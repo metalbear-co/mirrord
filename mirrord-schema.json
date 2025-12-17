@@ -23,6 +23,14 @@
         }
       ]
     },
+    "baggage": {
+      "title": "baggage {#root-baggage}",
+      "description": "OpenTelemetry (OTel) / W3C baggage propagator. See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "ci": {
       "title": "ci {#root-ci}",
       "anyOf": [
@@ -212,6 +220,14 @@
       "description": "Controls whether or not mirrord sends telemetry data to MetalBear cloud. Telemetry sent doesn't contain personal identifiers or any data that should be considered sensitive. It is used to improve the product. [For more information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md)",
       "type": [
         "boolean",
+        "null"
+      ]
+    },
+    "traceparnet": {
+      "title": "traceparent {#root-traceparent}",
+      "description": "OpenTelemetry (OTel) / W3C trace context. See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)",
+      "type": [
+        "string",
         "null"
       ]
     },
