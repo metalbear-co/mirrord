@@ -49,7 +49,7 @@ pub struct AcceptedPatchRequest {
     /// [`None`] means that replicas should not be patched.
     pub replicas: Option<i32>,
     #[serde(default)]
-    pub containers: Vec<serde_json::Value>,
+    pub containers: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Hash, PartialEq, Eq)]
@@ -83,7 +83,7 @@ pub struct MirrordClusterWorkloadPatchRequestSpec {
     /// [`None`] means that replicas should not be patched.
     pub replicas: Option<i32>,
     #[serde(default)]
-    pub containers: Vec<serde_json::Value>,
+    pub containers: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Hash, PartialEq, Eq)]
