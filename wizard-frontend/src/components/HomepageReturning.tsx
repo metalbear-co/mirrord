@@ -18,10 +18,7 @@ const HomepageReturning = () => {
     </CardTitle>
   );
 
-  const boilerplateStep = BoilerplateStep();
-  const configStep = ConfigStep();
-
-  const configSteps: WizardStep[] = [boilerplateStep, configStep];
+  const configSteps: WizardStep[] = [BoilerplateStep(), ConfigStep()];
   const learnSteps: WizardStep[] = LearningStepsReturning.concat(configSteps);
 
   return (

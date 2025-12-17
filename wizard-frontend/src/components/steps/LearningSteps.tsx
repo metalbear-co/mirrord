@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { type WizardStep } from "../Wizard";
 import mirrordArchitecture from "@/assets/mirrord-architecture.svg";
+import flowDiagram from "@/assets/flow-diagram.png";
 
 const learningStep1NewUser: WizardStep = {
   id: "wizard-1-intro",
@@ -241,7 +242,7 @@ const learningStep6NewUser: WizardStep = {
 
           <div className="bg-background border border-border rounded-lg p-2 mb-4">
             <img
-              src="src/assets/flow-diagram.png"
+              src={mirrordArchitecture}
               alt="Development Feedback Loop with mirrord"
               className="w-full max-w-full mx-auto rounded"
             />
@@ -486,7 +487,7 @@ const learningStep6Returning: WizardStep = {
 
           <div className="bg-background border border-border rounded-lg mb-4">
             <img
-              src="/src/assets/flow-diagram.png"
+              src={flowDiagram}
               alt="Development Feedback Loop with mirrord"
               className="w-full max-w-full mx-auto rounded"
             />

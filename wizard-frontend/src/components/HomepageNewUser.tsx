@@ -21,10 +21,8 @@ const HomepageNewUser = () => {
   );
 
   const introStep = IntroStep();
-  const boilerplateStep = BoilerplateStep();
-  const configStep = ConfigStep();
 
-  const configSteps: WizardStep[] = [boilerplateStep, configStep];
+  const configSteps: WizardStep[] = [BoilerplateStep(), ConfigStep()];
   const learnSteps: WizardStep[] = [introStep].concat(
     LearningStepsNewUser,
     configSteps,

@@ -43,7 +43,7 @@ use k8s_openapi::api::{
     batch::v1::{CronJob, Job},
     core::v1::{Namespace, Pod, Service},
 };
-use kube::{Client, client::ClientBuilder};
+use kube::{Client, client::ClientBuilder, runtime::reflector::Lookup};
 use mirrord_analytics::{AnalyticsReporter, ExecutionKind};
 use mirrord_config::target::TargetType;
 use mirrord_kube::{
@@ -415,8 +415,8 @@ impl IntoTargetInfo for Pod {
         _client: &Client,
     ) -> Result<Option<TargetInfo>, CliError> {
         fn into_info_option(pod: Pod) -> Option<TargetInfo> {
-            let target_name = pod.metadata.name.clone()?;
-            let target_namespace = pod.metadata.namespace.clone()?;
+            let target_name = pod.name()?.to_string();
+            let target_namespace = pod.namespace()?.to_string();
             let detected_ports = pod
                 .spec?
                 .containers
@@ -442,8 +442,8 @@ impl IntoTargetInfo for Deployment {
         _client: &Client,
     ) -> Result<Option<TargetInfo>, CliError> {
         fn into_info_option(deployment: Deployment) -> Option<TargetInfo> {
-            let target_name = deployment.metadata.name.clone()?;
-            let target_namespace = deployment.metadata.namespace.clone()?;
+            let target_name = deployment.name()?.to_string();
+            let target_namespace = deployment.namespace()?.to_string();
             let detected_ports = deployment
                 .spec?
                 .template
@@ -471,8 +471,8 @@ impl IntoTargetInfo for Rollout {
         client: &Client,
     ) -> Result<Option<TargetInfo>, CliError> {
         fn into_info_option(job: &Rollout) -> Option<TargetInfo> {
-            let target_name = job.metadata.name.clone()?;
-            let target_namespace = job.metadata.namespace.clone()?;
+            let target_name = job.name()?.to_string();
+            let target_namespace = job.namespace()?.to_string();
             Some(TargetInfo::new(
                 TargetType::Job,
                 target_name,
@@ -513,8 +513,8 @@ impl IntoTargetInfo for Job {
         _client: &Client,
     ) -> Result<Option<TargetInfo>, CliError> {
         fn into_info_option(job: Job) -> Option<TargetInfo> {
-            let target_name = job.metadata.name.clone()?;
-            let target_namespace = job.metadata.namespace.clone()?;
+            let target_name = job.name()?.to_string();
+            let target_namespace = job.namespace()?.to_string();
             let detected_ports = job
                 .spec?
                 .template
@@ -542,8 +542,8 @@ impl IntoTargetInfo for CronJob {
         _client: &Client,
     ) -> Result<Option<TargetInfo>, CliError> {
         fn into_info_option(cronjob: CronJob) -> Option<TargetInfo> {
-            let target_name = cronjob.metadata.name.clone()?;
-            let target_namespace = cronjob.metadata.namespace.clone()?;
+            let target_name = cronjob.name()?.to_string();
+            let target_namespace = cronjob.namespace()?.to_string();
             let detected_ports = cronjob
                 .spec?
                 .job_template
@@ -573,8 +573,8 @@ impl IntoTargetInfo for StatefulSet {
         _client: &Client,
     ) -> Result<Option<TargetInfo>, CliError> {
         fn into_info_option(stateful_set: StatefulSet) -> Option<TargetInfo> {
-            let target_name = stateful_set.metadata.name.clone()?;
-            let target_namespace = stateful_set.metadata.namespace.clone()?;
+            let target_name = stateful_set.name()?.to_string();
+            let target_namespace = stateful_set.namespace()?.to_string();
             let detected_ports = stateful_set
                 .spec?
                 .template
@@ -602,8 +602,8 @@ impl IntoTargetInfo for Service {
         client: &Client,
     ) -> Result<Option<TargetInfo>, CliError> {
         fn into_info_option(service: &Service) -> Option<TargetInfo> {
-            let target_name = service.metadata.name.clone()?;
-            let target_namespace = service.metadata.namespace.clone()?;
+            let target_name = service.name()?.to_string();
+            let target_namespace = service.namespace()?.to_string();
             Some(TargetInfo::new(
                 TargetType::Service,
                 target_name,
@@ -653,8 +653,8 @@ impl IntoTargetInfo for ReplicaSet {
         _client: &Client,
     ) -> Result<Option<TargetInfo>, CliError> {
         fn into_info_option(replica_set: ReplicaSet) -> Option<TargetInfo> {
-            let target_name = replica_set.metadata.name.clone()?;
-            let target_namespace = replica_set.metadata.namespace.clone()?;
+            let target_name = replica_set.name()?.to_string();
+            let target_namespace = replica_set.namespace()?.to_string();
             let detected_ports = replica_set
                 .spec?
                 .template?
