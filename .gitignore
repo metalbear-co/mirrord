@@ -11,6 +11,7 @@ __pycache__
 /target
 build/
 .mirrord
+.helix/
 
 ### go tests ###
 *.go_test_app
