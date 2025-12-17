@@ -1075,6 +1075,8 @@ mod tests {
             skip_sip: None,
             startup_retry: None,
             ci: None,
+            traceparnet: None,
+            baggage: None,
         };
 
         assert_eq!(config, expect);
