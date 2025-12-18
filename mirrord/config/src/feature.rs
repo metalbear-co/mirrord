@@ -6,10 +6,7 @@ use serde::{Deserialize, Serialize};
 use self::{copy_target::CopyTargetConfig, env::EnvConfig, fs::FsConfig, network::NetworkConfig};
 use crate::{
     config::source::MirrordConfigSource,
-    feature::{
-        database_branches::DatabaseBranchesConfig, redis::RedisConfig,
-        split_queues::SplitQueuesConfig,
-    },
+    feature::{database_branches::DatabaseBranchesConfig, split_queues::SplitQueuesConfig},
 };
 
 pub mod copy_target;
@@ -17,7 +14,6 @@ pub mod database_branches;
 pub mod env;
 pub mod fs;
 pub mod network;
-pub mod redis;
 pub mod split_queues;
 
 /// Controls mirrord features.

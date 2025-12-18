@@ -268,6 +268,9 @@ use mirrord_config::{
     LayerConfig,
     config::ConfigContext,
     feature::{
+        database_branches::{
+            ConnectionSource, ConnectionSourceKind, DatabaseBranchConfig, RedisBranchLocation,
+        },
         fs::FsModeConfig,
         network::{
             dns::{DnsConfig, DnsFilterConfig},
@@ -768,13 +771,33 @@ async fn exec(
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
-    // Check if Redis should be spawned locally (via config)
-    let _local_redis: Option<LocalRedis> = if config.feature.redis.local {
-        let port = config.feature.redis.local_port;
-        Some(start_local_redis(progress, port)?)
-    } else {
-        None
-    };
+    let _local_redis: Option<LocalRedis> = config
+        .feature
+        .db_branches
+        .iter()
+        .find_map(|branch| {
+            if let DatabaseBranchConfig::Redis(redis_config) = branch
+                && redis_config.location == RedisBranchLocation::Local
+            {
+                // Default Redis port
+                return Some((redis_config.base.connection.clone(), 6379));
+            }
+            None
+        })
+        .map(|(connection, port)| {
+            let ConnectionSource::Url(ConnectionSourceKind::Env { variable, .. }) = &connection;
+            config
+                .feature
+                .env
+                .r#override
+                .get_or_insert_with(Default::default)
+                .insert(variable.clone(), format!("localhost:{}", port));
+
+            config.feature.network.outgoing.ignore_localhost = true;
+
+            start_local_redis(progress, port)
+        })
+        .transpose()?;
 
     let mut analytics = AnalyticsReporter::only_error(
         config.telemetry,
@@ -1139,53 +1162,26 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
     }
 }
 
-/// Represents a local Redis instance (either process or Docker container)
+/// Represents a local Redis instance (Docker container)
 enum LocalRedis {
-    Process(std::process::Child),
     Docker(String), // container name
 }
 
 impl Drop for LocalRedis {
     fn drop(&mut self) {
-        match self {
-            LocalRedis::Process(child) => {
-                let _ = child.kill();
-            }
-            LocalRedis::Docker(name) => {
-                let _ = std::process::Command::new("docker")
-                    .args(["rm", "-f", name])
-                    .output();
-            }
-        }
+        let LocalRedis::Docker(name) = self;
+        let _ = std::process::Command::new("docker")
+            .args(["rm", "-f", name])
+            .output();
     }
 }
 
-/// Start a local Redis server for --outgoing-local
+/// Start a local Redis Docker container
 fn start_local_redis<P: Progress>(progress: &P, port: u16) -> CliResult<LocalRedis> {
-    use std::process::{Command, Stdio};
+    use std::process::Command;
 
     let mut sub = progress.subtask("starting local Redis");
-    let port_str = port.to_string();
-
-    // Try redis-server first
-    // if let Ok(redis_server) = which::which("redis-server") {
-    //     let child = Command::new(redis_server)
-    //         .args(["--port", &port_str, "--daemonize", "no"])
-    //         .stdout(Stdio::null())
-    //         .stderr(Stdio::null())
-    //         .spawn();
-
-    //     if let Ok(child) = child {
-    //         std::thread::sleep(std::time::Duration::from_millis(500));
-    //         if check_redis_ready(port) {
-    //             sub.success(Some(&format!("redis-server on localhost:{port}")));
-    //             return Ok(LocalRedis::Process(child));
-    //         }
-    //     }
-    // }
-
-    // Fallback to Docker
-    sub.print("redis-server not found, trying Docker...");
+    sub.print("starting Redis Docker container...");
 
     let container_name = format!("mirrord-redis-{port}");
 
