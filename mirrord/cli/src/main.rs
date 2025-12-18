@@ -308,7 +308,6 @@ mod newsletter;
 mod operator;
 mod port_forward;
 mod profile;
-mod redis;
 mod teams;
 mod user_data;
 mod util;
@@ -769,6 +768,14 @@ async fn exec(
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
+    // Check if Redis should be spawned locally (via config)
+    let _local_redis: Option<LocalRedis> = if config.feature.redis.local {
+        let port = config.feature.redis.local_port;
+        Some(start_local_redis(progress, port)?)
+    } else {
+        None
+    };
+
     let mut analytics = AnalyticsReporter::only_error(
         config.telemetry,
         Default::default(),
@@ -1052,7 +1059,6 @@ fn main() -> miette::Result<()> {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
             Commands::DbBranches(args) => db_branches_command(*args).await?,
-            Commands::Redis(args) => redis::redis_command(*args).await?,
         };
 
         Ok(())
@@ -1131,6 +1137,105 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
 
         result.ok();
     }
+}
+
+/// Represents a local Redis instance (either process or Docker container)
+enum LocalRedis {
+    Process(std::process::Child),
+    Docker(String), // container name
+}
+
+impl Drop for LocalRedis {
+    fn drop(&mut self) {
+        match self {
+            LocalRedis::Process(child) => {
+                let _ = child.kill();
+            }
+            LocalRedis::Docker(name) => {
+                let _ = std::process::Command::new("docker")
+                    .args(["rm", "-f", name])
+                    .output();
+            }
+        }
+    }
+}
+
+/// Start a local Redis server for --outgoing-local
+fn start_local_redis<P: Progress>(progress: &P, port: u16) -> CliResult<LocalRedis> {
+    use std::process::{Command, Stdio};
+
+    let mut sub = progress.subtask("starting local Redis");
+    let port_str = port.to_string();
+
+    // Try redis-server first
+    // if let Ok(redis_server) = which::which("redis-server") {
+    //     let child = Command::new(redis_server)
+    //         .args(["--port", &port_str, "--daemonize", "no"])
+    //         .stdout(Stdio::null())
+    //         .stderr(Stdio::null())
+    //         .spawn();
+
+    //     if let Ok(child) = child {
+    //         std::thread::sleep(std::time::Duration::from_millis(500));
+    //         if check_redis_ready(port) {
+    //             sub.success(Some(&format!("redis-server on localhost:{port}")));
+    //             return Ok(LocalRedis::Process(child));
+    //         }
+    //     }
+    // }
+
+    // Fallback to Docker
+    sub.print("redis-server not found, trying Docker...");
+
+    let container_name = format!("mirrord-redis-{port}");
+
+    // Remove any existing container with same name
+    let _ = Command::new("docker")
+        .args(["rm", "-f", &container_name])
+        .output();
+
+    let output = Command::new("docker")
+        .args([
+            "run",
+            "-d",
+            "--name",
+            &container_name,
+            "-p",
+            &format!("{port}:6379"),
+            "redis:7-alpine",
+        ])
+        .output()
+        .map_err(|e| CliError::LocalRedisError(format!("docker failed: {e}")))?;
+
+    if !output.status.success() {
+        sub.failure(Some("failed to start Redis"));
+        return Err(CliError::LocalRedisError(format!(
+            "docker run failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    // Wait for Redis to be ready
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        if check_redis_ready(port) {
+            sub.success(Some(&format!("Redis (Docker) on localhost:{port}")));
+            return Ok(LocalRedis::Docker(container_name));
+        }
+    }
+
+    sub.failure(Some("Redis not responding"));
+    Err(CliError::LocalRedisError(
+        "Redis did not become ready".into(),
+    ))
+}
+
+fn check_redis_ready(port: u16) -> bool {
+    std::process::Command::new("redis-cli")
+        .args(["-p", &port.to_string(), "PING"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "PONG")
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

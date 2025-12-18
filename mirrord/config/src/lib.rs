@@ -1019,6 +1019,7 @@ mod tests {
                 ..Default::default()
             }),
             feature: Some(FeatureFileConfig {
+                redis: None,
                 env: ToggleableConfig::Enabled(true).into(),
                 fs: ToggleableConfig::Config(FsUserConfig::Simple(FsModeConfig::Write)).into(),
                 network: Some(ToggleableConfig::Config(NetworkFileConfig {

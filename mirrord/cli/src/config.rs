@@ -168,9 +168,6 @@ pub(super) enum Commands {
     #[command(name = "db-branches")]
     DbBranches(Box<DbBranchesArgs>),
 
-    /// Local Redis for development.
-    Redis(Box<RedisArgs>),
-
     /// Verify config file without starting mirrord.
     ///
     /// Called from the IDE extensions.
@@ -1178,25 +1175,6 @@ pub(super) enum DbBranchesCommand {
         #[arg(required_unless_present = "all")]
         names: Vec<String>,
     },
-}
-
-#[derive(Args, Debug)]
-pub(crate) struct RedisArgs {
-    /// Source Redis target (pod/name, deploy/name, or just name for deployment)
-    #[arg(long)]
-    pub source: Option<String>,
-    /// Namespace of source
-    #[arg(short = 'n', long)]
-    pub source_namespace: Option<String>,
-    /// Local port to expose Redis on
-    #[arg(short = 'p', long, default_value = "6379")]
-    pub local_port: u16,
-    /// Container name
-    #[arg(long)]
-    pub container_name: Option<String>,
-    /// Docker image to use
-    #[arg(long)]
-    pub image: Option<String>,
 }
 
 #[cfg(test)]
