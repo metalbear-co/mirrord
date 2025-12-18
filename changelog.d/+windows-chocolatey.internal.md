@@ -1,1 +1,0 @@
-This PR adds chocolatey distribution to windows build workflow.
