@@ -167,6 +167,10 @@ pub enum ConnectionSourceKind {
         container: Option<String>,
         variable: String,
     },
+    EnvFrom {
+        container: Option<String>,
+        variable: String,
+    },
 }
 
 impl config::MirrordConfig for DatabaseBranchesConfig {
