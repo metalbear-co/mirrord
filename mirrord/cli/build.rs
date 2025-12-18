@@ -43,7 +43,7 @@ fn build_wizard_frontend() {
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let out_dir = Path::new(&out_dir);
 
-    // override used for release workflow so the frontend can be built before compilation
+    // override used for the release workflow so the frontend can be built before compilation
     // env var: WIZARD_DIST_DIR
     let dist_path = if let Ok(frontend_dist_override) = env::var("WIZARD_DIST_DIR") {
         Path::new(&frontend_dist_override).to_path_buf()
