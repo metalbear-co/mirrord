@@ -19,7 +19,9 @@ use mirrord_agent_iptables::{
     SafeIpTables,
     error::{IPTablesError, IPTablesResult},
 };
-use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
+use mirrord_protocol::{
+    ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage, dns::ReverseDnsLookupResponse,
+};
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
     process::Command,
@@ -545,6 +547,23 @@ impl ClientConnectionHandler {
                 self.dns_api
                     .make_request(ClientGetAddrInfoRequest::V2(request))
                     .await?;
+            }
+            ClientMessage::ReverseDnsLookup(request) => {
+                let hostname = match dns_lookup::lookup_addr(&request.ip_address) {
+                    Ok(hostname) => Some(hostname),
+                    Err(error) => {
+                        debug!(
+                            "Reverse DNS lookup failed for {}: {}",
+                            request.ip_address, error
+                        );
+                        None
+                    }
+                };
+
+                self.respond(DaemonMessage::ReverseDnsLookup(Ok(
+                    ReverseDnsLookupResponse { hostname },
+                )))
+                .await?
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             // Message handled exclusively by the operator, see its docs for details.
