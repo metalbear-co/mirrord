@@ -1059,6 +1059,30 @@
               "type": "string"
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "variable"
+          ],
+          "properties": {
+            "container": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "env_from"
+              ]
+            },
+            "variable": {
+              "type": "string"
+            }
+          }
         }
       ]
     },
