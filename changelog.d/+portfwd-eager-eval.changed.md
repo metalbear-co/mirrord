@@ -1,1 +1,0 @@
-Switched `mirrord port-forward` to evaluate connections eagerly. Using it with MySQL is now possible.

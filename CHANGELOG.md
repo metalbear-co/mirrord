@@ -8,6 +8,32 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.177.0](https://github.com/metalbear-co/mirrord/tree/3.177.0) - 2025-12-18
+
+### Changed
+
+- Added /var/db/timezone/zoneinfo to local to improve performance.
+- Refreshed configuration documentation.
+- Switched `mirrord port-forward` to evaluate connections eagerly. Using it
+  with MySQL is now possible.
+
+### Internal
+
+- Added more traffic mirroring tests.
+- Added chocolatey distribution to windows build workflow.
+- Added support for MSI builds for Windows mirrord.
+- Allow using windows-build.yml with repos without winget and choco
+  tokens.
+- Fixed the License not appearing in MSI packages.
+- mirrord-intproxy now logs operator version on default log level.
+- Added a method to `ResolvedTarget` for getting `envFrom` from the target's pod
+  spec.
+- Added a new field for the `MirrordClusterSession` CRD, `SessionCiInfo`. Now
+  the mirrord license-server can keep track of sessions that have been started
+  using the `mirrord ci start` command, and we can validate concurrent CI
+  seats.
+- intproxy now compiles on windows.
+
 ## [3.176.0](https://github.com/metalbear-co/mirrord/tree/3.176.0) - 2025-12-07
 
 
