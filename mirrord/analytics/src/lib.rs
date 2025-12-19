@@ -41,6 +41,7 @@ pub enum ExecutionKind {
     Exec = 2,
     PortForward = 3,
     Dump = 4,
+    Wizard = 5,
     Other = 0,
 }
 
@@ -51,6 +52,7 @@ impl From<u32> for ExecutionKind {
             2 => ExecutionKind::Exec,
             3 => ExecutionKind::PortForward,
             4 => ExecutionKind::Dump,
+            5 => ExecutionKind::Wizard,
             _ => ExecutionKind::Other,
         }
     }

@@ -37,3 +37,8 @@ intellij-ext/build
 intellij-ext/libmirrord_layer.*
 intellij-ext/bin
 .idea/
+
+### Wizard archive file ###
+wizard-frontend.tar.gz
+!wizard-frontend/package-lock.json
+!wizard-frontend/package.json
