@@ -261,9 +261,7 @@ pub fn windows_getaddrinfo<T: WindowsAddrInfo>(
 
     // Check DNS selector to determine if this should be resolved remotely
     let should_resolve_remotely = {
-        let result = setup()
-            .dns_selector()
-            .should_resolve_remotely(&node, port);
+        let result = setup().dns_selector().should_resolve_remotely(&node, port);
         tracing::debug!("DNS selector check for '{}': {}", node, result);
         result
     };

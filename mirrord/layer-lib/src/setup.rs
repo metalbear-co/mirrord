@@ -27,7 +27,7 @@ use regex::RegexSet;
 use crate::{
     debugger_ports::DebuggerPorts,
     file::{filter::FileFilter, mapper::FileRemapper},
-    socket::{OutgoingSelector, DnsSelector},
+    socket::{DnsSelector, OutgoingSelector},
     trace_only::{is_trace_only_mode, modify_config_for_trace_only},
 };
 
@@ -37,10 +37,8 @@ pub fn setup() -> &'static LayerSetup {
     SETUP.get().expect("layer is not initialized")
 }
 
-
 /// Initialized LayerSetup from LayerConfig
-pub fn init_layer_setup(mut config: LayerConfig)
-{
+pub fn init_layer_setup(mut config: LayerConfig) {
     if config.target.path.is_none() && config.feature.fs.mode.ne(&FsModeConfig::Local) {
         // Use localwithoverrides on targetless regardless of user config, unless fs-mode is already
         // set to local.
@@ -111,7 +109,7 @@ impl LayerSetup {
             .parse::<SocketAddr>()
             .expect("malformed internal proxy address");
 
-    let incoming_mode = IncomingMode::new(&mut config.feature.network.incoming);
+        let incoming_mode = IncomingMode::new(&mut config.feature.network.incoming);
         tracing::info!(?incoming_mode, ?config, "incoming has changed");
         #[cfg(target_os = "macos")]
         let env_backup = std::env::vars()

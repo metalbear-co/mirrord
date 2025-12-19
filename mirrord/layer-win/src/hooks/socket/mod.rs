@@ -15,7 +15,7 @@ use mirrord_intproxy_protocol::{ConnMetadataRequest, ConnMetadataResponse, PortS
 use mirrord_layer_lib::{
     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
-    setup::{setup, LayerSetup, NetworkHookConfig},
+    setup::{LayerSetup, NetworkHookConfig, setup},
     socket::{
         Bound, ConnectResult, Connected, SocketDescriptor, SocketKind, SocketState,
         get_bound_address, get_connected_addresses, get_socket, get_socket_state,
@@ -2272,10 +2272,7 @@ unsafe extern "system" fn getsockopt_detour(
 }
 
 /// Initialize socket hooks by setting up detours for Windows socket functions
-pub fn initialize_hooks(
-    guard: &mut DetourGuard<'static>,
-    setup: &LayerSetup,
-) -> LayerResult<()> {
+pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) -> LayerResult<()> {
     // Ensure winsock libraries are loaded before attempting to hook them
     // This prevents issues with Python's _socket.pyd or other dynamic loaders
     // ensure_winsock_libraries_loaded()?;
