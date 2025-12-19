@@ -128,19 +128,20 @@ impl<'a> HookManager<'a> {
             return Err(LayerError::NoModuleName(module.to_string()));
         };
 
-        let function = module
+        let mut function = module
             .find_symbol_by_name(symbol)
             .ok_or_else(|| LayerError::NoSymbolName(symbol.to_string()))?;
 
         // on Go we use `replace_fast` since we don't use the original function.
         tracing::warn!("hooking with not fast replace");
-        self.interceptor.begin_transaction();
         let res = self.interceptor
             .replace_fast(function, NativePointer(detour))
-            .map_err(Into::into);
-        self.interceptor.end_transaction();
+            .map_err(Into::into)?;
 
-        res
+        function.0 = function.0 + 8;
+        let res = self.interceptor
+            .replace_fast(function, NativePointer(detour))
+            .map_err(Into::into)
     }
 }
 
