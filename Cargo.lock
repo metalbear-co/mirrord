@@ -4765,6 +4765,7 @@ dependencies = [
  "dll-syringe",
  "exec",
  "frida-gum",
+ "http 1.4.0",
  "libc",
  "mirrord-config",
  "mirrord-intproxy-protocol",
