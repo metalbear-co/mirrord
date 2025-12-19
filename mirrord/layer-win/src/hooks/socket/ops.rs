@@ -7,6 +7,7 @@ use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingCon
 use mirrord_layer_lib::{
     error::{ConnectError, HostnameResolveError},
     proxy_connection::make_proxy_request_with_response,
+    setup::setup,
     socket::{
         ConnectionThrough, DnsResolver, HookResult, SocketDescriptor, SocketKind, SocketState,
         UserSocket, get_socket,
@@ -33,7 +34,7 @@ use winapi::{
 };
 use windows_strings::PCWSTR;
 
-use crate::{hooks::socket::utils::SocketAddrExtWin, layer_setup};
+use crate::hooks::socket::utils::SocketAddrExtWin;
 
 type ConnectExFn = unsafe extern "system" fn(
     SOCKET,
@@ -248,7 +249,7 @@ impl DnsResolver for WindowsDnsResolver {
     }
 
     fn remote_dns_enabled() -> bool {
-        layer_setup().remote_dns_enabled()
+        setup().remote_dns_enabled()
     }
 }
 
@@ -358,7 +359,7 @@ where
 
         // Handle localhost/unspecified addresses first -
         //  if applicable, connect locally without proxy
-        if !layer_setup().outgoing_config().ignore_localhost
+        if !setup().outgoing_config().ignore_localhost
             && (ip_address.ip().is_loopback() || ip_address.ip().is_unspecified())
         {
             if let Some(local_address) =
@@ -382,7 +383,7 @@ where
     };
 
     // Check the outgoing selector to determine routing
-    match layer_setup()
+    match setup()
         .outgoing_selector()
         .get_connection_through_with_resolver::<WindowsDnsResolver>(remote_addr, protocol)
     {
@@ -432,8 +433,8 @@ where
     // Convert SocketAddr to SockAddr for layer-lib
     let remote_sock_addr = SockAddr::from(remote_addr);
 
-    let enabled_tcp_outgoing = layer_setup().outgoing_config().tcp;
-    let enabled_udp_outgoing = layer_setup().outgoing_config().udp;
+    let enabled_tcp_outgoing = setup().outgoing_config().tcp;
+    let enabled_udp_outgoing = setup().outgoing_config().udp;
 
     match NetProtocol::from(user_socket.kind) {
         NetProtocol::Datagrams if enabled_udp_outgoing => connect_outgoing(

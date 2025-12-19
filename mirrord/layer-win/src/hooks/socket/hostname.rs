@@ -12,6 +12,7 @@ use std::sync::{LazyLock, Mutex};
 use mirrord_layer_lib::{
     error::{AddrInfoError, HookResult},
     proxy_connection::make_proxy_request_with_response,
+    setup::setup,
     socket::hostname::{HostnameResult, get_remote_hostname, get_remote_netbios_name},
 };
 use mirrord_protocol::dns::{AddressFamily, GetAddrInfoRequestV2, SockType};
@@ -27,7 +28,6 @@ use winapi::{
 };
 
 use super::utils::{ManagedAddrInfo, ManagedAddrInfoAny, WindowsAddrInfo, validate_buffer_params};
-use crate::layer_setup;
 
 /// Keep track of managed address info structures for proper cleanup.
 /// Maps pointer addresses to the ManagedAddrInfo objects that own them.
@@ -261,7 +261,7 @@ pub fn windows_getaddrinfo<T: WindowsAddrInfo>(
 
     // Check DNS selector to determine if this should be resolved remotely
     let should_resolve_remotely = {
-        let result = layer_setup()
+        let result = setup()
             .dns_selector()
             .should_resolve_remotely(&node, port);
         tracing::debug!("DNS selector check for '{}': {}", node, result);

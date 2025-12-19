@@ -3,7 +3,7 @@
 //! This module provides error types that can be shared between the Unix layer and Windows
 //! layer-win, along with platform-specific conversions to native error codes.
 
-#[cfg(target_os = "windows")]
+#[cfg(windows)]
 pub mod windows;
 
 #[cfg(unix)]
@@ -28,7 +28,7 @@ use nix::errno::Errno;
 use thiserror::Error;
 use tracing::{error, info};
 
-use crate::graceful_exit;
+use crate::{graceful_exit, setup::setup};
 
 mod ignore_codes {
     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
@@ -623,7 +623,7 @@ impl From<HookError> for i64 {
                     r"{reason}.
                     Please report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml
                     You can find the `mirrord-intproxy` logs in {}.",
-                    crate::setup::layer_setup()
+                    setup()
                         .layer_config()
                         .internal_proxy
                         .log_destination

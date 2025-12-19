@@ -37,7 +37,7 @@ pub use sockets::{
 #[cfg(windows)]
 use winapi::shared::ws2def::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
 
-pub use crate::{ConnectError, HookResult, proxy_connection::make_proxy_request_no_response};
+pub use crate::{ConnectError, HookResult, setup::setup, proxy_connection::make_proxy_request_no_response};
 
 /// Contains the addresses of a mirrord connected socket.
 ///
@@ -230,9 +230,7 @@ impl UserSocket {
             // the agent has processed the port unsubscription
             #[cfg(target_os = "windows")]
             {
-                use crate::setup::layer_setup;
-
-                if layer_setup().incoming_mode().steal {
+                if setup().incoming_mode().steal {
                     // Small delay to ensure agent processes unsubscription
                     std::thread::sleep(std::time::Duration::from_millis(50));
                 }

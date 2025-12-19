@@ -15,7 +15,7 @@ use mirrord_intproxy_protocol::{ConnMetadataRequest, ConnMetadataResponse, PortS
 use mirrord_layer_lib::{
     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
-    setup::{layer_setup, windows::NetworkHookConfig},
+    setup::{setup, LayerSetup, NetworkHookConfig},
     socket::{
         Bound, ConnectResult, Connected, SocketDescriptor, SocketKind, SocketState,
         get_bound_address, get_connected_addresses, get_socket, get_socket_state,
@@ -389,8 +389,7 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
     );
 
     // Check configuration-based early returns
-    let setup = layer_setup();
-    let incoming_config = setup.incoming_config();
+    let incoming_config = setup().incoming_config();
 
     if incoming_config.ignore_localhost && requested_addr.ip().is_loopback() {
         tracing::debug!("bind_detour -> ignoring localhost bind");
@@ -485,16 +484,15 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
     );
 
     // Check if incoming traffic is enabled
-    let setup = layer_setup();
     if matches!(
-        setup.incoming_config().mode,
+        setup().incoming_config().mode,
         mirrord_config::feature::network::incoming::IncomingMode::Off
     ) {
         tracing::debug!("listen_detour -> incoming traffic is disabled");
         return listen_result;
     }
 
-    if setup.targetless() {
+    if setup().targetless() {
         tracing::warn!("listen_detour -> running targetless, binding locally instead");
         return listen_result;
     }
@@ -505,14 +503,14 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
     }
 
     // Register with the agent for incoming traffic (like Unix layer PortSubscribe)
-    let mapped_port = setup
+    let mapped_port = setup()
         .incoming_config()
         .port_mapping
         .get_by_left(&bound_state.requested_address.port())
         .copied()
         .unwrap_or_else(|| bound_state.requested_address.port());
 
-    let subscription = setup.incoming_mode().subscription(mapped_port);
+    let subscription = setup().incoming_mode().subscription(mapped_port);
 
     let port_subscribe = PortSubscribe {
         listening_on: bound_state.address,
@@ -1355,12 +1353,12 @@ unsafe extern "system" fn wsa_send_detour(
         // Check if outgoing traffic is enabled for this socket type
         let should_intercept = match user_socket.kind {
             SocketKind::Tcp(_) => {
-                let tcp_outgoing = layer_setup().outgoing_config().tcp;
+                let tcp_outgoing = setup().outgoing_config().tcp;
                 tracing::debug!("wsa_send_detour -> TCP outgoing enabled: {}", tcp_outgoing);
                 tcp_outgoing
             }
             SocketKind::Udp(_) => {
-                let udp_outgoing = layer_setup().outgoing_config().udp;
+                let udp_outgoing = setup().outgoing_config().udp;
                 tracing::debug!("wsa_send_detour -> UDP outgoing enabled: {}", udp_outgoing);
                 udp_outgoing
             }
@@ -1825,7 +1823,7 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
 
     // Check if we should resolve this hostname remotely using the DNS selector
     let should_resolve_remotely = {
-        let result = layer_setup()
+        let result = setup()
             .dns_selector()
             .should_resolve_remotely(hostname_cstr, 0);
         tracing::debug!(
@@ -2064,12 +2062,12 @@ unsafe extern "system" fn send_detour(s: SOCKET, buf: *const i8, len: INT, flags
         // Check if outgoing traffic is enabled for this socket type
         let should_intercept = match user_socket.kind {
             SocketKind::Tcp(_) => {
-                let tcp_outgoing = layer_setup().outgoing_config().tcp;
+                let tcp_outgoing = setup().outgoing_config().tcp;
                 tracing::debug!("send_detour -> TCP outgoing enabled: {}", tcp_outgoing);
                 tcp_outgoing
             }
             SocketKind::Udp(_) => {
-                let udp_outgoing = layer_setup().outgoing_config().udp;
+                let udp_outgoing = setup().outgoing_config().udp;
                 tracing::debug!("send_detour -> UDP outgoing enabled: {}", udp_outgoing);
                 udp_outgoing
             }
@@ -2276,7 +2274,7 @@ unsafe extern "system" fn getsockopt_detour(
 /// Initialize socket hooks by setting up detours for Windows socket functions
 pub fn initialize_hooks(
     guard: &mut DetourGuard<'static>,
-    setup: &mirrord_layer_lib::setup::windows::LayerSetup,
+    setup: &LayerSetup,
 ) -> LayerResult<()> {
     // Ensure winsock libraries are loaded before attempting to hook them
     // This prevents issues with Python's _socket.pyd or other dynamic loaders

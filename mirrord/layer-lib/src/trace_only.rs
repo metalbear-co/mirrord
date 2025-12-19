@@ -21,8 +21,8 @@ pub fn modify_config_for_trace_only(config: &mut LayerConfig) {
     config.feature.fs.mode = FsModeConfig::Local;
     config.feature.network.dns.enabled = false;
     config.feature.network.incoming.mode = IncomingMode::Off;
-    // Note: outgoing and env configs don't have simple enabled flags
-    // They will operate locally when no agent connection exists
+    config.feature.network.outgoing.tcp = false;
+    config.feature.network.outgoing.udp = false;
 
     tracing::debug!("Configuration modified for trace-only mode");
 }

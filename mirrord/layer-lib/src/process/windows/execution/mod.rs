@@ -33,7 +33,7 @@ use super::sync::{LayerInitEvent, MIRRORD_LAYER_INIT_EVENT_NAME};
 use crate::{
     error::{LayerError, LayerResult, windows::WindowsError},
     proxy_connection::PROXY_CONNECTION,
-    setup::layer_setup,
+    setup::setup,
     socket::sockets::SHARED_SOCKETS_ENV_VAR,
 };
 
@@ -197,7 +197,7 @@ impl LayerManagedProcess {
             } else {
                 // Fallback: try to encode current config if layer setup is available
                 // Use a safe approach that doesn't panic if setup isn't initialized
-                match std::panic::catch_unwind(|| layer_setup().layer_config().encode()) {
+                match std::panic::catch_unwind(|| setup().layer_config().encode()) {
                     Ok(Ok(encoded_config)) => {
                         env_vars
                             .insert(LayerConfig::RESOLVED_CONFIG_ENV.to_string(), encoded_config);
