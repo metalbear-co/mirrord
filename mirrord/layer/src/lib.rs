@@ -104,7 +104,8 @@ use mirrord_config::{
 use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_lib::{
     debugger_ports::DebuggerPorts,
-    setup::{LayerSetup, SETUP, setup},
+    setup::{LayerSetup, init_layer_setup, setup},
+    trace_only::is_trace_only_mode,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
@@ -520,8 +521,6 @@ fn sip_only_layer_start(
     patch_binaries: Vec<String>,
     skip_patch_binaries: Vec<String>,
 ) {
-    use mirrord_config::feature::fs::READONLY_FILE_BUFFER_DEFAULT;
-
     load_only_layer_start(&config);
 
     let mut hook_manager = HookManager::default();
@@ -532,20 +531,7 @@ fn sip_only_layer_start(
     unsafe { exec_hooks::hooks::enable_exec_hooks(&mut hook_manager) };
     unsafe { replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK) };
 
-    // we need to hook file access to patch path to our temp bin.
-    config.feature.fs = FsConfig {
-        mode: FsModeConfig::Local,
-        read_write: None,
-        read_only: None,
-        local: None,
-        not_found: None,
-        mapping: None,
-        readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
-    };
-    let debugger_ports = DebuggerPorts::from_env();
-    let layer_setup = LayerSetup::new(config, debugger_ports, true);
-
-    SETUP.set(layer_setup).expect("SETUP set failed");
+    init_layer_setup(config, true);
 
     unsafe { file::hooks::enable_file_hooks(&mut hook_manager, setup()) };
 }

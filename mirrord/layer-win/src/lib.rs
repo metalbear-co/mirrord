@@ -79,7 +79,7 @@ fn layer_start() -> LayerResult<()> {
     let init_event = LayerInitEvent::for_child()?;
 
     let config = read_resolved_config().map_err(LayerError::Config)?;
-    init_layer_setup(config);
+    init_layer_setup(config, false);
 
     if is_trace_only_mode() {
         tracing::info!("Running in trace-only mode - skipping proxy connection initialization");

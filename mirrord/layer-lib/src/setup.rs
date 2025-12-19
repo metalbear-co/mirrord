@@ -5,7 +5,7 @@ use mirrord_config::{
     experimental::ExperimentalConfig,
     feature::{
         env::EnvConfig,
-        fs::{FsConfig, FsModeConfig},
+        fs::{FsConfig, FsModeConfig, READONLY_FILE_BUFFER_DEFAULT},
         network::{
             NetworkConfig,
             incoming::{
@@ -38,24 +38,37 @@ pub fn setup() -> &'static LayerSetup {
 }
 
 /// Initialized LayerSetup from LayerConfig
-pub fn init_layer_setup(mut config: LayerConfig) {
-    if config.target.path.is_none() && config.feature.fs.mode.ne(&FsModeConfig::Local) {
-        // Use localwithoverrides on targetless regardless of user config, unless fs-mode is already
-        // set to local.
-        config.feature.fs.mode = FsModeConfig::LocalWithOverrides;
-    }
-
+pub fn init_layer_setup(mut config: LayerConfig, sip_only: bool) {
     // Check if we're in trace only mode (no agent)
     let trace_only = is_trace_only_mode();
 
-    // Disable all features that require the agent
-    if trace_only {
-        modify_config_for_trace_only(&mut config);
+    if sip_only {
+        // we need to hook file access to patch path to our temp bin.
+        config.feature.fs = FsConfig {
+            mode: FsModeConfig::Local,
+            read_write: None,
+            read_only: None,
+            local: None,
+            not_found: None,
+            mapping: None,
+            readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
+        };
+    } else {
+        if config.target.path.is_none() && config.feature.fs.mode.ne(&FsModeConfig::Local) {
+            // Use localwithoverrides on targetless regardless of user config, unless fs-mode is
+            // already set to local.
+            config.feature.fs.mode = FsModeConfig::LocalWithOverrides;
+        }
+
+        // Disable all features that require the agent
+        if trace_only {
+            modify_config_for_trace_only(&mut config);
+        }
     }
 
     // init setup
     let debugger_ports = DebuggerPorts::from_env();
-    let local_hostname = trace_only || !config.feature.hostname;
+    let local_hostname = sip_only || trace_only || !config.feature.hostname;
     let state = LayerSetup::new(config, debugger_ports, local_hostname);
     SETUP.set(state).unwrap();
 }

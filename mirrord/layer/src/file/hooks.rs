@@ -19,6 +19,7 @@ use libc::{
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, statx};
+use mirrord_layer_lib::setup::LayerSetup;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
@@ -46,7 +47,6 @@ use crate::{
     },
     hooks::HookManager,
     replace,
-    setup::LayerSetup,
 };
 
 #[cfg(target_os = "macos")]
