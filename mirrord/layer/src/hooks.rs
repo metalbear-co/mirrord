@@ -158,7 +158,7 @@ impl<'a> HookManager<'a> {
         writer.put_nop();
         writer.put_nop();
         writer.flush();
-        function = NativePointer(writer.code_offset());
+        function = NativePointer(writer.code_offset() as *mut libc::c_void);
         self.interceptor
             .replace_fast(function, NativePointer(detour))
             .map_err(Into::into)
