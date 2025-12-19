@@ -1,1 +1,0 @@
-Refreshed configuration documetnatin.
