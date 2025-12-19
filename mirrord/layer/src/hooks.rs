@@ -188,7 +188,7 @@ impl<'a> HookManager<'a> {
             .replace_fast(function, NativePointer(detour))?;
 
         function.0 = function.0.wrapping_add(6);
-        change_mprotect(function.0, 30, true, true, true).unwrap();
+        unsafe { change_mprotect(function.0, 30, true, true, true).unwrap(); }
         use frida_gum::instruction_writer::{TargetInstructionWriter, InstructionWriter};
         let writer = frida_gum::instruction_writer::TargetInstructionWriter::new(function.0 as u64);
         writer.put_nop();
