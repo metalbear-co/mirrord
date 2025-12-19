@@ -59,6 +59,7 @@ impl<'a> HookManager<'a> {
         // First try to hook the default exported one, if it fails, fallback to first lib that
         // provides it.
         let function = Module::find_global_export_by_name(symbol);
+
         match function {
             Some(func) => self
                 .interceptor
@@ -137,7 +138,26 @@ impl<'a> HookManager<'a> {
         self.interceptor
             .replace_fast(function, NativePointer(detour))?;
 
-        function.0 = function.0.wrapping_add(17);
+        function.0 = function.0.wrapping_add(6);
+        let writer = frida_gum::instruction_writer::Aarch64InstructionWriter::new(function.0);
+        writer.put_nop();
+        writer.put_nop();
+        writer.put_nop();
+        writer.put_nop();
+        writer.put_nop();
+        writer.put_nop();
+        writer.put_nop();
+        writer.put_nop();
+        writer.put_nop();
+        writer.put_nop();
+        writer.put_nop();
+        writer.put_nop();
+        writer.put_nop();
+        writer.put_nop();
+        writer.put_nop();
+        writer.put_nop();
+        writer.flush();
+        function.0 = writer.code_offset();
         self.interceptor
             .replace_fast(function, NativePointer(detour))
             .map_err(Into::into)
