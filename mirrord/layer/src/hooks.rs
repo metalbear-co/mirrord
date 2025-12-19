@@ -133,8 +133,9 @@ impl<'a> HookManager<'a> {
             .ok_or_else(|| LayerError::NoSymbolName(symbol.to_string()))?;
 
         // on Go we use `replace_fast` since we don't use the original function.
+        tracing::warn!("hooking with not fast replace");
         self.interceptor
-            .replace_fast(function, NativePointer(detour))
+            .replace(function, NativePointer(detour), NativePointer(null_mut()))
             .map_err(Into::into)
     }
 }
