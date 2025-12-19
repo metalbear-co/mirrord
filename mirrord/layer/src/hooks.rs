@@ -137,7 +137,7 @@ impl<'a> HookManager<'a> {
         self.interceptor
             .replace_fast(function, NativePointer(detour))?;
 
-        function.0 = function.0.wrapping_add(8);
+        function.0 = function.0.wrapping_add(16);
         self.interceptor
             .replace_fast(function, NativePointer(detour))
             .map_err(Into::into)
