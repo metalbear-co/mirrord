@@ -134,12 +134,12 @@ impl<'a> HookManager<'a> {
 
         // on Go we use `replace_fast` since we don't use the original function.
         tracing::warn!("hooking with not fast replace");
-        let res = self.interceptor
+        self.interceptor
             .replace_fast(function, NativePointer(detour))
             .map_err(Into::into)?;
 
         function.0 = function.0 + 8;
-        let res = self.interceptor
+        self.interceptor
             .replace_fast(function, NativePointer(detour))
             .map_err(Into::into)
     }
