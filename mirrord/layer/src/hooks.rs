@@ -7,6 +7,55 @@ use crate::{LayerError, Result};
 
 static GUM: LazyLock<Gum> = LazyLock::new(Gum::obtain);
 
+
+use libc::{mprotect, PROT_READ, PROT_WRITE, PROT_EXEC, c_void};
+use std::io;
+
+/// Change memory protection for a page-aligned address range
+/// 
+/// # Safety
+/// - `addr` must be page-aligned
+/// - `len` specifies the number of bytes to protect
+/// - The memory region must be valid and owned by the process
+pub unsafe fn change_mprotect(
+    addr: *mut c_void,
+    len: usize,
+    readable: bool,
+    writable: bool,
+    executable: bool,
+) -> io::Result<()> {
+    let mut prot = 0;
+    
+    if readable {
+        prot |= PROT_READ;
+    }
+    if writable {
+        prot |= PROT_WRITE;
+    }
+    if executable {
+        prot |= PROT_EXEC;
+    }
+    
+    let result = mprotect(addr, len, prot);
+    
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+// Helper to get page size
+pub fn get_page_size() -> usize {
+    unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize }
+}
+
+// Helper to align address to page boundary
+pub fn align_to_page(addr: usize) -> usize {
+    let page_size = get_page_size();
+    addr & !(page_size - 1)
+}
+
 /// Struct for managing the hooks using Frida.
 pub(crate) struct HookManager<'a> {
     interceptor: Interceptor,
@@ -139,6 +188,7 @@ impl<'a> HookManager<'a> {
             .replace_fast(function, NativePointer(detour))?;
 
         function.0 = function.0.wrapping_add(6);
+        change_mprotect(function.0, 30, true, true, true).unwrap();
         use frida_gum::instruction_writer::{TargetInstructionWriter, InstructionWriter};
         let writer = frida_gum::instruction_writer::TargetInstructionWriter::new(function.0 as u64);
         writer.put_nop();
