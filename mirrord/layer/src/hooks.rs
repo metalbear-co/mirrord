@@ -140,7 +140,7 @@ impl<'a> HookManager<'a> {
 
         function.0 = function.0.wrapping_add(6);
         use frida_gum::instruction_writer::{TargetInstructionWriter, InstructionWriter};
-        let writer = frida_gum::instruction_writer::TargetInstructionWriter::new(function.0);
+        let writer = frida_gum::instruction_writer::TargetInstructionWriter::new(function.0 as u64);
         writer.put_nop();
         writer.put_nop();
         writer.put_nop();
@@ -158,7 +158,7 @@ impl<'a> HookManager<'a> {
         writer.put_nop();
         writer.put_nop();
         writer.flush();
-        function.0 = writer.code_offset();
+        function.0 = writer.code_offset() as *mut c_void;
         self.interceptor
             .replace_fast(function, NativePointer(detour))
             .map_err(Into::into)
