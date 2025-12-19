@@ -72,7 +72,7 @@ jobs:
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
-      windows_changed: ${{ steps.changed-windows.outputs.any_changed }}   # <-- ADDED
+      windows_changed: ${{ steps.changed-windows.outputs.any_changed }}
       wizard_frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
     steps:
       - uses: actions/checkout@v4
@@ -161,8 +161,8 @@ jobs:
           echo ${{ steps.changed-protocol.outputs.any_changed }};
           echo ${{ steps.changed-protocol-toml.outputs.any_changed }};
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
-          echo ${{ steps.changed-windows.outputs.any_changed }};           # <-- ADDED
-          echo ${{ steps.changed-windows.outputs.all_changed_files }};     # <-- ADDED
+          echo ${{ steps.changed-windows.outputs.any_changed }};
+          echo ${{ steps.changed-windows.outputs.all_changed_files }};
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
           
   lint:
@@ -173,7 +173,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v3
         with:
-          node-version: 22
+          node-version: 24
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -203,7 +203,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v3
         with:
-          node-version: 22
+          node-version: 24
       - run: npm install
         working-directory: ./wizard-frontend
       - run: npm run lint
@@ -619,6 +619,8 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: cargo build --manifest-path=./Cargo.toml -p mirrord --features wizard
+      # This needs improving to prevent flakiness! e.g. examining output for progress messages
+      # `sleep` is used here to give the wizard enough time to start before curl
       - run: |
           ./target/debug/mirrord wizard &
           sleep 2 && curl localhost:3000

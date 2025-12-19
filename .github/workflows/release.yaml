@@ -25,7 +25,7 @@ jobs:
         run: cargo install --git https://github.com/cross-rs/cross cross --rev 154b4ead7e639c7597d9e4e626b9c1c1e37608c0
       - uses: actions/setup-node@v3
         with:
-          node-version: 22
+          node-version: 24
       - run: npm install
         working-directory: ./wizard-frontend
       - run: npm run build
@@ -61,7 +61,7 @@ jobs:
         run: cargo install --git https://github.com/cross-rs/cross cross --rev 154b4ead7e639c7597d9e4e626b9c1c1e37608c0
       - uses: actions/setup-node@v3
         with:
-          node-version: 22
+          node-version: 24
       - run: npm install
         working-directory: ./wizard-frontend
       - run: npm run build
@@ -120,7 +120,7 @@ jobs:
         run: gon -log-level=debug -log-json .github/workflows/universal_dylib_sign.json
       - uses: actions/setup-node@v3
         with:
-          node-version: 22
+          node-version: 24
       - run: npm install
         working-directory: ./wizard-frontend
       - name: build macOS arm cli with universal dylib
