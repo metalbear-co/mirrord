@@ -179,18 +179,19 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
 }
 
 /// Same as [`enable_hooks`], but hook symbols found in the given `module_name`.
+#[tracing::instrument(level = "debug", skip(hook_manager), ret, err)]
 pub(crate) fn enable_hooks_in_loaded_module(hook_manager: &mut HookManager, module_name: String) {
     let Some(version) = super::get_go_runtime_version_in_module(hook_manager, &module_name) else {
         return;
     };
 
     if version >= 1.23 {
-        trace!("found version >= 1.23");
+        debug!("found version >= 1.23");
         post_go1_23(hook_manager, Some(module_name.as_str()));
     } else if version >= 1.19 {
-        trace!("found version >= 1.19");
+        debug!("found version >= 1.19");
         post_go1_19(hook_manager, Some(module_name.as_str()));
     } else {
-        trace!("found version < 1.19, arm64 not supported - not hooking");
+        debug!("found version < 1.19, arm64 not supported - not hooking");
     }
 }
