@@ -196,7 +196,7 @@ impl<'a> HookManager<'a> {
         // self.interceptor
         //     .replace_fast(function, NativePointer(detour))?;
 
-        unsafe { change_mprotect(function.0, 56, true, true, true).unwrap(); }
+        unsafe { change_mprotect(function.0, 200, true, true, true).unwrap(); }
         use frida_gum::instruction_writer::{TargetInstructionWriter, InstructionWriter};
         let writer = frida_gum::instruction_writer::TargetInstructionWriter::new(function.0 as u64);
         writer.put_nop();
@@ -233,7 +233,9 @@ impl<'a> HookManager<'a> {
         writer.put_nop();
         writer.put_nop();
         writer.put_nop();
-        writer.put_nop();
+        for i in 0..std::env::var("FML").unwrap().parse().unwrap() {
+            writer.put_nop();
+        }
         writer.flush();
         function = NativePointer(writer.code_offset() as *mut libc::c_void);
         drop(writer);
