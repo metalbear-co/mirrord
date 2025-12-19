@@ -18,14 +18,23 @@ use std::io;
 /// - `len` specifies the number of bytes to protect
 /// - The memory region must be valid and owned by the process
 pub unsafe fn change_mprotect(
-    addr: *mut c_void,
+    address: *mut c_void,
     len: usize,
     readable: bool,
     writable: bool,
     executable: bool,
 ) -> io::Result<()> {
     let mut prot = 0;
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize };
     
+    // Align address down to page boundary
+    let addr_usize = address as usize;
+    let aligned_address = addr_usize & !(page_size - 1);
+    
+    // Calculate aligned size
+    let end_address = addr_usize + len - 1;
+    let aligned_size = (1 + ((end_address - aligned_address) / page_size)) * page_size;
+
     if readable {
         prot |= PROT_READ;
     }
@@ -36,7 +45,7 @@ pub unsafe fn change_mprotect(
         prot |= PROT_EXEC;
     }
     
-    let result = mprotect(addr, len, prot);
+    let result = mprotect(aligned_address as *mut libc::c_void, aligned_size, prot);
     
     if result == 0 {
         Ok(())
