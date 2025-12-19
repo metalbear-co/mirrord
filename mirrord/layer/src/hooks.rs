@@ -209,6 +209,7 @@ impl<'a> HookManager<'a> {
         writer.put_nop();
         writer.put_nop();
         writer.put_nop();
+        writer.put_nop();
         writer.flush();
         function = NativePointer(writer.code_offset() as *mut libc::c_void);
         drop(writer);
