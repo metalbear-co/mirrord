@@ -28,7 +28,9 @@ use nix::errno::Errno;
 use thiserror::Error;
 use tracing::{error, info};
 
-use crate::{graceful_exit, setup::setup};
+use crate::graceful_exit;
+#[cfg(windows)]
+use crate::setup::setup;
 
 mod ignore_codes {
     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
