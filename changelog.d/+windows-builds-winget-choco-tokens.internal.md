@@ -1,1 +1,0 @@
-This PR allow using windows-build.yml with repos without winget and choco tokens

@@ -765,20 +765,6 @@ impl LocalConnectionTask {
         let (id_oneshot_tx, id_oneshot_rx) = oneshot::channel::<ConnectionId>();
         let (dns_oneshot_tx, dns_oneshot_rx) = oneshot::channel::<IpAddr>();
 
-        // lazy connection: wait until data starts
-        let first = match self.read_stream.next().await {
-            Some(Ok(data)) => data,
-            Some(Err(error)) => return Err(PortForwardError::TcpListenerError(error)),
-            None => {
-                // stream ended without sending data
-                let _ = self
-                    .task_internal_tx
-                    .send(PortForwardMessage::Close(self.socket_pair(), None))
-                    .await;
-                return Ok(());
-            }
-        };
-
         let (resolved_ip, port): (IpAddr, u16) = match &self.port_mapping.remote {
             (RemoteAddr::Ip(ip), port) => (IpAddr::V4(*ip), *port),
             (RemoteAddr::Hostname(hostname), port) => {
@@ -843,16 +829,6 @@ impl LocalConnectionTask {
                     .send(PortForwardMessage::Close(self.socket_pair(), None))
                     .await;
                 return Ok(());
-            }
-        };
-        match self
-            .task_internal_tx
-            .send(PortForwardMessage::Send(connection_id, first.into()))
-            .await
-        {
-            Ok(_) => (),
-            Err(error) => {
-                tracing::warn!("failed to send data to main loop: {error}");
             }
         };
 

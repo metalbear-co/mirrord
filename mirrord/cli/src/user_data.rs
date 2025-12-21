@@ -41,6 +41,12 @@ pub(crate) struct UserData {
     /// default values.
     #[serde(default = "Uuid::new_v4")]
     machine_id: Uuid,
+
+    /// True if the user has used the `mirrord wizard` command enough to be considered a returning
+    /// user. This update is triggered when the wizard gets a request on the cluster-details
+    /// endpoint, which happens when the user starts the flow to create a config file.
+    #[serde(default)]
+    is_returning_wizard: bool,
 }
 
 impl Default for UserData {
@@ -48,6 +54,7 @@ impl Default for UserData {
         Self {
             session_count: 0,
             machine_id: Uuid::new_v4(),
+            is_returning_wizard: false,
         }
     }
 }
@@ -122,6 +129,20 @@ impl UserData {
 
         self.overwrite_to_file().await?;
         Ok(self.session_count)
+    }
+
+    #[cfg(feature = "wizard")]
+    /// Updates user data file to indicate that user has used the Wizard
+    pub(crate) async fn update_is_returning_wizard(&mut self) -> io::Result<()> {
+        self.is_returning_wizard = true;
+
+        self.overwrite_to_file().await?;
+        Ok(())
+    }
+
+    #[cfg(feature = "wizard")]
+    pub(crate) fn is_returning_wizard(&self) -> bool {
+        self.is_returning_wizard
     }
 
     pub(crate) fn machine_id(&self) -> Uuid {

@@ -1015,7 +1015,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edca88bc138befd0323b20752846e6587272d3b03b0343c8ea28a6f819e6e71f"
 dependencies = [
  "async-trait",
- "axum-core",
+ "axum-core 0.4.5",
  "axum-macros",
  "base64 0.22.1",
  "bytes",
@@ -1026,7 +1026,7 @@ dependencies = [
  "hyper 1.8.1",
  "hyper-util",
  "itoa",
- "matchit",
+ "matchit 0.7.3",
  "memchr",
  "mime",
  "percent-encoding",
@@ -1040,6 +1040,39 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-tungstenite 0.24.0",
+ "tower 0.5.2",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "axum"
+version = "0.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b098575ebe77cb6d14fc7f32749631a6e44edbef6b796f89b020e99ba20d425"
+dependencies = [
+ "axum-core 0.5.5",
+ "bytes",
+ "form_urlencoded",
+ "futures-util",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "itoa",
+ "matchit 0.8.4",
+ "memchr",
+ "mime",
+ "percent-encoding",
+ "pin-project-lite",
+ "serde_core",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_urlencoded",
+ "sync_wrapper",
+ "tokio",
  "tower 0.5.2",
  "tower-layer",
  "tower-service",
@@ -1061,6 +1094,25 @@ dependencies = [
  "mime",
  "pin-project-lite",
  "rustversion",
+ "sync_wrapper",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "axum-core"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59446ce19cd142f8833f856eb31f3eb097812d1479ab224f54d72428ca21ea22"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "mime",
+ "pin-project-lite",
  "sync_wrapper",
  "tower-layer",
  "tower-service",
@@ -1373,6 +1425,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63044e1ae8e69f3b5a92c736ca6269b8d12fa7efe39bf34ddb06d102cf0e2cab"
 dependencies = [
  "memchr",
+ "regex-automata",
  "serde",
 ]
 
@@ -2589,7 +2642,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "libc",
 ]
@@ -3228,6 +3281,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-range-header"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9171a2ea8a68358193d15dd5d70c1c10a2afc3e7e4c5bc92bc9f025cebd7359c"
+
+[[package]]
 name = "http-serde"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3753,7 +3812,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "issue1317"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "actix-web",
  "env_logger",
@@ -3763,7 +3822,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "errno 0.3.14",
  "libc",
@@ -3772,7 +3831,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "libc",
  "socket2 0.5.10",
@@ -3780,14 +3839,14 @@ dependencies = [
 
 [[package]]
 name = "issue1899"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "issue2001"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "libc",
 ]
@@ -4137,7 +4196,7 @@ checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
 
 [[package]]
 name = "listen_ports"
-version = "3.176.0"
+version = "3.177.0"
 
 [[package]]
 name = "litemap"
@@ -4229,6 +4288,12 @@ name = "matchit"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
+
+[[package]]
+name = "matchit"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "md-5"
@@ -4324,6 +4389,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
+name = "mime_guess"
+version = "2.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
+dependencies = [
+ "mime",
+ "unicase",
+]
+
+[[package]]
 name = "minhook-detours-rs"
 version = "0.2.1"
 source = "git+https://github.com/metalbear-co/minhook-detours-rs.git?rev=4bfbf5717c6829f91b527180a038ec591b8265ca#4bfbf5717c6829f91b527180a038ec591b8265ca"
@@ -4392,9 +4467,10 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "actix-codec",
+ "axum 0.8.7",
  "base64 0.22.1",
  "ci_info",
  "clap",
@@ -4402,6 +4478,7 @@ dependencies = [
  "const-random",
  "dotenvy",
  "drain",
+ "flate2",
  "fs4 0.13.1",
  "futures",
  "hex",
@@ -4410,6 +4487,7 @@ dependencies = [
  "humantime",
  "hyper 1.8.1",
  "hyper-util",
+ "itertools 0.14.0",
  "k8s-openapi",
  "kube",
  "local-ip-address",
@@ -4432,6 +4510,7 @@ dependencies = [
  "mirrord-tls-util",
  "mirrord-vpn",
  "nix 0.29.0",
+ "opener",
  "prettytable-rs",
  "rand 0.9.2",
  "rcgen",
@@ -4443,12 +4522,15 @@ dependencies = [
  "serde",
  "serde_json",
  "socket2 0.5.10",
+ "tar",
+ "tempfile",
  "thiserror 2.0.17",
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-stream",
  "tokio-util",
  "tower 0.5.2",
+ "tower-http",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -4458,10 +4540,10 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "actix-codec",
- "axum",
+ "axum 0.7.9",
  "bollard",
  "bytes",
  "clap",
@@ -4518,7 +4600,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-env"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "base64 0.22.1",
  "k8s-openapi",
@@ -4531,7 +4613,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-iptables"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "async-trait",
  "caps",
@@ -4547,7 +4629,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "assert-json-diff",
  "base64 0.22.1",
@@ -4562,7 +4644,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "base64 0.22.1",
  "bcder",
@@ -4586,7 +4668,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "base64 0.22.1",
  "bimap",
@@ -4617,7 +4699,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4627,7 +4709,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "bincode",
  "drain",
@@ -4643,7 +4725,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "bytes",
  "futures",
@@ -4677,7 +4759,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy-protocol"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "bincode",
  "mirrord-protocol",
@@ -4687,12 +4769,13 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "actix-codec",
  "async-stream",
  "futures",
  "http 1.4.0",
+ "itertools 0.14.0",
  "k8s-openapi",
  "kube",
  "mirrord-agent-env",
@@ -4714,7 +4797,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "actix-codec",
  "apple-codesign",
@@ -4757,7 +4840,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-lib"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4788,7 +4871,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4797,7 +4880,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-win"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4828,7 +4911,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4838,7 +4921,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -4875,7 +4958,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "enum_dispatch",
  "indicatif",
@@ -4911,7 +4994,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "apple-codesign",
  "fs4 0.12.0",
@@ -4967,7 +5050,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-tls-util"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "http 1.4.0",
  "pem",
@@ -4984,7 +5067,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-vpn"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "futures",
  "ipnet",
@@ -5108,6 +5191,15 @@ checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
 dependencies = [
  "memchr",
  "minimal-lexical",
+]
+
+[[package]]
+name = "normpath"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf23ab2b905654b4cb177e30b629937b3868311d4e1cba859f899c041046e69b"
+dependencies = [
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5382,6 +5474,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "opener"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb9024962ab91e00c89d2a14352a8d0fc1a64346bf96f1839b45c09149564e47"
+dependencies = [
+ "bstr",
+ "normpath",
+ "windows-sys 0.60.2",
+]
+
+[[package]]
 name = "openssl-probe"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5404,7 +5507,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "tokio",
 ]
@@ -6563,14 +6666,14 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "libc",
 ]
@@ -6587,7 +6690,7 @@ dependencies = [
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.176.0"
+version = "3.177.0"
 dependencies = [
  "tokio",
 ]
@@ -6596,7 +6699,7 @@ dependencies = [
 name = "rust-websockets"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "axum 0.7.9",
  "tokio",
 ]
 
@@ -7985,7 +8088,7 @@ checksum = "877c5b330756d856ffcc4553ab34a5684481ade925ecc54bcd1bf02b1d0d4d52"
 dependencies = [
  "async-stream",
  "async-trait",
- "axum",
+ "axum 0.7.9",
  "base64 0.22.1",
  "bytes",
  "h2 0.4.12",
@@ -8067,12 +8170,20 @@ dependencies = [
  "base64 0.22.1",
  "bitflags 2.10.0",
  "bytes",
+ "futures-core",
  "futures-util",
  "http 1.4.0",
  "http-body 1.0.1",
+ "http-body-util",
+ "http-range-header",
+ "httpdate",
  "iri-string",
  "mime",
+ "mime_guess",
+ "percent-encoding",
  "pin-project-lite",
+ "tokio",
+ "tokio-util",
  "tower 0.5.2",
  "tower-layer",
  "tower-service",
@@ -8276,6 +8387,12 @@ checksum = "e1b88fcfe09e89d3866a5c11019378088af2d24c3fbd4f0543f96b479ec90697"
 dependencies = [
  "version_check",
 ]
+
+[[package]]
+name = "unicase"
+version = "2.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75b844d17643ee918803943289730bec8aac480150456169e647ed0b576ba539"
 
 [[package]]
 name = "unicode-ident"

@@ -2592,7 +2592,6 @@
           "$ref": "#/definitions/ReplicaSetTarget"
         },
         {
-          "type": "string",
           "enum": [
             "targetless"
           ]
