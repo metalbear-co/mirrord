@@ -85,6 +85,10 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
         env.push(envs::INJECT_HEADERS.as_k8s_spec(&agent.inject_headers));
     }
 
+    if let Some(clean) = agent.clean_iptables_on_start {
+        env.push(envs::CLEAN_IPTABLES_ON_START.as_k8s_spec(&clean));
+    }
+
     env
 }
 
