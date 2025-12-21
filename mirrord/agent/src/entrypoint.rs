@@ -713,18 +713,21 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
             .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
 
-        if !leftover_rules.is_empty() {
+        if leftover_rules.is_empty().not() {
             error!(
                 leftover_rules = ?leftover_rules,
                 DIRTY_IPTABLES_ERROR_MESSAGE
             );
-            let _ = notify_client_about_dirty_iptables(
-                listener,
-                args.communication_timeout,
-                state.tls_connector.clone(),
-            )
-            .await;
-            return Err(AgentError::IPTablesDirty);
+            if args.clean_iptables_on_start {
+            } else {
+                let _ = notify_client_about_dirty_iptables(
+                    listener,
+                    args.communication_timeout,
+                    state.tls_connector.clone(),
+                )
+                .await;
+                return Err(AgentError::IPTablesDirty);
+            }
         }
     }
 
