@@ -93,4 +93,4 @@ pub const MAX_BODY_BUFFER_TIMEOUT: CheckedEnv<u32> =
 
 /// When set, the agent will clean any existing iptables rules.
 pub const CLEAN_IPTABLES_ON_START: CheckedEnv<bool> =
-    CheckedEnv::new("MIRRORD_CLEAN_IPTABLES_ON_START");
+    CheckedEnv::new("MIRRORD_AGENT_CLEAN_IPTABLES_ON_START");
