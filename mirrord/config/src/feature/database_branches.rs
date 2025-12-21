@@ -13,7 +13,10 @@ pub mod redis;
 
 pub use mysql::{MysqlBranchConfig, MysqlBranchCopyConfig, MysqlBranchTableCopyConfig};
 pub use pg::{PgBranchConfig, PgBranchCopyConfig, PgBranchTableCopyConfig};
-pub use redis::{RedisBranchConfig, RedisBranchLocation};
+pub use redis::{
+    RedisBranchConfig, RedisBranchLocation, RedisConnectionConfig, RedisLocalConfig,
+    RedisOptions, RedisRuntime, RedisValueSource,
+};
 
 /// A list of configurations for database branches.
 ///

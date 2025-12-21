@@ -20,10 +20,7 @@ workspace = true
 
 [dependencies]
 mirrord-console = { path = "../console", features = ["async-logger"] }
-mirrord-operator = { path = "../operator", features = [
-    "client",
-    "setup",
-] }
+mirrord-operator = { path = "../operator", features = ["client", "setup"] }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
 mirrord-progress = { path = "../progress", features = ["implementations"] }
 mirrord-kube = { path = "../kube", features = ["portforward"] }
@@ -33,7 +30,7 @@ mirrord-analytics = { path = "../analytics" }
 mirrord-intproxy = { path = "../intproxy" }
 mirrord-vpn = { path = "../vpn" }
 mirrord-tls-util = { path = "../tls-util" }
-mirrord-auth= { path = "../auth" }
+mirrord-auth = { path = "../auth" }
 
 actix-codec.workspace = true
 clap.workspace = true
@@ -48,6 +45,7 @@ semver.workspace = true
 reqwest.workspace = true
 const-random = "0.1.15"
 tokio = { workspace = true, features = ["rt", "net", "macros", "process"] }
+tokio-retry.workspace = true
 kube.workspace = true
 k8s-openapi.workspace = true
 miette = { workspace = true, features = ["fancy"] }
