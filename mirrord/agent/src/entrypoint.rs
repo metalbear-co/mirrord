@@ -16,7 +16,7 @@ use futures::{TryFutureExt, future::OptionFuture};
 use metrics::{CLIENT_COUNT, start_metrics};
 use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{
-    IPTables, SafeIpTables,
+    SafeIpTables,
     error::{IPTablesError, IPTablesResult},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
