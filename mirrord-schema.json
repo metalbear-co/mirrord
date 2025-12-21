@@ -1034,7 +1034,7 @@
       ]
     },
     "DbBranchingConnectionSourceKind": {
-      "description": "Different ways to source the connection options.",
+      "description": "Different ways to source the connection options.\n\nSupport: - `env` in the target's pod spec. - `envFrom` in the target's pod spec.",
       "oneOf": [
         {
           "type": "object",
