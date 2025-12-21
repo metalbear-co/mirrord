@@ -63,6 +63,13 @@ pub struct Args {
     /// cluster.
     #[arg(long, default_value_t = false, env = envs::IPV6_SUPPORT.name)]
     pub ipv6: bool,
+
+    /// Enable support for IPv6-only clusters
+    ///
+    /// Only when this option is set will take the needed steps to run on an IPv6 single stack
+    /// cluster.
+    #[arg(long, default_value_t = false, env = envs::CLEAN_IPTABLES_ON_START.name)]
+    pub clean_iptables_on_start: bool,
 }
 
 impl Args {
