@@ -14,7 +14,7 @@ use tokio::{
         mpsc::{self, error::TrySendError},
         oneshot,
     },
-    task::{AbortHandle, JoinSet},
+    task::JoinSet,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
@@ -211,22 +211,35 @@ where
                 }
             }
 
-            match &port_state.steal_tx {
+            let join_handle = match &port_state.steal_tx {
                 Some(steal_tx) => {
-                    let _ = steal_tx.send(StolenTraffic::Tcp(redirected)).await;
+                    let (tx, rx) = oneshot::channel();
+                    let _ = steal_tx
+                        .send(StolenTraffic::Tcp {
+                            conn: redirected,
+                            join_handle_tx: tx,
+                            shutdown: port_state.shutdown.child_token(),
+                        })
+                        .await;
+
+                    rx.await.expect("TcpStealerTask dropped oneshot tx for returning JoinHandle to IO task for TCP connection")
                 }
-                None => {
-                    redirected.pass_through();
+                None => redirected.pass_through(port_state.shutdown.child_token()),
+            };
+
+            port_state.connections.spawn(async {
+                if let Err(err) = join_handle.await {
+                    tracing::error!(?err, "Redirected passthrough task panicked");
                 }
-            }
+            });
 
             return;
         };
 
         let tx = self.internal_tx.clone();
-        let token = port_state.http_shutdown.clone();
+        let token = port_state.shutdown.clone();
         let mut requests = ExtractedRequests::new(TokioIo::new(conn.stream), http_version);
-        port_state.spawn_connection(async move {
+        port_state.connections.spawn(async move {
             let mut shutting_down = false;
             loop {
                 let result = tokio::select! {
@@ -325,7 +338,7 @@ where
                         e.insert_entry(PortState {
                             steal_tx: None,
                             mirror_txs: vec![conn_tx.clone()],
-                            http_shutdown: Default::default(),
+                            shutdown: Default::default(),
                             connections: Default::default(),
                         });
                     }
@@ -356,7 +369,7 @@ where
                         e.insert_entry(PortState {
                             steal_tx: Some(conn_tx.clone()),
                             mirror_txs: Default::default(),
-                            http_shutdown: Default::default(),
+                            shutdown: Default::default(),
                             connections: Default::default(),
                         });
                     }
@@ -545,9 +558,9 @@ struct PortState {
     steal_tx: Option<mpsc::Sender<StolenTraffic>>,
     /// Mirrorers' traffic channel.
     mirror_txs: Vec<mpsc::Sender<MirroredTraffic>>,
-    /// Used to initiate a graceful shutdown of stolen HTTP connections,
-    /// once the all clients cancel their subscriptions.
-    http_shutdown: CancellationToken,
+    /// Used to initiate a graceful shutdown of redirected
+    /// connections, once the all clients cancel their subscriptions.
+    shutdown: CancellationToken,
     /// Used to track connection IO tasks and wait for their graceful shutdown.
     connections: JoinSet<()>,
 }
@@ -572,20 +585,8 @@ impl PortState {
     /// This function is essentially `AsyncDrop`, and it should always
     /// be called before removing the redirection.
     async fn graceful_shutdown(self) {
-        self.http_shutdown.cancel();
+        self.shutdown.cancel();
         self.connections.join_all().await;
-    }
-
-    /// Spawn a task and track its lifecycle.
-    /// [`Self::graceful_shutdown`] will wait for all tasks spawned by
-    /// this function to finish before returning.
-    #[inline]
-    fn spawn_connection<F>(&mut self, future: F) -> AbortHandle
-    where
-        F: Future<Output = ()>,
-        F: Send + 'static,
-    {
-        self.connections.spawn(future)
     }
 }
 
