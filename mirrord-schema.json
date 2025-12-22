@@ -1006,6 +1006,71 @@
               ]
             }
           }
+        },
+        {
+          "description": "When configuring a branch for Redis, set `type` to `redis`.\n\nExample with URL-based connection: ```json { \"type\": \"redis\", \"location\": \"local\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"REDIS_URL\" } } } ```\n\nExample with separated settings: ```json { \"type\": \"redis\", \"location\": \"local\", \"connection\": { \"host\": { \"type\": \"env\", \"variable\": \"REDIS_HOST\" }, \"port\": 6379, \"password\": { \"type\": \"env\", \"variable\": \"REDIS_PASSWORD\" } } } ```",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "connection": {
+              "description": "Connection configuration for the Redis instance.",
+              "default": {
+                "database": null,
+                "host": null,
+                "password": null,
+                "port": null,
+                "tls": null,
+                "url": null,
+                "username": null
+              },
+              "allOf": [
+                {
+                  "$ref": "#/definitions/RedisConnectionConfig"
+                }
+              ]
+            },
+            "id": {
+              "description": "Optional unique identifier for reusing branches across sessions.",
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "local": {
+              "description": "Local Redis runtime configuration. Only used when `location` is `local`.",
+              "default": {
+                "options": {
+                  "args": []
+                },
+                "port": 6379,
+                "runtime": "auto",
+                "version": "7-alpine"
+              },
+              "allOf": [
+                {
+                  "$ref": "#/definitions/RedisLocalConfig"
+                }
+              ]
+            },
+            "location": {
+              "description": "Where the Redis instance should run. - `local`: Spawns a local Redis instance. - `remote`: Uses the remote Redis (default behavior).",
+              "default": "remote",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/RedisBranchLocation"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "redis"
+              ]
+            }
+          }
         }
       ]
     },
@@ -2402,6 +2467,239 @@
               ]
             }
           }
+        }
+      ]
+    },
+    "RedisBranchLocation": {
+      "description": "Location for the Redis branch instance.",
+      "oneOf": [
+        {
+          "description": "Use a local Redis instance that mirrord manages.",
+          "type": "string",
+          "enum": [
+            "local"
+          ]
+        },
+        {
+          "description": "Use the remote Redis (default behavior, no-op).",
+          "type": "string",
+          "enum": [
+            "remote"
+          ]
+        }
+      ]
+    },
+    "RedisConnectionConfig": {
+      "description": "Redis connection configuration.\n\nSupports either a complete URL or separated connection parameters. If both are provided, `url` takes precedence.",
+      "type": "object",
+      "properties": {
+        "database": {
+          "description": "Redis database number (default: 0).",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "host": {
+          "description": "Redis host/hostname.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RedisValueSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "password": {
+          "description": "Redis password for authentication.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RedisValueSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "port": {
+          "description": "Redis port (default: 6379).",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "tls": {
+          "description": "Enable TLS/SSL connection.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "Complete Redis URL (e.g., `redis://user:pass@host:6379/0`). Can be sourced from an environment variable.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RedisValueSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "username": {
+          "description": "Redis username (Redis 6+ ACL).",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RedisValueSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RedisEnvSource": {
+      "description": "Environment variable source for Redis values.",
+      "type": "object",
+      "required": [
+        "type",
+        "variable"
+      ],
+      "properties": {
+        "container": {
+          "description": "Optional container name for multi-container pods.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "description": "Must be \"env\" to indicate environment variable source.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RedisEnvSourceType"
+            }
+          ]
+        },
+        "variable": {
+          "description": "Name of the environment variable.",
+          "type": "string"
+        }
+      }
+    },
+    "RedisEnvSourceType": {
+      "description": "Type marker for environment variable sources.",
+      "type": "string",
+      "enum": [
+        "env"
+      ]
+    },
+    "RedisLocalConfig": {
+      "description": "Configuration for local Redis runtime.",
+      "type": "object",
+      "properties": {
+        "options": {
+          "description": "Additional Redis configuration options.",
+          "default": {
+            "args": []
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/RedisOptions"
+            }
+          ]
+        },
+        "port": {
+          "description": "Local port to bind Redis to (default: 6379).",
+          "default": 6379,
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "runtime": {
+          "description": "Runtime backend for local Redis.",
+          "default": "auto",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RedisRuntime"
+            }
+          ]
+        },
+        "version": {
+          "description": "Redis version/tag to use (default: \"7-alpine\").",
+          "default": "7-alpine",
+          "type": "string"
+        }
+      }
+    },
+    "RedisOptions": {
+      "description": "Additional arguments passed to the Redis server.\n\nExample: ```json { \"args\": [\"--maxmemory\", \"256mb\", \"--appendonly\", \"yes\"] } ```",
+      "type": "object",
+      "properties": {
+        "args": {
+          "description": "Raw arguments passed directly to redis-server or as Docker CMD args. Use standard Redis config syntax (e.g., \"--maxmemory 256mb\").",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "RedisRuntime": {
+      "description": "Runtime backend for running local Redis.\n\nBackends are tried in order of preference: 1. `docker`- Uses Docker container 2. `redis_server` - Uses native redis-server binary 3. `auto` (default)  - Tries Docker first, falls back to redis-server",
+      "oneOf": [
+        {
+          "description": "Use Docker container.",
+          "type": "string",
+          "enum": [
+            "docker"
+          ]
+        },
+        {
+          "description": "Use native redis-server binary.",
+          "type": "string",
+          "enum": [
+            "redis_server"
+          ]
+        },
+        {
+          "description": "Auto-detect: try Docker first, fall back to redis-server.  (default)",
+          "type": "string",
+          "enum": [
+            "auto"
+          ]
+        }
+      ]
+    },
+    "RedisValueSource": {
+      "description": "Source for a Redis configuration value.\n\nValues can be specified directly or sourced from environment variables.",
+      "anyOf": [
+        {
+          "description": "Direct value.",
+          "type": "string"
+        },
+        {
+          "description": "Value sourced from environment.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RedisEnvSource"
+            }
+          ]
         }
       ]
     },
