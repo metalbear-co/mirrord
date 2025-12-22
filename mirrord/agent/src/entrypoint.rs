@@ -10,6 +10,7 @@ use std::{
     },
 };
 
+use async_pidfd::AsyncPidFd;
 use client_connection::AgentTlsConnector;
 use dns::{ClientGetAddrInfoRequest, DnsCommand};
 use futures::{TryFutureExt, future::OptionFuture};
@@ -684,11 +685,13 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 
     let state = State::new(&args).await?;
 
+    let cancellation_token = CancellationToken::new();
+
     // Check that chain names won't conflict with another agent or failed cleanup.
     // This check is only relevant if we have a target.
     // If we don't have any target, the agent should be running in a fresh network namespace,
     // and you should **not** expect that it can access iptables.
-    if state.container_pid().is_some() {
+    if let Some(target_pid) = state.container_pid() {
         let leftover_rules = state
             .network_runtime
             .handle()
@@ -726,9 +729,41 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             .await;
             return Err(AgentError::IPTablesDirty);
         }
-    }
 
-    let cancellation_token = CancellationToken::new();
+        // As soon as the main container exits, we want to exit as well.
+        // This not only makes for a better UX (no unused agent pods
+        // lingering), but is important for terminating redirected
+        // connections gracefully. If we don't exit as soon as the main
+        // container dies, the veth interface will be deleted while
+        // redirected connections are still open, and thus the other ends
+        // will stay open with no way to terminate them correctly.
+        let cancel = cancellation_token.clone();
+        let pidfd = AsyncPidFd::from_pid(target_pid.try_into().unwrap())
+            .expect("could not acquire pidfd to target process");
+        tokio::spawn(async move {
+            tracing::trace!("Starting watcher task for main target process");
+            match pidfd.wait().await {
+                Ok(status) => {
+                    // ExitInfo doesn't impl Debug >:(
+                    tracing::warn!(
+                        siginifo = ?status.siginfo,
+                        rusage = ?status.rusage,
+                        "wait() on target container did not return expected value"
+                    );
+                }
+                Err(error) => {
+                    if error.raw_os_error() != Some(libc::ECHILD) {
+                        tracing::warn!(
+                            ?error,
+                            "wait() on target container did not return expected value"
+                        );
+                    }
+                }
+            }
+            tracing::debug!("Main target process exited, shutting down...");
+            cancel.cancel();
+        });
+    }
 
     // To make sure that background tasks are cancelled when we exit early from this function.
     let cancel_guard = cancellation_token.clone().drop_guard();

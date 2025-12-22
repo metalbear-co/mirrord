@@ -560,6 +560,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-io"
+version = "2.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "456b8a8feb6f42d237746d4b3e9a178494627745c3c56c6ea55d92ba50d026fc"
+dependencies = [
+ "autocfg",
+ "cfg-if",
+ "concurrent-queue",
+ "futures-io",
+ "futures-lite",
+ "parking",
+ "polling",
+ "rustix 1.1.2",
+ "slab",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "async-pidfd"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "958321a23896f573a3f1809437af5816f3bc90dd2d5ffe8b1cd5645f42230c17"
+dependencies = [
+ "async-io",
+ "libc",
+]
+
+[[package]]
 name = "async-socks5"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4461,6 +4489,7 @@ name = "mirrord-agent"
 version = "3.176.0"
 dependencies = [
  "actix-codec",
+ "async-pidfd",
  "axum",
  "bollard",
  "bytes",
@@ -5840,6 +5869,20 @@ dependencies = [
  "pnet_base",
  "pnet_packet",
  "pnet_sys",
+]
+
+[[package]]
+name = "polling"
+version = "3.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d0e4f59085d47d8241c88ead0f274e8a0cb551f3625263c05eb8dd897c34218"
+dependencies = [
+ "cfg-if",
+ "concurrent-queue",
+ "hermit-abi",
+ "pin-project-lite",
+ "rustix 1.1.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
