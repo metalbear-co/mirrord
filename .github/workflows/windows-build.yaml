@@ -543,6 +543,21 @@ jobs:
           }
 
           "RELEASE_TAG=$tag" | Out-File -Append -FilePath $env:GITHUB_ENV
+      - name: Generate Checksums
+        if: env.RELEASE_TAG != ''
+        run: |
+           $exe = $env:MIRRORD_EXE
+           $dll = $env:MIRRORD_LAYER_FILE
+           
+           if (Test-Path $exe) {
+             (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower() | Out-File -FilePath "$exe.sha256" -NoNewline -Encoding ascii
+             "MIRRORD_EXE_SHA256=$exe.sha256" | Out-File -Append -FilePath $env:GITHUB_ENV
+           }
+           if (Test-Path $dll) {
+             (Get-FileHash $dll -Algorithm SHA256).Hash.ToLower() | Out-File -FilePath "$dll.sha256" -NoNewline -Encoding ascii
+             "MIRRORD_LAYER_SHA256=$dll.sha256" | Out-File -Append -FilePath $env:GITHUB_ENV
+           }
+
       - name: Upload artifacts to Release
         if: env.RELEASE_TAG != ''
         uses: metalbear-co/action-gh-release@ab50eebb6488051c6788d97fa95232267c6a4e23
@@ -552,6 +567,8 @@ jobs:
             ${{ env.MSI_PATH }}
             ${{ env.MIRRORD_EXE }}
             ${{ env.MIRRORD_LAYER_FILE }}
+            ${{ env.MIRRORD_EXE_SHA256 }}
+            ${{ env.MIRRORD_LAYER_SHA256 }}
 
 
       ###########################################################################
