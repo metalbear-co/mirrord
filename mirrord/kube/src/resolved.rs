@@ -200,19 +200,6 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::Targetless(..) => None,
         }
     }
-
-    /// Is this a [`ResolvedTarget::Deployment`], and is it empty?
-    pub fn empty_deployment(&self) -> bool {
-        if let Self::Deployment(ResolvedResource { resource, .. }) = self {
-            !resource
-                .status
-                .as_ref()
-                .map(|status| status.available_replicas > Some(0))
-                .unwrap_or_default()
-        } else {
-            false
-        }
-    }
 }
 
 impl ResolvedTarget<false> {
