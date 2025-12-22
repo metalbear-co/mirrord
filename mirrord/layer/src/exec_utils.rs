@@ -23,6 +23,7 @@ use crate::{
     },
     error::HookError,
     exec_hooks::{hooks, *},
+    graceful_exit,
     hooks::HookManager,
     replace,
 };
@@ -105,6 +106,15 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
                 path, non_existing_bin
             );
             Bypass(ExecOnNonExistingFile(non_existing_bin))
+        }
+        ref sip_error @ Err(SipError::TooManyFilesOpen(..)) => {
+            // we can't recover from hitting the fd limit, so we have to exit fully
+            graceful_exit!(
+                "mirrord failed to patch SIP with: {:?}",
+                sip_error.as_ref().unwrap_err()
+            );
+            // compile error if this match arm does not return a Detour
+            unreachable!()
         }
         Err(sip_error) => {
             warn!(
