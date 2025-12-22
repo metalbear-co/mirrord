@@ -36,7 +36,7 @@ on:
       - "**/*.md"
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   BUCKET_URI: gs://mirrord-windows-builds
@@ -543,7 +543,16 @@ jobs:
           }
 
           "RELEASE_TAG=$tag" | Out-File -Append -FilePath $env:GITHUB_ENV
-          Write-Host "Using RELEASE_TAG (version): $tag"
+      - name: Upload artifacts to Release
+        if: env.RELEASE_TAG != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: |
+            ${{ env.MSI_PATH }}
+            ${{ env.MIRRORD_EXE }}
+            ${{ env.MIRRORD_LAYER_FILE }}
+
 
       ###########################################################################
       # COMPUTE MSI DOWNLOAD URL FOR WINGET
