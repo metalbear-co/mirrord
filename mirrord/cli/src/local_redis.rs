@@ -83,8 +83,7 @@ pub fn build_connection_url(config: &RedisConnectionConfig) -> Option<String> {
 /// - If the app was using a URL (e.g., `REDIS_URL=redis://host:6379/0`), we return a URL.
 /// - If the app was using host:port (e.g., `REDIS_ADDR=redis-main:6379`), we return host:port.
 ///
-/// The `/0` in URL format is the Redis database number (Redis supports 16 databases, 0-15).
-/// Database 0 is the default.
+/// The `/0` in URL format is the Redis database number. Database 0 is the default.
 pub fn build_local_connection_string(port: u16, config: &RedisConnectionConfig) -> String {
     if config.has_url() {
         // App expects URL format: redis://localhost:6379/0
