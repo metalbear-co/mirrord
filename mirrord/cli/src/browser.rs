@@ -63,7 +63,7 @@ where
         }
     } else {
         progress.failure(Some(&format!(
-            "cannot find Google Chrome - you can use link in Chrome to set {url}"
+            "cannot find Google Chrome - you can use link in Chrome to set {init_url}"
         )));
     }
 }
