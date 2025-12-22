@@ -35,6 +35,7 @@ use crate::{
         },
         error::ConnError,
     },
+    metrics::{BYPASSED_HTTP_REQUESTS, MetricGuard},
 };
 
 pub type UpgradeDataRx = mpsc::Receiver<Bytes>;
@@ -59,6 +60,8 @@ where
     /// [`RequestDestination::send_result`].
     #[instrument(level = "trace", skip(self))]
     pub async fn run(mut self) {
+        let _metric_guard = MetricGuard::new(&BYPASSED_HTTP_REQUESTS);
+
         let result: Result<(), ConnError> = try {
             self.handle_frames().await?;
             self.handle_upgrade().await?;
