@@ -20,7 +20,8 @@ use mirrord_agent_iptables::{
     error::{IPTablesError, IPTablesResult},
 };
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage, dns::ReverseDnsLookupResponse,
+    ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage, ResponseError,
+    dns::ReverseDnsLookupResponse,
 };
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
@@ -549,19 +550,18 @@ impl ClientConnectionHandler {
                     .await?;
             }
             ClientMessage::ReverseDnsLookup(request) => {
-                let hostname = match dns_lookup::lookup_addr(&request.ip_address) {
-                    Ok(hostname) => Some(hostname),
-                    Err(error) => {
-                        debug!(
-                            "Reverse DNS lookup failed for {}: {}",
-                            request.ip_address, error
-                        );
-                        None
-                    }
-                };
+                let hostname = dns_lookup::lookup_addr(&request.ip_address).inspect_err(|error| {
+                    error!(
+                        address = ?request.ip_address,
+                        error = ?error,
+                        "Reverse DNS lookup failed",
+                    )
+                });
 
                 self.respond(DaemonMessage::ReverseDnsLookup(Ok(
-                    ReverseDnsLookupResponse { hostname },
+                    ReverseDnsLookupResponse {
+                        hostname: hostname.map_err(ResponseError::from),
+                    },
                 )))
                 .await?
             }

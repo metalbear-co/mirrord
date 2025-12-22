@@ -136,6 +136,7 @@ pub struct ReverseDnsLookupRequest {
 /// Response from reverse DNS lookup.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReverseDnsLookupResponse {
-    /// The hostname associated with the IP address, if lookup succeeded.
-    pub hostname: Option<String>,
+    /// The hostname associated with the IP address,
+    /// Contains an error if the lookup failed.
+    pub hostname: RemoteResult<String>,
 }
