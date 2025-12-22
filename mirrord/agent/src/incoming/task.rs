@@ -9,9 +9,12 @@ use std::{
 use futures::{FutureExt, StreamExt, future::Shared};
 use hyper_util::rt::TokioIo;
 use mirrord_agent_env::envs;
-use tokio::sync::{
-    mpsc::{self, error::TrySendError},
-    oneshot,
+use tokio::{
+    sync::{
+        mpsc::{self, error::TrySendError},
+        oneshot,
+    },
+    task::{AbortHandle, JoinSet},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
@@ -184,8 +187,8 @@ where
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]
-    async fn handle_initialized_connection(&self, conn: MaybeHttp) {
-        let Some(port_state) = self.ports.get(&conn.info.original_destination.port()) else {
+    async fn handle_initialized_connection(&mut self, conn: MaybeHttp) {
+        let Some(port_state) = self.ports.get_mut(&conn.info.original_destination.port()) else {
             tracing::warn!(
                 connection = ?conn,
                 "Redirected connection port is no longer subscribed, dropping",
@@ -223,7 +226,7 @@ where
         let tx = self.internal_tx.clone();
         let token = port_state.http_shutdown.clone();
         let mut requests = ExtractedRequests::new(TokioIo::new(conn.stream), http_version);
-        tokio::spawn(async move {
+        port_state.spawn_connection(async move {
             let mut shutting_down = false;
             loop {
                 let result = tokio::select! {
@@ -323,6 +326,7 @@ where
                             steal_tx: None,
                             mirror_txs: vec![conn_tx.clone()],
                             http_shutdown: Default::default(),
+                            connections: Default::default(),
                         });
                     }
                     Entry::Occupied(mut e) => {
@@ -353,6 +357,7 @@ where
                             steal_tx: Some(conn_tx.clone()),
                             mirror_txs: Default::default(),
                             http_shutdown: Default::default(),
+                            connections: Default::default(),
                         });
                     }
                     Entry::Occupied(mut e) => {
@@ -392,7 +397,7 @@ where
         mirror_txs.retain(|tx| tx.is_closed().not());
 
         if steal_tx.is_none() && mirror_txs.is_empty() {
-            e.remove();
+            e.remove().graceful_shutdown().await;
             self.redirector.remove_redirection(port).await?;
             if self.ports.is_empty() {
                 self.redirector.cleanup().await?;
@@ -408,7 +413,8 @@ where
     /// Cleans the redirections in [`Self::redirector`].
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn cleanup(&mut self) -> Result<(), R::Error> {
-        for port in std::mem::take(&mut self.ports).into_keys() {
+        for (port, state) in std::mem::take(&mut self.ports) {
+            state.graceful_shutdown().await;
             self.redirector.remove_redirection(port).await?;
         }
 
@@ -542,6 +548,8 @@ struct PortState {
     /// Used to initiate a graceful shutdown of stolen HTTP connections,
     /// once the all clients cancel their subscriptions.
     http_shutdown: CancellationToken,
+    /// Used to track connection IO tasks and wait for their graceful shutdown.
+    connections: JoinSet<()>,
 }
 
 impl fmt::Debug for PortState {
@@ -559,9 +567,25 @@ impl fmt::Debug for PortState {
     }
 }
 
-impl Drop for PortState {
-    fn drop(&mut self) {
+impl PortState {
+    /// Tell and wait for all connections to gracefully shut down.
+    /// This function is essentially `AsyncDrop`, and it should always
+    /// be called before removing the redirection.
+    async fn graceful_shutdown(self) {
         self.http_shutdown.cancel();
+        self.connections.join_all().await;
+    }
+
+    /// Spawn a task and track its lifecycle.
+    /// [`Self::graceful_shutdown`] will wait for all tasks spawned by
+    /// this function to finish before returning.
+    #[inline]
+    fn spawn_connection<F>(&mut self, future: F) -> AbortHandle
+    where
+        F: Future<Output = ()>,
+        F: Send + 'static,
+    {
+        self.connections.spawn(future)
     }
 }
 
