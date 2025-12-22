@@ -15,31 +15,29 @@ use crate::utils::{
     PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
 };
 
-/// Starts mirrord with a target that has an existing mirrord IP table chain from another agent or a
-/// failed cleanup. This should cause mirrord to exit and NOT perform cleanup on the table. This
-/// behaviour is required in order to have static chain names in the agent.
-///
-/// The existing mirrord IP table chain name is introduced via init container before the target
-/// starts. Instead of checking for the existence of the chain name after a run (to ensure it was
-/// not cleaned up), we can run the agent a second time and expect the same exit behaviour as the
-/// first run.
-///
-/// #### RELEVANT CODE
-/// Function that performs check: `SafeIpTables::ensure_iptables_clean()`
-/// Static chain/ table names: `IPTABLE_PREROUTING`, `IPTABLE_MESH`, `IPTABLE_STANDARD`,
-/// `IPTABLES_TABLE_NAME`
-#[cfg_attr(target_os = "windows", ignore)]
-#[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(120))]
-pub async fn agent_exits_on_dirty_tables(
-    #[values(EnvApp::NodeInclude)] application: EnvApp,
-    #[future] kube_client: Client,
-) {
+struct DirtyIptablesTest {
+    namespace: String,
+    target: String,
+    kube_client: Client,
+}
+
+/// This fixture only creates resources if a mirrord operator is NOT installed.
+#[fixture]
+async fn oss_only_dirty_iptables_test(#[future] kube_client: Client) -> Option<DirtyIptablesTest> {
     let kube_client = kube_client.await;
     if operator_installed(&kube_client).await.unwrap() {
-        return;
+        return None;
     }
+    Some(dirty_iptables_test_inner(kube_client).await)
+}
+
+#[fixture]
+async fn dirty_iptables_test(#[future] kube_client: Client) -> DirtyIptablesTest {
+    let kube_client = kube_client.await;
+    dirty_iptables_test_inner(kube_client).await
+}
+
+async fn dirty_iptables_test_inner(kube_client: Client) -> DirtyIptablesTest {
     let namespace = format!("dirty-iptables-{}", random_string());
     let pod_name = format!("{namespace}-pod");
     let init_image = std::env::var("MIRRORD_AGENT_IMAGE").unwrap_or_else(|_| "test".to_string());
@@ -105,7 +103,7 @@ pub async fn agent_exits_on_dirty_tables(
                     ]
                 }
             }))
-            .unwrap(),
+                .unwrap(),
         )
         .await
         .unwrap_or_else(|error| {
@@ -118,8 +116,42 @@ pub async fn agent_exits_on_dirty_tables(
 
     // Wait for the target pod to be ready
     println!("Waiting for target `{target}` in namespace `{namespace}` to be ready...");
-    watch::wait_until_pod_ready(&pod_name, &namespace, kube_client).await;
+    watch::wait_until_pod_ready(&pod_name, &namespace, kube_client.clone()).await;
 
+    DirtyIptablesTest {
+        namespace,
+        target,
+        kube_client,
+    }
+}
+
+/// Starts mirrord with a target that has an existing mirrord IP table chain from another agent or a
+/// failed cleanup. This should cause mirrord to exit and NOT perform cleanup on the table. This
+/// behaviour is required in order to have static chain names in the agent.
+///
+/// The existing mirrord IP table chain name is introduced via init container before the target
+/// starts. Instead of checking for the existence of the chain name after a run (to ensure it was
+/// not cleaned up), we can run the agent a second time and expect the same exit behaviour as the
+/// first run.
+///
+/// #### RELEVANT CODE
+/// Function that performs check: `SafeIpTables::ensure_iptables_clean()`
+/// Static chain/ table names: `IPTABLE_PREROUTING`, `IPTABLE_MESH`, `IPTABLE_STANDARD`,
+/// `IPTABLES_TABLE_NAME`
+#[cfg_attr(target_os = "windows", ignore)]
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(120))]
+pub async fn agent_exits_on_dirty_tables(
+    #[future] oss_only_dirty_iptables_test: Option<DirtyIptablesTest>,
+) {
+    let Some(DirtyIptablesTest {
+        namespace, target, ..
+    }) = oss_only_dirty_iptables_test.await
+    else {
+        return;
+    };
+    let application = EnvApp::NodeInclude;
     let mirrord_args = Some(application.mirrord_args().unwrap_or_default());
     let mut process = run_exec_with_target(
         application.command(),
@@ -151,4 +183,38 @@ pub async fn agent_exits_on_dirty_tables(
     process
         .assert_stderr_contains("Detected dirty iptables.")
         .await;
+}
+
+/// Verify that when the `agent.clean_iptables_on_start` option is set, the agent cleans up the
+/// iptables and starts, instead of erroring out.
+#[cfg_attr(target_os = "windows", ignore)]
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(120))]
+pub async fn agent_cleans_up_and_starts_on_dirty_tables(
+    #[future] dirty_iptables_test: DirtyIptablesTest,
+) {
+    let DirtyIptablesTest {
+        namespace,
+        target,
+        kube_client,
+    } = dirty_iptables_test.await;
+    let env = if operator_installed(&kube_client).await.unwrap() {
+        // if the operator is installed, cleanup should be enabled by default.
+        None
+    } else {
+        Some(vec![("MIRRORD_AGENT_CLEAN_IPTABLES_ON_START", "true")])
+    };
+    let application = EnvApp::NodeInclude;
+    let mirrord_args = Some(application.mirrord_args().unwrap_or_default());
+    let mut process = run_exec_with_target(
+        application.command(),
+        &target,
+        Some(&namespace),
+        mirrord_args.clone(),
+        env,
+    )
+    .await;
+
+    process.wait_assert_success().await;
 }
