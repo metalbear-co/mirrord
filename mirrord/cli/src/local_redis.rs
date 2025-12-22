@@ -154,7 +154,6 @@ async fn start_docker<P: Progress>(
     }
 
     // Wait for Redis to be ready with exponential backoff
-    // 100ms, 200ms, 400ms, 800ms, 1000ms, 1000ms... (max 10 attempts = ~5s total)
     let retry_strategy = ExponentialBackoff::from_millis(100)
         .max_delay(std::time::Duration::from_secs(1))
         .take(10);
