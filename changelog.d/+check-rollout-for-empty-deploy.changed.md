@@ -1,0 +1,1 @@
+When targeting an empty deployment with the operator, mirrord now checks if the deployment is managed by a rollout with the same name. If this is the case, the user is instructed to target that rollout instead.

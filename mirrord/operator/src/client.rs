@@ -6,6 +6,7 @@ use conn_wrapper::ConnectionWrapper;
 use connect_params::ConnectParams;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
 use http::{HeaderName, HeaderValue, request::Request};
+use k8s_openapi::api::apps::v1::Deployment;
 use kube::{
     Api, Client, Config, Resource,
     api::{ListParams, PostParams},
@@ -21,9 +22,15 @@ use mirrord_config::{
     LayerConfig, feature::database_branches::default_creation_timeout_secs, target::Target,
 };
 use mirrord_kube::{
-    api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
+    api::{
+        kubernetes::{
+            create_kube_config,
+            rollout::{Rollout, RolloutSpec, workload_ref::WorkloadRef},
+        },
+        runtime::RuntimeDataProvider,
+    },
     error::KubeApiError,
-    resolved::ResolvedTarget,
+    resolved::{ResolvedResource, ResolvedTarget},
     retry::RetryKube,
 };
 use mirrord_progress::Progress;
@@ -699,38 +706,15 @@ impl OperatorApi<PreparedClientCert> {
         P: Progress,
     {
         self.check_feature_support(layer_config)?;
+        let (do_copy_target, reason) = self
+            .should_copy_target(layer_config, &target, progress)
+            .await?;
 
         let use_proxy_api = self
             .operator
             .spec
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
-
-        let (do_copy_target, reason) = if layer_config.feature.copy_target.enabled {
-            (true, None)
-        } else if target.empty_deployment() {
-            (true, Some("empty deployment"))
-        } else if layer_config.feature.split_queues.sqs().next().is_some()
-            && self
-                .operator
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
-                .not()
-        {
-            (true, Some("SQS splitting"))
-        } else if layer_config.feature.split_queues.kafka().next().is_some()
-            && self
-                .operator()
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
-                .not()
-        {
-            (true, Some("Kafka splitting"))
-        } else {
-            (false, None)
-        };
 
         let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
             Some(
@@ -740,12 +724,12 @@ impl OperatorApi<PreparedClientCert> {
         } else {
             None
         };
-
         let pg_branch_names = if layer_config.feature.db_branches.is_empty().not() {
             Some(self.prepare_pg_branch_dbs(layer_config, progress).await?)
         } else {
             None
         };
+
         let (session, reused_copy) = if do_copy_target {
             let mut copy_subtask = progress.subtask("preparing target copy");
             if let Some(reason) = reason {
@@ -889,6 +873,138 @@ impl OperatorApi<PreparedClientCert> {
             tx,
             rx,
         })
+    }
+
+    /// Returns whether the `copy_target` feature should be used,
+    /// with an optional reason (in case the feature is not explicitly enabled in the
+    /// [`LayerConfig`]).
+    async fn should_copy_target<P: Progress>(
+        &self,
+        config: &LayerConfig,
+        target: &ResolvedTarget<false>,
+        progress: &P,
+    ) -> OperatorApiResult<(bool, Option<&'static str>)> {
+        if config.feature.copy_target.enabled {
+            // Explicitly enabled.
+            return Ok((true, None));
+        }
+
+        if config.feature.split_queues.sqs().next().is_some()
+            && self
+                .operator
+                .spec
+                .supported_features()
+                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
+                .not()
+        {
+            // Operator does not support SQS splitting without copying the target.
+            return Ok((true, Some("SQS splitting")));
+        }
+
+        if config.feature.split_queues.kafka().next().is_some()
+            && self
+                .operator()
+                .spec
+                .supported_features()
+                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
+                .not()
+        {
+            // Operator does not support Kafka splitting without copying the target.
+            return Ok((true, Some("Kafka splitting")));
+        }
+
+        let ResolvedTarget::Deployment(ResolvedResource { resource, .. }) = target else {
+            // We do replicas checks only for deployments.
+            return Ok((false, None));
+        };
+
+        let available_replicas = resource
+            .status
+            .as_ref()
+            .and_then(|status| status.available_replicas)
+            .unwrap_or_default();
+        if available_replicas > 0 {
+            // Has available replicas, all good.
+            return Ok((false, None));
+        }
+
+        let replicas = resource
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.replicas)
+            .unwrap_or(1);
+        if replicas > 0 {
+            // Is configured to have replicas.
+            // We assume that the deployment is in bad state only temporarily,
+            // and enable copy_target to improve UX.
+            return Ok((true, Some("empty deployment")));
+        }
+
+        let deploy_name = resource
+            .metadata
+            .name
+            .as_deref()
+            .ok_or_else(|| KubeApiError::missing_field(resource.as_ref(), ".metadata.name"))?;
+        let deploy_namespace =
+            resource.metadata.namespace.as_deref().ok_or_else(|| {
+                KubeApiError::missing_field(resource.as_ref(), ".metadata.namespace")
+            })?;
+        let api = Api::<Rollout>::namespaced(self.client.clone(), deploy_namespace);
+        match api.get(deploy_name).await {
+            // There is a rollout managing the target deployment via workload ref.
+            // The user should target the rollout instead.
+            Ok(Rollout {
+                spec:
+                    Some(RolloutSpec {
+                        workload_ref:
+                            Some(WorkloadRef {
+                                api_version,
+                                kind,
+                                name,
+                            }),
+                        ..
+                    }),
+                ..
+            }) if api_version == Deployment::api_version(&())
+                && kind == Deployment::kind(&())
+                && name == deploy_name =>
+            {
+                return Err(OperatorApiError::KubeApi(KubeApiError::invalid_state(
+                    resource.as_ref(),
+                    "deployment is an empty workload managed by a rollout with the same name, \
+                    please target the rollout instead",
+                )));
+            }
+            // There is a rollout with the same name, but it does not manage the target deployment.
+            // This is weird, logging it on debug.
+            Ok(rollout) => {
+                tracing::debug!(
+                    deployment = ?resource,
+                    rollout = ?rollout,
+                    "Target deployment is empty, and a rollout with the same name was found in the target namespace. \
+                    However, the rollout does not manage the deployment. \
+                    Copying the target for this session.",
+                );
+            }
+            // The rollout does not exist.
+            // It might be that rollouts are not even installed in the cluster.
+            // Depeneding on how hardened the cluster is, we might get one of these error codes.
+            Err(kube::Error::Api(response)) if [404, 403, 401].contains(&response.code) => {}
+            Err(error) => {
+                tracing::warn!(
+                    deployment = ?resource,
+                    %error,
+                    "Failed to check if the targeted empty deployment is managed by a rollout. \
+                    Copying the target for this session.",
+                );
+                progress.warning(&format!(
+                    "The target deployment is empty, and mirrord failed to check if it is managed by a rollout. \
+                    This session will use the copy_target feature. Error: {error}",
+                ));
+            }
+        }
+
+        Ok((true, Some("empty deployment")))
     }
 
     /// Creates a new [`OperatorSession`] with the given `id` and `connect_url`.
