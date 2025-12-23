@@ -675,17 +675,19 @@ mod test {
         let StolenTraffic::Http(http) = handle.next().await.unwrap().unwrap() else {
             unreachable!()
         };
+
         // Stealing client unsubscribes the port.
         // This should trigger graceful shutdown on the HTTP connection.
         handle.stop_steal(80);
-        // Wait for the RedirectorTask to process.
-        state.wait_for(|state| state.dirty.not()).await.unwrap();
 
         // Stealing client exits.
         // The HTTP client should get 502.
         std::mem::drop(http);
         let response_code = http_client_task.await.unwrap();
         assert_eq!(response_code, hyper::StatusCode::BAD_GATEWAY);
+
+        // Wait for the RedirectorTask to process.
+        state.wait_for(|state| state.dirty.not()).await.unwrap();
 
         // The whole agent exits.
         // Redirector task should exit.
