@@ -11,7 +11,7 @@ use kube::{
 use mirrord_config::{
     feature::database_branches::{
         ConnectionSource, ConnectionSourceKind, DatabaseBranchConfig, DatabaseBranchesConfig,
-        MysqlBranchConfig, PgBranchConfig,
+        MysqlBranchConfig, PgBranchConfig, PgIamAuthConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -32,8 +32,8 @@ use crate::{
         pg_branching::{
             BranchDatabasePhase as BranchDatabasePhasePg,
             ConnectionSource as CrdConnectionSourcePg,
-            ConnectionSourceKind as CrdConnectionSourceKindPg, PgBranchDatabase,
-            PgBranchDatabaseSpec,
+            ConnectionSourceKind as CrdConnectionSourceKindPg, IamAuthConfig as CrdIamAuthConfig,
+            PgBranchDatabase, PgBranchDatabaseSpec,
         },
     },
 };
@@ -466,6 +466,14 @@ impl PgBranchParams {
                 }),
             },
         };
+        // Convert IAM auth config if present
+        let iam_auth = config.iam_auth.as_ref().map(|iam| match iam {
+            PgIamAuthConfig::AwsRds { region, region_env } => CrdIamAuthConfig::AwsRds {
+                region: region.clone(),
+                region_env: region_env.clone(),
+            },
+            PgIamAuthConfig::GcpCloudSql => CrdIamAuthConfig::GcpCloudSql,
+        });
         let spec = PgBranchDatabaseSpec {
             id: id.to_string(),
             database_name: config.base.name.clone(),
@@ -474,6 +482,7 @@ impl PgBranchParams {
             ttl_secs: config.base.ttl_secs,
             postgres_version: config.base.version.clone(),
             copy: config.copy.clone().into(),
+            iam_auth,
         };
         let labels = BTreeMap::from([(
             labels::MIRRORD_PG_BRANCH_ID_LABEL.to_string(),

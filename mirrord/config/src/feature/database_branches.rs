@@ -11,7 +11,7 @@ pub mod mysql;
 pub mod pg;
 
 pub use mysql::{MysqlBranchConfig, MysqlBranchCopyConfig, MysqlBranchTableCopyConfig};
-pub use pg::{PgBranchConfig, PgBranchCopyConfig, PgBranchTableCopyConfig};
+pub use pg::{PgBranchConfig, PgBranchCopyConfig, PgBranchTableCopyConfig, PgIamAuthConfig};
 
 /// A list of configurations for database branches.
 ///

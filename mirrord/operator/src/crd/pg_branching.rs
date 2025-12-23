@@ -39,6 +39,33 @@ pub struct PgBranchDatabaseSpec {
     /// Options for copying data from source database to the branch.
     #[serde(default)]
     pub copy: BranchCopyConfig,
+    /// IAM authentication configuration for the source database.
+    /// Use this when the source database (RDS, Cloud SQL) requires IAM auth instead of passwords.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_auth: Option<IamAuthConfig>,
+}
+
+/// IAM authentication configuration for connecting to cloud-managed databases.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum IamAuthConfig {
+    /// AWS RDS/Aurora IAM authentication.
+    /// Requires the init container to have AWS credentials (via IRSA or instance profile).
+    AwsRds {
+        /// AWS region where the RDS instance is located.
+        /// Takes precedence over `region_env` if both are specified.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        region: Option<String>,
+
+        /// Name of the environment variable containing the AWS region.
+        /// If not specified, checks AWS_REGION then AWS_DEFAULT_REGION.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        region_env: Option<String>,
+    },
+    /// GCP Cloud SQL IAM authentication.
+    /// Requires the init container to have GCP credentials (via Workload Identity or service
+    /// account).
+    GcpCloudSql,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
