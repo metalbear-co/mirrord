@@ -97,7 +97,7 @@ pub enum StolenTraffic {
     Tcp {
         conn: RedirectedTcp,
         /// Used for returning the [`JoinHandle`] to the spawned IO
-        /// task so [`RedirectorTask`] can join it before flushing
+        /// task so [`RedirectorTask`](super::RedirectorTask) can join it before flushing
         /// iptables.
         join_handle_tx: oneshot::Sender<JoinHandle<()>>,
         /// Used for gracefully shutting down the IO task.
