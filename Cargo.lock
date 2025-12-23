@@ -4526,6 +4526,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
+ "tokio-retry",
  "tokio-rustls 0.26.4",
  "tokio-stream",
  "tokio-util",
