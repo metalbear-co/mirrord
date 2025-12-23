@@ -63,6 +63,11 @@ pub struct Args {
     /// cluster.
     #[arg(long, default_value_t = false, env = envs::IPV6_SUPPORT.name)]
     pub ipv6: bool,
+
+    /// Clean leftover iptables rules and start the new agent instead of erroring out when there
+    /// are existing mirrord rules in the target's iptables.
+    #[arg(long, default_value_t = false, env = envs::CLEAN_IPTABLES_ON_START.name)]
+    pub clean_iptables_on_start: bool,
 }
 
 impl Args {
