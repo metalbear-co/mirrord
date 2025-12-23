@@ -409,6 +409,13 @@ impl MysqlBranchParams {
                     container: container.clone(),
                     variable: variable.clone(),
                 }),
+                ConnectionSourceKind::EnvFrom {
+                    container,
+                    variable,
+                } => CrdConnectionSourceMysql::Url(CrdConnectionSourceKindMysql::EnvFrom {
+                    container: container.clone(),
+                    variable: variable.clone(),
+                }),
             },
         };
         let spec = MysqlBranchDatabaseSpec {
@@ -448,6 +455,13 @@ impl PgBranchParams {
                     container,
                     variable,
                 } => CrdConnectionSourcePg::Url(CrdConnectionSourceKindPg::Env {
+                    container: container.clone(),
+                    variable: variable.clone(),
+                }),
+                ConnectionSourceKind::EnvFrom {
+                    container,
+                    variable,
+                } => CrdConnectionSourcePg::Url(CrdConnectionSourceKindPg::EnvFrom {
                     container: container.clone(),
                     variable: variable.clone(),
                 }),

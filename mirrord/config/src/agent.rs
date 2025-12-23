@@ -502,6 +502,13 @@ pub struct AgentConfig {
     /// Support seccomp profile and app armor profile.
     pub security_context: Option<SecurityContext>,
 
+    /// ### agent.clean_iptables_on_start {#agent-clean_iptables_on_start}
+    ///
+    /// Clean leftover iptables rules and start the new agent instead of erroring out when there
+    /// are existing mirrord rules in the target's iptables.
+    #[config(env = "MIRRORD_AGENT_CLEAN_IPTABLES_ON_START")]
+    pub clean_iptables_on_start: Option<bool>,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).

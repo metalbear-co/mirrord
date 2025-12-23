@@ -192,6 +192,11 @@ when using ephemeral containers feature)
 Can be disabled if the check takes too long and you are sure there is enough resources on
 each node
 
+### agent.clean_iptables_on_start {#agent-clean_iptables_on_start}
+
+Clean leftover iptables rules and start the new agent instead of erroring out when there
+are existing mirrord rules in the target's iptables.
+
 ### agent.communication_timeout {#agent-communication_timeout}
 
 Controls how long the agent lives when there are no connections.
@@ -987,6 +992,10 @@ the target pod template.
 
 Different ways to source the connection options.
 
+Support:
+- `env` in the target's pod spec.
+- `envFrom` in the target's pod spec.
+
 #### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
 
 The timeout in seconds to wait for a database branch to become ready after creation.
@@ -1099,6 +1108,10 @@ the target pod template.
 ```
 
 Different ways to source the connection options.
+
+Support:
+- `env` in the target's pod spec.
+- `envFrom` in the target's pod spec.
 
 #### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
 

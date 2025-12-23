@@ -328,6 +328,14 @@
             "null"
           ]
         },
+        "clean_iptables_on_start": {
+          "title": "agent.clean_iptables_on_start {#agent-clean_iptables_on_start}",
+          "description": "Clean leftover iptables rules and start the new agent instead of erroring out when there are existing mirrord rules in the target's iptables.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "communication_timeout": {
           "title": "agent.communication_timeout {#agent-communication_timeout}",
           "description": "Controls how long the agent lives when there are no connections.\n\nEach connection has its own heartbeat mechanism, so even if the local application has no messages, the agent stays alive until there are no more heartbeat messages.",
@@ -1099,7 +1107,7 @@
       ]
     },
     "DbBranchingConnectionSourceKind": {
-      "description": "Different ways to source the connection options.",
+      "description": "Different ways to source the connection options.\n\nSupport: - `env` in the target's pod spec. - `envFrom` in the target's pod spec.",
       "oneOf": [
         {
           "type": "object",
@@ -1118,6 +1126,30 @@
               "type": "string",
               "enum": [
                 "env"
+              ]
+            },
+            "variable": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "variable"
+          ],
+          "properties": {
+            "container": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "env_from"
               ]
             },
             "variable": {

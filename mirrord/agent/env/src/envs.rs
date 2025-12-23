@@ -90,3 +90,7 @@ pub const MAX_BODY_BUFFER_SIZE: CheckedEnv<u32> = CheckedEnv::new("MIRRORD_MAX_B
 /// Sets how long to wait (in milliseconds) to receive the entire body for body filters.
 pub const MAX_BODY_BUFFER_TIMEOUT: CheckedEnv<u32> =
     CheckedEnv::new("MIRRORD_MAX_BODY_BUFFER_TIMEOUT");
+
+/// When set, the agent will clean any existing iptables rules.
+pub const CLEAN_IPTABLES_ON_START: CheckedEnv<bool> =
+    CheckedEnv::new("MIRRORD_AGENT_CLEAN_IPTABLES_ON_START");
