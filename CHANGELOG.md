@@ -38,7 +38,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 ### Internal
 
 - Send is_ci bool to our analytics server when running mirrord from a CI
-  environment. [#312](https://github.com/metalbear-co/mirrord/issues/312)
+  environment.
 - Fix flake.nix for Linux
 
 
