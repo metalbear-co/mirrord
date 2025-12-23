@@ -102,7 +102,6 @@ impl RedirectedTcp {
                     if let Err(err) = self.io.shutdown().await {
                         tracing::error!(?err, "Error shutting down stolen tcp connection")
                     };
-                    drop(self.io);
                 }
             }
         };
@@ -156,7 +155,6 @@ impl RedirectedTcp {
                     if let Err(err) = self.io.shutdown().await {
                         tracing::error!(?err, "Error shutting down passed-through tcp connection")
                     };
-                    drop(self.io);
                 }
             }
         })
