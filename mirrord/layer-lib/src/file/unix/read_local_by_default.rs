@@ -30,6 +30,7 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r"^/opt(/|$)",
         r"^/tmp(/|$)",
         r"^/var/tmp(/|$)",
+        r"^/var/db/timezone/zoneinfo(/|$)",
         r"^/snap(/|$)",
         r"^/run(/|$)",
         r"^/selinux(/|$)",

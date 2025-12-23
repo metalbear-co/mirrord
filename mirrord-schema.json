@@ -1034,7 +1034,7 @@
       ]
     },
     "DbBranchingConnectionSourceKind": {
-      "description": "Different ways to source the connection options.",
+      "description": "Different ways to source the connection options.\n\nSupport: - `env` in the target's pod spec. - `envFrom` in the target's pod spec.",
       "oneOf": [
         {
           "type": "object",
@@ -1053,6 +1053,30 @@
               "type": "string",
               "enum": [
                 "env"
+              ]
+            },
+            "variable": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "variable"
+          ],
+          "properties": {
+            "container": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "env_from"
               ]
             },
             "variable": {
@@ -2592,7 +2616,6 @@
           "$ref": "#/definitions/ReplicaSetTarget"
         },
         {
-          "type": "string",
           "enum": [
             "targetless"
           ]

@@ -987,6 +987,10 @@ the target pod template.
 
 Different ways to source the connection options.
 
+Support:
+- `env` in the target's pod spec.
+- `envFrom` in the target's pod spec.
+
 #### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
 
 The timeout in seconds to wait for a database branch to become ready after creation.
@@ -1099,6 +1103,10 @@ the target pod template.
 ```
 
 Different ways to source the connection options.
+
+Support:
+- `env` in the target's pod spec.
+- `envFrom` in the target's pod spec.
 
 #### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
 

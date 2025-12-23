@@ -159,11 +159,19 @@ pub enum ConnectionSource {
 }
 
 /// Different ways to source the connection options.
+///
+/// Support:
+/// - `env` in the target's pod spec.
+/// - `envFrom` in the target's pod spec.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSourceKind")]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConnectionSourceKind {
     Env {
+        container: Option<String>,
+        variable: String,
+    },
+    EnvFrom {
         container: Option<String>,
         variable: String,
     },
