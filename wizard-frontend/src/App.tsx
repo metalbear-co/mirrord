@@ -9,6 +9,7 @@ import {
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Homepage from "./pages/Homepage";
 import NotFound from "./pages/NotFound";
+import AdminDashboard from "./pages/AdminDashboard";
 import { UserDataContext } from "./components/UserDataContext";
 import ALL_API_ROUTES from "./lib/routes";
 
@@ -37,6 +38,7 @@ const InnerApp = () => {
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Homepage />} />
+            <Route path="/admin-dashboard" element={<AdminDashboard />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
