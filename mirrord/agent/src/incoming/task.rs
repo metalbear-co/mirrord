@@ -229,7 +229,7 @@ where
 
             port_state.spawn(async {
                 if let Err(err) = join_handle.await {
-                    tracing::error!(?err, "Redirected passthrough task panicked");
+                    tracing::warn!(?err, "Redirected passthrough task failed to join");
                 }
             });
 
@@ -599,7 +599,7 @@ impl PortState {
         // Drain any finished connections to prevent OOM
         while let Some(joined) = self.connections.try_join_next() {
             if let Err(err) = joined {
-                tracing::warn!(?err, "IO task panicked");
+                tracing::warn!(?err, "IO task failed to join");
             }
         }
 
