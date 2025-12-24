@@ -585,9 +585,13 @@ impl PortState {
     /// Tell and wait for all connections to gracefully shut down.
     /// This function is essentially `AsyncDrop`, and it should always
     /// be called before removing the redirection.
-    async fn graceful_shutdown(self) {
+    async fn graceful_shutdown(mut self) {
         self.shutdown.cancel();
-        self.connections.join_all().await;
+        while let Some(joined) = self.connections.join_next().await {
+            if let Err(err) = joined {
+                tracing::warn!(?err, "IO task failed to join");
+            }
+        }
     }
 
     /// Spawn a new task for tracking its termination later.
