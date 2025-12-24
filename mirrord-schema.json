@@ -655,6 +655,17 @@
         }
       }
     },
+    "AppleVariablesConfig": {
+      "type": "object",
+      "required": [
+        "log"
+      ],
+      "properties": {
+        "log": {
+          "type": "boolean"
+        }
+      }
+    },
     "BodyFilter": {
       "oneOf": [
         {
@@ -1254,6 +1265,18 @@
       "description": "mirrord Experimental features. This shouldn't be used unless someone from MetalBear/mirrord tells you to.",
       "type": "object",
       "properties": {
+        "applev": {
+          "title": "_experimental_ applev {#experimental-applev}",
+          "description": "Configuraiton for inspecting and modifying apple variables. macOS only.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AppleVariablesConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "browser_extension_config": {
           "title": "_experimental_ browser_extension_config {#experimental-browser_extension_config}",
           "description": "mirrord will open a URL for initiating mirrord browser extension to automatically inject HTTP header that matches the HTTP filter configured in `feature.network.incoming.http_filter.header_filter`.",
