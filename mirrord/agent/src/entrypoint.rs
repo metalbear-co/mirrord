@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    mem,
+    io, mem,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
     path::PathBuf,
@@ -650,6 +650,41 @@ pub async fn notify_client_about_dirty_iptables(
     Ok(())
 }
 
+/// Monitors the main container process and cancels `cancel` when it
+/// exits. This not only makes for a better UX (no unused agent pods
+/// lingering), but is important for terminating redirected
+/// connections gracefully. If we don't exit as soon as the main
+/// container dies, the veth interface will be deleted while
+/// redirected connections are still open, and thus the other ends
+/// will stay open with no way to terminate them correctly.
+fn monitor_main_container(cancel: CancellationToken, pid: libc::pid_t) -> io::Result<()> {
+    let fd = AsyncPidFd::from_pid(pid)?;
+    tokio::spawn(async move {
+        tracing::trace!("Starting watcher task for main target process");
+        match fd.wait().await {
+            Ok(status) => {
+                // ExitInfo doesn't impl Debug >:(
+                tracing::warn!(
+                    siginifo = ?status.siginfo,
+                    rusage = ?status.rusage,
+                    "wait() on target container did not return expected value"
+                );
+            }
+            Err(error) => {
+                if error.raw_os_error() != Some(libc::ECHILD) {
+                    tracing::warn!(
+                        ?error,
+                        "wait() on target container did not return expected value"
+                    );
+                }
+            }
+        }
+        tracing::debug!("Main target process exited, shutting down...");
+        cancel.cancel();
+    });
+    Ok(())
+}
+
 /// Real mirrord-agent routine.
 ///
 /// Obtains the PID of the target container (if there is any),
@@ -730,39 +765,11 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             return Err(AgentError::IPTablesDirty);
         }
 
-        // As soon as the main container exits, we want to exit as well.
-        // This not only makes for a better UX (no unused agent pods
-        // lingering), but is important for terminating redirected
-        // connections gracefully. If we don't exit as soon as the main
-        // container dies, the veth interface will be deleted while
-        // redirected connections are still open, and thus the other ends
-        // will stay open with no way to terminate them correctly.
-        let cancel = cancellation_token.clone();
-        let pidfd = AsyncPidFd::from_pid(target_pid.try_into().unwrap())
-            .expect("could not acquire pidfd to target process");
-        tokio::spawn(async move {
-            tracing::trace!("Starting watcher task for main target process");
-            match pidfd.wait().await {
-                Ok(status) => {
-                    // ExitInfo doesn't impl Debug >:(
-                    tracing::warn!(
-                        siginifo = ?status.siginfo,
-                        rusage = ?status.rusage,
-                        "wait() on target container did not return expected value"
-                    );
-                }
-                Err(error) => {
-                    if error.raw_os_error() != Some(libc::ECHILD) {
-                        tracing::warn!(
-                            ?error,
-                            "wait() on target container did not return expected value"
-                        );
-                    }
-                }
-            }
-            tracing::debug!("Main target process exited, shutting down...");
-            cancel.cancel();
-        });
+        // Casting u64 to i32 but linux pids shouldn't exceed 2^22
+        let pid = target_pid.try_into().unwrap();
+        if let Err(err) = monitor_main_container(cancellation_token.clone(), pid) {
+            tracing::warn!(?err, "failed to monitor main container process for exit");
+        };
     }
 
     // To make sure that background tasks are cancelled when we exit early from this function.
