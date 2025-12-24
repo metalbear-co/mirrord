@@ -227,7 +227,7 @@ where
                 None => redirected.pass_through(port_state.shutdown.child_token()),
             };
 
-            port_state.connections.spawn(async {
+            port_state.spawn(async {
                 if let Err(err) = join_handle.await {
                     tracing::error!(?err, "Redirected passthrough task panicked");
                 }
@@ -239,7 +239,8 @@ where
         let tx = self.internal_tx.clone();
         let token = port_state.shutdown.clone();
         let mut requests = ExtractedRequests::new(TokioIo::new(conn.stream), http_version);
-        port_state.connections.spawn(async move {
+
+        port_state.spawn(async move {
             let mut shutting_down = false;
             loop {
                 let result = tokio::select! {
@@ -587,6 +588,22 @@ impl PortState {
     async fn graceful_shutdown(self) {
         self.shutdown.cancel();
         self.connections.join_all().await;
+    }
+
+    /// Spawn a new task for tracking its termination later.
+    #[inline]
+    fn spawn<F>(&mut self, f: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        // Drain any finished connections to prevent OOM
+        while let Some(joined) = self.connections.try_join_next() {
+            if let Err(err) = joined {
+                tracing::warn!(?err, "IO task panicked");
+            }
+        }
+
+        self.connections.spawn(f);
     }
 }
 
