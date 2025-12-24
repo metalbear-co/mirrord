@@ -12,8 +12,11 @@ use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
-use mirrord_operator::{client::OperatorApi, crd::session::SessionCiInfo};
-use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_operator::{
+    client::OperatorApi,
+    crd::{NewOperatorFeature, session::SessionCiInfo},
+};
+use mirrord_progress::{NullProgress, Progress, ProgressTracker};
 #[cfg(unix)]
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
@@ -84,7 +87,7 @@ async fn generate_ci_api_key(config_file: Option<PathBuf>) -> CliResult<()> {
 
     let mut subtask = progress.subtask("creating API key");
     let api_key = operator_api
-        .create_ci_api_key()
+        .create_ci_api_key(&progress)
         .await
         .inspect_err(|error| {
             subtask.failure(Some(&format!("failed to create API key: {error}")));
@@ -331,6 +334,41 @@ impl MirrordCi {
         unimplemented!("Not supported on windows.");
     }
 
+    async fn select_operator_ci_api_key_to_use(
+        config_file: Option<&PathBuf>,
+    ) -> CiResult<Option<CiApiKey>> {
+        let mut cfg_context =
+            ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config_file);
+        let layer_config = LayerConfig::resolve(&mut cfg_context)?;
+
+        let operator_api =
+            OperatorApi::try_new(&layer_config, &mut NullReporter::default(), &NullProgress)
+                .await?
+                .ok_or(CiError::OperatorNotInstalled)?;
+
+        let supports_ci_api_key_v2 = operator_api
+            .operator()
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::CiApiKeyV2);
+
+        match std::env::var(MIRRORD_CI_API_KEY) {
+            Ok(api_key) => {
+                let decoded = CiApiKey::decode(&api_key)?;
+
+                match decoded {
+                    CiApiKey::V1(..) => Ok(Some(decoded)),
+                    CiApiKey::V2(..) if supports_ci_api_key_v2 => Ok(Some(decoded)),
+                    CiApiKey::V2(..) => Err(CiError::UnsupportedCiApiKeyVersion),
+                }
+            }
+            Err(env::VarError::NotPresent) => Ok(None),
+            Err(fail @ env::VarError::NotUnicode(..)) => {
+                Err(CiError::EnvVar(MIRRORD_CI_API_KEY, fail))
+            }
+        }
+    }
+
     /// Reads the [`MirrordCiStore`], and the env var [`MIRRORD_CI_API_KEY`] to return a valid
     /// [`MirrordCi`].
     #[tracing::instrument(level = Level::TRACE, ret, err)]
@@ -338,11 +376,15 @@ impl MirrordCi {
         let store = MirrordCiStore::read_from_file_or_default().await?;
         let start_args = args.into();
 
-        let ci_api_key = match std::env::var(MIRRORD_CI_API_KEY) {
-            Ok(api_key) => Some(CiApiKey::decode(&api_key)?),
-            Err(env::VarError::NotPresent) => None,
-            Err(fail @ env::VarError::NotUnicode(..)) => {
-                return Err(CiError::EnvVar(MIRRORD_CI_API_KEY, fail));
+        let ci_api_key = match Self::select_operator_ci_api_key_to_use(
+            args.exec_args.params.config_file.as_ref(),
+        )
+        .await
+        {
+            Ok(ci_api_key) => ci_api_key,
+            Err(CiError::OperatorNotInstalled) => None,
+            Err(fail) => {
+                return Err(fail);
             }
         };
 

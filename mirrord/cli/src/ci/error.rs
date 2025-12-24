@@ -2,6 +2,8 @@ use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
 use thiserror::Error;
 
+use crate::error::GENERAL_HELP;
+
 #[derive(Error, Debug, Diagnostic)]
 pub(crate) enum CiError {
     #[error("File operation failed: {0}!")]
@@ -66,4 +68,25 @@ pub(crate) enum CiError {
         "`mirrord ci` failed to execute an internal command for this operation, please report it to us."
     ))]
     NixErrno(#[from] nix::errno::Errno),
+
+    #[error(transparent)]
+    Config(#[from] mirrord_config::config::ConfigError),
+
+    #[error(transparent)]
+    OperatorApi(#[from] mirrord_operator::client::error::OperatorApiError),
+
+    #[error("mirrord operator was not found in the cluster.")]
+    #[diagnostic(help(
+        "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
+        Read more here: https://metalbear.com/mirrord/docs/overview/quick-start/#operator.{GENERAL_HELP}"
+    ))]
+    OperatorNotInstalled,
+
+    #[error("`MIRRORD_CI_API_KEY` env var contains an unsupported key version.")]
+    #[diagnostic(help(
+        "You have set the `MIRRORD_CI_API_KEY` to use a newer version of the key, but the operator doesn't \
+        support it. Consider upgrading the operator or using an older key version. \
+        {GENERAL_HELP}"
+    ))]
+    UnsupportedCiApiKeyVersion,
 }

@@ -175,6 +175,24 @@ impl<'de> Deserialize<'de> for KeyPair {
     }
 }
 
+impl bincode::Encode for KeyPair {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        bincode::Encode::encode(&self.pem, encoder)
+    }
+}
+
+impl<Context> bincode::Decode<Context> for KeyPair {
+    fn decode<D: bincode::de::Decoder<Context = Context>>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        let pem = String::decode(decoder)?;
+        Self::try_from(pem).map_err(bincode::error::DecodeError::custom)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use x509_certificate::Signer;

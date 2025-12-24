@@ -1,7 +1,7 @@
 use std::{fmt, num::ParseIntError};
 
 pub use http::Error as HttpError;
-use mirrord_auth::error::ApiKeyError;
+use mirrord_auth::{error::ApiKeyError, x509_certificate::X509CertificateError};
 use mirrord_kube::error::KubeApiError;
 use thiserror::Error;
 use tower::retry::backoff::InvalidBackoff;
@@ -95,6 +95,9 @@ pub enum OperatorApiError {
 
     #[error(transparent)]
     SerdeJson(#[from] serde_json::Error),
+
+    #[error(transparent)]
+    X509Certificate(#[from] X509CertificateError),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;

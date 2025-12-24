@@ -155,11 +155,24 @@ impl LicenseValidity for NaiveDate {
 pub enum CiApiKey {
     /// V1 API key carries exactly the same data as [`Credentials`].
     V1(Credentials),
+    V2(Credentials),
 }
 
 impl From<Credentials> for CiApiKey {
     fn from(credentials: Credentials) -> Self {
         CiApiKey::V1(credentials)
+    }
+}
+
+impl bincode::Encode for CiApiKey {
+    fn encode<E: enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        use bincode::Encode;
+
+        match self {
+            CiApiKey::V1(credentials) | CiApiKey::V2(credentials) => {
+                Encode::encode(&credentials, encoder)
+            }
+        }
     }
 }
 
@@ -416,48 +429,69 @@ pub mod client {
 
     impl CiApiKey {
         const V1_PREFIX: &str = "mci-v1:";
+        const V2_PREFIX: &str = "mci-v2:";
 
-        /// V1 encoding:
+        const fn prefix(&self) -> &str {
+            match self {
+                CiApiKey::V1(..) => CiApiKey::V1_PREFIX,
+                CiApiKey::V2(..) => CiApiKey::V2_PREFIX,
+            }
+        }
+
+        /// # V1 encoding:
         /// 1. Serialize [`Credentials`] with `bincode` (standard config).
         /// 2. Compress with `zlib` with highest compression level (9).
         /// 3. Encode with URL-safe base64 without padding.
         /// 4. Prefix with `mci-v1:`, mirrord CI version 1.
-        pub fn encode(&self) -> Result<String, ApiKeyError> {
-            match self {
-                CiApiKey::V1(credentials) => {
-                    let bytes = bincode::encode_to_vec(credentials, bincode::config::standard())?;
+        pub fn encode_as_url_safe_string(&self) -> Result<String, ApiKeyError> {
+            let bytes = bincode::encode_to_vec(&self, bincode::config::standard())?;
 
-                    let mut compression_encoder = ZlibEncoder::new(Vec::new(), Compression::best());
-                    compression_encoder.write_all(&bytes)?;
-                    let compressed = compression_encoder.finish()?;
+            let mut compression_encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+            compression_encoder.write_all(&bytes)?;
 
-                    let encoded = format!(
-                        "{}{}",
-                        Self::V1_PREFIX,
-                        BASE64_URL_SAFE_NO_PAD.encode(compressed),
-                    );
-                    Ok(encoded)
-                }
-            }
+            let compressed = compression_encoder.finish()?;
+
+            Ok(format!(
+                "{}{}",
+                self.prefix(),
+                BASE64_URL_SAFE_NO_PAD.encode(compressed),
+            ))
         }
 
         /// Decoding a CI API key by first checking the prefix to determine the version.
         /// Then follow the encoding process in reverse for each version.
         pub fn decode(encoded: &str) -> Result<Self, ApiKeyError> {
-            if let Some(rest) = encoded.strip_prefix(Self::V1_PREFIX) {
-                let compressed_bytes = BASE64_URL_SAFE_NO_PAD.decode(rest)?;
+            let (rest, version) = encoded
+                .strip_prefix(Self::V1_PREFIX)
+                .zip(Some(Self::V1_PREFIX))
+                .or_else(|| {
+                    encoded
+                        .strip_prefix(Self::V2_PREFIX)
+                        .zip(Some(Self::V2_PREFIX))
+                })
+                .ok_or(ApiKeyError::InvalidFormat)?;
 
-                let mut compression_decoder = ZlibDecoder::new(&compressed_bytes[..]);
-                let mut bytes = Vec::new();
-                compression_decoder.read_to_end(&mut bytes)?;
+            let compressed_bytes = BASE64_URL_SAFE_NO_PAD.decode(rest)?;
 
-                let (credentials, _) =
-                    bincode::decode_from_slice(&bytes, bincode::config::standard())?;
+            let mut compression_decoder = ZlibDecoder::new(&compressed_bytes[..]);
+            let mut bytes = Vec::new();
+            compression_decoder.read_to_end(&mut bytes)?;
 
-                return Ok(CiApiKey::V1(credentials));
+            match version {
+                Self::V1_PREFIX => {
+                    let (credentials, _) =
+                        bincode::decode_from_slice(&bytes, bincode::config::standard())?;
+
+                    Ok(CiApiKey::V1(credentials))
+                }
+                Self::V2_PREFIX => {
+                    let (key_pair, _) =
+                        bincode::decode_from_slice(&bytes, bincode::config::standard())?;
+
+                    Ok(CiApiKey::V2(key_pair))
+                }
+                _ => unreachable!("BUG: we have already checked the CiApiKey prefix!"),
             }
-
-            Err(ApiKeyError::InvalidFormat)
         }
     }
 }
@@ -521,7 +555,9 @@ fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
         const V1_API_KEY: &str = "mci-v1:eNqFUk1oE0EYzSZprG1FtMVKLXadWj2Y7c7mPxHEED1oola0-EMlzm4mYehms52ZiDFGaKz_HtSLiFhaehMPKt48CL1IERTspbdS7MGDUvCi2EOdNBIKPfTwMXzMe2_em-9bzjlh1WmIap9wOSWnU5LgJo_rALabHPCEpkLF4xp0u9r2xQeOyUlckgctwuWzmPHLTD5qcUxtShiWU8TAFsNaF9xZI7S0bVtHgLs7t_iCMKpFfZof-sMXRRte08L9Wh_srT_XnSeUFmhGMcjh9ULeukWryeHa43iffNN1MNY8nNqaSL5s5afOzf7ePqY_uPH3e8_QPPwzNFWVIrAqBUQ5PJ1qHnNk6hhR1axbVomVLUjSint0oQx4ycYgBnAjGPCCPLqaZhhxBmIahF7AijozKLE5KVhpkhHwUAhlg9FwQIFh3acENBhV9LBhKKGwZoSgHvGhoC6ECjSHLHINNYhW0TS9gFOCTBDLIpNhL7iCKRP3QtXfr_lC_VAQicU4sgycSf_3LPxQAWyQavbSnCJjmFi5dL6QqYVImETkSGDKSZYYiGNQgf2enjU_YKwiVENAVJsWbHGW3K1lUGQoJxR8lcYquOKOt68mR1pmr89bc6kX7TPn857KdMf40-MTHb8-5_f-WHo-8G7s3p1O--fyx5ZDXy5s3vF1aeVRZKr37m3l20J8eqb5DDxdW66mVUU3cMvBT0f6dn0ITcYXWbd-q3xfHXl980nl5OPxOXmxcunZw9GNZ_sPjxrpow";
 
         let api_key = CiApiKey::decode(V1_API_KEY).expect("decode api key");
-        let CiApiKey::V1(credentials) = &api_key;
+        let CiApiKey::V1(credentials) = &api_key else {
+            panic!("It's a test for v1 only!")
+        };
         assert_eq!(
             credentials.as_ref().subject_common_name().unwrap(),
             "mirrord-ci@API Key Unit Test"
@@ -531,7 +567,21 @@ fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
             "API Key Unit Test`s Enterprise License"
         );
 
-        let encoded = api_key.encode().expect("encode api key");
+        let encoded = api_key.encode_as_url_safe_string().expect("encode api key");
         assert_eq!(encoded, V1_API_KEY);
+    }
+
+    #[test]
+    fn v2_ci_api_key_encode_decode() {
+        // This credential is generated using a test root issuer
+        const V2_API_KEY: &str = "mci-v2:eNptjr0OgjAYAHcS3oHdGIFISAeHln7Sht-iNGU0gsQQglaU8E4-pJGZG2-5-27_EAh5auUFl_gMVgTVYk0jOUKABUxEVDRy5UQCDjwpB7-5DsJTJSpiG23mvm-1FJ2b8XnHypCw2pN3OlfINNoTYHTRicNpmCFRj-o5-o-46TBqNUNK7d1G5_BmH_vmkNfBNJY0pHRl5wfa7DED";
+
+        let api_key = CiApiKey::decode(V2_API_KEY).expect("decode api key");
+        let CiApiKey::V2(_) = &api_key else {
+            panic!("It's a test for v2 only!")
+        };
+
+        let encoded = api_key.encode_as_url_safe_string().expect("encode api key");
+        assert_eq!(encoded, V2_API_KEY);
     }
 }

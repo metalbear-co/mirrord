@@ -4941,6 +4941,7 @@ dependencies = [
  "mirrord-progress",
  "mirrord-protocol",
  "rand 0.9.2",
+ "rcgen",
  "rstest",
  "schemars 0.8.22",
  "semver 1.0.27",

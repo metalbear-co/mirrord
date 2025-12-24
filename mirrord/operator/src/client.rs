@@ -17,6 +17,7 @@ use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::{CiApiKey, Credentials, LicenseValidity},
+    key_pair::KeyPair,
 };
 use mirrord_config::{
     LayerConfig, feature::database_branches::default_creation_timeout_secs, target::Target,
@@ -35,6 +36,7 @@ use mirrord_kube::{
 };
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+use rcgen::CertificateParams;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -307,6 +309,13 @@ impl OperatorApi<NoClientCert> {
     {
         let certificate = match ci_api_key {
             CiApiKey::V1(credentials) => credentials.as_ref(),
+            CiApiKey::V2(key_pair) => {
+                let mut params = CertificateParams::new(vec!["mirrord-ci".to_string()]).unwrap();
+
+                let cert = params.self_signed(key_pair).unwrap();
+
+                todo!()
+            }
         };
 
         reporter.set_operator_properties(AnalyticsOperatorProperties {
@@ -495,7 +504,10 @@ where
 
     /// Create a new CI api key by generating a random key pair, creating a certificate
     /// signing request and sending it to the operator.
-    pub async fn create_ci_api_key(&self) -> Result<String, OperatorApiError> {
+    pub async fn create_ci_api_key<P>(&self, progress: &P) -> Result<String, OperatorApiError>
+    where
+        P: Progress,
+    {
         if self
             .operator()
             .spec
@@ -509,22 +521,32 @@ where
             });
         }
 
-        let api_key: CiApiKey = Credentials::init_ci::<MirrordClusterOperatorUserCredential>(
-            self.client.clone(),
-            &format!(
-                "mirrord-ci@{}",
-                self.operator.spec.license.organization.as_str()
-            ),
-        )
-        .await
-        .map_err(|error| {
-            OperatorApiError::ClientCertError(format!(
-                "failed to create credentials for CI: {error}"
-            ))
-        })?
-        .into();
+        let api_key = if self
+            .operator()
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::CiApiKeyV2)
+        {
+            progress.info("Api key V2 support detected.");
+            CiApiKey::V2(KeyPair::new_random()?)
+        } else {
+            Credentials::init_ci::<MirrordClusterOperatorUserCredential>(
+                self.client.clone(),
+                &format!(
+                    "mirrord-ci@{}",
+                    self.operator.spec.license.organization.as_str()
+                ),
+            )
+            .await
+            .map_err(|error| {
+                OperatorApiError::ClientCertError(format!(
+                    "failed to create credentials for CI: {error}"
+                ))
+            })?
+            .into()
+        };
 
-        let encoded = api_key.encode().map_err(|error| {
+        let encoded = api_key.encode_as_url_safe_string().map_err(|error| {
             OperatorApiError::ClientCertError(format!("failed to encode api key: {error}"))
         })?;
 
