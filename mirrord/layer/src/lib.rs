@@ -442,23 +442,6 @@ fn layer_start(mut config: LayerConfig) {
         return;
     }
 
-    #[cfg(target_os = "macos")]
-    if let Some(applev_config) = setup().experimental().applev.as_ref()
-        && applev_config.log
-    {
-        unsafe {
-            let mut applev = exec_utils::extract_applev();
-            let mut count: usize = 0;
-            while !(*applev).is_null() {
-                let c_str = std::ffi::CStr::from_ptr(*applev);
-                tracing::info!("applev[{}]: {}", count, c_str.to_string_lossy());
-                applev = applev.add(1);
-                count = count.saturating_add(1);
-            }
-            tracing::info!(count, "Finished reading Apple variables");
-        }
-    }
-
     #[allow(static_mut_refs)]
     unsafe {
         let address = setup().proxy_address();
@@ -500,6 +483,21 @@ fn layer_start(mut config: LayerConfig) {
                 unsafe { std::env::remove_var(&key) };
             }
         });
+    }
+
+    #[cfg(target_os = "macos")]
+    if setup().experimental().applev.as_ref().is_some() {
+        unsafe {
+            let mut applev = exec_utils::extract_applev();
+            let mut count: usize = 0;
+            while !(*applev).is_null() {
+                let c_str = std::ffi::CStr::from_ptr(*applev);
+                tracing::info!("applev[{}]: {}", count, c_str.to_string_lossy());
+                applev = applev.add(1);
+                count = count.saturating_add(1);
+            }
+            tracing::info!(count, "Finished reading Apple variables");
+        }
     }
 }
 

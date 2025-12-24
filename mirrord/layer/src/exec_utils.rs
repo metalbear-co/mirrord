@@ -348,7 +348,7 @@ pub(crate) unsafe fn extract_applev() -> *mut *mut c_char {
         static mut environ: *mut *mut c_char;
     }
 
-    let applev = unsafe {
+    unsafe {
         let mut envp = environ;
         let mut envc: usize = 0;
 
@@ -364,9 +364,7 @@ pub(crate) unsafe fn extract_applev() -> *mut *mut c_char {
         info!("skipped {} envs from envp", envc);
 
         envp
-    };
-
-    applev
+    }
 }
 
 #[cfg(all(test, target_os = "macos"))]
