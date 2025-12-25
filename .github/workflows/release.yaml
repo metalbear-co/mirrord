@@ -6,6 +6,11 @@ on:
   # Running from workflow dispatch (AKA manual) will not publish anything.
   # This is intended for testing changes to this flow.
   workflow_dispatch:
+    inputs:
+      build_windows:
+        description: "Trigger Windows build after release?"
+        type: boolean
+        default: true
 
 jobs:
   build_binaries_aarch64-unknown-linux-gnu:
@@ -461,3 +466,20 @@ jobs:
           update-latest: true
           # Don't update the vX.Y tags
           update-minor: false
+
+  trigger_windows_build:
+    needs: update_latest
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    if: ${{ !cancelled() && !failure() && (inputs.build_windows || inputs.build_windows == null) }}
+    steps:
+      - name: Trigger Windows Build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run windows-build.yaml \
+            -f release_tag=${{ github.ref_name }} \
+            -f sign_artifacts=true \
+            -f choco_publish=true \
+            -f winget_publish=true
