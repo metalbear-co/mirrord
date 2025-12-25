@@ -17,7 +17,7 @@ use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::{CiApiKey, Credentials, LicenseValidity},
-    key_pair::KeyPair,
+    x509_certificate::{self, X509CertificateBuilder},
 };
 use mirrord_config::{
     LayerConfig, feature::database_branches::default_creation_timeout_secs, target::Target,
@@ -36,7 +36,7 @@ use mirrord_kube::{
 };
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use rcgen::CertificateParams;
+use rcgen::{CertificateParams, DnType, DnValue, KeyPair};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -307,16 +307,7 @@ impl OperatorApi<NoClientCert> {
         R: Reporter,
         P: Progress,
     {
-        let certificate = match ci_api_key {
-            CiApiKey::V1(credentials) => credentials.as_ref(),
-            CiApiKey::V2(key_pair) => {
-                let mut params = CertificateParams::new(vec!["mirrord-ci".to_string()]).unwrap();
-
-                let cert = params.self_signed(key_pair).unwrap();
-
-                todo!()
-            }
-        };
+        let certificate = ci_api_key.credentials().as_ref();
 
         reporter.set_operator_properties(AnalyticsOperatorProperties {
             client_hash: Some(AnalyticsHash::from_bytes(&certificate.public_key_data())),
@@ -329,8 +320,37 @@ impl OperatorApi<NoClientCert> {
                 .map(AnalyticsHash::from_base64),
         });
 
-        self.prepare_with_certificate(progress, layer_config, certificate)
-            .await
+        if self
+            .operator()
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::BypassCiCertificateVerification)
+        {
+            self.bypass_client_certificate_verification(layer_config, certificate)
+                .await
+        } else {
+            self.prepare_with_certificate(progress, layer_config, certificate)
+                .await
+        }
+    }
+
+    #[tracing::instrument(level = Level::DEBUG)]
+    async fn bypass_client_certificate_verification(
+        self,
+        layer_config: &LayerConfig,
+        certificate: &Certificate,
+    ) -> OperatorApi<MaybeClientCert> {
+        let Self {
+            client, operator, ..
+        } = self;
+
+        OperatorApi {
+            client,
+            client_cert: MaybeClientCert {
+                cert_result: Ok(certificate.clone()),
+            },
+            operator,
+        }
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(progress))]
@@ -521,30 +541,21 @@ where
             });
         }
 
-        let api_key = if self
-            .operator()
-            .spec
-            .supported_features()
-            .contains(&NewOperatorFeature::CiApiKeyV2)
-        {
-            progress.info("Api key V2 support detected.");
-            CiApiKey::V2(KeyPair::new_random()?)
-        } else {
-            Credentials::init_ci::<MirrordClusterOperatorUserCredential>(
-                self.client.clone(),
-                &format!(
-                    "mirrord-ci@{}",
-                    self.operator.spec.license.organization.as_str()
-                ),
-            )
-            .await
-            .map_err(|error| {
-                OperatorApiError::ClientCertError(format!(
-                    "failed to create credentials for CI: {error}"
-                ))
-            })?
-            .into()
-        };
+        let credentials = Credentials::init_ci::<MirrordClusterOperatorUserCredential>(
+            self.client.clone(),
+            &format!(
+                "mirrord-ci@{}",
+                self.operator.spec.license.organization.as_str()
+            ),
+        )
+        .await
+        .map_err(|error| {
+            OperatorApiError::ClientCertError(format!(
+                "failed to create credentials for CI: {error}"
+            ))
+        })?;
+
+        let api_key = CiApiKey::V1(credentials);
 
         let encoded = api_key.encode_as_url_safe_string().map_err(|error| {
             OperatorApiError::ClientCertError(format!("failed to encode api key: {error}"))
