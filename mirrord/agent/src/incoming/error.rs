@@ -54,5 +54,5 @@ pub enum ConnError {
     #[error("bug in the mirrord-agent, please report it: {0}")]
     AgentBug(String),
     #[error("connection cancelled")]
-    Cancelled
+    Cancelled,
 }
