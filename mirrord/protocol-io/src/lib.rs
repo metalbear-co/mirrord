@@ -175,7 +175,6 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
     }
 
     /// Create a dummy instance, mainly used for tests.
-    #[cfg(test)]
     pub fn dummy() -> (Self, mpsc::Sender<Type::InMsg>, ConnectionOutput<Type>) {
         let (inbound_tx, inbound_rx) = mpsc::channel(32);
 
@@ -238,17 +237,14 @@ impl<Type: ProtocolEndpoint> Drop for Connection<Type> {
 
 /// The "other end" of a `Connection`. Used for pulling out messages
 /// sent through it. Used only for testing.
-#[cfg(test)]
 pub struct ConnectionOutput<Type: ProtocolEndpoint>(Arc<SharedState<Type>>);
 
-#[cfg(test)]
 impl<Type: ProtocolEndpoint> fmt::Debug for ConnectionOutput<Type> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("ConnectionOutput").field(&self.0).finish()
     }
 }
 
-#[cfg(test)]
 impl<Type: ProtocolEndpoint> ConnectionOutput<Type>
 where
     Type::OutMsg: bincode::Decode<()>,
