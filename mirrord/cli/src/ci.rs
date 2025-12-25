@@ -84,7 +84,7 @@ async fn generate_ci_api_key(config_file: Option<PathBuf>) -> CliResult<()> {
 
     let mut subtask = progress.subtask("creating API key");
     let api_key = operator_api
-        .create_ci_api_key(&progress)
+        .create_ci_api_key()
         .await
         .inspect_err(|error| {
             subtask.failure(Some(&format!("failed to create API key: {error}")));

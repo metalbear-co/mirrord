@@ -17,7 +17,6 @@ use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::{CiApiKey, Credentials, LicenseValidity},
-    x509_certificate::{self, X509CertificateBuilder},
 };
 use mirrord_config::{
     LayerConfig, feature::database_branches::default_creation_timeout_secs, target::Target,
@@ -36,7 +35,6 @@ use mirrord_kube::{
 };
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use rcgen::{CertificateParams, DnType, DnValue, KeyPair};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -320,37 +318,8 @@ impl OperatorApi<NoClientCert> {
                 .map(AnalyticsHash::from_base64),
         });
 
-        if self
-            .operator()
-            .spec
-            .supported_features()
-            .contains(&NewOperatorFeature::BypassCiCertificateVerification)
-        {
-            self.bypass_client_certificate_verification(layer_config, certificate)
-                .await
-        } else {
-            self.prepare_with_certificate(progress, layer_config, certificate)
-                .await
-        }
-    }
-
-    #[tracing::instrument(level = Level::DEBUG)]
-    async fn bypass_client_certificate_verification(
-        self,
-        layer_config: &LayerConfig,
-        certificate: &Certificate,
-    ) -> OperatorApi<MaybeClientCert> {
-        let Self {
-            client, operator, ..
-        } = self;
-
-        OperatorApi {
-            client,
-            client_cert: MaybeClientCert {
-                cert_result: Ok(certificate.clone()),
-            },
-            operator,
-        }
+        self.prepare_with_certificate(progress, layer_config, certificate)
+            .await
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(progress))]
@@ -524,10 +493,7 @@ where
 
     /// Create a new CI api key by generating a random key pair, creating a certificate
     /// signing request and sending it to the operator.
-    pub async fn create_ci_api_key<P>(&self, progress: &P) -> Result<String, OperatorApiError>
-    where
-        P: Progress,
-    {
+    pub async fn create_ci_api_key(&self) -> Result<String, OperatorApiError> {
         if self
             .operator()
             .spec

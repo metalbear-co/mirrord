@@ -39,7 +39,6 @@ client = [
   "dep:serde_urlencoded",
   "dep:uuid",
   "dep:tower",
-  "dep:rcgen",
 ]
 crd = [
   "dep:k8s-openapi",
@@ -84,7 +83,6 @@ tower = { workspace = true, features = ["retry"], optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
-rcgen = { workspace = true, optional = true }
 
 [dev-dependencies]
 rstest.workspace = true
