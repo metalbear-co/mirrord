@@ -650,6 +650,10 @@ The LD_PRELOAD will automatically use the correct architecture.
 mirrord Experimental features.
 This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 
+### _experimental_ applev {#experimental-applev}
+
+Configuraiton for inspecting and modifying apple variables. macOS only.
+
 ### _experimental_ browser_extension_config {#experimental-browser_extension_config}
 
 mirrord will open a URL for initiating mirrord browser extension to
