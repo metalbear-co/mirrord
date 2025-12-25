@@ -491,7 +491,6 @@ where
         Ok(())
     }
 
-    #[inline]
     fn spawn_tracked_connection<F>(
         tx: mpsc::Sender<InternalMessage>,
         port: u16,
