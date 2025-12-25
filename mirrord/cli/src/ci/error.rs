@@ -66,10 +66,4 @@ pub(crate) enum CiError {
         "`mirrord ci` failed to execute an internal command for this operation, please report it to us."
     ))]
     NixErrno(#[from] nix::errno::Errno),
-
-    #[error(transparent)]
-    Config(#[from] mirrord_config::config::ConfigError),
-
-    #[error(transparent)]
-    OperatorApi(#[from] mirrord_operator::client::error::OperatorApiError),
 }

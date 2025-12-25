@@ -46,5 +46,3 @@ pub const RECONNECT_NOT_POSSIBLE_CODE: u16 = 410;
 /// Reason returned in error responses from the operator, when reconnecting to a session is no
 /// longer possible.
 pub const RECONNECT_NOT_POSSIBLE_REASON: &str = "ReconnectNotPossible";
-
-pub const CLIENT_CI_BYPASS_CERT_HEADER: &str = "x-client-ci-bypass-cert";

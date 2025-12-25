@@ -28,7 +28,7 @@ use crate::{
 
 pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
 
-pub(crate) const GENERAL_HELP: &str = r#"
+const GENERAL_HELP: &str = r#"
 
 - If you're still stuck:
 
@@ -573,9 +573,6 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::InvalidBackoff(fail) => Self::InvalidBackoff(fail.to_string()),
             OperatorApiError::ApiKey(fail) => Self::ApiKey(fail),
             OperatorApiError::SerdeJson(fail) => Self::JsonSerializeError(fail),
-            OperatorApiError::X509Certificate(fail) => {
-                Self::OperatorClientCertError(fail.to_string())
-            }
         }
     }
 }
