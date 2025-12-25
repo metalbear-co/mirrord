@@ -158,6 +158,9 @@ pub enum CiApiKey {
 }
 
 impl CiApiKey {
+    /// Retrieves the [`Credentials`] from this [`CiApiKey`].
+    ///
+    /// Helper so you don't have to `match ci_api_key` everywhere to access it.
     pub fn credentials(&self) -> &Credentials {
         match self {
             CiApiKey::V1(credentials) => credentials,
