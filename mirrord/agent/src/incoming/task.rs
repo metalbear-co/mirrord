@@ -4,6 +4,7 @@ use std::{
     fmt,
     ops::Not,
     sync::Arc,
+    time::Duration,
 };
 
 use futures::{FutureExt, StreamExt, future::Shared};
@@ -151,21 +152,73 @@ where
     ///
     /// # Unsubscribed connections
     ///
-    /// If port is no longer stolen/mirrored, this functions simply drops it.
-    /// We consider this to be an unlikely race condition.
+    /// If port is no longer stolen/mirrored but there are other
+    /// active connections on the same port, the connection is
+    /// unconditionally passed through. Otherwise, the connection is
+    /// dropped. We consider this to be an unlikely race condition.
     #[tracing::instrument(level = Level::TRACE, ret)]
-    fn handle_connection(&self, conn: Redirected) {
+    fn handle_connection(&mut self, conn: Redirected) {
         let source = conn.source;
         let destination = conn.destination;
 
-        if self.ports.contains_key(&conn.destination.port()).not() {
-            tracing::warn!(
-                %source,
-                %destination,
-                "Redirected connection port is no longer subscribed, dropping",
-            );
-            return;
-        };
+        match self.ports.entry(conn.destination.port()) {
+            Entry::Occupied(mut e) => 'inactive: {
+                // Connection arrived on inactive redirected port, need to pass through.
+                let state = e.get_mut();
+                if state.mirror_txs.is_empty().not() || state.steal_tx.is_some() {
+                    break 'inactive;
+                }
+
+                let local_addr = match conn.stream.local_addr() {
+                    Ok(addr) => addr,
+                    Err(err) => {
+                        tracing::error!(
+                            ?err,
+                            "failed to acquire local address for connection arriving on inactive port."
+                        );
+                        return;
+                    }
+                };
+
+                let info = ConnectionInfo {
+                    original_destination: conn.destination,
+                    local_addr,
+                    peer_addr: conn.source,
+                    tls_connector: None,
+                };
+                let shutdown = state.shutdown.child_token();
+                let internal_tx = self.internal_tx.clone();
+                let port = conn.destination.port();
+                state.spawn(async move {
+                    tracing::debug!("connection arrived on inactive port, passing through");
+                    if let Err(err) = RedirectedTcp::new(Box::new(conn.stream), info)
+                        .pass_through(shutdown)
+                        .await
+                    {
+                        tracing::error!(
+                            ?err,
+                            "error joining inactive port redirected connection IO task"
+                        );
+                    }
+
+                    // Send a DeadChannel message to hopefully purge this [`PortState`]
+                    internal_tx
+                        .send(InternalMessage::DeadChannel(port))
+                        .await
+                        .expect("RedirectorTask exit before child task");
+                });
+
+                return;
+            }
+            Entry::Vacant(_) => {
+                tracing::warn!(
+                    %source,
+                    %destination,
+                    "Redirected connection port is no longer subscribed, dropping",
+                );
+                return;
+            }
+        }
 
         let tx = self.internal_tx.clone();
         let tls_store = self.tls_store.clone();
@@ -401,16 +454,21 @@ where
             return Ok(());
         };
 
+        let state = e.get_mut();
+        state.drain();
+
         let PortState {
             steal_tx,
             mirror_txs,
+            connections,
             ..
-        } = e.get_mut();
+        } = state;
 
         *steal_tx = steal_tx.take().filter(|tx| tx.is_closed().not());
         mirror_txs.retain(|tx| tx.is_closed().not());
 
-        if steal_tx.is_none() && mirror_txs.is_empty() {
+        // Remove if the [`PortState`] is no longer needed.
+        if mirror_txs.is_empty() && connections.is_empty() && steal_tx.is_none() {
             e.remove().graceful_shutdown().await;
             self.redirector.remove_redirection(port).await?;
             if self.ports.is_empty() {
@@ -594,6 +652,16 @@ impl PortState {
         }
     }
 
+    /// Drain dead connections.
+    #[inline]
+    fn drain(&mut self) {
+        while let Some(joined) = self.connections.try_join_next() {
+            if let Err(err) = joined {
+                tracing::warn!(?err, "IO task returned JoinError");
+            }
+        }
+    }
+
     /// Spawn a new task for tracking its termination later.
     #[inline]
     fn spawn<F>(&mut self, f: F)
@@ -601,12 +669,7 @@ impl PortState {
         F: Future<Output = ()> + Send + 'static,
     {
         // Drain any finished connections to prevent OOM
-        while let Some(joined) = self.connections.try_join_next() {
-            if let Err(err) = joined {
-                tracing::warn!(?err, "IO task returned JoinError");
-            }
-        }
-
+        self.drain();
         self.connections.spawn(f);
     }
 }
@@ -619,10 +682,99 @@ mod test {
     use http_body_util::Empty;
     use hyper_util::rt::TokioIo;
     use rstest::rstest;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
 
     use crate::incoming::{
         RedirectorTask, RedirectorTaskConfig, StolenTraffic, test::DummyRedirector,
     };
+
+    #[rstest]
+    #[timeout(Duration::from_secs(5))]
+    #[tokio::test]
+    async fn passthrough_connections_on_inactive_ports() {
+        let (redirector, mut state, mut tx) = DummyRedirector::new();
+        let (task, mut handle, _) = RedirectorTask::new(
+            redirector,
+            Default::default(),
+            RedirectorTaskConfig::from_env(),
+        );
+        tokio::spawn(task.run());
+
+        // Make sure connections are now passed through
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        handle.steal(port).await.unwrap();
+        assert!(state.borrow().has_redirections([port]));
+
+        let mut tcp = tx.make_connection(listener.local_addr().unwrap()).await;
+        tcp.write_all(b"def not http\r\n\r\n").await.unwrap();
+
+        let StolenTraffic::Tcp {
+            conn: rtcp,
+            join_handle_tx,
+            shutdown,
+        } = handle.next().await.unwrap().unwrap()
+        else {
+            panic!("falsely detected HTTP traffic");
+        };
+
+        join_handle_tx
+            .send(tokio::spawn(async move {
+                let mut io = rtcp.into_io();
+                let mut buf = [0; 16];
+                io.read_exact(&mut buf).await.unwrap();
+                assert_eq!(&buf, b"def not http\r\n\r\n");
+
+                io.read_exact(&mut buf[..4]).await.unwrap();
+                assert_eq!(&buf[..4], b"ping");
+
+                io.write_all(b"pong").await.unwrap();
+
+                tokio::select! {
+                    _ = shutdown.cancelled() => {},
+                    r = io.read(&mut buf) => {
+                        // We never rx any data, just use this to
+                        // detect termination.
+                        assert!(r.is_ok_and(|c| c == 0))
+                    }
+                }
+            }))
+            .unwrap();
+
+        handle.stop_steal(port);
+        // Wait a little, ensure redirection hasn't been removed.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(state.borrow().has_redirections([port]));
+
+        // Make sure connection is stil alive.
+        tcp.write_all(b"ping").await.unwrap();
+        let mut buf = [0; 4];
+        tcp.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"pong");
+
+        // Make sure connections are now being passed through.
+        let tcp2 = tx.make_connection(listener.local_addr().unwrap()).await;
+        let (rtcp2, _) = listener.accept().await.unwrap();
+
+        // Drop the old one
+        drop(tcp);
+
+        // Wait a little, ensure redirection still hasn't been removed.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(state.borrow().has_redirections([port]));
+
+        drop((tcp2, rtcp2));
+
+        // NOW the redirection should be gone (because there are no more active connections).
+        state
+            .wait_for(|state| state.has_redirections([]))
+            .await
+            .unwrap();
+    }
 
     #[rstest]
     #[timeout(Duration::from_secs(5))]

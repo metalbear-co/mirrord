@@ -182,6 +182,11 @@ impl RedirectedTcp {
             None => Ok(MaybeTls::NoTls(tcp_stream)),
         }
     }
+
+    #[cfg(test)]
+    pub fn into_io(self) -> Box<dyn IncomingIO + 'static> {
+        self.io
+    }
 }
 
 impl fmt::Debug for RedirectedTcp {
