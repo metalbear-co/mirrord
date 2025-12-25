@@ -459,7 +459,7 @@ pub mod client {
         /// 3. Encode with URL-safe base64 without padding.
         /// 4. Prefix with `mci-v1:`, mirrord CI version 1.
         pub fn encode_as_url_safe_string(&self) -> Result<String, ApiKeyError> {
-            let bytes = bincode::encode_to_vec(&self, bincode::config::standard())?;
+            let bytes = bincode::encode_to_vec(self, bincode::config::standard())?;
 
             let mut compression_encoder = ZlibEncoder::new(Vec::new(), Compression::best());
             compression_encoder.write_all(&bytes)?;
