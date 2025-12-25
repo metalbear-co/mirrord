@@ -56,6 +56,12 @@ pub enum ConnectionSourceKind {
         container: Option<String>,
         variable: String,
     },
+
+    /// Environment from resource reference in the the pod template.
+    EnvFrom {
+        container: Option<String>,
+        variable: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

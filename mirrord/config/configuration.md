@@ -192,6 +192,11 @@ when using ephemeral containers feature)
 Can be disabled if the check takes too long and you are sure there is enough resources on
 each node
 
+### agent.clean_iptables_on_start {#agent-clean_iptables_on_start}
+
+Clean leftover iptables rules and start the new agent instead of erroring out when there
+are existing mirrord rules in the target's iptables.
+
 ### agent.communication_timeout {#agent-communication_timeout}
 
 Controls how long the agent lives when there are no connections.
@@ -645,6 +650,10 @@ The LD_PRELOAD will automatically use the correct architecture.
 mirrord Experimental features.
 This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 
+### _experimental_ applev {#experimental-applev}
+
+Configuraiton for inspecting and modifying apple variables. macOS only.
+
 ### _experimental_ browser_extension_config {#experimental-browser_extension_config}
 
 mirrord will open a URL for initiating mirrord browser extension to
@@ -987,6 +996,10 @@ the target pod template.
 
 Different ways to source the connection options.
 
+Support:
+- `env` in the target's pod spec.
+- `envFrom` in the target's pod spec.
+
 #### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
 
 The timeout in seconds to wait for a database branch to become ready after creation.
@@ -1099,6 +1112,10 @@ the target pod template.
 ```
 
 Different ways to source the connection options.
+
+Support:
+- `env` in the target's pod spec.
+- `envFrom` in the target's pod spec.
 
 #### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
 
