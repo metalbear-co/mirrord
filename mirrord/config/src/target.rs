@@ -340,9 +340,6 @@ impl JsonSchema for Target {
             schema_gen.subschema_for::<service::ServiceTarget>(),
             schema_gen.subschema_for::<replica_set::ReplicaSetTarget>(),
             schemars::schema::Schema::Object(schemars::schema::SchemaObject {
-                instance_type: Some(schemars::schema::SingleOrVec::Single(Box::new(
-                    schemars::schema::InstanceType::String,
-                ))),
                 enum_values: Some(vec![serde_json::Value::String("targetless".to_string())]),
                 ..Default::default()
             }),

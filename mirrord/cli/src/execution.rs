@@ -16,7 +16,7 @@ use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel};
 use mirrord_protocol_io::{Client, Connection};
 #[cfg(target_os = "macos")]
-use mirrord_sip::{SipPatchOptions, sip_patch};
+use mirrord_sip::{SipError, SipPatchOptions, sip_patch};
 use mirrord_tls_util::SecureChannelSetup;
 use semver::Version;
 use serde::Serialize;
@@ -377,7 +377,13 @@ impl MirrordExecution {
                 .transpose() // We transpose twice to propagate a possible error out of this
                 // closure.
             })
-            .transpose()?;
+            .transpose()
+            .inspect_err(|sip_error| {
+                // we can't recover from hitting the fd limit, so we have to exit fully
+                if let SipError::TooManyFilesOpen(..) = sip_error {
+                    panic!("mirrord failed to patch SIP with: {}", sip_error);
+                }
+            })?;
 
         #[cfg(not(target_os = "macos"))]
         let patched_path = None;

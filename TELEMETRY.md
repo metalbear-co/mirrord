@@ -18,3 +18,9 @@ Telemetry can be disabled by specifying the following in the mirrord config file
 ```json
 {"telemetry": false}
 ```
+
+Alternatively, in the wizard, it is disabled via command-line flag:
+
+```bash
+mirrord wizard --telemetry=false
+```

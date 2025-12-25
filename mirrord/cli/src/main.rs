@@ -231,9 +231,19 @@
 //!
 //! > For users interested in getting mirrord for teams, which is a paid feature.
 //!
-//! Opens a browser window to our mirrord for teams intro page, if we fail to open it, then it
+//! Opens a browser window to our mirrord for teams intro page. If we fail to open it, then it
 //! prints a nice little message to stdout.
+//!
+//! ### `mirrord wizard [OPTIONS]`
+//!
+//! - `wizard::wizard_command`
+//!
+//! > Opens the onboarding wizard, for setting up a config file via a UI.
+//!
+//! Opens a browser window for the wizard. The wizard is served on `localhost` and has various
+//! endpoints that are accessed by the frontend. This is all gated behind the `wizard` feature.
 #![feature(try_blocks)]
+#![feature(iterator_try_collect)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
@@ -314,6 +324,9 @@ mod util;
 mod verify_config;
 mod vpn;
 mod wsl;
+
+#[cfg(feature = "wizard")]
+mod wizard;
 
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
@@ -776,6 +789,8 @@ async fn exec(
     );
     (&config).collect_analytics(analytics.get_mut());
 
+    analytics.get_mut().add("is_ci", ci_info::is_ci());
+
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
         progress.warning(&warning);
@@ -1050,6 +1065,16 @@ fn main() -> miette::Result<()> {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
             Commands::DbBranches(args) => db_branches_command(*args).await?,
+            #[cfg(feature = "wizard")]
+            Commands::Wizard(args) => {
+                wizard::wizard_command(
+                    *args,
+                    watch,
+                    user_data,
+                    &mut ProgressTracker::from_env("wizard"),
+                )
+                .await?
+            }
         };
 
         Ok(())
@@ -1094,10 +1119,9 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
 
             let sent = client
                 .get(format!(
-                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={version}&platform={platform}&ci={is_ci}",
+                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={version}&platform={platform}",
                     version = CURRENT_VERSION,
                     platform = std::env::consts::OS,
-                    is_ci = ci_info::is_ci(),
                 ))
                 .timeout(Duration::from_secs(1))
                 .send().await?;

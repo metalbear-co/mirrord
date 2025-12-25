@@ -81,6 +81,9 @@
 
             # E2E testing
             go
+            protobuf
+            clang
+            rustPlatform.bindgenHook
             nodejs_24 # Needs express.js - install with `npm install express` after entering the devshell
             (python3.withPackages (
               py-pkgs: with py-pkgs; [
