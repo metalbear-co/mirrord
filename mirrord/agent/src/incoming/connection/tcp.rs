@@ -91,23 +91,25 @@ impl RedirectedTcp {
                 mirror_data_tx: self.mirror_tx.into(),
             };
 
-            tokio::select! {
-                result = copy_bidirectional::copy_bidirectional(&mut self.io, &mut outgoing) => {
-                    outgoing
-                        .mirror_data_tx
-                        .send_item(IncomingStreamItem::Finished(result.clone()));
-                    let _ = outgoing
-                        .data_tx
-                        .send(IncomingStreamItem::Finished(result))
-                        .await;
-                }
+            let result = tokio::select! {
+                r = copy_bidirectional::copy_bidirectional(&mut self.io, &mut outgoing) => r,
                 _ = shutdown.cancelled() => {
                     tracing::debug!("Gracefully shutting down stolen tcp connection");
                     if let Err(err) = self.io.shutdown().await {
                         tracing::error!(?err, "Error shutting down stolen tcp connection")
                     };
+
+                    Err(ConnError::Cancelled)
                 }
-            }
+            };
+
+            outgoing
+                .mirror_data_tx
+                .send_item(IncomingStreamItem::Finished(result.clone()));
+            let _ = outgoing
+                .data_tx
+                .send(IncomingStreamItem::Finished(result))
+                .await;
         };
 
         let join_handle = handle.spawn(task);
@@ -130,7 +132,17 @@ impl RedirectedTcp {
         handle.spawn(async move {
             let mut mirror_data_tx = OptionalBroadcast::from(self.mirror_tx.take());
 
-            let stream = match self.make_pass_through_connection().await {
+            let passthrough = tokio::select! {
+                conn = self.make_pass_through_connection() => conn,
+                _ = shutdown.cancelled() => {
+                    tracing::debug!("Gracefully shutting down passed-through connection during TCP/TLS handshake");
+                    mirror_data_tx
+                        .send_item(IncomingStreamItem::Finished(Err(ConnError::Cancelled)));
+                    return;
+                }
+            };
+
+            let stream = match passthrough {
                 Ok(stream) => stream,
                 Err(error) => {
                     tracing::warn!(
@@ -148,19 +160,22 @@ impl RedirectedTcp {
                 buffer: BytesMut::with_capacity(64 * 1024),
                 mirror_data_tx,
             };
-            tokio::select! {
-                result = copy_bidirectional::copy_bidirectional(&mut self.io, &mut outgoing) =>  {
-                    outgoing
-                        .mirror_data_tx
-                        .send_item(IncomingStreamItem::Finished(result));
-                }
+
+            let result = tokio::select! {
+                r = copy_bidirectional::copy_bidirectional(&mut self.io, &mut outgoing) => r,
+
                 _ = shutdown.cancelled() => {
                     tracing::debug!("Gracefully shutting down passed-through tcp connection");
                     if let Err(err) = self.io.shutdown().await {
                         tracing::error!(?err, "Error shutting down passed-through tcp connection")
                     };
+                    Err(ConnError::Cancelled)
                 }
-            }
+            };
+
+            outgoing
+                .mirror_data_tx
+                .send_item(IncomingStreamItem::Finished(result));
         })
     }
 
