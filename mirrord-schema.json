@@ -656,15 +656,7 @@
       }
     },
     "AppleVariablesConfig": {
-      "type": "object",
-      "required": [
-        "log"
-      ],
-      "properties": {
-        "log": {
-          "type": "boolean"
-        }
-      }
+      "type": "object"
     },
     "BodyFilter": {
       "oneOf": [

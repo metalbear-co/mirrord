@@ -138,7 +138,6 @@ pub struct ExperimentalConfig {
     #[config(default = false)]
     pub dlopen_cgo: bool,
 
-    #[cfg(target_os = "macos")]
     /// ### _experimental_ applev {#experimental-applev}
     ///
     /// Configuraiton for inspecting and modifying apple variables. macOS only.
@@ -164,11 +163,9 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("force_hook_connect", self.force_hook_connect);
         analytics.add("non_blocking_tcp_connect", self.non_blocking_tcp_connect);
         analytics.add("dlopen_cgo", self.dlopen_cgo);
-        #[cfg(target_os = "macos")]
         analytics.add("applev", self.applev.is_some());
     }
 }
 
-#[cfg(target_os = "macos")]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, JsonSchema, Default)]
-pub struct AppleVariablesConfig;
+pub struct AppleVariablesConfig {}
