@@ -160,80 +160,86 @@ where
         let source = conn.source;
         let destination = conn.destination;
 
-        match self.ports.entry(destination.port()) {
-            Entry::Occupied(mut e) => 'inactive: {
-                // Connection arrived on inactive redirected port, need to pass through.
-                let state = e.get_mut();
-                if state.mirror_txs.is_empty().not() || state.steal_tx.is_some() {
-                    break 'inactive;
-                }
+        let Entry::Occupied(mut e) = self.ports.entry(destination.port()) else {
+            tracing::warn!(
+                %source,
+                %destination,
+                "Redirected connection port is no longer subscribed and has no active connections, dropping",
+            );
+            return;
+        };
 
-                let local_addr = match conn.stream.local_addr() {
-                    Ok(addr) => addr,
-                    Err(err) => {
+        let state = e.get_mut();
+        if state.mirror_txs.is_empty().not() || state.steal_tx.is_some() {
+            let tx = self.internal_tx.clone();
+            let tls_store = self.tls_store.clone();
+            let shutdown = state.shutdown.child_token();
+            Self::spawn_tracked_connection(
+                self.internal_tx.clone(),
+                destination.port(),
+                state,
+                async move {
+                    let detection_result = tokio::select! {
+                        r = MaybeHttp::detect(conn, &tls_store) => r,
+                        _ = shutdown.cancelled() => {
+                            tracing::debug!("Shutting down redirected connection during HTTP detection");
+                            return;
+                        }
+                    };
+
+                    match detection_result {
+                        Ok(conn) => {
+                            let _ = tx.send(InternalMessage::ConnInitialized(conn)).await;
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                %error,
+                                %source,
+                                %destination,
+                                "HTTP detection failed on a redirected connection",
+                            )
+                        }
+                    }
+                },
+            );
+        } else {
+            let local_addr = match conn.stream.local_addr() {
+                Ok(addr) => addr,
+                Err(err) => {
+                    tracing::error!(
+                        ?err,
+                        "failed to acquire local address for connection arriving on inactive port."
+                    );
+                    return;
+                }
+            };
+
+            let info = ConnectionInfo {
+                original_destination: destination,
+                local_addr,
+                peer_addr: source,
+                tls_connector: None,
+            };
+
+            let shutdown = state.shutdown.child_token();
+            Self::spawn_tracked_connection(
+                self.internal_tx.clone(),
+                destination.port(),
+                e.get_mut(),
+                async move {
+                    tracing::debug!("connection arrived on inactive port, passing through");
+                    if let Err(err) = RedirectedTcp::new(Box::new(conn.stream), info)
+                        .pass_through(shutdown)
+                        .await
+                    {
                         tracing::error!(
                             ?err,
-                            "failed to acquire local address for connection arriving on inactive port."
+                            "error joining inactive port redirected connection IO task"
                         );
-                        return;
                     }
-                };
-
-                let info = ConnectionInfo {
-                    original_destination: destination,
-                    local_addr,
-                    peer_addr: source,
-                    tls_connector: None,
-                };
-
-                let shutdown = state.shutdown.child_token();
-                Self::spawn_tracked_connection(
-                    self.internal_tx.clone(),
-                    destination.port(),
-                    e.get_mut(),
-                    async move {
-                        tracing::debug!("connection arrived on inactive port, passing through");
-                        if let Err(err) = RedirectedTcp::new(Box::new(conn.stream), info)
-                            .pass_through(shutdown)
-                            .await
-                        {
-                            tracing::error!(
-                                ?err,
-                                "error joining inactive port redirected connection IO task"
-                            );
-                        }
-                    },
-                );
-
-                return;
-            }
-            Entry::Vacant(_) => {
-                tracing::warn!(
-                    %source,
-                    %destination,
-                    "Redirected connection port is no longer subscribed, dropping",
-                );
-                return;
-            }
+                },
+            );
         }
-
-        let tx = self.internal_tx.clone();
-        let tls_store = self.tls_store.clone();
-        tokio::spawn(async move {
-            match MaybeHttp::detect(conn, &tls_store).await {
-                Ok(conn) => {
-                    let _ = tx.send(InternalMessage::ConnInitialized(conn)).await;
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        %error,
-                        %source,
-                        %destination,
-                        "HTTP detection failed on a redirected connection",
-                    )
-                }
-            }
-        });
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]
