@@ -19,6 +19,7 @@ use hyper::{
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
+use serde_json_path::JsonPath;
 use strum_macros::{AsRefStr, EnumString};
 
 use crate::{ConnectionId, Payload, Port, RemoteResult, RequestId};
@@ -213,6 +214,36 @@ impl std::ops::Deref for Filter {
     }
 }
 
+/// Wraps the string that will become a [`serde_json_path::JsonPath`], providing a nice API in
+/// `JsonPathQuery::new` that validates the regex in mirrord-layer.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct JsonPathQuery(String);
+impl JsonPathQuery {
+    pub fn new(query_str: String) -> Result<Self, serde_json_path::ParseError> {
+        let _ = JsonPath::parse(&query_str).inspect_err(|fail| {
+            tracing::error!(
+                r"
+    Something went wrong while creating a jsonpath query for [{query_str:#?}]!
+
+    >> Please check that the string supplied is a jsonpath query.
+
+    > Error:
+    {fail:#?} "
+            )
+        })?;
+
+        Ok(Self(query_str))
+    }
+}
+
+impl std::ops::Deref for JsonPathQuery {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// HTTP filter for HTTP methods.
 ///
 /// Supports all the standard methods, plus a `Other` variant for custom methods (why would anyone
@@ -244,7 +275,7 @@ pub enum HttpMethodFilter {
 /// Filter based on the contents of the body.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, strum_macros::Display)]
 pub enum HttpBodyFilter {
-    Json { query: String, matches: Filter },
+    Json { query: JsonPathQuery, matches: Filter },
 }
 
 /// Describes different types of HTTP filtering available

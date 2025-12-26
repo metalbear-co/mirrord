@@ -23,6 +23,7 @@ bytes.workspace = true
 thiserror.workspace = true
 futures.workspace = true
 serde.workspace = true
+serde_json_path.workspace = true
 tracing.workspace = true
 hyper = { workspace = true, features = ["client"] }
 http-serde = "2"

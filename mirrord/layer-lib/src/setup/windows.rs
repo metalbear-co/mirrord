@@ -180,7 +180,7 @@ impl LayerSetup {
         &self.config.feature.fs
     }
 
-    /// Get access to network configuration  
+    /// Get access to network configuration
     pub fn network_config(&self) -> &mirrord_config::feature::network::NetworkConfig {
         &self.config.feature.network
     }
@@ -230,7 +230,8 @@ impl IncomingMode {
     fn parse_body_filter(filter: &BodyFilter) -> HttpBodyFilter {
         match filter {
             BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
-                query: query.clone(),
+                query: JsonPathQuery::new(query.clone())
+                    .expect("invalid json body filter `query` string"),
                 matches: Filter::new(matches.clone())
                     .expect("invalid json body filter `matches` string"),
             },

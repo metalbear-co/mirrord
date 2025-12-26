@@ -28,8 +28,7 @@ use mirrord_protocol::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
     tcp::{
-        Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, MIRROR_HTTP_FILTER_VERSION,
-        MirrorType, StealType,
+        Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, JsonPathQuery, MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType
     },
 };
 use semver::Version;
@@ -995,7 +994,8 @@ impl IncomingMode {
                 // TODO(areg) unification
                 match filter {
                     BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
-                        query: query.clone(),
+                        query: JsonPathQuery::new(query.clone())
+                            .expect("invalid json body filter `query` string"),
                         matches: Filter::new(matches.clone())
                             .expect("invalid json body filter `matches` string"),
                     },
@@ -1049,7 +1049,8 @@ impl IncomingMode {
                     // TODO(areg) unify
                     match body_filter {
                         BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
-                            query: query.clone(),
+                            query: JsonPathQuery::new(query.clone())
+                                .expect("invalid json body filter `query` string"),
                             matches: Filter::new(matches.clone())
                                 .expect("invalid json body filter `matches` string"),
                         },
