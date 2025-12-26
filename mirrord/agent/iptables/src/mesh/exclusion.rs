@@ -48,9 +48,7 @@ where
         self.managed.inner().remove_rule(
             Self::ENTRYPOINT,
             &format!("-j {}", self.managed.chain_name()),
-        )?;
-
-        Ok(())
+        )
     }
 
     pub fn add_exclusion(&self, port: u16) -> IPTablesResult<()> {
@@ -59,8 +57,7 @@ where
     }
 
     pub fn remove_exclusion(&self, port: u16) -> IPTablesResult<()> {
-        self.managed.remove_rule(Self::accept_port_rule(port))?;
-        Ok(())
+        self.managed.remove_rule(Self::accept_port_rule(port))
     }
 
     fn accept_port_rule(port: u16) -> String {
@@ -108,16 +105,19 @@ where
     async fn mount_entrypoint(&self) -> IPTablesResult<()> {
         // Should mount the internal iptables because exclusion inserts itself as first rule and
         // this may also happen here so exclusion should mount second
-        self.inner.mount_entrypoint().await?;
+        let first_res = self.inner.mount_entrypoint().await;
 
-        self.exclusion.mount_entrypoint()
+        let second_res = self.exclusion.mount_entrypoint();
+
+        first_res.and(second_res)
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     async fn unmount_entrypoint(&self) -> IPTablesResult<()> {
-        self.inner.unmount_entrypoint().await?;
+        let first_res = self.inner.unmount_entrypoint().await;
 
-        self.exclusion.unmount_entrypoint()
+        let second_res = self.exclusion.unmount_entrypoint();
+        first_res.and(second_res)
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]

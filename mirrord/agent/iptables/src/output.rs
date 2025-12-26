@@ -77,9 +77,7 @@ where
         self.managed.inner().remove_rule(
             Self::ENTRYPOINT,
             &format!("-j {}", self.managed.chain_name()),
-        )?;
-
-        Ok(())
+        )
     }
 
     async fn add_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
