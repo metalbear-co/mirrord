@@ -53,7 +53,9 @@ on:
 
   # pull_request: REMOVED (triggered via ci.yaml now)
 
-# permissions: contents: write - REMOVED to allow inheritance (Read in CI, Write in Release)
+# permissions: contents: write - Restored for workflow_dispatch (manual) support. Ignored by workflow_call.
+permissions:
+  contents: write
 
 env:
   BUCKET_URI: gs://mirrord-windows-builds
