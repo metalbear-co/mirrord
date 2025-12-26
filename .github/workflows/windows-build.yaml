@@ -53,8 +53,7 @@ on:
 
   # pull_request: REMOVED (triggered via ci.yaml now)
 
-permissions:
-  contents: write
+# permissions: contents: write - REMOVED to allow inheritance (Read in CI, Write in Release)
 
 env:
   BUCKET_URI: gs://mirrord-windows-builds
@@ -577,7 +576,7 @@ jobs:
            }
 
       - name: Upload artifacts to Release
-        if: env.RELEASE_TAG != ''
+        if: inputs.release_tag != ''
         uses: metalbear-co/action-gh-release@ab50eebb6488051c6788d97fa95232267c6a4e23
         with:
           tag_name: ${{ env.RELEASE_TAG }}

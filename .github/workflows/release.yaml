@@ -469,17 +469,12 @@ jobs:
 
   trigger_windows_build:
     needs: update_latest
-    runs-on: ubuntu-24.04
-    permissions:
-      actions: write
     if: ${{ !cancelled() && !failure() && (inputs.build_windows || inputs.build_windows == null) }}
-    steps:
-      - name: Trigger Windows Build
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh workflow run windows-build.yaml \
-            -f release_tag=${{ github.ref_name }} \
-            -f sign_artifacts=true \
-            -f choco_publish=true \
-            -f winget_publish=true
+    uses: ./.github/workflows/windows-build.yaml
+    with:
+      mode: build_sign
+      release_tag: ${{ github.ref_name }}
+      sign_artifacts: "true"
+      choco_publish: "true"
+      winget_publish: "true"
+    secrets: inherit
