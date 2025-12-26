@@ -85,7 +85,12 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
-
+      - name: Debug Inputs and Context
+        run: |
+          echo "DEBUG: inputs.release_tag='${{ inputs.release_tag }}'"
+          echo "DEBUG: github.event_name='${{ github.event_name }}'"
+          echo "DEBUG: github.ref_name='${{ github.ref_name }}'"
+          echo "DEBUG: github.ref='${{ github.ref }}'"
       - name: Toolchain info
         run: |
           $ErrorActionPreference = "Stop"
