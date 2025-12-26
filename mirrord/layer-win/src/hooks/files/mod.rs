@@ -17,7 +17,7 @@ use mirrord_layer_lib::{
     LayerResult,
     file::filter::FileMode,
     proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
-    setup::layer_setup,
+    setup::setup,
 };
 use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest, SeekFromInternal,
@@ -281,7 +281,7 @@ unsafe extern "system" fn nt_create_file_hook(
             )
         };
 
-        let setup = layer_setup();
+        let setup = setup();
         // NOTE(gabriela): this is the only place, realistically, where this logic handling
         // is even needed in the first place, as the lack of [`MirrordHandle`]s will propagate
         // to all functions which rely on expecting one!

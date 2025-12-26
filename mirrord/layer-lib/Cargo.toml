@@ -36,6 +36,7 @@ socket2.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 regex.workspace = true
+http.workspace = true
 
 # Tokio for async pipe operations
 tokio = { workspace = true, features = ["rt", "macros"] }

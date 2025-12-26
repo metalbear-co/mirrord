@@ -102,17 +102,20 @@ use mirrord_config::{
     feature::{env::mapper::EnvVarsRemapper, fs::FsModeConfig, network::incoming::IncomingMode},
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
+use mirrord_layer_lib::{
+    debugger_ports::DebuggerPorts,
+    setup::{LayerSetup, init_layer_setup, setup},
+    trace_only::is_trace_only_mode,
+};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use nix::errno::Errno;
 use proxy_connection::ProxyConnection;
-use setup::LayerSetup;
 use socket::SOCKETS;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     common::make_proxy_request_with_response,
-    debugger_ports::DebuggerPorts,
     detour::DetourGuard,
     load::LoadType,
     socket::{hooks::MANAGED_ADDRINFO, ops::REMOTE_DNS_REVERSE_MAPPING},
@@ -136,7 +139,6 @@ mod integration_tests_deps {
 }
 
 mod common;
-mod debugger_ports;
 mod detour;
 mod error;
 mod exec_hooks;
@@ -147,7 +149,6 @@ mod hooks;
 mod load;
 mod macros;
 mod proxy_connection;
-mod setup;
 mod socket;
 #[cfg(target_os = "macos")]
 mod tls;
@@ -163,8 +164,6 @@ mod go;
     target_os = "linux"
 ))]
 use crate::go::go_hooks;
-
-const TRACE_ONLY_ENV: &str = "MIRRORD_LAYER_TRACE_ONLY";
 
 /// if this env var exists, we exit.
 /// This to allow a way to protect from mirrord being used in destructive tests and such.
@@ -183,12 +182,6 @@ const FAILSAFE_ENV: &str = "MIRRORD_DONT_LOAD";
 /// Should not be used directly. Use [`common::make_proxy_request_with_response`] or
 /// [`common::make_proxy_request_no_response`] functions instead.
 static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
-
-static SETUP: OnceLock<LayerSetup> = OnceLock::new();
-
-fn setup() -> &'static LayerSetup {
-    SETUP.get().expect("layer is not initialized")
-}
 
 // The following statics are to avoid using CoreFoundation or high level macOS APIs
 // that aren't safe to use after fork.
@@ -284,11 +277,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 /// if not in trace only mode.
 fn load_only_layer_start(config: &LayerConfig) {
     // Check if we're in trace only mode (no agent)
-    let trace_only = std::env::var(TRACE_ONLY_ENV)
-        .unwrap_or_default()
-        .parse()
-        .unwrap_or(false);
-    if trace_only {
+    if is_trace_only_mode() {
         return;
     }
 
@@ -383,40 +372,18 @@ fn init_tracing() {
 /// 5. Fetches remote environment from the agent (if enabled with
 ///    [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
 fn layer_start(mut config: LayerConfig) {
-    if config.target.path.is_none() && config.feature.fs.mode.ne(&FsModeConfig::Local) {
-        // Use localwithoverrides on targetless regardless of user config, unless fs-mode is already
-        // set to local.
-        config.feature.fs.mode = FsModeConfig::LocalWithOverrides;
-    }
-
-    // Check if we're in trace only mode (no agent)
-    let trace_only = std::env::var(TRACE_ONLY_ENV)
-        .unwrap_or_default()
-        .parse()
-        .unwrap_or(false);
-
-    // Disable all features that require the agent
-    if trace_only {
-        config.feature.fs.mode = FsModeConfig::Local;
-        config.feature.network.dns.enabled = false;
-        config.feature.network.incoming.mode = IncomingMode::Off;
-        config.feature.network.outgoing.tcp = false;
-        config.feature.network.outgoing.udp = false;
-    }
-
     init_tracing();
+
+    // initialize LayerSetup from config
+    init_layer_setup(&mut config).expect("init_layer_setup failed");
 
     let proxy_connection_timeout = *PROXY_CONNECTION_TIMEOUT
         .get_or_init(|| Duration::from_secs(config.internal_proxy.socket_timeout));
 
-    let debugger_ports = DebuggerPorts::from_env();
-    let local_hostname = trace_only || !config.feature.hostname;
     let process_info = EXECUTABLE_ARGS
         .get()
         .expect("EXECUTABLE_ARGS MUST BE SET")
         .to_process_info(&config);
-    let state = LayerSetup::new(config, debugger_ports, local_hostname);
-    SETUP.set(state).unwrap();
 
     let state = setup();
     enable_hooks(state);
@@ -569,8 +536,6 @@ fn sip_only_layer_start(
     patch_binaries: Vec<String>,
     skip_patch_binaries: Vec<String>,
 ) {
-    use mirrord_config::feature::fs::READONLY_FILE_BUFFER_DEFAULT;
-
     load_only_layer_start(&config);
 
     let mut hook_manager = HookManager::default();
@@ -581,20 +546,7 @@ fn sip_only_layer_start(
     unsafe { exec_hooks::hooks::enable_exec_hooks(&mut hook_manager) };
     unsafe { replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK) };
 
-    // we need to hook file access to patch path to our temp bin.
-    config.feature.fs = FsConfig {
-        mode: FsModeConfig::Local,
-        read_write: None,
-        read_only: None,
-        local: None,
-        not_found: None,
-        mapping: None,
-        readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
-    };
-    let debugger_ports = DebuggerPorts::from_env();
-    let layer_setup = LayerSetup::new(config, debugger_ports, true);
-
-    SETUP.set(layer_setup).expect("SETUP set failed");
+    init_layer_setup(config, true);
 
     unsafe { file::hooks::enable_file_hooks(&mut hook_manager, setup()) };
 }
