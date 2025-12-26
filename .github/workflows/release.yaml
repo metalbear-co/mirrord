@@ -470,6 +470,8 @@ jobs:
   trigger_windows_build:
     needs: update_latest
     if: ${{ !cancelled() && !failure() && (inputs.build_windows || inputs.build_windows == null) }}
+    permissions:
+      contents: write
     uses: ./.github/workflows/windows-build.yaml
     with:
       mode: build_sign
