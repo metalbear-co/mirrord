@@ -475,8 +475,8 @@ jobs:
     uses: ./.github/workflows/windows-build.yaml
     with:
       mode: build_sign
-      release_tag: ${{ github.event_name != 'workflow_dispatch' && github.ref_name || '' }}
+      release_tag: ${{ github.event_name == 'push' && github.ref_name || '' }}
       sign_artifacts: "true"
-      choco_publish: ${{ github.event_name != 'workflow_dispatch' && 'true' || 'false' }}
-      winget_publish: ${{ github.event_name != 'workflow_dispatch' && 'true' || 'false' }}
+      choco_publish: ${{ github.event_name == 'push' && 'true' || 'false' }}
+      winget_publish: ${{ github.event_name == 'push' && 'true' || 'false' }}
     secrets: inherit
