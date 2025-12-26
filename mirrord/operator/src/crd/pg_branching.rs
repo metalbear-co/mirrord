@@ -47,7 +47,7 @@ pub struct PgBranchDatabaseSpec {
 
 /// IAM authentication configuration for connecting to cloud-managed databases.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum IamAuthConfig {
     /// AWS RDS/Aurora IAM authentication.
     /// Requires the init container to have AWS credentials (via IRSA or instance profile).
