@@ -9,6 +9,7 @@ This document outlines the three main ways the Windows build workflow operates i
 In this mode, the Windows build runs as a **check** to ensure code validity. It **does not** sign artifacts or publish them.
 
 ```mermaid
+%%{init: {'theme': 'neutral', 'themeVariables': {'lineColor': '#f00'}}}%%
 graph TD
     A["User Pushes Code"] --> B["CI Workflow (ci.yaml)"]
     B --> C{"Windows Files Changed?"}
@@ -30,6 +31,7 @@ graph TD
 In this mode, the Windows build is part of the official release pipeline. It **signs** the artifacts and **uploads** them to the GitHub Release.
 
 ```mermaid
+%%{init: {'theme': 'neutral', 'themeVariables': {'lineColor': '#f00'}}}%%
 graph TD
     A["Push Tag v*"] --> B["Release Workflow (release.yaml)"]
     B --> C["Build Linux & Mac Artifacts"]
@@ -58,6 +60,7 @@ graph TD
 This gives you full control. You can use this to test the release process without pushing a tag, or to build specific artifacts for debugging.
 
 ```mermaid
+%%{init: {'theme': 'neutral', 'themeVariables': {'lineColor': '#f00'}}}%%
 graph TD
     A["User - Actions Tab"] --> B["Select 'Windows Build'"]
     B --> C["Configure Inputs"]
