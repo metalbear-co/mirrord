@@ -654,6 +654,14 @@ jobs:
           config: ".markdownlint.json"
           globs: "README.md"
 
+  windows_build:
+    needs: changed_files
+    if: ${{ needs.changed_files.outputs.windows_changed == 'true' }}
+    uses: ./.github/workflows/windows-build.yaml
+    with:
+      mode: build_sign
+    secrets: inherit
+
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
   # building concurrently can run faster the release ide tests
   build_mirrord_on_release_branch:
@@ -716,6 +724,7 @@ jobs:
         lint_markdown,
         check-rust-docs,
         cargo-deny,
+        windows_build,
       ]
     runs-on: ubuntu-24.04
     steps:
@@ -736,5 +745,6 @@ jobs:
             (needs.intellij_e2e_on_release_branch.result == 'success' || needs.intellij_e2e_on_release_branch.result == 'skipped') &&
             (needs.vscode_e2e_on_release_branch.result == 'success' || needs.vscode_e2e_on_release_branch.result == 'skipped') &&
             (needs.check-rust-docs.result == 'success' || needs.check-rust-docs.result == 'skipped') &&
-            (needs.cargo-deny.result == 'success' || needs.cargo-deny.result == 'skipped') }}
+            (needs.cargo-deny.result == 'success' || needs.cargo-deny.result == 'skipped') &&
+            (needs.windows_build.result == 'success' || needs.windows_build.result == 'skipped') }}
         run: echo $CI_SUCCESS && if [ "$CI_SUCCESS" == "true" ]; then echo "SUCCESS" && exit 0; else echo "Failure" && exit 1; fi

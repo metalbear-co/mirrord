@@ -28,12 +28,30 @@ on:
         options: ["false", "true"]
         default: "false"
 
-  pull_request:
-    branches: ["main", "*staging*", "windows-support"]
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore:
-      - "*.md"
-      - "**/*.md"
+  workflow_call:
+    inputs:
+      mode:
+        description: "Pick artifacts from GCS (reuse) or build & sign now"
+        type: string
+        default: build_sign
+      release_tag:
+        description: "Version to use for Chocolatey/WinGet (e.g. 0.0.1-test2). Defaults to MIRRORD_VERSION."
+        required: false
+        type: string
+      sign_artifacts:
+        description: "Code-sign EXE & DLL & MSI"
+        type: string
+        default: "false"
+      choco_publish:
+        description: "Publish a Chocolatey package?"
+        type: string
+        default: "false"
+      winget_publish:
+        description: "Update WinGet manifest (wingetcreate)?"
+        type: string
+        default: "false"
+
+  # pull_request: REMOVED (triggered via ci.yaml now)
 
 permissions:
   contents: write
@@ -56,11 +74,11 @@ jobs:
       run:
         shell: pwsh
     env:
-      MODE: ${{ github.event.inputs.mode || 'build_sign' }}
-      RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag || '' }}
-      SIGN_ARTIFACTS: ${{ github.event.inputs.sign_artifacts || 'false' }}
-      PUBLISH_CHOCO: ${{ github.event.inputs.choco_publish || 'true' }}
-      PUBLISH_WINGET: ${{ github.event.inputs.winget_publish || 'false' }}
+      MODE: ${{ inputs.mode || 'build_sign' }}
+      RELEASE_TAG_INPUT: ${{ inputs.release_tag || '' }}
+      SIGN_ARTIFACTS: ${{ inputs.sign_artifacts || 'false' }}
+      PUBLISH_CHOCO: ${{ inputs.choco_publish || 'true' }}
+      PUBLISH_WINGET: ${{ inputs.winget_publish || 'false' }}
 
     steps:
       - name: Checkout
