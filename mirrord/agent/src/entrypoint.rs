@@ -658,8 +658,7 @@ pub async fn notify_client_about_dirty_iptables(
     Ok(())
 }
 
-// TODO: INFO -> TRACE
-#[tracing::instrument(level = Level::INFO, ret, err)]
+#[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn get_rules(
     iptables: &IPTablesWrapper,
     ip6tables: Option<&IPTablesWrapper>,
@@ -677,8 +676,7 @@ async fn get_rules(
 ///
 /// If `clean_existing_rules` is set, the iptables will be cleaned after fetching the existing
 /// rules. The rules from before the cleanup will be returned for logging.
-// TODO: INFO -> TRACE
-#[tracing::instrument(level = Level::INFO, ret, err)]
+#[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn check_existing_rules(
     support_ipv6: bool,
     clean_existing_rules: bool,
