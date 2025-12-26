@@ -484,6 +484,21 @@ fn layer_start(mut config: LayerConfig) {
             }
         });
     }
+
+    #[cfg(target_os = "macos")]
+    if setup().experimental().applev.as_ref().is_some() {
+        unsafe {
+            let mut applev = exec_utils::extract_applev();
+            let mut count: usize = 0;
+            while !(*applev).is_null() {
+                let c_str = std::ffi::CStr::from_ptr(*applev);
+                tracing::info!("applev[{}]: {}", count, c_str.to_string_lossy());
+                applev = applev.add(1);
+                count = count.saturating_add(1);
+            }
+            tracing::info!(count, "Finished reading Apple variables");
+        }
+    }
 }
 
 /// Name of environment variable used to mark whether remote environment has already been fetched.
