@@ -97,10 +97,9 @@ where
     }
 
     async fn unmount_entrypoint(&self) -> IPTablesResult<()> {
-        self.prerouting.unmount_entrypoint().await?;
-        self.output.unmount_entrypoint().await?;
-
-        Ok(())
+        let first_res = self.prerouting.unmount_entrypoint().await;
+        let second_res = self.output.unmount_entrypoint().await;
+        first_res.and(second_res)
     }
 
     async fn add_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {

@@ -98,7 +98,11 @@ async fn dirty_iptables_test_inner(kube_client: Client) -> DirtyIptablesTest {
                         {
                             "name": "py-serv",
                             "image": "ghcr.io/metalbear-co/mirrord-pytest:latest",
-                            "ports": [ { "containerPort": 80 } ]
+                            "ports": [ { "containerPort": 80 } ],
+                            "env": [
+                                {"name": "MIRRORD_FAKE_VAR_FIRST", "value": "mirrord.is.running"},
+                                {"name": "MIRRORD_FAKE_VAR_SECOND", "value": "7777"}
+                            ]
                         }
                     ]
                 }
