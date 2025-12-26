@@ -1,6 +1,6 @@
 [package]
 name = "mirrord-protocol"
-version = "1.24.2"
+version = "1.25.0"
 authors.workspace = true
 description.workspace = true
 documentation.workspace = true
@@ -30,7 +30,12 @@ http-body-util = { workspace = true }
 fancy-regex = { workspace = true }
 socket2.workspace = true
 semver = { workspace = true, features = ["serde"] }
-derive_more = { workspace = true, features = ["from", "into", "deref", "display"] }
+derive_more = { workspace = true, features = [
+  "from",
+  "into",
+  "deref",
+  "display",
+] }
 uuid = { workspace = true, features = ["v4"] }
 
 mirrord-macros = { path = "../macros" }

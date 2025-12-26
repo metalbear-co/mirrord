@@ -220,7 +220,8 @@ pub async fn proxy(
                     | message @ Some(DaemonMessage::GetAddrInfoResponse(_))
                     | message @ Some(DaemonMessage::PauseTarget(_))
                     | message @ Some(DaemonMessage::SwitchProtocolVersionResponse(_))
-                    | message @ Some(DaemonMessage::Vpn(_)) => {
+                    | message @ Some(DaemonMessage::Vpn(_))
+                    | message @ Some(DaemonMessage::ReverseDnsLookup(_)) => {
                         return Err(
                             ExternalProxyError::PingPongFailed(format!(
                                 "agent sent an unexpected message: {message:?}"

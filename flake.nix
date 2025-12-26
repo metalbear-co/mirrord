@@ -97,8 +97,9 @@
           env =
             with pkgs;
             lib.optionalAttrs stdenv.isDarwin {
-              # Tells bindgen which C compiler to compile frida with when targetting linux
+              # Tells bindgen which C/C++ compiler to compile frida with when targetting linux
               CC_x86_64_unknown_linux_gnu = lib.getExe pkgsCross.gnu64.stdenv.cc;
+              CXX_x86_64_unknown_linux_gnu = lib.getExe pkgsCross.gnu64.stdenv.cc;
             };
         };
       }

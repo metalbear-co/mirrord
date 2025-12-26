@@ -290,14 +290,22 @@ impl SubscriptionsManager {
                 let port = match blocked_action {
                     BlockedAction::Steal(steal_type) => steal_type.get_port(),
                     BlockedAction::Mirror(port) => *port,
+                    BlockedAction::OutgoingTcp(addr) | BlockedAction::OutgoingUdp(addr) => {
+                        tracing::error!(
+                            ?addr,
+                            "This code is handling incoming policies - the operator shouldn't produce an outgoing blocked action at this point"
+                        );
+                        return Ok(vec![]);
+                    }
                 };
+
                 let Some(subscription) = self.subscriptions.remove(&port) else {
                     return Ok(vec![]);
                 };
 
                 subscription
                     .reject(response_error.clone())
-                    .map_err(|subscription|{
+                    .map_err(|subscription| {
                         tracing::error!(?subscription, "Subscription was confirmed before, then requested again and blocked by a policy.");
                         IncomingProxyError::SubscriptionFailed(response_error.clone())
                     })

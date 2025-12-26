@@ -67,7 +67,8 @@ pub struct MirrordPolicySpec {
     #[serde(default)]
     pub fs: FsPolicy,
 
-    /// Fine grained control over network features like specifying required HTTP filters.
+    /// Fine grained control over network features like specifying required HTTP filters and
+    /// limiting outgoing connections.
     #[serde(default)]
     pub network: NetworkPolicy,
 
@@ -142,6 +143,8 @@ pub struct MirrordClusterPolicySpec {
     #[serde(default)]
     pub fs: FsPolicy,
 
+    /// Fine grained control over network features like specifying required HTTP filters and
+    /// limiting outgoing connections.
     #[serde(default)]
     pub network: NetworkPolicy,
 
@@ -222,6 +225,8 @@ pub struct FsPolicy {
 pub struct NetworkPolicy {
     #[serde(default)]
     pub incoming: IncomingNetworkPolicy,
+    #[serde(default)]
+    pub outgoing: OutgoingNetworkPolicy,
 }
 
 /// Incoming network operations policy that partialy mimics the mirrord `network.incoming` config.
@@ -230,6 +235,70 @@ pub struct NetworkPolicy {
 pub struct IncomingNetworkPolicy {
     #[serde(default)]
     pub http_filter: HttpFilterPolicy,
+}
+
+/// Outgoing network operations policy that partialy mimics the mirrord `network.outgoing` config.
+#[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OutgoingNetworkPolicy {
+    /// List of allowed outgoing connections.
+    /// If specified, only connections matching these rules will be permitted.
+    /// Evaluated before `block` rules, so a connection that matches both will be blocked.
+    #[serde(default)]
+    pub allow: Vec<OutgoingRule>,
+
+    /// List of blocked outgoing connections.
+    /// If specified, connections matching these rules will be denied.
+    /// Evaluated after `allow` rules, so a connection that matches both will be blocked.
+    #[serde(default)]
+    pub block: Vec<OutgoingRule>,
+}
+
+/// A rule describing outgoing network connections (for either allow or block lists).
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OutgoingRule {
+    /// IP-based destination rules.
+    pub ip_block: Option<IpBlock>,
+
+    /// Regex pattern for matching hostnames.
+    pub hostname: Option<String>,
+
+    /// List of ports and protocols this rule applies to.
+    /// If not specified, the rule applies to all ports.
+    #[serde(default)]
+    pub ports: HashSet<PortRule>,
+}
+
+/// IP block specification for outgoing connections.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IpBlock {
+    /// CIDR notation of the IP range (e.g., "10.0.0.0/16").
+    pub cidr: String,
+
+    /// List of CIDR ranges to exclude from the IP range.
+    #[serde(default)]
+    pub except: HashSet<String>,
+}
+
+/// Port and protocol specification for outgoing connections.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema, Hash)]
+#[serde(rename_all = "camelCase")]
+pub struct PortRule {
+    /// Network protocol (TCP or UDP).
+    pub protocol: Protocol,
+
+    /// Port number.
+    pub port: u16,
+}
+
+/// Network protocol specification.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema, Hash)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Protocol {
+    TCP,
+    UDP,
 }
 
 /// Http filter policy that allows to specify requirements for the HTTP filter used in a session.
