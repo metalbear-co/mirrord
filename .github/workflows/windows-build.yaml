@@ -1,4 +1,4 @@
-name: Windows Build Choco + WinGet Test
+name: Windows Build + Choco and WinGet
 
 on:
   workflow_dispatch:
