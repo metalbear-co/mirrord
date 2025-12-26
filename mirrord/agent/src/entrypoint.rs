@@ -686,16 +686,17 @@ async fn check_existing_rules(
     let iptables = mirrord_agent_iptables::get_iptables(nftables, false);
     let ip6tables = support_ipv6.then(|| mirrord_agent_iptables::get_iptables(nftables, true));
     let rules = get_rules(&iptables, ip6tables.as_ref()).await?;
-    if clean_existing_rules && rules.is_empty().not() {
-        if let Err(err) = clear_iptable_chain(support_ipv6, with_mesh_exclusion).await {
-            // the error could be because we tried to remove two rules and only one of them was
-            // present to begin with, so removing the other, non-existent one failed.
-            // So we check the rules after cleaning and only fail if there are still rules.
-            let rules = get_rules(&iptables, ip6tables.as_ref()).await?;
-            if rules.is_empty().not() {
-                // There are still rules after the cleanup, the cleanup was not successful.
-                return Err(err);
-            }
+    if clean_existing_rules
+        && rules.is_empty().not()
+        && let Err(err) = clear_iptable_chain(support_ipv6, with_mesh_exclusion).await
+    {
+        // the error could be because we tried to remove two rules and only one of them was
+        // present to begin with, so removing the other, non-existent one failed.
+        // So we check the rules after cleaning and only fail if there are still rules.
+        let rules = get_rules(&iptables, ip6tables.as_ref()).await?;
+        if rules.is_empty().not() {
+            // There are still rules after the cleanup, the cleanup was not successful.
+            return Err(err);
         }
     }
 
