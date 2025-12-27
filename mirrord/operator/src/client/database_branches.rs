@@ -11,8 +11,7 @@ use kube::{
 use mirrord_config::{
     feature::database_branches::{
         ConnectionSource, ConnectionSourceKind, DatabaseBranchConfig, DatabaseBranchesConfig,
-        MysqlBranchConfig, PgBranchConfig, PgIamAuthConfig,
-        pg::EnvVarSource as ConfigEnvVarSource,
+        MysqlBranchConfig, PgBranchConfig, PgIamAuthConfig, pg::EnvVarSource as ConfigEnvVarSource,
     },
     target::{Target, TargetDisplay},
 };
@@ -33,9 +32,8 @@ use crate::{
         pg_branching::{
             BranchDatabasePhase as BranchDatabasePhasePg,
             ConnectionSource as CrdConnectionSourcePg,
-            ConnectionSourceKind as CrdConnectionSourceKindPg, IamAuthConfig as CrdIamAuthConfig,
-            EnvVarSource as CrdEnvVarSource,
-            PgBranchDatabase, PgBranchDatabaseSpec,
+            ConnectionSourceKind as CrdConnectionSourceKindPg, EnvVarSource as CrdEnvVarSource,
+            IamAuthConfig as CrdIamAuthConfig, PgBranchDatabase, PgBranchDatabaseSpec,
         },
     },
 };

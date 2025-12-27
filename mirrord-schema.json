@@ -967,6 +967,17 @@
               "format": "uint64",
               "minimum": 0.0
             },
+            "iam_auth": {
+              "description": "IAM authentication for the source database. Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication instead of password-based authentication.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/PgIamAuthConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "id": {
               "title": "feature.db_branches.base.id {#feature-db_branches-base-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
@@ -1241,6 +1252,31 @@
         }
       },
       "additionalProperties": false
+    },
+    "EnvVarSource": {
+      "description": "Source for reading a value from an environment variable. Follows the same pattern as `connection.url`.\n\nExample: ```json { \"type\": \"env\", \"variable\": \"MY_AWS_REGION\" } ```",
+      "oneOf": [
+        {
+          "description": "Read from an environment variable",
+          "type": "object",
+          "required": [
+            "type",
+            "variable"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "env"
+              ]
+            },
+            "variable": {
+              "description": "Name of the environment variable",
+              "type": "string"
+            }
+          }
+        }
+      ]
     },
     "ExperimentalFileConfig": {
       "description": "mirrord Experimental features. This shouldn't be used unless someone from MetalBear/mirrord tells you to.",
@@ -2351,6 +2387,107 @@
           ]
         }
       }
+    },
+    "PgIamAuthConfig": {
+      "description": "IAM authentication configuration for cloud-managed PostgreSQL databases.\n\nExample for AWS RDS with defaults (uses AWS_REGION, AWS_ACCESS_KEY_ID, etc.): ```json { \"iam_auth\": { \"type\": \"aws_rds\" } } ```\n\nExample with custom environment variables: ```json { \"iam_auth\": { \"type\": \"aws_rds\", \"region\": { \"type\": \"env\", \"variable\": \"MY_AWS_REGION\" }, \"access_key_id\": { \"type\": \"env\", \"variable\": \"MY_ACCESS_KEY\" }, \"secret_access_key\": { \"type\": \"env\", \"variable\": \"MY_SECRET_KEY\" } } } ```\n\nExample for GCP Cloud SQL: ```json { \"iam_auth\": { \"type\": \"gcp_cloud_sql\" } } ```",
+      "oneOf": [
+        {
+          "description": "AWS RDS/Aurora IAM authentication. The init container must have AWS credentials (via IRSA, instance profile, or env vars).",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "access_key_id": {
+              "description": "AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/EnvVarSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "region": {
+              "description": "AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/EnvVarSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "secret_access_key": {
+              "description": "AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/EnvVarSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "session_token": {
+              "description": "AWS Session Token (for temporary credentials). If not specified, uses AWS_SESSION_TOKEN.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/EnvVarSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "aws_rds"
+              ]
+            }
+          }
+        },
+        {
+          "description": "GCP Cloud SQL IAM authentication. The init container must have GCP credentials (via Workload Identity or service account key).",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "credentials": {
+              "description": "Path to service account JSON key file. If not specified, uses GOOGLE_APPLICATION_CREDENTIALS.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/EnvVarSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "project": {
+              "description": "GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/EnvVarSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "gcp_cloud_sql"
+              ]
+            }
+          }
+        }
+      ]
     },
     "PodTarget": {
       "description": "<!--${internal}--> Mirror the pod specified by [`PodTarget::pod`].",
