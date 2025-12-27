@@ -45,6 +45,17 @@ pub struct PgBranchDatabaseSpec {
     pub iam_auth: Option<IamAuthConfig>,
 }
 
+/// Source for reading a value from an environment variable.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EnvVarSource {
+    /// Read from an environment variable
+    Env {
+        /// Name of the environment variable
+        variable: String,
+    },
+}
+
 /// IAM authentication configuration for connecting to cloud-managed databases.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -52,20 +63,36 @@ pub enum IamAuthConfig {
     /// AWS RDS/Aurora IAM authentication.
     /// Requires the init container to have AWS credentials (via IRSA or instance profile).
     AwsRds {
-        /// AWS region where the RDS instance is located.
-        /// Takes precedence over `region_env` if both are specified.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        region: Option<String>,
+        /// AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        region: Option<EnvVarSource>,
 
-        /// Name of the environment variable containing the AWS region.
-        /// If not specified, checks AWS_REGION then AWS_DEFAULT_REGION.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        region_env: Option<String>,
+        /// AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        access_key_id: Option<EnvVarSource>,
+
+        /// AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        secret_access_key: Option<EnvVarSource>,
+
+        /// AWS Session Token (for temporary credentials). If not specified, uses
+        /// AWS_SESSION_TOKEN.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_token: Option<EnvVarSource>,
     },
     /// GCP Cloud SQL IAM authentication.
     /// Requires the init container to have GCP credentials (via Workload Identity or service
     /// account).
-    GcpCloudSql,
+    GcpCloudSql {
+        /// Path to service account JSON key file. If not specified, uses
+        /// GOOGLE_APPLICATION_CREDENTIALS.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        credentials: Option<EnvVarSource>,
+
+        /// GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<EnvVarSource>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

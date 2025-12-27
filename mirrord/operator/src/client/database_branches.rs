@@ -12,6 +12,7 @@ use mirrord_config::{
     feature::database_branches::{
         ConnectionSource, ConnectionSourceKind, DatabaseBranchConfig, DatabaseBranchesConfig,
         MysqlBranchConfig, PgBranchConfig, PgIamAuthConfig,
+        pg::EnvVarSource as ConfigEnvVarSource,
     },
     target::{Target, TargetDisplay},
 };
@@ -33,6 +34,7 @@ use crate::{
             BranchDatabasePhase as BranchDatabasePhasePg,
             ConnectionSource as CrdConnectionSourcePg,
             ConnectionSourceKind as CrdConnectionSourceKindPg, IamAuthConfig as CrdIamAuthConfig,
+            EnvVarSource as CrdEnvVarSource,
             PgBranchDatabase, PgBranchDatabaseSpec,
         },
     },
@@ -466,13 +468,35 @@ impl PgBranchParams {
                 }),
             },
         };
+        // Helper to convert config EnvVarSource to CRD EnvVarSource
+        fn convert_env_source(src: &ConfigEnvVarSource) -> CrdEnvVarSource {
+            match src {
+                ConfigEnvVarSource::Env { variable } => CrdEnvVarSource::Env {
+                    variable: variable.clone(),
+                },
+            }
+        }
+
         // Convert IAM auth config if present
         let iam_auth = config.iam_auth.as_ref().map(|iam| match iam {
-            PgIamAuthConfig::AwsRds { region, region_env } => CrdIamAuthConfig::AwsRds {
-                region: region.clone(),
-                region_env: region_env.clone(),
+            PgIamAuthConfig::AwsRds {
+                region,
+                access_key_id,
+                secret_access_key,
+                session_token,
+            } => CrdIamAuthConfig::AwsRds {
+                region: region.as_ref().map(convert_env_source),
+                access_key_id: access_key_id.as_ref().map(convert_env_source),
+                secret_access_key: secret_access_key.as_ref().map(convert_env_source),
+                session_token: session_token.as_ref().map(convert_env_source),
             },
-            PgIamAuthConfig::GcpCloudSql => CrdIamAuthConfig::GcpCloudSql,
+            PgIamAuthConfig::GcpCloudSql {
+                credentials,
+                project,
+            } => CrdIamAuthConfig::GcpCloudSql {
+                credentials: credentials.as_ref().map(convert_env_source),
+                project: project.as_ref().map(convert_env_source),
+            },
         });
         let spec = PgBranchDatabaseSpec {
             id: id.to_string(),
