@@ -55,27 +55,35 @@ graph TD
 
 ## 3. Manual / Standalone Flow
 
-**Trigger**: Manually running the workflow via GitHub Actions UI.
+**Trigger**: Manually running the workflow via GitHub Actions UI (`windows-build.yaml` or `release.yaml`).
 
-This gives you full control. You can use this to test the release process without pushing a tag, or to build specific artifacts for debugging.
+> [!NOTE]
+> The `reuse` mode (downloading pre-built artifacts from GCS) has been removed. The workflow now always builds from source.
 
-```mermaid
-%%{init: {'theme': 'neutral', 'themeVariables': {'lineColor': '#f00'}}}%%
-graph TD
-    A["User - Actions Tab"] --> B["Select 'Windows Build'"]
-    B --> C["Configure Inputs"]
-    C --> D["Run Workflow<br>(workflow_<br>dispatch)"]
-    
-    D --> E{"Input: Sign?"}
-    E -->|True| F["Sign Artifacts"]
-    E -->|False| G["Skip Signing"]
-    
-    F & G --> H["Run Tests"]
-    
-    H --> I{"Input: Release Tag?"}
-    I -->|Set| J["Upload to Release"]
-    I -->|Empty| K["Skip Upload"]
-```
+### Option A: Trigger `windows-build.yaml` directly
+Use this to test the Windows build logic in isolation.
 
-*   **Inputs**: Fully configurable UI (Mode, Tag, Sign, Publish Choco, Publish WinGet).
-*   **Permissions**: Uses `write` permissions by default (user triggered).
+*   **Inputs**:
+    *   `release_tag`: If set (e.g., `0.0.1-test`), it will attempt to upload artifacts to a GitHub Release with this tag.
+    *   `sign_artifacts`: Check to enable code signing (requires secrets).
+    *   `choco_publish` / `winget_publish`: Check to test package publishing.
+*   **Permissions**:
+    *   This workflow works best for **compilation and test verification** (inputs left empty).
+    *   **WARNING**: If you want to test **artifacts upload**, you must ensure the repository's "Workflow permissions" settings allow Read and Write, or the upload step will fail (as the local `permissions: write` block has been vetted out for CI compatibility).
+
+### Option B: Trigger `release.yaml` (Recommended for Release Testing)
+Use this to test the full release pipeline, including permissions and uploads.
+
+*   **Trigger**: Select `Release` workflow -> Run workflow.
+*   **Behavior**: It mimics a real tag push but allows you to skip parts or target a test tag. It explicitly grants `write` permissions to the Windows job, ensuring uploads work correctly without changing global repo settings.
+*   **Inputs**:
+    *   `build_windows`: Check to include the Windows build job.
+
+## Testing Guidelines
+
+| Goal | Workflow | Inputs | Notes |
+| :--- | :--- | :--- | :--- |
+| **Verify Compilation** | `windows-build` | All disabled | Fast check, no secrets needed. |
+| **Verify Tests** | `ci.yaml` | (Automatic on PR) | Runs standard test suite. |
+| **Test Release Upload** | `release.yaml` | `build_windows: true` | Safest way to test uploads. Creates draft/pre-release if tag unused. |
+| **Test Windows Specifics** | `windows-build` | `release_tag: test` | **Requires** repo permission "Read and Write" enabled in Settings. |
