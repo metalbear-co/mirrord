@@ -104,6 +104,12 @@ pub enum PgIamAuthConfig {
         /// GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project: Option<EnvVarSource>,
+
+        /// Inline service account JSON key content.
+        /// Pass credentials directly from an env var
+        /// instead of mounting a file. The JSON content will be written to a temp file.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        credentials_json: Option<EnvVarSource>,
     },
 }
 

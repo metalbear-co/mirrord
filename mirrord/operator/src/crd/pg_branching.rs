@@ -92,6 +92,12 @@ pub enum IamAuthConfig {
         /// GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project: Option<EnvVarSource>,
+
+        /// Inline service account JSON key content.
+        /// Use this when you want to pass credentials directly from an env var
+        /// instead of mounting a file.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        credentials_json: Option<EnvVarSource>,
     },
 }
 

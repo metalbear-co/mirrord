@@ -491,9 +491,11 @@ impl PgBranchParams {
             PgIamAuthConfig::GcpCloudSql {
                 credentials,
                 project,
+                credentials_json,
             } => CrdIamAuthConfig::GcpCloudSql {
                 credentials: credentials.as_ref().map(convert_env_source),
                 project: project.as_ref().map(convert_env_source),
+                credentials_json: credentials_json.as_ref().map(convert_env_source),
             },
         });
         let spec = PgBranchDatabaseSpec {
