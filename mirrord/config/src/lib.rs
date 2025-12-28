@@ -482,6 +482,7 @@ impl LayerConfig {
             http_filter.header_filter.is_some(),
             http_filter.all_of.is_some(),
             http_filter.any_of.is_some(),
+            http_filter.body_filter.is_some(),
         ]
         .into_iter()
         .filter(|used| *used)
