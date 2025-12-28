@@ -476,6 +476,7 @@ impl PgBranchParams {
         }
 
         // Convert IAM auth config if present
+        tracing::info!(?config.iam_auth, "Converting IAM auth config from user config to CRD");
         let iam_auth = config.iam_auth.as_ref().map(|iam| match iam {
             PgIamAuthConfig::AwsRds {
                 region,
@@ -489,15 +490,17 @@ impl PgBranchParams {
                 session_token: session_token.as_ref().map(convert_env_source),
             },
             PgIamAuthConfig::GcpCloudSql {
-                credentials,
-                project,
                 credentials_json,
-            } => CrdIamAuthConfig::GcpCloudSql {
-                credentials: credentials.as_ref().map(convert_env_source),
-                project: project.as_ref().map(convert_env_source),
-                credentials_json: credentials_json.as_ref().map(convert_env_source),
-            },
+                project,
+            } => {
+                tracing::info!(?credentials_json, ?project, "Converting GcpCloudSql config");
+                CrdIamAuthConfig::GcpCloudSql {
+                    credentials_json: credentials_json.as_ref().map(convert_env_source),
+                    project: project.as_ref().map(convert_env_source),
+                }
+            }
         });
+        tracing::info!(?iam_auth, "Converted IAM auth for CRD");
         let spec = PgBranchDatabaseSpec {
             id: id.to_string(),
             database_name: config.base.name.clone(),
