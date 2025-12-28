@@ -524,18 +524,16 @@ impl LayerConfig {
 
         if let Some(all_of) = &http_filter.all_of {
             for filter in all_of {
-                match filter {
-                    InnerFilter::Body(body_filter) => verify_body_filter(body_filter)?,
-                    _ => (),
+                if let InnerFilter::Body(body) = filter {
+                    verify_body_filter(body)?
                 }
             }
         }
 
         if let Some(any_of) = &http_filter.any_of {
             for filter in any_of {
-                match filter {
-                    InnerFilter::Body(body_filter) => verify_body_filter(body_filter)?,
-                    _ => (),
+                if let InnerFilter::Body(body) = filter {
+                    verify_body_filter(body)?
                 }
             }
         }
