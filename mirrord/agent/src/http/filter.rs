@@ -4,10 +4,7 @@ use fancy_regex::Regex;
 use hyper::http::request::Parts;
 use mirrord_protocol::tcp::HttpMethodFilter;
 use serde_json::Value;
-use serde_json_path::{
-    JsonPath,
-    functions::{NodesType, ValueType},
-};
+use serde_json_path::JsonPath;
 use tracing::Level;
 
 /// Currently supported filtering criterias.
@@ -84,54 +81,6 @@ impl TryFrom<&mirrord_protocol::tcp::HttpBodyFilter> for HttpBodyFilter {
             },
         })
     }
-}
-
-#[serde_json_path::function(name = "typeof")]
-fn type_of(nodes: NodesType) -> ValueType {
-    #[derive(PartialEq, strum_macros::Display)]
-    #[strum(serialize_all = "lowercase")]
-    enum Types {
-        Null,
-        Bool,
-        Number,
-        String,
-        Array,
-        Object,
-    }
-
-    impl From<Types> for ValueType<'static> {
-        fn from(t: Types) -> Self {
-            ValueType::Value(Value::String(t.to_string()))
-        }
-    }
-
-    impl From<&Value> for Types {
-        fn from(v: &Value) -> Self {
-            match v {
-                Value::Null => Self::Null,
-                Value::Bool(_) => Self::Bool,
-                Value::Number(_) => Self::Number,
-                Value::String(_) => Self::String,
-                Value::Array(_) => Self::Array,
-                Value::Object(_) => Self::Object,
-            }
-        }
-    }
-
-    let mut iter = nodes.iter();
-
-    let first_type = match iter.next() {
-        Some(first) => Types::from(*first),
-        None => return ValueType::Nothing,
-    };
-
-    for v in iter {
-        if Types::from(*v) != first_type {
-            return ValueType::Nothing;
-        }
-    }
-
-    first_type.into()
 }
 
 impl HttpFilter {

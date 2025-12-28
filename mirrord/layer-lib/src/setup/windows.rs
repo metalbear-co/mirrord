@@ -230,8 +230,7 @@ impl IncomingMode {
     fn parse_body_filter(filter: &BodyFilter) -> HttpBodyFilter {
         match filter {
             BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
-                query: JsonPathQuery::new(query.clone())
-                    .expect("invalid json body filter `query` string"),
+                query: JsonPathQuery::new_unchecked(query.clone()),
                 matches: Filter::new(matches.clone())
                     .expect("invalid json body filter `matches` string"),
             },

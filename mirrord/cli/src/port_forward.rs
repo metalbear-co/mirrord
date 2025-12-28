@@ -28,7 +28,8 @@ use mirrord_protocol::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
     tcp::{
-        Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, JsonPathQuery, MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType
+        Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, JsonPathQuery,
+        MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType,
     },
 };
 use semver::Version;
