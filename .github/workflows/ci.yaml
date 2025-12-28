@@ -32,11 +32,6 @@ name: CI
 
 on:
   workflow_dispatch:
-    inputs:
-      test_windows_release_build:
-        description: "Test Windows Release Build (Sign + Publish)"
-        type: boolean
-        default: false
   push:
   pull_request:
     branches: [main, "*staging*", "windows-support"]
@@ -661,14 +656,10 @@ jobs:
 
   windows_build:
     needs: changed_files
-    if: ${{ needs.changed_files.outputs.windows_changed == 'true' || inputs.test_windows_release_build == 'true' }}
+    if: ${{ needs.changed_files.outputs.windows_changed == 'true' }}
     uses: ./.github/workflows/windows-build.yaml
     with:
       mode: build_sign
-      sign_artifacts: ${{ inputs.test_windows_release_build == 'true' && 'true' || 'false' }}
-      choco_publish: ${{ inputs.test_windows_release_build == 'true' && 'true' || 'false' }}
-      winget_publish: ${{ inputs.test_windows_release_build == 'true' && 'true' || 'false' }}
-      release_tag: ${{ inputs.test_windows_release_build == 'true' && '0.0.1-test-windows-release' || '' }}
     secrets: inherit
 
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
