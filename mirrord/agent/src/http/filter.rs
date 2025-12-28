@@ -155,7 +155,7 @@ impl HttpFilter {
                         let json = match serde_json::from_reader::<_, Value>(body) {
                             Ok(json) => json,
                             Err(error) => {
-                                tracing::trace!(?error, "json filter failed to parse body json");
+                                tracing::debug!(?error, "json filter failed to parse body json");
                                 return false;
                             }
                         };
