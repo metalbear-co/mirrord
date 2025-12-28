@@ -53,8 +53,8 @@ on:
 
   # pull_request: REMOVED (triggered via ci.yaml now)
 
-  permissions:
-    contents: write
+permissions:
+  contents: write
 
 env:
   MSI_BUCKET_URI: gs://mirrord-windows-builds-public
