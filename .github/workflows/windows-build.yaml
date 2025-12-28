@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Pick artifacts from GCS (reuse) or build & sign now"
+        description: "Build & sign (build_sign)"
         type: choice
-        options: [build_sign, reuse]
+        options: [build_sign]
         default: build_sign
       release_tag:
         description: "Version to use for Chocolatey/WinGet (e.g. 0.0.1-test2). Defaults to MIRRORD_VERSION."
@@ -31,7 +31,7 @@ on:
   workflow_call:
     inputs:
       mode:
-        description: "Pick artifacts from GCS (reuse) or build & sign now"
+        description: "Build & sign (build_sign)"
         type: string
         default: build_sign
       release_tag:
@@ -56,9 +56,7 @@ on:
 # permissions: contents: write - REMOVED to allow inheritance (Read in CI, Write in Release)
 
 env:
-  BUCKET_URI: gs://mirrord-windows-builds
   MSI_BUCKET_URI: gs://mirrord-windows-builds-public
-  ARTIFACT_SUBPATH: windows/mirrord-latest
   RUST_BACKTRACE: "1"
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: "false"
@@ -104,7 +102,7 @@ jobs:
           Remove-Item $testDir -Recurse -Force
 
       ###########################################################################
-      # PREPARE ARTIFACTS (either reuse from GCS OR build+sign)
+      # PREPARE ARTIFACTS
       ###########################################################################
       
       - name: Prepare e2e tests dependencies
@@ -147,38 +145,7 @@ jobs:
           $Tmp    = Join-Path $env:RUNNER_TEMP "prep"
           New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 
-          # FIXED: added missing closing ")
           $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, "true", "InvariantCultureIgnoreCase")
-
-          if ($env:MODE -eq "reuse") {
-            if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
-              throw "gcloud not found"
-            }
-
-            $dest = Join-Path $Tmp "picked"
-            New-Item -ItemType Directory -Force -Path $dest | Out-Null
-
-            gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
-
-            $exe = (Get-ChildItem $dest -Filter "mirrord.exe" -Recurse -File | Select-Object -First 1).FullName
-            $dll = (Get-ChildItem $dest -Filter "mirrord_layer_win.dll" -Recurse -File | Select-Object -First 1).FullName
-
-            if (-not $exe -or -not $dll) {
-              throw "Failed to find EXE or DLL"
-            }
-
-            if ($shouldSign) {
-              & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
-                  /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
-              & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
-                  /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
-            }
-
-            Set-Env "MIRRORD_EXE" $exe
-            Set-Env "MIRRORD_LAYER_FILE" $dll
-            Set-Env "MIRRORD_VERSION" "unknown"
-            exit 0
-          }
 
           rustup target add $Target
 
@@ -575,7 +542,7 @@ jobs:
            }
 
       - name: Upload artifacts to Release
-        if: inputs.release_tag != ''
+        if: inputs.release_tag != '' && github.event_name != 'pull_request'
         uses: metalbear-co/action-gh-release@ab50eebb6488051c6788d97fa95232267c6a4e23
         with:
           tag_name: ${{ env.RELEASE_TAG }}
