@@ -635,7 +635,10 @@ Add a changelog file in `changelog.d/` named `<identifier>.<category>.md`
 - Don't use Linear issues or private repo issue numbers
 
 **Category:**
-Check `towncrier.toml` for available categories (`added`, `changed`, `fixed`, etc.) and choose the one that fits your change.
+- `added` for new functionality
+- `fixed` for fixed bugs
+- `internal` for anything users don't care about, e.g. changes in tests or CI
+- `changed` for anything else
 
 # Architecture
 
@@ -738,6 +741,7 @@ flowchart TB
 ## Release PR
 
 1. Create a new branch named after the new version, e.g. `3.333.0`. This will trigger additional CI jobs.
+	1. If the new release only contains `internal` and `fixed` changes, bump a patch version. Otherwise, bump a minor version.
 2. On the new branch, bump the workspace version in `Cargo.toml` and run `cargo update -w` to update `Cargo.lock`.
 3. Generate the changelog with: `towncrier build --version <new-version>`.
 4. Review the generated changelog and fix any issues or typos.
