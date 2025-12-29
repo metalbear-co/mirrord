@@ -664,6 +664,8 @@ jobs:
     name: build mirrord CLI
     needs: check_if_release_branch
     if: ${{ needs.check_if_release_branch.outputs.release_branch == 'true' }}
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
