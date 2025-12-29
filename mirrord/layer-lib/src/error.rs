@@ -602,7 +602,7 @@ impl From<HookError> for i64 {
             HookError::IO(ref e) if (ignore_codes::is_ignored_code(e.raw_os_error())) => {
                 info!("libc error (doesn't indicate a problem) >> {fail:#?}")
             }
-            HookError::FileNotFound(path) => {
+            HookError::FileNotFound(ref path) => {
                 info!("mirrord file not found triggered: {path:?}")
             }
             HookError::SocketUnsuportedIpv6 => {
