@@ -6,7 +6,7 @@ pub mod unstable;
 
 use std::{error::Error, fmt, io, path::PathBuf};
 
-pub use context::ConfigContext;
+pub use context::{ConfigContext, EnvKey};
 use thiserror::Error;
 
 use crate::feature::split_queues::QueueSplittingVerificationError;

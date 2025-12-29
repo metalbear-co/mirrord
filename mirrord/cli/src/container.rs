@@ -97,6 +97,8 @@ fn resolve_library_path(config: &LayerConfig) -> CliResult<String> {
 /// Uses [`ExecutionKind::Container`] to create the [`AnalyticsReporter`].
 ///
 /// Uses the given `progress` to pass warnings from [`LayerConfig`] verification.
+///
+/// Returns the resolved config and analytics reporter.
 async fn create_config_and_analytics<P: Progress>(
     progress: &mut P,
     mut cfg_context: ConfigContext,
@@ -107,11 +109,16 @@ async fn create_config_and_analytics<P: Progress>(
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
     // Initialize only error analytics, extproxy will be the full AnalyticsReporter.
-    let analytics = AnalyticsReporter::only_error(
+    let mut analytics = AnalyticsReporter::only_error(
         config.telemetry,
         ExecutionKind::Container,
         watch,
         user_data.machine_id(),
+    );
+
+    analytics.get_mut().add(
+        "key_length",
+        cfg_context.resolve_env_key().analytics_len(),
     );
 
     let result = config.verify(&mut cfg_context);
@@ -224,7 +231,10 @@ pub async fn container_command(
 
     progress.warning("mirrord container is currently an unstable feature");
 
-    let cfg_context = ConfigContext::default().override_envs(exec_params.as_env_vars());
+    let cfg_context = ConfigContext::default()
+        .override_envs(exec_params.as_env_vars())
+        .with_cli_key(exec_params.key.clone());
+
     let (mut config, mut analytics) =
         create_config_and_analytics(&mut progress, cfg_context, watch, user_data).await?;
 
