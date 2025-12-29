@@ -75,7 +75,9 @@ pub fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Deto
 
     match file_filter.mode {
         FsModeConfig::Local => Detour::Bypass(Bypass::ignored_file(text)),
-        _ if file_filter.not_found.is_match(text) => Detour::Error(HookError::FileNotFound),
+        _ if file_filter.not_found.is_match(text) => {
+            Detour::Error(HookError::FileNotFound(path.clone()))
+        }
         _ if file_filter.read_write.is_match(text) => Detour::Success(()),
         _ if file_filter.read_only.is_match(text) => {
             if write {

@@ -1,4 +1,4 @@
-use std::{env::VarError, net::SocketAddr, ptr, str::ParseBoolError};
+use std::{env::VarError, net::SocketAddr, path::Path, ptr, str::ParseBoolError};
 
 use ignore_codes::*;
 use libc::{DIR, FILE, c_char, hostent};
@@ -95,8 +95,8 @@ pub(crate) enum HookError {
 
     /// When the user's application tries to access a file filtered out by the `not-found` file
     /// filter.
-    #[error("mirrord-layer: Ignored file")]
-    FileNotFound,
+    #[error("mirrord-layer: Ignored file `{0}`")]
+    FileNotFound(Path),
 
     #[error("mirrord-layer: Proxy connection failed: `{0}`")]
     ProxyError(#[from] ProxyError),
@@ -216,8 +216,8 @@ impl From<HookError> for i64 {
             HookError::IO(ref e) if (is_ignored_code(e.raw_os_error())) => {
                 info!("libc error (doesn't indicate a problem) >> {fail:#?}")
             }
-            HookError::FileNotFound => {
-                info!("mirrord file not found triggered")
+            HookError::FileNotFound(path) => {
+                info!("mirrord file not found triggered: {path:?}")
             }
             HookError::SocketUnsuportedIpv6 => {
                 info!("{fail}")
