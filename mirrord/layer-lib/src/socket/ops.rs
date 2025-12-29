@@ -26,7 +26,8 @@ use crate::error::windows::WindowsError;
 use crate::{
     HookError, HookResult,
     error::ConnectError,
-    socket::{Bound, Connected, SOCKETS, SocketState, UserSocket},
+    setup::setup,
+    socket::{Bound, Connected, SOCKETS, SocketState, UserSocket, ConnectionThrough},
 };
 
 // Platform-specific socket descriptor type
@@ -164,6 +165,13 @@ fn set_last_error(error: i32) {
     };
 }
 
+fn nop_connect_fn(_addr: SockAddr) -> ConnectResult {
+    ConnectResult {
+        result: 0,
+        error: None,
+    }
+}
+
 /// Common logic for outgoing connections that can be used by platform-specific implementations.
 ///
 /// This function handles the mirrord proxy connection setup but leaves the actual socket
@@ -184,7 +192,7 @@ fn set_last_error(error: i32) {
     ret,
     skip(user_socket_info, proxy_request_fn, connect_fn)
 )]
-pub fn connect_outgoing<const CALL_CONNECT: bool, P, F>(
+pub fn connect_outgoing_common<P, F>(
     sockfd: SocketDescriptor,
     remote_address: SockAddr,
     user_socket_info: Arc<UserSocket>,
@@ -194,7 +202,7 @@ pub fn connect_outgoing<const CALL_CONNECT: bool, P, F>(
 ) -> HookResult<ConnectResult>
 where
     P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
-    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
+    F: FnOnce(SockAddr) -> ConnectResult,
 {
     debug!("connect_outgoing -> preparing {protocol:?} connection to {remote_address:?}");
 
@@ -245,103 +253,81 @@ where
             }
         }
 
-        // Connect to the interceptor socket that is listening.
-        call_connect_fn(
-            connect_fn,
-            sockfd,
-            remote_addr,
-            in_cluster_address,
-            Some(layer_address),
-        )
+        
+        // Connect to the socket prepared by the internal proxy.
+        let connect_result: ConnectResult = connect_fn(remote_addr);
+
+        #[cfg(unix)]
+        if let Some(raw_error) = connect_result.error
+            && raw_error != libc::EINTR
+            && raw_error != libc::EINPROGRESS
+        {
+            // We failed to connect to the internal proxy socket.
+            // This is most likely a bug,
+            // so let's try and include here as much info as possible.
+
+            let error = io::Error::from_raw_os_error(raw_error);
+            let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
+            let socket_name =
+                nix::sys::socket::getsockname::<SockaddrStorage>(sockfd).map(|sockaddr| {
+                    // `Debug` implementation is not very helpful, `ToString` produces a nice
+                    // address.
+                    sockaddr.to_string()
+                });
+            let socket_type = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType);
+            error!(
+                sockfd,
+                ?user_socket_info,
+                ?socket_type,
+                socket_addr = ?socket_name,
+
+                outgoing_connect_request_id = connection_id,
+                internal_proxy_socket_address = %layer_address,
+                agent_peer_address = %remote_address,
+                agent_local_address = in_cluster_address.as_ref().map(ToString::to_string),
+
+                raw_error,
+                %error,
+
+                ?SOCKETS,
+
+                "Failed to connect to an internal proxy socket. \
+                This is most likely a bug, please report it.",
+            );
+            return Detour::Error(error.into());
+        }
+
+        let connected = Connected {
+            connection_id: Some(connection_id),
+            remote_address,
+            local_address: in_cluster_address,
+            layer_address: Some(layer_address),
+        };
+
+        trace!("we are connected {connected:#?}");
+
+        set_socket_state(sockfd, SocketState::Connected(connected));
+
+        Ok(connect_result)
     };
 
-    if remote_address.is_unix() {
-        remote_connection(remote_address)
+    let connect_result = if remote_address.is_unix() {
+        remote_connection(remote_address)?
     } else {
-        // For non-Unix sockets, we need to determine if this should be handled locally or remotely
-        // This decision should be made by the platform-specific implementation based on
-        // outgoing selector configuration
-        remote_connection(remote_address)
-    }
-}
-#[mirrord_layer_macro::instrument(level = "debug", ret, skip(connect_fn))]
-pub fn call_connect_fn<F>(
-    connect_fn: F,
-    sockfd: SocketDescriptor,
-    remote_addr: SockAddr,
-    in_cluster_address_opt: Option<SocketAddress>,
-    layer_address_opt: Option<SocketAddress>,
-) -> HookResult<ConnectResult>
-where
-    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
-{
-    let remote_address = SocketAddress::try_from(remote_addr.clone()).unwrap();
-    let (connect_result, connected) = match (
-        layer_address_opt.clone(),
-        in_cluster_address_opt.clone(),
-    ) {
-        (Some(layer_address), Some(in_cluster_address)) => {
-            debug!(
-                "call_connect_fn -> connecting to remote_address={remote_address:?}, in_cluster_address={in_cluster_address:?}, layer_address={layer_address:?}"
-            );
+        // make sure its a valid IPV4/6 address
+        let socket_addr = remote_address.as_socket().ok_or(HookError::UnsupportedSocketType)?;
 
-            let layer_addr = SockAddr::try_from(layer_address.clone())?;
-            let connect_result: ConnectResult = connect_fn(sockfd, layer_addr);
-            if connect_result.is_failure() {
-                error!(
-                    "connect -> Failed call to connect_fn with {:#?}",
-                    connect_result,
-                );
-                return Err(std::io::Error::last_os_error().into());
-            }
-
-            (
-                connect_result,
-                Connected {
-                    remote_address: layer_address.clone(),
-                    local_address: in_cluster_address,
-                    layer_address: Some(layer_address),
-                },
-            )
-        }
-        _ => {
-            // both or none of layer_address and in_cluster_address must be provided
-            if layer_address_opt.is_none() ^ in_cluster_address_opt.is_none() {
-                return Err(ConnectError::ParameterMissing(format!(
-                    "layer_address: {:?}, in_cluster_address: {:?}",
-                    layer_address_opt, in_cluster_address_opt
-                ))
-                .into());
-            }
-
-            debug!(
-                "call_connect_fn -> bypassing interception, connecting locally to {remote_address:?}"
-            );
-
-            let connect_result: ConnectResult = connect_fn(sockfd, remote_addr);
-            if connect_result.is_failure() {
-                error!(
-                    "connect -> Failed call to connect_fn with {:#?}",
-                    connect_result,
-                );
-                return Err(std::io::Error::last_os_error().into());
-            }
-
-            (
-                connect_result,
-                Connected {
-                    remote_address: remote_address.clone(),
-                    local_address: remote_address,
-                    layer_address: None,
-                },
-            )
+        // Can't just connect to whatever `remote_address` is, as it might be a remotely resolved
+        // address, in a local connection context (or vice versa), so we let `remote_connection`
+        // handle this address trickery.
+        match setup()
+            .outgoing_selector()
+            .get_connection_through(socket_addr, protocol)?
+        {
+            ConnectionThrough::Remote(addr) => remote_connection(SockAddr::from(addr))?,
+            ConnectionThrough::Local(addr) => connect_fn(SockAddr::from(addr))
         }
     };
-
-    trace!("we are connected {connected:#?}");
-
-    set_socket_state(sockfd, SocketState::Connected(connected));
-
     Ok(connect_result)
 }
 
@@ -356,22 +342,6 @@ pub fn create_outgoing_request(
     }
 }
 
-/// Updates a socket to connected state with the provided connection information
-pub fn update_socket_connected_state(
-    user_socket: &mut UserSocket,
-    remote_address: SocketAddress,
-    local_address: SocketAddress,
-    layer_address: Option<SocketAddress>,
-) {
-    let connected = Connected {
-        remote_address,
-        local_address,
-        layer_address,
-    };
-
-    user_socket.state = SocketState::Connected(connected);
-}
-
 /// Checks if an address should be handled as a Unix socket
 pub fn is_unix_address(address: &SockAddr) -> bool {
     address.is_unix()
@@ -380,37 +350,6 @@ pub fn is_unix_address(address: &SockAddr) -> bool {
 /// Converts a socket address to the appropriate format for outgoing connections
 pub fn prepare_outgoing_address(address: SocketAddr) -> SocketAddress {
     address.into()
-}
-
-/// Version of connect_outgoing for UDP that doesn't perform actual connect (semantic connection
-/// only)
-#[mirrord_layer_macro::instrument(level = "trace", ret, skip(user_socket_info, proxy_request_fn))]
-pub fn connect_outgoing_udp<P>(
-    sockfd: SocketDescriptor,
-    remote_address: SockAddr,
-    user_socket_info: Arc<UserSocket>,
-    protocol: NetProtocol,
-    proxy_request_fn: P,
-) -> HookResult<ConnectResult>
-where
-    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
-{
-    // No-op connect function for UDP
-    let connect_fn = |_sockfd: SocketDescriptor, _: SockAddr| -> ConnectResult {
-        ConnectResult {
-            result: 0,
-            error: None,
-        }
-    };
-
-    connect_outgoing(
-        sockfd,
-        remote_address,
-        user_socket_info,
-        protocol,
-        proxy_request_fn,
-        connect_fn,
-    )
 }
 
 /// Helps manually resolving DNS on port `53` with UDP, see `send_to` and `sendmsg`.
@@ -438,16 +377,20 @@ pub fn send_dns_patch(
     sockets.insert(sockfd, user_socket_info);
 
     // Sending a packet on port NOT 53.
-    let actual_destination = sockets
+    let destination = sockets
         .iter()
         .filter(|(_, socket)| socket.kind.is_udp())
         // Is the `destination` one of our sockets? If so, then we grab the actual address,
-        // instead of the, possibly fake address from mirrord.
+        // instead of the possibly fake address from mirrord.
         .find_map(|(_, receiver_socket)| match &receiver_socket.state {
-            SocketState::Bound(crate::socket::Bound {
-                requested_address,
-                address,
-            }) => {
+            SocketState::Bound {
+                bound:
+                    Bound {
+                        requested_address,
+                        address,
+                    },
+                ..
+            } => {
                 // Special case for port `0`, see `getsockname`.
                 if requested_address.port() == 0 {
                     (SocketAddr::new(requested_address.ip(), address.port()) == destination)
@@ -474,7 +417,7 @@ pub fn send_dns_patch(
         })
         .ok_or(HookError::ManagedSocketNotFound(destination))?;
 
-    Ok(actual_destination.into())
+    Ok(destination.into())
 }
 
 /// Platform-specific sendto function type definitions
@@ -586,12 +529,13 @@ where
             rawish_true_destination,
         )
     } else {
-        connect_outgoing_udp(
+        connect_outgoing_common(
             sockfd,
             destination.into(),
             user_socket_info,
             NetProtocol::Datagrams,
             proxy_request_fn,
+            nop_connect_fn,
         )?;
 
         let layer_address: SockAddr = SOCKETS
@@ -651,36 +595,4 @@ mod tests {
         assert!(!is_unix_address(&addr));
     }
 
-    #[test]
-    fn test_update_socket_connected_state() {
-        use crate::socket::SocketKind;
-
-        #[cfg(unix)]
-        let (domain, socket_type) = (libc::AF_INET, libc::SOCK_STREAM);
-        #[cfg(windows)]
-        let (domain, socket_type) = (
-            winapi::shared::ws2def::AF_INET,
-            winapi::shared::ws2def::SOCK_STREAM,
-        );
-
-        let mut socket = UserSocket::new(
-            domain,
-            socket_type,
-            0,
-            SocketState::Initialized,
-            SocketKind::Tcp(socket_type),
-        );
-
-        let remote_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        let local_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9090);
-
-        update_socket_connected_state(&mut socket, remote_addr.into(), local_addr.into(), None);
-
-        assert!(socket.is_connected());
-        if let SocketState::Connected(connected) = &socket.state {
-            assert_eq!(connected.layer_address, None);
-        } else {
-            panic!("Socket should be in connected state");
-        }
-    }
 }

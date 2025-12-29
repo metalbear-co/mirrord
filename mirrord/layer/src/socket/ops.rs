@@ -531,6 +531,17 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
     mut user_socket_info: Arc<UserSocket>,
     protocol: NetProtocol,
 ) -> Detour<ConnectResult> {
+
+    let connect_fn = |layer_address: SockAddr| -> ConnectResult {
+        unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
+    } if CALL_CONNECT else { nop_connect_fn };
+    connect_outgoing_common(
+        sockfd, 
+        remote_address, 
+        user_socket_info, 
+        protocol,
+        common::make_proxy_request_with_response.into(),
+        connect_fn)
     // Closure that performs the connection with mirrord messaging.
     let remote_connection = |remote_address: SockAddr| {
         // Prepare this socket to be intercepted.
@@ -540,7 +551,7 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
             remote_address: remote_address.clone(),
             protocol,
         };
-        let response = common::make_proxy_request_with_response(request)??;
+        let response = (request)??;
 
         let OutgoingConnectResponse {
             connection_id,

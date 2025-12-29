@@ -153,38 +153,36 @@ impl ResponseManager {
     }
 }
 
-/// Generic helper to make proxy requests with consistent error handling
-pub fn make_proxy_request_with_response<T>(request: T) -> ProxyResult<T::Response>
+/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
+/// Blocks until the proxy responds.
+pub fn make_proxy_request_with_response<T>(request: T) -> HookResult<T::Response>
 where
     T: IsLayerRequestWithResponse + Debug,
     T::Response: Debug,
 {
-    PROXY_CONNECTION
-        .get()
-        .ok_or_else(|| {
-            ProxyError::IoFailed(std::io::Error::new(
-                std::io::ErrorKind::NotConnected,
-                "Cannot get proxy connection",
-            ))
-        })?
-        .make_request_with_response(request)
+    // SAFETY: mutation happens only on initialization.
+    #[allow(static_mut_refs)]
+    unsafe {
+        PROXY_CONNECTION
+            .get()
+            .ok_or(HookError::CannotGetProxyConnection)?
+            .make_request_with_response(request)
+            .map_err(Into::into)
+    }
 }
 
-/// Generic helper function to proxy a request that might have a large response to mirrord intproxy.
+/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
 /// Blocks until the request is sent.
 pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
     request: T,
 ) -> HookResult<MessageId> {
     // SAFETY: mutation happens only on initialization.
     #[allow(static_mut_refs)]
-    PROXY_CONNECTION
-        .get()
-        .ok_or_else(|| {
-            HookError::ProxyError(ProxyError::IoFailed(std::io::Error::new(
-                std::io::ErrorKind::NotConnected,
-                "Cannot get proxy connection",
-            )))
-        })?
-        .make_request_no_response(request)
-        .map_err(|e| e.into())
+    unsafe {
+        PROXY_CONNECTION
+            .get()
+            .ok_or(HookError::CannotGetProxyConnection)?
+            .make_request_no_response(request)
+            .map_err(Into::into)
+    }
 }
