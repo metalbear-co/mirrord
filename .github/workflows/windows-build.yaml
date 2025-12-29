@@ -3,11 +3,7 @@ name: Windows Build + Choco and WinGet
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        description: "Build & sign (build_sign)"
-        type: choice
-        options: [build_sign]
-        default: build_sign
+
       release_tag:
         description: "Version to use for Chocolatey/WinGet (e.g. 0.0.1-test2). Defaults to MIRRORD_VERSION."
         required: false
@@ -30,10 +26,7 @@ on:
 
   workflow_call:
     inputs:
-      mode:
-        description: "Build & sign (build_sign)"
-        type: string
-        default: build_sign
+
       release_tag:
         description: "Version to use for Chocolatey/WinGet (e.g. 0.0.1-test2). Defaults to MIRRORD_VERSION."
         required: false
@@ -71,7 +64,7 @@ jobs:
       run:
         shell: pwsh
     env:
-      MODE: ${{ inputs.mode || 'build_sign' }}
+
       RELEASE_TAG_INPUT: ${{ inputs.release_tag || '' }}
       SIGN_ARTIFACTS: ${{ inputs.sign_artifacts || 'false' }}
       PUBLISH_CHOCO: ${{ inputs.choco_publish || 'true' }}

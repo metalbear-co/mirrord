@@ -7,10 +7,7 @@ on:
   # This is intended for testing changes to this flow.
   workflow_dispatch:
     inputs:
-      build_windows:
-        description: "Trigger Windows build after release?"
-        type: boolean
-        default: true
+
 
 jobs:
   build_binaries_aarch64-unknown-linux-gnu:
@@ -469,12 +466,12 @@ jobs:
 
   trigger_windows_build:
     needs: update_latest
-    if: ${{ !cancelled() && !failure() && (inputs.build_windows || inputs.build_windows == null) }}
+    if: ${{ !cancelled() && !failure() }}
     permissions:
       contents: write
     uses: ./.github/workflows/windows-build.yaml
     with:
-      mode: build_sign
+
       release_tag: ${{ github.event_name == 'push' && github.ref_name || '' }}
       sign_artifacts: "true"
       choco_publish: ${{ github.event_name == 'push' && 'true' || 'false' }}

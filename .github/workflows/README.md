@@ -1,89 +1,85 @@
 # Workflow Structure & Options
 
-This document outlines the three main ways the Windows build workflow operates in the new structure.
+This document outlines the main workflows in this repository and how they interact to handle CI, Releases, and Windows builds.
 
-## 1. Standard PR / Push Flow
+## 1. CI Flow (`ci.yaml`)
 
 **Trigger**: Push to a branch or Open/Update a Pull Request.
 
-In this mode, the Windows build runs as a **check** to ensure code validity. It **does not** sign artifacts or publish them.
+This workflow is the primary gatekeeper. It runs linting, unit tests, integration tests, and end-to-end tests.
+It is optimized to only run necessary jobs based on changed files.
 
 ```mermaid
 %%{init: {'theme': 'neutral', 'themeVariables': {'lineColor': '#f00'}}}%%
 graph TD
     A["User Pushes Code"] --> B["CI Workflow (ci.yaml)"]
-    B --> C{"Windows Files Changed?"}
-    C -->|Yes| D["Call Reusable<br>Windows Build"]
-    C -->|No| E["Skip Windows Build"]
-    D --> F["Restoring Cache / Building"]
-    F --> G["Run Tests"]
-    G --> H["Upload Artifacts (Unsigned)"]
-    H --> I[End]
+    B --> C["Changed Files Detection"]
+    C --> D{"Rust Files Changed?"}
+    D -->|Yes| E["Run Lints & Tests (Linux/Mac)"]
+    D -->|Yes| F["Call Reusable Windows Build"]
+    C --> G{"Docs/Other Changed?"}
+    G -->|Yes| H["Run Relevant Checks"]
+    E --> I[End]
+    F --> I
+    H --> I
 ```
 
-*   **Inputs**: Uses defaults (`sign_artifacts: false`, `choco_publish: false`).
-*   **Permissions**: Inherits `read` permissions (safe for forks).
+*   **Windows Build in CI**: It runs as a **check** to ensure code validity. It **does not** sign artifacts or publish them. It is triggered if any Rust code or Windows-specific scripts match the change patterns.
 
-## 2. Release Process Flow
+## 2. Release Process Flow (`release.yaml`)
 
-**Trigger**: Pushing a tag (e.g. `v3.12.0`).
+**Trigger**: Pushing a tag (e.g. `1.2.3`).
 
-In this mode, the Windows build is part of the official release pipeline. It **signs** the artifacts and **uploads** them to the GitHub Release.
+This workflow handles the official release process. It builds signed artifacts for all platforms and publishes them.
 
 ```mermaid
-%%{init: {'theme': 'neutral', 'themeVariables': {'lineColor': '#f00'}}}%%
+%%{init: {'theme': 'neutral', 'themeVariables': {'lineColor': '#00f'}}}%%
 graph TD
     A["Push Tag v*"] --> B["Release Workflow (release.yaml)"]
-    B --> C["Build Linux & Mac Artifacts"]
-    B --> D["Call Reusable<br>Windows Build"]
     
-    subgraph "Windows Build (Reusable)"
-        D --> D1["Build Artifacts"]
-        D1 --> D2["Sign Artifacts (Certificate)"]
-        D2 --> D3["Run Tests"]
-        D3 --> D4{"Release Tag Provided?"}
-        D4 -->|Yes| D5["Upload to GitHub Release"]
-        D5 --> D6["Publish Chocolatey<br>/ WinGet"]
+    subgraph "Linux & Mac"
+        B --> C["Build Linux (x64/arm64)"]
+        B --> D["Build macOS (Universal)"]
+        D --> D1["Sign & Notarize (Gon)"]
     end
 
-    C --> E["Create GitHub Release"]
-    D6 --> E
+    subgraph "Windows"
+        B --> E["Call Reusable Windows Build"]
+        E --> E1["Build MSI/EXE/DLL"]
+        E1 --> E2["Sign Artifacts"]
+        E2 --> E3["Upload to Release"]
+        E3 --> E4["Publish Choco & WinGet"]
+    end
+    
+    C --> F["Create GitHub Release"]
+    D1 --> F
+    E4 --> F
+    
+    F --> G["Update Homebrew Formula"]
+    G --> H["Update 'latest' Tag"]
 ```
 
-*   **Inputs**: `sign_artifacts: true`, `choco_publish: true`, `winget_publish: true`.
-*   **Permissions**: Inherits `write` permissions (required for upload).
+### Key Components
 
-## 3. Manual / Standalone Flow
+1.  **Cross-Compilation**: Uses `cross` for Linux ARM64/x64 builds.
+2.  **macOS Signing**: Uses `gon` to sign and notarize macOS binaries.
+3.  **Windows Reusable Workflow**: The `windows-build.yaml` is called with `sign_artifacts: true` and publish flags enabled. It handles its own signing and uploading to the existing GitHub release.
+4.  **Distribution**: Updates Homebrew tap and moves the `latest` tag upon success.
 
-**Trigger**: Manually running the workflow via GitHub Actions UI (`windows-build.yaml` or `release.yaml`).
+## 3. Manual / Test Flow
 
-> [!NOTE]
-> The `reuse` mode (downloading pre-built artifacts from GCS) has been removed. The workflow now always builds from source.
+You can manually trigger workflows for testing purposes.
 
-### Option A: Trigger `windows-build.yaml` directly
-Use this to test the Windows build logic in isolation.
+### testing `windows-build.yaml` in isolation
 
+*   **Trigger**: Manually via GitHub Actions UI.
 *   **Inputs**:
-    *   `release_tag`: If set (e.g., `0.0.1-test`), it will attempt to upload artifacts to a GitHub Release with this tag.
-    *   `sign_artifacts`: Check to enable code signing (requires secrets).
-    *   `choco_publish` / `winget_publish`: Check to test package publishing.
-*   **Permissions**:
-    *   This workflow works best for **compilation and test verification** (inputs left empty).
-    *   **WARNING**: If you want to test **artifacts upload**, you must ensure the repository's "Workflow permissions" settings allow Read and Write, or the upload step will fail (as the local `permissions: write` block has been vetted out for CI compatibility).
+    *   `release_tag`: If set, tries to upload artifacts (requires Write permissions).
+    *   `sign_artifacts`: Enable code signing.
+    *   `choco_publish` / `winget_publish`: Test package publishing.
 
-### Option B: Trigger `release.yaml` (Recommended for Release Testing)
-Use this to test the full release pipeline, including permissions and uploads.
+### Testing `release.yaml`
 
-*   **Trigger**: Select `Release` workflow -> Run workflow.
-*   **Behavior**: It mimics a real tag push but allows you to skip parts or target a test tag. It explicitly grants `write` permissions to the Windows job, ensuring uploads work correctly without changing global repo settings.
-*   **Inputs**:
-    *   `build_windows`: Check to include the Windows build job.
-
-## Testing Guidelines
-
-| Goal | Workflow | Inputs | Notes |
-| :--- | :--- | :--- | :--- |
-| **Verify Compilation** | `windows-build` | All disabled | Fast check, no secrets needed. |
-| **Verify Tests** | `ci.yaml` | (Automatic on PR) | Runs standard test suite. |
-| **Test Release Upload** | `release.yaml` | `build_windows: true` | Safest way to test uploads. Creates draft/pre-release if tag unused. |
-| **Test Windows Specifics** | `windows-build` | `release_tag: test` | **Requires** repo permission "Read and Write" enabled in Settings. |
+*   **Trigger**: Manually via GitHub Actions UI.
+*   **Behavior**: It mimics a release but runs on the current branch.
+*   **Note**: Ensure you understand that it might try to push Docker images or publish packages if not carefully fenced by conditionals (mostly protected by `github.event_name != 'workflow_dispatch'` checks for dangerous steps).
