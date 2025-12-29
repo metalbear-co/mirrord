@@ -103,7 +103,7 @@ layer injected into it. Some test apps need to be compiled before they can be us
 
 The basic command to run the E2E tests is:
 ```bash
-cargo test --package tests
+cargo test --package mirrord-tests
 ```
 
 However, when running on macOS a universal binary has to be created first:
@@ -161,7 +161,7 @@ IPv6 tests (they currently don't run in the CI):
 The Kubernetes resources created by the E2E tests are automatically deleted when the test exits. However, you can preserve resources from failed tests for debugging. To do this, set the `MIRRORD_E2E_PRESERVE_FAILED` variable to any value.
 
 ```bash
-MIRRORD_E2E_PRESERVE_FAILED=y cargo test --package tests
+MIRRORD_E2E_PRESERVE_FAILED=y cargo test --package mirrord-tests
 ```
 
 All test resources share a common label `mirrord-e2e-test-resource=true`. To delete them, simply run:
