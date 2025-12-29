@@ -654,7 +654,6 @@ jobs:
     needs: changed_files
     if: ${{ needs.changed_files.outputs.rs_changed == 'true' }}
     uses: ./.github/workflows/windows-build.yaml
-    with:
 
     secrets: inherit
 
