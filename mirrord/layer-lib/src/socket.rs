@@ -106,8 +106,8 @@ pub enum SocketState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
 pub enum SocketKind {
-    Tcp(i32),
-    Udp(i32),
+    Tcp(c_int),
+    Udp(c_int),
 }
 
 impl SocketKind {

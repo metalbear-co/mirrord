@@ -184,7 +184,7 @@ fn set_last_error(error: i32) {
     ret,
     skip(user_socket_info, proxy_request_fn, connect_fn)
 )]
-pub fn connect_outgoing<P, F>(
+pub fn connect_outgoing<const CALL_CONNECT: bool, P, F>(
     sockfd: SocketDescriptor,
     remote_address: SockAddr,
     user_socket_info: Arc<UserSocket>,
@@ -214,31 +214,34 @@ where
         };
 
         let OutgoingConnectResponse {
+            connection_id,
             mut layer_address,
             in_cluster_address,
-            ..
         } = response;
 
-        if let SocketAddress::Ip(interceptor_address) = &mut layer_address {
+        if let SocketAddress::Ip(interceptor_addr) = &mut layer_address {
             // Our socket can be bound to any local interface,
             // so the interceptor listens on an unspecified IP address, e.g. 0.0.0.0
             // We need to fill the exact IP here.
             match &user_socket_info.state {
-                SocketState::Bound(Bound { address, .. }) => {
-                    if interceptor_address.ip().is_unspecified() {
-                        if interceptor_address.is_ipv4() {
-                            interceptor_address.set_ip(Ipv4Addr::LOCALHOST.into())
+                SocketState::Bound {
+                    bound: Bound { address, .. },
+                    ..
+                } => {
+                    if interceptor_addr.ip().is_unspecified() {
+                        if interceptor_addr.is_ipv4() {
+                            interceptor_addr.set_ip(Ipv4Addr::LOCALHOST.into())
                         } else {
-                            interceptor_address.set_ip(Ipv6Addr::LOCALHOST.into())
+                            interceptor_addr.set_ip(Ipv6Addr::LOCALHOST.into())
                         }
                     } else {
-                        interceptor_address.set_ip(address.ip());
+                        interceptor_addr.set_ip(address.ip());
                     }
                 }
-                _ if interceptor_address.is_ipv4() => {
-                    interceptor_address.set_ip(Ipv4Addr::LOCALHOST.into())
+                _ if interceptor_addr.is_ipv4() => {
+                    interceptor_addr.set_ip(Ipv4Addr::LOCALHOST.into())
                 }
-                _ => interceptor_address.set_ip(Ipv6Addr::LOCALHOST.into()),
+                _ => interceptor_addr.set_ip(Ipv6Addr::LOCALHOST.into()),
             }
         }
 
