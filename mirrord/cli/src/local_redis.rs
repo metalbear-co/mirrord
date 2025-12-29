@@ -5,8 +5,11 @@
 
 use std::process::{Child, Command, Stdio};
 
-use mirrord_config::feature::database_branches::{
-    RedisConnectionConfig, RedisLocalConfig, RedisRuntime, RedisValueSource,
+use mirrord_config::{
+    container::ContainerRuntime,
+    feature::database_branches::{
+        RedisConnectionConfig, RedisLocalConfig, RedisRuntime, RedisValueSource,
+    },
 };
 use mirrord_progress::Progress;
 use tokio_retry::{Retry, strategy::ExponentialBackoff};
@@ -15,8 +18,11 @@ use crate::{CliError, CliResult};
 
 /// Represents a local Redis instance managed by mirrord.
 pub enum LocalRedis {
-    /// Docker container (container name).
-    Docker(String),
+    /// Container (runtime command, container name).
+    Container {
+        runtime: String,
+        container_name: String,
+    },
     /// Native redis-server process (child process handle).
     Process(Child),
 }
@@ -24,8 +30,13 @@ pub enum LocalRedis {
 impl Drop for LocalRedis {
     fn drop(&mut self) {
         match self {
-            LocalRedis::Docker(name) => {
-                let _ = Command::new("docker").args(["rm", "-f", name]).output();
+            LocalRedis::Container {
+                runtime,
+                container_name,
+            } => {
+                let _ = Command::new(runtime)
+                    .args(["rm", "-f", container_name])
+                    .output();
             }
             LocalRedis::Process(child) => {
                 let _ = child.kill();
@@ -101,33 +112,43 @@ pub async fn start<P: Progress>(
     local_config: &RedisLocalConfig,
 ) -> CliResult<LocalRedis> {
     match local_config.runtime {
-        RedisRuntime::Docker => start_docker(progress, local_config).await,
+        RedisRuntime::Container => {
+            start_container(progress, local_config, local_config.container_runtime).await
+        }
         RedisRuntime::RedisServer => start_server(progress, local_config).await,
-        RedisRuntime::Auto => start_docker(progress, local_config)
-            .await
-            .or_else(|_| futures::executor::block_on(start_server(progress, local_config))),
+        RedisRuntime::Auto => {
+            // Try configured container runtime first, then fall back to redis-server
+            start_container(progress, local_config, local_config.container_runtime)
+                .await
+                .or_else(|_| futures::executor::block_on(start_server(progress, local_config)))
+        }
     }
 }
 
-/// Start Redis using Docker container.
-async fn start_docker<P: Progress>(
+/// Start Redis using a container runtime (Docker, Podman, or nerdctl).
+async fn start_container<P: Progress>(
     progress: &P,
     config: &RedisLocalConfig,
+    container_runtime: ContainerRuntime,
 ) -> CliResult<LocalRedis> {
+    let runtime_name = container_runtime.command();
     let mut sub = progress.subtask("starting local Redis");
-    sub.print("starting Redis Docker container...");
+    sub.print(&format!("starting Redis {} container...", runtime_name));
+
+    // Use custom command path if provided, otherwise use runtime name from PATH
+    let runtime_cmd = config.container_command.as_deref().unwrap_or(runtime_name);
 
     let port = config.port;
     let container_name = format!("mirrord-redis-{port}");
     let image = format!("redis:{}", config.version);
 
     // Remove any existing container with same name
-    let _ = Command::new("docker")
+    let _ = Command::new(runtime_cmd)
         .args(["rm", "-f", &container_name])
         .output();
 
-    // Build docker run command
-    let mut docker_args = vec![
+    // Build container run command
+    let mut container_args = vec![
         "run".to_string(),
         "-d".to_string(),
         "--name".to_string(),
@@ -138,17 +159,17 @@ async fn start_docker<P: Progress>(
     ];
 
     // Add any custom Redis args (passed as CMD to the container)
-    docker_args.extend(config.options.args.iter().cloned());
+    container_args.extend(config.options.args.iter().cloned());
 
-    let output = Command::new("docker")
-        .args(&docker_args)
+    let output = Command::new(runtime_cmd)
+        .args(&container_args)
         .output()
-        .map_err(|e| CliError::LocalRedisError(format!("docker failed: {e}")))?;
+        .map_err(|e| CliError::LocalRedisError(format!("{runtime_name} failed: {e}")))?;
 
     if !output.status.success() {
-        sub.failure(Some("failed to start Redis (Docker)"));
+        sub.failure(Some(&format!("failed to start Redis ({runtime_name})")));
         return Err(CliError::LocalRedisError(format!(
-            "docker run failed: {}",
+            "{runtime_name} run failed: {}",
             String::from_utf8_lossy(&output.stderr)
         )));
     }
@@ -164,8 +185,11 @@ async fn start_docker<P: Progress>(
     .await;
 
     if ready.is_ok() {
-        sub.success(Some(&format!("Redis (Docker) on localhost:{port}")));
-        Ok(LocalRedis::Docker(container_name))
+        sub.success(Some(&format!("Redis ({runtime_name}) on localhost:{port}")));
+        Ok(LocalRedis::Container {
+            runtime: runtime_cmd.to_string(),
+            container_name,
+        })
     } else {
         sub.failure(Some("Redis container not responding"));
         Err(CliError::LocalRedisError(
@@ -184,16 +208,19 @@ async fn start_server<P: Progress>(
 
     let port = config.port;
 
+    // Use custom server path if provided, otherwise use "redis-server" from PATH
+    let server_cmd = config.server_command.as_deref().unwrap_or("redis-server");
+
     // Build redis-server command with port and any custom args
     let mut redis_args = vec!["--port".to_string(), port.to_string()];
     redis_args.extend(config.options.args.iter().cloned());
 
-    let child = Command::new("redis-server")
+    let child = Command::new(server_cmd)
         .args(&redis_args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|e| CliError::LocalRedisError(format!("redis-server failed: {e}")))?;
+        .map_err(|e| CliError::LocalRedisError(format!("{server_cmd} failed: {e}")))?;
 
     // Wait for Redis to be ready with exponential backoff
     let retry_strategy = ExponentialBackoff::from_millis(100)

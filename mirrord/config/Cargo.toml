@@ -21,6 +21,7 @@ mirrord-config-derive = { path = "./derive" }
 mirrord-analytics = { path = "../analytics" }
 mirrord-protocol = { path = "../protocol" }
 
+clap = { workspace = true, features = ["derive"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

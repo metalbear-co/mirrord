@@ -4675,6 +4675,7 @@ dependencies = [
  "base64 0.22.1",
  "bimap",
  "bitflags 2.10.0",
+ "clap",
  "fancy-regex",
  "ipnet",
  "k8s-openapi",
