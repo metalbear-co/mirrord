@@ -789,6 +789,8 @@ async fn exec(
     );
     (&config).collect_analytics(analytics.get_mut());
 
+    analytics.get_mut().add("is_ci", ci_info::is_ci());
+
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
         progress.warning(&warning);
@@ -921,11 +923,10 @@ async fn port_forward(
                 CliError::PortForwardingSetupError,
             ),
             AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
+            AgentConnectionError::ProtocolError(protocol_error) => protocol_error.into(),
         })?;
-    let connection_2 = connection::AgentConnection {
-        sender: agent_conn.agent_tx,
-        receiver: agent_conn.agent_rx,
-    };
+
+    let connection_2 = agent_conn.connection;
 
     progress.success(Some("Ready!"));
     let _ = tokio::try_join!(
@@ -1118,10 +1119,9 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
 
             let sent = client
                 .get(format!(
-                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={version}&platform={platform}&ci={is_ci}",
+                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={version}&platform={platform}",
                     version = CURRENT_VERSION,
                     platform = std::env::consts::OS,
-                    is_ci = ci_info::is_ci(),
                 ))
                 .timeout(Duration::from_secs(1))
                 .send().await?;

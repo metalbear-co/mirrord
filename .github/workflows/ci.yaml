@@ -467,6 +467,8 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
       - name: mirrord cli UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord --features "wizard"
+      - name: mirrord protocol-io UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}

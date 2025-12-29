@@ -2,10 +2,11 @@ use std::{fmt, ops::Not, time::Duration};
 
 use base64::{Engine, engine::general_purpose};
 use chrono::{DateTime, Utc};
-use conn_wrapper::ConnectionWrapper;
 use connect_params::ConnectParams;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
+use futures::{SinkExt, StreamExt, future::Either};
 use http::{HeaderName, HeaderValue, request::Request};
+use k8s_openapi::api::apps::v1::Deployment;
 use kube::{
     Api, Client, Config, Resource,
     api::{ListParams, PostParams},
@@ -21,16 +22,23 @@ use mirrord_config::{
     LayerConfig, feature::database_branches::default_creation_timeout_secs, target::Target,
 };
 use mirrord_kube::{
-    api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
+    api::{
+        kubernetes::{
+            create_kube_config,
+            rollout::{Rollout, RolloutSpec, workload_ref::WorkloadRef},
+        },
+        runtime::RuntimeDataProvider,
+    },
     error::KubeApiError,
-    resolved::ResolvedTarget,
+    resolved::{ResolvedResource, ResolvedTarget},
     retry::RetryKube,
 };
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_protocol_io::{Client as ProtocolClient, Connection};
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio_tungstenite::tungstenite;
 use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
@@ -53,7 +61,6 @@ use crate::{
     },
 };
 
-mod conn_wrapper;
 mod connect_params;
 mod credentials;
 mod database_branches;
@@ -130,7 +137,7 @@ pub struct OperatorSession {
     /// Version of the operator, right now only for [`fmt::Debug`] implementation.
     operator_version: Version,
     /// Version of [`mirrord_protocol`] used by the operator.
-    /// Used to create [`ConnectionWrapper`].
+    /// Used to create [`Connection`].
     pub operator_protocol_version: Option<Version>,
     /// Allow the layer to attempt reconnection
     pub allow_reconnect: bool,
@@ -155,25 +162,15 @@ impl fmt::Debug for OperatorSession {
 
 /// Connection to an operator target.
 pub struct OperatorSessionConnection {
-    /// Session of this connection.
     pub session: Box<OperatorSession>,
-    /// Used to send [`ClientMessage`]s to the operator.
-    pub tx: Sender<ClientMessage>,
-    /// Used to receive [`DaemonMessage`]s from the operator.
-    pub rx: Receiver<DaemonMessage>,
+    pub conn: Connection<ProtocolClient>,
 }
 
 impl fmt::Debug for OperatorSessionConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let tx_queued_messages = self.tx.max_capacity() - self.tx.capacity();
-        let rx_queued_messages = self.rx.len();
-
         f.debug_struct("OperatorSessionConnection")
             .field("session", &self.session)
-            .field("tx_closed", &self.tx.is_closed())
-            .field("tx_queued_messages", &tx_queued_messages)
-            .field("rx_closed", &self.rx.is_closed())
-            .field("rx_queued_messages", &rx_queued_messages)
+            .field("closed", &self.conn.is_closed())
             .finish()
     }
 }
@@ -699,38 +696,15 @@ impl OperatorApi<PreparedClientCert> {
         P: Progress,
     {
         self.check_feature_support(layer_config)?;
+        let (do_copy_target, reason) = self
+            .should_copy_target(layer_config, &target, progress)
+            .await?;
 
         let use_proxy_api = self
             .operator
             .spec
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
-
-        let (do_copy_target, reason) = if layer_config.feature.copy_target.enabled {
-            (true, None)
-        } else if target.empty_deployment() {
-            (true, Some("empty deployment"))
-        } else if layer_config.feature.split_queues.sqs().next().is_some()
-            && self
-                .operator
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
-                .not()
-        {
-            (true, Some("SQS splitting"))
-        } else if layer_config.feature.split_queues.kafka().next().is_some()
-            && self
-                .operator()
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
-                .not()
-        {
-            (true, Some("Kafka splitting"))
-        } else {
-            (false, None)
-        };
 
         let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
             Some(
@@ -740,12 +714,12 @@ impl OperatorApi<PreparedClientCert> {
         } else {
             None
         };
-
         let pg_branch_names = if layer_config.feature.db_branches.is_empty().not() {
             Some(self.prepare_pg_branch_dbs(layer_config, progress).await?)
         } else {
             None
         };
+
         let (session, reused_copy) = if do_copy_target {
             let mut copy_subtask = progress.subtask("preparing target copy");
             if let Some(reason) = reason {
@@ -849,10 +823,10 @@ impl OperatorApi<PreparedClientCert> {
         };
 
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let (tx, rx, session) = match Self::connect_target(&self.client, &session).await {
-            Ok((tx, rx)) => {
+        let (conn, session) = match Self::connect_target(&self.client, &session).await {
+            Ok(conn) => {
                 connection_subtask.success(Some("connected to the target"));
-                (tx, rx, session)
+                (conn, session)
             }
             Err(OperatorApiError::KubeError {
                 error: kube::Error::Api(response),
@@ -877,18 +851,149 @@ impl OperatorApi<PreparedClientCert> {
                 let session = self.make_operator_session(session_id, connect_url)?;
 
                 let mut connection_subtask = progress.subtask("connecting to the target");
-                let (tx, rx) = Self::connect_target(&self.client, &session).await?;
+                let conn = Self::connect_target(&self.client, &session).await?;
                 connection_subtask.success(Some("connected to the target"));
-                (tx, rx, session)
+                (conn, session)
             }
             Err(error) => return Err(error),
         };
 
         Ok(OperatorSessionConnection {
             session: Box::new(session),
-            tx,
-            rx,
+            conn,
         })
+    }
+
+    /// Returns whether the `copy_target` feature should be used,
+    /// with an optional reason (in case the feature is not explicitly enabled in the
+    /// [`LayerConfig`]).
+    async fn should_copy_target<P: Progress>(
+        &self,
+        config: &LayerConfig,
+        target: &ResolvedTarget<false>,
+        progress: &P,
+    ) -> OperatorApiResult<(bool, Option<&'static str>)> {
+        if config.feature.copy_target.enabled {
+            // Explicitly enabled.
+            return Ok((true, None));
+        }
+
+        if config.feature.split_queues.sqs().next().is_some()
+            && self
+                .operator
+                .spec
+                .supported_features()
+                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
+                .not()
+        {
+            // Operator does not support SQS splitting without copying the target.
+            return Ok((true, Some("SQS splitting")));
+        }
+
+        if config.feature.split_queues.kafka().next().is_some()
+            && self
+                .operator()
+                .spec
+                .supported_features()
+                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
+                .not()
+        {
+            // Operator does not support Kafka splitting without copying the target.
+            return Ok((true, Some("Kafka splitting")));
+        }
+
+        let ResolvedTarget::Deployment(ResolvedResource { resource, .. }) = target else {
+            // We do replicas checks only for deployments.
+            return Ok((false, None));
+        };
+
+        let available_replicas = resource
+            .status
+            .as_ref()
+            .and_then(|status| status.available_replicas)
+            .unwrap_or_default();
+        if available_replicas > 0 {
+            // Has available replicas, all good.
+            return Ok((false, None));
+        }
+
+        let replicas = resource
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.replicas)
+            .unwrap_or(1);
+        if replicas > 0 {
+            // Is configured to have replicas.
+            // We assume that the deployment is in bad state only temporarily,
+            // and enable copy_target to improve UX.
+            return Ok((true, Some("empty deployment")));
+        }
+
+        let deploy_name = resource
+            .metadata
+            .name
+            .as_deref()
+            .ok_or_else(|| KubeApiError::missing_field(resource.as_ref(), ".metadata.name"))?;
+        let deploy_namespace =
+            resource.metadata.namespace.as_deref().ok_or_else(|| {
+                KubeApiError::missing_field(resource.as_ref(), ".metadata.namespace")
+            })?;
+        let api = Api::<Rollout>::namespaced(self.client.clone(), deploy_namespace);
+        match api.get(deploy_name).await {
+            // There is a rollout managing the target deployment via workload ref.
+            // The user should target the rollout instead.
+            Ok(Rollout {
+                spec:
+                    Some(RolloutSpec {
+                        workload_ref:
+                            Some(WorkloadRef {
+                                api_version,
+                                kind,
+                                name,
+                            }),
+                        ..
+                    }),
+                ..
+            }) if api_version == Deployment::api_version(&())
+                && kind == Deployment::kind(&())
+                && name == deploy_name =>
+            {
+                return Err(OperatorApiError::KubeApi(KubeApiError::invalid_state(
+                    resource.as_ref(),
+                    "deployment is an empty workload managed by a rollout with the same name, \
+                    please target the rollout instead",
+                )));
+            }
+            // There is a rollout with the same name, but it does not manage the target deployment.
+            // This is weird, logging it on debug.
+            Ok(rollout) => {
+                tracing::debug!(
+                    deployment = ?resource,
+                    rollout = ?rollout,
+                    "Target deployment is empty, and a rollout with the same name was found in the target namespace. \
+                    However, the rollout does not manage the deployment. \
+                    Copying the target for this session.",
+                );
+            }
+            // The rollout does not exist.
+            // It might be that rollouts are not even installed in the cluster.
+            // Depeneding on how hardened the cluster is, we might get one of these error codes.
+            Err(kube::Error::Api(response)) if [404, 403, 401].contains(&response.code) => {}
+            Err(error) => {
+                tracing::warn!(
+                    deployment = ?resource,
+                    %error,
+                    "Failed to check if the targeted empty deployment is managed by a rollout. \
+                    Copying the target for this session.",
+                );
+                progress.warning(&format!(
+                    "The target deployment is empty, and mirrord failed to check if it is managed by a rollout. \
+                    This session will use the copy_target feature. Error: {error}",
+                ));
+            }
+        }
+
+        Ok((true, Some("empty deployment")))
     }
 
     /// Creates a new [`OperatorSession`] with the given `id` and `connect_url`.
@@ -1259,9 +1364,9 @@ impl OperatorApi<PreparedClientCert> {
             )?))
             .build();
 
-        let (tx, rx) = Self::connect_target(&client, &session).await?;
+        let conn = Self::connect_target(&client, &session).await?;
 
-        Ok(OperatorSessionConnection { tx, rx, session })
+        Ok(OperatorSessionConnection { conn, session })
     }
 
     /// Creates websocket connection to the operator target.
@@ -1269,7 +1374,7 @@ impl OperatorApi<PreparedClientCert> {
     async fn connect_target(
         client: &Client,
         session: &OperatorSession,
-    ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
+    ) -> OperatorApiResult<Connection<ProtocolClient>> {
         let request_builder = Request::builder()
             .uri(&session.connect_url)
             .header(SESSION_ID_HEADER, session.id.to_string());
@@ -1278,17 +1383,52 @@ impl OperatorApi<PreparedClientCert> {
             .body(vec![])
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
 
-        let connection = upgrade::connect_ws(client, request)
+        #[derive(thiserror::Error, Debug)]
+        enum OperatorClientError {
+            #[error(transparent)]
+            DecodeError(#[from] bincode::error::DecodeError),
+            #[error(transparent)]
+            WsError(#[from] tungstenite::Error),
+            #[error("invalid message: {0:?}")]
+            InvalidMessage(tungstenite::Message),
+        }
+
+        let ws = upgrade::connect_ws(client, request)
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
-            })?;
+            })?
+            .with(|e: Vec<u8>| async {
+                Ok::<_, OperatorClientError>(tungstenite::Message::Binary(e))
+            })
+            .map(|i| match i.map_err(OperatorClientError::from)? {
+                tungstenite::Message::Binary(pl) => Ok(pl),
+                other => Err(OperatorClientError::InvalidMessage(other)),
+            });
 
-        Ok(ConnectionWrapper::wrap(
-            connection,
-            session.operator_protocol_version.clone(),
-        ))
+        let operator_protocol_version = session.operator_protocol_version.clone();
+
+        let conn = Connection::<ProtocolClient>::from_channel(
+            ws,
+            // Mock protocol version negotiation if the operator does not support it.
+            Some(move |msg| match msg {
+                ClientMessage::SwitchProtocolVersion(version) => match &operator_protocol_version {
+                    Some(operator_protocol_version) => {
+                        Either::Left(ClientMessage::SwitchProtocolVersion(
+                            operator_protocol_version.min(&version).clone(),
+                        ))
+                    }
+                    _ => Either::Right(DaemonMessage::SwitchProtocolVersionResponse(
+                        semver::Version::new(1, 2, 1),
+                    )),
+                },
+                other => Either::Left(other),
+            }),
+        )
+        .await?;
+
+        Ok(conn)
     }
 
     /// Prepare branch databases, and return database resource names.

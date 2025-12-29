@@ -328,6 +328,14 @@
             "null"
           ]
         },
+        "clean_iptables_on_start": {
+          "title": "agent.clean_iptables_on_start {#agent-clean_iptables_on_start}",
+          "description": "Clean leftover iptables rules and start the new agent instead of erroring out when there are existing mirrord rules in the target's iptables.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "communication_timeout": {
           "title": "agent.communication_timeout {#agent-communication_timeout}",
           "description": "Controls how long the agent lives when there are no connections.\n\nEach connection has its own heartbeat mechanism, so even if the local application has no messages, the agent stays alive until there are no more heartbeat messages.",
@@ -646,6 +654,9 @@
           "type": "string"
         }
       }
+    },
+    "AppleVariablesConfig": {
+      "type": "object"
     },
     "BodyFilter": {
       "oneOf": [
@@ -1034,7 +1045,7 @@
       ]
     },
     "DbBranchingConnectionSourceKind": {
-      "description": "Different ways to source the connection options.",
+      "description": "Different ways to source the connection options.\n\nSupport: - `env` in the target's pod spec. - `envFrom` in the target's pod spec.",
       "oneOf": [
         {
           "type": "object",
@@ -1053,6 +1064,30 @@
               "type": "string",
               "enum": [
                 "env"
+              ]
+            },
+            "variable": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "variable"
+          ],
+          "properties": {
+            "container": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "env_from"
               ]
             },
             "variable": {
@@ -1222,6 +1257,18 @@
       "description": "mirrord Experimental features. This shouldn't be used unless someone from MetalBear/mirrord tells you to.",
       "type": "object",
       "properties": {
+        "applev": {
+          "title": "_experimental_ applev {#experimental-applev}",
+          "description": "Configuraiton for inspecting and modifying apple variables. macOS only.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AppleVariablesConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "browser_extension_config": {
           "title": "_experimental_ browser_extension_config {#experimental-browser_extension_config}",
           "description": "mirrord will open a URL for initiating mirrord browser extension to automatically inject HTTP header that matches the HTTP filter configured in `feature.network.incoming.http_filter.header_filter`.",
