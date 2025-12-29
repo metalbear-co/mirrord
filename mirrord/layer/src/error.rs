@@ -1,4 +1,4 @@
-use std::{env::VarError, net::SocketAddr, path::Path, ptr, str::ParseBoolError};
+use std::{env::VarError, net::SocketAddr, ptr, str::ParseBoolError};
 
 use ignore_codes::*;
 use libc::{DIR, FILE, c_char, hostent};

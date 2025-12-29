@@ -12,7 +12,6 @@ use std::{
     env::VarError,
     io,
     net::{AddrParseError, SocketAddr},
-    path::Path,
     str::ParseBoolError,
     sync::{MutexGuard, PoisonError},
 };
