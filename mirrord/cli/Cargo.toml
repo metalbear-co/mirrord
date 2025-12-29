@@ -30,7 +30,8 @@ mirrord-analytics = { path = "../analytics" }
 mirrord-intproxy = { path = "../intproxy" }
 mirrord-vpn = { path = "../vpn" }
 mirrord-tls-util = { path = "../tls-util" }
-mirrord-auth = { path = "../auth" }
+mirrord-protocol-io = { path = "../protocol-io" }
+mirrord-auth= { path = "../auth" }
 
 actix-codec.workspace = true
 clap.workspace = true
