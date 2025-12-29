@@ -57,7 +57,7 @@ impl PathExt for Path {
     fn ensure_not_relative_or_not_found(&self) -> Detour<()> {
         if self.is_relative() {
             if crate::setup().file_filter().check_not_found(self) {
-                Detour::Error(HookError::FileNotFound)
+                Detour::Error(HookError::FileNotFound(self.to_string_lossy().to_string()))
             } else {
                 Detour::Bypass(Bypass::relative_path(self.to_str().unwrap_or_default()))
             }
@@ -76,7 +76,7 @@ pub fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Deto
     match file_filter.mode {
         FsModeConfig::Local => Detour::Bypass(Bypass::ignored_file(text)),
         _ if file_filter.not_found.is_match(text) => {
-            Detour::Error(HookError::FileNotFound(path.clone()))
+            Detour::Error(HookError::FileNotFound(text.to_string()))
         }
         _ if file_filter.read_write.is_match(text) => Detour::Success(()),
         _ if file_filter.read_only.is_match(text) => {
@@ -87,7 +87,9 @@ pub fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Deto
             }
         }
         _ if file_filter.local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
-        _ if file_filter.default_not_found.is_match(text) => Detour::Error(HookError::FileNotFound),
+        _ if file_filter.default_not_found.is_match(text) => {
+            Detour::Error(HookError::FileNotFound(text.to_string()))
+        }
         _ if file_filter.default_remote_ro.is_match(text) && !write => Detour::Success(()),
         _ if file_filter.default_local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
         FsModeConfig::LocalWithOverrides => Detour::Bypass(Bypass::ignored_file(text)),

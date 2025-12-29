@@ -96,7 +96,7 @@ pub(crate) enum HookError {
     /// When the user's application tries to access a file filtered out by the `not-found` file
     /// filter.
     #[error("mirrord-layer: Ignored file `{0}`")]
-    FileNotFound(Path),
+    FileNotFound(String),
 
     #[error("mirrord-layer: Proxy connection failed: `{0}`")]
     ProxyError(#[from] ProxyError),
@@ -217,7 +217,7 @@ impl From<HookError> for i64 {
                 info!("libc error (doesn't indicate a problem) >> {fail:#?}")
             }
             HookError::FileNotFound(ref path) => {
-                info!("mirrord file not found triggered: {path:?}")
+                info!("mirrord file not found triggered: {path}")
             }
             HookError::SocketUnsuportedIpv6 => {
                 info!("{fail}")
@@ -304,7 +304,7 @@ impl From<HookError> for i64 {
             HookError::UnsupportedSocketType => libc::EAFNOSUPPORT,
             HookError::BadPointer => libc::EFAULT,
             HookError::AddressAlreadyBound(_) => libc::EADDRINUSE,
-            HookError::FileNotFound => libc::ENOENT,
+            HookError::FileNotFound(_) => libc::ENOENT,
             #[cfg(target_os = "linux")]
             HookError::BadDescriptor => libc::EBADF,
             #[cfg(target_os = "linux")]
