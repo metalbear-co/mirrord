@@ -1,8 +1,9 @@
-use std::fmt;
+use std::{convert::Infallible, fmt};
 
 use kube::Resource;
 use mirrord_config::target::TargetType;
 use thiserror::Error;
+use tower::retry::backoff::InvalidBackoff;
 
 pub type Result<T, E = KubeApiError> = std::result::Result<T, E>;
 
@@ -47,9 +48,6 @@ pub enum KubeApiError {
     #[error("Resource fetched from Kube API is invalid: {0}")]
     InvalidResourceState(String),
 
-    #[error("Agent Job was created, but Pod is not running")]
-    AgentPodNotRunning,
-
     /// Attempted to create an `OperatorTarget` from a resource that cannot be an immediate target.
     ///
     /// Create this variant with the [`KubeApiError::requires_copy`] method.
@@ -75,6 +73,17 @@ pub enum KubeApiError {
     /// listing that type has not been implemented.
     #[error("Targets of type `{0}` cannot be listed. This is a bug.")]
     InvalidTargetTypeBug(TargetType),
+
+    #[error(transparent)]
+    InvalidBackoff(#[from] InvalidBackoff),
+
+    /// Generic failure of the agent pod startup routine.
+    #[error("Failed to wait for the agent pod to start: {0}")]
+    AgentPodStartError(String),
+
+    /// Spawned agent pod was deleted during startup.
+    #[error("Agent pod was unexpectedly deleted")]
+    AgentPodDeleted,
 }
 
 impl KubeApiError {
@@ -143,5 +152,11 @@ impl KubeApiError {
 
     pub fn requires_copy<R: Resource<DynamicType = ()>>() -> Self {
         Self::RequiresCopy(R::plural(&()).into_owned())
+    }
+}
+
+impl From<Infallible> for KubeApiError {
+    fn from(_: Infallible) -> Self {
+        unreachable!()
     }
 }

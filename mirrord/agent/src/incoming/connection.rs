@@ -26,6 +26,7 @@ use crate::{
     metrics::{MetricGuard, REDIRECTED_CONNECTIONS},
 };
 
+mod body_utils;
 mod copy_bidirectional;
 pub mod http;
 mod http_task;
@@ -139,7 +140,7 @@ where
     }
 }
 
-/// A redirected connection that passed the HTTP detection.
+/// A redirected connection that went through HTTP detection.
 ///
 /// # Metrics
 ///
@@ -158,7 +159,7 @@ impl MaybeHttp {
     /// Timeout for detemining if the redirected connection is HTTP.
     pub const HTTP_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
-    /// Accepts the TLS connection (optionally) and detects if the redirected connection is
+    /// Accepts the (possibly TLS) connection and detects if the redirected connection is
     /// HTTP.
     pub async fn detect(
         redirected: Redirected,

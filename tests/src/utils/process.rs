@@ -1,7 +1,9 @@
 use core::ops::Not;
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::process::ExitStatusExt;
 use std::{
     collections::HashMap,
-    os::unix::process::ExitStatusExt,
+    io::Write,
     process::{ExitStatus, Stdio},
     sync::Arc,
     time::Duration,
@@ -75,21 +77,37 @@ impl TestProcess {
 
     pub async fn wait_assert_success(&mut self) {
         let output = self.wait().await;
+        #[cfg(not(target_os = "windows"))]
         assert!(
             output.success(),
             "application unexpectedly failed: exit code {:?}, signal code {:?}",
             output.code(),
             output.signal(),
         );
+
+        #[cfg(target_os = "windows")]
+        assert!(
+            output.success(),
+            "application unexpectedly failed: exit code {:?}",
+            output.code(),
+        );
     }
 
     pub async fn wait_assert_fail(&mut self) {
         let output = self.wait().await;
+        #[cfg(not(target_os = "windows"))]
         assert!(
             output.success().not(),
             "application unexpectedly succeeded: exit code {:?}, signal code {:?}",
             output.code(),
             output.signal()
+        );
+
+        #[cfg(target_os = "windows")]
+        assert!(
+            output.success().not(),
+            "application unexpectedly succeeded: exit code {:?}",
+            output.code(),
         );
     }
 
@@ -164,8 +182,9 @@ impl TestProcess {
     pub async fn wait_for_line(&self, timeout: Duration, line: &str) {
         let now = std::time::Instant::now();
         while now.elapsed() < timeout {
-            let stderr = self.get_stderr().await;
-            if stderr.contains(line) {
+            let output = self.get_stderr().await;
+
+            if output.contains(line) {
                 return;
             }
             // avoid busyloop
@@ -288,7 +307,8 @@ impl TestProcess {
                 }
 
                 let string = String::from_utf8_lossy(&buf[..n]);
-                eprintln!("stderr {} {pid}: {}", format_time(), string);
+                eprint!("stderr {} {pid}: {}", format_time(), string);
+                let _ = Write::flush(&mut std::io::stderr());
                 {
                     stderr_data_reader.write().await.push_str(&string);
                 }
@@ -304,6 +324,7 @@ impl TestProcess {
                 }
                 let string = String::from_utf8_lossy(&buf[..n]);
                 print!("stdout {} {pid}: {}", format_time(), string);
+                let _ = Write::flush(&mut std::io::stdout());
                 {
                     stdout_data_reader.write().await.push_str(&string);
                 }
@@ -341,5 +362,21 @@ impl TestProcess {
             .unwrap();
         println!("Started application.");
         TestProcess::from_child(child, None)
+    }
+}
+
+/// Ensures that the child process is killed when the `TestProcess` is dropped.
+/// This is especially important on Windows, where processes may not be terminated
+/// automatically when the parent process exits.
+#[cfg(target_os = "windows")]
+impl Drop for TestProcess {
+    fn drop(&mut self) {
+        // Ensure clean process termination, especially on Windows
+        if let Some(pid) = self.child.id() {
+            // Use Windows taskkill for more aggressive cleanup of process tree
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .output();
+        }
     }
 }

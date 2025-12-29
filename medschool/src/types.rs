@@ -25,8 +25,11 @@ pub struct PartialType<'a> {
     /// as they come.
     pub docs: Vec<String>,
 
-    /// Only useful when [`syn::ItemStruct`], we don't look into variants of enums.
+    /// Fields of [`syn::ItemStruct`].
     pub fields: BTreeSet<PartialField<'a>>,
+
+    /// Variants of [`syn::ItemEnum`].
+    pub variants: BTreeSet<PartialVariant<'a>>,
 }
 
 /// The fields when the item we're looking is [`syn::ItemStruct`].
@@ -36,7 +39,7 @@ pub struct PartialType<'a> {
 #[derive(Debug, Clone)]
 pub struct PartialField<'a> {
     /// The name of the field, e.g. `{foo}: String`.
-    pub ident: Cow<'a, str>,
+    pub ident: Option<Cow<'a, str>>,
 
     /// The type of the field, e.g. `foo: {String}`.
     ///
@@ -52,6 +55,19 @@ pub struct PartialField<'a> {
     ///
     /// These docs will be merged with the type docs of this field's type, if it is a sub-type of
     /// any type that we declared.
+    pub docs: Vec<String>,
+}
+
+/// The variatns when the item we'are looking is [`syn::ItemEnum`].
+#[derive(Debug, Clone)]
+pub struct PartialVariant<'a> {
+    /// The name of the variant.
+    pub ident: Cow<'a, str>,
+
+    /// Fields of the variant.
+    pub fields: BTreeSet<PartialField<'a>>,
+
+    /// The docs on the variant.
     pub docs: Vec<String>,
 }
 
@@ -75,11 +91,29 @@ impl TryFrom<syn::Field> for PartialField<'_> {
         }
         .ok_or(())?;
 
-        let ident = field.ident.as_ref().ok_or(())?.to_string();
+        let ident = field.ident.as_ref().map(|i| i.to_string().into());
         Ok(Self {
-            ident: ident.into(),
+            ident,
             ty: type_ident.to_string().into(),
-            docs: docs_from_attributes(field.attrs).ok_or(())?,
+            docs: docs_from_attributes(field.attrs).unwrap_or_default(),
+        })
+    }
+}
+
+impl TryFrom<syn::Variant> for PartialVariant<'_> {
+    type Error = ();
+
+    fn try_from(variant: syn::Variant) -> Result<Self, Self::Error> {
+        let ident = variant.ident.to_string().into();
+        let fields = variant
+            .fields
+            .into_iter()
+            .filter_map(|field| PartialField::try_from(field).ok())
+            .collect();
+        Ok(PartialVariant {
+            ident,
+            fields,
+            docs: docs_from_attributes(variant.attrs).unwrap_or_default(),
         })
     }
 }
@@ -93,6 +127,11 @@ impl PartialType<'_> {
                 self.fields
                     .into_iter()
                     .flat_map(|field| field.docs.into_iter()),
+            )
+            .chain(
+                self.variants
+                    .into_iter()
+                    .flat_map(|variant| variant.docs.into_iter()),
             )
             .collect()
     }
@@ -118,12 +157,33 @@ impl Ord for PartialField<'_> {
     }
 }
 
+impl PartialEq for PartialVariant<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.ident == other.ident
+    }
+}
+
+impl Eq for PartialVariant<'_> {}
+
+impl PartialOrd for PartialVariant<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PartialVariant<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.ident.cmp(&other.ident)
+    }
+}
+
 impl<'a> From<PartialField<'a>> for PartialType<'a> {
     fn from(value: PartialField<'a>) -> Self {
         Self {
-            ident: value.ident,
+            ident: value.ident.unwrap_or_default(),
             docs: value.docs,
             fields: Default::default(),
+            variants: Default::default(),
         }
     }
 }
@@ -154,10 +214,14 @@ impl Display for PartialType<'_> {
         let docs = self.docs.last().cloned().unwrap_or_default();
         formatter.write_str(&docs)?;
 
-        self.fields.iter().try_for_each(|field| {
-            formatter.write_str(&field.ident)?;
-            Ok(())
-        })?;
+        for field in &self.fields {
+            formatter.write_str(field.ident.as_deref().unwrap_or("unnamed"))?;
+        }
+
+        for variant in &self.variants {
+            formatter.write_str(variant.ident.as_ref())?;
+        }
+
         Ok(())
     }
 }

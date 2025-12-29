@@ -3,7 +3,6 @@ use std::ffi::OsString;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
-    ops::Not,
     time::Duration,
 };
 
@@ -13,14 +12,11 @@ use mirrord_config::{
     external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
-use mirrord_operator::client::OperatorSession;
 use mirrord_progress::Progress;
-use mirrord_protocol::{
-    ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel,
-    tcp::{HTTP_COMPOSITE_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION},
-};
+use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel};
+use mirrord_protocol_io::{Client, Connection};
 #[cfg(target_os = "macos")]
-use mirrord_sip::{SipPatchOptions, sip_patch};
+use mirrord_sip::{SipError, SipPatchOptions, sip_patch};
 use mirrord_tls_util::SecureChannelSetup;
 use semver::Version;
 use serde::Serialize;
@@ -35,9 +31,11 @@ use tracing::{Level, debug, error, info, trace, warn};
 
 #[cfg(target_os = "macos")]
 use crate::extract::extract_arm64;
+#[cfg(unix)]
+use crate::util::reparent_to_init;
 use crate::{
-    CliResult,
-    connection::{AGENT_CONNECT_INFO_ENV_KEY, AgentConnection, create_and_connect},
+    CliResult, MirrordCi,
+    connection::{AGENT_CONNECT_INFO_ENV_KEY, create_and_connect},
     error::CliError,
     extract::extract_library,
     util::{get_user_git_branch, remove_proxy_env},
@@ -188,11 +186,26 @@ impl MirrordExecution {
         #[cfg(target_os = "macos")] args: Option<&[OsString]>,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
+        mirrord_for_ci: Option<&MirrordCi>,
     ) -> CliResult<Self>
     where
         P: Progress,
     {
-        let lib_path = extract_library(None, progress, true)?;
+        // Extract Layer from exe, or use existing file if MIRRORD_LAYER_FILE env var is set (for
+        // debugging)
+        let lib_path = match std::env::var("MIRRORD_LAYER_FILE") {
+            Ok(existing_path) => {
+                tracing::debug!(
+                    "Using existing library file from MIRRORD_LAYER_FILE: {}",
+                    existing_path
+                );
+                std::path::PathBuf::from(existing_path)
+            }
+            Err(_) => {
+                tracing::debug!("MIRRORD_LAYER_FILE not set, extracting library from binary");
+                extract_library(None, progress, true)?
+            }
+        };
 
         if !config.use_proxy {
             remove_proxy_env();
@@ -201,53 +214,24 @@ impl MirrordExecution {
         let branch_name = get_user_git_branch().await;
 
         let (connect_info, mut connection) =
-            create_and_connect(config, progress, analytics, branch_name)
+            create_and_connect(config, progress, analytics, branch_name, mirrord_for_ci)
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         let agent_protocol_version = match &connect_info {
-            AgentConnectInfo::Operator(OperatorSession {
-                operator_protocol_version: Some(version),
-                ..
-            }) => Some(version.clone()),
+            AgentConnectInfo::Operator(session) => session.operator_protocol_version.clone(),
             AgentConnectInfo::DirectKubernetes(_) => {
                 Some(MirrordExecution::get_agent_version(&mut connection).await?)
             }
             _ => None,
         };
 
-        if config.feature.network.incoming.http_filter.is_composite()
-            && agent_protocol_version
-                .as_ref()
-                .map(|version| HTTP_COMPOSITE_FILTER_VERSION.matches(version))
-                .unwrap_or(false)
-                .not()
-        {
-            Err(ConfigError::Conflict(format!(
-                "Cannot use 'any_of' or 'all_of' HTTP filter types, protocol version used by mirrord-agent must match {}. \
-                    Consider using a newer version of mirrord-agent",
-                *HTTP_COMPOSITE_FILTER_VERSION
-            )))?
-        }
-
-        if config
+        config
             .feature
             .network
             .incoming
             .http_filter
-            .has_method_filter()
-            && agent_protocol_version
-                .as_ref()
-                .map(|version| HTTP_METHOD_FILTER_VERSION.matches(version))
-                .unwrap_or(false)
-                .not()
-        {
-            Err(ConfigError::Conflict(format!(
-                "Cannot use 'method' HTTP filter type, protocol version used by mirrord-agent must match {}. \
-                    Consider using a newer version of mirrord-agent",
-                *HTTP_METHOD_FILTER_VERSION
-            )))?
-        }
+            .ensure_usable_with(agent_protocol_version)?;
 
         let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
@@ -273,20 +257,32 @@ impl MirrordExecution {
         }
 
         let lib_path = lib_path.to_string_lossy().into_owned();
-        // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
-        // If already exists, we append.
-        if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
-            env_vars.insert(INJECTION_ENV_VAR.to_string(), format!("{v}:{lib_path}"))
-        } else {
-            env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
-        };
+        #[cfg(not(target_os = "windows"))]
+        {
+            // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
+            // If already exists, we append.
+            if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
+                env_vars.insert(INJECTION_ENV_VAR.to_string(), format!("{v}:{lib_path}"))
+            } else {
+                env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
+            };
+        }
+        #[cfg(target_os = "windows")]
+        {
+            unsafe { std::env::set_var("MIRRORD_LAYER_FILE", lib_path) };
+        }
 
         let encoded_config = config.encode()?;
 
         let mut proxy_command =
             Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
+        proxy_command.arg("intproxy");
+
+        if mirrord_for_ci.is_some() {
+            proxy_command.arg("--mirrord-for-ci");
+        }
+
         proxy_command
-            .arg("intproxy")
             // Start of debug args. Don't add real args after this point,
             // `_debug_args` Clap field will swallow them.
             .arg("--log-destination")
@@ -301,6 +297,11 @@ impl MirrordExecution {
             )
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
+        #[cfg(unix)]
+        unsafe {
+            proxy_command.pre_exec(|| reparent_to_init().map_err(Into::into));
+        }
+
         let mut proxy_process = proxy_command.spawn().map_err(|e| {
             CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
         })?;
@@ -309,6 +310,18 @@ impl MirrordExecution {
         let _stderr_guard = watch_stderr(stderr, progress).await;
 
         let stdout = proxy_process.stdout.take().expect("stdout was piped");
+
+        // Windows-Compatibility: this wait hangs after agent EnvVarsResponse
+        //  Skipping it works around the issue.
+        #[cfg(not(target_os = "windows"))]
+        {
+            // The pre_exec(reparent_to_init) causes the process to fork and our immediate child
+            // promptly exits (which is what we wait for here), reparenting our (now former)
+            // grandchild to init.
+            // This should *never* fail, see https://man7.org/linux/man-pages/man2/wait.2.html for
+            // reference.
+            proxy_process.wait().await.unwrap();
+        }
 
         let intproxy_address: SocketAddr = BufReader::new(stdout)
             .lines()
@@ -364,7 +377,13 @@ impl MirrordExecution {
                 .transpose() // We transpose twice to propagate a possible error out of this
                 // closure.
             })
-            .transpose()?;
+            .transpose()
+            .inspect_err(|sip_error| {
+                // we can't recover from hitting the fd limit, so we have to exit fully
+                if let SipError::TooManyFilesOpen(..) = sip_error {
+                    panic!("mirrord failed to patch SIP with: {}", sip_error);
+                }
+            })?;
 
         #[cfg(not(target_os = "macos"))]
         let patched_path = None;
@@ -384,19 +403,14 @@ impl MirrordExecution {
         })
     }
 
-    async fn get_agent_version(connection: &mut AgentConnection) -> CliResult<Version> {
-        let Ok(_) = connection
-            .sender
+    async fn get_agent_version(connection: &mut Connection<Client>) -> CliResult<Version> {
+        connection
             .send(ClientMessage::SwitchProtocolVersion(
                 mirrord_protocol::VERSION.clone(),
             ))
-            .await
-        else {
-            return Err(CliError::InitialAgentCommFailed(
-                "failed to send protocol version request".to_string(),
-            ));
-        };
-        match connection.receiver.recv().await {
+            .await;
+
+        match connection.recv().await {
             Some(DaemonMessage::SwitchProtocolVersionResponse(version)) => Ok(version),
             Some(msg) => Err(CliError::InitialAgentCommFailed(format!(
                 "received unexpected message during agent version check: {msg:?}"
@@ -434,7 +448,7 @@ impl MirrordExecution {
         let branch_name = get_user_git_branch().await;
 
         let (connect_info, mut connection) =
-            create_and_connect(config, progress, analytics, branch_name)
+            create_and_connect(config, progress, analytics, branch_name, None)
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
@@ -520,7 +534,7 @@ impl MirrordExecution {
     /// `MirrordExecution::get_remote_env`.
     async fn fetch_env_vars(
         config: &LayerConfig,
-        connection: &mut AgentConnection,
+        connection: &mut Connection<Client>,
     ) -> CliResult<HashMap<String, String>> {
         let (env_vars_exclude, env_vars_include) = match (
             config
@@ -585,23 +599,19 @@ impl MirrordExecution {
     /// Retrieve remote environment from the connected agent.
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn get_remote_env(
-        connection: &mut AgentConnection,
+        connection: &mut Connection<Client>,
         env_vars_filter: HashSet<String>,
         env_vars_select: HashSet<String>,
     ) -> CliResult<HashMap<String, String>> {
         connection
-            .sender
             .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
                 env_vars_select,
             }))
-            .await
-            .map_err(|_| {
-                CliError::InitialAgentCommFailed("agent unexpectedly closed connection".to_string())
-            })?;
+            .await;
 
         loop {
-            let result = match connection.receiver.recv().await {
+            let result = match connection.recv().await {
                 Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env))) => {
                     tracing::trace!(?remote_env, "Agent responded with the remote env");
                     Ok(remote_env)
@@ -632,7 +642,7 @@ impl MirrordExecution {
                 )),
             };
 
-            return result;
+            return result.map(Into::into);
         }
     }
 

@@ -1,8 +1,6 @@
 #![feature(try_trait_v2)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
-// TODO(alex): Get a big `Box` for the big variants.
-#![allow(clippy::large_enum_variant)]
 
 //! # Features
 //!
@@ -16,6 +14,10 @@
 //! Turn this feature on if you want to connect to agent pods from outside the cluster with port
 //! forwarding.
 
+pub use kube;
+
 pub mod api;
 pub mod error;
+pub mod extract;
 pub mod resolved;
+pub mod retry;

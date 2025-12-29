@@ -33,7 +33,7 @@ log = { version = "0.4", features = ["std"] }
 miette.workspace = true
 thiserror.workspace = true
 
-tokio = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["rt", "rt-multi-thread", "macros"] }
 tracing = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 drain = { workspace = true, optional = true }

@@ -146,7 +146,7 @@ async fn mirror_http_traffic(
 /// at the same time.
 ///
 /// This test requires that the operator's agents use passthrough mirroring and connection flushing.
-#[cfg_attr(not(feature = "operator"), ignore)]
+#[cfg_attr(any(not(feature = "operator"), target_os = "windows"), ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(240))]

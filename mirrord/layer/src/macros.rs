@@ -152,10 +152,28 @@ macro_rules! hook_symbol {
     ($hook_manager:expr_2021, $func:expr_2021, $detour_name:expr_2021) => {
         match $hook_manager.hook_symbol_main_module($func, $detour_name as *mut libc::c_void) {
             Ok(_) => {
-                trace!("hooked {:?} in main module", $func);
+                tracing::trace!("hooked {:?} in main module", $func);
             }
             Err(err) => {
-                trace!("hook {:?} in main module failed with err {err:?}", $func);
+                tracing::trace!("hook {:?} in main module failed with err {err:?}", $func);
+            }
+        }
+    };
+    ($hook_manager:expr_2021, $module_name:expr_2021, $func:expr_2021, $detour_name:expr_2021) => {
+        match $hook_manager.hook_symbol_in_module(
+            $module_name,
+            $func,
+            $detour_name as *mut libc::c_void,
+        ) {
+            Ok(_) => {
+                tracing::trace!("hooked {:?} in module {:?}", $func, $module_name);
+            }
+            Err(err) => {
+                tracing::trace!(
+                    "hook {:?} in module {:?} failed: {err:?}",
+                    $func,
+                    $module_name
+                );
             }
         }
     };

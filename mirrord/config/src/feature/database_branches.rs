@@ -7,6 +7,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{self, source::MirrordConfigSource};
 
+pub mod mysql;
+pub mod pg;
+
+pub use mysql::{MysqlBranchConfig, MysqlBranchCopyConfig, MysqlBranchTableCopyConfig};
+pub use pg::{PgBranchConfig, PgBranchCopyConfig, PgBranchTableCopyConfig};
+
 /// A list of configurations for database branches.
 ///
 /// ```json
@@ -41,14 +47,22 @@ impl Deref for DatabaseBranchesConfig {
 }
 
 impl DatabaseBranchesConfig {
-    pub fn mysql(&self) -> impl '_ + Iterator<Item = &DatabaseBranchConfig> {
-        self.0.iter().filter(|db| db._type == DatabaseType::MySql)
+    pub fn count_mysql(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::Mysql { .. }))
+            .count()
+    }
+
+    pub fn count_pg(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::Pg { .. }))
+            .count()
     }
 }
 
 /// Configuration for a database branch.
-///
-/// By specifying a unique `id`, the branch database will be reused if not expired.
 ///
 /// Example:
 ///
@@ -67,40 +81,76 @@ impl DatabaseBranchesConfig {
 ///   }
 /// }
 /// ```
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum DatabaseBranchConfig {
+    Mysql(MysqlBranchConfig),
+    Pg(PgBranchConfig),
+}
+
+/// Despite the database type, all database branch config objects share the following fields.
 #[derive(MirrordConfig, Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[config(map_to = "DatabaseBranchFileConfig")]
-pub struct DatabaseBranchConfig {
-    /// A unique identifier chosen by the user. This is useful when reusing branch database
-    /// sharing among different Kubernetes users.
+#[config(map_to = "DatabaseBranchBaseFileConfig")]
+pub struct DatabaseBranchBaseConfig {
+    /// #### feature.db_branches.base.id {#feature-db_branches-base-id}
+    ///
+    /// Users can choose to specify a unique `id`. This is useful for reusing or sharing
+    /// the same database branch among Kubernetes users.
     pub id: Option<String>,
 
-    /// Name of the database
+    /// #### feature.db_branches.base.name {#feature-db_branches-base-name}
+    ///
+    /// When source database connection detail is not accessible to mirrord operator, users
+    /// can specify the database `name` so it is included in the connection options mirrord
+    /// uses as the override.
     pub name: Option<String>,
 
-    /// The time-to-live (TTL) for the branch database, in seconds. Defaults to 300 seconds.
+    /// #### feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}
+    ///
+    /// Mirrord operator starts counting the TTL when a branch is no longer used by any session.
+    /// The time-to-live (TTL) for the branch database is set to 300 seconds by default.
+    /// Users can set `ttl_secs` to customize this value according to their need. Please note
+    /// that longer TTL paired with frequent mirrord session turnover can result in increased
+    /// resource usage. For this reason, branch database TTL caps out at 15 min.
     #[serde(default = "default_ttl_secs")]
     pub ttl_secs: u64,
 
-    /// The database type.
-    #[serde(rename = "type")]
-    pub _type: DatabaseType,
+    /// #### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
+    ///
+    /// The timeout in seconds to wait for a database branch to become ready after creation.
+    /// Defaults to 60 seconds. Adjust this value based on your database size and cluster
+    /// performance.
+    #[serde(default = "default_creation_timeout_secs")]
+    pub creation_timeout_secs: u64,
 
-    /// The database image version.
+    /// #### feature.db_branches.base.version {#feature-db_branches-base-version}
+    ///
+    /// Mirrord operator uses a default version of the database image unless `version` is given.
     pub version: Option<String>,
 
-    /// The database connection details.
+    /// #### feature.db_branches.base.connection {#feature-db_branches-base-connection}
+    ///
+    /// `connection` describes how to get the connection information to the source database.
+    /// When the branch database is ready for use, Mirrord operator will replace the connection
+    /// information with the branch database's.
     pub connection: ConnectionSource,
 }
 
-/// Supported database types.
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[schemars(rename = "DbBranchingDatabaseType")]
-pub enum DatabaseType {
-    #[serde(rename = "mysql")]
-    MySql,
-}
-
-/// Options for connecting to the database.
+/// Different ways of connecting to the source database.
+///
+/// Example:
+///
+/// A single complete connection URL stored in an environment variable accessible from
+/// the target pod template.
+///
+/// ```json
+/// {
+///   "url": {
+///     "type": "env",
+///     "variable": "DB_CONNECTION_URL"
+///   }
+/// }
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSource")]
 #[serde(rename_all = "snake_case")]
@@ -109,11 +159,19 @@ pub enum ConnectionSource {
 }
 
 /// Different ways to source the connection options.
+///
+/// Support:
+/// - `env` in the target's pod spec.
+/// - `envFrom` in the target's pod spec.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSourceKind")]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConnectionSourceKind {
     Env {
+        container: Option<String>,
+        variable: String,
+    },
+    EnvFrom {
         container: Option<String>,
         variable: String,
     },
@@ -136,10 +194,15 @@ impl config::FromMirrordConfig for DatabaseBranchesConfig {
 
 impl CollectAnalytics for &DatabaseBranchesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
-        analytics.add("mysql_branch_count", self.mysql().count());
+        analytics.add("mysql_branch_count", self.count_mysql());
+        analytics.add("pg_branch_count", self.count_pg());
     }
 }
 
 fn default_ttl_secs() -> u64 {
     300
+}
+
+pub fn default_creation_timeout_secs() -> u64 {
+    60
 }

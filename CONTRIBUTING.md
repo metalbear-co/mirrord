@@ -13,10 +13,11 @@ Make sure to take a look at the project's [style guide](STYLE.md).
 - [Getting Started](#getting-started)
 - [Debugging mirrord](#debugging-mirrord)
 - [New Hook Guidelines](#new-hook-guidelines)
-- [Compiling on MacOs](#compiling-on-macos)
+- [Compiling on MacOS](#compiling-on-macos)
 - [Adding new target types](#adding-new-target-types)
 - [Testing the release workflow](#testing-the-release-workflow)
 - [Architecture](#architecture)
+- [Release mirrord](#release-mirrord)
 
 # Getting Started
 
@@ -94,7 +95,7 @@ with the mirrord CLI. The mirrord CLI spawns an agent for the target on the clus
 layer injected into it. Some test apps need to be compiled before they can be used in the tests
 ([this should be automated in the future](https://github.com/metalbear-co/mirrord/issues/982)).
 
-> **Note:** `//go:build linux` prevents certain Go test apps from being built on macOS. When using 
+> **Note:** `//go:build linux` prevents certain Go test apps from being built on macOS. When using
 > `scripts/build_go_apps.sh`, make the change below so the script continues building all other apps.
 > ```bash
 > go build -o "$1.go_test_app" || echo "Failed to build $directory/$1.go_test_app"
@@ -112,7 +113,7 @@ scripts/build_fat_mac.sh
 
 And then in order to use that binary in the tests, run the tests like this:
 ```bash
-MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord cargo test -p tests
+MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord cargo test -p mirrord-tests
 ```
 
 If new tests are added, decorate them with `cfg_attr` attribute macro to define what the tests target.
@@ -555,62 +556,38 @@ In order to have a more structured approach, here's the flow you should follow w
 
 # Compiling on MacOS
 
-The `mirrord-agent` crate makes use of the `#[cfg(target_os = "linux")]` attribute to allow the whole repo to compile on MacOS when you run `cargo build`.
+`mirrord` is cross-platform and natively supports compiling from a MacOS host, with one exception: `mirrord-agent` - the component/crate that runs inside of the kubernetes cluster.
 
-To enable `mirrord-agent` code analysis with rust-analyzer:
-1. Install additional targets
+`mirrord-agent` feature-gates dependencies, modules and its entrypoint to allow compilation on MacOS, but produces a binary that does nothing.
+To be able to properly compile and work on the code (using rust-analyzer) you need to be able to cross-compile to linux, which requires the following steps:
+
+1. Install the x86 linux target
 ```sh
 rustup target add x86_64-unknown-linux-gnu
-rustup target add aarch64-apple-darwin
-rustup target add x86_64-apple-darwin
-rustup target add aarch64-unknown-linux-gnu
-```
-2. Add additional targets to your local `.cargo/config.toml` block:
-```toml
-[build]
-target = [
-    "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
-    "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu",
-]
 ```
 
-If you're using rust-analyzer VSCode extension, put this block in `.vscode/settings.json` as well:
+2. Get a C compiler capable of targeting the `x86_64-unknown-linux-gnu` triplet
+
+Usually the builtin clang compiler can handle this, if you use GCC you'll need a custom build that targets this triplet
+(see [homebrew-macos-cross-toolchains](https://github.com/messense/homebrew-macos-cross-toolchains) if you use brew)
+
+3. Tell `bindgen` which C compiler to use when building `frida-gum`, the C library we use for detour hooking:
+```sh
+export CC_x86_64_unknown_linux_gnu=(C compiler from step 2)
+```
+
+Now you can pass the linux target to `cargo` commands:
+```sh
+cargo check -p mirrord-agent --target x86_64-unknown-linux-gnu
+```
+
+And tell rust-analyzer to use it:
 ```json
-{
-    "rust-analyzer.check.targets": [
-        "aarch64-apple-darwin",
-        "x86_64-apple-darwin",
-        "x86_64-unknown-linux-gnu",
-        "aarch64-unknown-linux-gnu"
-    ]
-}
+"rust-analyzer.cargo.target": "x86_64-unknown-linux-gnu"
 ```
 
-You can use `cargo-zigbuild` to run `cargo check` or `clippy` on the agent's code on macOS.
-
-`cargo check`
-
-```shell
-cargo-zigbuild check -p mirrord-agent --target x86_64-unknown-linux-gnu
-```
-
-`clippy` only for the agent
-
-```shell
-cargo-zigbuild clippy --target x86_64-unknown-linux-gnu -p mirrord-agent -- -Wclippy::indexing_slicing -D warnings
-```
-
-`clippy` for all code:
-
-```shell
-cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
-```
-
-If it doesn't work, try updating `cargo-zigbuild`
-(`cargo install cargo-zigbuild` or maybe `cargo install cargo-zigbuild --force`)
-or via `homebrew` if it was installed via homebrew.
+This is editor specific, please check [rust-analyzer's documentation](https://rust-analyzer.github.io/book/other_editors.html)
+to find where to put it in your editor's configuration.
 
 # Adding new target types
 
@@ -642,7 +619,28 @@ You can check the run as it progresses and download the completed artifacts from
 
 If you're making changes to the release and/or CI workflows for MacOS specifically - for example changing how the universal binary is created, you need to ensure that [the script for building the universal binary](/scripts/build_fat_mac.sh) that is run manually when developing has also been updated if necessary.
 
-## Architecture
+# Submitting a Pull Request
+
+## Changelog Entry
+
+Add a changelog file in `changelog.d/` named `<identifier>.<category>.md`
+
+**Examples:**
+- `1054.changed.md` (with GitHub issue)
+- `+some-name.added.md` (without issue)
+
+**Identifier:**
+- If a GitHub issue exists, use the issue number from the public [mirrord repo](https://github.com/metalbear-co/mirrord)
+- Use `+some-name` if no issue exists
+- Don't use Linear issues or private repo issue numbers
+
+**Category:**
+- `added` for new functionality
+- `fixed` for fixed bugs
+- `internal` for anything users don't care about, e.g. changes in tests or CI
+- `changed` for anything else
+
+# Architecture
 
 A high level view of mirrord.
 
@@ -737,3 +735,28 @@ flowchart TB
     style Pod fill:#e6ffe6,stroke:#006600,stroke-width:2px
     style Binary fill:#f9f9f9,stroke:#333,stroke-width:2px
 ```
+
+# Release mirrord
+
+## Release PR
+
+1. Create a new branch named after the new version, e.g. `3.333.0`. This will trigger additional CI jobs.
+	1. If the new release only contains `internal` and `fixed` changes, bump a patch version. Otherwise, bump a minor version.
+2. On the new branch, bump the workspace version in `Cargo.toml` and run `cargo update -w` to update `Cargo.lock`.
+3. Generate the changelog with: `towncrier build --version <new-version>`.
+4. Review the generated changelog and fix any issues or typos.
+5. Push the release branch and open a PR.
+
+**Note:** All the steps above can also be completed by running: `./scripts/release.sh 3.333.0`.
+Before running the script, ensure there are no uncommitted changes in your repository.
+
+## Create a new GitHub release
+
+1. After the release PR is merged, create a new GitHub release with a new tag. Use the new version for both
+   the tag name and the release title. Use the changelog from the release PR as the release description,
+   excluding the `Internal` section if present.
+
+   **Note**: Ensure the tag is attached to the release commit.
+
+2. Creating the release will trigger the `Release` workflow, which builds and publishes all artifacts, including images.
+3. When the `Release` workflow completes successfully, update the relevant environment variables in the analytics server.

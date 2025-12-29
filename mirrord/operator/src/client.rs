@@ -2,41 +2,58 @@ use std::{fmt, ops::Not, time::Duration};
 
 use base64::{Engine, engine::general_purpose};
 use chrono::{DateTime, Utc};
-use conn_wrapper::ConnectionWrapper;
 use connect_params::ConnectParams;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
+use futures::{SinkExt, StreamExt, future::Either};
 use http::{HeaderName, HeaderValue, request::Request};
+use k8s_openapi::api::apps::v1::Deployment;
 use kube::{
     Api, Client, Config, Resource,
     api::{ListParams, PostParams},
+    client::ClientBuilder,
 };
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
-    credentials::LicenseValidity,
+    credentials::{CiApiKey, Credentials, LicenseValidity},
 };
-use mirrord_config::{LayerConfig, target::Target};
+use mirrord_config::{
+    LayerConfig, feature::database_branches::default_creation_timeout_secs, target::Target,
+};
 use mirrord_kube::{
-    api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
+    api::{
+        kubernetes::{
+            create_kube_config,
+            rollout::{Rollout, RolloutSpec, workload_ref::WorkloadRef},
+        },
+        runtime::RuntimeDataProvider,
+    },
     error::KubeApiError,
-    resolved::ResolvedTarget,
+    resolved::{ResolvedResource, ResolvedTarget},
+    retry::RetryKube,
 };
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_protocol_io::{Client as ProtocolClient, Connection};
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio_tungstenite::tungstenite;
+use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
 use crate::{
     client::database_branches::{
-        DatabaseBranchParams, create_mysql_branches, list_reusable_mysql_branches,
+        DatabaseBranchParams, create_mysql_branches, create_pg_branches,
+        list_reusable_mysql_branches, list_reusable_pg_branches,
     },
     crd::{
-        MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME, TargetCrd,
+        MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
+        OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
         mysql_branching::MysqlBranchDatabase,
+        pg_branching::PgBranchDatabase,
+        session::SessionCiInfo,
     },
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CLI_VERSION_HEADER,
@@ -44,8 +61,8 @@ use crate::{
     },
 };
 
-mod conn_wrapper;
 mod connect_params;
+mod credentials;
 mod database_branches;
 mod discovery;
 pub mod error;
@@ -117,10 +134,11 @@ pub struct OperatorSession {
     client_cert: Certificate,
     /// Operator license fingerprint, right now only for setting [`Reporter`] properties.
     operator_license_fingerprint: Option<String>,
+    /// Version of the operator, right now only for [`fmt::Debug`] implementation.
+    operator_version: Version,
     /// Version of [`mirrord_protocol`] used by the operator.
-    /// Used to create [`ConnectionWrapper`].
+    /// Used to create [`Connection`].
     pub operator_protocol_version: Option<Version>,
-
     /// Allow the layer to attempt reconnection
     pub allow_reconnect: bool,
 }
@@ -136,6 +154,7 @@ impl fmt::Debug for OperatorSession {
                 &self.operator_license_fingerprint,
             )
             .field("operator_protocol_version", &self.operator_protocol_version)
+            .field("operator_version", &self.operator_version)
             .field("allow_reconnect", &self.allow_reconnect)
             .finish()
     }
@@ -143,25 +162,15 @@ impl fmt::Debug for OperatorSession {
 
 /// Connection to an operator target.
 pub struct OperatorSessionConnection {
-    /// Session of this connection.
-    pub session: OperatorSession,
-    /// Used to send [`ClientMessage`]s to the operator.
-    pub tx: Sender<ClientMessage>,
-    /// Used to receive [`DaemonMessage`]s from the operator.
-    pub rx: Receiver<DaemonMessage>,
+    pub session: Box<OperatorSession>,
+    pub conn: Connection<ProtocolClient>,
 }
 
 impl fmt::Debug for OperatorSessionConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let tx_queued_messages = self.tx.max_capacity() - self.tx.capacity();
-        let rx_queued_messages = self.rx.len();
-
         f.debug_struct("OperatorSessionConnection")
             .field("session", &self.session)
-            .field("tx_closed", &self.tx.is_closed())
-            .field("tx_queued_messages", &tx_queued_messages)
-            .field("rx_closed", &self.rx.is_closed())
-            .field("rx_queued_messages", &rx_queued_messages)
+            .field("closed", &self.conn.is_closed())
             .finish()
     }
 }
@@ -218,10 +227,15 @@ impl OperatorApi<NoClientCert> {
         P: Progress,
     {
         let base_config = Self::base_client_config(config).await?;
+
         let client = progress
-            .suspend(|| Client::try_from(base_config.clone()))
-            .map_err(KubeApiError::from)
-            .map_err(OperatorApiError::CreateKubeClient)?;
+            .suspend(|| ClientBuilder::try_from(base_config.clone()))
+            .map_err(KubeApiError::from)?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(RetryKube::try_from(
+                &config.startup_retry,
+            )?))
+            .build();
 
         let operator: Result<MirrordOperatorCrd, _> =
             Api::all(client.clone()).get(OPERATOR_STATUS_NAME).await;
@@ -269,19 +283,104 @@ impl OperatorApi<NoClientCert> {
         })
     }
 
-    /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
-    /// In case of failure, state of this API instance does not change.
     #[tracing::instrument(level = Level::TRACE, skip(reporter, progress))]
-    pub async fn prepare_client_cert<P, R>(
+    pub async fn with_ci_api_key<P, R>(
         self,
         reporter: &mut R,
         progress: &P,
+        layer_config: &LayerConfig,
+        ci_api_key: &CiApiKey,
+    ) -> OperatorApi<MaybeClientCert>
+    where
+        R: Reporter,
+        P: Progress,
+    {
+        let certificate = match ci_api_key {
+            CiApiKey::V1(credentials) => credentials.as_ref(),
+        };
+
+        reporter.set_operator_properties(AnalyticsOperatorProperties {
+            client_hash: Some(AnalyticsHash::from_bytes(&certificate.public_key_data())),
+            license_hash: self
+                .operator
+                .spec
+                .license
+                .fingerprint
+                .as_deref()
+                .map(AnalyticsHash::from_base64),
+        });
+
+        self.prepare_with_certificate(progress, layer_config, certificate)
+            .await
+    }
+
+    #[tracing::instrument(level = Level::TRACE, skip(progress))]
+    async fn prepare_with_certificate<P>(
+        self,
+        progress: &P,
+        layer_config: &LayerConfig,
+        certificate: &Certificate,
+    ) -> OperatorApi<MaybeClientCert>
+    where
+        P: Progress,
+    {
+        let previous_client = self.client.clone();
+
+        let result = try {
+            let header = Self::make_client_cert_header(certificate)?;
+
+            let mut config = self.client_cert.base_config;
+            config
+                .headers
+                .push((HeaderName::from_static(CLIENT_CERT_HEADER), header));
+
+            let client = progress
+                .suspend(|| ClientBuilder::try_from(config))
+                .map_err(KubeApiError::from)
+                .map_err(OperatorApiError::CreateKubeClient)?
+                .with_layer(&BufferLayer::new(1024))
+                .with_layer(&RetryLayer::new(RetryKube::try_from(
+                    &layer_config.startup_retry,
+                )?))
+                .build();
+
+            (client, certificate)
+        };
+
+        match result {
+            Ok((new_client, cert)) => OperatorApi {
+                client: new_client,
+                client_cert: MaybeClientCert {
+                    cert_result: Ok(cert.clone()),
+                },
+                operator: self.operator,
+            },
+
+            Err(error) => OperatorApi {
+                client: previous_client,
+                client_cert: MaybeClientCert {
+                    cert_result: Err(error),
+                },
+                operator: self.operator,
+            },
+        }
+    }
+
+    /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
+    /// In case of failure, state of this API instance does not change.
+    #[tracing::instrument(level = Level::TRACE, skip(reporter, progress))]
+    pub async fn with_client_certificate<P, R>(
+        self,
+        reporter: &mut R,
+        progress: &P,
+        layer_config: &LayerConfig,
     ) -> OperatorApi<MaybeClientCert>
     where
         R: Reporter,
         P: Progress,
     {
         let previous_client = self.client.clone();
+        let operator_crd = self.operator.clone();
 
         let result = try {
             let certificate = self.get_client_certificate().await?;
@@ -297,35 +396,18 @@ impl OperatorApi<NoClientCert> {
                     .map(AnalyticsHash::from_base64),
             });
 
-            let header = Self::make_client_cert_header(&certificate)?;
-
-            let mut config = self.client_cert.base_config;
-            config
-                .headers
-                .push((HeaderName::from_static(CLIENT_CERT_HEADER), header));
-            let client = progress
-                .suspend(|| Client::try_from(config))
-                .map_err(KubeApiError::from)
-                .map_err(OperatorApiError::CreateKubeClient)?;
-
-            (client, certificate)
+            self.prepare_with_certificate(progress, layer_config, &certificate)
+                .await
         };
 
         match result {
-            Ok((new_client, cert)) => OperatorApi {
-                client: new_client,
-                client_cert: MaybeClientCert {
-                    cert_result: Ok(cert),
-                },
-                operator: self.operator,
-            },
-
+            Ok(api) => api,
             Err(error) => OperatorApi {
                 client: previous_client,
                 client_cert: MaybeClientCert {
                     cert_result: Err(error),
                 },
-                operator: self.operator,
+                operator: operator_crd,
             },
         }
     }
@@ -391,25 +473,6 @@ where
         Ok(())
     }
 
-    pub fn check_operator_version<P>(&self, progress: &P) -> bool
-    where
-        P: Progress,
-    {
-        let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION"))
-            .expect("Something went wrong when parsing mirrord version!");
-
-        if self.operator.spec.operator_version > mirrord_version {
-            let message = format!(
-                "mirrord binary version {} does not match the operator version {}. Consider updating your mirrord binary.",
-                mirrord_version, self.operator.spec.operator_version
-            );
-            progress.warning(&message);
-            false
-        } else {
-            true
-        }
-    }
-
     /// Returns a reference to the operator resource fetched from the cluster.
     pub fn operator(&self) -> &MirrordOperatorCrd {
         &self.operator
@@ -418,6 +481,44 @@ where
     /// Returns a reference to the [`Client`] used by this instance.
     pub fn client(&self) -> &Client {
         &self.client
+    }
+
+    /// Create a new CI api key by generating a random key pair, creating a certificate
+    /// signing request and sending it to the operator.
+    pub async fn create_ci_api_key(&self) -> Result<String, OperatorApiError> {
+        if self
+            .operator()
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::ExtendableUserCredentials)
+            .not()
+        {
+            return Err(OperatorApiError::UnsupportedFeature {
+                feature: NewOperatorFeature::ExtendableUserCredentials,
+                operator_version: self.operator().spec.operator_version.to_string(),
+            });
+        }
+
+        let api_key: CiApiKey = Credentials::init_ci::<MirrordClusterOperatorUserCredential>(
+            self.client.clone(),
+            &format!(
+                "mirrord-ci@{}",
+                self.operator.spec.license.organization.as_str()
+            ),
+        )
+        .await
+        .map_err(|error| {
+            OperatorApiError::ClientCertError(format!(
+                "failed to create credentials for CI: {error}"
+            ))
+        })?
+        .into();
+
+        let encoded = api_key.encode().map_err(|error| {
+            OperatorApiError::ClientCertError(format!("failed to encode api key: {error}"))
+        })?;
+
+        Ok(encoded)
     }
 
     /// Creates a base [`Config`] for creating kube [`Client`]s.
@@ -529,10 +630,14 @@ where
         })?;
 
         credential_store
-            .get_client_certificate::<MirrordOperatorCrd>(
+            .get_client_certificate::<MirrordOperatorCrd, MirrordClusterOperatorUserCredential>(
                 &self.client,
                 fingerprint,
                 subscription_id,
+                self.operator()
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::ExtendableUserCredentials),
             )
             .await
             .map_err(|error| {
@@ -585,11 +690,15 @@ impl OperatorApi<PreparedClientCert> {
         layer_config: &mut LayerConfig,
         progress: &P,
         branch_name: Option<String>,
+        session_ci_info: Option<SessionCiInfo>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
     {
         self.check_feature_support(layer_config)?;
+        let (do_copy_target, reason) = self
+            .should_copy_target(layer_config, &target, progress)
+            .await?;
 
         let use_proxy_api = self
             .operator
@@ -597,34 +706,16 @@ impl OperatorApi<PreparedClientCert> {
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
 
-        let (do_copy_target, reason) = if layer_config.feature.copy_target.enabled {
-            (true, None)
-        } else if target.empty_deployment() {
-            (true, Some("empty deployment"))
-        } else if layer_config.feature.split_queues.sqs().next().is_some()
-            && self
-                .operator
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
-                .not()
-        {
-            (true, Some("SQS splitting"))
-        } else if layer_config.feature.split_queues.kafka().next().is_some()
-            && self
-                .operator()
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
-                .not()
-        {
-            (true, Some("Kafka splitting"))
-        } else {
-            (false, None)
-        };
-
         let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
-            Some(self.prepare_branch_dbs(layer_config, progress).await?)
+            Some(
+                self.prepare_mysql_branch_dbs(layer_config, progress)
+                    .await?,
+            )
+        } else {
+            None
+        };
+        let pg_branch_names = if layer_config.feature.db_branches.is_empty().not() {
+            Some(self.prepare_pg_branch_dbs(layer_config, progress).await?)
         } else {
             None
         };
@@ -650,12 +741,15 @@ impl OperatorApi<PreparedClientCert> {
                 .status
                 .as_ref()
                 .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+
             let connect_url = Self::copy_target_connect_url(
                 &copied,
                 use_proxy_api,
                 layer_config.profile.as_deref(),
                 branch_name.clone(),
                 mysql_branch_names.clone().unwrap_or_default(),
+                pg_branch_names.clone().unwrap_or_default(),
+                session_ci_info.clone(),
             );
             let session = self.make_operator_session(id, connect_url)?;
 
@@ -718,18 +812,21 @@ impl OperatorApi<PreparedClientCert> {
                 layer_config,
                 branch_name.clone(),
                 mysql_branch_names.clone().unwrap_or_default(),
+                pg_branch_names.clone().unwrap_or_default(),
+                session_ci_info.clone(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
+
             let session = self.make_operator_session(None, connect_url)?;
 
             (session, false)
         };
 
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let (tx, rx, session) = match Self::connect_target(&self.client, &session).await {
-            Ok((tx, rx)) => {
+        let (conn, session) = match Self::connect_target(&self.client, &session).await {
+            Ok(conn) => {
                 connection_subtask.success(Some("connected to the target"));
-                (tx, rx, session)
+                (conn, session)
             }
             Err(OperatorApiError::KubeError {
                 error: kube::Error::Api(response),
@@ -744,6 +841,8 @@ impl OperatorApi<PreparedClientCert> {
                     layer_config.profile.as_deref(),
                     branch_name,
                     mysql_branch_names.unwrap_or_default(),
+                    pg_branch_names.unwrap_or_default(),
+                    session_ci_info.clone(),
                 );
                 let session_id = copied
                     .status
@@ -752,14 +851,149 @@ impl OperatorApi<PreparedClientCert> {
                 let session = self.make_operator_session(session_id, connect_url)?;
 
                 let mut connection_subtask = progress.subtask("connecting to the target");
-                let (tx, rx) = Self::connect_target(&self.client, &session).await?;
+                let conn = Self::connect_target(&self.client, &session).await?;
                 connection_subtask.success(Some("connected to the target"));
-                (tx, rx, session)
+                (conn, session)
             }
             Err(error) => return Err(error),
         };
 
-        Ok(OperatorSessionConnection { session, tx, rx })
+        Ok(OperatorSessionConnection {
+            session: Box::new(session),
+            conn,
+        })
+    }
+
+    /// Returns whether the `copy_target` feature should be used,
+    /// with an optional reason (in case the feature is not explicitly enabled in the
+    /// [`LayerConfig`]).
+    async fn should_copy_target<P: Progress>(
+        &self,
+        config: &LayerConfig,
+        target: &ResolvedTarget<false>,
+        progress: &P,
+    ) -> OperatorApiResult<(bool, Option<&'static str>)> {
+        if config.feature.copy_target.enabled {
+            // Explicitly enabled.
+            return Ok((true, None));
+        }
+
+        if config.feature.split_queues.sqs().next().is_some()
+            && self
+                .operator
+                .spec
+                .supported_features()
+                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
+                .not()
+        {
+            // Operator does not support SQS splitting without copying the target.
+            return Ok((true, Some("SQS splitting")));
+        }
+
+        if config.feature.split_queues.kafka().next().is_some()
+            && self
+                .operator()
+                .spec
+                .supported_features()
+                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
+                .not()
+        {
+            // Operator does not support Kafka splitting without copying the target.
+            return Ok((true, Some("Kafka splitting")));
+        }
+
+        let ResolvedTarget::Deployment(ResolvedResource { resource, .. }) = target else {
+            // We do replicas checks only for deployments.
+            return Ok((false, None));
+        };
+
+        let available_replicas = resource
+            .status
+            .as_ref()
+            .and_then(|status| status.available_replicas)
+            .unwrap_or_default();
+        if available_replicas > 0 {
+            // Has available replicas, all good.
+            return Ok((false, None));
+        }
+
+        let replicas = resource
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.replicas)
+            .unwrap_or(1);
+        if replicas > 0 {
+            // Is configured to have replicas.
+            // We assume that the deployment is in bad state only temporarily,
+            // and enable copy_target to improve UX.
+            return Ok((true, Some("empty deployment")));
+        }
+
+        let deploy_name = resource
+            .metadata
+            .name
+            .as_deref()
+            .ok_or_else(|| KubeApiError::missing_field(resource.as_ref(), ".metadata.name"))?;
+        let deploy_namespace =
+            resource.metadata.namespace.as_deref().ok_or_else(|| {
+                KubeApiError::missing_field(resource.as_ref(), ".metadata.namespace")
+            })?;
+        let api = Api::<Rollout>::namespaced(self.client.clone(), deploy_namespace);
+        match api.get(deploy_name).await {
+            // There is a rollout managing the target deployment via workload ref.
+            // The user should target the rollout instead.
+            Ok(Rollout {
+                spec:
+                    Some(RolloutSpec {
+                        workload_ref:
+                            Some(WorkloadRef {
+                                api_version,
+                                kind,
+                                name,
+                            }),
+                        ..
+                    }),
+                ..
+            }) if api_version == Deployment::api_version(&())
+                && kind == Deployment::kind(&())
+                && name == deploy_name =>
+            {
+                return Err(OperatorApiError::KubeApi(KubeApiError::invalid_state(
+                    resource.as_ref(),
+                    "deployment is an empty workload managed by a rollout with the same name, \
+                    please target the rollout instead",
+                )));
+            }
+            // There is a rollout with the same name, but it does not manage the target deployment.
+            // This is weird, logging it on debug.
+            Ok(rollout) => {
+                tracing::debug!(
+                    deployment = ?resource,
+                    rollout = ?rollout,
+                    "Target deployment is empty, and a rollout with the same name was found in the target namespace. \
+                    However, the rollout does not manage the deployment. \
+                    Copying the target for this session.",
+                );
+            }
+            // The rollout does not exist.
+            // It might be that rollouts are not even installed in the cluster.
+            // Depeneding on how hardened the cluster is, we might get one of these error codes.
+            Err(kube::Error::Api(response)) if [404, 403, 401].contains(&response.code) => {}
+            Err(error) => {
+                tracing::warn!(
+                    deployment = ?resource,
+                    %error,
+                    "Failed to check if the targeted empty deployment is managed by a rollout. \
+                    Copying the target for this session.",
+                );
+                progress.warning(&format!(
+                    "The target deployment is empty, and mirrord failed to check if it is managed by a rollout. \
+                    This session will use the copy_target feature. Error: {error}",
+                ));
+            }
+        }
+
+        Ok((true, Some("empty deployment")))
     }
 
     /// Creates a new [`OperatorSession`] with the given `id` and `connect_url`.
@@ -781,6 +1015,7 @@ impl OperatorApi<PreparedClientCert> {
             .protocol_version
             .as_ref()
             .and_then(|version| version.parse().ok());
+        let operator_version = self.operator.spec.operator_version.clone();
         let allow_reconnect = self
             .operator
             .spec
@@ -793,6 +1028,7 @@ impl OperatorApi<PreparedClientCert> {
             client_cert: self.client_cert.cert.clone(),
             operator_license_fingerprint: self.operator.spec.license.fingerprint.clone(),
             operator_protocol_version,
+            operator_version,
             allow_reconnect,
         })
     }
@@ -837,6 +1073,8 @@ impl OperatorApi<PreparedClientCert> {
         profile: Option<&str>,
         branch_name: Option<String>,
         mysql_branch_names: Vec<String>,
+        pg_branch_names: Vec<String>,
+        session_ci_info: Option<SessionCiInfo>,
     ) -> String {
         let name = crd
             .meta()
@@ -861,6 +1099,8 @@ impl OperatorApi<PreparedClientCert> {
             sqs_splits: Default::default(),
             branch_name,
             mysql_branch_names,
+            pg_branch_names,
+            session_ci_info,
         };
 
         if use_proxy {
@@ -925,6 +1165,7 @@ impl OperatorApi<PreparedClientCert> {
             .clone();
 
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
+
         let copy_target_name = TargetCrd::urlfied_name(&target);
         let copy_target_spec = CopyTargetSpec {
             target,
@@ -1092,7 +1333,7 @@ impl OperatorApi<PreparedClientCert> {
     #[tracing::instrument(level = Level::TRACE, skip(layer_config, reporter), ret, err)]
     pub async fn connect_in_existing_session<R>(
         layer_config: &LayerConfig,
-        session: OperatorSession,
+        session: Box<OperatorSession>,
         reporter: &mut R,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
@@ -1114,13 +1355,18 @@ impl OperatorApi<PreparedClientCert> {
             .headers
             .push((HeaderName::from_static(CLIENT_CERT_HEADER), cert_header));
 
-        let client = Client::try_from(config)
+        let client = ClientBuilder::try_from(config)
             .map_err(KubeApiError::from)
-            .map_err(OperatorApiError::CreateKubeClient)?;
+            .map_err(OperatorApiError::CreateKubeClient)?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(RetryKube::try_from(
+                &layer_config.startup_retry,
+            )?))
+            .build();
 
-        let (tx, rx) = Self::connect_target(&client, &session).await?;
+        let conn = Self::connect_target(&client, &session).await?;
 
-        Ok(OperatorSessionConnection { tx, rx, session })
+        Ok(OperatorSessionConnection { conn, session })
     }
 
     /// Creates websocket connection to the operator target.
@@ -1128,24 +1374,61 @@ impl OperatorApi<PreparedClientCert> {
     async fn connect_target(
         client: &Client,
         session: &OperatorSession,
-    ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
-        let request = Request::builder()
+    ) -> OperatorApiResult<Connection<ProtocolClient>> {
+        let request_builder = Request::builder()
             .uri(&session.connect_url)
-            .header(SESSION_ID_HEADER, session.id.to_string())
+            .header(SESSION_ID_HEADER, session.id.to_string());
+
+        let request = request_builder
             .body(vec![])
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
 
-        let connection = upgrade::connect_ws(client, request)
+        #[derive(thiserror::Error, Debug)]
+        enum OperatorClientError {
+            #[error(transparent)]
+            DecodeError(#[from] bincode::error::DecodeError),
+            #[error(transparent)]
+            WsError(#[from] tungstenite::Error),
+            #[error("invalid message: {0:?}")]
+            InvalidMessage(tungstenite::Message),
+        }
+
+        let ws = upgrade::connect_ws(client, request)
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
-            })?;
+            })?
+            .with(|e: Vec<u8>| async {
+                Ok::<_, OperatorClientError>(tungstenite::Message::Binary(e))
+            })
+            .map(|i| match i.map_err(OperatorClientError::from)? {
+                tungstenite::Message::Binary(pl) => Ok(pl),
+                other => Err(OperatorClientError::InvalidMessage(other)),
+            });
 
-        Ok(ConnectionWrapper::wrap(
-            connection,
-            session.operator_protocol_version.clone(),
-        ))
+        let operator_protocol_version = session.operator_protocol_version.clone();
+
+        let conn = Connection::<ProtocolClient>::from_channel(
+            ws,
+            // Mock protocol version negotiation if the operator does not support it.
+            Some(move |msg| match msg {
+                ClientMessage::SwitchProtocolVersion(version) => match &operator_protocol_version {
+                    Some(operator_protocol_version) => {
+                        Either::Left(ClientMessage::SwitchProtocolVersion(
+                            operator_protocol_version.min(&version).clone(),
+                        ))
+                    }
+                    _ => Either::Right(DaemonMessage::SwitchProtocolVersionResponse(
+                        semver::Version::new(1, 2, 1),
+                    )),
+                },
+                other => Either::Left(other),
+            }),
+        )
+        .await?;
+
+        Ok(conn)
     }
 
     /// Prepare branch databases, and return database resource names.
@@ -1154,7 +1437,7 @@ impl OperatorApi<PreparedClientCert> {
     /// 2. Create new ones if any missing.
     /// 3. Wait for all new databases to be ready.
     #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
-    async fn prepare_branch_dbs<P: Progress>(
+    async fn prepare_mysql_branch_dbs<P: Progress>(
         &self,
         layer_config: &LayerConfig,
         progress: &P,
@@ -1172,17 +1455,37 @@ impl OperatorApi<PreparedClientCert> {
             .unwrap_or(self.client.default_namespace());
         let mysql_branch_api: Api<MysqlBranchDatabase> =
             Api::namespaced(self.client.clone(), namespace);
-
         let DatabaseBranchParams {
             mysql: mut create_mysql_params,
+            pg: _create_pg_params,
         } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
 
         let reusable_mysql_branches =
             list_reusable_mysql_branches(&mysql_branch_api, &create_mysql_params, &subtask).await?;
 
         create_mysql_params.retain(|id, _| !reusable_mysql_branches.contains_key(id));
+
+        // Get the maximum timeout from all DB branch configs
+        let timeout_secs = layer_config
+            .feature
+            .db_branches
+            .iter()
+            .map(|branch_config| match branch_config {
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
+                    mysql_config,
+                ) => mysql_config.base.creation_timeout_secs,
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
+                    pg_config.base.creation_timeout_secs
+                }
+            })
+            .max()
+            .unwrap_or(default_creation_timeout_secs());
+        let timeout = std::time::Duration::from_secs(timeout_secs);
+
         let created_mysql_branches =
-            create_mysql_branches(&mysql_branch_api, create_mysql_params, &subtask).await?;
+            create_mysql_branches(&mysql_branch_api, create_mysql_params, timeout, &subtask)
+                .await?;
+
         subtask.success(None);
 
         let mysql_branch_names = reusable_mysql_branches
@@ -1198,6 +1501,76 @@ impl OperatorApi<PreparedClientCert> {
             .collect::<Result<Vec<String>, _>>()?;
         Ok(mysql_branch_names)
     }
+
+    /// Prepare branch databases, and return database resource names.
+    ///
+    /// 1. List reusable branch databases.
+    /// 2. Create new ones if any missing.
+    /// 3. Wait for all new databases to be ready.
+    #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
+    async fn prepare_pg_branch_dbs<P: Progress>(
+        &self,
+        layer_config: &LayerConfig,
+        progress: &P,
+    ) -> OperatorApiResult<Vec<String>> {
+        let mut subtask = progress.subtask("preparing branch databases");
+        let target = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
+        let namespace = layer_config
+            .target
+            .namespace
+            .as_deref()
+            .unwrap_or(self.client.default_namespace());
+        let pg_branch_api: Api<PgBranchDatabase> = Api::namespaced(self.client.clone(), namespace);
+        let DatabaseBranchParams {
+            mysql: _create_mysql_params,
+            pg: mut create_pg_params,
+        } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+
+        let reusable_pg_branches =
+            list_reusable_pg_branches(&pg_branch_api, &create_pg_params, &subtask).await?;
+
+        create_pg_params.retain(|id, _| !reusable_pg_branches.contains_key(id));
+
+        // Get the maximum timeout from all DB branch configs
+        let timeout_secs = layer_config
+            .feature
+            .db_branches
+            .iter()
+            .map(|branch_config| match branch_config {
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
+                    mysql_config,
+                ) => mysql_config.base.creation_timeout_secs,
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
+                    pg_config.base.creation_timeout_secs
+                }
+            })
+            .max()
+            .unwrap_or(default_creation_timeout_secs());
+        let timeout = std::time::Duration::from_secs(timeout_secs);
+
+        let created_mysql_branches =
+            create_pg_branches(&pg_branch_api, create_pg_params, timeout, &subtask).await?;
+
+        subtask.success(None);
+
+        let pg_branch_names = reusable_pg_branches
+            .values()
+            .chain(created_mysql_branches.values())
+            .map(|branch| {
+                branch
+                    .meta()
+                    .name
+                    .clone()
+                    .ok_or(KubeApiError::missing_field(branch, ".metadata.name"))
+            })
+            .collect::<Result<Vec<String>, _>>()?;
+
+        Ok(pg_branch_names)
+    }
 }
 
 #[cfg(test)]
@@ -1212,7 +1585,7 @@ mod test {
     use rstest::rstest;
 
     use super::OperatorApi;
-    use crate::client::connect_params::ConnectParams;
+    use crate::{client::connect_params::ConnectParams, crd::session::SessionCiInfo};
 
     /// Verifies that [`OperatorApi::target_connect_url`] produces expected URLs.
     ///
@@ -1229,11 +1602,13 @@ mod test {
                 },
                 spec: None,
                 status: None,
-            },
+            }.into(),
             container: None,
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -1250,11 +1625,13 @@ mod test {
                 },
                 spec: None,
                 status: None,
-            },
+            }.into(),
             container: None,
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -1271,11 +1648,13 @@ mod test {
                 },
                 spec: None,
                 status: None,
-            },
+            }.into(),
             container: Some("py-serv".into()),
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -1292,11 +1671,13 @@ mod test {
                 },
                 spec: None,
                 status: None,
-            },
+            }.into(),
             container: Some("py-serv".into()),
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -1313,11 +1694,13 @@ mod test {
                 },
                 spec: None,
                 status: None,
-            },
+            }.into(),
             container: Some("py-serv".into()),
         }),
         ConcurrentSteal::Abort,
         Some("no-steal"),
+        Default::default(),
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -1334,11 +1717,13 @@ mod test {
                 },
                 spec: None,
                 status: None,
-            },
+            }.into(),
             container: Some("py-serv".into()),
         }),
         ConcurrentSteal::Abort,
         Some("/should?be&escaped"),
+        Default::default(),
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -1355,7 +1740,7 @@ mod test {
                 },
                 spec: None,
                 status: None,
-            },
+            }.into(),
             container: Some("py-serv".into()),
         }),
         ConcurrentSteal::Abort,
@@ -1367,6 +1752,8 @@ mod test {
                 ("header-2".to_string(), "filter-2".to_string()),
             ]),
         )]),
+        Default::default(),
+        Default::default(),
         Default::default(),
         Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
@@ -1383,7 +1770,7 @@ mod test {
                 },
                 spec: None,
                 status: None,
-            },
+            }.into(),
             container: Some("py-serv".into()),
         }),
         ConcurrentSteal::Abort,
@@ -1396,6 +1783,8 @@ mod test {
                 ("header-2".to_string(), "filter-2".to_string()),
             ]),
         )]),
+        Default::default(),
+        Default::default(),
         Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&sqs_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
@@ -1411,7 +1800,7 @@ mod test {
                 },
                 spec: None,
                 status: None,
-            },
+            }.into(),
             container: Some("py-serv".into()),
         }),
         ConcurrentSteal::Abort,
@@ -1419,8 +1808,62 @@ mod test {
         Default::default(),
         Default::default(),
         vec!["branch-1".into(), "branch-2".into()],
+        Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&mysql_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
+    )]
+    #[case::deployment_container_proxy_pg_branches(
+        true,
+        ResolvedTarget::Deployment(ResolvedResource {
+            resource: Deployment {
+                metadata: ObjectMeta {
+                    name: Some("py-serv-deployment".into()),
+                    namespace: Some("default".into()),
+                    ..Default::default()
+                },
+                spec: None,
+                status: None,
+            }.into(),
+            container: Some("py-serv".into()),
+        }),
+        ConcurrentSteal::Abort,
+        None,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        vec!["branch-1".into(), "branch-2".into()],
+        Default::default(),
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
+        ?connect=true&on_concurrent_steal=abort&pg_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
+    )]
+    #[case::deployment_no_container_no_proxy_with_session_ci_info(
+        false,
+        ResolvedTarget::Deployment(ResolvedResource {
+            resource: Deployment {
+                metadata: ObjectMeta {
+                    name: Some("py-serv-deployment".into()),
+                    namespace: Some("default".into()),
+                    ..Default::default()
+                },
+                spec: None,
+                status: None,
+            }.into(),
+            container: None,
+        }),
+        ConcurrentSteal::Abort,
+        None,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        Some(SessionCiInfo {
+            provider: Some("Krzysztof".into()),
+            environment: Some("Kresy".into()),
+            pipeline: Some("Wschodnie".into()),
+            triggered_by: Some("Kononowicz".into())
+        }),
+        "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort&session_ci_info=%7B%22provider%22%3A%22Krzysztof%22%2C%22environment%22%3A%22Kresy%22%2C%22pipeline%22%3A%22Wschodnie%22%2C%22triggeredBy%22%3A%22Kononowicz%22%7D"
     )]
     #[test]
     fn target_connect_url(
@@ -1431,6 +1874,8 @@ mod test {
         #[case] kafka_splits: HashMap<&str, BTreeMap<String, String>>,
         #[case] sqs_splits: HashMap<&str, BTreeMap<String, String>>,
         #[case] mysql_branch_names: Vec<String>,
+        #[case] pg_branch_names: Vec<String>,
+        #[case] session_ci_info: Option<SessionCiInfo>,
         #[case] expected: &str,
     ) {
         let kafka_splits = kafka_splits
@@ -1451,6 +1896,8 @@ mod test {
             sqs_splits,
             branch_name: None,
             mysql_branch_names,
+            pg_branch_names,
+            session_ci_info,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);

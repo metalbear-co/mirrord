@@ -1,3 +1,8 @@
+# Cross compilable mirrord workspace
+# On Windows: You can build specific packages like cargo build -p mirrord -p mirrord-layer-win
+# On Unix: Default cargo build will build the Unix-compatible crates
+# All platforms: mirrord/* in members ensures all crates are available for explicit builds
+# This will be resolved in the future, follow - https://github.com/rust-lang/rfcs/pull/3759
 [workspace]
 
 members = [
@@ -31,7 +36,7 @@ resolver = "2"
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.161.0"
+version = "3.179.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -59,22 +64,25 @@ categories = ["development-tools", "backend", "devtool"]
 [workspace.dependencies]
 actix-codec = "0.5"
 
-# Used by `operator`, `layer`, `console`, `protocol`, `intproxy-protocol`.
+# Used by `operator`, `layer`, `console`, `protocol`, `intproxy-protocol`, `auth`.
 bincode = { version = "2", features = ["serde"] }
 bytes = "1"
 
-tokio = { version = "1" }
+# Used by `protocol`
+derive_more = "2.0.1"
+
+tokio = { version = "1", features = ["fs", "net", "io-util"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 nix = { version = "0.29", features = ["net"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 futures = "0.3"
 thiserror = "2"
-k8s-openapi = { version = "0.24", features = ["earliest"] }
+k8s-openapi = { version = "0.24", features = ["v1_30"] }
 reqwest = { version = "0.12", default-features = false, features = [
     "blocking",
     "rustls-tls-native-roots",
@@ -82,7 +90,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "socks",
     "http2",
 ] }
-kube = { git = "https://github.com/metalbear-co/kube.git", rev = "c095706801fd0fc287e82bcbc314b458097fe9e1", default-features = false, features = [
+kube = { git = "https://github.com/metalbear-co/kube.git", rev = "842a9e2ef0fe8bc62c25106c763a0a2f800ff6e5", default-features = false, features = [
     "runtime",
     "derive",
     "client",
@@ -93,10 +101,7 @@ kube = { git = "https://github.com/metalbear-co/kube.git", rev = "c095706801fd0f
     "socks5",
     "http-proxy",
 ] }
-hickory-resolver = { version = "0.24.3", features = [
-    "serde",
-    "tokio-runtime",
-] }
+hickory-resolver = { version = "0.24.3", features = ["serde", "tokio-runtime"] }
 hickory-proto = "0.24.3"
 tokio-util = { version = "0.7", features = ["net", "codec"] }
 
@@ -108,9 +113,13 @@ fancy-regex = { version = "0.14" }
 enum_dispatch = "0.3"
 dotenvy = "0.15"
 
+# Used by `agent`, `protocol`
+serde_json_path = "0.7.2"
+serde_json_path_macros = "0.1.6"
+
 # If you update `hyper`, check that `h2` version is compatible in `intproxy/Cargo.toml`.
 # There is a test for this: `cargo test -p mirrord-intproxy hyper_and_h2_versions_in_sync`
-hyper = { version = "1", features = ["full"] }
+hyper = { version = "1.7", features = ["full"] }
 hyper-util = { version = "0.1" }
 http-body = "1"
 http-body-util = "0.1"
@@ -126,7 +135,7 @@ rustls = "0.23"
 # Used by `operator`, `tests`.
 tokio-tungstenite = { version = "0.24" }
 
-# Used by `operator`, `agent`.
+# Used by `operator`, `agent`, `kube`.
 http = { version = "1" }
 
 # Used by `intproxy`, `cli`.
@@ -185,19 +194,68 @@ pem = "3"
 
 # Used by `cli`, `auth`
 home = "0.5"
-
-# Used by `cli`, `analytics`
-uuid = { version = "1.17", features = ["v4", "serde"] }
-
-# Used by `cli`, `auth`
 fs4 = { version = "0.13", features = ["tokio"], default-features = false }
+
+# Used by `cli`, `analytics`, `protocol`
+uuid = { version = "1.18", features = ["v4", "serde"] }
 
 # Used by `cli`, `sip`
 hex = "0.4"
 
-# Used by `config`, `protocol`.
+# Used by `config`, `protocol`, `agent`
 strum = "0.27.1"
 strum_macros = "0.27.1"
+
+# Used by `cli`
+dll-syringe = "0.16.0"
+
+# Used by `layer` and `layerlib`
+frida-gum = { version = "0.17", features = ["auto-download", "std"] }
+
+# Used by `layer-win`
+anyhow = "1.0"
+minhook-detours-rs = { git = "https://github.com/metalbear-co/minhook-detours-rs.git", rev = "4bfbf5717c6829f91b527180a038ec591b8265ca" }
+windows-strings = "0.4"
+
+# Used by `cli`, `intproxy`
+windows = { version = "0.61", features = [
+    "Win32_Security",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+    "Win32_Foundation",
+    "Win32_Networking_WinSock",
+] }
+
+# Used by `cli`, `kube`
+itertools = "0.14.0"
+
+# Used by `layer-win`
+winapi = { version = "0.3.9", features = [
+    "winbase",
+    "minwindef",
+    "winnt",
+    "consoleapi",
+    "libloaderapi",
+    "fileapi",
+    "winsock2",
+    "mswsock",
+    "ws2tcpip",
+    "ws2def",
+    "ws2ipdef",
+    "debugapi",
+    "processthreadsapi",
+    "errhandlingapi",
+    "sysinfoapi",
+    "synchapi",
+    "handleapi",
+    "processenv",
+    "winioctl",
+    "memoryapi",
+    "timezoneapi",
+    "securitybaseapi",
+    "namedpipeapi",
+] }
+
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"

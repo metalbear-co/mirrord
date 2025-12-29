@@ -1,0 +1,65 @@
+[package]
+name = "mirrord-layer-lib"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["cli-execution", "layer-hook-execution"]
+# CLI-specific process execution (for mirrord CLI spawning processes)
+cli-execution = []
+# Layer hook-specific process execution (for intercepted process creation)
+layer-hook-execution = []
+
+[dependencies]
+mirrord-config = { path = "../config" }
+mirrord-protocol = { path = "../protocol" }
+mirrord-progress = { path = "../progress" }
+mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
+mirrord-layer-macro = { path = "../layer/macro" }
+
+base64.workspace = true
+bincode.workspace = true
+socket2.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+regex.workspace = true
+
+# Tokio for async pipe operations
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
+frida-gum = { version = "0.17", features = ["auto-download", "std"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mirrord-sip = { path = "../sip" }
+exec.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+str-win = { path = "../str-win" }
+winapi.workspace = true
+dll-syringe.workspace = true
+anyhow.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[dev-dependencies]
+mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
+serde_json.workspace = true
+rstest.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "fs"] }
+tempfile.workspace = true
+rand.workspace = true

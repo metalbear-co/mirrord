@@ -10,13 +10,12 @@ use std::{
 
 use base64::prelude::*;
 use bincode::{Decode, Encode};
-use hooks::FN_FCNTL;
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::feature::network::{
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
     outgoing::{OutgoingConfig, OutgoingFilterConfig},
 };
-use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
+use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnCloseRequest, PortUnsubscribe};
 use mirrord_protocol::{
     DnsLookupError, ResolveErrorKindInternal, ResponseError, outgoing::SocketAddress,
 };
@@ -80,7 +79,11 @@ pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> = La
             Mutex::new(HashMap::from_iter(fds_and_sockets.into_iter().filter_map(
                 |(fd, socket)| {
                     // Do not inherit sockets that are `FD_CLOEXEC`.
-                    if unsafe { FN_FCNTL(fd, libc::F_GETFD, 0) != -1 } {
+                    // NOTE: The original `fcntl` is called instead of `FN_FCNTL` because the latter
+                    // may be null at this point, likely due to child-spawning functions that mess
+                    // with memory such as fork/exec.
+                    // See: https://github.com/metalbear-co/mirrord-intellij/issues/374
+                    if unsafe { libc::fcntl(fd, libc::F_GETFD, 0) != -1 } {
                         Some((fd, Arc::new(socket)))
                     } else {
                         None
@@ -104,7 +107,11 @@ pub struct Connected {
     /// but use this address in the [`libc::recvfrom`] handling of [`fill_address`].
     remote_address: SocketAddress,
 
-    /// Local address (pod-wise)
+    /// Local address of the agent's socket.
+    ///
+    /// Whenever the user calls [`libc::getsockname`], this is the address we return to them.
+    ///
+    /// Not available in case of experimental non-blocking TCP connections.
     ///
     /// ## Example
     ///
@@ -117,11 +124,16 @@ pub struct Connected {
     ///
     /// We would set this ip as `1.2.3.4:{port}` in `bind`, where `{port}` is the user requested
     /// port.
-    local_address: SocketAddress,
+    local_address: Option<SocketAddress>,
 
     /// The address of the interceptor socket, this is what we're really connected to in the
     /// outgoing feature.
     layer_address: Option<SocketAddress>,
+
+    /// Unique ID of this connection.
+    ///
+    /// Only for sockets used for outgoing connections.
+    connection_id: Option<u128>,
 }
 
 /// Represents a [`SocketState`] where the user made a [`libc::bind`] call, and we intercepted it.
@@ -149,7 +161,12 @@ pub struct Bound {
 pub enum SocketState {
     #[default]
     Initialized,
-    Bound(Bound),
+    Bound {
+        bound: Bound,
+        // if true, the socket has a mapped BUT should not be used to make port subscriptions
+        // used for listen_ports (COR-1014).
+        is_only_bound: bool,
+    },
     Listening(Bound),
     Connected(Connected),
 }
@@ -223,16 +240,30 @@ impl UserSocket {
     /// Inform internal proxy about closing a listening port.
     #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()), ret)]
     pub(crate) fn close(&self) {
-        if let Self {
-            state: SocketState::Listening(bound),
-            kind: SocketKind::Tcp(..),
-            ..
-        } = self
-        {
-            let _ = common::make_proxy_request_no_response(PortUnsubscribe {
-                port: bound.requested_address.port(),
-                listening_on: bound.address,
-            });
+        match self {
+            Self {
+                state: SocketState::Listening(bound),
+                kind: SocketKind::Tcp(..),
+                ..
+            } => {
+                let _ = common::make_proxy_request_no_response(PortUnsubscribe {
+                    port: bound.requested_address.port(),
+                    listening_on: bound.address,
+                });
+            }
+            Self {
+                state:
+                    SocketState::Connected(Connected {
+                        connection_id: Some(id),
+                        ..
+                    }),
+                ..
+            } => {
+                let _ = common::make_proxy_request_no_response(OutgoingConnCloseRequest {
+                    conn_id: *id,
+                });
+            }
+            _ => {}
         }
     }
 }

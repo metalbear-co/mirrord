@@ -2,6 +2,8 @@ use std::{
     fmt,
     net::{Ipv4Addr, SocketAddr},
     ops::Not,
+    pin::Pin,
+    task::{Context, Poll},
     time::Duration,
 };
 
@@ -10,7 +12,7 @@ use futures::StreamExt;
 use http_body_util::{BodyExt, Empty, StreamBody, combinators::BoxBody};
 use hyper::{
     Request, Response,
-    body::{Frame, Incoming},
+    body::{Body, Frame, Incoming, SizeHint},
     header,
     http::{HeaderName, Method, StatusCode, request},
 };
@@ -40,7 +42,8 @@ use crate::{
         HttpVersion, body::RolledBackBody, extract_requests::ExtractedRequests, sender::HttpSender,
     },
     steal::{StealerCommand, TcpStealerApi},
-    util::{ClientId, protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus},
+    task::status::BgTaskStatus,
+    util::{ClientId, protocol_version::ClientProtocolVersion},
 };
 
 /// TCP protocols used in steal tests.
@@ -169,8 +172,42 @@ impl TestHttpKind {
     }
 }
 
+// Boxing things to keep generics out of [`TestRequest`]
+pub struct TestBody {
+    body_gen: Box<dyn Fn() -> BoxBody<Bytes, hyper::Error> + Send + Sync>,
+
+    #[allow(clippy::type_complexity)]
+    verifier: Box<
+        dyn Fn(
+                &request::Parts,
+                RolledBackBody<Incoming>,
+            ) -> Pin<Box<dyn Future<Output = ()> + Send>>
+            + Send
+            + Sync,
+    >,
+}
+
+impl TestBody {
+    pub fn new<B, R, V>(body: B, verifier: V) -> Self
+    where
+        R: Body<Data = Bytes, Error = hyper::Error> + Send + Sync + 'static,
+        B: Fn() -> R + Send + Sync + 'static,
+        V: Fn(
+                &request::Parts,
+                RolledBackBody<Incoming>,
+            ) -> Pin<Box<dyn Future<Output = ()> + Send>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        Self {
+            body_gen: Box::new(move || body().boxed()),
+            verifier: Box::new(verifier),
+        }
+    }
+}
+
 /// HTTP request used in steal tests.
-#[derive(Clone)]
 pub struct TestRequest {
     pub path: String,
     pub id_header: usize,
@@ -179,6 +216,7 @@ pub struct TestRequest {
     pub kind: TestHttpKind,
     pub connector: Option<TlsConnector>,
     pub acceptor: Option<TlsAcceptor>,
+    pub body: Option<TestBody>,
 }
 
 impl fmt::Debug for TestRequest {
@@ -198,6 +236,7 @@ impl TestRequest {
     const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("request-id");
     pub const USER_ID_HEADER: HeaderName = HeaderName::from_static("user-id");
     const HANDLED_BY_HEADER: HeaderName = HeaderName::from_static("handled-by");
+    pub const MIRRORD_AGENT_HEADER: HeaderName = HeaderName::from_static("mirrord-agent");
 
     fn as_hyper_request(&self) -> Request<BoxBody<Bytes, hyper::Error>> {
         let uri = format!(
@@ -220,27 +259,39 @@ impl TestRequest {
                 .body(Empty::<Bytes>::new().map_err(|_| unreachable!()).boxed())
                 .unwrap(),
             None => {
-                let (frame_tx, frame_rx) = mpsc::channel::<Result<Frame<Bytes>, hyper::Error>>(1);
-                tokio::spawn(async move {
-                    for _ in 0..3 {
-                        tokio::time::sleep(Duration::from_millis(10)).await;
-                        frame_tx
-                            .send(Ok(Frame::data(Self::FRAME.into())))
-                            .await
-                            .unwrap();
-                    }
-                });
+                let body = self
+                    .body
+                    .as_ref()
+                    .map(|t| (t.body_gen)())
+                    .unwrap_or_else(|| {
+                        let (frame_tx, frame_rx) =
+                            mpsc::channel::<Result<Frame<Bytes>, hyper::Error>>(1);
+
+                        tokio::spawn(async move {
+                            for _ in 0..3 {
+                                tokio::time::sleep(Duration::from_millis(10)).await;
+                                frame_tx
+                                    .send(Ok(Frame::data(Self::FRAME.into())))
+                                    .await
+                                    .unwrap();
+                            }
+                        });
+                        BoxBody::new(StreamBody::new(ReceiverStream::new(frame_rx)))
+                    });
                 Request::builder()
                     .method(Method::POST)
                     .uri(uri)
                     .header(Self::REQUEST_ID_HEADER, self.id_header.to_string())
                     .header(Self::USER_ID_HEADER, self.user_header.to_string())
-                    .body(BoxBody::new(StreamBody::new(ReceiverStream::new(frame_rx))))
+                    .body(body)
                     .unwrap()
             }
         }
     }
 
+    /// Generates a test response to this request. Includes
+    /// `request-id` and `handled-by` headers for running later
+    /// assertions.
     fn as_hyper_response(&self, handled_by: ClientId) -> Response<BoxBody<Bytes, hyper::Error>> {
         match self.upgrade {
             Some(protocol) => Response::builder()
@@ -320,15 +371,20 @@ impl TestRequest {
                     protocol.name()
                 );
             }
-            None => {
-                assert_eq!(parts.method, Method::POST);
-                let body = body.collect().await.unwrap().to_bytes();
-                let expected = std::iter::repeat_n(Self::FRAME, 3)
-                    .flatten()
-                    .copied()
-                    .collect::<Vec<_>>();
-                assert_eq!(body.as_ref(), &expected);
-            }
+            None => match &self.body {
+                Some(test) => {
+                    (test.verifier)(&parts, body).await;
+                }
+                None => {
+                    assert_eq!(parts.method, Method::POST);
+                    let body = body.collect().await.unwrap().to_bytes();
+                    let expected = std::iter::repeat_n(Self::FRAME, 3)
+                        .flatten()
+                        .copied()
+                        .collect::<Vec<_>>();
+                    assert_eq!(body.as_ref(), &expected);
+                }
+            },
         }
     }
 
@@ -396,6 +452,11 @@ impl TestRequest {
         }
     }
 
+    /// Accept a request on `conn`, verify that it matches this one,
+    /// and respond to it.
+    ///
+    /// This is only useful for verifying passthrough requests. For
+    /// stolen requests, see [`StealingClient::expect_request`].
     pub async fn accept(&self, conn: TcpStream, handled_by: ClientId) {
         let conn = match &self.acceptor {
             Some(acceptor) => {
@@ -485,9 +546,21 @@ impl TestRequest {
         sender: &mut HttpSender<BoxBody<Bytes, hyper::Error>>,
         expect_handled_by: ClientId,
     ) {
+        self.send_verify(sender, expect_handled_by, |_| ()).await
+    }
+
+    pub async fn send_verify<F>(
+        &self,
+        sender: &mut HttpSender<BoxBody<Bytes, hyper::Error>>,
+        expect_handled_by: ClientId,
+        verify: F,
+    ) where
+        F: FnOnce(&Response<Incoming>),
+    {
         println!("[{}:{}] Sending request: {self:?}", file!(), line!());
         let request = self.as_hyper_request();
         let mut response = sender.send(request).await.unwrap();
+        verify(&response);
 
         println!(
             "[{}:{}] Got response: {response:?}, expected {self:?}",
@@ -511,6 +584,9 @@ impl TestRequest {
     }
 }
 
+/// Client for listening for and handling stolen connections. Directly
+/// receives and interprets `DaemonMessage`s. For handling passthrough
+/// requests, see `TestRequest::accept` and friends.
 pub struct StealingClient {
     id: ClientId,
     api: TcpStealerApi,
@@ -597,6 +673,7 @@ impl StealingClient {
         }
     }
 
+    /// For handling passthrough requests, see [`TestRequest::accept`].
     pub async fn expect_request(&mut self, expected: &TestRequest) {
         let mut request = match self.api.recv().await.unwrap() {
             DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV1(
@@ -900,5 +977,40 @@ impl StealingClient {
 
     pub async fn recv(&mut self) -> DaemonMessage {
         self.api.recv().await.unwrap()
+    }
+}
+
+pub struct WithSizeHint<B> {
+    inner: B,
+    size: Option<SizeHint>,
+}
+
+impl<B> WithSizeHint<B> {
+    pub fn new(inner: B, size: Option<SizeHint>) -> Self {
+        Self { inner, size }
+    }
+}
+
+impl<B> Body for WithSizeHint<B>
+where
+    B: Body,
+{
+    type Data = B::Data;
+    type Error = B::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        // SAFETY: We're not moving out of `inner`
+        unsafe { self.map_unchecked_mut(|s| &mut s.inner).poll_frame(cx) }
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.size.clone().unwrap_or_default()
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
     }
 }

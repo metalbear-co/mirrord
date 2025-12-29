@@ -1,8 +1,6 @@
 #![feature(error_reporter)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
-// TODO(alex): Get a big `Box` for the big variants.
-#![allow(clippy::large_enum_variant)]
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -24,6 +22,7 @@ use mirrord_intproxy_protocol::{
 use mirrord_protocol::{
     CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
 };
+use mirrord_protocol_io::{Client, TxHandle};
 use ping_pong::{PingPong, PingPongMessage};
 use proxies::{
     files::{FilesProxy, FilesProxyMessage},
@@ -100,13 +99,19 @@ pub struct IntProxy {
 
     /// Interval for logging connected process information
     process_logging_interval: Interval,
+
+    /// Send handle for the agent connection
+    agent_tx: TxHandle<Client>,
 }
 
 impl IntProxy {
     /// Size of channels used to communicate with main tasks (see [`MainTaskId`]).
     const CHANNEL_SIZE: usize = 512;
     /// How long can the agent connection remain silent.
+    #[cfg(not(test))]
     const PING_INTERVAL: Duration = Duration::from_secs(30);
+    #[cfg(test)]
+    const PING_INTERVAL: Duration = Duration::from_secs(1);
     /// How many sequential reconnects should PingPong task attepmt to perform before giving up.
     const PING_PONG_MAX_RECONNECTS: usize = 5;
 
@@ -122,18 +127,16 @@ impl IntProxy {
         experimental: &ExperimentalConfig,
     ) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
-            Default::default();
+            BackgroundTasks::new(agent_conn.connection.tx_handle());
 
-        let agent = background_tasks.register_restartable(
-            agent_conn,
-            MainTaskId::AgentConnection,
-            Self::CHANNEL_SIZE,
-        );
         let layer_initializer = background_tasks.register(
             LayerInitializer::new(listener),
             MainTaskId::LayerInitializer,
             Self::CHANNEL_SIZE,
         );
+
+        let agent_conn_reconnectable = agent_conn.reconnectable();
+
         // We need to negotiate mirrord-protocol version
         // before we can process layers' requests.
         //
@@ -141,17 +144,24 @@ impl IntProxy {
         // to requests that have a requirement on the mirrord-protocol version.
         background_tasks.suspend_messages(MainTaskId::LayerInitializer);
         let ping_pong = background_tasks.register_restartable(
-            PingPong::new(Self::PING_INTERVAL, Self::PING_PONG_MAX_RECONNECTS),
+            PingPong::new(
+                Self::PING_INTERVAL,
+                if agent_conn_reconnectable {
+                    Self::PING_PONG_MAX_RECONNECTS
+                } else {
+                    0
+                },
+            ),
             MainTaskId::PingPong,
             Self::CHANNEL_SIZE,
         );
         let simple = background_tasks.register(
-            SimpleProxy::new(experimental.dns_permission_error_fatal.unwrap_or_default()),
+            SimpleProxy::new(experimental.dns_permission_error_fatal),
             MainTaskId::SimpleProxy,
             Self::CHANNEL_SIZE,
         );
         let outgoing = background_tasks.register(
-            OutgoingProxy::default(),
+            OutgoingProxy::new(experimental.non_blocking_tcp_connect),
             MainTaskId::OutgoingProxy,
             Self::CHANNEL_SIZE,
         );
@@ -166,6 +176,14 @@ impl IntProxy {
         let files = background_tasks.register(
             FilesProxy::new(file_buffer_size),
             MainTaskId::FilesProxy,
+            Self::CHANNEL_SIZE,
+        );
+
+        let agent_tx = agent_conn.connection.tx_handle();
+
+        let agent = background_tasks.register_restartable(
+            agent_conn,
+            MainTaskId::AgentConnection,
             Self::CHANNEL_SIZE,
         );
 
@@ -195,6 +213,7 @@ impl IntProxy {
             ping_pong_update_allowed: false,
             connected_layers: HashMap::new(),
             process_logging_interval,
+            agent_tx,
         }
     }
 
@@ -237,8 +256,7 @@ impl IntProxy {
         first_timeout: Duration,
         idle_timeout: Duration,
     ) -> ControlFlow<Result<(), ProxyStartupError>, FailoverStrategy> {
-        self.task_txs
-            .agent
+        self.agent_tx
             .send(ClientMessage::SwitchProtocolVersion(
                 mirrord_protocol::VERSION.clone(),
             ))
@@ -305,7 +323,7 @@ impl IntProxy {
     /// [`ProxyMessage::NewLayer`] is handled here, as an exception.
     async fn handle(&mut self, msg: ProxyMessage) -> Result<(), ProxyRuntimeError> {
         match msg {
-            ProxyMessage::NewLayer(_) | ProxyMessage::FromLayer(_) | ProxyMessage::ToAgent(_)
+            ProxyMessage::NewLayer(_) | ProxyMessage::FromLayer(_)
                 if self.reconnect_task_queue.is_some() =>
             {
                 // We are in reconnect state so should queue this message.
@@ -343,6 +361,10 @@ impl IntProxy {
                         .incoming
                         .send(IncomingProxyMessage::LayerForked(msg))
                         .await;
+                    self.task_txs
+                        .outgoing
+                        .send(OutgoingProxyMessage::LayerForked(msg))
+                        .await;
                 }
             }
             ProxyMessage::FromAgent(msg) => self.handle_agent_message(msg).await?,
@@ -356,7 +378,6 @@ impl IntProxy {
                 }
                 self.handle_layer_message(msg).await?
             }
-            ProxyMessage::ToAgent(msg) => self.task_txs.agent.send(msg).await,
             ProxyMessage::ToLayer(msg) => {
                 let ToLayer {
                     message,
@@ -404,6 +425,10 @@ impl IntProxy {
                 self.task_txs
                     .incoming
                     .send(IncomingProxyMessage::LayerClosed(msg))
+                    .await;
+                self.task_txs
+                    .outgoing
+                    .send(OutgoingProxyMessage::LayerClosed(msg))
                     .await;
 
                 self.task_txs.layers.remove(&LayerId(id));
@@ -457,10 +482,7 @@ impl IntProxy {
                     .await
             }
             DaemonMessage::OperatorPing(id) => {
-                self.task_txs
-                    .agent
-                    .send(ClientMessage::OperatorPong(id))
-                    .await
+                self.agent_tx.send(ClientMessage::OperatorPong(id)).await
             }
             DaemonMessage::Close(reason) => Err(ProxyRuntimeError::AgentFailed(reason))?,
             DaemonMessage::TcpOutgoing(msg) => {
@@ -508,7 +530,7 @@ impl IntProxy {
                 }
 
                 if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
-                    self.task_txs.agent.send(ClientMessage::ReadyForLogs).await;
+                    self.agent_tx.send(ClientMessage::ReadyForLogs).await;
                 }
 
                 self.task_txs
@@ -525,7 +547,14 @@ impl IntProxy {
 
                 self.task_txs
                     .incoming
-                    .send(IncomingProxyMessage::AgentProtocolVersion(protocol_version))
+                    .send(IncomingProxyMessage::AgentProtocolVersion(
+                        protocol_version.clone(),
+                    ))
+                    .await;
+
+                self.task_txs
+                    .outgoing
+                    .send(OutgoingProxyMessage::AgentProtocolVersion(protocol_version))
                     .await;
             }
             DaemonMessage::LogMessage(log) => match log.level {
@@ -545,12 +574,12 @@ impl IntProxy {
             DaemonMessage::GetEnvVarsResponse(res) => {
                 self.task_txs
                     .simple
-                    .send(SimpleProxyMessage::GetEnvRes(res))
+                    .send(SimpleProxyMessage::GetEnvRes(res.map(Into::into)))
                     .await
             }
             message @ DaemonMessage::PauseTarget(_) | message @ DaemonMessage::Vpn(_) => {
                 Err(ProxyRuntimeError::UnexpectedAgentMessage(
-                    UnexpectedAgentMessage(message),
+                    UnexpectedAgentMessage(message.into()),
                 ))?;
             }
         }
@@ -579,12 +608,10 @@ impl IntProxy {
                     .send(SimpleProxyMessage::AddrInfoReq(message_id, layer_id, req))
                     .await
             }
-            LayerToProxyMessage::OutgoingConnect(req) => {
+            LayerToProxyMessage::Outgoing(req) => {
                 self.task_txs
                     .outgoing
-                    .send(OutgoingProxyMessage::LayerConnect(
-                        req, message_id, layer_id,
-                    ))
+                    .send(OutgoingProxyMessage::Layer(req, message_id, layer_id))
                     .await
             }
             LayerToProxyMessage::Incoming(req) => {
@@ -607,54 +634,66 @@ impl IntProxy {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_connection_refresh(
         &mut self,
         kind: ConnectionRefresh,
     ) -> Result<(), ProxyRuntimeError> {
         self.task_txs
             .ping_pong
-            .send(PingPongMessage::ConnectionRefresh(kind))
+            .send(PingPongMessage::ConnectionRefresh(
+                kind.clone_with_another_handle(),
+            ))
+            .await;
+
+        self.task_txs
+            .files
+            .send(FilesProxyMessage::ConnectionRefresh(
+                kind.clone_with_another_handle(),
+            ))
+            .await;
+
+        self.task_txs
+            .incoming
+            .send(IncomingProxyMessage::ConnectionRefresh(
+                kind.clone_with_another_handle(),
+            ))
+            .await;
+
+        self.task_txs
+            .outgoing
+            .send(OutgoingProxyMessage::ConnectionRefresh(
+                kind.clone_with_another_handle(),
+            ))
+            .await;
+
+        self.task_txs
+            .simple
+            .send(SimpleProxyMessage::ConnectionRefresh(
+                kind.clone_with_another_handle(),
+            ))
             .await;
 
         match kind {
             ConnectionRefresh::Start => {
                 // Initialise default reconnect message queue
                 self.reconnect_task_queue.get_or_insert_default();
-
-                self.task_txs
-                    .simple
-                    .send(SimpleProxyMessage::ConnectionRefresh)
-                    .await;
-
-                self.task_txs
-                    .outgoing
-                    .send(OutgoingProxyMessage::ConnectionRefresh)
-                    .await;
             }
-            ConnectionRefresh::End => {
+            ConnectionRefresh::End(new_agent_tx) => {
                 let task_queue = self.reconnect_task_queue.take().unwrap_or_else(|| {
                     tracing::error!("Unexpected state: agent reconnect finished without correctly initializing a reconnect");
                     panic!("agent reconnect finished without correctly initializing a reconnect");
                 });
 
-                self.task_txs
-                    .agent
+                self.agent_tx = new_agent_tx;
+
+                self.agent_tx
                     .send(ClientMessage::SwitchProtocolVersion(
                         self.protocol_version
                             .as_ref()
                             .unwrap_or(&mirrord_protocol::VERSION)
                             .clone(),
                     ))
-                    .await;
-
-                self.task_txs
-                    .files
-                    .send(FilesProxyMessage::ConnectionRefresh)
-                    .await;
-
-                self.task_txs
-                    .incoming
-                    .send(IncomingProxyMessage::ConnectionRefresh)
                     .await;
 
                 Box::pin(async {
@@ -684,19 +723,45 @@ impl IntProxy {
 mod test {
     use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
-    use mirrord_config::{config::MirrordConfig, experimental::ExperimentalFileConfig};
-    use mirrord_intproxy_protocol::{
-        LayerToProxyMessage, LocalMessage, NewSessionRequest, ProcessInfo, ProxyToLayerMessage,
+    use hyper::{HeaderMap, Method, StatusCode, Uri, Version};
+    use mirrord_analytics::NullReporter;
+    use mirrord_config::{
+        LayerFileConfig, config::MirrordConfig, experimental::ExperimentalFileConfig,
     };
-    use mirrord_protocol::{ClientMessage, DaemonMessage, FileRequest, file::StatFsRequestV2};
+    use mirrord_intproxy_protocol::{
+        IncomingRequest, LayerToProxyMessage, LocalMessage, NetProtocol, NewSessionRequest,
+        OutgoingConnectRequest, OutgoingRequest, OutgoingResponse, PortSubscribe, PortSubscription,
+        ProcessInfo, ProxyToLayerMessage,
+        codec::{AsyncDecoder, AsyncEncoder},
+    };
+    use mirrord_protocol::{
+        ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError,
+        ResponseError, VERSION,
+        dns::{AddressFamily, GetAddrInfoRequestV2, GetAddrInfoResponse, SockType},
+        file::{OpenFileRequest, StatFsRequestV2},
+        outgoing::{LayerConnectV2, SocketAddress, tcp::LayerTcpOutgoing},
+        tcp::{
+            ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, DaemonTcp,
+            HttpRequestMetadata, HttpResponse, IncomingTrafficTransportType, InternalHttpBodyFrame,
+            InternalHttpBodyNew, InternalHttpRequest, InternalHttpResponse, LayerTcpSteal,
+            StealType,
+        },
+    };
+    use mirrord_protocol_io::{Client, Connection, ConnectionOutput};
     use tokio::{
-        net::{TcpListener, TcpStream},
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{
+            TcpListener, TcpStream,
+            tcp::{OwnedReadHalf, OwnedWriteHalf},
+        },
         sync::mpsc,
     };
 
     use crate::{
         IntProxy,
-        agent_conn::{AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow},
+        agent_conn::{
+            AgentConnectInfo, AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow,
+        },
     };
 
     /// Verifies that [`IntProxy`] waits with processing layers' requests
@@ -708,17 +773,15 @@ mod test {
     /// Once intproxy exposes its state in some way, we can remove it.
     #[tokio::test]
     async fn intproxy_waits_for_protocol_version() {
-        let (agent_tx, mut proxy_rx) = mpsc::channel(12);
-        let (proxy_tx, agent_rx) = mpsc::channel(12);
-
         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
             .await
             .unwrap();
         let proxy_addr = listener.local_addr().unwrap();
 
+        let (connection, proxy_tx, proxy_rx) = Connection::dummy();
+
         let agent_conn = AgentConnection {
-            agent_rx,
-            agent_tx,
+            connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
         let proxy = IntProxy::new_with_connection(
@@ -733,7 +796,7 @@ mod test {
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
-        match proxy_rx.recv().await.unwrap() {
+        match proxy_rx.next().await.unwrap() {
             ClientMessage::SwitchProtocolVersion(version) => {
                 assert_eq!(version, *mirrord_protocol::VERSION)
             }
@@ -788,7 +851,7 @@ mod test {
         // it would surely respond to our previous request here.
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                match proxy_rx.recv().await.unwrap() {
+                match proxy_rx.next().await.unwrap() {
                     ClientMessage::Ping => {
                         proxy_tx.send(DaemonMessage::Pong).await.unwrap();
                     }
@@ -807,7 +870,7 @@ mod test {
             .unwrap();
 
         loop {
-            match proxy_rx.recv().await.unwrap() {
+            match proxy_rx.next().await.unwrap() {
                 ClientMessage::Ping => {
                     proxy_tx.send(DaemonMessage::Pong).await.unwrap();
                 }
@@ -827,19 +890,18 @@ mod test {
     /// Verifies that [`IntProxy`] goes in failover state when a runtime error happens
     #[tokio::test]
     async fn switch_to_failover() {
-        let (agent_tx, _proxy_rx) = mpsc::channel(12);
-        let (proxy_tx, agent_rx) = mpsc::channel(12);
-
         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
             .await
             .unwrap();
         let proxy_addr = listener.local_addr().unwrap();
 
+        let (connection, proxy_tx, _proxy_rx) = Connection::dummy();
+
         let agent_conn = AgentConnection {
-            agent_rx,
-            agent_tx,
+            connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
+
         let proxy = IntProxy::new_with_connection(
             agent_conn,
             listener,
@@ -922,18 +984,17 @@ mod test {
     /// Verifies that [`IntProxy`] run method return an error on a startup error
     #[tokio::test]
     async fn startup_fail() {
-        let (agent_tx, _proxy_rx) = mpsc::channel(12);
-        let (_proxy_tx, agent_rx) = mpsc::channel(12);
-
         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
             .await
             .unwrap();
 
+        let (connection, _proxy_tx, _proxy_rx) = Connection::dummy();
+
         let agent_conn = AgentConnection {
-            agent_rx,
-            agent_tx,
+            connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
+
         let proxy = IntProxy::new_with_connection(
             agent_conn,
             listener,
@@ -951,5 +1012,550 @@ mod test {
         .await
         .unwrap()
         .unwrap_err();
+    }
+
+    struct ReconnectTestSetup {
+        conn_rx: mpsc::Receiver<(mpsc::Sender<DaemonMessage>, ConnectionOutput<Client>)>,
+        from_layer: AsyncEncoder<LocalMessage<LayerToProxyMessage>, OwnedWriteHalf>,
+        to_layer: AsyncDecoder<LocalMessage<ProxyToLayerMessage>, OwnedReadHalf>,
+    }
+
+    async fn setup_reconnect_test() -> ReconnectTestSetup {
+        let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+            .await
+            .unwrap();
+
+        let (conn_tx, conn_rx) = mpsc::channel(1);
+
+        let config = LayerFileConfig::default()
+            .generate_config(&mut Default::default())
+            .unwrap();
+
+        let agent_conn = AgentConnection::new(
+            &config,
+            AgentConnectInfo::Dummy(conn_tx),
+            &mut NullReporter::default(),
+        )
+        .await
+        .unwrap();
+
+        let conn = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+
+        let (mut from_layer, mut to_layer) = mirrord_intproxy_protocol::codec::make_async_framed::<
+            LocalMessage<LayerToProxyMessage>,
+            LocalMessage<ProxyToLayerMessage>,
+        >(conn);
+
+        from_layer
+            .send(&LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                    process_info: ProcessInfo {
+                        pid: 1337,
+                        parent_pid: 1336,
+                        name: "hello there".into(),
+                        cmdline: vec!["hello there".into()],
+                        loaded: true,
+                    },
+                    parent_layer: None,
+                }),
+            })
+            .await
+            .unwrap();
+        from_layer.flush().await.unwrap();
+
+        let proxy = IntProxy::new_with_connection(
+            agent_conn,
+            listener,
+            4096,
+            Default::default(),
+            Duration::from_secs(60),
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
+        );
+        tokio::spawn(proxy.run(Duration::from_millis(100), Duration::ZERO));
+
+        match to_layer.receive().await.unwrap().unwrap() {
+            LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::NewSession(..),
+            } => {}
+            other => panic!("unexpected local message from the proxy: {other:?}"),
+        }
+
+        ReconnectTestSetup {
+            from_layer,
+            to_layer,
+            conn_rx,
+        }
+    }
+
+    async fn next_proxy_msg(
+        to_proxy: &mpsc::Sender<DaemonMessage>,
+        from_proxy: &ConnectionOutput<Client>,
+    ) -> ClientMessage {
+        loop {
+            match from_proxy.next().await.unwrap() {
+                ClientMessage::Ping => to_proxy.send(DaemonMessage::Pong).await.unwrap(),
+                ClientMessage::ReadyForLogs => (),
+                other => return other,
+            }
+        }
+    }
+
+    async fn switch_protocol_version(
+        to_proxy: &mpsc::Sender<DaemonMessage>,
+        from_proxy: &ConnectionOutput<Client>,
+    ) {
+        assert_eq!(
+            next_proxy_msg(to_proxy, from_proxy).await,
+            ClientMessage::SwitchProtocolVersion(VERSION.clone()),
+        );
+
+        to_proxy
+            .send(DaemonMessage::SwitchProtocolVersionResponse(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+            .unwrap();
+    }
+
+    /// Verifies that [`IntProxy`] reconnects and restores state (port subscriptions) correctly
+    #[tokio::test]
+    #[rstest::rstest]
+    #[timeout(Duration::from_secs(5))]
+    async fn reconnect_restore_subscriptions() {
+        let ReconnectTestSetup {
+            mut conn_rx,
+            mut from_layer,
+            mut to_layer,
+        } = setup_reconnect_test().await;
+
+        let (mut to_proxy, mut from_proxy) = conn_rx.recv().await.unwrap();
+
+        // Subscribe to a port so we can later confirm that it
+        // restores the subscription after the reconnect.
+        from_layer
+            .send(&LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::Incoming(IncomingRequest::PortSubscribe(
+                    PortSubscribe {
+                        listening_on: "0.0.0.0:42069".parse().unwrap(),
+                        subscription: PortSubscription::Steal(StealType::All(42069)),
+                    },
+                )),
+            })
+            .await
+            .unwrap();
+
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        assert_eq!(
+            next_proxy_msg(&to_proxy, &from_proxy).await,
+            ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(42069)))
+        );
+
+        to_proxy
+            .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(
+                42069,
+            ))))
+            .await
+            .unwrap();
+
+        // Run multiple times for good measure
+        for _ in 0..3 {
+            // Simulate dropping the connection
+            drop(to_proxy);
+
+            // The intproxy (AgentConnection to be exact) should now try to reconnect.
+            // We'll receive the new dummy connection from conn_rx.
+
+            (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+
+            switch_protocol_version(&to_proxy, &from_proxy).await;
+
+            assert_eq!(
+                next_proxy_msg(&to_proxy, &from_proxy).await,
+                ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(42069)))
+            );
+
+            to_proxy
+                .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(
+                    42069,
+                ))))
+                .await
+                .unwrap();
+
+            assert!(matches!(
+                to_layer.receive().await,
+                Ok(Some(LocalMessage {
+                    message_id: 0,
+                    inner: ProxyToLayerMessage::Incoming(
+                        mirrord_intproxy_protocol::IncomingResponse::PortSubscribe(Ok(()))
+                    )
+                }))
+            ));
+        }
+    }
+
+    /// Verifies that [`IntProxy`] reconnects correctly when a pong is no received.
+    #[tokio::test]
+    #[rstest::rstest]
+    #[timeout(Duration::from_secs(5))]
+    async fn reconnect_on_lost_ping(#[values(true, false)] drop_explicitly: bool) {
+        let ReconnectTestSetup {
+            mut conn_rx,
+            // Keep the connection so intproxy doesn't exit
+            from_layer: _from_layer,
+            to_layer: _,
+        } = setup_reconnect_test().await;
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        assert_eq!(from_proxy.next().await, Some(ClientMessage::ReadyForLogs));
+        assert_eq!(from_proxy.next().await, Some(ClientMessage::Ping));
+
+        // Don't respond to pings.
+        if drop_explicitly {
+            drop(to_proxy);
+        }
+
+        // We should get a reconnect.
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        assert_eq!(from_proxy.next().await, Some(ClientMessage::ReadyForLogs));
+        assert_eq!(from_proxy.next().await, Some(ClientMessage::Ping));
+    }
+
+    /// Verifies that [`IntProxy`] reconnects correctly while waiting for a fileops response.
+    #[tokio::test]
+    #[rstest::rstest]
+    #[timeout(Duration::from_secs(5))]
+    async fn reconnect_during_fileop() {
+        let ReconnectTestSetup {
+            mut conn_rx,
+            // Keep the connection so intproxy doesn't exit
+            mut from_layer,
+            mut to_layer,
+        } = setup_reconnect_test().await;
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        let file_request = FileRequest::Open(OpenFileRequest {
+            path: "/some/file".into(),
+            open_options: Default::default(),
+        });
+
+        from_layer
+            .send(&LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::File(file_request.clone()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            next_proxy_msg(&to_proxy, &from_proxy).await,
+            ClientMessage::FileRequest(file_request)
+        );
+
+        drop(to_proxy);
+
+        // We should get a reconnect.
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        assert!(matches!(
+            to_layer.receive().await,
+            Ok(Some(LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::File(FileResponse::Open(Err(ResponseError::RemoteIO(
+                    RemoteIOError {
+                        raw_os_error: None,
+                        kind: ErrorKindInternal::Unknown(error_msg)
+                    }
+                ))))
+            })) if error_msg == "connection with mirrord-agent was lost"
+        ));
+    }
+
+    /// Verifies that [`IntProxy`] reconnects correctly while waiting for a response to a
+    /// [`ClientMessage::TcpOutgoing`].
+    #[tokio::test]
+    #[rstest::rstest]
+    #[timeout(Duration::from_secs(5))]
+    async fn reconnect_during_outgoing() {
+        let ReconnectTestSetup {
+            mut conn_rx,
+            // Keep the connection so intproxy doesn't exit
+            mut from_layer,
+            mut to_layer,
+        } = setup_reconnect_test().await;
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        let socket_addr = SocketAddress::Ip("8.0.0.85:69".parse().unwrap());
+
+        from_layer
+            .send(&LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::Outgoing(OutgoingRequest::Connect(
+                    OutgoingConnectRequest {
+                        remote_address: socket_addr.clone(),
+                        protocol: NetProtocol::Stream,
+                    },
+                )),
+            })
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            next_proxy_msg(&to_proxy, &from_proxy).await,
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
+                remote_address,
+                ..
+            })) if remote_address == socket_addr
+        ));
+
+        drop(to_proxy);
+
+        // We should get a reconnect.
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        assert!(matches!(
+            to_layer.receive().await,
+            Ok(Some(LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(
+                    ResponseError::RemoteIO(RemoteIOError {
+                        raw_os_error: None,
+                        kind: ErrorKindInternal::Unknown(error_msg)
+                    })
+                )))
+            })) if error_msg == "connection with mirrord-agent was lost"
+        ));
+    }
+
+    /// Verifies that [`IntProxy`] reconnects correctly while waiting for dns response
+    #[tokio::test]
+    #[rstest::rstest]
+    #[timeout(Duration::from_secs(5))]
+    async fn reconnect_during_dns() {
+        let ReconnectTestSetup {
+            mut conn_rx,
+            // Keep the connection so intproxy doesn't exit
+            mut from_layer,
+            mut to_layer,
+        } = setup_reconnect_test().await;
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        let request = GetAddrInfoRequestV2 {
+            node: "hello".into(),
+            service_port: 4000,
+            family: AddressFamily::Ipv4Only,
+            socktype: SockType::Stream,
+            flags: 0,
+            protocol: 0,
+        };
+
+        from_layer
+            .send(&LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::GetAddrInfo(request.clone()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            next_proxy_msg(&to_proxy, &from_proxy).await,
+            ClientMessage::GetAddrInfoRequestV2(request)
+        );
+
+        drop(to_proxy);
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        assert!(matches!(
+            to_layer.receive().await,
+            Ok(Some(LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::GetAddrInfo(GetAddrInfoResponse(Err(
+                    ResponseError::RemoteIO(RemoteIOError {
+                        raw_os_error: None,
+                        kind: ErrorKindInternal::Unknown(error_msg)
+                    })
+                )))
+            })) if error_msg == "connection with mirrord-agent was lost"
+        ));
+    }
+
+    /// Verifies that [`IntProxy`] reconnects correctly while it was serving a stolen request
+    #[tokio::test]
+    #[rstest::rstest]
+    #[timeout(Duration::from_secs(5))]
+    async fn reconnect_during_http(#[values(true, false)] drop_during_response: bool) {
+        let ReconnectTestSetup {
+            mut conn_rx,
+            // Keep the connection so intproxy doesn't exit
+            mut from_layer,
+            mut to_layer,
+        } = setup_reconnect_test().await;
+
+        let server = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = server.local_addr().unwrap();
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        from_layer
+            .send(&LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::Incoming(IncomingRequest::PortSubscribe(
+                    PortSubscribe {
+                        listening_on: addr,
+                        subscription: PortSubscription::Steal(StealType::All(80)),
+                    },
+                )),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            next_proxy_msg(&to_proxy, &from_proxy).await,
+            ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(80)))
+        );
+
+        to_proxy
+            .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(80))))
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            to_layer.receive().await,
+            Ok(Some(LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::Incoming(
+                    mirrord_intproxy_protocol::IncomingResponse::PortSubscribe(Ok(()))
+                )
+            }))
+        ));
+
+        let mut headers = HeaderMap::new();
+        headers.insert("content-length", "hello".len().into());
+
+        to_proxy
+            .send(DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
+                ChunkedRequest::StartV2(ChunkedRequestStartV2 {
+                    connection_id: 0,
+                    request_id: 0,
+                    request: InternalHttpRequest {
+                        method: Method::GET,
+                        uri: Uri::from_static("/test/"),
+                        headers: headers.clone(),
+                        version: Version::HTTP_10,
+                        body: InternalHttpBodyNew {
+                            frames: vec![InternalHttpBodyFrame::Data("he".into())],
+                            is_last: false,
+                        },
+                    },
+                    metadata: HttpRequestMetadata::V1 {
+                        source: "1.2.3.4:58239".parse().unwrap(),
+                        destination: "1.1.1.1:80".parse().unwrap(),
+                    },
+                    transport: IncomingTrafficTransportType::Tcp,
+                }),
+            )))
+            .await
+            .unwrap();
+
+        let (mut conn, _) = server.accept().await.unwrap();
+
+        if drop_during_response {
+            to_proxy
+                .send(DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
+                    ChunkedRequest::Body(ChunkedRequestBodyV1 {
+                        frames: vec![InternalHttpBodyFrame::Data("llo".into())],
+                        is_last: true,
+                        connection_id: 0,
+                        request_id: 0,
+                    }),
+                )))
+                .await
+                .unwrap();
+
+            const EXPECTED: &[u8] = b"GET /test/ HTTP/1.0\r\ncontent-length: 5\r\n\r\nhello";
+            let mut buf = [0u8; EXPECTED.len()];
+            conn.read_exact(&mut buf).await.unwrap();
+            assert_eq!(buf, EXPECTED);
+
+            conn.write_all(b"HTTP/1.0 200 OK\r\ncontent-length: 5\r\n\r\nwo")
+                .await
+                .unwrap();
+
+            assert_eq!(
+                next_proxy_msg(&to_proxy, &from_proxy).await,
+                ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
+                    mirrord_protocol::tcp::ChunkedResponse::Start(HttpResponse {
+                        port: 80,
+                        connection_id: 0,
+                        request_id: 0,
+                        internal_response: InternalHttpResponse {
+                            status: StatusCode::OK,
+                            version: Version::HTTP_10,
+                            headers: headers.clone(),
+                            body: vec![InternalHttpBodyFrame::Data("wo".into())]
+                        }
+                    })
+                ))
+            );
+        }
+
+        drop(to_proxy);
+
+        // Assert intproxy closed the connection
+        assert!(conn.read(&mut [0]).await.is_ok_and(|s| s == 0));
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        assert_eq!(
+            next_proxy_msg(&to_proxy, &from_proxy).await,
+            ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(80)))
+        );
+
+        to_proxy
+            .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(80))))
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            to_layer.receive().await,
+            Ok(Some(LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::Incoming(
+                    mirrord_intproxy_protocol::IncomingResponse::PortSubscribe(Ok(()))
+                )
+            }))
+        ));
     }
 }

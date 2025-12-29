@@ -46,6 +46,7 @@ pub enum TargetFileConfig {
         /// but it is not optional in a resulting [`TargetConfig`] object - either there is a path,
         /// or the target configuration is `None`.
         #[serde(default, deserialize_with = "string_or_struct_option")]
+        #[schemars(schema_with = "make_simple_target_custom_schema")]
         path: Option<Target>,
         namespace: Option<String>,
     },
@@ -339,9 +340,6 @@ impl JsonSchema for Target {
             schema_gen.subschema_for::<service::ServiceTarget>(),
             schema_gen.subschema_for::<replica_set::ReplicaSetTarget>(),
             schemars::schema::Schema::Object(schemars::schema::SchemaObject {
-                instance_type: Some(schemars::schema::SingleOrVec::Single(Box::new(
-                    schemars::schema::InstanceType::String,
-                ))),
                 enum_values: Some(vec![serde_json::Value::String("targetless".to_string())]),
                 ..Default::default()
             }),
@@ -388,7 +386,7 @@ impl Target {
     }
 
     /// `true` if this [`Target`] is only supported when the operator is enabled.
-    pub(super) fn requires_operator(&self) -> bool {
+    pub fn requires_operator(&self) -> bool {
         matches!(
             self,
             Target::Job(_)

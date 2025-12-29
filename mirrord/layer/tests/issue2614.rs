@@ -15,15 +15,19 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn test_issue2614(dylib_path: &Path) {
+async fn test_issue2614(
+    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
+    dylib_path: &Path,
+) {
     let tmpdir = tempfile::tempdir().unwrap();
     let file_path = tmpdir
         .path()
         .join(format!("testfile-{}", rand::random::<u64>(),));
-    let application = Application::Go23Open {
+    let application = Application::GoOpen {
         path: file_path.to_str().unwrap().into(),
         flags: libc::O_CREAT | libc::O_RDWR,
         mode: libc::S_IRUSR | libc::S_IRGRP | libc::S_IROTH,
+        version: go_version,
     };
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![("MIRRORD_FILE_MODE", "local")], None)

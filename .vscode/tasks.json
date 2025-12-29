@@ -12,9 +12,31 @@
 			],
 			"group": {
 				"kind": "build",
-				"isDefault": true
+				"isDefault": false
 			},
 			"label": "rust: cargo build"
-		}
+		},
+		{
+			"label": "cargo: build mirrord (msvc)",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"build",
+				"-p", "mirrord", "-p", "mirrord-layer-win", "-p", "rust-e2e-fileops",
+				"--target", "x86_64-pc-windows-msvc"
+				// "--release" // uncomment if building in release mode
+			],
+			"options": {
+				"env": {
+					"MIRRORD_DISABLE_VERSION_CHECK": "true",
+					"MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord_layer_win.dll"
+				}
+			},
+			"problemMatcher": "$rustc",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
 	]
 }

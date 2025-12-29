@@ -1,8 +1,17 @@
-use std::{collections::HashSet, ops::Deref, str::FromStr};
+use std::{
+    collections::HashSet,
+    ops::{Deref, Not},
+    str::FromStr,
+    sync::LazyLock,
+};
 
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
+use mirrord_protocol::tcp::{
+    HTTP_BODY_JSON_FILTER_VERSION, HTTP_COMPOSITE_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION,
+};
 use schemars::JsonSchema;
+use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -116,6 +125,12 @@ pub struct HttpFilterConfig {
     #[config(env = "MIRRORD_HTTP_METHOD_FILTER")]
     pub method_filter: Option<String>,
 
+    /// ##### feature.network.incoming.http_filter.body_filter {#feature-network-incoming-http-body-filter}
+    ///
+    /// Matches the request based on the contents of its body. Currently only JSON body filtering
+    /// is supported.
+    pub body_filter: Option<BodyFilter>,
+
     /// ##### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
     ///
     /// An array of HTTP filters.
@@ -178,15 +193,59 @@ impl HttpFilterConfig {
     pub fn is_filter_set(&self) -> bool {
         self.header_filter.is_some()
             || self.path_filter.is_some()
+            || self.method_filter.is_some()
             || self.all_of.is_some()
             || self.any_of.is_some()
+            || self.body_filter.is_some()
     }
 
-    pub fn is_composite(&self) -> bool {
+    pub fn ensure_usable_with(
+        &self,
+        agent_protocol_version: Option<Version>,
+    ) -> Result<(), ConfigError> {
+        #![allow(clippy::type_complexity)]
+        static REQUIREMENTS: [(fn(&HttpFilterConfig) -> bool, &LazyLock<VersionReq>, &str); 3] = [
+            (
+                HttpFilterConfig::is_composite,
+                &HTTP_COMPOSITE_FILTER_VERSION,
+                "'any_of' or 'all_of' HTTP filter types",
+            ),
+            (
+                HttpFilterConfig::has_method_filter,
+                &HTTP_METHOD_FILTER_VERSION,
+                "'method' http filter type",
+            ),
+            (
+                HttpFilterConfig::has_json_body_filter,
+                &HTTP_BODY_JSON_FILTER_VERSION,
+                "JSON body filters",
+            ),
+        ];
+
+        for (validator, version, what) in REQUIREMENTS {
+            if validator(self)
+                && agent_protocol_version
+                    .as_ref()
+                    .map(|v| version.matches(v))
+                    .unwrap_or(false)
+                    .not()
+            {
+                Err(ConfigError::Conflict(format!(
+                    "Cannot use {what}, protocol version used by mirrord-agent must match {}. \
+                    Consider using a newer version of mirrord-agent",
+                    **version
+                )))?
+            }
+        }
+
+        Ok(())
+    }
+
+    fn is_composite(&self) -> bool {
         self.all_of.is_some() || self.any_of.is_some()
     }
 
-    pub fn has_method_filter(&self) -> bool {
+    fn has_method_filter(&self) -> bool {
         self.method_filter.is_some()
             || self.all_of.as_ref().is_some_and(|composite| {
                 composite
@@ -197,6 +256,20 @@ impl HttpFilterConfig {
                 composite
                     .iter()
                     .any(|f| matches!(f, InnerFilter::Method { .. }))
+            })
+    }
+
+    fn has_json_body_filter(&self) -> bool {
+        matches!(self.body_filter, Some(BodyFilter::Json { .. }))
+            || self.all_of.as_ref().is_some_and(|composite| {
+                composite
+                    .iter()
+                    .any(|f| matches!(f, InnerFilter::Body(BodyFilter::Json { .. })))
+            })
+            || self.any_of.as_ref().is_some_and(|composite| {
+                composite
+                    .iter()
+                    .any(|f| matches!(f, InnerFilter::Body(BodyFilter::Json { .. })))
             })
     }
 
@@ -241,6 +314,111 @@ pub enum InnerFilter {
     Method {
         method: String,
     },
+
+    /// ##### feature.network.incoming.inner_filter.body_filter {#feature-network-incoming-inner-body-filter}
+    ///
+    /// Matches the request based on the contents of its body. Currently only JSON body filtering is
+    /// supported.
+    Body(BodyFilter),
+}
+
+#[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(tag = "body", rename_all = "lowercase")]
+pub enum BodyFilter {
+    /// ##### feature.network.incoming.inner_filter.body_filter.json {#feature-network-incoming-inner-body-filter-json}
+    ///
+    /// Tries to parse the body as a JSON object and find (a) matching subobjects(s).
+    ///
+    /// `query` should be a valid JSONPath (RFC 9535) query string.
+    //
+    /// `matches` should be a regex. Supports regexes validated by the
+    /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate
+    ///
+    /// Example:
+    /// ```json
+    /// "http_filter": {
+    ///   "body_filter": {
+    ///     "body": "json",
+    ///     "query": "$.library.books[*]",
+    ///     "matches": "^\\d{3,5}$"
+    ///   }
+    /// }
+    /// ```
+    /// will match
+    /// ```json
+    /// {
+    ///   "library": {
+    ///     "books": [
+    ///       34555,
+    ///       1233,
+    ///       234
+    ///       23432
+    ///     ]
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// The filter will match if there is at least one query result.
+    ///
+    /// Non-string matches are stringified before being compared to
+    /// the regex. To filter query results by type, the `typeof`
+    /// [function extension](https://www.rfc-editor.org/rfc/rfc9535.html#name-function-extensions)
+    /// is provided. It takes in a single `NodesType` parameter and
+    /// returns `"null" | "bool" | "number" | "string" | "array" | "object"`,
+    /// depending on the type of the argument. If not all nodes in the
+    /// argument have the same type, it returns `nothing`.
+    ///
+    /// Example:
+    ///
+    /// ```json
+    /// "body_filter": {
+    ///   "body": "json",
+    ///   "query": "$.books[?(typeof(@) == 'number')]",
+    ///   "matches": "4$"
+    /// }
+    /// ```
+    /// will match
+    ///
+    /// ```json
+    /// {
+    ///   "books": [
+    ///     1111,
+    ///     2222,
+    ///     4444
+    ///   ]
+    /// }
+    /// ```
+    ///
+    /// but not
+    ///
+    /// ```json
+    /// {
+    ///   "books": [
+    ///     "1111",
+    ///     "2222",
+    ///     "4444"
+    ///   ]
+    /// }
+    /// ```
+    ///
+    ///
+    ///
+    /// To use with with `all_of` or `any_of`, use the following syntax:
+    /// ```json
+    /// "http_filter": {
+    ///   "all_of": [
+    ///     {
+    ///       "path": "/buildings"
+    ///     },
+    ///     {
+    ///       "body": "json",
+    ///       "query": "$.library.books[*]",
+    ///       "matches": "^\\d{3,5}$"
+    ///     }
+    ///   ]
+    /// }
+    /// ```
+    Json { query: String, matches: String },
 }
 
 /// <!--${internal}-->
@@ -271,6 +449,8 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
         let all_of = None;
         let any_of = None;
 
+        let body_filter = None;
+
         let ports = FromEnv::new("MIRRORD_HTTP_FILTER_PORTS")
             .source_value(context)
             .transpose()?;
@@ -279,6 +459,7 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
             header_filter,
             path_filter,
             method_filter,
+            body_filter,
             all_of,
             any_of,
             ports,

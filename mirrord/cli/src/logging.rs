@@ -50,6 +50,7 @@ pub async fn init_tracing_registry(
                     .with_writer(std::io::stderr)
                     .with_file(true)
                     .with_line_number(true)
+                    .with_ansi(false)
                     .pretty(),
             )
             .with(tracing_subscriber::EnvFilter::from_default_env())
@@ -67,13 +68,17 @@ pub async fn init_tracing_registry(
 ///
 /// Proxies output logs in JSON, which is not really human-readable.
 /// However, it allows us to use some nice tools, like [hl](https://github.com/pamburus/hl).
-fn init_proxy_tracing_registry(
+async fn init_proxy_tracing_registry(
     log_destination: &Path,
     log_level: &str,
     json_log: bool,
 ) -> std::io::Result<()> {
     if std::env::var("MIRRORD_CONSOLE_ADDR").is_ok() {
         return Ok(());
+    }
+
+    if let Some(parent) = log_destination.parent() {
+        tokio::fs::create_dir_all(parent).await?;
     }
 
     let output_file = OpenOptions::new()
@@ -102,13 +107,16 @@ fn init_proxy_tracing_registry(
     Ok(())
 }
 
-pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), InternalProxyError> {
+pub async fn init_intproxy_tracing_registry(
+    config: &LayerConfig,
+) -> Result<(), InternalProxyError> {
     if crate::util::intproxy_container_mode().not() {
         init_proxy_tracing_registry(
             &config.internal_proxy.log_destination,
             &config.internal_proxy.log_level,
             config.internal_proxy.json_log,
         )
+        .await
         .map_err(|fail| {
             InternalProxyError::OpenLogFile(
                 config
@@ -145,13 +153,16 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
     }
 }
 
-pub fn init_extproxy_tracing_registry(config: &LayerConfig) -> Result<(), ExternalProxyError> {
+pub async fn init_extproxy_tracing_registry(
+    config: &LayerConfig,
+) -> Result<(), ExternalProxyError> {
     let log_destination = &config.external_proxy.log_destination;
     init_proxy_tracing_registry(
         log_destination,
         &config.external_proxy.log_level,
         config.external_proxy.json_log,
     )
+    .await
     .map_err(|fail| {
         ExternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
     })
@@ -165,6 +176,13 @@ where
     S: Stream<Item = std::io::Result<String>> + 's,
 {
     let log_destination = &config.internal_proxy.log_destination;
+
+    if let Some(parent) = log_destination.parent() {
+        tokio::fs::create_dir_all(parent).await.map_err(|error| {
+            InternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), error)
+        })?;
+    }
+
     let mut output_file = tokio::fs::OpenOptions::new()
         .create(true)
         .append(true)

@@ -115,7 +115,7 @@ mod test {
 
     use super::*;
 
-    const EXPECTED: &str = "# Root\n\nRoot - 1l\n\nRoot - 2l\n\n## Root - b_field\n\nRoot_B_Node - 1l\n\nRoot_B_Node - 2l\n\n### Root_B_Node - c_field\n\nRoot_B_C_Node - 1l\n\nRoot_B_C_Node - 2l\n\n### Root_B_C_Node - d_field\n\nRoot_B_C_D_Edge - 1l\n\nRoot_B_C_D_Edge - 2l\n\n#### Root_B_C_D_Edge - c_field\n\nRoot_B_C_D_Edge - edge - c_field\n\n#### Root_B_C_D_Edge - d_field\n\nRoot_B_C_D_Edge - edge - d_field\n\n### Root_B_C_Node - root_b_c_node_field\n\nRoot_B_C_Node - edge - root_b_c_node_field\n\n### Root_B_Node - root_b_node_field\n\nRoot_B_Node - edge - root_b_node_field\n\n## Root - e_field\n\nRoot_E_Edge - 1l\n\nRoot_E_Edge - 2l\n\n## Root_E_Edge - e_field\n\nRoot_E_Edge - edge - e_field\n\n## Root_E_Edge - f_field\n\nRoot_E_Edge - edge - f_field\n\n## Root - root_field\n\nRoot - edge - root_field\n\n";
+    const EXPECTED: &str = "# Root\n\nRoot - 1l\n\nRoot - 2l\n\n## Root - b_field\n\nRoot_B_Node - 1l\n\nRoot_B_Node - 2l\n\n### Root_B_Node - c_field\n\nRoot_B_C_Node - 1l\n\nRoot_B_C_Node - 2l\n\n### Root_B_C_Node - d_field\n\nRoot_B_C_D_Edge - 1l\n\nRoot_B_C_D_Edge - 2l\n\n#### Root_B_C_D_Edge - c_field\n\nRoot_B_C_D_Edge - edge - c_field\n\n#### Root_B_C_D_Edge - d_field\n\nRoot_B_C_D_Edge - edge - d_field\n\n### Root_B_C_Node - root_b_c_node_field\n\nRoot_B_C_Node - edge - root_b_c_node_field\n\n### Root_B_Node - root_b_node_field\n\nRoot_B_Node - edge - root_b_node_field\n\n## Root - e_field\n\nRoot_E_Edge - 1l\n\nRoot_E_Edge - 2l\n\n## Root_E_Edge - e_field\n\nRoot_E_Edge - edge - e_field\n\n## Root_E_Edge - f_field\n\nRoot_E_Edge - edge - f_field\n\n## Root - g_field\n\nRoot_G_Edge - 1l\n\nRoot_G_Edge - 2l\n\nRoot_G_H_Edge - 1l\n\nRoot_G_H_Edge - 2l\n\n## Root_G_H_Edge - i_field\n\nRoot_G_H_Edge - edge - i_field\n\n## Root - root_field\n\nRoot - edge - root_field\n\n";
 
     const FILES: [&str; 5] = [
         r#"
@@ -153,6 +153,9 @@ mod test {
 
         /// ## Root - b_field
         b_field: Option<Vec<Root_B_Node>>,
+
+        /// ## Root - g_field
+        g_field: Root_G_Edge,
     }
 "#,
         r#"
@@ -200,10 +203,25 @@ mod test {
         /// Root_E_Edge - edge - e_field
         e_field: String,
     }
+
+    /// Root_G_Edge - 1l
+    ///
+    /// Root_G_Edge - 2l
+    struct Root_G_Edge(Vec<Root_G_H_Edge>);
+
+    /// Root_G_H_Edge - 1l
+    ///
+    /// Root_G_H_Edge - 2l
+    struct Root_G_H_Edge {
+        /// ## Root_G_H_Edge - i_field
+        ///
+        /// Root_G_H_Edge - edge - i_field
+        i_field: i32,
+    }
 "#,
     ];
 
-    const UNORDERED_EXPECTED: &str = "# UnorderedStructC\n\n## UnorderedField -> UnorderedStructA\n\n# UnorderedStructA\n\n## UnorderedField - a\n\n## UnorderedField - b\n\n## UnorderedField -> UnorderedStructB\n\n# UnorderedStructB\n\n## UnorderedField - a\n\n# Example Enum\n\n## UnorderedField -> UnorderedStructA\n\n# UnorderedStructA\n\n## UnorderedField - a\n\n## UnorderedField - b\n\n";
+    const UNORDERED_EXPECTED: &str = "# UnorderedStructC\n\n## UnorderedField -> UnorderedStructA\n\n# UnorderedStructA\n\n## UnorderedField - a\n\n## UnorderedField - b\n\n## UnorderedField -> UnorderedStructB\n\n# UnorderedStructB\n\n## UnorderedField - a\n\n# Example Enum\n\n## UnorderedField -> UnorderedStructA\n\n# UnorderedStructA\n\n## UnorderedField - a\n\n## UnorderedField - b\n\n## UnorderedField - c -> NestedEnum\n\n# Nested Enum\n\nNestedEnumVariantA\n\nUnorderedStructD\n\nUnorderedField - a -> UnorderedStructD\n\nNestedEnumVariantB\n\nUnorderedStructD\n\nUnorderedField - a -> UnorderedStructD\n\n";
     const UNORDERED_FILES: [&str; 2] = [
         r#"
     /// # UnorderedStructA
@@ -238,6 +256,25 @@ mod test {
 
         /// ## UnorderedField -> UnorderedStructA
         a_field: UnorderedStructA,
+
+        /// ## UnorderedField - c -> NestedEnum
+        c_field: NestedEnum,
+    }
+
+    /// # Nested Enum
+    enum NestedEnum {
+        /// NestedEnumVariantA
+        A {
+            x: UnorderedStructD,
+        },
+        /// NestedEnumVariantB
+        B(UnorderedStructD),
+    }
+
+    /// UnorderedStructD
+    struct UnorderedStructD {
+        /// UnorderedField - a -> UnorderedStructD
+        a_field: usize,
     }
     "#,
     ];

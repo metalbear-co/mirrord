@@ -1,8 +1,11 @@
 use std::{fmt, num::ParseIntError};
 
 pub use http::Error as HttpError;
+use mirrord_auth::error::ApiKeyError;
 use mirrord_kube::error::KubeApiError;
+use mirrord_protocol_io::ProtocolError;
 use thiserror::Error;
+use tower::retry::backoff::InvalidBackoff;
 
 use crate::crd::{NewOperatorFeature, kube_target::UnknownTargetType};
 
@@ -17,6 +20,7 @@ pub enum OperatorOperation {
     SessionManagement,
     ListingTargets,
     MysqlBranching,
+    PgBranching,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -30,6 +34,7 @@ impl fmt::Display for OperatorOperation {
             Self::SessionManagement => "session management",
             Self::ListingTargets => "listing targets",
             Self::MysqlBranching => "mysql branching",
+            Self::PgBranching => "postgresql branching",
         };
 
         f.write_str(as_str)
@@ -82,6 +87,18 @@ pub enum OperatorApiError {
 
     #[error("operation timed out: {}", operation)]
     OperationTimeout { operation: OperatorOperation },
+
+    #[error(transparent)]
+    InvalidBackoff(#[from] InvalidBackoff),
+
+    #[error("protocol error: {0}")]
+    ProtocolError(#[from] ProtocolError),
+
+    #[error(transparent)]
+    ApiKey(#[from] ApiKeyError),
+
+    #[error(transparent)]
+    SerdeJson(#[from] serde_json::Error),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;

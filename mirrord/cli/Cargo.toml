@@ -33,9 +33,10 @@ mirrord-analytics = { path = "../analytics" }
 mirrord-intproxy = { path = "../intproxy" }
 mirrord-vpn = { path = "../vpn" }
 mirrord-tls-util = { path = "../tls-util" }
+mirrord-protocol-io = { path = "../protocol-io" }
+mirrord-auth= { path = "../auth" }
 
 actix-codec.workspace = true
-base64.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
 tracing.workspace = true
@@ -53,7 +54,6 @@ k8s-openapi.workspace = true
 miette = { workspace = true, features = ["fancy"] }
 thiserror.workspace = true
 humantime = "2"
-nix = { workspace = true, features = ["process", "resource"] }
 tokio-util.workspace = true
 socket2.workspace = true
 drain.workspace = true
@@ -69,6 +69,25 @@ home.workspace = true
 uuid.workspace = true
 fs4.workspace = true
 hex.workspace = true
+tower = { workspace = true, features = ["retry"] }
+ci_info = "0.14"
+opener = "0.8.3"
+tempfile = { workspace = true, optional = true }
+axum = { version = "0.8.4", optional = true }
+tower-http = { version = "0.6.6", features = ["fs", "set-header"], optional = true }
+tar = { version = "0.4.44", optional = true }
+flate2 = { version = "1.1.2", optional = true }
+itertools = { workspace = true, optional = true }
+
+[target.'cfg(unix)'.dependencies]
+rand.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
+
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+nix = { workspace = true, features = ["process", "resource", "signal"] }
+base64.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
@@ -76,8 +95,11 @@ mirrord-sip = { path = "../sip" }
 [target.'cfg(target_os = "linux")'.dependencies]
 xmas-elf = "0.10"
 
-[build-dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.build-dependencies]
 mirrord-layer = { artifact = "cdylib", path = "../layer" }
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+mirrord-layer-win = { artifact = "cdylib", path = "../layer-win" }
 
 [dev-dependencies]
 rstest.workspace = true
@@ -86,3 +108,7 @@ hyper-util = { workspace = true, "features" = ["server"] }
 http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
+
+[features]
+windows_build = []
+wizard = ["dep:axum", "dep:tower-http", "dep:tar", "dep:flate2", "dep:tempfile", "dep:itertools"]

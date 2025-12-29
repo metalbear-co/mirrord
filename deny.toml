@@ -12,8 +12,9 @@ version = 2
 ignore = [
     "RUSTSEC-2020-0095", # difference is unmaintained. (part of apple-codesign)
     "RUSTSEC-2023-0071", # rsa crate, potential key recovery through timing sidechannels, though it sounds bad
-                         # we only use rsa as part of apple-codesign for re-sign binaries, so this should not matter.
+    # we only use rsa as part of apple-codesign for re-sign binaries, so this should not matter.
     "RUSTSEC-2024-0436", # paste is unmaintained but we should not have an issue with it.
+	"RUSTSEC-2025-0134", # rustls-pemfile is unmaintained, but we cannot remove it yet.
 ]
 
 [licenses]
@@ -40,9 +41,7 @@ allow = [
 [[licenses.clarify]]
 crate = "ring"
 expression = "MIT AND ISC AND OpenSSL"
-license-files = [
-    { path = "LICENSE", hash = 0xbd0eed23 }
-]
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 
 [bans]
 # enable this when dependencies are a bit more stable
@@ -56,5 +55,6 @@ unknown-git = "deny"
 allow-git = [
     "https://github.com/metalbear-co/rawsocket",
     "https://github.com/metalbear-co/rust-iptables",
-    "https://github.com/metalbear-co/kube"
+    "https://github.com/metalbear-co/kube",
+    "https://github.com/metalbear-co/minhook-detours-rs",
 ]

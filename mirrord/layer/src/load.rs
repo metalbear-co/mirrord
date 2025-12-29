@@ -35,6 +35,7 @@ static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "debugserver",
         "jspawnhelper",
         "bazel-real",
+        "clang",
     ])
 });
 

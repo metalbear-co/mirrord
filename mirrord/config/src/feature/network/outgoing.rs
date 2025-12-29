@@ -56,12 +56,12 @@ use crate::{
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum OutgoingFilterConfig {
-    /// Traffic that matches what's specified here will go through the remote pod, everything else
-    /// will go through local.
+    /// When filters are specified under `remote`, matching traffic will go through the remote pod,
+    /// everything else will go through local.
     Remote(VecOrSingle<String>),
 
-    /// Traffic that matches what's specified here will go through the local app, everything else
-    /// will go through the remote pod.
+    /// When filters are specified under `local`, matching traffic will go through the local app,
+    /// everything else will go through the remote pod.
     Local(VecOrSingle<String>),
 }
 
@@ -106,32 +106,32 @@ pub enum OutgoingFilterConfig {
 #[config(map_to = "OutgoingFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct OutgoingConfig {
-    /// #### feature.network.outgoing.tcp {#feature.network.outgoing.tcp}
+    /// **feature.network.outgoing.tcp** {#feature.network.outgoing.tcp}
     ///
     /// Defaults to `true`.
     #[config(env = "MIRRORD_TCP_OUTGOING", default = true)]
     pub tcp: bool,
 
-    /// #### feature.network.outgoing.udp {#feature.network.outgoing.udp}
+    /// **feature.network.outgoing.udp** {#feature.network.outgoing.udp}
     ///
     /// Defaults to `true`.
     #[config(env = "MIRRORD_UDP_OUTGOING", default = true)]
     pub udp: bool,
 
-    /// #### feature.network.outgoing.ignore_localhost {#feature.network.outgoing.ignore_localhost}
+    /// **feature.network.outgoing.ignore_localhost** {#feature.network.outgoing.ignore_localhost}
     ///
     /// Defaults to `false`.
     // Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702
     #[config(default = false)]
     pub ignore_localhost: bool,
 
-    /// #### feature.network.outgoing.filter {#feature.network.outgoing.filter}
+    /// **feature.network.outgoing.filter** {#feature.network.outgoing.filter}
     ///
     /// Filters that are used to send specific traffic from either the remote pod or the local app
     #[config(default)]
     pub filter: Option<OutgoingFilterConfig>,
 
-    /// #### feature.network.outgoing.unix_streams {#feature.network.outgoing.unix_streams}
+    /// **feature.network.outgoing.unix_streams** {#feature.network.outgoing.unix_streams}
     ///
     /// Connect to these unix streams remotely (and to all other paths locally).
     ///

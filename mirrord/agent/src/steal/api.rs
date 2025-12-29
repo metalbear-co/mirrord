@@ -29,13 +29,14 @@ use super::{Command, StealerCommand, StealerMessage};
 use crate::{
     AgentError,
     error::AgentResult,
-    http::filter::HttpFilter,
+    http::{MIRRORD_AGENT_HTTP_HEADER_NAME, filter::HttpFilter},
     incoming::{
-        ConnError, IncomingStream, IncomingStreamItem, ResponseBodyProvider, ResponseProvider,
-        StolenHttp, StolenTcp,
+        ConnError, IncomingStream, IncomingStreamItem, RedirectorTaskConfig, ResponseBodyProvider,
+        ResponseProvider, StolenHttp, StolenTcp,
     },
     steal::api::wait_body::WaitForFullBody,
-    util::{ClientId, protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus},
+    task::status::BgTaskStatus,
+    util::{ClientId, protocol_version::ClientProtocolVersion},
 };
 
 mod wait_body;
@@ -203,6 +204,7 @@ impl TcpStealerApi {
             request_head,
             stream,
             response_provider,
+            redirector_config,
         } = request;
 
         if self
@@ -214,10 +216,10 @@ impl TcpStealerApi {
                     connection_id,
                     request_id: Self::REQUEST_ID,
                     request: InternalHttpRequest {
-                        method: request_head.method,
-                        uri: request_head.uri,
-                        headers: request_head.headers,
-                        version: request_head.version,
+                        method: request_head.parts.method,
+                        uri: request_head.parts.uri,
+                        headers: request_head.parts.headers,
+                        version: request_head.parts.version,
                         body: InternalHttpBodyNew {
                             frames: request_head.body_head,
                             is_last: request_head.body_finished,
@@ -229,6 +231,7 @@ impl TcpStealerApi {
                     },
                     transport: info
                         .tls_connector
+                        .as_ref()
                         .map(|tls| IncomingTrafficTransportType::Tls {
                             server_name: tls.server_name().map(|s| s.to_str().into_owned()),
                             alpn_protocol: tls.alpn_protocol().map(Vec::from),
@@ -241,10 +244,10 @@ impl TcpStealerApi {
             let message = DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
                 ChunkedRequest::StartV1(HttpRequest {
                     internal_request: InternalHttpRequest {
-                        method: request_head.method,
-                        uri: request_head.uri,
-                        headers: request_head.headers,
-                        version: request_head.version,
+                        method: request_head.parts.method,
+                        uri: request_head.parts.uri,
+                        headers: request_head.parts.headers,
+                        version: request_head.parts.version,
                         body: request_head.body_head,
                     },
                     connection_id,
@@ -268,10 +271,10 @@ impl TcpStealerApi {
         } else if self.protocol_version.matches(&HTTP_FRAMED_VERSION) {
             let message = DaemonMessage::TcpSteal(DaemonTcp::HttpRequestFramed(HttpRequest {
                 internal_request: InternalHttpRequest {
-                    method: request_head.method,
-                    uri: request_head.uri,
-                    headers: request_head.headers,
-                    version: request_head.version,
+                    method: request_head.parts.method,
+                    uri: request_head.parts.uri,
+                    headers: request_head.parts.headers,
+                    version: request_head.parts.version,
                     body: InternalHttpBody(request_head.body_head.into()),
                 },
                 connection_id,
@@ -282,10 +285,10 @@ impl TcpStealerApi {
         } else {
             let message = DaemonMessage::TcpSteal(DaemonTcp::HttpRequest(HttpRequest {
                 internal_request: InternalHttpRequest {
-                    method: request_head.method,
-                    uri: request_head.uri,
-                    headers: request_head.headers,
-                    version: request_head.version,
+                    method: request_head.parts.method,
+                    uri: request_head.parts.uri,
+                    headers: request_head.parts.headers,
+                    version: request_head.parts.version,
                     body: frames_to_legacy(request_head.body_head),
                 },
                 connection_id,
@@ -298,7 +301,10 @@ impl TcpStealerApi {
         self.incoming_streams.insert(connection_id, stream);
         self.connections.insert(
             connection_id,
-            ClientConnectionState::HttpRequestSent { response_provider },
+            ClientConnectionState::HttpRequestSent {
+                response_provider,
+                redirector_config,
+            },
         );
 
         Ok(())
@@ -429,15 +435,16 @@ impl TcpStealerApi {
                     connection_id,
                     ClientConnectionState::HttpRequestSent {
                         response_provider: request.response_provider,
+                        redirector_config: request.redirector_config,
                     },
                 );
                 let message = if self.protocol_version.matches(&HTTP_FRAMED_VERSION) {
                     DaemonTcp::HttpRequestFramed(HttpRequest {
                         internal_request: InternalHttpRequest {
-                            method: request.request_head.method,
-                            uri: request.request_head.uri,
-                            headers: request.request_head.headers,
-                            version: request.request_head.version,
+                            method: request.request_head.parts.method,
+                            uri: request.request_head.parts.uri,
+                            headers: request.request_head.parts.headers,
+                            version: request.request_head.parts.version,
                             body: InternalHttpBody(
                                 request.request_head.body_head.into_iter().collect(),
                             ),
@@ -449,10 +456,10 @@ impl TcpStealerApi {
                 } else {
                     DaemonTcp::HttpRequest(HttpRequest {
                         internal_request: InternalHttpRequest {
-                            method: request.request_head.method,
-                            uri: request.request_head.uri,
-                            headers: request.request_head.headers,
-                            version: request.request_head.version,
+                            method: request.request_head.parts.method,
+                            uri: request.request_head.parts.uri,
+                            headers: request.request_head.parts.headers,
+                            version: request.request_head.parts.version,
                             body: frames_to_legacy(request.request_head.body_head),
                         },
                         connection_id,
@@ -491,12 +498,17 @@ impl TcpStealerApi {
                             HttpFilter::try_from(&mirrord_protocol::tcp::HttpFilter::Header(
                                 filter,
                             ))
+                            .map_err(Box::new)
                             .map_err(AgentError::InvalidHttpFilter)?,
                         ),
                     ),
                     StealType::FilteredHttpEx(port, filter) => (
                         port,
-                        Some(HttpFilter::try_from(&filter).map_err(AgentError::InvalidHttpFilter)?),
+                        Some(
+                            HttpFilter::try_from(&filter)
+                                .map_err(Box::new)
+                                .map_err(AgentError::InvalidHttpFilter)?,
+                        ),
                     ),
                 };
 
@@ -594,7 +606,10 @@ enum ClientConnectionState {
     /// TCP connection, client is sending data.
     Tcp { data_tx: mpsc::Sender<Bytes> },
     /// HTTP request sent, waiting for the response from the client.
-    HttpRequestSent { response_provider: ResponseProvider },
+    HttpRequestSent {
+        response_provider: ResponseProvider,
+        redirector_config: RedirectorTaskConfig,
+    },
     /// HTTP request sent, response received, client is sending response body frames.
     HttpResponseReceived { body_provider: ResponseBodyProvider },
     /// HTTP request finished, connection upgraded, client is sending data.
@@ -648,8 +663,11 @@ impl ClientConnectionState {
         B: IntoIterator<Item = InternalHttpBodyFrame>,
     {
         let state = std::mem::replace(self, Self::Closed);
-        let response_provider = match state {
-            Self::HttpRequestSent { response_provider } => response_provider,
+        let (response_provider, redirector_config) = match state {
+            Self::HttpRequestSent {
+                response_provider,
+                redirector_config,
+            } => (response_provider, redirector_config),
             state => {
                 *self = state;
                 return;
@@ -658,9 +676,13 @@ impl ClientConnectionState {
 
         let parts = {
             let mut hyper_response = Response::new(());
+
             *hyper_response.status_mut() = response.internal_response.status;
             *hyper_response.headers_mut() = response.internal_response.headers;
             *hyper_response.version_mut() = response.internal_response.version;
+
+            Self::modify_response(&mut hyper_response, &redirector_config);
+
             hyper_response.into_parts().0
         };
 
@@ -681,6 +703,18 @@ impl ClientConnectionState {
                 body_provider.send_frame(frame.into()).await;
             }
             *self = Self::HttpResponseReceived { body_provider };
+        }
+    }
+
+    /// Used for applying transformations on the response returned
+    /// from the client. Currently just inserts the mirrord agent
+    /// header.
+    fn modify_response<T>(response: &mut Response<T>, redirector_config: &RedirectorTaskConfig) {
+        if redirector_config.inject_headers {
+            response.headers_mut().insert(
+                MIRRORD_AGENT_HTTP_HEADER_NAME,
+                http::HeaderValue::from_static("forwarded-to-client"),
+            );
         }
     }
 }

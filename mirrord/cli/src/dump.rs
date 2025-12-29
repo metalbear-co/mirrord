@@ -16,6 +16,7 @@ use mirrord_protocol::{
         NewTcpConnectionV2, TcpData,
     },
 };
+use mirrord_protocol_io::{Client, Connection};
 use thiserror::Error;
 use tokio::{
     sync::mpsc,
@@ -24,11 +25,7 @@ use tokio::{
 use tracing::{debug, info};
 
 use super::config::DumpArgs;
-use crate::{
-    connection::{AgentConnection, create_and_connect},
-    error::CliResult,
-    user_data::UserData,
-};
+use crate::{connection::create_and_connect, error::CliResult, user_data::UserData};
 
 /// Implements the `mirrord dump` command.
 ///
@@ -62,7 +59,7 @@ pub async fn dump_command(
 
     // Create connection to the agent
     let (_connection_info, connection) =
-        create_and_connect(&mut config, &mut progress, &mut analytics, None).await?;
+        create_and_connect(&mut config, &mut progress, &mut analytics, None, None).await?;
 
     // Start the dump session
     let session = DumpSession::new(connection, args.ports.clone());
@@ -78,7 +75,10 @@ pub enum DumpSessionError {
     AgentConnClosed(Option<String>),
 
     #[error("received an unexpected message from the agent: {0:?}")]
-    UnexpectedAgentMessage(DaemonMessage),
+    UnexpectedAgentMessage(
+        /// Boxed due to large size difference.
+        Box<DaemonMessage>,
+    ),
 
     #[error("port subscription failed: {0}")]
     PortSubscriptionFailed(ResponseError),
@@ -90,9 +90,9 @@ impl From<mpsc::error::SendError<ClientMessage>> for DumpSessionError {
     }
 }
 
-/// Implements `mirrord dump` logic on an established [`AgentConnection`].
+/// Implements `mirrord dump` logic on an established [`Connection`].
 struct DumpSession {
-    connection: AgentConnection,
+    connection: Connection<Client>,
     ports: Vec<u16>,
     /// How many of our port subscriptions were confirmed.
     confirmations: usize,
@@ -109,7 +109,7 @@ struct DumpSession {
 }
 
 impl DumpSession {
-    fn new(connection: AgentConnection, ports: Vec<u16>) -> Self {
+    fn new(connection: Connection<Client>, ports: Vec<u16>) -> Self {
         let mut ping_interval = tokio::time::interval(Duration::from_secs(30));
         ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -130,14 +130,12 @@ impl DumpSession {
     /// 3. Issues port subscriptions.
     async fn init_connection(&mut self) -> Result<(), DumpSessionError> {
         self.connection
-            .sender
             .send(ClientMessage::SwitchProtocolVersion(
                 mirrord_protocol::VERSION.clone(),
             ))
-            .await?;
+            .await;
         match self
             .connection
-            .receiver
             .recv()
             .await
             .ok_or(DumpSessionError::AgentConnClosed(None))?
@@ -145,16 +143,13 @@ impl DumpSession {
             DaemonMessage::SwitchProtocolVersionResponse(version) => {
                 debug!("Established mirrord-protocol version {version}");
             }
-            other => return Err(DumpSessionError::UnexpectedAgentMessage(other)),
+            other => return Err(DumpSessionError::UnexpectedAgentMessage(Box::new(other))),
         }
-        self.connection
-            .sender
-            .send(ClientMessage::ReadyForLogs)
-            .await?;
+        self.connection.send(ClientMessage::ReadyForLogs).await;
 
         for port in &self.ports {
             let message = ClientMessage::Tcp(LayerTcp::PortSubscribe(*port));
-            self.connection.sender.send(message).await?;
+            self.connection.send(message).await;
             info!("Issued subscription to port {} for mirroring", port);
         }
 
@@ -391,9 +386,9 @@ impl DumpSession {
                 );
             }
             message @ DaemonTcp::SubscribeResult(..) => {
-                return Err(DumpSessionError::UnexpectedAgentMessage(
+                return Err(DumpSessionError::UnexpectedAgentMessage(Box::new(
                     DaemonMessage::Tcp(message),
-                ));
+                )));
             }
         }
 
@@ -407,11 +402,11 @@ impl DumpSession {
             let message = tokio::select! {
                 _ = self.ping_interval.tick() => {
                     tracing::debug!("Ping timeout reached, sending ping");
-                    self.connection.sender.send(ClientMessage::Ping).await?;
+                    self.connection.send(ClientMessage::Ping).await;
                     continue;
                 },
 
-                message = self.connection.receiver.recv() => {
+                message = self.connection.recv() => {
                     tracing::debug!(?message, "Received message");
                     message.ok_or(DumpSessionError::AgentConnClosed(None))?
                 },
@@ -419,11 +414,7 @@ impl DumpSession {
 
             match message {
                 DaemonMessage::OperatorPing(id) => {
-                    self.connection
-                        .sender
-                        .send(ClientMessage::OperatorPong(id))
-                        .await
-                        .ok();
+                    self.connection.send(ClientMessage::OperatorPong(id)).await;
                 }
                 DaemonMessage::Tcp(message) => {
                     self.handle_tcp_message(message, progress)?;
@@ -446,7 +437,7 @@ impl DumpSession {
                 | DaemonMessage::UdpOutgoing(..)
                 | DaemonMessage::Vpn(..)
                 | DaemonMessage::TcpSteal(..)) => {
-                    return Err(DumpSessionError::UnexpectedAgentMessage(message));
+                    return Err(DumpSessionError::UnexpectedAgentMessage(Box::new(message)));
                 }
             }
         }

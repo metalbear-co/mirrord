@@ -35,18 +35,13 @@ fn get_rw_test_file_env_vars() -> Vec<(&'static str, &'static str)> {
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
-async fn self_open(
-    #[values(
-        Application::Go21SelfOpen,
-        Application::Go22SelfOpen,
-        Application::Go23SelfOpen
-    )]
-    application: Application,
+async fn go_self_open(
+    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();
 
-    let (mut test_process, mut intproxy) = application
+    let (mut test_process, mut intproxy) = Application::GoSelfOpen(go_version)
         .start_process_with_layer(dylib_path, vec![], None)
         .await;
 
@@ -249,32 +244,6 @@ async fn node_close(
         .await;
 
     let contents = "hello";
-    // on macOS it will send xstat before reading.
-    #[cfg(target_os = "macos")]
-    {
-        let read_amount = contents.len();
-        assert_eq!(
-            intproxy.recv().await,
-            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
-                path: None,
-                fd: Some(1),
-                follow_symlink: true
-            }))
-        );
-
-        let metadata = MetadataInternal {
-            device_id: 0,
-            size: read_amount as u64,
-            user_id: 2,
-            blocks: 3,
-            ..Default::default()
-        };
-        intproxy
-            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-                XstatResponse { metadata },
-            ))))
-            .await;
-    }
 
     intproxy.expect_file_read(contents, fd).await;
 
@@ -290,18 +259,13 @@ async fn node_close(
 #[timeout(Duration::from_secs(60))]
 #[cfg(target_os = "linux")]
 async fn go_stat(
-    #[values(
-        Application::Go21FileOps,
-        Application::Go22FileOps,
-        Application::Go23FileOps
-    )]
-    application: Application,
+    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();
 
     // add rw override for the specific path
-    let (mut test_process, mut intproxy) = application
+    let (mut test_process, mut intproxy) = Application::GoFileOps(go_version)
         .start_process_with_layer(
             dylib_path,
             vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt")],
@@ -360,7 +324,11 @@ async fn go_stat(
 #[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "macos")]
 async fn go_dir(
-    #[values(Application::Go21Dir, Application::Go22Dir, Application::Go23Dir)]
+    #[values(
+        Application::GoDir(GoVersion::GO_1_23),
+        Application::GoDir(GoVersion::GO_1_24),
+        Application::GoDir(GoVersion::GO_1_25)
+    )]
     application: Application,
     dylib_path: &Path,
 ) {
@@ -480,13 +448,12 @@ async fn go_dir(
 #[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "linux")]
 async fn go_dir_on_linux(
-    #[values(Application::Go21Dir, Application::Go22Dir, Application::Go23Dir)]
-    application: Application,
+    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();
 
-    let (mut test_process, mut intproxy) = application
+    let (mut test_process, mut intproxy) = Application::GoDir(go_version)
         .start_process_with_layer(
             dylib_path,
             vec![("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo")],
@@ -573,12 +540,7 @@ async fn go_dir_on_linux(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn go_dir_bypass(
-    #[values(
-        Application::Go21DirBypass,
-        Application::Go22DirBypass,
-        Application::Go23DirBypass
-    )]
-    application: Application,
+    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();
@@ -591,7 +553,7 @@ async fn go_dir_bypass(
     let path_string = tmp_dir.to_str().unwrap().to_string();
 
     // But make this path local so that in the getdents64 detour we get to the bypass.
-    let (mut test_process, _intproxy) = application
+    let (mut test_process, _intproxy) = Application::GoDirBypass(go_version)
         .start_process_with_layer(
             dylib_path,
             vec![
@@ -618,13 +580,12 @@ async fn go_dir_bypass(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn read_go(
-    #[values(Application::Go21Read, Application::Go22Read, Application::Go23Read)]
-    application: Application,
+    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();
 
-    let (mut test_process, mut intproxy) = application
+    let (mut test_process, mut intproxy) = Application::GoRead(go_version)
         .start_process_with_layer(dylib_path, vec![("MIRRORD_FILE_MODE", "read")], None)
         .await;
 
@@ -660,13 +621,12 @@ async fn read_go(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn write_go(
-    #[values(Application::Go21Write, Application::Go22Write, Application::Go23Write)]
-    application: Application,
+    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();
 
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut layer_connection) = Application::GoWrite(go_version)
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
 
@@ -689,13 +649,12 @@ async fn write_go(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn lseek_go(
-    #[values(Application::Go21LSeek, Application::Go22LSeek, Application::Go23LSeek)]
-    application: Application,
+    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();
 
-    let (mut test_process, mut intproxy) = application
+    let (mut test_process, mut intproxy) = Application::GoLSeek(go_version)
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
 
@@ -720,17 +679,12 @@ async fn lseek_go(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn faccessat_go(
-    #[values(
-        Application::Go21FAccessAt,
-        Application::Go22FAccessAt,
-        Application::Go23FAccessAt
-    )]
-    application: Application,
+    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();
 
-    let (mut test_process, mut intproxy) = application
+    let (mut test_process, mut intproxy) = Application::GoFAccessAt(go_version)
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
 

@@ -15,6 +15,8 @@ It’s meant to provide the benefits of running your service on a cloud environm
 going through the hassle of deploying it there, and without disrupting the environment by deploying untested code.
 It comes as a Visual Studio Code extension, an IntelliJ plugin and a CLI tool. You can read more about it [here](https://metalbear.co/mirrord/docs/overview/introduction/).
 
+Or maybe you're just Looking for the [KubeCon Atlanta raffle password](#kubecon-atlanta-raffle).
+
 # Contents
 
 - [Contents](#contents)
@@ -168,6 +170,15 @@ We're available on [Slack](https://metalbear.co/slack) for any questions.
 ## Help and Community
 
 Join our [Slack](https://metalbear.co/slack) for questions, support and fun.
+
+We always appreciate hearing how mirrord has made a difference for our users.  
+Check out our [ADOPTERS.md](./ADOPTERS.md) to see how others are using mirrord —  
+and [open a pull request](https://github.com/metalbear-co/mirrord/pulls) to add your organization if you’d like to share how mirrord has been useful to you.
+
+## KubeCon Atlanta Raffle
+
+The password is: **"The blind rooster crows at midnight."**
+Say it to one of our team members at Booth #1560.
 
 ## Code of Conduct
 

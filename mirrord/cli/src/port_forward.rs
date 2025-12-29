@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    ops::Not,
     str::FromStr,
     time::{Duration, Instant},
 };
@@ -8,7 +9,7 @@ use std::{
 use futures::StreamExt;
 use mirrord_config::feature::network::incoming::{
     IncomingConfig,
-    http_filter::{HttpFilterConfig, InnerFilter},
+    http_filter::{BodyFilter, HttpFilterConfig, InnerFilter},
 };
 use mirrord_intproxy::{
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
@@ -26,8 +27,13 @@ use mirrord_protocol::{
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
-    tcp::{Filter, HttpFilter, HttpMethodFilter, StealType},
+    tcp::{
+        Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, MIRROR_HTTP_FILTER_VERSION,
+        MirrorType, StealType,
+    },
 };
+use mirrord_protocol_io::{Client, Connection};
+use semver::Version;
 use thiserror::Error;
 use tokio::{
     io::AsyncWriteExt,
@@ -45,7 +51,7 @@ use tokio_stream::{StreamMap, wrappers::TcpListenerStream};
 use tokio_util::io::ReaderStream;
 use tracing::Level;
 
-use crate::{AddrPortMapping, LocalPort, RemoteAddr, RemotePort, connection::AgentConnection};
+use crate::{AddrPortMapping, LocalPort, RemoteAddr, RemotePort};
 
 /// Connection address pair
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -64,7 +70,7 @@ struct ConnectionPortMapping {
 
 pub struct PortForwarder {
     /// communicates with the agent (only TCP supported)
-    agent_connection: AgentConnection,
+    agent_connection: Connection<Client>,
     /// associates local ports with destination ports
     /// destinations may contain unresolved hostnames
     raw_mappings: HashMap<SocketAddr, (RemoteAddr, u16)>,
@@ -91,7 +97,7 @@ pub struct PortForwarder {
 
 impl PortForwarder {
     pub(crate) async fn new(
-        agent_connection: AgentConnection,
+        agent_connection: Connection<Client>,
         mappings: HashMap<SocketAddr, (RemoteAddr, u16)>,
     ) -> Result<Self, PortForwardError> {
         // open tcp listener for local addrs
@@ -127,19 +133,17 @@ impl PortForwarder {
     pub(crate) async fn run(&mut self) -> Result<(), PortForwardError> {
         // setup agent connection
         self.agent_connection
-            .sender
             .send(ClientMessage::SwitchProtocolVersion(
                 mirrord_protocol::VERSION.clone(),
             ))
-            .await?;
-        match self.agent_connection.receiver.recv().await {
+            .await;
+        match self.agent_connection.recv().await {
             Some(DaemonMessage::SwitchProtocolVersionResponse(version))
                 if CLIENT_READY_FOR_LOGS.matches(&version) =>
             {
                 self.agent_connection
-                    .sender
                     .send(ClientMessage::ReadyForLogs)
-                    .await?;
+                    .await;
             }
             _ => return Err(PortForwardError::AgentConnectionFailed),
         }
@@ -151,12 +155,12 @@ impl PortForwarder {
                         // no pong received before timeout
                         break Err(PortForwardError::AgentError("agent failed to respond to Ping".into()));
                     }
-                    self.agent_connection.sender.send(ClientMessage::Ping).await?;
+                    self.agent_connection.send(ClientMessage::Ping).await;
                     self.waiting_for_pong = true;
                     self.ping_pong_timeout = Instant::now() + Duration::from_secs(30);
                 },
 
-                message = self.agent_connection.receiver.recv() => match message {
+                message = self.agent_connection.recv() => match message {
                     Some(message) => self.handle_msg_from_agent(message).await?,
                     None => {
                         break Err(PortForwardError::AgentError("unexpected end of connection with agent".into()));
@@ -176,7 +180,7 @@ impl PortForwarder {
         }
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     async fn handle_msg_from_agent(
         &mut self,
         message: DaemonMessage,
@@ -206,11 +210,10 @@ impl PortForwarder {
                             Ok(_) => (),
                             Err(_) => {
                                 self.agent_connection
-                                    .sender
                                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(
                                         LayerClose { connection_id },
                                     )))
-                                    .await?;
+                                    .await;
                                 self.task_txs.remove(&socket_pair);
                                 self.sockets.remove(&connection_id);
                                 tracing::warn!(
@@ -229,6 +232,12 @@ impl PortForwarder {
                         let _ = self.id_oneshots.pop_front();
                     }
                 },
+                DaemonTcpOutgoing::ConnectV2(..) => {
+                    // Port forwarder does not use connect v2 variants.
+                    return Err(PortForwardError::AgentError(format!(
+                        "unexpected message from agent: {message:?}"
+                    )));
+                }
                 DaemonTcpOutgoing::Read(res) => match res {
                     Ok(res) => {
                         let Some(ConnectionPortMapping {
@@ -248,13 +257,12 @@ impl PortForwarder {
                                 self.task_txs.remove(socket_pair);
                                 self.sockets.remove(&res.connection_id);
                                 self.agent_connection
-                                    .sender
                                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(
                                         LayerClose {
                                             connection_id: res.connection_id,
                                         },
                                     )))
-                                    .await?;
+                                    .await;
                                 tracing::error!(
                                     "failed to send response from remote to local port"
                                 );
@@ -339,10 +347,8 @@ impl PortForwarder {
             }
             DaemonMessage::OperatorPing(id) => {
                 self.agent_connection
-                    .sender
                     .send(ClientMessage::OperatorPong(id))
                     .await
-                    .ok();
             }
             message @ (DaemonMessage::File(..)
             | DaemonMessage::Pong
@@ -353,7 +359,7 @@ impl PortForwarder {
             | DaemonMessage::UdpOutgoing(..)
             | DaemonMessage::Vpn(..)
             | DaemonMessage::TcpSteal(..)) => {
-                // includes unexepcted DaemonMessage::Pong
+                // includes unexpected DaemonMessage::Pong
                 return Err(PortForwardError::AgentError(format!(
                     "unexpected message from agent: {message:?}"
                 )));
@@ -363,7 +369,7 @@ impl PortForwarder {
         Ok(())
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     async fn handle_listener_stream(
         &mut self,
         message: (SocketAddr, Result<TcpStream, std::io::Error>),
@@ -374,7 +380,7 @@ impl PortForwarder {
             Err(error) => {
                 // error from TcpStream
                 tracing::error!(
-                    "error occured while listening to local socket {local_socket}: {error}"
+                    "error occurred while listening to local socket {local_socket}: {error}"
                 );
                 self.listeners.remove(&local_socket);
                 return Ok(());
@@ -419,7 +425,7 @@ impl PortForwarder {
         Ok(())
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     async fn handle_msg_from_task(
         &mut self,
         message: PortForwardMessage,
@@ -428,42 +434,38 @@ impl PortForwarder {
             PortForwardMessage::Lookup(socket_pair, node, oneshot) => {
                 self.dns_oneshots.push_back((socket_pair, oneshot));
                 self.agent_connection
-                    .sender
                     .send(ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
                         node,
                     }))
-                    .await?;
+                    .await;
             }
             PortForwardMessage::Connect(port_mapping, oneshot) => {
                 let remote_address = SocketAddress::Ip(port_mapping.remote);
                 self.id_oneshots.push_back((port_mapping.pair, oneshot));
                 self.agent_connection
-                    .sender
                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
                         LayerConnect { remote_address },
                     )))
-                    .await?;
+                    .await;
             }
             PortForwardMessage::Send(connection_id, bytes) => {
                 self.agent_connection
-                    .sender
                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(
                         LayerWrite {
                             connection_id,
                             bytes,
                         },
                     )))
-                    .await?;
+                    .await;
             }
             PortForwardMessage::Close(socket_pair, connection_id) => {
                 self.task_txs.remove(&socket_pair);
                 if let Some(connection_id) = connection_id {
                     self.agent_connection
-                        .sender
                         .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(
                             LayerClose { connection_id },
                         )))
-                        .await?;
+                        .await;
                     self.sockets.remove(&connection_id);
                 }
             }
@@ -474,7 +476,7 @@ impl PortForwarder {
 
 pub struct ReversePortForwarder {
     /// communicates with the agent (only TCP supported).
-    agent_connection: AgentConnection,
+    agent_connection: Connection<Client>,
     /// background task (uses [`IncomingProxy`] to communicate with layer)
     background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError>,
     /// incoming proxy background task tx
@@ -487,13 +489,14 @@ pub struct ReversePortForwarder {
 
 impl ReversePortForwarder {
     pub(crate) async fn new(
-        mut agent_connection: AgentConnection,
+        mut agent_connection: Connection<Client>,
         mappings: HashMap<RemotePort, LocalPort>,
         mut network_config: IncomingConfig,
         idle_local_http_connection_timeout: Duration,
     ) -> Result<Self, PortForwardError> {
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError> =
-            Default::default();
+            BackgroundTasks::new(agent_connection.tx_handle());
+
         let incoming = background_tasks.register(
             IncomingProxy::new(
                 idle_local_http_connection_timeout,
@@ -508,28 +511,25 @@ impl ReversePortForwarder {
         );
 
         agent_connection
-            .sender
             .send(ClientMessage::SwitchProtocolVersion(
                 mirrord_protocol::VERSION.clone(),
             ))
-            .await?;
-        let protocol_version = match agent_connection.receiver.recv().await {
+            .await;
+        let protocol_version = match agent_connection.recv().await {
             Some(DaemonMessage::SwitchProtocolVersionResponse(version)) => version,
             _ => return Err(PortForwardError::AgentConnectionFailed),
         };
 
         if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
-            agent_connection
-                .sender
-                .send(ClientMessage::ReadyForLogs)
-                .await?;
+            agent_connection.send(ClientMessage::ReadyForLogs).await;
         }
+
+        let incoming_mode = IncomingMode::new(&mut network_config, &protocol_version);
 
         incoming
             .send(IncomingProxyMessage::AgentProtocolVersion(protocol_version))
             .await;
 
-        let incoming_mode = IncomingMode::new(&mut network_config);
         for (i, (&remote, &local)) in mappings.iter().enumerate() {
             let subscription = incoming_mode.subscription(remote);
             let message_id = i as u64;
@@ -562,14 +562,15 @@ impl ReversePortForwarder {
                         // no pong received before timeout
                         break Err(PortForwardError::AgentError("agent failed to respond to Ping".into()));
                     }
-                    self.agent_connection.sender.send(ClientMessage::Ping).await?;
+                    self.agent_connection.send(ClientMessage::Ping).await;
                     self.waiting_for_pong = true;
                     self.ping_pong_timeout = Instant::now() + Duration::from_secs(30);
                 },
 
-                message = self.agent_connection.receiver.recv() => match message {
+                message = self.agent_connection.recv() => match message {
                     Some(message) => {
-                        self.handle_msg_from_agent(message).await?},
+                        self.handle_msg_from_agent(message).await?
+                    },
                     None => {
                         break Err(PortForwardError::AgentError("unexpected end of connection with agent".into()));
                     },
@@ -600,10 +601,8 @@ impl ReversePortForwarder {
             }
             DaemonMessage::OperatorPing(id) => {
                 self.agent_connection
-                    .sender
                     .send(ClientMessage::OperatorPong(id))
                     .await
-                    .ok();
             }
             DaemonMessage::LogMessage(log_message) => match log_message.level {
                 LogLevel::Warn => tracing::warn!("agent log: {}", log_message.message),
@@ -641,9 +640,6 @@ impl ReversePortForwarder {
     ) -> Result<(), PortForwardError> {
         match update {
             TaskUpdate::Message(message) => match message {
-                ProxyMessage::ToAgent(message) => {
-                    self.agent_connection.sender.send(message).await?;
-                }
                 ProxyMessage::ToLayer(ToLayer {
                     message: ProxyToLayerMessage::Incoming(IncomingResponse::PortSubscribe(res)),
                     ..
@@ -707,7 +703,7 @@ struct LocalConnectionTask {
     /// read half of the TcpStream connected to the local port, wrapped in a stream
     read_stream: ReaderStream<OwnedReadHalf>,
     /// write half of the TcpStream connected to the local port
-    write: OwnedWriteHalf,
+    write: Option<OwnedWriteHalf>,
     /// the mapping local_port:remote_ip:remote_port
     port_mapping: AddrPortMapping,
     /// tx for sending internal messages to the main loop
@@ -734,7 +730,7 @@ impl LocalConnectionTask {
         Self {
             peer_socket,
             read_stream,
-            write,
+            write: Some(write),
             port_mapping,
             task_internal_tx,
             data_rx: response_rx,
@@ -748,23 +744,10 @@ impl LocalConnectionTask {
         }
     }
 
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     pub async fn run(&mut self) -> Result<(), PortForwardError> {
         let (id_oneshot_tx, id_oneshot_rx) = oneshot::channel::<ConnectionId>();
         let (dns_oneshot_tx, dns_oneshot_rx) = oneshot::channel::<IpAddr>();
-
-        // lazy connection: wait until data starts
-        let first = match self.read_stream.next().await {
-            Some(Ok(data)) => data,
-            Some(Err(error)) => return Err(PortForwardError::TcpListenerError(error)),
-            None => {
-                // stream ended without sending data
-                let _ = self
-                    .task_internal_tx
-                    .send(PortForwardMessage::Close(self.socket_pair(), None))
-                    .await;
-                return Ok(());
-            }
-        };
 
         let (resolved_ip, port): (IpAddr, u16) = match &self.port_mapping.remote {
             (RemoteAddr::Ip(ip), port) => (IpAddr::V4(*ip), *port),
@@ -832,16 +815,6 @@ impl LocalConnectionTask {
                 return Ok(());
             }
         };
-        match self
-            .task_internal_tx
-            .send(PortForwardMessage::Send(connection_id, first.into()))
-            .await
-        {
-            Ok(_) => (),
-            Err(error) => {
-                tracing::warn!("failed to send data to main loop: {error}");
-            }
-        };
 
         let result: Result<(), PortForwardError> = loop {
             select! {
@@ -871,18 +844,31 @@ impl LocalConnectionTask {
                 },
 
                 message = self.data_rx.recv() => match message {
-                    Some(message) => {
-                        match self.write.write_all(message.as_ref()).await {
-                            Ok(_) => continue,
-                            Err(error) => {
-                                tracing::error!(
-                                    %error,
-                                    port_mapping = ?self.port_mapping,
-                                    "local connection failed",
-                                );
-                                break Ok(());
-                            },
+                    Some(message) if message.is_empty() => {
+                        // ignore repeat empty messages
+                        if let Some(write) = self.write.take() {
+                            drop(write);
+                            tracing::debug!(
+                                port_mapping = ?self.port_mapping,
+                                "remote half closed the connection",
+                            );
                         }
+                    }
+                    Some(message) => {
+                       // ignore messages after write half closed
+                        if let Some(write) = self.write.as_mut() {
+                            match write.write_all(message.as_ref()).await {
+                                Ok(_) => continue,
+                                Err(error) => {
+                                    tracing::error!(
+                                        %error,
+                                        port_mapping = ?self.port_mapping,
+                                        "local connection failed",
+                                    );
+                                    break Ok(());
+                                },
+                            }
+                        };
                     },
                     None => break Ok(()),
                 }
@@ -900,34 +886,17 @@ impl LocalConnectionTask {
     }
 }
 
-/// Structs from mirrord_layer
-/// HTTP filter used by the layer with the `steal` feature.
 #[derive(Debug)]
-pub enum StealHttpFilter {
-    /// No filter.
-    None,
-    /// More recent filter (header or path).
-    Filter(HttpFilter),
+pub struct IncomingMode {
+    pub steal: bool,
+    pub http_settings: Option<HttpSettings>,
 }
-
-/// Settings for handling HTTP with the `steal` feature.
 #[derive(Debug)]
-struct StealHttpSettings {
+pub struct HttpSettings {
     /// The HTTP filter to use.
-    pub filter: StealHttpFilter,
+    pub filter: HttpFilter,
     /// Ports to filter HTTP on.
     pub ports: HashSet<Port>,
-}
-
-/// Operation mode for the `incoming` feature.
-#[derive(Debug)]
-enum IncomingMode {
-    /// The agent sends data to both the user application and the remote target.
-    /// Data coming from the layer is discarded.
-    Mirror,
-    /// The agent sends data only to the user application.
-    /// Data coming from the layer is sent to the agent.
-    Steal(StealHttpSettings),
 }
 
 impl IncomingMode {
@@ -936,9 +905,21 @@ impl IncomingMode {
     /// # Params
     ///
     /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
-    fn new(config: &mut IncomingConfig) -> Self {
-        if !config.is_steal() {
-            return Self::Mirror;
+    fn new(config: &mut IncomingConfig, protocol_version: &Version) -> Self {
+        // Only create HttpSettings if there are actual filters configured.
+        if config.http_filter.is_filter_set().not() {
+            return Self {
+                steal: config.is_steal(),
+                http_settings: None,
+            };
+        }
+
+        if config.is_steal().not() && MIRROR_HTTP_FILTER_VERSION.matches(protocol_version).not() {
+            tracing::warn!(
+                %protocol_version,
+                "Negotiated mirrord-protocol does not support using an HTTP filter when mirroring traffic. \
+                The HTTP filter will be ignored."
+            )
         }
 
         let ports = config
@@ -952,73 +933,89 @@ impl IncomingMode {
         let http_filter_config = &config.http_filter;
 
         // Matching all fields to make this check future-proof.
+        // TODO(areg) unify this with mirrord_layer::setup::parse_http_filter
         let filter = match http_filter_config {
             HttpFilterConfig {
                 path_filter: Some(path),
                 header_filter: None,
                 method_filter: None,
+                body_filter: None,
                 all_of: None,
                 any_of: None,
                 ports: _ports,
-            } => StealHttpFilter::Filter(HttpFilter::Path(
-                Filter::new(path.into()).expect("invalid filter expression"),
-            )),
+            } => HttpFilter::Path(Filter::new(path.into()).expect("invalid filter expression")),
 
             HttpFilterConfig {
                 path_filter: None,
                 header_filter: Some(header),
                 method_filter: None,
+                body_filter: None,
                 all_of: None,
                 any_of: None,
                 ports: _ports,
-            } => StealHttpFilter::Filter(HttpFilter::Header(
-                Filter::new(header.into()).expect("invalid filter expression"),
-            )),
+            } => HttpFilter::Header(Filter::new(header.into()).expect("invalid filter expression")),
 
             HttpFilterConfig {
                 path_filter: None,
                 header_filter: None,
                 method_filter: Some(method),
+                body_filter: None,
                 all_of: None,
                 any_of: None,
                 ports: _ports,
-            } => StealHttpFilter::Filter(HttpFilter::Method(
+            } => HttpFilter::Method(
                 HttpMethodFilter::from_str(method).expect("invalid method filter string"),
-            )),
+            ),
 
             HttpFilterConfig {
                 path_filter: None,
                 header_filter: None,
                 method_filter: None,
+                body_filter: Some(filter),
+                all_of: None,
+                any_of: None,
+                ports: _ports,
+            } => HttpFilter::Body(
+                // TODO(areg) unification
+                match filter {
+                    BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
+                        query: query.clone(),
+                        matches: Filter::new(matches.clone())
+                            .expect("invalid json body filter `matches` string"),
+                    },
+                },
+            ),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                body_filter: None,
                 all_of: Some(filters),
                 any_of: None,
                 ports: _ports,
-            } => StealHttpFilter::Filter(Self::make_composite_filter(true, filters)),
+            } => Self::make_composite_filter(true, filters),
 
             HttpFilterConfig {
                 path_filter: None,
                 header_filter: None,
                 method_filter: None,
+                body_filter: None,
                 all_of: None,
                 any_of: Some(filters),
                 ports: _ports,
-            } => StealHttpFilter::Filter(Self::make_composite_filter(false, filters)),
+            } => Self::make_composite_filter(false, filters),
 
-            HttpFilterConfig {
-                path_filter: None,
-                header_filter: None,
-                method_filter: None,
-                all_of: None,
-                any_of: None,
-                ports: _ports,
-            } => StealHttpFilter::None,
-
-            _ => panic!("multiple HTTP filters specified, this is a bug"),
+            _ => panic!("No HTTP filters specified, this should have been caught earlier"),
         };
 
-        Self::Steal(StealHttpSettings { filter, ports })
+        Self {
+            steal: config.is_steal(),
+            http_settings: Some(HttpSettings { filter, ports }),
+        }
     }
 
+    // TODO(areg) unify this with mirrord_layer::setup::parse_http_filter
     fn make_composite_filter(all: bool, filters: &[InnerFilter]) -> HttpFilter {
         let filters = filters
             .iter()
@@ -1032,6 +1029,16 @@ impl IncomingMode {
                 InnerFilter::Method { method } => HttpFilter::Method(
                     HttpMethodFilter::from_str(method).expect("invalid method filter string"),
                 ),
+                InnerFilter::Body(body_filter) => HttpFilter::Body(
+                    // TODO(areg) unify
+                    match body_filter {
+                        BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
+                            query: query.clone(),
+                            matches: Filter::new(matches.clone())
+                                .expect("invalid json body filter `matches` string"),
+                        },
+                    },
+                ),
             })
             .collect();
 
@@ -1039,18 +1046,32 @@ impl IncomingMode {
     }
 
     /// Returns [`PortSubscription`] request to be used for the given port.
-    fn subscription(&self, port: Port) -> PortSubscription {
-        let Self::Steal(steal) = self else {
-            return PortSubscription::Mirror(port);
-        };
-
-        let steal_type = match &steal.filter {
-            _ if !steal.ports.contains(&port) => StealType::All(port),
-            StealHttpFilter::None => StealType::All(port),
-            StealHttpFilter::Filter(filter) => StealType::FilteredHttpEx(port, filter.clone()),
-        };
-
-        PortSubscription::Steal(steal_type)
+    pub fn subscription(&self, port: Port) -> PortSubscription {
+        if self.steal {
+            let steal_type = match &self.http_settings {
+                None => StealType::All(port),
+                Some(settings) => {
+                    if settings.ports.contains(&port) {
+                        StealType::FilteredHttpEx(port, settings.filter.clone())
+                    } else {
+                        StealType::All(port)
+                    }
+                }
+            };
+            PortSubscription::Steal(steal_type)
+        } else {
+            let mirror_type = match &self.http_settings {
+                None => MirrorType::All(port),
+                Some(settings) => {
+                    if settings.ports.contains(&port) {
+                        MirrorType::FilteredHttp(port, settings.filter.clone())
+                    } else {
+                        MirrorType::All(port)
+                    }
+                }
+            };
+            PortSubscription::Mirror(mirror_type)
+        }
     }
 }
 
@@ -1059,7 +1080,7 @@ pub enum PortForwardError {
     #[error("multiple port forwarding mappings found for local address `{0}`")]
     PortMapSetupError(SocketAddr),
 
-    #[error("multiple port forwarding mappings found for desination port `{0:?}`")]
+    #[error("multiple port forwarding mappings found for destination port `{0:?}`")]
     ReversePortMapSetupError(RemotePort),
 
     #[error("agent closed connection with error: `{0}`")]
@@ -1097,6 +1118,7 @@ impl From<mpsc::error::SendError<ClientMessage>> for PortForwardError {
 mod test {
     use std::{
         collections::HashMap,
+        io::ErrorKind::WouldBlock,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         time::Duration,
     };
@@ -1114,6 +1136,7 @@ mod test {
             StealType, TcpClose, TcpData,
         },
     };
+    use mirrord_protocol_io::{Client, Connection, ConnectionOutput};
     use reqwest::{Method, StatusCode, Version, header::HeaderMap};
     use rstest::rstest;
     use tokio::{
@@ -1124,7 +1147,6 @@ mod test {
 
     use crate::{
         RemoteAddr,
-        connection::AgentConnection,
         port_forward::{PortForwarder, ReversePortForwarder},
     };
 
@@ -1137,27 +1159,19 @@ mod test {
     }
 
     impl TestAgentConnection {
-        fn new() -> (Self, AgentConnection) {
-            let (daemon_to_forwarder, daemon_from_forwarder) = mpsc::channel::<DaemonMessage>(8);
-            let (client_task_to_test, client_task_from_test) = mpsc::channel::<ClientMessage>(8);
-            let (client_forwarder_to_task, client_task_from_forwarder) =
-                mpsc::channel::<ClientMessage>(8);
+        fn new() -> (Self, Connection<Client>) {
+            let (connection, tx, rx) = Connection::dummy();
 
-            tokio::spawn(Self::auto_responder(
-                client_task_from_forwarder,
-                client_task_to_test,
-                daemon_to_forwarder.clone(),
-            ));
+            let (filtered_tx, filtered_rx) = mpsc::channel(8);
+
+            tokio::spawn(Self::auto_responder(rx, filtered_tx, tx.clone()));
 
             (
                 Self {
-                    daemon_msg_tx: daemon_to_forwarder,
-                    client_msg_rx: client_task_from_test,
+                    daemon_msg_tx: tx,
+                    client_msg_rx: filtered_rx,
                 },
-                AgentConnection {
-                    sender: client_forwarder_to_task,
-                    receiver: daemon_from_forwarder,
-                },
+                connection,
             )
         }
 
@@ -1177,12 +1191,12 @@ mod test {
         }
 
         async fn auto_responder(
-            mut rx: mpsc::Receiver<ClientMessage>,
+            rx: ConnectionOutput<Client>,
             tx_to_test_code: mpsc::Sender<ClientMessage>,
             tx_to_port_forwarder: mpsc::Sender<DaemonMessage>,
         ) {
             loop {
-                let Some(message) = rx.recv().await else {
+                let Some(message) = rx.next().await else {
                     break;
                 };
 
@@ -1238,7 +1252,7 @@ mod test {
         }));
         assert_eq!(test_connection.recv().await, expected,);
 
-        // reply with successful on daemon_msg_tx
+        // Reply with successful on daemon_msg_tx
         test_connection
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
                 DaemonConnect {
@@ -1255,7 +1269,7 @@ mod test {
         }));
         assert_eq!(test_connection.recv().await, expected);
 
-        // send response data from agent on daemon_msg_tx
+        // Send response data from agent on daemon_msg_tx
         test_connection
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
@@ -1265,10 +1279,35 @@ mod test {
             ))))
             .await;
 
-        // check data arrives at local
+        // Check data arrives at local
         let mut buf = [0; 16];
         stream.read_exact(&mut buf).await.unwrap();
         assert_eq!(buf, b"reply-my-beloved".as_ref());
+
+        // Half closure: check that the (local port) read half of the stream is still open
+        assert_eq!(
+            stream
+                .try_read(&mut buf)
+                .expect_err("reading should give `WouldBlock` error (no data to read)")
+                .kind(),
+            WouldBlock
+        );
+
+        // Half close the connection (emulate sending FIN from remote)
+        test_connection
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
+                DaemonRead {
+                    connection_id: 1,
+                    bytes: "".to_payload(),
+                },
+            ))))
+            .await;
+
+        // Wait for the socket to be readable
+        stream.readable().await.unwrap();
+
+        // Check that the (local port) read half of the stream has closed
+        assert_eq!(stream.try_read(&mut buf).unwrap(), 0);
     }
 
     #[tokio::test]

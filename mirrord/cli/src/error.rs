@@ -1,7 +1,10 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
+#[cfg(feature = "wizard")]
+use axum::response::{IntoResponse, Response};
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
+use mirrord_auth::error::ApiKeyError;
 use mirrord_config::config::ConfigError;
 use mirrord_console::error::ConsoleError;
 use mirrord_intproxy::{
@@ -10,12 +13,14 @@ use mirrord_intproxy::{
 };
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
+use mirrord_protocol_io::ProtocolError;
 use mirrord_tls_util::SecureChannelError;
 use mirrord_vpn::error::VpnError;
 use reqwest::StatusCode;
 use thiserror::Error;
 
 use crate::{
+    ci::error::CiError,
     container::{CommandDisplay, IntproxySidecarError},
     dump::DumpSessionError,
     port_forward::PortForwardError,
@@ -95,6 +100,7 @@ pub(crate) enum ExternalProxyError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     OpenLogFile(String, std::io::Error),
 
+    #[cfg(not(target_os = "windows"))]
     #[error("Failed to set sid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     SetSid(nix::Error),
@@ -115,6 +121,7 @@ pub(crate) enum InternalProxyError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     ListenerSetup(std::io::Error),
 
+    #[cfg(not(target_os = "windows"))]
     #[error("Failed to set sid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     SetSid(nix::Error),
@@ -388,6 +395,12 @@ pub(crate) enum CliError {
     #[error("An error occurred in the port-forwarding process: {0}")]
     PortForwardingError(#[from] PortForwardError),
 
+    #[error("An error occurred in the wizard while serving the wizard app: {0}")]
+    WizardServeError(#[from] io::Error),
+
+    #[error("An error occurred in the wizard while fetching target data: {0}")]
+    WizardTargetError(#[from] KubeApiError),
+
     #[error("Failed to execute authentication command specified in kubeconfig: {0}")]
     #[diagnostic(help("
         mirrord failed to execute Kube authentication command.
@@ -421,6 +434,7 @@ pub(crate) enum CliError {
     #[error(transparent)]
     ProfileError(#[from] ProfileError),
 
+    #[cfg(not(target_os = "windows"))]
     #[error(
         "Failed to execute the binary: execve failed with {}",
         nix::errno::Errno::E2BIG
@@ -439,6 +453,38 @@ pub(crate) enum CliError {
 
     #[error("operator operation timed out: {}", operation)]
     OperatorOperationTimeout { operation: String },
+
+    #[error("Failed to setup mirrord startup retry config with `{0}`")]
+    #[diagnostic(help(
+        "This may happen when `startup_retry.min_ms > startup_retry.max_ms` or when `startup_retry.max_ms == 0`. If this is not teh case in your config, then this might be a bug!"
+    ))]
+    InvalidBackoff(String),
+
+    #[error("Job Agent's Pod got deleted during initialization")]
+    #[diagnostic(help(
+        "This likely means that you don't have the required permissions to spawn it.
+        Look into your namespace's Pod Security admission controllers and try mirrord for Teams if the issue persists.
+        You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=errreqop&utm_medium=cli"
+    ))]
+    AgentPodDeleted,
+
+    #[error("Detected mirrord being run within mirrord")]
+    #[diagnostic(help(
+        "Running mirrord within mirrord is likely to fail or introduce severe slowness. \
+        If you are using a mirrord IDE plugin, please check that your build/run script \
+        does not invoke mirrord."
+    ))]
+    NestedExec,
+
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    MirrordForCi(#[from] CiError),
+
+    #[error("The '{0}' command is not currently supported on Windows")]
+    UnsupportedOnWindows(String),
+
+    #[error(transparent)]
+    ApiKey(#[from] ApiKeyError),
 }
 
 impl CliError {
@@ -464,6 +510,7 @@ impl CliError {
             {
                 Self::InvalidCertificate(error)
             }
+            KubeApiError::AgentPodDeleted => Self::AgentPodDeleted,
             error => fallback(error),
         }
     }
@@ -524,7 +571,24 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::OperationTimeout { operation } => Self::OperatorOperationTimeout {
                 operation: operation.to_string(),
             },
+            OperatorApiError::InvalidBackoff(fail) => Self::InvalidBackoff(fail.to_string()),
+            OperatorApiError::ProtocolError(error) => Self::from(error),
+            OperatorApiError::ApiKey(fail) => Self::ApiKey(fail),
+            OperatorApiError::SerdeJson(fail) => Self::JsonSerializeError(fail),
         }
+    }
+}
+
+impl From<ProtocolError> for CliError {
+    fn from(e: ProtocolError) -> Self {
+        Self::InitialAgentCommFailed(e.to_string())
+    }
+}
+
+#[cfg(feature = "wizard")]
+impl IntoResponse for CliError {
+    fn into_response(self) -> Response {
+        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
     }
 }
 

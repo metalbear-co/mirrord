@@ -3,7 +3,6 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use chrono::{DateTime, Utc};
 use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
@@ -17,18 +16,25 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "client")]
 use crate::client::error::OperatorApiError;
-use crate::{crd::copy_target::CopyTargetCrd, types::LicenseInfoOwned};
+use crate::{
+    crd::{copy_target::CopyTargetCrd, kafka::MirrordKafkaEphemeralTopicSpec},
+    types::LicenseInfoOwned,
+};
 
 pub mod copy_target;
+pub mod external;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
 pub mod mysql_branching;
+pub mod patch;
+pub mod pg_branching;
 pub mod policy;
 pub mod profile;
 pub mod session;
 pub mod steal_tls;
 
+pub use kafka::MirrordKafkaEphemeralTopic;
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -335,6 +341,7 @@ pub struct Session {
     pub locked_ports: Option<Vec<LockedPortCompat>>,
     pub user_id: Option<String>,
     pub sqs: Option<Vec<MirrordSqsSession>>,
+    pub kafka: Option<Vec<MirrordKafkaEphemeralTopicSpec>>,
 }
 
 /// Resource used to access the operator's session management routes.
@@ -381,6 +388,8 @@ pub enum NewOperatorFeature {
     KafkaQueueSplittingDirect,
     SqsQueueSplittingDirect,
     MySqlBranching,
+    ExtendableUserCredentials,
+    PgBranching,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -405,6 +414,8 @@ impl Display for NewOperatorFeature {
                 "SQS queue splitting without copy target"
             }
             NewOperatorFeature::MySqlBranching => "MySQL branching",
+            NewOperatorFeature::PgBranching => "PostgreSQL branching",
+            NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -729,30 +740,35 @@ pub struct MirrordSqsSessionSpec {
     pub session_id: String,
 }
 
-/// Describes an operator user.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
     version = "v1",
-    kind = "MirrordOperatorUser",
-    root = "MirrordOperatorUser"
+    kind = "MirrordClusterOperatorUserCredential",
+    status = "MirrordClusterOperatorUserCredentialStatus"
 )]
 #[serde(rename_all = "camelCase")]
-pub struct MirrordOperatorUserSpec {
-    /// Unique ID.
-    pub user_id: String,
-    /// Last seen local username.
-    pub last_username: String,
-    /// Last seen hostname.
-    pub last_hostname: String,
-    /// Last seen Kubernetes username.
-    pub last_k8s_username: String,
-    /// Most recent session activity.
-    pub last_seen: DateTime<Utc>,
-    /// Total session count.
-    pub total_sessions_count: u64,
-    /// Total session duration.
-    pub total_sessions_duration_seconds: u64,
-    /// Last session's target.
-    pub last_target: String,
+pub struct MirrordClusterOperatorUserCredentialSpec {
+    /// Certificate signing request created using the client's key pair.
+    pub csr: String,
+
+    /// The intented usage of this credential.
+    pub kind: UserCredentialKind,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrordClusterOperatorUserCredentialStatus {
+    pub certificate: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum UserCredentialKind {
+    #[default]
+    Regular,
+    Ci,
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
 }

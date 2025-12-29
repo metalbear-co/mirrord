@@ -1,3 +1,6 @@
+#![cfg(not(target_os = "windows"))]
+// Currently browser only supported on not(windows)
+
 use std::{process::Command, sync::LazyLock};
 
 use base64::engine::{Engine, general_purpose::STANDARD};
@@ -59,7 +62,9 @@ where
             progress.failure(None);
         }
     } else {
-        progress.failure(Some("cannot find Google Chrome"));
+        progress.failure(Some(&format!(
+            "cannot find Google Chrome - you can use link in Chrome to set {init_url}"
+        )));
     }
 }
 

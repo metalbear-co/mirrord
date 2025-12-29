@@ -2,30 +2,39 @@
 //!
 //! Verify the whole flow from the [`TcpStealerApi`](super::api::TcpStealerApi)
 //! to the [`RedirectorTask`](crate::incoming::RedirectorTask).
+#![allow(clippy::indexing_slicing)]
 
 use std::time::Duration;
 
+use bytes::{Buf, Bytes};
 use futures::StreamExt;
+use http_body_util::{BodyExt, Full, StreamBody};
+use hyper::body::SizeHint;
 use mirrord_protocol::{
     DaemonMessage, LogLevel,
-    tcp::{DaemonTcp, Filter, HttpFilter, IncomingTrafficTransportType, StealType},
+    tcp::{DaemonTcp, Filter, HttpBodyFilter, HttpFilter, IncomingTrafficTransportType, StealType},
 };
 use mirrord_tls_util::MaybeTls;
+use rand::distr::{Alphanumeric, SampleString};
 use rstest::rstest;
 use rustls::pki_types::ServerName;
 use tokio::{net::TcpListener, sync::mpsc};
 use tokio_rustls::TlsStream;
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
-use utils::{StealingClient, TestHttpKind, TestRequest, TestTcpProtocol};
+use utils::{StealingClient, TestBody, TestHttpKind, TestRequest, TestTcpProtocol, WithSizeHint};
 
 use super::{StealerCommand, TcpStealerTask};
 use crate::{
     incoming::{
-        RedirectorTask,
+        RedirectorTask, RedirectorTaskConfig,
         test::{DummyConnectionTx, DummyRedirector},
         tls::test::SimpleStore,
     },
-    util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},
+    task::{
+        BgTaskRuntime,
+        status::{BgTaskStatus, IntoStatus},
+    },
 };
 
 mod utils;
@@ -49,7 +58,7 @@ async fn request_upgrade(
     )]
     upgraded_protocol: TestTcpProtocol,
 ) {
-    let mut setup = TestSetup::new_http(http_kind).await;
+    let mut setup = TestSetup::new_http(http_kind, RedirectorTaskConfig::from_env()).await;
 
     let request = TestRequest {
         path: "/api/v1".into(),
@@ -59,6 +68,7 @@ async fn request_upgrade(
         kind: http_kind,
         connector: setup.tls.as_ref().map(|s| s.connector(http_kind.alpn())),
         acceptor: setup.tls.as_ref().map(SimpleStore::acceptor),
+        body: None,
     };
 
     let mut stealing_client = StealingClient::new(
@@ -109,7 +119,7 @@ async fn http_with_unfiltered_subscription(
     )]
     http_kind: TestHttpKind,
 ) {
-    let mut setup = TestSetup::new_http(http_kind).await;
+    let mut setup = TestSetup::new_http(http_kind, RedirectorTaskConfig::from_env()).await;
 
     let request = TestRequest {
         path: "/api/v1".into(),
@@ -119,6 +129,7 @@ async fn http_with_unfiltered_subscription(
         kind: http_kind,
         connector: setup.tls.as_ref().map(|s| s.connector(http_kind.alpn())),
         acceptor: setup.tls.as_ref().map(SimpleStore::acceptor),
+        body: None,
     };
 
     let mut client_1 = StealingClient::new(
@@ -166,7 +177,7 @@ async fn http_with_unfiltered_subscription(
 #[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn tcp_stealing(#[values(false, true)] with_tls: bool, #[values(false, true)] stolen: bool) {
-    let mut setup = TestSetup::new_tcp(with_tls).await;
+    let mut setup = TestSetup::new_tcp(with_tls, RedirectorTaskConfig::from_env()).await;
 
     let steal_type = if stolen {
         StealType::All(setup.original_server.local_addr().unwrap().port())
@@ -244,7 +255,7 @@ async fn tcp_stealing(#[values(false, true)] with_tls: bool, #[values(false, tru
 #[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn tls_protocol_version_check() {
-    let mut setup = TestSetup::new_tcp(true).await;
+    let mut setup = TestSetup::new_tcp(true, RedirectorTaskConfig::from_env()).await;
 
     let mut client = StealingClient::new(
         0,
@@ -293,7 +304,7 @@ async fn multiple_matching_filters(
     )]
     http_kind: TestHttpKind,
 ) {
-    let mut setup = TestSetup::new_http(http_kind).await;
+    let mut setup = TestSetup::new_http(http_kind, RedirectorTaskConfig::from_env()).await;
 
     let request = TestRequest {
         path: "/api/v1".into(),
@@ -303,6 +314,7 @@ async fn multiple_matching_filters(
         kind: http_kind,
         connector: setup.tls.as_ref().map(|s| s.connector(http_kind.alpn())),
         acceptor: setup.tls.as_ref().map(SimpleStore::acceptor),
+        body: None,
     };
 
     let clients = futures::stream::iter(0..3)
@@ -366,7 +378,7 @@ async fn multiple_filtered_subscriptions(
     )]
     http_kind: TestHttpKind,
 ) {
-    let mut setup = TestSetup::new_http(http_kind).await;
+    let mut setup = TestSetup::new_http(http_kind, RedirectorTaskConfig::from_env()).await;
 
     let mut requests = (0..4)
         .map(|i| TestRequest {
@@ -377,6 +389,7 @@ async fn multiple_filtered_subscriptions(
             kind: http_kind,
             connector: setup.tls.as_ref().map(|s| s.connector(http_kind.alpn())),
             acceptor: setup.tls.as_ref().map(SimpleStore::acceptor),
+            body: None,
         })
         .collect::<Vec<_>>();
     let last_request = requests.pop().unwrap();
@@ -425,20 +438,388 @@ async fn multiple_filtered_subscriptions(
     );
 }
 
+/// Verifies that `Mirrord-Agent` headers are inserted with correct
+/// values into responses to stolen http requests.
+#[rstest]
+#[tokio::test(flavor = "current_thread")]
+#[timeout(Duration::from_secs(10))]
+async fn header_injection(
+    #[values(
+        TestHttpKind::Http1,
+        TestHttpKind::Http1Alpn,
+        TestHttpKind::Http1NoAlpn,
+        TestHttpKind::Http2,
+        TestHttpKind::Http2Alpn,
+        TestHttpKind::Http2NoAlpn
+    )]
+    http_kind: TestHttpKind,
+) {
+    use crate::util::ClientId;
+
+    let mut setup = TestSetup::new_http(
+        http_kind,
+        RedirectorTaskConfig {
+            inject_headers: true,
+        },
+    )
+    .await;
+
+    let request_passthrough = TestRequest {
+        path: "/passthrough".into(),
+        id_header: 0,
+        user_header: 0,
+        upgrade: None,
+        kind: http_kind,
+        connector: setup.tls.as_ref().map(|s| s.connector(http_kind.alpn())),
+        acceptor: setup.tls.as_ref().map(SimpleStore::acceptor),
+        body: None,
+    };
+
+    let request_forwarded = TestRequest {
+        path: "/forward".into(),
+        id_header: 0,
+        user_header: 0,
+        upgrade: None,
+        kind: http_kind,
+        connector: setup.tls.as_ref().map(|s| s.connector(http_kind.alpn())),
+        acceptor: setup.tls.as_ref().map(SimpleStore::acceptor),
+        body: None,
+    };
+
+    let mut client = StealingClient::new(
+        1,
+        setup.stealer_tx.clone(),
+        "1.19.4",
+        StealType::FilteredHttpEx(
+            setup.original_server.local_addr().unwrap().port(),
+            HttpFilter::Path(Filter::new("/forward".into()).unwrap()),
+        ),
+        setup.stealer_status.clone(),
+    )
+    .await;
+
+    let mut run =
+        async |request: &TestRequest, expected_header_value: &str, expect_handled_by: ClientId| {
+            let conn = setup
+                .conn_tx
+                .make_connection(setup.original_server.local_addr().unwrap())
+                .await;
+
+            let mut sender = request.make_connection(conn).await;
+            request
+                .send_verify(&mut sender, expect_handled_by, |r| {
+                    assert_eq!(
+                        r.headers()
+                            .get(TestRequest::MIRRORD_AGENT_HEADER)
+                            .unwrap()
+                            .to_str()
+                            .unwrap(),
+                        expected_header_value
+                    )
+                })
+                .await;
+        };
+
+    tokio::join!(
+        async {
+            client.expect_request(&request_forwarded).await;
+            let (stream, _) = setup.original_server.accept().await.unwrap();
+            request_passthrough.accept(stream, 0).await;
+        },
+        async {
+            run(&request_forwarded, "forwarded-to-client", 1).await;
+            run(&request_passthrough, "passed-through", 0).await;
+        }
+    );
+}
+
+#[derive(Clone, Copy)]
+enum FailReason {
+    Timeout,
+    TooBig,
+}
+
+/// Dictates the value of the content-length header
+#[derive(Clone, Copy)]
+enum SizeHintType {
+    /// Remove the size hint, removing content-length header
+    Missing,
+    /// Apply size hint to the body, setting the content-length header
+    Set,
+    /// Keep the size hint of the original body
+    Original,
+}
+
+impl SizeHintType {
+    fn hint(self, real_size: u64) -> Option<SizeHint> {
+        match self {
+            SizeHintType::Missing => Some(SizeHint::default()),
+            SizeHintType::Set => Some(SizeHint::with_exact(real_size)),
+            SizeHintType::Original => None,
+        }
+    }
+}
+
+/// Verifies that when buffering the body fails (for whatever reason),
+/// the request is correctly forwarded to the original destination
+/// *unmodified*.
+#[rstest]
+#[tokio::test(flavor = "current_thread")]
+#[timeout(Duration::from_secs(5))]
+async fn body_filters_fail(
+    #[values(
+        TestHttpKind::Http1,
+        TestHttpKind::Http1Alpn,
+        TestHttpKind::Http1NoAlpn,
+        TestHttpKind::Http2,
+        TestHttpKind::Http2Alpn,
+        TestHttpKind::Http2NoAlpn
+    )]
+    http_kind: TestHttpKind,
+
+    #[values(FailReason::Timeout, FailReason::TooBig)] reason: FailReason,
+    #[values(SizeHintType::Missing, SizeHintType::Set, SizeHintType::Original)]
+    size_hint: SizeHintType,
+) {
+    use serde_json::json;
+
+    let mut setup = TestSetup::new_http(http_kind, RedirectorTaskConfig::from_env()).await;
+
+    let payload = Bytes::from(
+        json!({
+            "pass": true,
+            "payload": Alphanumeric
+            .sample_string(&mut rand::rng(), match reason {
+                FailReason::Timeout => 48 * 1024,
+                FailReason::TooBig => 128 * 1024,
+            })
+        })
+        .to_string(),
+    );
+
+    let payload_2 = payload.clone();
+
+    let request = TestRequest {
+        path: "/".into(),
+        id_header: 0,
+        user_header: 1,
+        upgrade: None,
+        kind: http_kind,
+        connector: setup.tls.as_ref().map(|s| s.connector(http_kind.alpn())),
+        acceptor: setup.tls.as_ref().map(SimpleStore::acceptor),
+        body: Some(TestBody::new(
+            move || {
+                let mut initial = Full::new(payload.clone());
+                let (tx, rx) = mpsc::channel(1);
+                tokio::spawn(async move {
+                    while let Some(frame) = initial.frame().await {
+                        match (frame, reason) {
+                            (Ok(frame), FailReason::Timeout) => {
+                                let Some(data) = frame.data_ref() else {
+                                    tx.send(Ok(frame))
+                                        .await
+                                        .expect("other end of channel closed");
+                                    continue;
+                                };
+                                // Forcibly splitting frames to simulate a slow connection.
+                                // This involves unnecessary copying but Bytes has no self-aware
+                                // `chunk` and it's a test so it doesn't matter.
+                                for chunk in data.chunks(1024) {
+                                    tokio::time::sleep(Duration::from_millis(25)).await;
+                                    tx.send(Ok(hyper::body::Frame::data(Bytes::copy_from_slice(
+                                        chunk,
+                                    ))))
+                                    .await
+                                    .expect("other end of channel closed");
+                                }
+                            }
+                            (frame, _) => {
+                                tx.send(frame).await.expect("other end of channel closed");
+                            }
+                        }
+                    }
+                });
+                WithSizeHint::new(
+                    StreamBody::new(ReceiverStream::new(rx)).map_err(|_| unreachable!()),
+                    size_hint.hint(payload.len() as u64),
+                )
+            },
+            move |_parts, mut body| {
+                let mut remaining = payload_2.clone();
+                Box::pin(async move {
+                    while let Some(frame) = body.frame().await {
+                        let frame = frame
+                            .expect("invalid frame")
+                            .into_data()
+                            .expect("received non-data frame");
+
+                        assert!(remaining.len() >= frame.len());
+                        assert_eq!(&remaining[..frame.len()], &frame[..]);
+                        remaining.advance(frame.len());
+                    }
+                    assert!(remaining.is_empty());
+                })
+            },
+        )),
+    };
+
+    let _client = StealingClient::new(
+        0,
+        setup.stealer_tx.clone(),
+        "1.22.1",
+        StealType::FilteredHttpEx(
+            setup.original_server.local_addr().unwrap().port(),
+            HttpFilter::Body(HttpBodyFilter::Json {
+                query: "$.pass".into(),
+                matches: Filter::new("true".into()).unwrap(),
+            }),
+        ),
+        setup.stealer_status.clone(),
+    )
+    .await;
+
+    let conn = setup
+        .conn_tx
+        .make_connection(setup.original_server.local_addr().unwrap())
+        .await;
+
+    tokio::join!(
+        async {
+            let (stream, _) = setup.original_server.accept().await.unwrap();
+            request.accept(stream, 1).await;
+        },
+        async {
+            let mut sender = request.make_connection(conn).await;
+            request.send(&mut sender, 1).await;
+        }
+    );
+}
+
+/// Verifies that when body filters work and correctly forward the
+/// packets to the desired destination.
+#[rstest]
+#[tokio::test(flavor = "current_thread")]
+#[timeout(Duration::from_secs(5))]
+/// Verifies that the body gets buffered and passed to the clients correctly
+async fn body_filters_pass(
+    #[values(
+        TestHttpKind::Http1,
+        TestHttpKind::Http1Alpn,
+        TestHttpKind::Http1NoAlpn,
+        TestHttpKind::Http2,
+        TestHttpKind::Http2Alpn,
+        TestHttpKind::Http2NoAlpn
+    )]
+    http_kind: TestHttpKind,
+
+    #[values(true, false)] match_filter: bool,
+    #[values(12, 60 * 1024)] payload_len: usize,
+    #[values(SizeHintType::Missing, SizeHintType::Set, SizeHintType::Original)]
+    size_hint: SizeHintType,
+) {
+    use serde_json::json;
+
+    let mut setup = TestSetup::new_http(http_kind, RedirectorTaskConfig::from_env()).await;
+
+    let payload = Bytes::from(
+        json!({
+            "pass": match_filter,
+            "payload": Alphanumeric
+                .sample_string(&mut rand::rng(), payload_len)
+        })
+        .to_string(),
+    );
+
+    let payload_2 = payload.clone();
+
+    let request = TestRequest {
+        path: "/".into(),
+        id_header: 0,
+        user_header: 1,
+        upgrade: None,
+        kind: http_kind,
+        connector: setup.tls.as_ref().map(|s| s.connector(http_kind.alpn())),
+        acceptor: setup.tls.as_ref().map(SimpleStore::acceptor),
+        body: Some(TestBody::new(
+            move || {
+                WithSizeHint::new(
+                    Full::new(payload.clone()).map_err(|_| unreachable!()),
+                    size_hint.hint(payload.len() as u64),
+                )
+            },
+            move |_parts, mut body| {
+                let mut remaining = payload_2.clone();
+                Box::pin(async move {
+                    while let Some(frame) = { body.frame().await } {
+                        let frame = frame
+                            .expect("invalid frame")
+                            .into_data()
+                            .expect("received non-data frame");
+
+                        assert!(remaining.len() >= frame.len());
+                        assert_eq!(&remaining[..frame.len()], &frame[..]);
+                        remaining.advance(frame.len());
+                    }
+                    assert!(remaining.is_empty());
+                })
+            },
+        )),
+    };
+
+    let mut client = StealingClient::new(
+        0,
+        setup.stealer_tx.clone(),
+        "1.22.1",
+        StealType::FilteredHttpEx(
+            setup.original_server.local_addr().unwrap().port(),
+            HttpFilter::Body(HttpBodyFilter::Json {
+                query: "$.pass".into(),
+                matches: Filter::new("rue".into()).unwrap(),
+            }),
+        ),
+        setup.stealer_status.clone(),
+    )
+    .await;
+
+    let conn = setup
+        .conn_tx
+        .make_connection(setup.original_server.local_addr().unwrap())
+        .await;
+
+    tokio::join!(
+        async {
+            if match_filter {
+                client.expect_request(&request).await;
+            } else {
+                let (stream, _) = setup.original_server.accept().await.unwrap();
+                request.accept(stream, 1).await;
+            }
+        },
+        async {
+            let mut sender = request.make_connection(conn).await;
+            request
+                .send(&mut sender, if match_filter { 0 } else { 1 })
+                .await;
+        }
+    );
+}
+
 struct TestSetup {
+    /// Simulates the app that would be running on the cluster.
     original_server: TcpListener,
     stealer_tx: mpsc::Sender<StealerCommand>,
     stealer_status: BgTaskStatus,
     tls: Option<SimpleStore>,
     conn_tx: DummyConnectionTx,
+    _runtime: BgTaskRuntime,
 }
 
 impl TestSetup {
-    async fn new_http(http_kind: TestHttpKind) -> Self {
-        Self::new_tcp(http_kind.uses_tls()).await
+    async fn new_http(http_kind: TestHttpKind, redirector_config: RedirectorTaskConfig) -> Self {
+        Self::new_tcp(http_kind.uses_tls(), redirector_config).await
     }
 
-    async fn new_tcp(with_tls: bool) -> Self {
+    async fn new_tcp(with_tls: bool, redirector_config: RedirectorTaskConfig) -> Self {
         let original_server = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let original_destination = original_server.local_addr().unwrap();
         let tls_setup = if with_tls {
@@ -453,11 +834,15 @@ impl TestSetup {
                 .as_ref()
                 .map(|setup| setup.store.clone())
                 .unwrap_or_default(),
+            redirector_config,
         );
         let (stealer_tx, stealer_rx) = mpsc::channel(8);
         let stealer_task = TcpStealerTask::new(stealer_rx, handle);
         tokio::spawn(redirector.run());
-        let stealer_status = BgTaskRuntime::Local
+
+        let local_bg_task_runtime = BgTaskRuntime::spawn(None).await.unwrap();
+        let stealer_status = local_bg_task_runtime
+            .handle()
             .spawn(stealer_task.run(CancellationToken::new()))
             .into_status("stealer");
 
@@ -467,6 +852,7 @@ impl TestSetup {
             stealer_status,
             tls: tls_setup,
             conn_tx,
+            _runtime: local_bg_task_runtime,
         }
     }
 }

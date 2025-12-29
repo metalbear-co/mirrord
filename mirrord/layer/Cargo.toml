@@ -26,6 +26,7 @@ mirrord-console = { path = "../console" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = [
     "codec",
 ] }
+mirrord-layer-lib = { path = "../layer-lib" }
 
 base64.workspace = true
 bincode.workspace = true
@@ -62,7 +63,7 @@ futures.workspace = true
 rstest.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
-tests = { path = "../../tests" }
+mirrord-tests = { path = "../../tests" }
 test-cdylib = "1"
 tokio = { workspace = true, features = ["rt", "net", "macros", "fs"] }
 

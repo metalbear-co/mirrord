@@ -228,6 +228,10 @@ impl PortSubscriptions {
             );
         }
     }
+
+    pub fn get(&mut self, port: u16) -> Option<&PortSubscription> {
+        self.subscriptions.get(&port)
+    }
 }
 
 /// Steal subscription for a port.
@@ -258,7 +262,7 @@ impl PortSubscription {
 mod test {
     use crate::{
         http::filter::HttpFilter,
-        incoming::{RedirectorTask, test::DummyRedirector},
+        incoming::{RedirectorTask, RedirectorTaskConfig, test::DummyRedirector},
         steal::subscriptions::{PortSubscription, PortSubscriptions},
         util::ClientId,
     };
@@ -280,8 +284,11 @@ mod test {
     #[tokio::test]
     async fn multiple_subscriptions_one_port() {
         let (redirector, mut state, _tx) = DummyRedirector::new();
-        let (redirector_task, steal_handle, _) =
-            RedirectorTask::new(redirector, Default::default());
+        let (redirector_task, steal_handle, _) = RedirectorTask::new(
+            redirector,
+            Default::default(),
+            RedirectorTaskConfig::from_env(),
+        );
         tokio::spawn(redirector_task.run());
         let mut subscriptions = PortSubscriptions::new(steal_handle);
 
@@ -324,8 +331,11 @@ mod test {
     #[tokio::test]
     async fn multiple_subscriptions_multiple_ports() {
         let (redirector, mut state, _tx) = DummyRedirector::new();
-        let (redirector_task, steal_handle, _) =
-            RedirectorTask::new(redirector, Default::default());
+        let (redirector_task, steal_handle, _) = RedirectorTask::new(
+            redirector,
+            Default::default(),
+            RedirectorTaskConfig::from_env(),
+        );
         tokio::spawn(redirector_task.run());
         let mut subscriptions = PortSubscriptions::new(steal_handle);
 
@@ -368,8 +378,11 @@ mod test {
     #[tokio::test]
     async fn remove_all_from_client() {
         let (redirector, mut state, _tx) = DummyRedirector::new();
-        let (redirector_task, steal_handle, _) =
-            RedirectorTask::new(redirector, Default::default());
+        let (redirector_task, steal_handle, _) = RedirectorTask::new(
+            redirector,
+            Default::default(),
+            RedirectorTaskConfig::from_env(),
+        );
         tokio::spawn(redirector_task.run());
         let mut subscriptions = PortSubscriptions::new(steal_handle);
 

@@ -3,8 +3,9 @@ use std::{process::ExitStatus, sync::Arc};
 use thiserror::Error;
 
 use crate::{
-    client_connection::TlsSetupError, incoming::RedirectorTaskError, namespace::NamespaceError,
-    runtime, util::error::RemoteRuntimeError,
+    client_connection::TlsSetupError, http::filter::FilterCreationError,
+    incoming::RedirectorTaskError, namespace::NamespaceError, runtime,
+    util::error::AgentRuntimeError,
 };
 
 #[derive(Debug, Error)]
@@ -48,7 +49,11 @@ pub(crate) enum AgentError {
     ExhaustedConnectionId,
 
     #[error("Failed to parse the given HTTP filter: {0}")]
-    InvalidHttpFilter(#[from] fancy_regex::Error),
+    InvalidHttpFilter(
+        /// Boxed due to large size difference.
+        #[from]
+        Box<FilterCreationError>,
+    ),
 
     #[error("Timeout on accepting first client connection")]
     FirstConnectionTimeout,
@@ -63,7 +68,10 @@ pub(crate) enum AgentError {
     IPTablesDirty,
 
     #[error("Failed to start a tokio runtime in the target's namespace: {0}")]
-    RemoteRuntimeError(#[from] RemoteRuntimeError),
+    RemoteRuntimeError(#[from] AgentRuntimeError),
+
+    #[error(transparent)]
+    Timeout(#[from] tokio::time::error::Elapsed),
 }
 
 pub(crate) type AgentResult<T, E = AgentError> = std::result::Result<T, E>;

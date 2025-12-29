@@ -1,3 +1,6 @@
+// NOTE(gabriela): prevent compiling lib.rs so layer acts as empty
+// library to allow layer-lib as optional dependency for unix.
+#![cfg(unix)]
 #![feature(c_variadic)]
 #![feature(io_error_uncategorized)]
 #![feature(try_trait_v2)]
@@ -8,8 +11,6 @@
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
-// TODO(alex): Get a big `Box` for the big variants.
-#![allow(clippy::result_large_err)]
 
 //! Loaded dynamically with your local process.
 //!
@@ -66,6 +67,11 @@
 extern crate alloc;
 extern crate core;
 
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+use std::ffi::c_void;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -82,6 +88,11 @@ use ctor::ctor;
 use error::{LayerError, Result};
 use file::OPEN_FILES;
 use hooks::HookManager;
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+use libc::c_char;
 use libc::{c_int, pid_t};
 use load::ExecuteArgs;
 #[cfg(target_os = "macos")]
@@ -100,8 +111,11 @@ use socket::SOCKETS;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
-    common::make_proxy_request_with_response, debugger_ports::DebuggerPorts, detour::DetourGuard,
+    common::make_proxy_request_with_response,
+    debugger_ports::DebuggerPorts,
+    detour::DetourGuard,
     load::LoadType,
+    socket::{hooks::MANAGED_ADDRINFO, ops::REMOTE_DNS_REVERSE_MAPPING},
 };
 
 /// Silences `deny(unused_crate_dependencies)`.
@@ -114,10 +128,10 @@ mod integration_tests_deps {
     use apple_codesign as _;
     use futures as _;
     use mirrord_intproxy as _;
+    use mirrord_tests as _;
     use serde_json as _;
     use tempfile as _;
     use test_cdylib as _;
-    use tests as _;
     use tokio as _;
 }
 
@@ -151,6 +165,10 @@ mod go;
 use crate::go::go_hooks;
 
 const TRACE_ONLY_ENV: &str = "MIRRORD_LAYER_TRACE_ONLY";
+
+/// if this env var exists, we exit.
+/// This to allow a way to protect from mirrord being used in destructive tests and such.
+const FAILSAFE_ENV: &str = "MIRRORD_DONT_LOAD";
 
 // TODO: We don't really need a lock, we just need a type that:
 //  1. Can be initialized as static (with a const constructor or whatever)
@@ -187,6 +205,12 @@ static PROXY_CONNECTION_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
+    // we don't care about value, just that this env exists
+    let dont_start = std::env::var(FAILSAFE_ENV).is_ok();
+    if dont_start {
+        panic!("{FAILSAFE_ENV} environment variable found, stopping execution.")
+    }
+
     let given_process = EXECUTABLE_ARGS.get_or_try_init(ExecuteArgs::from_env)?;
 
     EXECUTABLE_PATH.get_or_try_init(|| {
@@ -460,6 +484,21 @@ fn layer_start(mut config: LayerConfig) {
             }
         });
     }
+
+    #[cfg(target_os = "macos")]
+    if setup().experimental().applev.as_ref().is_some() {
+        unsafe {
+            let mut applev = exec_utils::extract_applev();
+            let mut count: usize = 0;
+            while !(*applev).is_null() {
+                let c_str = std::ffi::CStr::from_ptr(*applev);
+                tracing::info!("applev[{}]: {}", count, c_str.to_string_lossy());
+                applev = applev.add(1);
+                count = count.saturating_add(1);
+            }
+            tracing::info!(count, "Finished reading Apple variables");
+        }
+    }
 }
 
 /// Name of environment variable used to mark whether remote environment has already been fetched.
@@ -540,9 +579,7 @@ fn sip_only_layer_start(
         exec_utils::enable_macos_hooks(&mut hook_manager, patch_binaries, skip_patch_binaries)
     };
     unsafe { exec_hooks::hooks::enable_exec_hooks(&mut hook_manager) };
-    if config.experimental.vfork_emulation {
-        unsafe { replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK) };
-    }
+    unsafe { replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK) };
 
     // we need to hook file access to patch path to our temp bin.
     config.feature.fs = FsConfig {
@@ -619,9 +656,7 @@ fn enable_hooks(state: &LayerSetup) {
         };
 
         replace!(&mut hook_manager, "fork", fork_detour, FnFork, FN_FORK);
-        if state.experimental().vfork_emulation {
-            replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK);
-        }
+        replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK);
     };
 
     unsafe {
@@ -658,7 +693,25 @@ fn enable_hooks(state: &LayerSetup) {
         target_os = "linux"
     ))]
     {
-        go_hooks::enable_hooks(&mut hook_manager, state.experimental());
+        go_hooks::enable_hooks(&mut hook_manager);
+    }
+
+    #[cfg(all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ))]
+    {
+        if state.experimental().dlopen_cgo {
+            unsafe {
+                replace!(
+                    &mut hook_manager,
+                    "dlopen",
+                    dlopen_detour,
+                    FnDlopen,
+                    FN_DLOPEN
+                );
+            }
+        }
     }
 }
 
@@ -714,6 +767,15 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 /// on macOS, be wary what we do in this path as we might trigger <https://github.com/metalbear-co/mirrord/issues/1745>
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
+    // when running in multi-threaded app, we can have a scenario where another thread holds a mutex
+    // while the fork executes this leaves the mutex locked forever in the child process since
+    // there's no thread to unlock it so we need to grab all the mutexes we can here, and drop
+    // after the fork see https://github.com/metalbear-co/mirrord/issues/3659#issuecomment-3433990010
+    let sockets = SOCKETS.lock();
+    let open_files = OPEN_FILES.lock();
+    let addr_info = MANAGED_ADDRINFO.lock();
+    let dns_mapping = REMOTE_DNS_REVERSE_MAPPING.lock();
+
     unsafe {
         tracing::debug!("Process {} forking!.", std::process::id());
 
@@ -761,6 +823,10 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
             Ordering::Less => tracing::debug!("fork failed"),
         }
 
+        drop(sockets);
+        drop(open_files);
+        drop(addr_info);
+        drop(dns_mapping);
         res
     }
 }
@@ -908,4 +974,35 @@ pub(crate) unsafe extern "C" fn uv_fs_close_detour(
         close_layer_fd(fd);
         FN_UV_FS_CLOSE(a, b, fd, c)
     }
+}
+
+/// ## Hook
+///
+/// Detect if `dlopen()` loaded go dynamic library. If so, enable go specific hooks.
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+#[hook_fn]
+pub(crate) unsafe extern "C" fn dlopen_detour(
+    raw_path: *const c_char,
+    mode: c_int,
+) -> *const c_void {
+    let handle = unsafe { FN_DLOPEN(raw_path, mode) };
+    let _guard = DetourGuard::new();
+
+    let mut hook_manager = HookManager::default();
+    let path_str = unsafe {
+        std::ffi::CStr::from_ptr(raw_path)
+            .to_string_lossy()
+            .into_owned()
+    };
+    let filename = std::path::Path::new(&path_str)
+        .file_name()
+        .expect("cannot get the filename of the dynamic library")
+        .to_string_lossy()
+        .into_owned();
+    go_hooks::enable_hooks_in_loaded_module(&mut hook_manager, filename);
+
+    handle
 }

@@ -8,6 +8,520 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.179.0](https://github.com/metalbear-co/mirrord/tree/3.179.0) - 2025-12-24
+
+
+### Added
+
+- Agents can be told to cleanup leftover iptable rules on startup instead of
+  erroring out.
+
+
+### Changed
+
+- Fixed two issues found in DB brancing:
+  - resolve env when target type is rollout
+  - support envFrom as connection source
+- Print browser extension configuration URL if Chrome couldn't launch
+- When targeting an empty deployment with the operator, mirrord now checks if
+  the deployment is managed by a rollout with the same name. If this is the
+  case, the user is instructed to target that rollout instead.
+
+
+### Fixed
+
+- mirrord will now fail (panic) if SIP patching encounters the `"Too many open
+  files"` error. To fix this, the user can
+  try increasing the file limit using `ulimit`.
+
+
+### Internal
+
+- Send is_ci bool to our analytics server when running mirrord from a CI
+  environment.
+- Fix flake.nix for Linux
+
+
+## [3.178.0](https://github.com/metalbear-co/mirrord/tree/3.178.0) - 2025-12-20
+
+
+### Added
+
+- Added the `mirrord wizard` command, which starts the onboarding wizard in
+  your browser.
+  You can use the wizard to learn about mirrord basics and create a config file
+  from existing boilerplate.
+
+
+### Fixed
+
+- fix openapi v3 spec of Target
+
+## [3.177.0](https://github.com/metalbear-co/mirrord/tree/3.177.0) - 2025-12-18
+
+### Changed
+
+- Added /var/db/timezone/zoneinfo to local to improve performance.
+- Refreshed configuration documentation.
+- Switched `mirrord port-forward` to evaluate connections eagerly. Using it
+  with MySQL is now possible.
+
+### Internal
+
+- Added more traffic mirroring tests.
+- Added chocolatey distribution to windows build workflow.
+- Added support for MSI builds for Windows mirrord.
+- Allow using windows-build.yml with repos without winget and choco
+  tokens.
+- Fixed the License not appearing in MSI packages.
+- mirrord-intproxy now logs operator version on default log level.
+- Added a method to `ResolvedTarget` for getting `envFrom` from the target's pod
+  spec.
+- Added a new field for the `MirrordClusterSession` CRD, `SessionCiInfo`. Now
+  the mirrord license-server can keep track of sessions that have been started
+  using the `mirrord ci start` command, and we can validate concurrent CI
+  seats.
+- intproxy now compiles on windows.
+
+## [3.176.0](https://github.com/metalbear-co/mirrord/tree/3.176.0) - 2025-12-07
+
+
+### Added
+
+- Added support for node.js'
+  [`fs.copyFile`](https://nodejs.org/api/fs.html#fspromisescopyfilesrc-dest-mode)
+  function. [#3741](https://github.com/metalbear-co/mirrord/issues/3741)
+- Added clang in build tools list, so mirrord only patches it and hooks exec
+  and spawn.
+- Added security context configuration option for agent pod.
+
+## [3.175.0](https://github.com/metalbear-co/mirrord/tree/3.175.0) - 2025-12-03
+
+
+### Added
+
+- Add pg branching.
+- Added dlopen detour to support cgo library being loaded dynamically on Linux.
+  The feature is behind an experimental feature flag.
+- Added support for filtering incoming HTTP requests by running JSONPath
+  queries on the body and matching the results against a regex.
+
+
+### Changed
+
+- Change tracing to not emit ansi format logs in the terminal
+- Made `mirrord ci stop` command idempotent.
+- Marked mirrord config settings related to agent's mirroring as deprecated.
+  Mirroring implementation based on raw sockets will be removed in the future.
+- Updated the `experimental` section of the mirrord config:
+  1. Removed deprecated `readlink` setting.
+  2. Removed deprecated `readonly_file_buffer` setting, which had been moved to
+  `feature.fs`.
+  3. Removed `vfork_emulation` setting. vfork emulation is now always enabled.
+  4. `hook_rename` is now enabled by default.
+  5. `dns_permission_error_fatal` is now enabled by default.
+
+
+### Fixed
+
+- Fixed a rare layer crash in `exec`
+- Fixed an issue where mirrord-agent could fail with an OOM error when serving
+  heavy TCP traffic.
+- Fixed main branch Windows build errors and warnings
+- mirrord-console now compiles again
+
+
+### Internal
+
+- Added `MirrordClusterExternalResource` CRD.
+- Added a unit test verifying that the internal proxy properly handles remote
+  termination of stolen HTTP requests.
+- Added release guide in CONTRIBUTING.md.
+- Fixed some clippy lints.
+- On operator restart migrate copied pods.
+- Optimized implementation of mirrord-protocol encoding.
+- This PR fixes the issue with windows builds that steal the latest release for
+  the main branch
+- This test runs every hour and checks that the latest release exists and all
+  the artifacts are there to be fetched.
+  Also added a small fix later
+- `ResolvedTarget::assert_valid_mirrord_target` no longer asserts that there is
+  at least one available replica.
+
+## [3.174.0](https://github.com/metalbear-co/mirrord/tree/3.174.0) - 2025-11-20
+
+
+### Added
+
+- Added HM Courts & Tribunal Service to ADOPTERS.md.
+- Added a new option under `mirrord ci start` to run the binary and wait for it
+  to complete.
+
+
+### Changed
+
+- Allow an overlap in the configuration for `incoming.ports` and
+  `incoming.http_filter.ports`.
+
+
+### Fixed
+
+- Fixed minor edge case where intproxy might hit code that's supposed to be
+  unreachable and panic
+  [#intproxy-panic](https://github.com/metalbear-co/mirrord/issues/intproxy-panic)
+- Fixed a DNS regression that happens when user's DNS library bind their
+  outgoing
+  socket to unspecified address before send UDP message to the nameserver.
+
+## [3.173.2](https://github.com/metalbear-co/mirrord/tree/3.173.2) - 2025-11-18
+
+
+### Changed
+
+- Exclude `GOPATH` and `GOMODCACHE` from env fetched
+
+## [3.173.1](https://github.com/metalbear-co/mirrord/tree/3.173.1) - 2025-11-16
+
+
+### Internal
+
+- Add cleanup of unnecessary items in CI builder for docker builds.
+  [#add-cleanup-before-docker-build](https://github.com/metalbear-co/mirrord/issues/add-cleanup-before-docker-build)
+
+## [3.173.0](https://github.com/metalbear-co/mirrord/tree/3.173.0) - 2025-11-16
+
+
+### Changed
+
+- Update `experimental.non_blocking_tcp_connect` config default to `false`.
+
+
+### Fixed
+
+- Fixed the security advisories of the config's template engine by updating it
+  to the newest version
+  [#3657](https://github.com/metalbear-co/mirrord/issues/3657)
+
+
+### Internal
+
+- Fix the way release script gets workspace version.
+- Kubernetes-related packages have been removed from the devshell, they should
+  be installed system-wide instead.
+- Use the pip from the setup action, not the one preinstalled on the runner.
+- make CI workflow trigger for PRs targeted to `windows-support` branch
+  (windows main)
+
+## [3.172.0](https://github.com/metalbear-co/mirrord/tree/3.172.0) - 2025-11-06
+
+
+### Removed
+
+- Reverted arm64e support in mirrord-sip.
+
+
+### Changed
+
+- When possible, mirrord now binds application socket to the requested address
+  (instead of always to localhost or unspecified).
+  [#3693](https://github.com/metalbear-co/mirrord/issues/3693)
+- Reverted independent send handles for intproxy tasks.
+- The `fs.not_found` filesystem filter is now checked *before* bypassing
+  relative files, meaning you can now ignore relative files instead of always
+  reading them locally
+- `incoming.listen_ports` mappings now always apply, regardless of whether the
+  port is stolen or not.
+- mirrord CLI progress messages now always include the binary version.
+
+## [3.171.0](https://github.com/metalbear-co/mirrord/tree/3.171.0) - 2025-11-04
+
+
+### Added
+
+- Added ADOPTERS.md
+- Added configurable creation timeout to the db branching config
+- mirrord can now run arm64e binaries, both when inside a universal binary and
+  standalone. In practice, this means running arm64e+x86_64 universal binaries
+  no longer has to go through the Rosetta emulation layer.
+
+
+### Internal
+
+- Added optional signing for windows builds.
+- Build only the fat universal layer lib when running macos tests in CI.
+- CLI and Intproxy now queue and (almost) fairly schedule agent-bound messages.
+  Intproxy now also has proper flow control when receiving network traffic from
+  user apps.
+- Changed incoming proxy's `BusyTcpListener` check to use IPv4 instead of IPv6.
+- Enriched an error log produced by `mirrord-layer` in some cases.
+- The flake's lockfile has been updated and rust-analyzer is now grabbed from
+  nixpkgs, allowing updates without changing the rust toolchain.
+- Update configuration.md with MySQL data copy options.
+- Updated contributing guidance. Add PR section.
+
+## [3.170.0](https://github.com/metalbear-co/mirrord/tree/3.170.0) - 2025-10-29
+
+
+### Added
+
+- Added copy mode configuration for MySQL branching.
+
+
+### Changed
+
+- `experimental.non_blocking_tcp_connect` now defaults to `true` in OSS.
+
+
+### Fixed
+
+- Fixed a bogus error reported by `mirrord ci stop` when the application has
+  already exited.
+
+
+### Internal
+
+- Fixed `update_latest` CI job with write permission.
+- Don't publish buildcache in release workflow.
+
+
+## [3.169.0](https://github.com/metalbear-co/mirrord/tree/3.169.0) - 2025-10-27
+
+
+### Added
+
+- `mirrord ci start` now pipes application's stdout and stderr to files in a
+  temporary directory (`/tmp/mirrord/{binary-name}-{timestamp}-{random}` by
+  default). This can be configured with the `ci.output_dir` option in your
+  mirrord config.
+
+
+### Internal
+
+- Add TypedHeader like extractor to mirrord-kube for axum like extraction from
+  kubernetes resources.
+- When reconnecting to an operator session, the CLI now checks for a fatal 410
+  error.
+
+## [3.168.1](https://github.com/metalbear-co/mirrord/tree/3.168.1) - 2025-10-24
+
+
+### Changed
+
+- Operator status not showing data for SQS split queues.
+- When it's root, CWD will no longer be in the default-local list for file
+  operations.
+
+
+### Internal
+
+- Fix missing source value in query params of version check.
+- Remove a leftover file that is not used anywhere.
+
+## [3.168.0](https://github.com/metalbear-co/mirrord/tree/3.168.0) - 2025-10-23
+
+
+### Added
+
+- CLI for db branches to show and destroy
+
+
+### Changed
+
+- Changed semantics of `internal_proxy.log_destination` and
+  `external_proxy.log_destination` fields.
+  Now mirrord auto detects whether the path leads to the desired log files, or
+  directories where the log files should be created.
+
+
+### Fixed
+
+- fix rare case of fork and deadlock
+  [#3659](https://github.com/metalbear-co/mirrord/issues/3659)
+
+
+### Internal
+
+- The macOS CI now uses github's aarch64 runners
+  [#3305](https://github.com/metalbear-co/mirrord/issues/3305)
+- Add ignore to `RUSTSEC-2025-0074`, `RUSTSEC-2025-0075`, `RUSTSEC-2025-0080`,
+  `RUSTSEC-2025-0081`, `RUSTSEC-2025-0098`and `RUSTSEC-2025-0104` becuase
+  open-i18n/rust-unic is unmaintained but we should not have any issue with it.
+- Added a nix devshell
+- Improved `MirrordClusterSession` CRD.
+
+## [3.167.0](https://github.com/metalbear-co/mirrord/tree/3.167.0) - 2025-10-17
+
+### Added
+
+- Add Kafka splitting info to the operator status.
+- mirrord now makes outgoing connect attempts concurrently.
+
+### Fixed
+
+- Fixed a bug in the `mirrord port-forward` command where half closed streams
+  were not properly handled, causing "missing" traffic.
+- Fixed issues with outgoing connections to abstract UNIX sockets.
+- `mirrord ci` subcommand is now visible in the `--help` output.
+
+### Internal
+
+- Added enum variant support for medschool.
+
+## [3.166.0](https://github.com/metalbear-co/mirrord/tree/3.166.0) - 2025-10-15
+
+
+### Added
+
+- Added new config option `experimental.non_blocking_tcp_connect`. The setting
+  enables a new way of handling outgoing TCP connections,
+  which should improve performance of asynchronous applications.
+  [#2744](https://github.com/metalbear-co/mirrord/issues/2744)
+- Added 2 new commands: `mirrord ci start` which runs mirrord in a ci runner,
+  and `mirrord ci stop` which stops the mirrord-for-ci.
+- add MIRRORD_DONT_LOAD to crash mirrord if exists when mirrord loads to enable
+  users running destructive actions with mirrord
+
+
+### Changed
+
+- Moving operator tests from mirrord to operator.
+  [#842](https://github.com/metalbear-co/mirrord/issues/842)
+
+
+### Fixed
+
+- Improved error messages originating from parsing configuration files.
+  [#3371](https://github.com/metalbear-co/mirrord/issues/3371)
+- Fix JSONSchema to reflect that target.path can be string
+
+
+### Internal
+
+- Added a github action to build windows builds, now supporting windows
+  [#windows-build](https://github.com/metalbear-co/mirrord/issues/windows-build)
+- Added a `ci` query param to the version check, so we can identify mirrord
+  being used in a ci context in our analytics.
+- Updated Rust types for DB branching configs in order to support more types of
+  DBs.
+
+## [3.165.0](https://github.com/metalbear-co/mirrord/tree/3.165.0) - 2025-10-09
+
+### Changed
+
+- intproxy compiles on Windows.
+  [#.531](https://github.com/metalbear-co/mirrord/issues/.531)
+- All configuration snippets for agent are now self-contained.
+  [#3610](https://github.com/metalbear-co/mirrord/issues/3610)
+
+### Fixed
+
+- Fixed the check that disallows operator-only targets when the operator is not
+  in use.
+
+### Internal
+
+- The agent's docker image is now distroless, making it smaller and more
+  secure.
+  [#distroless-agent-runtime](https://github.com/metalbear-co/mirrord/issues/distroless-agent-runtime)
+- Added a GitHub action to build Windows builds.
+- Added more traffic mirroring tests.
+
+## [3.164.0](https://github.com/metalbear-co/mirrord/tree/3.164.0) - 2025-10-06
+
+
+### Added
+
+- Added a new command to generate mirrord CI API key for operator users.
+
+
+### Changed
+
+- Improves the agent handling of background tasks by having them run in a
+  separate tokio runtime. Also adds a timeout for waiting on these tasks to
+  finish (timeout of 5 seconds).
+- Removed the outdated operator version check.
+
+
+### Fixed
+
+- Disallow nested `mirrord exec` and `mirrord container` executions.
+- Fixed an issue where mirrord sessions would sometimes fail after reconnecting
+  to the operator.
+
+
+### Internal
+
+- Added a new CRD for persisting workload patches.
+- Allow config to be printed in IDE that supports it
+- Pinned `ci-agent-runtime` image to specific commit.
+- Removed an unused `test.json` file from the repo.
+- Removed legacy `MirrordOperatorUser` CRD.
+- The `dirty_iptables::agent_exits_on_dirty_tables` E2E test no longer depends
+  on `/bin/sh` being present in the agent image.
+- Verify correct Prometheus metrics in SQS E2E tests.
+
+## [3.163.0](https://github.com/metalbear-co/mirrord/tree/3.163.0) - 2025-09-19
+
+
+### Added
+
+- Improved UX when spawning the agent pod fails or takes a long time
+  [#3578](https://github.com/metalbear-co/mirrord/issues/3578)
+- Added a configuration option to automatically inject `Mirrord-Agent` header
+  into responses to HTTP requests served by the mirrord-agent.
+  The header indicates whether the request was handled by the local
+  or the remote app. Header can be enabled with `agent.inject_headers`.
+
+
+### Fixed
+
+- Fixed compatibility issues with Go 1.25.
+
+
+### Internal
+
+- Improved mirrord-agent docs.
+- Increased the timeout on the layer test `outgoing::outgoing_tcp_bound_socket`
+  from 15 to 25 seconds to reduce chance of flakes on macOS.
+- Update CI to use newer versions of node and express.
+
+## [3.162.0](https://github.com/metalbear-co/mirrord/tree/3.162.0) - 2025-09-16
+
+
+### Added
+
+- Mirroring incoming TCP traffic now supports using an HTTP filter.
+  [#2538](https://github.com/metalbear-co/mirrord/issues/2538)
+- mirrord now retries failed Kubernetes API requests made during startup. This
+  should improve stability when facing transient errors, like cluster
+  connectivity issues.
+
+  The retry policy can be adjusted in startup_retry mirrord config section.
+
+
+### Changed
+
+- Agent->layer message logs will no longer contain environment variables.
+- Update TELEMETRY.md to include the machine_id metric in the OSS.
+- Updated so if the PingPong will not attempt to request restart if not
+  connected to operator.
+
+
+### Fixed
+
+- Intproxy now no longer runs as a child of the user process so it doesn't get
+  reaped by wait/waitall calls.
+  [#3563](https://github.com/metalbear-co/mirrord/issues/3563)
+
+
+### Internal
+
+- Add tuple struct support for medschool.
+- Add warning message to `AgentConnection`'s reconnect to print out what kind
+  of reconnect is requested.
+- Fixed cancellation of background tasks in the internal proxy.
+- Improved UX of filtered traffic mirroring with old agents.
+
 ## [3.161.0](https://github.com/metalbear-co/mirrord/tree/3.161.0) - 2025-09-04
 
 

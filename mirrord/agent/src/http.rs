@@ -19,6 +19,11 @@ pub mod extract_requests;
 pub mod filter;
 pub mod sender;
 
+/// When the corresponding config flag is enabled, a header with this
+/// name is injected into http responses. See
+/// `mirrord_config::agent::AgentConfig::inject_headers` for details.
+pub(crate) const MIRRORD_AGENT_HTTP_HEADER_NAME: &str = "Mirrord-Agent";
+
 /// [`Response`] type with a boxed body.
 pub type BoxResponse = Response<BoxBody<Bytes, hyper::Error>>;
 

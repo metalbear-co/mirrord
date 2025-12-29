@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 use std::{
     assert_matches::assert_matches,
     collections::HashMap,
-    fmt::Debug,
+    fmt::{self, Debug},
     fs::File,
     io,
     net::SocketAddr,
@@ -17,23 +17,30 @@ use std::{
 use actix_codec::Framed;
 use futures::{SinkExt, StreamExt};
 use mirrord_config::{
-    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
+    LayerConfig, LayerFileConfig, MIRRORD_LAYER_INTPROXY_ADDR,
     config::{ConfigContext, MirrordConfig},
     experimental::ExperimentalFileConfig,
 };
 use mirrord_intproxy::{IntProxy, agent_conn::AgentConnection};
 use mirrord_protocol::{
-    ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
+    ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
     file::{
-        AccessFileRequest, AccessFileResponse, OpenFileRequest, OpenOptionsInternal,
-        ReadFileRequest, SeekFromInternal, XstatFsResponseV2, XstatRequest, XstatResponse,
+        AccessFileRequest, AccessFileResponse, MetadataInternal, OpenFileRequest,
+        OpenOptionsInternal, ReadFileRequest, SeekFromInternal, XstatFsResponseV2, XstatRequest,
+        XstatResponse,
+    },
+    outgoing::{
+        DaemonConnect, DaemonConnectV2, LayerConnectV2, SocketAddress,
+        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
+        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
+    uid::Uid,
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::{SipPatchOptions, sip_patch};
+pub use mirrord_tests::utils::process::TestProcess;
 use rstest::fixture;
-pub use tests::utils::process::TestProcess;
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
@@ -117,9 +124,21 @@ pub struct TestIntProxy {
 }
 
 impl TestIntProxy {
-    pub async fn new(listener: TcpListener) -> Self {
+    pub async fn new(listener: TcpListener, config: Option<&Path>) -> Self {
         let fake_agent_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let fake_agent_address = fake_agent_listener.local_addr().unwrap();
+        let experimental_config = match config {
+            Some(path) => {
+                LayerFileConfig::from_path(path)
+                    .unwrap()
+                    .generate_config(&mut Default::default())
+                    .unwrap()
+                    .experimental
+            }
+            None => ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
+        };
 
         tokio::spawn(async move {
             let agent_conn = AgentConnection::new_for_raw_address(fake_agent_address)
@@ -131,9 +150,7 @@ impl TestIntProxy {
                 0,
                 Default::default(),
                 Duration::from_secs(60),
-                &ExperimentalFileConfig::default()
-                    .generate_config(&mut Default::default())
-                    .unwrap(),
+                &experimental_config,
             );
             intproxy
                 .run(Duration::from_secs(5), Duration::from_secs(5))
@@ -153,6 +170,72 @@ impl TestIntProxy {
 
     pub async fn recv(&mut self) -> ClientMessage {
         self.try_recv().await.expect("intproxy connection closed")
+    }
+
+    pub async fn recv_tcp_connect(&mut self) -> (Uid, SocketAddr) {
+        match self.recv().await {
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
+                uid,
+                remote_address: SocketAddress::Ip(addr),
+            })) => {
+                println!("Received TCP connect request for address {addr} with uid {uid}");
+                (uid, addr)
+            }
+            other => panic!("unexpected message received from the intproxy: {other:?}"),
+        }
+    }
+
+    pub async fn send_tcp_connect_ok(
+        &mut self,
+        uid: Uid,
+        connection_id: ConnectionId,
+        remote_addr: SocketAddr,
+        local_addr: SocketAddr,
+    ) {
+        self.send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(
+            DaemonConnectV2 {
+                uid,
+                connect: Ok(DaemonConnect {
+                    connection_id,
+                    remote_address: remote_addr.into(),
+                    local_address: local_addr.into(),
+                }),
+            },
+        )))
+        .await
+    }
+
+    pub async fn recv_udp_connect(&mut self) -> (Uid, SocketAddr) {
+        match self.recv().await {
+            ClientMessage::UdpOutgoing(LayerUdpOutgoing::ConnectV2(LayerConnectV2 {
+                uid,
+                remote_address: SocketAddress::Ip(addr),
+            })) => {
+                println!("Received UDP connect request for address {addr} with uid {uid}");
+                (uid, addr)
+            }
+            other => panic!("unexpected message received from the intproxy: {other:?}"),
+        }
+    }
+
+    pub async fn send_udp_connect_ok(
+        &mut self,
+        uid: Uid,
+        connection_id: ConnectionId,
+        remote_addr: SocketAddr,
+        local_addr: SocketAddr,
+    ) {
+        self.send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::ConnectV2(
+            DaemonConnectV2 {
+                uid,
+                connect: Ok(DaemonConnect {
+                    connection_id,
+                    remote_address: remote_addr.into(),
+                    local_address: local_addr.into(),
+                }),
+            },
+        )))
+        .await
     }
 
     pub async fn try_recv(&mut self) -> Option<ClientMessage> {
@@ -180,8 +263,12 @@ impl TestIntProxy {
             .expect("intproxy connection failed");
     }
 
-    pub async fn new_with_app_port(listener: TcpListener, app_port: u16) -> Self {
-        let mut res = Self::new(listener).await;
+    pub async fn new_with_app_port(
+        listener: TcpListener,
+        app_port: u16,
+        config: Option<&Path>,
+    ) -> Self {
+        let mut res = Self::new(listener, config).await;
 
         let msg = res.recv().await;
         println!("Got first message from library: {:?}", msg);
@@ -760,8 +847,14 @@ impl TestIntProxy {
             .unwrap();
     }
 
-    /// Assert that the layer sends an xstat request with the given fd, answer the request.
-    pub async fn expect_xstat(&mut self, path: Option<PathBuf>, fd: Option<u64>) {
+    /// Assert that the layer sends an xstat request with the given fd, answer the request with the
+    /// given metadata.
+    pub async fn expect_xstat_with_metadata(
+        &mut self,
+        path: Option<PathBuf>,
+        fd: Option<u64>,
+        metadata: MetadataInternal,
+    ) {
         assert_eq!(
             self.recv().await,
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
@@ -773,12 +866,16 @@ impl TestIntProxy {
 
         self.codec
             .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-                XstatResponse {
-                    metadata: Default::default(),
-                },
+                XstatResponse { metadata },
             ))))
             .await
             .unwrap();
+    }
+
+    /// Assert that the layer sends an xstat request with the given fd, answer the request.
+    pub async fn expect_xstat(&mut self, path: Option<PathBuf>, fd: Option<u64>) {
+        self.expect_xstat_with_metadata(path, fd, Default::default())
+            .await
     }
 
     /// Consume messages from the codec and return the first non-xstat message.
@@ -809,12 +906,30 @@ impl TestIntProxy {
     }
 }
 
+/// Go versions used with test applications.
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy)]
+pub enum GoVersion {
+    GO_1_23,
+    GO_1_24,
+    GO_1_25,
+}
+
+impl fmt::Display for GoVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let as_str = match self {
+            Self::GO_1_23 => "23",
+            Self::GO_1_24 => "24",
+            Self::GO_1_25 => "25",
+        };
+        f.write_str(as_str)
+    }
+}
+
 /// Various applications used by integration tests.
 #[derive(Debug)]
 pub enum Application {
-    Go21HTTP,
-    Go22HTTP,
-    Go23HTTP,
+    GoHTTP(GoVersion),
     NodeHTTP,
     PythonFastApiHTTP,
     /// Shared sockets [#864](https://github.com/metalbear-co/mirrord/issues/864).
@@ -824,41 +939,26 @@ pub enum Application {
     PythonDontLoad,
     PythonListen,
     RustFileOps,
-    Go21FileOps,
-    Go22FileOps,
-    Go23FileOps,
+    GoFileOps(GoVersion),
     JavaTemurinSip,
     EnvBashCat,
     NodeFileOps,
     NodeSpawn,
+    NodeCopyFile,
     NodeIssue2903,
-    Go21Dir,
-    Go22Dir,
-    Go23Dir,
-    Go21DirBypass,
-    Go22DirBypass,
-    Go23DirBypass,
-    Go21Issue834,
-    Go22Issue834,
-    Go23Issue834,
+    GoDir(GoVersion),
+    GoDirBypass(GoVersion),
+    GoIssue834(GoVersion),
     BashShebang,
-    Go21Read,
-    Go22Read,
-    Go23Read,
-    Go21Write,
-    Go22Write,
-    Go23Write,
-    Go21LSeek,
-    Go22LSeek,
-    Go23LSeek,
-    Go21FAccessAt,
-    Go22FAccessAt,
-    Go23FAccessAt,
-    Go21SelfOpen,
-    Go22SelfOpen,
-    Go23SelfOpen,
+    GoRead(GoVersion),
+    GoWrite(GoVersion),
+    GoLSeek(GoVersion),
+    GoFAccessAt(GoVersion),
+    GoSelfOpen(GoVersion),
     RustOutgoingUdp,
-    RustOutgoingTcp,
+    RustOutgoingTcp {
+        non_blocking: bool,
+    },
     RustIssue1123,
     RustIssue1054,
     RustIssue1458,
@@ -886,20 +986,23 @@ pub enum Application {
     NodeIssue2807,
     RustRebind0,
     /// Go application that simply opens a file.
-    Go23Open {
+    GoOpen {
         /// Path to the file, accepted as `-p` param.
         path: String,
         /// Flags to use when opening the file, accepted as `-f` param.
         flags: i32,
         /// Mode to use when opening the file, accepted as `-m` param.
         mode: u32,
+        version: GoVersion,
     },
     /// For running applications with the executable and arguments determined at runtime.
     DynamicApp(String, Vec<String>),
     /// Go app that only checks whether Linux pidfd syscalls are supported.
-    Go23Issue2988,
+    GoIssue2988(GoVersion),
     NodeMakeConnections,
     NodeIssue3456,
+    /// C++ app that dlopen c-shared go library.
+    DlopenCgo,
 }
 
 impl Application {
@@ -943,12 +1046,10 @@ impl Application {
                 "{}/.sdkman/candidates/java/17.0.6-tem/bin/java",
                 std::env::var("HOME").unwrap(),
             ),
-            Application::Go21HTTP => String::from("tests/apps/app_go/21.go_test_app"),
-            Application::Go22HTTP => String::from("tests/apps/app_go/22.go_test_app"),
-            Application::Go23HTTP => String::from("tests/apps/app_go/23.go_test_app"),
-            Application::Go21FileOps => String::from("tests/apps/fileops/go/21.go_test_app"),
-            Application::Go22FileOps => String::from("tests/apps/fileops/go/22.go_test_app"),
-            Application::Go23FileOps => String::from("tests/apps/fileops/go/23.go_test_app"),
+            Application::GoHTTP(version) => format!("tests/apps/app_go/{version}.go_test_app"),
+            Application::GoFileOps(version) => {
+                format!("tests/apps/fileops/go/{version}.go_test_app")
+            }
             Application::RustFileOps => {
                 format!(
                     "{}/{}",
@@ -959,40 +1060,33 @@ impl Application {
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
             Application::NodeFileOps
             | Application::NodeSpawn
+            | Application::NodeCopyFile
             | Application::NodeIssue2903
             | Application::NodeMakeConnections => String::from("node"),
-            Application::Go21Dir => String::from("tests/apps/dir_go/21.go_test_app"),
-            Application::Go22Dir => String::from("tests/apps/dir_go/22.go_test_app"),
-            Application::Go23Dir => String::from("tests/apps/dir_go/23.go_test_app"),
-            Application::Go21Issue834 => String::from("tests/apps/issue834/21.go_test_app"),
-            Application::Go22Issue834 => String::from("tests/apps/issue834/22.go_test_app"),
-            Application::Go23Issue834 => String::from("tests/apps/issue834/23.go_test_app"),
-            Application::Go21DirBypass => String::from("tests/apps/dir_go_bypass/21.go_test_app"),
-            Application::Go22DirBypass => String::from("tests/apps/dir_go_bypass/22.go_test_app"),
-            Application::Go23DirBypass => String::from("tests/apps/dir_go_bypass/23.go_test_app"),
+            Application::GoDir(version) => format!("tests/apps/dir_go/{version}.go_test_app"),
+            Application::GoIssue834(version) => {
+                format!("tests/apps/issue834/{version}.go_test_app")
+            }
+            Application::GoDirBypass(version) => {
+                format!("tests/apps/dir_go_bypass/{version}.go_test_app")
+            }
             Application::BashShebang => String::from("tests/apps/nothing.sh"),
-            Application::Go21Read => String::from("tests/apps/read_go/21.go_test_app"),
-            Application::Go22Read => String::from("tests/apps/read_go/22.go_test_app"),
-            Application::Go23Read => String::from("tests/apps/read_go/23.go_test_app"),
-            Application::Go21Write => String::from("tests/apps/write_go/21.go_test_app"),
-            Application::Go22Write => String::from("tests/apps/write_go/22.go_test_app"),
-            Application::Go23Write => String::from("tests/apps/write_go/23.go_test_app"),
-            Application::Go21LSeek => String::from("tests/apps/lseek_go/21.go_test_app"),
-            Application::Go22LSeek => String::from("tests/apps/lseek_go/22.go_test_app"),
-            Application::Go23LSeek => String::from("tests/apps/lseek_go/23.go_test_app"),
-            Application::Go21FAccessAt => String::from("tests/apps/faccessat_go/21.go_test_app"),
-            Application::Go22FAccessAt => String::from("tests/apps/faccessat_go/22.go_test_app"),
-            Application::Go23FAccessAt => String::from("tests/apps/faccessat_go/23.go_test_app"),
-            Application::Go21SelfOpen => String::from("tests/apps/self_open/21.go_test_app"),
-            Application::Go22SelfOpen => String::from("tests/apps/self_open/22.go_test_app"),
-            Application::Go23SelfOpen => String::from("tests/apps/self_open/23.go_test_app"),
+            Application::GoRead(version) => format!("tests/apps/read_go/{version}.go_test_app"),
+            Application::GoWrite(version) => format!("tests/apps/write_go/{version}.go_test_app"),
+            Application::GoLSeek(version) => format!("tests/apps/lseek_go/{version}.go_test_app"),
+            Application::GoFAccessAt(version) => {
+                format!("tests/apps/faccessat_go/{version}.go_test_app")
+            }
+            Application::GoSelfOpen(version) => {
+                format!("tests/apps/self_open/{version}.go_test_app")
+            }
             Application::RustIssue1123 => String::from("tests/apps/issue1123/target/issue1123"),
             Application::RustIssue1054 => String::from("tests/apps/issue1054/target/issue1054"),
             Application::RustIssue1458 => String::from("tests/apps/issue1458/target/issue1458"),
             Application::RustIssue1458PortNot53 => {
                 String::from("tests/apps/issue1458portnot53/target/issue1458portnot53")
             }
-            Application::RustOutgoingUdp | Application::RustOutgoingTcp => format!(
+            Application::RustOutgoingUdp | Application::RustOutgoingTcp { .. } => format!(
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
                 "../../target/debug/outgoing",
@@ -1082,9 +1176,14 @@ impl Application {
             ),
             Application::RustIssue2058 => String::from("tests/apps/issue2058/target/issue2058"),
             Application::RustIssue2204 => String::from("tests/apps/issue2204/target/issue2204"),
-            Application::Go23Open { .. } => String::from("tests/apps/open_go/23.go_test_app"),
+            Application::GoOpen { version, .. } => {
+                format!("tests/apps/open_go/{version}.go_test_app")
+            }
             Application::DynamicApp(exe, _) => exe.clone(),
-            Application::Go23Issue2988 => String::from("tests/apps/issue2988/23.go_test_app"),
+            Application::GoIssue2988(version) => {
+                format!("tests/apps/issue2988/{version}.go_test_app")
+            }
+            Application::DlopenCgo => String::from("tests/apps/dlopen_cgo/out.cpp_dlopen_cgo"),
         }
     }
 
@@ -1142,6 +1241,10 @@ impl Application {
                 app_path.push("node_spawn.mjs");
                 vec![app_path.to_string_lossy().to_string()]
             }
+            Application::NodeCopyFile => {
+                app_path.push("node_copyfile.mjs");
+                vec![app_path.to_string_lossy().to_string()]
+            }
             Application::NodeIssue2903 => {
                 app_path.push("issue2903.mjs");
                 vec![app_path.to_string_lossy().to_string()]
@@ -1162,30 +1265,14 @@ impl Application {
                 app_path.push("self_connect.py");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
-            Application::Go21HTTP
-            | Application::Go22HTTP
-            | Application::Go23HTTP
-            | Application::Go21Dir
-            | Application::Go22Dir
-            | Application::Go23Dir
-            | Application::Go21FileOps
-            | Application::Go22FileOps
-            | Application::Go23FileOps
-            | Application::Go21Issue834
-            | Application::Go22Issue834
-            | Application::Go23Issue834
-            | Application::Go21Read
-            | Application::Go22Read
-            | Application::Go23Read
-            | Application::Go21Write
-            | Application::Go22Write
-            | Application::Go23Write
-            | Application::Go21LSeek
-            | Application::Go22LSeek
-            | Application::Go23LSeek
-            | Application::Go21FAccessAt
-            | Application::Go22FAccessAt
-            | Application::Go23FAccessAt
+            Application::GoHTTP(..)
+            | Application::GoDir(..)
+            | Application::GoFileOps(..)
+            | Application::GoIssue834(..)
+            | Application::GoRead(..)
+            | Application::GoWrite(..)
+            | Application::GoLSeek(..)
+            | Application::GoFAccessAt(..)
             | Application::Fork
             | Application::ReadLink
             | Application::StatfsFstatfs
@@ -1205,12 +1292,8 @@ impl Application {
             | Application::RustListenPorts
             | Application::EnvBashCat
             | Application::BashShebang
-            | Application::Go21SelfOpen
-            | Application::Go22SelfOpen
-            | Application::Go23SelfOpen
-            | Application::Go21DirBypass
-            | Application::Go22DirBypass
-            | Application::Go23DirBypass
+            | Application::GoSelfOpen(..)
+            | Application::GoDirBypass(..)
             | Application::RustIssue2058
             | Application::OpenFile
             | Application::CIssue2055
@@ -1219,16 +1302,30 @@ impl Application {
             | Application::RustRebind0
             | Application::RustIssue2438
             | Application::RustIssue3248
-            | Application::Go23Issue2988 => vec![],
+            | Application::GoIssue2988(..)
+            | Application::DlopenCgo => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
                 .collect(),
-            Application::RustOutgoingTcp => ["--tcp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
+            Application::RustOutgoingTcp {
+                non_blocking: false,
+            } => ["--tcp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
                 .collect(),
-            Application::Go23Open { path, flags, mode } => {
+            Application::RustOutgoingTcp { non_blocking: true } => [
+                "--tcp",
+                RUST_OUTGOING_LOCAL,
+                RUST_OUTGOING_PEERS,
+                "--non-blocking",
+            ]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+            Application::GoOpen {
+                path, flags, mode, ..
+            } => {
                 vec![
                     "-p".to_string(),
                     path.clone(),
@@ -1244,12 +1341,8 @@ impl Application {
 
     pub fn get_app_port(&self) -> u16 {
         match self {
-            Application::Go21HTTP
-            | Application::Go22HTTP
-            | Application::Go23HTTP
-            | Application::Go21FileOps
-            | Application::Go22FileOps
-            | Application::Go23FileOps
+            Application::GoHTTP(..)
+            | Application::GoFileOps(..)
             | Application::NodeHTTP
             | Application::RustIssue1054
             | Application::PythonFlaskHTTP => 80,
@@ -1264,6 +1357,7 @@ impl Application {
             | Application::EnvBashCat
             | Application::NodeFileOps
             | Application::NodeSpawn
+            | Application::NodeCopyFile
             | Application::NodeIssue2903
             | Application::NodeIssue3456
             | Application::BashShebang
@@ -1272,32 +1366,16 @@ impl Application {
             | Application::StatfsFstatfs
             | Application::MkdirRmdir
             | Application::Realpath
-            | Application::Go21Issue834
-            | Application::Go22Issue834
-            | Application::Go23Issue834
-            | Application::Go21Read
-            | Application::Go22Read
-            | Application::Go23Read
-            | Application::Go21Write
-            | Application::Go22Write
-            | Application::Go23Write
-            | Application::Go21LSeek
-            | Application::Go22LSeek
-            | Application::Go23LSeek
-            | Application::Go21FAccessAt
-            | Application::Go22FAccessAt
-            | Application::Go23FAccessAt
-            | Application::Go21DirBypass
-            | Application::Go22DirBypass
-            | Application::Go23DirBypass
-            | Application::Go21SelfOpen
-            | Application::Go22SelfOpen
-            | Application::Go23SelfOpen
-            | Application::Go21Dir
-            | Application::Go22Dir
-            | Application::Go23Dir
+            | Application::GoIssue834(..)
+            | Application::GoRead(..)
+            | Application::GoWrite(..)
+            | Application::GoLSeek(..)
+            | Application::GoFAccessAt(..)
+            | Application::GoDirBypass(..)
+            | Application::GoSelfOpen(..)
+            | Application::GoDir(..)
             | Application::RustOutgoingUdp
-            | Application::RustOutgoingTcp
+            | Application::RustOutgoingTcp { .. }
             | Application::RustIssue1458
             | Application::RustIssue1458PortNot53
             | Application::RustIssue1776
@@ -1315,12 +1393,13 @@ impl Application {
             | Application::RustIssue3248
             | Application::NodeIssue2807
             | Application::RustRebind0
-            | Application::Go23Open { .. }
+            | Application::GoOpen { .. }
             | Application::DynamicApp(..)
-            | Application::Go23Issue2988
+            | Application::GoIssue2988(..)
             | Application::NodeMakeConnections => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
+            Application::DlopenCgo => 23333,
         }
     }
 
@@ -1349,7 +1428,10 @@ impl Application {
         let env = get_env(dylib_path, address, extra_env_vars, configuration_file);
         let test_process = self.get_test_process(env).await;
 
-        (test_process, TestIntProxy::new(listener).await)
+        (
+            test_process,
+            TestIntProxy::new(listener, configuration_file).await,
+        )
     }
 
     /// Like `start_process_with_layer`, but also verify a port subscribe.
@@ -1366,7 +1448,8 @@ impl Application {
 
         (
             test_process,
-            TestIntProxy::new_with_app_port(listener, self.get_app_port()).await,
+            TestIntProxy::new_with_app_port(listener, self.get_app_port(), configuration_file)
+                .await,
         )
     }
 }

@@ -22,16 +22,14 @@ default = []
 incluster = []
 # Enables connecting to the agent pod with kube's portforwarder.
 portforward = [
-    "dep:tokio-retry"
+  "dep:tokio-retry"
 ]
 
 [dependencies]
 mirrord-agent-env = { path = "../agent/env", features = ["k8s-openapi"] }
 mirrord-config = { path = "../config"}
 mirrord-progress = { path = "../progress" }
-mirrord-protocol = { path = "../protocol" }
 
-actix-codec.workspace = true
 async-stream = "0.3"
 futures.workspace = true
 k8s-openapi.workspace = true
@@ -45,6 +43,9 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tokio-retry = { workspace = true, optional = true }
+tower = { workspace = true, features = ["retry"] }
+http.workspace = true
+itertools.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true

@@ -6,8 +6,16 @@ use std::{
 };
 
 use actix_codec::{Decoder, Encoder};
-use bincode::{Decode, Encode, error::DecodeError};
-use bytes::{Buf, BufMut, BytesMut};
+use bincode::{
+    Decode, Encode,
+    enc::{
+        EncoderImpl,
+        write::{SizeWriter, Writer},
+    },
+    error::{DecodeError, EncodeError},
+};
+use bytes::{Buf, BytesMut};
+use derive_more::{Deref, From, Into};
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 
@@ -101,6 +109,10 @@ pub enum FileRequest {
     /// Same as StatFs, but results in the V2 response.
     StatFsV2(StatFsRequestV2),
     Rename(RenameRequest),
+    Ftruncate(FtruncateRequest),
+    Futimens(FutimensRequest),
+    Fchown(FchownRequest),
+    Fchmod(FchmodRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -173,10 +185,14 @@ pub enum FileResponse {
     Unlink(RemoteResult<()>),
     XstatFsV2(RemoteResult<XstatFsResponseV2>),
     Rename(RemoteResult<()>),
+    Ftruncate(RemoteResult<()>),
+    Futimens(RemoteResult<()>),
+    Fchown(RemoteResult<()>),
+    Fchmod(RemoteResult<()>),
 }
 
 /// `-agent` --> `-layer` messages.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, PartialEq, Eq, Clone, Debug)]
 #[protocol_break(2)]
 #[allow(deprecated)] // We can't remove deprecated variants without breaking the protocol
 pub enum DaemonMessage {
@@ -191,7 +207,7 @@ pub enum DaemonMessage {
     File(FileResponse),
     Pong,
     /// NOTE: can remove `RemoteResult` when we break protocol compatibility.
-    GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
+    GetEnvVarsResponse(RemoteResult<RemoteEnvVars>),
     GetAddrInfoResponse(GetAddrInfoResponse),
     /// Pause is deprecated but we don't want to break protocol
     PauseTarget(crate::pause::DaemonPauseTarget),
@@ -205,11 +221,29 @@ pub enum DaemonMessage {
     OperatorPing(u128),
 }
 
+#[derive(Encode, Decode, PartialEq, Eq, Clone, From, Into, Deref)]
+pub struct RemoteEnvVars(pub HashMap<String, String>);
+
+impl core::fmt::Debug for RemoteEnvVars {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("GetEnvVarsResponse")
+            .field(&"<REDACTED>")
+            .finish()
+    }
+}
+
 pub struct ProtocolCodec<I, O> {
     config: bincode::config::Configuration,
     /// Phantom fields to make this struct generic over message types.
     _phantom_incoming_message: PhantomData<I>,
     _phantom_outgoing_message: PhantomData<O>,
+}
+
+impl<I, O> Copy for ProtocolCodec<I, O> {}
+impl<I, O> Clone for ProtocolCodec<I, O> {
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
 // Codec to be used by the client side to receive `DaemonMessage`s from the agent and send
@@ -249,22 +283,32 @@ impl<I, O: bincode::Encode> Encoder<O> for ProtocolCodec<I, O> {
     type Error = io::Error;
 
     fn encode(&mut self, msg: O, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let encoded = match bincode::encode_to_vec(msg, self.config) {
-            Ok(encoded) => encoded,
-            Err(err) => {
-                return Err(io::Error::other(err.to_string()));
-            }
+        // First, calculate the size of encoded message, and eagerly reserve enough space in the
+        // buffer. This guarantees at most one allocation.
+        let size = {
+            let mut size_writer = EncoderImpl::new(SizeWriter::default(), self.config);
+            msg.encode(&mut size_writer).map_err(io::Error::other)?;
+            size_writer.into_writer().bytes_written
         };
-        dst.reserve(encoded.len());
-        dst.put(&encoded[..]);
+        dst.reserve(size);
 
-        Ok(())
+        /// Allows using [`BytesMut`] as bincode's [`Writer`].
+        struct WriterAdapter<'a>(&'a mut BytesMut);
+
+        impl Writer for WriterAdapter<'_> {
+            fn write(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
+                self.0.extend_from_slice(bytes);
+                Ok(())
+            }
+        }
+
+        bincode::encode_into_writer(msg, WriterAdapter(dst), self.config).map_err(io::Error::other)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use bytes::BytesMut;
+    use bytes::{BufMut, BytesMut};
 
     use super::*;
     use crate::{Payload, tcp::TcpData};

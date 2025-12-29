@@ -46,8 +46,8 @@ async fn operator_setup(
         sqs_splitting,
         kafka_splitting,
         application_auto_pause,
-        stateful_sessions,
         mysql_branching,
+        pg_branching,
     }: OperatorSetupParams,
 ) -> CliResult<(), OperatorSetupError> {
     eprintln!(
@@ -100,8 +100,8 @@ async fn operator_setup(
             sqs_splitting,
             kafka_splitting,
             application_auto_pause,
-            stateful_sessions,
             mysql_branching,
+            pg_branching,
         });
 
         match file {
@@ -122,7 +122,7 @@ async fn operator_setup(
 /// Handle commands related to the operator `mirrord operator ...`
 pub(crate) async fn operator_command(args: OperatorArgs) -> CliResult<()> {
     match args.command {
-        OperatorCommand::Setup(params) => operator_setup(params).await.map_err(CliError::from),
+        OperatorCommand::Setup(params) => operator_setup(*params).await.map_err(CliError::from),
         OperatorCommand::Status { config_file } => {
             StatusCommandHandler::new(config_file)
                 .and_then(StatusCommandHandler::handle)

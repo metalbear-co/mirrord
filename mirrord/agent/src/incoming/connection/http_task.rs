@@ -1,4 +1,4 @@
-use std::{error::Report, future::Future};
+use std::{error::Report, future::Future, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
@@ -19,14 +19,15 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::instrument;
 
 use crate::{
     http::{
-        HttpVersion, body::RolledBackBody, error::MirrordErrorResponse,
-        extract_requests::ExtractedRequest, sender::HttpSender,
+        HttpVersion, MIRRORD_AGENT_HTTP_HEADER_NAME, body::RolledBackBody,
+        error::MirrordErrorResponse, extract_requests::ExtractedRequest, sender::HttpSender,
     },
     incoming::{
-        IncomingStreamItem,
+        IncomingStreamItem, RedirectorTaskConfig,
         connection::{
             ConnectionInfo,
             copy_bidirectional::{self, CowBytes, OutgoingDestination},
@@ -56,6 +57,7 @@ where
     ///
     /// This method must ensure that [`Self::destination`] is notified about the result with
     /// [`RequestDestination::send_result`].
+    #[instrument(level = "trace", skip(self))]
     pub async fn run(mut self) {
         let result: Result<(), ConnError> = try {
             self.handle_frames().await?;
@@ -104,9 +106,10 @@ where
 
 impl HttpTask<PassthroughConnection> {
     pub fn new(
-        info: ConnectionInfo,
+        info: Arc<ConnectionInfo>,
         mirror_data_tx: OptionalBroadcast,
         request: ExtractedRequest,
+        redirector_config: RedirectorTaskConfig,
     ) -> Self {
         let (request_frame_tx, request_frame_rx) = request
             .body_tail
@@ -114,6 +117,7 @@ impl HttpTask<PassthroughConnection> {
             .then(|| mpsc::channel::<Frame<Bytes>>(1))
             .unzip();
 
+        let redirector_config_clone = redirector_config.clone();
         let upgrade = tokio::spawn(async move {
             let version = request.parts.version;
 
@@ -121,10 +125,12 @@ impl HttpTask<PassthroughConnection> {
                 .map(ReceiverStream::new)
                 .map(|stream| stream.map(Ok))
                 .map(StreamBody::new);
+
             let body = RolledBackBody {
                 head: request.body_head.into_iter(),
                 tail: body_tail,
             };
+
             let hyper_request = Request::from_parts(request.parts, body);
 
             let mut response = match Self::send_request(&info, hyper_request).await {
@@ -139,6 +145,8 @@ impl HttpTask<PassthroughConnection> {
                     return Err(error);
                 }
             };
+
+            Self::modify_response(&mut response, &redirector_config_clone);
 
             let upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS)
                 .then(|| hyper::upgrade::on(&mut response));
@@ -204,6 +212,23 @@ impl HttpTask<PassthroughConnection> {
             .await
             .map_err(From::from)
             .map_err(ConnError::PassthroughHttpError)
+    }
+
+    /// Used for applying transformations on responses to
+    /// passed-through requests.
+    ///
+    /// Currently just inserts the mirrord agent
+    /// header.
+    fn modify_response(
+        response: &mut Response<Incoming>,
+        redirector_config: &RedirectorTaskConfig,
+    ) {
+        if redirector_config.inject_headers {
+            response.headers_mut().insert(
+                MIRRORD_AGENT_HTTP_HEADER_NAME,
+                http::HeaderValue::from_static("passed-through"),
+            );
+        }
     }
 }
 
@@ -374,7 +399,8 @@ impl RequestDestination for PassthroughConnection {
 
     async fn wait_for_upgrade(&mut self) -> Result<Option<Self::Upgraded>, ConnError> {
         match (&mut self.upgrade).await {
-            Err(..) => todo!("task panicked"),
+            Err(..) => Err(ConnError::AgentBug("passthrough task panicked".into())),
+
             Ok(Err(error)) => Err(error),
             Ok(Ok(Some(upgraded))) => Ok(Some(UpgradedPassthroughConnection {
                 upgraded: TokioIo::new(upgraded),

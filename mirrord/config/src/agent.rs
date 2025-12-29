@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{
-    self, ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, from_env::FromEnv,
+    self, ConfigContext, FromFileError, FromMirrordConfig, MirrordConfig, from_env::FromEnv,
     source::MirrordConfigSource,
 };
 
@@ -68,6 +68,9 @@ impl fmt::Display for LinuxCapability {
 ///     "network_interface": "eth0",
 ///     "flush_connections": false,
 ///     "exclude_from_mesh": false
+///     "inject_headers": false,
+///     "max_body_buffer_size": 65535,
+///     "max_body_buffer_timeout": 1000
 ///   }
 /// }
 /// ```
@@ -128,7 +131,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "image": "internal.repo/images/mirrord:latest"
+    ///   "agent": {
+    ///     "image": "internal.repo/images/mirrord:latest"
+    ///   }
     /// }
     /// ```
     ///
@@ -136,9 +141,11 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "image": {
-    ///     "registry": "internal.repo/images/mirrord",
-    ///     "tag": "latest"
+    ///   "agent": {
+    ///     "image": {
+    ///       "registry": "internal.repo/images/mirrord",
+    ///       "tag": "latest"
+    ///     }
     ///   }
     /// }
     /// ```
@@ -222,7 +229,14 @@ pub struct AgentConfig {
     ///
     /// The default behavior is try to access the internet and use that interface. If that fails
     /// it uses `eth0`.
-    #[config(env = "MIRRORD_AGENT_NETWORK_INTERFACE")]
+    ///
+    /// DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
+    /// and will be removed in the future. This field will be removed, and the agent will always
+    /// use iptables redirects for mirroring traffic.
+    #[config(
+        env = "MIRRORD_AGENT_NETWORK_INTERFACE",
+        deprecated = "agent.network_interface is deprecated and will be removed when the raw-socket-based mirroring implementation is retired"
+    )]
     pub network_interface: Option<String>,
 
     /// ### agent.flush_connections {#agent-flush_connections}
@@ -258,11 +272,15 @@ pub struct AgentConfig {
     /// Defaults to `operator: Exists`.
     ///
     /// ```json
-    /// [
-    ///   {
-    ///     "key": "meow", "operator": "Exists", "effect": "NoSchedule"
+    /// {
+    ///   "agent": {
+    ///     "tolerations": [
+    ///         {
+    ///           "key": "meow", "operator": "Exists", "effect": "NoSchedule"
+    ///         }
+    ///     ]
     ///   }
-    /// ]
+    /// }
     /// ```
     ///
     /// Set to an empty array to have no tolerations at all
@@ -270,19 +288,23 @@ pub struct AgentConfig {
 
     /// ### agent.resources {#agent-resources}
     ///
-    /// Set pod resource reqirements. (not with ephemeral agents)
+    /// Set pod resource requirements. (not with ephemeral agents)
     /// Default is
     /// ```json
     /// {
-    ///   "requests":
-    ///   {
-    ///     "cpu": "1m",
-    ///     "memory": "1Mi"
-    ///   },
-    ///   "limits":
-    ///   {
-    ///     "cpu": "100m",
-    ///       "memory": "100Mi"
+    ///   "agent": {
+    ///     "resources": {
+    ///       "requests":
+    ///       {
+    ///         "cpu": "1m",
+    ///         "memory": "1Mi"
+    ///       },
+    ///       "limits":
+    ///       {
+    ///         "cpu": "100m",
+    ///         "memory": "100Mi"
+    ///       }
+    ///     }
     ///   }
     /// }
     /// ```
@@ -329,7 +351,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "labels": { "user": "meow", "state": "asleep" }
+    ///   "agent": {
+    ///     "labels": { "user": "meow", "state": "asleep" }
+    ///   }
     /// }
     /// ```
     pub labels: Option<HashMap<String, String>>,
@@ -340,10 +364,12 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "annotations": {
-    ///     "cats.io/inject": "enabled"
-    ///     "prometheus.io/scrape": "true",
-    ///     "prometheus.io/port": "9000"
+    ///   "agent": {
+    ///     "annotations": {
+    ///       "cats.io/inject": "enabled"
+    ///       "prometheus.io/scrape": "true",
+    ///       "prometheus.io/port": "9000"
+    ///     }
     ///   }
     /// }
     /// ```
@@ -356,7 +382,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "node_selector": { "kubernetes.io/hostname": "node1" }
+    ///   "agent": {
+    ///     "node_selector": { "kubernetes.io/hostname": "node1" }
+    ///   }
     /// }
     /// ```
     pub node_selector: Option<HashMap<String, String>>,
@@ -367,7 +395,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "service_account": "my-service-account"
+    ///   "agent": {
+    ///     "service_account": "my-service-account"
+    ///   }
     /// }
     /// ```
     pub service_account: Option<String>,
@@ -381,7 +411,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "metrics": "0.0.0.0:9000"
+    ///   "agent": {
+    ///     "metrics": "0.0.0.0:9000"
+    ///   }
     /// }
     /// ```
     pub metrics: Option<SocketAddr>,
@@ -401,7 +433,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "priority_class": "my-priority-class-name"
+    ///   "agent": {
+    ///     "priority_class": "my-priority-class-name"
+    ///   }
     /// }
     /// ```
     ///
@@ -421,8 +455,59 @@ pub struct AgentConfig {
     /// When this is set, `network_interface` setting is ignored.
     ///
     /// Defaults to true.
-    #[config(default = true)]
+    ///
+    /// DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
+    /// and will be removed in the future. This field will be removed, and the agent will always
+    /// use iptables redirects for mirroring traffic.
+    #[config(
+        default = true,
+        deprecated = "agent.passthrough_mirroring is deprecated and will be removed when the raw-socket-based mirroring implementation is retired"
+    )]
     pub passthrough_mirroring: bool,
+
+    /// ### agent.inject_headers {#agent-inject_headers}
+    ///
+    /// Sets whether `Mirrord-Agent` headers are injected into HTTP
+    /// responses that went through the agent.
+    ///
+    /// Possible values for the header:
+    ///
+    /// - `passed-through`: set when the request was not sent to the local app (perhaps because it
+    ///   didn't match the filters)
+    ///
+    /// - `forwarded-to-client`: set when the request was sent to the local app
+    #[config(default = false)]
+    pub inject_headers: bool,
+
+    /// ### agent.max_body_buffer_size {#agent-max_body_buffer_size}
+    ///
+    /// Maximum size, in bytes, of HTTP request body buffers. Used for
+    /// temporarily storing bodies of incoming HTTP requests to run
+    /// body filters. HTTP body filters will not match any requests
+    /// with bodies larger than this.
+    #[config(default = 65535)]
+    pub max_body_buffer_size: u32,
+
+    /// ### agent.max_body_buffer_timeout {#agent-max_body_buffer_timeout}
+    ///
+    /// Maximum timeout, in milliseconds, for receiving HTTP request
+    /// bodies. HTTP body filters will not match any requests whose
+    /// bodies do not arrive within this timeout.
+    #[config(default = 1000)]
+    pub max_body_buffer_timeout: u32,
+
+    /// ### agent.security_context {#agent-security_context}
+    ///
+    /// Agent pod security context (not with ephemeral agents).
+    /// Support seccomp profile and app armor profile.
+    pub security_context: Option<SecurityContext>,
+
+    /// ### agent.clean_iptables_on_start {#agent-clean_iptables_on_start}
+    ///
+    /// Clean leftover iptables rules and start the new agent instead of erroring out when there
+    /// are existing mirrord rules in the target's iptables.
+    #[config(env = "MIRRORD_AGENT_CLEAN_IPTABLES_ON_START")]
+    pub clean_iptables_on_start: Option<bool>,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
@@ -536,7 +621,7 @@ impl AgentConfig {
 }
 
 impl AgentFileConfig {
-    pub fn from_path<P>(path: P) -> Result<Self, ConfigError>
+    pub fn from_path<P>(path: P) -> Result<Self, FromFileError>
     where
         P: AsRef<Path>,
     {
@@ -546,7 +631,52 @@ impl AgentFileConfig {
             Some("json") => Ok(serde_json::from_str::<Self>(&config)?),
             Some("toml") => Ok(toml::from_str::<Self>(&config)?),
             Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&config)?),
-            _ => Err(ConfigError::UnsupportedFormat),
+            ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct SecurityContext {
+    pub app_armor_profile: Option<AppArmorProfile>,
+    pub seccomp_profile: Option<SeccompProfile>,
+}
+
+impl From<SecurityContext> for k8s_openapi::api::core::v1::PodSecurityContext {
+    fn from(ctx: SecurityContext) -> Self {
+        Self {
+            app_armor_profile: ctx.app_armor_profile.map(Into::into),
+            seccomp_profile: ctx.seccomp_profile.map(Into::into),
+            ..Default::default()
+        }
+    }
+}
+
+pub type AppArmorProfile = SecurityProfile;
+pub type SeccompProfile = SecurityProfile;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct SecurityProfile {
+    pub localhost_profile: Option<String>,
+
+    #[serde(rename = "type")]
+    pub type_: String,
+}
+
+impl From<AppArmorProfile> for k8s_openapi::api::core::v1::AppArmorProfile {
+    fn from(profile: SecurityProfile) -> Self {
+        Self {
+            localhost_profile: profile.localhost_profile,
+            type_: profile.type_,
+        }
+    }
+}
+
+impl From<SeccompProfile> for k8s_openapi::api::core::v1::SeccompProfile {
+    fn from(profile: SecurityProfile) -> Self {
+        Self {
+            localhost_profile: profile.localhost_profile,
+            type_: profile.type_,
         }
     }
 }
