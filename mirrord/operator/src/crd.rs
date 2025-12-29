@@ -26,6 +26,7 @@ pub mod external;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
+pub mod multi_cluster;
 pub mod mysql_branching;
 pub mod patch;
 pub mod pg_branching;
