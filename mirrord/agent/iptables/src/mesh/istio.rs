@@ -46,17 +46,19 @@ where
     }
 
     async fn unmount_entrypoint(&self) -> IPTablesResult<()> {
-        let first_res = self.prerouting.unmount_entrypoint().await;
-        let second_res = self.output.unmount_entrypoint().await;
+        // Don't fail early, so that we delete the second part even if the second part does not
+        // exist and its deletion therefore fails.
+        let prerouting_res = self.prerouting.unmount_entrypoint().await;
+        let output_res = self.output.unmount_entrypoint().await;
 
-        let third_res = tokio::fs::write(
+        let route_localnet_res = tokio::fs::write(
             "/proc/sys/net/ipv4/conf/all/route_localnet",
             IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL.as_bytes(),
         )
         .await
         .map_err(Into::into);
 
-        first_res.and(second_res).and(third_res)
+        prerouting_res.and(output_res).and(route_localnet_res)
     }
 
     async fn add_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {

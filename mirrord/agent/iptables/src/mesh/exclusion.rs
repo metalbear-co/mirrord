@@ -105,19 +105,19 @@ where
     async fn mount_entrypoint(&self) -> IPTablesResult<()> {
         // Should mount the internal iptables because exclusion inserts itself as first rule and
         // this may also happen here so exclusion should mount second
-        let first_res = self.inner.mount_entrypoint().await;
+        self.inner.mount_entrypoint().await?;
 
-        let second_res = self.exclusion.mount_entrypoint();
-
-        first_res.and(second_res)
+        self.exclusion.mount_entrypoint()
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     async fn unmount_entrypoint(&self) -> IPTablesResult<()> {
-        let first_res = self.inner.unmount_entrypoint().await;
+        // Don't fail early, so that we delete the second part even if the second part does not
+        // exist and its deletion therefore fails.
+        let inner_res = self.inner.unmount_entrypoint().await;
 
-        let second_res = self.exclusion.unmount_entrypoint();
-        first_res.and(second_res)
+        let exclusion_res = self.exclusion.unmount_entrypoint();
+        inner_res.and(exclusion_res)
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]

@@ -46,9 +46,11 @@ where
     }
 
     async fn unmount_entrypoint(&self) -> IPTablesResult<()> {
-        let first_res = self.prerouting.unmount_entrypoint().await;
-        let second_res = self.output.unmount_entrypoint().await;
-        first_res.and(second_res)
+        // Don't fail early, so that we delete the second part even if the second part does not
+        // exist and its deletion therefore fails.
+        let prerouting_res = self.prerouting.unmount_entrypoint().await;
+        let output_res = self.output.unmount_entrypoint().await;
+        prerouting_res.and(output_res)
     }
 
     async fn add_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
@@ -63,14 +65,16 @@ where
     }
 
     async fn remove_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
-        let first_res = self
+        // Don't fail early, so that we delete the second part even if the second part does not
+        // exist and its deletion therefore fails.
+        let prerouting_res = self
             .prerouting
             .remove_redirect(redirected_port, target_port)
             .await;
-        let second_res = self
+        let output_res = self
             .output
             .remove_redirect(redirected_port, target_port)
             .await;
-        first_res.and(second_res)
+        prerouting_res.and(output_res)
     }
 }
