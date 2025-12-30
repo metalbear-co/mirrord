@@ -14,18 +14,18 @@ pub use dns::{
 // Cross-platform socket constants
 #[cfg(unix)]
 use libc::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
-use libc::c_int;
 use mirrord_config::feature::network::{
     dns::{DnsConfig, DnsFilterConfig},
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
     outgoing::{OutgoingConfig, OutgoingFilterConfig},
 };
-use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnCloseRequest, PortUnsubscribe};
+use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
 use mirrord_protocol::outgoing::SocketAddress;
 // Re-export ops module items
 pub use ops::{
-    ConnectFn, ConnectResult, SendtoFn,
+    ConnectFn, ConnectResult, SendtoFn, connect_outgoing, connect_outgoing_udp,
     create_outgoing_request, is_unix_address, prepare_outgoing_address, send_dns_patch, send_to,
+    update_socket_connected_state,
 };
 use socket2::SockAddr;
 // Re-export sockets module items
@@ -52,7 +52,7 @@ pub struct Connected {
     ///
     /// For the _outgoing_ feature, we actually connect to the `layer_address` interceptor socket,
     /// but use this address in the `recvfrom` handling of `fill_address`.
-    remote_address: SocketAddress,
+    pub remote_address: SocketAddress,
 
     /// Local address (pod-wise)
     ///
@@ -67,16 +67,11 @@ pub struct Connected {
     ///
     /// We would set this ip as `1.2.3.4:{port}` in `bind`, where `{port}` is the user requested
     /// port.
-    local_address: Option<SocketAddress>,
+    pub local_address: SocketAddress,
 
     /// The address of the interceptor socket, this is what we're really connected to in the
     /// outgoing feature.
-    layer_address: Option<SocketAddress>,
-
-    /// Unique ID of this connection.
-    ///
-    /// Only for sockets used for outgoing connections.
-    connection_id: Option<u128>,
+    pub layer_address: Option<SocketAddress>,
 }
 
 /// Represents a [`SocketState`] where the user made a `bind` call, and we intercepted it.
@@ -104,12 +99,7 @@ pub struct Bound {
 pub enum SocketState {
     #[default]
     Initialized,
-    Bound {
-        bound: Bound,
-        // if true, the socket has a mapped BUT should not be used to make port subscriptions
-        // used for listen_ports (COR-1014).
-        is_only_bound: bool,
-    },
+    Bound(Bound),
     Listening(Bound),
     Connected(Connected),
 }
@@ -130,6 +120,24 @@ impl SocketKind {
     }
 }
 
+impl TryFrom<i32> for SocketKind {
+    type Error = i32;
+
+    fn try_from(socket_type: i32) -> Result<Self, Self::Error> {
+        // Mask out any flags (like SOCK_NONBLOCK, SOCK_CLOEXEC) to get the base socket type
+        let base_type = socket_type & 0xFF;
+
+        match base_type {
+            SOCK_STREAM => Ok(SocketKind::Tcp(socket_type)),
+            SOCK_DGRAM => Ok(SocketKind::Udp(socket_type)),
+            _ => {
+                // Return error for unknown socket types instead of defaulting
+                Err(socket_type)
+            }
+        }
+    }
+}
+
 impl From<SocketKind> for NetProtocol {
     fn from(kind: SocketKind) -> Self {
         match kind {
@@ -139,46 +147,25 @@ impl From<SocketKind> for NetProtocol {
     }
 }
 
-impl TryFrom<c_int> for SocketKind {
-    #[cfg(unix)]
-    type Error = Bypass;
-    #[cfg(windows)]
-    type Error = i32;
-
-    fn try_from(type_: c_int) -> Result<Self, Self::Error> {
-        if (type_ & SOCK_STREAM) > 0 {
-            Ok(SocketKind::Tcp(type_))
-        } else if (type_ & SOCK_DGRAM) > 0 {
-            Ok(SocketKind::Udp(type_))
-        } else {
-            #[cfg(unix)]
-            if cfg!(unix) {
-                Err(Bypass::Type(type_))
-            } else {
-                Err(socket_type)
-            }
-        }
-    }
-}
-
 // TODO(alex): We could treat `sockfd` as being the same as `&self` for socket ops, we currently
 // can't do that due to how `dup` interacts directly with our `Arc<UserSocket>`, because we just
 // `clone` the arc, we end up with exact duplicates, but `dup` generates a new fd that we have no
 // way of putting inside the duplicated `UserSocket`.
+/// Cross-platform socket structure that holds socket metadata and state.
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct UserSocket {
-    pub domain: c_int,
-    pub type_: c_int,
-    pub protocol: c_int,
+    pub domain: i32,
+    pub type_: i32,
+    pub protocol: i32,
     pub state: SocketState,
     pub kind: SocketKind,
 }
 
 impl UserSocket {
     pub fn new(
-        domain: c_int,
-        type_: c_int,
-        protocol: c_int,
+        domain: i32,
+        type_: i32,
+        protocol: i32,
         state: SocketState,
         kind: SocketKind,
     ) -> Self {
@@ -229,30 +216,27 @@ impl UserSocket {
     /// If this socket was listening and bound to a port, notifies agent to stop
     /// mirroring/stealing that port by sending PortUnsubscribe.
     pub fn close(&self) {
-        match self {
-            Self {
-                state: SocketState::Listening(bound),
-                kind: SocketKind::Tcp(..),
-                ..
-            } => {
-                let _ = common::make_proxy_request_no_response(PortUnsubscribe {
-                    port: bound.requested_address.port(),
-                    listening_on: bound.address,
-                });
+        if self.is_listening()
+            && let Some(bound) = self.bound_address()
+        {
+            let port_unsubscribe = PortUnsubscribe {
+                port: bound.address.port(),
+                listening_on: bound.address,
+            };
+
+            // Send unsubscribe request to stop port operations
+            let _ = make_proxy_request_no_response(port_unsubscribe);
+
+            // For steal mode on Windows, add a small delay to allow agent processing
+            // This prevents race conditions where subsequent requests arrive before
+            // the agent has processed the port unsubscription
+            #[cfg(target_os = "windows")]
+            {
+                if setup().incoming_mode().steal {
+                    // Small delay to ensure agent processes unsubscription
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
             }
-            Self {
-                state:
-                    SocketState::Connected(Connected {
-                        connection_id: Some(id),
-                        ..
-                    }),
-                ..
-            } => {
-                let _ = make_proxy_request_no_response(OutgoingConnCloseRequest {
-                    conn_id: *id,
-                });
-            }
-            _ => {}
         }
     }
 }
@@ -382,12 +366,11 @@ impl OutgoingSelector {
     ///
     /// So if the user specified a selector with `0.0.0.0:0`, we're going to be always matching on
     /// it.
-    #[mirrord_layer_macro::instrument(level = "trace", ret)]
-    pub fn get_connection_through(
+    pub fn get_connection_through_with_resolver<R: DnsResolver>(
         &self,
         address: SocketAddr,
         protocol: NetProtocol,
-    ) -> HookResult<ConnectionThrough> {
+    ) -> Result<ConnectionThrough, R::Error> {
         let (filters, selector_is_local) = match self {
             Self::Unfiltered => return Ok(ConnectionThrough::Remote(address)),
             Self::Local(filters) => (filters, true),
@@ -395,12 +378,14 @@ impl OutgoingSelector {
         };
 
         for filter in filters {
-            if !filter.matches(address, protocol, selector_is_local)? {
+            if !filter.matches_with_resolver::<R>(address, protocol, selector_is_local)? {
                 continue;
             }
 
             return if selector_is_local {
-                Self::get_local_address_to_connect(address).map(ConnectionThrough::Local)
+                // For local connections, platform-specific implementations should handle address
+                // resolution
+                Ok(ConnectionThrough::Local(address))
             } else {
                 Ok(ConnectionThrough::Remote(address))
             };
@@ -409,7 +394,9 @@ impl OutgoingSelector {
         if selector_is_local {
             Ok(ConnectionThrough::Remote(address))
         } else {
-            Self::get_local_address_to_connect(address).map(ConnectionThrough::Local)
+            // For local fallback, platform-specific implementations should handle address
+            // resolution
+            Ok(ConnectionThrough::Local(address))
         }
     }
 
@@ -566,26 +553,32 @@ pub trait ProtocolAndAddressFilterExt {
     /// [`AddressFilter::Name`]). If remote DNS is disabled or `force_local_dns`
     /// flag is used, the method uses local resolution `ToSocketAddrs`. Otherwise, it uses
     /// remote resolution `remote_getaddrinfo`.
-    fn matches(
+    /// Matches the outgoing connection request against this filter with optional DNS resolution
+    fn matches_with_resolver<R: DnsResolver>(
         &self,
         address: SocketAddr,
         protocol: NetProtocol,
         force_local_dns: bool,
-    ) -> HookResult<bool>;
+    ) -> Result<bool, R::Error>;
 }
 
 impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
-    fn matches(
+    fn matches_with_resolver<R: DnsResolver>(
         &self,
         address: SocketAddr,
         protocol: NetProtocol,
         force_local_dns: bool,
-    ) -> HookResult<bool> {
-        if let (ProtocolFilter::Tcp, NetProtocol::Datagrams)
-        | (ProtocolFilter::Udp, NetProtocol::Stream) = (self.protocol, protocol)
-        {
+    ) -> Result<bool, R::Error> {
+        // Check protocol match
+        let protocol_matches = matches!(
+            (&self.protocol, protocol),
+            (ProtocolFilter::Any, _)
+                | (ProtocolFilter::Tcp, NetProtocol::Stream)
+                | (ProtocolFilter::Udp, NetProtocol::Datagrams)
+        );
+        if !protocol_matches {
             return Ok(false);
-        };
+        }
 
         let port = self.address.port();
         if port != 0 && port != address.port() {

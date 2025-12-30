@@ -37,12 +37,12 @@ tracing.workspace = true
 thiserror.workspace = true
 regex.workspace = true
 http.workspace = true
-libc.workspace = true
 
 # Tokio for async pipe operations
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 [target.'cfg(unix)'.dependencies]
+libc.workspace = true
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
 frida-gum = { version = "0.17", features = ["auto-download", "std"] }
 

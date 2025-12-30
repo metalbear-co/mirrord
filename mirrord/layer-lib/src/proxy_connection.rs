@@ -153,36 +153,38 @@ impl ResponseManager {
     }
 }
 
-/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
-/// Blocks until the proxy responds.
-pub fn make_proxy_request_with_response<T>(request: T) -> HookResult<T::Response>
+/// Generic helper to make proxy requests with consistent error handling
+pub fn make_proxy_request_with_response<T>(request: T) -> ProxyResult<T::Response>
 where
     T: IsLayerRequestWithResponse + Debug,
     T::Response: Debug,
 {
-    // SAFETY: mutation happens only on initialization.
-    #[allow(static_mut_refs)]
-    unsafe {
-        PROXY_CONNECTION
-            .get()
-            .ok_or(HookError::CannotGetProxyConnection)?
-            .make_request_with_response(request)
-            .map_err(Into::into)
-    }
+    PROXY_CONNECTION
+        .get()
+        .ok_or_else(|| {
+            ProxyError::IoFailed(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "Cannot get proxy connection",
+            ))
+        })?
+        .make_request_with_response(request)
 }
 
-/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
+/// Generic helper function to proxy a request that might have a large response to mirrord intproxy.
 /// Blocks until the request is sent.
 pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
     request: T,
 ) -> HookResult<MessageId> {
     // SAFETY: mutation happens only on initialization.
     #[allow(static_mut_refs)]
-    unsafe {
-        PROXY_CONNECTION
-            .get()
-            .ok_or(HookError::CannotGetProxyConnection)?
-            .make_request_no_response(request)
-            .map_err(Into::into)
-    }
+    PROXY_CONNECTION
+        .get()
+        .ok_or_else(|| {
+            HookError::ProxyError(ProxyError::IoFailed(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "Cannot get proxy connection",
+            )))
+        })?
+        .make_request_no_response(request)
+        .map_err(|e| e.into())
 }

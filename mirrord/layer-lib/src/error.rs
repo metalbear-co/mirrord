@@ -134,14 +134,17 @@ pub enum HostnameResolveError {
     #[error("Proxy connection not available")]
     ProxyConnectionUnavailable,
 
-    // #[error("mirrord-layer: Proxy connection failed: `{0}`")]
-    // HookError(#[from] HookError),
+    #[error("mirrord-layer: Proxy connection failed: `{0}`")]
+    ProxyError(#[from] ProxyError),
 
     #[error("Failed to open file {path}: {details}")]
     FileOpenError { path: String, details: String },
 
     #[error("Failed to read file {path}: {details}")]
     FileReadError { path: String, details: String },
+
+    #[error("Remote error while accessing file {path}: {error}")]
+    RemoteFileError { path: String, error: String },
 
     #[error("DNS resolution failed for hostname '{hostname}': {details}")]
     DnsResolutionFailed { hostname: String, details: String },

@@ -385,7 +385,7 @@ where
     // Check the outgoing selector to determine routing
     match setup()
         .outgoing_selector()
-        .get_connection_through(remote_addr, protocol)
+        .get_connection_through_with_resolver::<WindowsDnsResolver>(remote_addr, protocol)
     {
         Ok(ConnectionThrough::Remote(_filtered_addr)) => {
             tracing::debug!(
