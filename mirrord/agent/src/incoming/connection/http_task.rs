@@ -19,7 +19,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::instrument;
+use tracing::{Level, instrument};
 
 use crate::{
     http::{
@@ -58,9 +58,12 @@ where
     ///
     /// This method must ensure that [`Self::destination`] is notified about the result with
     /// [`RequestDestination::send_result`].
-    #[instrument(level = "trace", skip(self))]
+    #[instrument(level = Level::TRACE, skip(self))]
     pub async fn run(mut self) {
+        tracing::debug!(?BYPASSED_HTTP_REQUESTS, "Before we create the guard");
         let _metric_guard = MetricGuard::new(&BYPASSED_HTTP_REQUESTS);
+
+        tracing::debug!(?BYPASSED_HTTP_REQUESTS, "After we create the guard");
 
         let result: Result<(), ConnError> = try {
             self.handle_frames().await?;
