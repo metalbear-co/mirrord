@@ -18,7 +18,9 @@ use mirrord_config::{
 use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
     Port,
-    tcp::{Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, MirrorType, StealType},
+    tcp::{
+        Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, JsonPathQuery, MirrorType, StealType,
+    },
 };
 
 use crate::{
