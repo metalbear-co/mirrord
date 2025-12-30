@@ -20,7 +20,7 @@ use crate::{CliError, CliResult};
 pub enum LocalRedis {
     /// Container (runtime command, container name).
     Container {
-        runtime: String,
+        runtime: ContainerRuntime,
         container_name: String,
     },
     /// Native redis-server process (child process handle).
@@ -34,7 +34,7 @@ impl Drop for LocalRedis {
                 runtime,
                 container_name,
             } => {
-                let _ = Command::new(runtime)
+                let _ = Command::new(runtime.command())
                     .args(["rm", "-f", container_name])
                     .output();
             }
@@ -150,6 +150,7 @@ async fn start_container<P: Progress>(
     // Build container run command
     let mut container_args = vec![
         "run".to_string(),
+        "--rm".to_string(),
         "-d".to_string(),
         "--name".to_string(),
         container_name.clone(),
@@ -187,7 +188,7 @@ async fn start_container<P: Progress>(
     if ready.is_ok() {
         sub.success(Some(&format!("Redis ({runtime_name}) on localhost:{port}")));
         Ok(LocalRedis::Container {
-            runtime: runtime_cmd.to_string(),
+            runtime: container_runtime,
             container_name,
         })
     } else {
