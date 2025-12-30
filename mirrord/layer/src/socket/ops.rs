@@ -234,8 +234,7 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
         .http_filter
         .ports
         .as_ref()
-        .is_some_and(|filter_ports| filter_ports.contains(&mapped_port))
-        .not();
+        .is_some_and(|filter_ports| filter_ports.contains(&mapped_port).not());
 
     let not_stolen_with_filter = !http_filter_used || not_a_filtered_port;
 
