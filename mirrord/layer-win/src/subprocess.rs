@@ -122,23 +122,6 @@ pub fn create_proxy_connection(context: &ProcessContext) -> LayerResult<ProxyCon
     }
 }
 
-/// Get the proxy address for layer setup based on process context
-pub fn get_setup_address(context: &ProcessContext) -> LayerResult<SocketAddr> {
-    match context {
-        ProcessContext::Child { proxy_addr, .. } => {
-            // Child process - use inherited proxy address
-            Ok(*proxy_addr)
-        }
-        ProcessContext::Parent => {
-            // Parent process - use environment variable
-            std::env::var(mirrord_config::MIRRORD_LAYER_INTPROXY_ADDR)
-                .map_err(LayerError::MissingEnvIntProxyAddr)?
-                .parse::<SocketAddr>()
-                .map_err(LayerError::MalformedIntProxyAddr)
-        }
-    }
-}
-
 /// Create process info for the current process
 fn create_process_info(pid: u32, parent_pid: u32) -> mirrord_intproxy_protocol::ProcessInfo {
     mirrord_intproxy_protocol::ProcessInfo {
