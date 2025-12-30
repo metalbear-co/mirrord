@@ -12,7 +12,7 @@ use crate::{
         ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result, from_env::FromEnv,
         source::MirrordConfigSource, unstable::Unstable,
     },
-    util::{MirrordToggleableConfig, ToggleableConfig},
+    util::{MirrordToggleableConfig, ToggleableConfig, VecOrSingle},
 };
 
 pub mod http_filter;
@@ -533,8 +533,7 @@ impl IncomingConfig {
         }
     }
 
-    /// Update the [`HttpFilterConfig::ports`] with the health probes ports from the target and
-    /// ports `[80, 8080]`.
+    /// Update the [`HttpFilterConfig::ports`] with the health probes ports from the target.
     ///
     /// Usually the user app will be listening on HTTP on the same ports as these probes, so
     /// we can insert them in the user config.
@@ -546,11 +545,10 @@ impl IncomingConfig {
     pub fn add_probe_ports_to_http_filter_ports(
         &mut self,
         probes_ports: &[u16],
-    ) -> Option<&PortList> {
+    ) -> Option<&VecOrSingle<u16>> {
         if self.is_steal() && self.http_filter.is_filter_set() && self.http_filter.ports.is_none() {
             let filtered_ports = probes_ports
                 .iter()
-                .chain(&[80, 8080])
                 // Avoid conflicts with `incoming.ignore_ports`.
                 .filter(|port| self.ignore_ports.contains(port).not())
                 .filter(|port| {
@@ -875,8 +873,7 @@ mod test {
             ..Default::default()
         }
     )]
-    // case_3: Conflicts between `IncomingConfig::ports` and probe port, but default ports 80 and
-    // 8080 are still added.
+    // case_3: Conflicts between `IncomingConfig::ports` and probe port.
     #[case(
         IncomingConfig {
             mode: IncomingMode::Steal,
@@ -893,7 +890,6 @@ mod test {
             ports: Some([81].into()),
             http_filter: HttpFilterConfig {
                 header_filter: Some("siemomysł".into()),
-                ports: Some(vec![80, 8080].into()),
                 ..Default::default()
             },
             ..Default::default()

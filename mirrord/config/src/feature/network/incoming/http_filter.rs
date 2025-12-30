@@ -175,7 +175,8 @@ pub struct HttpFilterConfig {
 
     /// ##### feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}
     ///
-    /// Activate the HTTP traffic filter only for these ports.
+    /// Activate the HTTP traffic filter only for these ports. When
+    /// absent, filtering will be done for all ports.
     ///
     /// Other ports will *not* be stolen, unless listed in
     /// [`feature.network.incoming.ports`](#feature-network-incoming-ports).
@@ -183,10 +184,8 @@ pub struct HttpFilterConfig {
     /// We check the pod's health probe ports and automatically add them here, as they're
     /// usually the same ports your app might be listening on. If your app ports and the
     /// health probe ports don't match, then setting this option will override this behavior.
-    ///
-    /// Set to [80, 8080] by default.
     #[config(env = "MIRRORD_HTTP_FILTER_PORTS")]
-    pub ports: Option<PortList>,
+    pub ports: Option<VecOrSingle<u16>>,
 }
 
 impl HttpFilterConfig {
@@ -277,7 +276,7 @@ impl HttpFilterConfig {
         if let Some(ports) = self.ports.as_ref()
             && self.is_filter_set()
         {
-            Some(&*ports.0)
+            Some(ports)
         } else {
             None
         }
@@ -421,17 +420,6 @@ pub enum BodyFilter {
     Json { query: String, matches: String },
 }
 
-/// <!--${internal}-->
-/// Helper struct for setting up ports configuration (part of the HTTP traffic stealer feature).
-///
-/// Defaults to a list of ports `[80, 8080]`.
-///
-/// We use this to allow implementing a custom [`Default`] initialization, as the [`MirrordConfig`]
-/// macro (currently) doesn't support more intricate expressions.
-#[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PortList(VecOrSingle<u16>);
-
 impl MirrordToggleableConfig for HttpFilterFileConfig {
     fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
         let header_filter = FromEnv::new("MIRRORD_HTTP_HEADER_FILTER")
@@ -464,69 +452,6 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
             any_of,
             ports,
         })
-    }
-}
-
-impl Default for PortList {
-    fn default() -> Self {
-        Self(VecOrSingle::Multiple(vec![80, 8080]))
-    }
-}
-
-impl Deref for PortList {
-    type Target = VecOrSingle<u16>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl FromStr for PortList {
-    type Err = <VecOrSingle<u16> as FromStr>::Err;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse().map(PortList)
-    }
-}
-
-impl From<PortList> for Vec<u16> {
-    fn from(value: PortList) -> Self {
-        value.0.to_vec()
-    }
-}
-
-impl From<Vec<u16>> for PortList {
-    fn from(value: Vec<u16>) -> Self {
-        PortList(VecOrSingle::Multiple(value))
-    }
-}
-
-impl From<PortList> for HashSet<u16> {
-    fn from(value: PortList) -> Self {
-        value.0.into()
-    }
-}
-
-impl From<HashSet<u16>> for PortList {
-    fn from(value: HashSet<u16>) -> Self {
-        PortList(VecOrSingle::Multiple(Vec::from_iter(value)))
-    }
-}
-
-impl core::fmt::Display for PortList {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[")?;
-        let mut first = true;
-        for port in self.iter() {
-            if first {
-                write!(f, "{port}")?;
-                first = false;
-            } else {
-                write!(f, ", {port}")?;
-            }
-        }
-        write!(f, "]")?;
-        Ok(())
     }
 }
 
