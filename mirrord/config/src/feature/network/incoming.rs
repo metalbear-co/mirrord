@@ -516,13 +516,10 @@ impl IncomingConfig {
         }
 
         if self.http_filter.is_filter_set() {
-            if let Some(filter_ports) = self.http_filter.ports.as_ref()
-                && filter_ports.contains(&port)
-            {
-                false
-            } else {
-                self.ports.as_ref().is_some_and(|set| set.contains(&port))
-            }
+            self.http_filter
+                .ports
+                .as_ref()
+                .is_some_and(|p| p.contains(&port).not())
         } else if self.ignore_ports.contains(&port) {
             false
         } else {
