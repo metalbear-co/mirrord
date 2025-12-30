@@ -256,6 +256,8 @@ winapi = { version = "0.3.9", features = [
     "namedpipeapi",
 ] }
 
+# Used by `analytics`, `cli`
+ci_info = "0.14"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
