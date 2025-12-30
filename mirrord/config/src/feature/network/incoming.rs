@@ -535,16 +535,20 @@ impl IncomingConfig {
     /// Usually the user app will be listening on HTTP on the same ports as these probes, so
     /// we can insert them in the user config.
     ///
-    /// If the user has set anything in [`HttpFilterConfig::ports`], then we do nothing, to
-    /// avoid overriding their config. We also take care to not create conflicts with other
-    /// port configs that we have, such as [`IncomingConfig::ignore_ports`]`, and
-    /// [`IncomingConfig::ports`].
+    /// We also take care to not create conflicts with other port
+    /// configs that we have, such as [`IncomingConfig::ignore_ports`],
+    /// and [`IncomingConfig::ports`].
     pub fn add_probe_ports_to_http_filter_ports(
         &mut self,
         probes_ports: &[u16],
     ) -> Option<&VecOrSingle<u16>> {
-        if self.is_steal() && self.http_filter.is_filter_set() && self.http_filter.ports.is_none() {
-            let filtered_ports = probes_ports
+        if self.is_steal()
+            && self.http_filter.is_filter_set()
+            // We don't need to do anything `http_filter.ports` is `None`
+            // as that means we filter everything.
+            && let Some(ports) = &mut self.http_filter.ports
+        {
+            probes_ports
                 .iter()
                 // Avoid conflicts with `incoming.ignore_ports`.
                 .filter(|port| self.ignore_ports.contains(port).not())
@@ -556,13 +560,11 @@ impl IncomingConfig {
                     }
                 })
                 .copied()
-                .collect::<HashSet<_>>();
-
-            // Only add something if we have a port to add, otherwise leave it as `None` so
-            // we can use the `PortList::default` when initializing things.
-            if filtered_ports.is_empty().not() {
-                self.http_filter.ports.replace(filtered_ports.into());
-            }
+                .for_each(|port| {
+                    if !ports.contains(&port) {
+                        ports.push(port);
+                    }
+                });
         }
 
         self.http_filter.ports.as_ref()
