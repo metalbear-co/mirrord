@@ -29,9 +29,7 @@ portforward = [
 mirrord-agent-env = { path = "../agent/env", features = ["k8s-openapi"] }
 mirrord-config = { path = "../config"}
 mirrord-progress = { path = "../progress" }
-mirrord-protocol = { path = "../protocol" }
 
-actix-codec.workspace = true
 async-stream = "0.3"
 futures.workspace = true
 k8s-openapi.workspace = true

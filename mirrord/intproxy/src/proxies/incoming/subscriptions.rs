@@ -3,6 +3,7 @@ use std::{
     net::SocketAddr,
 };
 
+use futures::future::Either;
 use mirrord_intproxy_protocol::{
     IncomingResponse, LayerId, MessageId, PortSubscribe, PortUnsubscribe, ProxyToLayerMessage,
 };
@@ -194,7 +195,7 @@ impl SubscriptionsManager {
         message_id: MessageId,
         request: PortSubscribe,
         protocol_version: Option<&Version>,
-    ) -> Option<ProxyMessage> {
+    ) -> Option<Either<ProxyMessage, ClientMessage>> {
         self.remote_ports.add(
             layer_id,
             (request.subscription.port(), request.listening_on),
@@ -208,11 +209,14 @@ impl SubscriptionsManager {
         };
 
         match self.subscriptions.entry(port) {
-            Entry::Occupied(mut e) => e.get_mut().push_source(source).map(ProxyMessage::ToLayer),
+            Entry::Occupied(mut e) => e
+                .get_mut()
+                .push_source(source)
+                .map(|m| Either::Left(ProxyMessage::ToLayer(m))),
             Entry::Vacant(e) => {
                 let (subscription, message) = Subscription::new(source, protocol_version);
                 e.insert(subscription);
-                Some(ProxyMessage::ToAgent(message))
+                Some(Either::Right(message))
             }
         }
     }
@@ -286,14 +290,22 @@ impl SubscriptionsManager {
                 let port = match blocked_action {
                     BlockedAction::Steal(steal_type) => steal_type.get_port(),
                     BlockedAction::Mirror(port) => *port,
+                    BlockedAction::OutgoingTcp(addr) | BlockedAction::OutgoingUdp(addr) => {
+                        tracing::error!(
+                            ?addr,
+                            "This code is handling incoming policies - the operator shouldn't produce an outgoing blocked action at this point"
+                        );
+                        return Ok(vec![]);
+                    }
                 };
+
                 let Some(subscription) = self.subscriptions.remove(&port) else {
                     return Ok(vec![]);
                 };
 
                 subscription
                     .reject(response_error.clone())
-                    .map_err(|subscription|{
+                    .map_err(|subscription| {
                         tracing::error!(?subscription, "Subscription was confirmed before, then requested again and blocked by a policy.");
                         IncomingProxyError::SubscriptionFailed(response_error.clone())
                     })
@@ -357,9 +369,9 @@ mod test {
         assert!(
             matches!(
                 response,
-                Some(ProxyMessage::ToAgent(ClientMessage::Tcp(
-                    LayerTcp::PortSubscribe(80)
-                )))
+                Some(Either::Right(ClientMessage::Tcp(LayerTcp::PortSubscribe(
+                    80
+                ))))
             ),
             "{response:?}"
         );
@@ -438,9 +450,9 @@ mod test {
         assert!(
             matches!(
                 response,
-                Some(ProxyMessage::ToAgent(ClientMessage::Tcp(
-                    LayerTcp::PortSubscribe(80)
-                )))
+                Some(Either::Right(ClientMessage::Tcp(LayerTcp::PortSubscribe(
+                    80
+                ))))
             ),
             "{response:?}"
         );
@@ -505,9 +517,9 @@ mod test {
         assert!(
             matches!(
                 response,
-                Some(ProxyMessage::ToAgent(ClientMessage::Tcp(
-                    LayerTcp::PortSubscribe(80)
-                )))
+                Some(Either::Right(ClientMessage::Tcp(LayerTcp::PortSubscribe(
+                    80
+                ))))
             ),
             "{response:?}"
         );
