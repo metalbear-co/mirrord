@@ -1,0 +1,189 @@
+import React, { useState, type ReactNode, useContext } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui/dialog";
+import { Badge } from "./ui/badge";
+import { ConfigDataContext, DefaultConfig } from "./UserDataContext";
+import { readBoilerplateType } from "./JsonUtils";
+import { Button } from "./ui/button";
+
+export interface WizardStep {
+  id: string;
+  title: string;
+  content: ReactNode;
+  allowProgress?: boolean;
+}
+
+export interface WizardProps {
+  steps: WizardStep[];
+  onComplete?: () => void;
+  className?: string;
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+// Simplified WizardHeader for generic wizard
+const WizardHeader = ({
+  title,
+  currentStep,
+  totalSteps,
+  fetchConfigBadge,
+  goToPrevious,
+}: {
+  title: string;
+  currentStep: number;
+  totalSteps: number;
+  fetchConfigBadge: () => string;
+  goToPrevious: () => void;
+}) => (
+  <div className="bg-background p-4 flex-shrink-0">
+    <div className="mb-4">
+      <DialogTitle className="flex items-center gap-2">
+        {title === "Configuration Setup" && (
+          <Button variant="outline" onClick={goToPrevious}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+        )}
+        {title}
+        {title === "Configuration Setup" && (
+          <Badge variant="secondary">{fetchConfigBadge()}</Badge>
+        )}
+      </DialogTitle>
+      <p className="text-sm text-muted-foreground">
+        Step {currentStep + 1} of {totalSteps}
+      </p>
+    </div>
+  </div>
+);
+
+// Simplified WizardFooter for generic wizard
+const WizardFooter = ({
+  onPrevious,
+  onNext,
+  isFirstStep,
+  isLastStep,
+  allowProgress,
+}: {
+  onPrevious: () => void;
+  onNext: () => void;
+  isFirstStep: boolean;
+  isLastStep: boolean;
+  allowProgress: boolean;
+}) => (
+  <div className="border-t bg-background p-4">
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          onClick={onPrevious}
+          disabled={isFirstStep}
+          className="flex items-center gap-2"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Back
+        </Button>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Button
+          onClick={onNext}
+          className="flex items-center gap-2"
+          disabled={!allowProgress}
+        >
+          {isLastStep ? "Close" : "Next"}
+          {!isLastStep && <ChevronRight className="h-4 w-4" />}
+        </Button>
+      </div>
+    </div>
+  </div>
+);
+
+export const Wizard: React.FC<WizardProps> = ({
+  steps,
+  onComplete,
+  isOpen = true,
+  onClose,
+}) => {
+  const [currentStep, setCurrentStep] = useState(0);
+
+  const currentStepData = steps[currentStep];
+  const isFirstStep = currentStep === 0;
+  const isLastStep = currentStep === steps.length - 1;
+  const config = useContext(ConfigDataContext);
+
+  const fetchConfigBadge = () => {
+    switch (readBoilerplateType(config!.config)) {
+      case "mirror":
+        return "Mirror mode";
+      case "replace":
+        return "Replace mode";
+      case "steal":
+        return "Filtering mode";
+      case "custom":
+        return "Custom mode";
+    }
+  };
+
+  const goToNext = () => {
+    if (isLastStep) {
+      onComplete?.();
+      onClose?.();
+    } else {
+      const nextStep = currentStep + 1;
+      setCurrentStep(nextStep);
+    }
+  };
+
+  const goToPrevious = () => {
+    if (!isFirstStep) {
+      const prevStep = currentStep - 1;
+      setCurrentStep(prevStep);
+    }
+  };
+
+  const closeWizard = () => {
+    // reset current step number
+    setCurrentStep(0);
+    // reset current config to default
+    config?.setConfig(DefaultConfig);
+    // close according to prop
+    onClose?.();
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={closeWizard}>
+      <DialogContent className="max-w-3xl max-h-[85vh] p-0 flex flex-col">
+        <DialogDescription className="sr-only">mirrord wizard dialog</DialogDescription>
+        {/* Fixed Header */}
+        <WizardHeader
+          title={currentStepData?.title ?? ""}
+          currentStep={currentStep}
+          totalSteps={steps.length}
+          fetchConfigBadge={fetchConfigBadge}
+          goToPrevious={goToPrevious}
+        />
+
+        {/* Scrollable Content */}
+        <div className="flex-1 px-4 pt-2 pb-4 overflow-y-auto">
+          <div className="min-h-[200px]">
+            {React.cloneElement(currentStepData?.content as React.ReactElement)}
+          </div>
+        </div>
+
+        {/* Footer with Navigation, use alternative on config tabs*/}
+        {!isLastStep && (
+          <WizardFooter
+            onPrevious={goToPrevious}
+            onNext={goToNext}
+            isFirstStep={isFirstStep}
+            isLastStep={isLastStep}
+            allowProgress={currentStepData?.allowProgress ?? true}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+export default Wizard;

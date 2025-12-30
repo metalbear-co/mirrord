@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use k8s_openapi::api::{
     apps::v1::{Deployment, ReplicaSet, StatefulSet},
@@ -198,19 +198,6 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
                 container.as_deref()
             }
             ResolvedTarget::Targetless(..) => None,
-        }
-    }
-
-    /// Is this a [`ResolvedTarget::Deployment`], and is it empty?
-    pub fn empty_deployment(&self) -> bool {
-        if let Self::Deployment(ResolvedResource { resource, .. }) = self {
-            !resource
-                .status
-                .as_ref()
-                .map(|status| status.available_replicas > Some(0))
-                .unwrap_or_default()
-        } else {
-            false
         }
     }
 }
@@ -535,9 +522,60 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
         }
     }
 
+    /// If pod spec is defined directly under the target resource's spec, return it.
+    /// Otherwise, resolve the target resource to its underlying pod spec.
+    pub async fn resolve_pod_spec<'a>(
+        &'a self,
+        client: &Client,
+    ) -> Result<Option<Cow<'a, PodSpec>>, KubeApiError> {
+        match self {
+            ResolvedTarget::Rollout(inner) => Ok(inner
+                .resource
+                .get_pod_template(client)
+                .await?
+                .into_owned()
+                .spec
+                .map(Cow::Owned)),
+            ResolvedTarget::Service(ResolvedResource {
+                resource,
+                container,
+            }) => {
+                let pods = ResolvedResource::<Service>::get_pods(resource, client).await?;
+                if pods.is_empty() {
+                    return Err(KubeApiError::invalid_state(
+                        resource.as_ref(),
+                        "no pods matching the labels were found",
+                    ));
+                }
+
+                if let Some(container) = &container {
+                    let pod = pods
+                        .into_iter()
+                        .flat_map(|pod| pod.spec)
+                        .find(|spec| spec.containers.iter().any(|c| c.name == *container));
+                    Ok(pod.map(Cow::Owned))
+                } else {
+                    // return the first pod spec found if container is not given.
+                    Ok(pods
+                        .into_iter()
+                        .next()
+                        .and_then(|pod| pod.spec)
+                        .map(Cow::Owned))
+                }
+            }
+            _ => Ok(self.get_pod_spec().map(Cow::Borrowed)),
+        }
+    }
+
     /// Get the environment variable with `name` from the target's pod spec.
-    pub fn get_env(&self, name: &str) -> Option<&EnvVar> {
-        let pod_spec = self.get_pod_spec()?;
+    pub async fn get_env(
+        &self,
+        client: &Client,
+        name: &str,
+    ) -> Result<Option<EnvVar>, KubeApiError> {
+        let Some(pod_spec) = self.resolve_pod_spec(client).await? else {
+            return Ok(None);
+        };
         let target_container = self.container();
 
         if let Some(container_name) = target_container {
@@ -547,7 +585,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
                 {
                     for env_var in env {
                         if env_var.name == name {
-                            return Some(env_var);
+                            return Ok(Some(env_var.clone()));
                         }
                     }
                 }
@@ -557,34 +595,36 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
                 if let Some(env) = &container.env {
                     for env_var in env {
                         if env_var.name == name {
-                            return Some(env_var);
+                            return Ok(Some(env_var.clone()));
                         }
                     }
                 }
             }
         }
 
-        None
+        Ok(None)
     }
 
     /// Get the `envFrom` field from the target's pod spec.
-    pub fn get_env_from(&self) -> Option<&Vec<EnvFromSource>> {
-        let pod_spec = self.get_pod_spec()?;
+    pub async fn get_env_from(
+        &self,
+        client: &Client,
+    ) -> Result<Option<Vec<EnvFromSource>>, KubeApiError> {
+        let Some(pod_spec) = self.resolve_pod_spec(client).await? else {
+            return Ok(None);
+        };
         let target_container = self.container();
 
         if let Some(container_name) = target_container {
             for container in &pod_spec.containers {
                 if container.name == container_name {
-                    return container.env_from.as_ref();
+                    return Ok(container.env_from.clone());
                 }
             }
         } else {
-            return pod_spec
-                .containers
-                .first()
-                .and_then(|c| c.env_from.as_ref());
+            return Ok(pod_spec.containers.first().and_then(|c| c.env_from.clone()));
         }
 
-        None
+        Ok(None)
     }
 }

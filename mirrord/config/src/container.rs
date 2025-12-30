@@ -1,10 +1,43 @@
-use std::{net::IpAddr, path::PathBuf};
+use std::{fmt, net::IpAddr, path::PathBuf};
 
+use clap::ValueEnum;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::config::source::MirrordConfigSource;
+
+/// Container runtimes supported by mirrord.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default, ValueEnum,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ContainerRuntime {
+    /// Docker container runtime. (default)
+    #[default]
+    Docker,
+    /// Podman container runtime.
+    Podman,
+    /// nerdctl container runtime (containerd).
+    Nerdctl,
+}
+
+impl ContainerRuntime {
+    /// Returns the command name for this runtime.
+    pub fn command(&self) -> &'static str {
+        match self {
+            Self::Docker => "docker",
+            Self::Podman => "podman",
+            Self::Nerdctl => "nerdctl",
+        }
+    }
+}
+
+impl fmt::Display for ContainerRuntime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.command())
+    }
+}
 
 static DEFAULT_CLI_IMAGE: &str = concat!(
     "ghcr.io/metalbear-co/mirrord-cli:",

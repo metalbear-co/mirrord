@@ -13,6 +13,7 @@ use std::{
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
+pub use mirrord_config::container::ContainerRuntime;
 use mirrord_config::{
     LayerConfig,
     feature::env::{
@@ -23,7 +24,6 @@ use mirrord_config::{
 };
 use mirrord_operator::setup::OperatorNamespace;
 use thiserror::Error;
-
 /// Macro to automatically handle Windows unsupported commands.
 /// Usage: `windows_unsupported!(args, "command_name", { command_execution })`
 #[macro_export]
@@ -185,12 +185,21 @@ pub(super) enum Commands {
     #[command(hide = true)]
     Vpn(Box<VpnArgs>),
 
-    /// Subscribe to the mirrord newsletter
+    /// Subscribe to the mirrord newsletter.
     Newsletter,
 
     /// Execute a command related to mirrord CI.
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Ci(Box<CiArgs>),
+
+    /// Launch the config wizard.
+    ///
+    /// The config wizard is a web app that allows the user to create a mirrord config file by
+    /// interacting with the GUI instead of by hand. This includes starting with a boilerplate
+    /// config, finding targets in the cluster and using exposed target ports to create network
+    /// configuration. Like `mirrord exec` it requires a connection to the cluster.
+    #[cfg(feature = "wizard")]
+    Wizard(Box<WizardArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -977,24 +986,6 @@ pub(super) enum DiagnoseCommand {
     },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, serde::Serialize)]
-/// Runtimes supported by the `mirrord container` command.
-pub(super) enum ContainerRuntime {
-    Docker,
-    Podman,
-    Nerdctl,
-}
-
-impl std::fmt::Display for ContainerRuntime {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ContainerRuntime::Docker => write!(f, "docker"),
-            ContainerRuntime::Podman => write!(f, "podman"),
-            ContainerRuntime::Nerdctl => write!(f, "nerdctl"),
-        }
-    }
-}
-
 // `mirrord container` command
 #[derive(Args, Debug)]
 #[clap(args_conflicts_with_subcommands = true)]
@@ -1175,6 +1166,29 @@ pub(super) enum DbBranchesCommand {
         #[arg(required_unless_present = "all")]
         names: Vec<String>,
     },
+}
+
+#[derive(Args, Debug)]
+pub struct WizardArgs {
+    /// Accept/reject invalid certificates.
+    #[arg(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", short = 'c', long, default_missing_value="true", num_args=0..=1, require_equals=true
+    )]
+    pub accept_invalid_certificates: Option<bool>,
+
+    /// Kube context to use from Kubeconfig.
+    #[arg(env = "MIRRORD_KUBE_CONTEXT", long)]
+    pub context: Option<String>,
+
+    /// Kubeconfig.
+    #[arg(env = "MIRRORD_KUBECONFIG", long)]
+    pub kubeconfig: Option<String>,
+
+    /// Controls whether mirrord sends telemetry data to MetalBear cloud. Telemetry sent doesn't
+    /// contain personal identifiers or any data that should be considered sensitive. It is used to
+    /// improve the product.
+    /// [More information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md).
+    #[arg(env = "MIRRORD_TELEMETRY", long, default_value = "true")]
+    pub telemetry: bool,
 }
 
 #[cfg(test)]

@@ -119,7 +119,7 @@ pub struct ExperimentalConfig {
     /// Forces hooking all instances of the connect function.
     /// In very niche cases the connect function has multiple exports and this flag
     /// makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>
-    #[config(default = false)]
+    #[config(default = true)]
     pub force_hook_connect: bool,
 
     /// ### _experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
@@ -137,6 +137,11 @@ pub struct ExperimentalConfig {
     /// Defaults to `false`.
     #[config(default = false)]
     pub dlopen_cgo: bool,
+
+    /// ### _experimental_ applev {#experimental-applev}
+    ///
+    /// Configuraiton for inspecting and modifying apple variables. macOS only.
+    pub applev: Option<AppleVariablesConfig>,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -157,5 +162,10 @@ impl CollectAnalytics for &ExperimentalConfig {
         );
         analytics.add("force_hook_connect", self.force_hook_connect);
         analytics.add("non_blocking_tcp_connect", self.non_blocking_tcp_connect);
+        analytics.add("dlopen_cgo", self.dlopen_cgo);
+        analytics.add("applev", self.applev.is_some());
     }
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, JsonSchema, Default)]
+pub struct AppleVariablesConfig {}

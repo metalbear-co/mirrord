@@ -20,10 +20,7 @@ workspace = true
 
 [dependencies]
 mirrord-console = { path = "../console", features = ["async-logger"] }
-mirrord-operator = { path = "../operator", features = [
-    "client",
-    "setup",
-] }
+mirrord-operator = { path = "../operator", features = ["client", "setup"] }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
 mirrord-progress = { path = "../progress", features = ["implementations"] }
 mirrord-kube = { path = "../kube", features = ["portforward"] }
@@ -33,6 +30,7 @@ mirrord-analytics = { path = "../analytics" }
 mirrord-intproxy = { path = "../intproxy" }
 mirrord-vpn = { path = "../vpn" }
 mirrord-tls-util = { path = "../tls-util" }
+mirrord-protocol-io = { path = "../protocol-io" }
 mirrord-auth= { path = "../auth" }
 
 actix-codec.workspace = true
@@ -48,6 +46,7 @@ semver.workspace = true
 reqwest.workspace = true
 const-random = "0.1.15"
 tokio = { workspace = true, features = ["rt", "net", "macros", "process"] }
+tokio-retry.workspace = true
 kube.workspace = true
 k8s-openapi.workspace = true
 miette = { workspace = true, features = ["fancy"] }
@@ -70,6 +69,13 @@ fs4.workspace = true
 hex.workspace = true
 tower = { workspace = true, features = ["retry"] }
 ci_info = "0.14"
+opener = "0.8.3"
+tempfile = { workspace = true, optional = true }
+axum = { version = "0.8.4", optional = true }
+tower-http = { version = "0.6.6", features = ["fs", "set-header"], optional = true }
+tar = { version = "0.4.44", optional = true }
+flate2 = { version = "1.1.2", optional = true }
+itertools = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 rand.workspace = true
@@ -103,3 +109,4 @@ rcgen.workspace = true
 
 [features]
 windows_build = []
+wizard = ["dep:axum", "dep:tower-http", "dep:tar", "dep:flate2", "dep:tempfile", "dep:itertools"]

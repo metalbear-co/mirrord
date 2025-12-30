@@ -8,6 +8,55 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.179.0](https://github.com/metalbear-co/mirrord/tree/3.179.0) - 2025-12-24
+
+
+### Added
+
+- Agents can be told to cleanup leftover iptable rules on startup instead of
+  erroring out.
+
+
+### Changed
+
+- Fixed two issues found in DB brancing:
+  - resolve env when target type is rollout
+  - support envFrom as connection source
+- Print browser extension configuration URL if Chrome couldn't launch
+- When targeting an empty deployment with the operator, mirrord now checks if
+  the deployment is managed by a rollout with the same name. If this is the
+  case, the user is instructed to target that rollout instead.
+
+
+### Fixed
+
+- mirrord will now fail (panic) if SIP patching encounters the `"Too many open
+  files"` error. To fix this, the user can
+  try increasing the file limit using `ulimit`.
+
+
+### Internal
+
+- Send is_ci bool to our analytics server when running mirrord from a CI
+  environment.
+- Fix flake.nix for Linux
+
+
+## [3.178.0](https://github.com/metalbear-co/mirrord/tree/3.178.0) - 2025-12-20
+
+
+### Added
+
+- Added the `mirrord wizard` command, which starts the onboarding wizard in
+  your browser.
+  You can use the wizard to learn about mirrord basics and create a config file
+  from existing boilerplate.
+
+
+### Fixed
+
+- fix openapi v3 spec of Target
+
 ## [3.177.0](https://github.com/metalbear-co/mirrord/tree/3.177.0) - 2025-12-18
 
 ### Changed
