@@ -794,6 +794,32 @@
       },
       "additionalProperties": false
     },
+    "ContainerRuntime": {
+      "description": "Container runtimes supported by mirrord.",
+      "oneOf": [
+        {
+          "description": "Docker container runtime. (default)",
+          "type": "string",
+          "enum": [
+            "docker"
+          ]
+        },
+        {
+          "description": "Podman container runtime.",
+          "type": "string",
+          "enum": [
+            "podman"
+          ]
+        },
+        {
+          "description": "nerdctl container runtime (containerd).",
+          "type": "string",
+          "enum": [
+            "nerdctl"
+          ]
+        }
+      ]
+    },
     "CopyTargetFileConfig": {
       "title": "feature.copy_target {#copy_target}",
       "description": "Allows the user to target a pod created dynamically from the original [`target`](#target). The new pod inherits most of the original target's specification, e.g. labels.\n\nSee the [copy target reference](https://metalbear.com/mirrord/docs/reference/copy-target/) for more details.\n\n### Minimal `copy_target` config {#copy_target-minimal}\n\n```json { \"feature\": { \"copy_target\": true } } ```\n\n### Advanced `copy_target` config {#copy_target-advanced}\n\n```json { \"feature\": { \"copy_target\": { \"enabled\": true, \"scale_down\": true, \"exclude_containers\": [\"my-container\"], \"exclude_init_containers\": [\"my-init-container\"] } } } ```",
@@ -1053,11 +1079,14 @@
             "local": {
               "description": "Local Redis runtime configuration. Only used when `location` is `local`.",
               "default": {
+                "container_command": null,
+                "container_runtime": "docker",
                 "options": {
                   "args": []
                 },
                 "port": 6379,
-                "runtime": "auto",
+                "runtime": "container",
+                "server_command": null,
                 "version": "7-alpine"
               },
               "allOf": [
@@ -2659,6 +2688,23 @@
       "description": "Configuration for local Redis runtime.",
       "type": "object",
       "properties": {
+        "container_command": {
+          "description": "Custom path to the container command. If not provided, uses the runtime name from PATH (e.g., \"docker\"). Example: `/usr/local/bin/docker` or `/home/user/.local/bin/podman`",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "container_runtime": {
+          "description": "Which container runtime to use (Docker, Podman, or nerdctl). Only applies when `runtime` is `container` or `auto`.",
+          "default": "docker",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContainerRuntime"
+            }
+          ]
+        },
         "options": {
           "description": "Additional Redis configuration options.",
           "default": {
@@ -2678,16 +2724,24 @@
           "minimum": 0.0
         },
         "runtime": {
-          "description": "Runtime backend for local Redis.",
-          "default": "auto",
+          "description": "Runtime backend for local Redis: `container`, `redis_server`, or `auto`.",
+          "default": "container",
           "allOf": [
             {
               "$ref": "#/definitions/RedisRuntime"
             }
           ]
         },
+        "server_command": {
+          "description": "Custom path to the redis-server binary. If not provided, uses \"redis-server\" from PATH. Example: `/opt/redis/bin/redis-server`",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "version": {
-          "description": "Redis version/tag to use (default: \"7-alpine\").",
+          "description": "Redis version/tag to use (default: \"7-alpine\"). Used as the container image tag.",
           "default": "7-alpine",
           "type": "string"
         }
@@ -2708,13 +2762,13 @@
       }
     },
     "RedisRuntime": {
-      "description": "Runtime backend for running local Redis.\n\nBackends are tried in order of preference: 1. `docker`- Uses Docker container 2. `redis_server` - Uses native redis-server binary 3. `auto` (default)  - Tries Docker first, falls back to redis-server",
+      "description": "Runtime backend for running local Redis.\n\nFor container-based runtimes, mirrord spawns the Redis image in a container. For `redis_server`, it runs the native binary directly.\n\nBackends: - `container` (default) - Uses a container runtime (Docker/Podman/nerdctl) - `redis_server` - Uses native redis-server binary - `auto` - Tries container first, falls back to redis-server",
       "oneOf": [
         {
-          "description": "Use Docker container.",
+          "description": "Use a container runtime (configure which one via `container_runtime`). (default)",
           "type": "string",
           "enum": [
-            "docker"
+            "container"
           ]
         },
         {
@@ -2725,7 +2779,7 @@
           ]
         },
         {
-          "description": "Auto-detect: try Docker first, fall back to redis-server.  (default)",
+          "description": "Auto-detect: try container first, fall back to redis-server.",
           "type": "string",
           "enum": [
             "auto"
