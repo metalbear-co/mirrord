@@ -2330,6 +2330,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dns-lookup"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e39034cee21a2f5bbb66ba0e3689819c4bb5d00382a282006e802a7ffa6c41d"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "socket2 0.6.1",
+ "windows-sys 0.60.2",
+]
+
+[[package]]
 name = "dns_resolve"
 version = "0.1.0"
 
@@ -4550,6 +4562,7 @@ dependencies = [
  "bytes",
  "clap",
  "containerd-client",
+ "dns-lookup",
  "enum_dispatch",
  "faccess",
  "fancy-regex",
@@ -4971,7 +4984,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.24.2"
+version = "1.25.0"
 dependencies = [
  "actix-codec",
  "bincode",
