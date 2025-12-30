@@ -141,11 +141,18 @@ pub struct OperatorSession {
     pub operator_protocol_version: Option<Version>,
     /// Allow the layer to attempt reconnection
     pub allow_reconnect: bool,
+    /// OpenTelemetry (OTel) / W3C trace context.
+    /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
+    traceparent: Option<String>,
+    /// OpenTelemetry (OTel) / W3C baggage propagator.
+    /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
+    baggage: Option<String>,
 }
 
 impl fmt::Debug for OperatorSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OperatorSession")
+        let mut debug_struct = f.debug_struct("OperatorSession");
+        debug_struct
             .field("id", &format!("{:X}", self.id))
             .field("connect_url", &self.connect_url)
             .field("cert_public_key_data", &self.client_cert.public_key_data())
@@ -155,8 +162,14 @@ impl fmt::Debug for OperatorSession {
             )
             .field("operator_protocol_version", &self.operator_protocol_version)
             .field("operator_version", &self.operator_version)
-            .field("allow_reconnect", &self.allow_reconnect)
-            .finish()
+            .field("allow_reconnect", &self.allow_reconnect);
+        if let Some(traceparent) = &self.traceparent {
+            debug_struct.field("traceparent", traceparent);
+        }
+        if let Some(baggage) = &self.baggage {
+            debug_struct.field("baggage", baggage);
+        }
+        debug_struct.finish()
     }
 }
 
@@ -751,7 +764,12 @@ impl OperatorApi<PreparedClientCert> {
                 pg_branch_names.clone().unwrap_or_default(),
                 session_ci_info.clone(),
             );
-            let session = self.make_operator_session(id, connect_url)?;
+            let session = self.make_operator_session(
+                id,
+                connect_url,
+                layer_config.traceparnet.clone(),
+                layer_config.baggage.clone(),
+            )?;
 
             (session, reused)
         } else {
@@ -817,7 +835,12 @@ impl OperatorApi<PreparedClientCert> {
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
 
-            let session = self.make_operator_session(None, connect_url)?;
+            let session = self.make_operator_session(
+                None,
+                connect_url,
+                layer_config.traceparnet.clone(),
+                layer_config.baggage.clone(),
+            )?;
 
             (session, false)
         };
@@ -848,7 +871,12 @@ impl OperatorApi<PreparedClientCert> {
                     .status
                     .as_ref()
                     .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
-                let session = self.make_operator_session(session_id, connect_url)?;
+                let session = self.make_operator_session(
+                    session_id,
+                    connect_url,
+                    layer_config.traceparnet.clone(),
+                    layer_config.baggage.clone(),
+                )?;
 
                 let mut connection_subtask = progress.subtask("connecting to the target");
                 let conn = Self::connect_target(&self.client, &session).await?;
@@ -1004,6 +1032,8 @@ impl OperatorApi<PreparedClientCert> {
         &self,
         id: Option<&str>,
         connect_url: String,
+        traceparent: Option<String>,
+        baggage: Option<String>,
     ) -> OperatorApiResult<OperatorSession> {
         let id = id
             .map(|id| u64::from_str_radix(id, 16))
@@ -1030,6 +1060,8 @@ impl OperatorApi<PreparedClientCert> {
             operator_protocol_version,
             operator_version,
             allow_reconnect,
+            traceparent,
+            baggage,
         })
     }
 
@@ -1378,6 +1410,16 @@ impl OperatorApi<PreparedClientCert> {
         let request_builder = Request::builder()
             .uri(&session.connect_url)
             .header(SESSION_ID_HEADER, session.id.to_string());
+        let request_builder = if let Some(traceparent) = &session.traceparent {
+            request_builder.header("traceparent", traceparent.clone())
+        } else {
+            request_builder
+        };
+        let request_builder = if let Some(baggage) = &session.baggage {
+            request_builder.header("baggage", baggage.clone())
+        } else {
+            request_builder
+        };
 
         let request = request_builder
             .body(vec![])
