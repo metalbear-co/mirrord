@@ -14,6 +14,7 @@ pub use dns::{
 // Cross-platform socket constants
 #[cfg(unix)]
 use libc::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
+use libc::c_int;
 use mirrord_config::feature::network::{
     dns::{DnsConfig, DnsFilterConfig},
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
@@ -99,7 +100,12 @@ pub struct Bound {
 pub enum SocketState {
     #[default]
     Initialized,
-    Bound(Bound),
+    Bound {
+        bound: Bound,
+        // if true, the socket has a mapped BUT should not be used to make port subscriptions
+        // used for listen_ports (COR-1014).
+        is_only_bound: bool,
+    },
     Listening(Bound),
     Connected(Connected),
 }
