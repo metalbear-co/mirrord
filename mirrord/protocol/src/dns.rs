@@ -124,3 +124,19 @@ impl From<GetAddrInfoRequest> for GetAddrInfoRequestV2 {
         }
     }
 }
+
+/// Request for reverse DNS lookup (IP address to hostname).
+///
+/// Triggered by the operator when enforcing hostname-based outgoing network policies.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReverseDnsLookupRequest {
+    pub ip_address: IpAddr,
+}
+
+/// Response from reverse DNS lookup.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReverseDnsLookupResponse {
+    /// The hostname associated with the IP address,
+    /// Contains an error if the lookup failed.
+    pub hostname: RemoteResult<String>,
+}
