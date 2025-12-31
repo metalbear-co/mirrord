@@ -566,7 +566,7 @@ fn get_platform_errno(fail: HookError) -> u32 {
         HookError::UnsupportedSocketType => WSAEAFNOSUPPORT,
         HookError::BadPointer => WSAEFAULT,
         HookError::AddressAlreadyBound(_) => WSAEADDRINUSE,
-        HookError::FileNotFound => ERROR_FILE_NOT_FOUND,
+        HookError::FileNotFound(_) => ERROR_FILE_NOT_FOUND,
         #[cfg(target_os = "linux")]
         HookError::BadDescriptor => WSAEBADF,
         #[cfg(target_os = "linux")]
