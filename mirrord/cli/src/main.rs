@@ -231,9 +231,19 @@
 //!
 //! > For users interested in getting mirrord for teams, which is a paid feature.
 //!
-//! Opens a browser window to our mirrord for teams intro page, if we fail to open it, then it
+//! Opens a browser window to our mirrord for teams intro page. If we fail to open it, then it
 //! prints a nice little message to stdout.
+//!
+//! ### `mirrord wizard [OPTIONS]`
+//!
+//! - `wizard::wizard_command`
+//!
+//! > Opens the onboarding wizard, for setting up a config file via a UI.
+//!
+//! Opens a browser window for the wizard. The wizard is served on `localhost` and has various
+//! endpoints that are accessed by the frontend. This is all gated behind the `wizard` feature.
 #![feature(try_blocks)]
+#![feature(iterator_try_collect)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
@@ -268,6 +278,7 @@ use mirrord_config::{
     LayerConfig,
     config::ConfigContext,
     feature::{
+        database_branches::{DatabaseBranchConfig, RedisBranchLocation},
         fs::FsModeConfig,
         network::{
             dns::{DnsConfig, DnsFilterConfig},
@@ -303,6 +314,7 @@ mod internal_proxy;
 #[cfg(target_os = "linux")]
 mod is_static;
 mod list;
+mod local_redis;
 mod logging;
 mod newsletter;
 mod operator;
@@ -314,6 +326,9 @@ mod util;
 mod verify_config;
 mod vpn;
 mod wsl;
+
+#[cfg(feature = "wizard")]
+mod wizard;
 
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
@@ -768,6 +783,37 @@ async fn exec(
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
+    let _local_redis: Option<local_redis::LocalRedis> = if let Some(redis_config) =
+        config.feature.db_branches.iter().find_map(|branch| {
+            if let DatabaseBranchConfig::Redis(redis_config) = branch
+                && redis_config.location == RedisBranchLocation::Local
+            {
+                return Some(redis_config.clone());
+            }
+            None
+        }) {
+        let port = redis_config.local.port;
+
+        // Get the override variable and build the appropriate connection string
+        if let Some(variable) = redis_config.connection.override_variable() {
+            let local_conn =
+                local_redis::build_local_connection_string(port, &redis_config.connection);
+            config
+                .feature
+                .env
+                .r#override
+                .get_or_insert_with(Default::default)
+                .insert(variable.to_string(), local_conn);
+        }
+
+        // Auto-configure: ignore localhost so traffic goes directly to local Redis
+        config.feature.network.outgoing.ignore_localhost = true;
+
+        Some(local_redis::start(progress, &redis_config.local).await?)
+    } else {
+        None
+    };
+
     let mut analytics = AnalyticsReporter::only_error(
         config.telemetry,
         Default::default(),
@@ -775,6 +821,8 @@ async fn exec(
         user_data.machine_id(),
     );
     (&config).collect_analytics(analytics.get_mut());
+
+    analytics.get_mut().add("is_ci", ci_info::is_ci());
 
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
@@ -908,11 +956,10 @@ async fn port_forward(
                 CliError::PortForwardingSetupError,
             ),
             AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
+            AgentConnectionError::ProtocolError(protocol_error) => protocol_error.into(),
         })?;
-    let connection_2 = connection::AgentConnection {
-        sender: agent_conn.agent_tx,
-        receiver: agent_conn.agent_rx,
-    };
+
+    let connection_2 = agent_conn.connection;
 
     progress.success(Some("Ready!"));
     let _ = tokio::try_join!(
@@ -1051,6 +1098,16 @@ fn main() -> miette::Result<()> {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
             Commands::DbBranches(args) => db_branches_command(*args).await?,
+            #[cfg(feature = "wizard")]
+            Commands::Wizard(args) => {
+                wizard::wizard_command(
+                    *args,
+                    watch,
+                    user_data,
+                    &mut ProgressTracker::from_env("wizard"),
+                )
+                .await?
+            }
         };
 
         Ok(())
@@ -1095,10 +1152,9 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
 
             let sent = client
                 .get(format!(
-                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={version}&platform={platform}&ci={is_ci}",
+                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={version}&platform={platform}",
                     version = CURRENT_VERSION,
                     platform = std::env::consts::OS,
-                    is_ci = ci_info::is_ci(),
                 ))
                 .timeout(Duration::from_secs(1))
                 .send().await?;

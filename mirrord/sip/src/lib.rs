@@ -691,9 +691,12 @@ mod main {
     /// Check if the file that the user wants to execute is a SIP protected binary
     ///
     /// (or a script starting with a shebang that leads to a SIP protected binary).
-    /// If it is, create a non-protected version of the file and return `Ok(Some(patched_path)`.
+    /// If it is, create a non-protected version of the file and return `Ok(Some(patched_path))`.
     /// If it is not, `Ok(None)`.
     /// Propagate errors.
+    ///
+    /// Note about `SipError::TooManyFilesOpen`: We can't recover from this. The caller should act
+    /// accordingly by exiting fully.
     pub fn sip_patch(
         binary_path: &str,
         opts: SipPatchOptions,
@@ -728,8 +731,7 @@ mod main {
         //     \_/____________________________/
         //
         // DO NOT INTRODUCE NEW TRACING LOGS OR CHANGE THE LEVEL OF EXISTING LOGS - tracing logs are
-        // NOT fork safe, and have been known to cause issues, including forcing the user's
-        // machine to restart.
+        // NOT fork safe, and have been suspected to cause issues.
         let patch_result = match status {
             Ok(SipScript { path, shebang }) => {
                 let patched_interpreter = patch_binary(&shebang.interpreter_path)?;
@@ -753,7 +755,8 @@ mod main {
             Err(SipError::IO(err)) if err.raw_os_error() == Some(24) => {
                 // The full error is: `{ code: 24, kind: Uncategorized, message: "Too many open
                 // files" }`. This error was encountered in the past when using mirrord with Air
-                // (hot reloader).
+                // (hot reloader). We can't recover from this, but we can't `graceful_exit!` within
+                // this crate so this error is handled by the caller.
                 Err(SipError::TooManyFilesOpen(binary_path.to_string()))
             }
             Err(SipError::IO(err)) if err.kind() == ErrorKind::NotFound => {

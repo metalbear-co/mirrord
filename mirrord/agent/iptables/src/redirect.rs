@@ -8,6 +8,9 @@ use crate::error::IPTablesResult;
 pub trait Redirect {
     async fn mount_entrypoint(&self) -> IPTablesResult<()>;
 
+    /// Returns an error if any of the deletions failed. Deletions fail also if what they try
+    /// to delete does not exist. It's up to the caller of this method to decide how to deal with
+    /// that.
     async fn unmount_entrypoint(&self) -> IPTablesResult<()>;
 
     /// Create port redirection

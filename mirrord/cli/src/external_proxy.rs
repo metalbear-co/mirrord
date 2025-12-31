@@ -183,13 +183,13 @@ pub async fn proxy(
                 }}
             }
 
-            message = own_agent_conn.agent_rx.recv() => {
+            message = own_agent_conn.connection.recv() => {
                 tracing::debug!(?message, "received message on own connection");
 
                 match message {
                     Some(DaemonMessage::Pong) => continue,
                     Some(DaemonMessage::OperatorPing(id)) => {
-                        own_agent_conn.agent_tx.send(ClientMessage::OperatorPong(id)).await.ok();
+                        own_agent_conn.connection.send(ClientMessage::OperatorPong(id)).await;
                     }
                     Some(DaemonMessage::LogMessage(LogMessage {
                         level: LogLevel::Error,
@@ -220,7 +220,8 @@ pub async fn proxy(
                     | message @ Some(DaemonMessage::GetAddrInfoResponse(_))
                     | message @ Some(DaemonMessage::PauseTarget(_))
                     | message @ Some(DaemonMessage::SwitchProtocolVersionResponse(_))
-                    | message @ Some(DaemonMessage::Vpn(_)) => {
+                    | message @ Some(DaemonMessage::Vpn(_))
+                    | message @ Some(DaemonMessage::ReverseDnsLookup(_)) => {
                         return Err(
                             ExternalProxyError::PingPongFailed(format!(
                                 "agent sent an unexpected message: {message:?}"
@@ -240,7 +241,7 @@ pub async fn proxy(
             _ = ping_pong_ticker.tick() => {
                 tracing::debug!("sending ping");
 
-                let _ = own_agent_conn.agent_tx.send(ClientMessage::Ping).await;
+                own_agent_conn.connection.send(ClientMessage::Ping).await;
             }
 
             _ = initial_connection_timeout.as_mut(), if connections.load(Ordering::Relaxed) == 0 => {
@@ -274,11 +275,7 @@ async fn handle_connection(
             client_message = stream.next() => {
                 match client_message {
                     Some(Ok(client_message)) => {
-                        if let Err(error) = agent_conn.agent_tx.send(client_message).await {
-                            tracing::error!(?peer_addr, %error, "unable to send message to agent");
-
-                            break;
-                        }
+                        agent_conn.connection.send(client_message).await;
                     }
                     Some(Err(error)) => {
                         tracing::error!(?peer_addr, %error, "unable to recive message from intproxy");
@@ -290,7 +287,7 @@ async fn handle_connection(
                     }
                 }
             }
-            daemon_message = agent_conn.agent_rx.recv() => {
+            daemon_message = agent_conn.connection.recv() => {
                 match daemon_message { Some(daemon_message) => {
                     if let Err(error) = stream.send(daemon_message).await {
                         tracing::error!(?peer_addr, %error, "unable to send message to intproxy");
