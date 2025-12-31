@@ -68,11 +68,11 @@ pub struct MirrordMultiClusterSessionStatus {
     pub closed: Option<String>,
 }
 
-/// Status of a private session in a specific cluster
+/// Status of a cluster session within a multi-cluster session
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ClusterSessionStatus {
-    /// Name of the MirrordPrivateClusterSession resource
+    /// Name of the MirrordClusterSession resource in this cluster
     pub session_name: String,
     
     /// Whether this cluster's session is ready
@@ -85,13 +85,17 @@ pub struct ClusterSessionStatus {
     /// Error message if session failed
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    
+    /// Last heartbeat from agent
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_heartbeat: Option<MicroTime>,
 }
 
 /// Phase of multi-cluster session lifecycle
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum MultiClusterSessionPhase {
     #[default]
-    /// Creating private sessions in remote clusters
+    /// Creating sessions in remote clusters
     Initializing,
     
     /// Waiting for all cluster sessions to become ready
@@ -105,57 +109,5 @@ pub enum MultiClusterSessionPhase {
     
     /// Session is being cleaned up
     Terminating,
-}
-
-/// Private interface session - created by Envoy in remote clusters
-#[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[kube(
-    group = "operator.metalbear.co",
-    version = "v1alpha",
-    kind = "MirrordPrivateClusterSession",
-    status = "MirrordPrivateClusterSessionStatus",
-    namespaced
-)]
-#[serde(rename_all = "camelCase")]
-pub struct MirrordPrivateClusterSessionSpec {
-    /// Target to mirror in THIS cluster
-    pub target: SessionTarget,
-    
-    /// Session ID from primary cluster (for correlation)
-    pub primary_session_id: String,
-    
-    /// Namespace in this cluster
-    pub namespace: String,
-    
-    /// Owner info (from primary)
-    pub owner: SessionOwner,
-    
-    /// Name of the primary cluster (for debugging)
-    pub primary_cluster: String,
-}
-
-/// Status of a private cluster session
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct MirrordPrivateClusterSessionStatus {
-    /// Agent pod name created in this cluster
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_pod: Option<String>,
-    
-    /// WebSocket endpoint to connect to this cluster's agent
-    /// Format: wss://<service>.<namespace>.svc.cluster.local:<port>
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_endpoint: Option<String>,
-    
-    /// Whether the session is ready
-    pub ready: bool,
-    
-    /// Error if failed
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    
-    /// Last heartbeat from agent
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_heartbeat: Option<MicroTime>,
 }
 

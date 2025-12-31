@@ -43,6 +43,19 @@ pub struct MirrordClusterSessionSpec {
     /// Set when the session uses a copied pod.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub copy_target: Option<SessionCopyTarget>,
+
+    /// Multi-cluster coordination: ID of the parent MirrordMultiClusterSession.
+    ///
+    /// If set, this session is part of a multi-cluster session and was created by Envoy.
+    /// The value is the name of the MirrordMultiClusterSession CRD in the primary cluster.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multi_cluster_parent_id: Option<String>,
+
+    /// Multi-cluster coordination: logical name of the primary cluster.
+    ///
+    /// If set, indicates which cluster is coordinating this multi-cluster session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multi_cluster_primary: Option<String>,
 }
 
 /// Describes an owner of a mirrord session.
