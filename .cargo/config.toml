@@ -5,6 +5,9 @@ bindeps = true
 opt-level = 0
 debug = true
 
+[profile.test.package."*"]
+incremental = true
+
 [profile.debug-overflow]
 inherits = "dev"
 opt-level = 0
@@ -15,5 +18,5 @@ incremental = false
 
 [target.'cfg(windows)']
 rustflags = [
-    "-C", "link-args=/STACK:8388608",  # STACKSIZE=8MB
+    "-C", "link-args=/STACK:8388608", # STACKSIZE=8MB
 ]
