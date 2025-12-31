@@ -1,7 +1,7 @@
 #![allow(clippy::unused_io_amount)]
 #![allow(clippy::indexing_slicing)]
 
-use std::{collections::BTreeMap, path::PathBuf, sync::Once};
+use std::{collections::BTreeMap, io::Write, path::PathBuf, sync::Once};
 
 use chrono::{Timelike, Utc};
 use k8s_openapi::api::core::v1::Service;
@@ -11,7 +11,9 @@ pub use process::TestProcess;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest::{RequestBuilder, StatusCode};
 use rstest::*;
+use serde_json;
 use serde_json::{json, Value};
+use tempfile::NamedTempFile;
 
 pub mod application;
 pub mod cluster_resource;
@@ -57,6 +59,28 @@ pub fn random_string() -> String {
 fn format_time() -> String {
     let now = Utc::now();
     format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
+}
+
+/// Write config JSON to tempfile
+pub fn json_to_tempfile(config: Value) -> NamedTempFile {
+  let tempfile = NamedTempFile::new();
+  match tempfile {
+    Ok(mut tf) => {
+      let json_string = serde_json::to_string(&config).unwrap_or_default();
+      let _ = write!(tf, "{}", json_string);
+      tf
+    },
+    Err(e) => {
+      panic!("Error generating tempfile: {}", e);
+    }
+  }
+}
+
+/// Returns tempfile path
+pub fn json_to_path(config: Value) -> PathBuf {
+    let tempfile = json_to_tempfile(config);
+    let path = tempfile.path();
+    PathBuf::from(path)
 }
 
 static CRYPTO_PROVIDER_INSTALLED: Once = Once::new();
