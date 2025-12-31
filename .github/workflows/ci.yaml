@@ -42,6 +42,9 @@ concurrency:
   group: ${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
@@ -652,7 +655,7 @@ jobs:
 
   windows_build:
     needs: changed_files
-    if: ${{ needs.changed_files.outputs.rs_changed == 'true' }}
+    if: ${{ needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
     uses: ./.github/workflows/windows-build.yaml
 
     secrets: inherit
