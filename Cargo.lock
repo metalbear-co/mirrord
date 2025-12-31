@@ -4646,6 +4646,7 @@ version = "3.179.0"
 dependencies = [
  "assert-json-diff",
  "base64 0.22.1",
+ "ci_info",
  "drain",
  "reqwest",
  "serde",
