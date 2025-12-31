@@ -26,6 +26,7 @@ use crate::{
         ReverseDnsLookupResponse,
     },
     file::*,
+    metrics::MetricsRequest,
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
@@ -230,6 +231,7 @@ pub enum DaemonMessage {
     ///
     /// Sent by the agent in response to [`ClientMessage::ReverseDnsLookup`].
     ReverseDnsLookup(RemoteResult<ReverseDnsLookupResponse>),
+    Metrics(MetricsRequest),
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone, From, Into, Deref)]
