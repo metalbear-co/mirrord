@@ -1470,13 +1470,14 @@ impl OperatorApi<PreparedClientCert> {
             .feature
             .db_branches
             .iter()
-            .map(|branch_config| match branch_config {
+            .filter_map(|branch_config| match branch_config {
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
                     mysql_config,
-                ) => mysql_config.base.creation_timeout_secs,
+                ) => Some(mysql_config.base.creation_timeout_secs),
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
-                    pg_config.base.creation_timeout_secs
+                    Some(pg_config.base.creation_timeout_secs)
                 }
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Redis(_) => None,
             })
             .max()
             .unwrap_or(default_creation_timeout_secs());
@@ -1540,13 +1541,14 @@ impl OperatorApi<PreparedClientCert> {
             .feature
             .db_branches
             .iter()
-            .map(|branch_config| match branch_config {
+            .filter_map(|branch_config| match branch_config {
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
                     mysql_config,
-                ) => mysql_config.base.creation_timeout_secs,
+                ) => Some(mysql_config.base.creation_timeout_secs),
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
-                    pg_config.base.creation_timeout_secs
+                    Some(pg_config.base.creation_timeout_secs)
                 }
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Redis(_) => None,
             })
             .max()
             .unwrap_or(default_creation_timeout_secs());
