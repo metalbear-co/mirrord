@@ -213,7 +213,7 @@ impl TcpStealerTask {
         if filters.values().any(HttpFilter::needs_body) {
             ongoing.spawn(async move {
                 if let Err(error) = http.buffer_body().await {
-                    tracing::warn!(?error, "failed to buffer request body");
+                    tracing::debug!(?error, "failed to buffer request body");
                 };
                 http
             });
