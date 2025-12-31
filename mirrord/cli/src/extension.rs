@@ -14,6 +14,7 @@ async fn mirrord_exec<P>(
     mut progress: P,
     analytics: &mut AnalyticsReporter,
     config_file_path: Option<&str>,
+    key: &str,
 ) -> CliResult<()>
 where
     P: Progress,
@@ -43,6 +44,7 @@ where
             &config,
             config_file_path,
             execution_info.uses_operator,
+            Some(key),
         );
         sub_progress_config.success(Some("config summary"));
     }
@@ -63,6 +65,7 @@ pub(crate) async fn extension_exec(
     let progress = ProgressTracker::try_from_env("mirrord preparing to launch")
         .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
 
+    // Create ConfigContext (no CLI key for extensions)
     let mut cfg_context = ConfigContext::default()
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.clone())
         .override_env_opt("MIRRORD_IMPERSONATED_TARGET", args.target);
@@ -70,12 +73,16 @@ pub(crate) async fn extension_exec(
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
+    let key = cfg_context.resolve_env_key();
+
     let mut analytics = AnalyticsReporter::only_error(
         config.telemetry,
         Default::default(),
         watch,
         user_data.machine_id(),
     );
+
+    analytics.get_mut().add("key_length", key.analytics_len());
 
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
@@ -107,6 +114,7 @@ pub(crate) async fn extension_exec(
         progress,
         &mut analytics,
         args.config_file.as_ref().and_then(|p| p.to_str()),
+        key.as_str(),
     )
     .await;
     #[cfg(not(target_os = "macos"))]
@@ -115,6 +123,7 @@ pub(crate) async fn extension_exec(
         progress,
         &mut analytics,
         args.config_file.as_ref().and_then(|p| p.to_str()),
+        key.as_str(),
     )
     .await;
 

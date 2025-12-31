@@ -340,6 +340,7 @@ use crate::{
     util::get_user_git_branch,
 };
 
+#[allow(clippy::too_many_arguments)]
 async fn exec_process<P>(
     mut config: LayerConfig,
     config_file_path: Option<&str>,
@@ -348,6 +349,7 @@ async fn exec_process<P>(
     analytics: &mut AnalyticsReporter,
     user_data: &mut UserData,
     mirrord_for_ci: Option<MirrordCi>,
+    key: &str,
 ) -> CliResult<()>
 where
     P: Progress,
@@ -434,6 +436,7 @@ where
         &config,
         config_file_path,
         execution_info.uses_operator,
+        Some(key),
     );
     // Without the success message, the final progress displays the last info message
     // as the subtask title.
@@ -585,6 +588,7 @@ pub(crate) fn print_config<P>(
     config: &LayerConfig,
     config_file_path: Option<&str>,
     operator_used: bool,
+    key: Option<&str>,
 ) where
     P: Progress,
 {
@@ -742,10 +746,15 @@ pub(crate) fn print_config<P>(
         } => "remotely with exceptions",
     };
     progress.info(&format!("dns: DNS will be resolved {}", dns_info));
+
     progress.info(&format!(
         "internal proxy: logs will be written to {}",
         config.internal_proxy.log_destination.display()
     ));
+
+    if let Some(key) = key {
+        progress.info(&format!("key: {}", key));
+    }
 }
 
 async fn exec(
@@ -777,7 +786,11 @@ async fn exec(
         )
     }
 
-    let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
+    // Create ConfigContext with CLI key if provided
+    let mut cfg_context = ConfigContext::default()
+        .override_envs(args.params.as_env_vars())
+        .with_cli_key(args.params.key.clone());
+
     let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
 
@@ -824,6 +837,9 @@ async fn exec(
 
     analytics.get_mut().add("is_ci", ci_info::is_ci());
 
+    let key = cfg_context.resolve_env_key();
+    analytics.get_mut().add("key_length", key.analytics_len());
+
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
         progress.warning(&warning);
@@ -838,6 +854,7 @@ async fn exec(
         &mut analytics,
         user_data,
         mirrord_for_ci,
+        key.as_str(),
     )
     .await;
 
@@ -915,9 +932,13 @@ async fn port_forward(
             }),
         )
         .override_env_opt("MIRRORD_KUBE_CONTEXT", args.context.as_ref())
-        .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.as_ref());
+        .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.as_ref())
+        .with_cli_key(args.key.clone());
+
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
+
+    let key = cfg_context.resolve_env_key();
 
     let mut analytics = AnalyticsReporter::new(
         config.telemetry,
@@ -926,6 +947,8 @@ async fn port_forward(
         user_data.machine_id(),
     );
     (&config).collect_analytics(analytics.get_mut());
+
+    analytics.get_mut().add("key_length", key.analytics_len());
 
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {

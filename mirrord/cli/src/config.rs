@@ -301,6 +301,14 @@ pub(super) struct ExecParams {
     /// These variables will override environment fetched from the remote target.
     #[arg(long, value_hint = ValueHint::FilePath)]
     pub env_file: Option<PathBuf>,
+
+    /// Key used for traffic filtering.
+    /// Should be referenced in mirrord.json as key-<key> to scope queue and HTTP traffic.
+    ///
+    /// If a key value is provided, mirrord uses it for filtering.
+    /// If omitted, mirrord generates a key automatically.
+    #[arg(long)]
+    pub key: Option<String>,
 }
 
 impl ExecParams {
@@ -639,6 +647,14 @@ pub(super) struct PortForwardArgs {
     /// Can be used multiple times.
     #[arg(short = 'R', long)]
     pub reverse_port_mapping: Vec<PortOnlyMapping>,
+
+    /// Key used for traffic filtering.
+    /// Should be referenced in mirrord.json as key-<key> to scope queue and HTTP traffic.
+    ///
+    /// If a key value is provided, mirrord uses it for filtering.
+    /// If omitted, mirrord generates a key automatically.
+    #[arg(long)]
+    pub key: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

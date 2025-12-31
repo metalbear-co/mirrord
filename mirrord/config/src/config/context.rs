@@ -7,6 +7,50 @@ use std::{
     ops::Not,
 };
 
+use crate::LayerFileConfig;
+
+/// Session key for traffic filtering.
+///
+/// Distinguishes between user-provided keys (from CLI or config file)
+/// and auto-generated keys (UUID v4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnvKey {
+    /// Key provided by user via CLI argument or config file.
+    Provided(String),
+    /// Auto-generated UUID v4 when no key was provided.
+    Generated(String),
+}
+
+impl EnvKey {
+    /// Returns the key value as a string slice.
+    pub fn as_str(&self) -> &str {
+        match self {
+            EnvKey::Provided(s) | EnvKey::Generated(s) => s,
+        }
+    }
+
+    /// Returns whether this key was provided by the user (not auto-generated).
+    pub fn is_provided(&self) -> bool {
+        matches!(self, EnvKey::Provided(_))
+    }
+
+    /// Returns whether this key was auto-generated (not provided by the user).
+    pub fn is_generated(&self) -> bool {
+        matches!(self, EnvKey::Generated(_))
+    }
+
+    /// Returns the length to report in analytics.
+    ///
+    /// - 0 for auto-generated keys
+    /// - Actual length for user-provided keys
+    pub fn analytics_len(&self) -> usize {
+        match self {
+            EnvKey::Provided(s) => s.len(),
+            EnvKey::Generated(_) => 0,
+        }
+    }
+}
+
 /// Context for generating and verifying a [`MirrordConfig`](super::MirrordConfig).
 ///
 /// See:
@@ -29,6 +73,9 @@ pub struct ConfigContext {
 
     /// Warnings collected during config verification.
     warnings: Vec<String>,
+
+    /// CLI-provided key (takes priority in env key resolution).
+    cli_key: Option<String>,
 }
 
 impl ConfigContext {
@@ -134,6 +181,32 @@ impl ConfigContext {
     pub fn has_warnings(&self) -> bool {
         self.warnings.is_empty().not()
     }
+
+    /// Sets the CLI-provided key (takes priority in key resolution).
+    ///
+    /// This should be called when the user provides `--key` on the command line.
+    pub fn with_cli_key(mut self, key: Option<String>) -> Self {
+        self.cli_key = key;
+        self
+    }
+
+    /// Resolves the session key with the following priority:
+    /// 1. CLI-provided key (set via `with_cli_key`)
+    /// 2. Key from config file
+    /// 3. Auto-generated UUID v4
+    ///
+    /// The key is resolved lazily and cached for subsequent calls.
+    pub fn resolve_env_key(&self) -> EnvKey {
+        self.cli_key
+            .clone()
+            .or_else(|| {
+                self.get_env(crate::LayerConfig::FILE_PATH_ENV)
+                    .ok()
+                    .and_then(|path| LayerFileConfig::extract_key_from_file(path.as_ref()))
+            })
+            .map(EnvKey::Provided)
+            .unwrap_or_else(|| EnvKey::Generated(uuid::Uuid::new_v4().to_string()))
+    }
 }
 
 impl Default for ConfigContext {
@@ -143,6 +216,7 @@ impl Default for ConfigContext {
             env_override: Default::default(),
             strict_env: false,
             warnings: Default::default(),
+            cli_key: None,
         }
     }
 }
