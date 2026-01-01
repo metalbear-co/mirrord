@@ -262,13 +262,6 @@ jobs:
     runs-on: ubuntu-24.04
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_GCS_BUCKET: ${{ secrets.SCCACHE_GCS_BUCKET }}
-      GCP_SCCACHE_CREDENTIALS: ${{ secrets.GCP_SCCACHE_CREDENTIALS }}
-      SCCACHE_GCS_RW_MODE: READ_WRITE
-      SCCACHE_NO_DAEMON: "1"
-      SCCACHE_LOG: "debug"
     container:
       image: ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9
     steps:
@@ -276,12 +269,6 @@ jobs:
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Configure sccache credentials
-        run: |
-          echo "$GCP_SCCACHE_CREDENTIALS" > /tmp/sccache_key.json
-          echo "SCCACHE_GCS_KEY_PATH=/tmp/sccache_key.json" >> $GITHUB_ENV
-      - name: Run sccache-cache
-        uses: metalbear-co/sccache-action-1@v0.0.9
       # the setup rust toolchain action ignores the input if file exists.. so remove it
       - run: rm rust-toolchain.toml
       - run: rustup default nightly-2025-08-01
@@ -366,19 +353,8 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [changed_files]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_GCS_BUCKET: ${{ secrets.SCCACHE_GCS_BUCKET }}
-      GCP_SCCACHE_CREDENTIALS: ${{ secrets.GCP_SCCACHE_CREDENTIALS }}
-      SCCACHE_GCS_RW_MODE: READ_WRITE
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
-      - name: Configure sccache credentials
-        run: |
-          echo "$GCP_SCCACHE_CREDENTIALS" > /tmp/sccache_key.json
-          echo "SCCACHE_GCS_KEY_PATH=/tmp/sccache_key.json" >> $GITHUB_ENV
-      - name: Run sccache-cache
-        uses: metalbear-co/sccache-action-1@v0.0.9
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           target: x86_64-unknown-linux-gnu
@@ -657,24 +633,11 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
-      RUSTC_WRAPPER: sccache
-      SCCACHE_GCS_BUCKET: ${{ secrets.SCCACHE_GCS_BUCKET }}
-      GCP_SCCACHE_CREDENTIALS: ${{ secrets.GCP_SCCACHE_CREDENTIALS }}
-      SCCACHE_GCS_RW_MODE: READ_WRITE
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v3
         with:
           node-version: 22
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 22
-      - name: Configure sccache credentials
-        run: |
-          echo "$GCP_SCCACHE_CREDENTIALS" > /tmp/sccache_key.json
-          echo "SCCACHE_GCS_KEY_PATH=/tmp/sccache_key.json" >> $GITHUB_ENV
-      - name: Run sccache-cache
-        uses: metalbear-co/sccache-action-1@v0.0.9
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
       - uses: metalbear-co/ci/e2e-setup-action@main
         with:
