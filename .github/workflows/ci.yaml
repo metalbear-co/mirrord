@@ -71,6 +71,7 @@ jobs:
     if: github.event.pull_request.draft == false
     outputs:
       rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
+      windows_changed: ${{ steps.changed-windows.outputs.any_changed }}
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
@@ -102,6 +103,14 @@ jobs:
             deny.toml
             deny.toml
             .cargo/**
+            mirrord/**/win/**
+            scripts/**/*.ps1
+            **/*.ps1
+      - name: get changed windows files
+        id: changed-windows
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        with:
+          files: |
             mirrord/layer-win/**
             mirrord/str-win/**
             mirrord/**/windows/**
@@ -224,7 +233,7 @@ jobs:
 
   cargo-deny:
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -686,7 +695,7 @@ jobs:
 
   windows_build:
     needs: changed_files
-    if: ${{ needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
+    if: ${{ needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
     uses: ./.github/workflows/windows-build.yaml
 
     secrets: inherit
