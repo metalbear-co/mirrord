@@ -9,7 +9,7 @@ use std::{
 
 use axum::{Router, extract::State, routing::get};
 use http::StatusCode;
-use mirrord_protocol::metrics::{MetricsResponse, WhichMetric};
+use mirrord_protocol::metrics::{MetricsRequest, MetricsResponse, WhichMetric};
 use prometheus::{IntGauge, Registry, proto::MetricFamily};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -301,10 +301,12 @@ async fn get_metrics(State(state): State<Arc<Metrics>>) -> (StatusCode, String) 
     }
 }
 
-pub(crate) fn request_metric(which_metric: WhichMetric) -> MetricsResponse {
+pub(crate) fn request_metric(
+    MetricsRequest { agent_id, metric }: MetricsRequest,
+) -> MetricsResponse {
     let mut metrics = HashMap::default();
 
-    match which_metric {
+    match metric {
         WhichMetric::ClientCount => {
             metrics.insert(WhichMetric::ClientCount, CLIENT_COUNT.load_as_i64());
         }
@@ -418,7 +420,7 @@ pub(crate) fn request_metric(which_metric: WhichMetric) -> MetricsResponse {
         WhichMetric::Unknown => (),
     };
 
-    MetricsResponse(metrics)
+    MetricsResponse { agent_id, metrics }
 }
 
 /// Starts the mirrord-agent prometheus metrics service.

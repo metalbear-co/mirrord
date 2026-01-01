@@ -23,8 +23,12 @@ pub enum WhichMetric {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct MetricsRequest {
+    pub agent_id: u64,
     pub metric: WhichMetric,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct MetricsResponse(pub HashMap<WhichMetric, i64>);
+pub struct MetricsResponse {
+    pub agent_id: u64,
+    pub metrics: HashMap<WhichMetric, i64>,
+}

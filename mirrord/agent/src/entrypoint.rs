@@ -21,7 +21,7 @@ use mirrord_agent_iptables::{
 };
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage, ResponseError,
-    dns::ReverseDnsLookupResponse, metrics::MetricsRequest,
+    dns::ReverseDnsLookupResponse,
 };
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
@@ -621,8 +621,8 @@ impl ClientConnectionHandler {
                 self.respond(DaemonMessage::Close("VPN is not supported".into()))
                     .await?;
             }
-            ClientMessage::Metrics(MetricsRequest { metric }) => {
-                self.respond(DaemonMessage::Metrics(request_metric(metric)))
+            ClientMessage::Metrics(request) => {
+                self.respond(DaemonMessage::Metrics(request_metric(request)))
                     .await?;
             }
         }
