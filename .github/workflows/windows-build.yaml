@@ -69,6 +69,10 @@ jobs:
       SIGN_ARTIFACTS: ${{ inputs.sign_artifacts || 'false' }}
       PUBLISH_CHOCO: ${{ inputs.choco_publish || 'true' }}
       PUBLISH_WINGET: ${{ inputs.winget_publish || 'false' }}
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GCS_BUCKET: ${{ secrets.SCCACHE_GCS_BUCKET }}
+      GCP_SCCACHE_CREDENTIALS: ${{ secrets.GCP_SCCACHE_CREDENTIALS }}
+      SCCACHE_GCS_RW_MODE: READ_WRITE
 
     steps:
       - name: Checkout
@@ -83,6 +87,8 @@ jobs:
           rustc -V
           cargo -V
           rustup show
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       # Early sanity check that the runner account can write to C:.
       - name: Validate C write access
