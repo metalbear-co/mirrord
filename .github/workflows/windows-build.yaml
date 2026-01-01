@@ -88,7 +88,7 @@ jobs:
           cargo -V
           rustup show
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.9
+        uses: metalbear-co/sccache-action-1@v0.0.9
 
       # Early sanity check that the runner account can write to C:.
       - name: Validate C write access
