@@ -26,7 +26,7 @@ use crate::{
         ReverseDnsLookupResponse,
     },
     file::*,
-    metrics::MetricsRequest,
+    metrics::{MetricsRequest, MetricsResponse},
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
@@ -167,6 +167,8 @@ pub enum ClientMessage {
     ///
     /// Sent by the operator when enforcing hostname-based outgoing network policies.
     ReverseDnsLookup(ReverseDnsLookupRequest),
+
+    Metrics(MetricsRequest),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -231,7 +233,8 @@ pub enum DaemonMessage {
     ///
     /// Sent by the agent in response to [`ClientMessage::ReverseDnsLookup`].
     ReverseDnsLookup(RemoteResult<ReverseDnsLookupResponse>),
-    Metrics(MetricsRequest),
+
+    Metrics(MetricsResponse),
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone, From, Into, Deref)]

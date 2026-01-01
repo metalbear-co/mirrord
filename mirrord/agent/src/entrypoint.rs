@@ -21,7 +21,7 @@ use mirrord_agent_iptables::{
 };
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage, ResponseError,
-    dns::ReverseDnsLookupResponse,
+    dns::ReverseDnsLookupResponse, metrics::MetricsRequest,
 };
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
@@ -45,7 +45,7 @@ use crate::{
     error::{AgentError, AgentResult},
     file::FileManager,
     incoming::MirrorHandle,
-    metrics,
+    metrics::{self, request_metric},
     mirror::TcpMirrorApi,
     namespace::NamespaceType,
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
@@ -619,6 +619,10 @@ impl ClientConnectionHandler {
             }
             ClientMessage::Vpn(_message) => {
                 self.respond(DaemonMessage::Close("VPN is not supported".into()))
+                    .await?;
+            }
+            ClientMessage::Metrics(MetricsRequest { metric }) => {
+                self.respond(DaemonMessage::Metrics(request_metric(metric)))
                     .await?;
             }
         }

@@ -1,7 +1,20 @@
+use std::collections::HashMap;
+
 use bincode::{Decode, Encode};
 
-#[derive(Default, Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum Metric {
+#[derive(Default, Encode, Decode, Debug, PartialEq, Eq, Clone, Hash)]
+pub enum WhichMetric {
+    ClientCount,
+    DnsRequestCount,
+    OpenFdCount,
+    MirrorPortSubscription,
+    MirrorConnectionSubscription,
+    StealFilteredPortSubscription,
+    StealUnfilteredPortSubscription,
+    RedirectedConnections,
+    RedirectedRequests,
+    TcpOutgoingConnection,
+    UdpOutgoingConnection,
     BypassedHttpRequests,
     All,
     #[default]
@@ -10,5 +23,8 @@ pub enum Metric {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct MetricsRequest {
-    metric: Metric,
+    pub metric: WhichMetric,
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct MetricsResponse(pub HashMap<WhichMetric, i64>);
