@@ -276,6 +276,10 @@ jobs:
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Configure sccache credentials
+        run: |
+          echo "$GCP_SCCACHE_CREDENTIALS" > /tmp/sccache_key.json
+          echo "SCCACHE_GCS_KEY_PATH=/tmp/sccache_key.json" >> $GITHUB_ENV
       - name: Run sccache-cache
         uses: metalbear-co/sccache-action-1@v0.0.9
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -369,6 +373,10 @@ jobs:
       SCCACHE_GCS_RW_MODE: READ_WRITE
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
+      - name: Configure sccache credentials
+        run: |
+          echo "$GCP_SCCACHE_CREDENTIALS" > /tmp/sccache_key.json
+          echo "SCCACHE_GCS_KEY_PATH=/tmp/sccache_key.json" >> $GITHUB_ENV
       - name: Run sccache-cache
         uses: metalbear-co/sccache-action-1@v0.0.9
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
@@ -658,6 +666,13 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 22
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22
+      - name: Configure sccache credentials
+        run: |
+          echo "$GCP_SCCACHE_CREDENTIALS" > /tmp/sccache_key.json
+          echo "SCCACHE_GCS_KEY_PATH=/tmp/sccache_key.json" >> $GITHUB_ENV
       - name: Run sccache-cache
         uses: metalbear-co/sccache-action-1@v0.0.9
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a

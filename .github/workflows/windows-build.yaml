@@ -87,6 +87,10 @@ jobs:
           rustc -V
           cargo -V
           rustup show
+      - name: Configure sccache credentials
+        run: |
+          $env:GCP_SCCACHE_CREDENTIALS | Out-File -FilePath "$env:RUNNER_TEMP\sccache_key.json" -Encoding ascii
+          "SCCACHE_GCS_KEY_PATH=$env:RUNNER_TEMP\sccache_key.json" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Run sccache-cache
         uses: metalbear-co/sccache-action-1@v0.0.9
 
