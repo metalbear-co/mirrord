@@ -267,6 +267,8 @@ jobs:
       SCCACHE_GCS_BUCKET: ${{ secrets.SCCACHE_GCS_BUCKET }}
       GCP_SCCACHE_CREDENTIALS: ${{ secrets.GCP_SCCACHE_CREDENTIALS }}
       SCCACHE_GCS_RW_MODE: READ_WRITE
+      SCCACHE_NO_DAEMON: "1"
+      SCCACHE_LOG: "debug"
     container:
       image: ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9
     steps:
