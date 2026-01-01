@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bincode::{Decode, Encode};
 
-#[derive(Default, Encode, Decode, Debug, PartialEq, Eq, Clone, Hash)]
+#[derive(Default, Encode, Decode, Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum WhichMetric {
     ClientCount,
     DnsRequestCount,
