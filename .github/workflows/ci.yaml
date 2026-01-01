@@ -101,7 +101,6 @@ jobs:
             rust-toolchain.toml
             rustfmt.toml
             deny.toml
-            deny.toml
             .cargo/**
             mirrord/**/win/**
             scripts/**/*.ps1
