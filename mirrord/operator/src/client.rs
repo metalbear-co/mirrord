@@ -695,6 +695,18 @@ impl OperatorApi<PreparedClientCert> {
     where
         P: Progress,
     {
+        // Multi-cluster is handled transparently by the operator's Envoy component.
+        // The CLI just connects normally - if multi-cluster is enabled, Envoy orchestrates.
+        // User doesn't need to know or care about multi-cluster configuration.
+        if let Some(multi_cluster_info) = self.multi_cluster_info() {
+            tracing::info!(
+                is_primary = %multi_cluster_info.is_primary,
+                primary_cluster = %multi_cluster_info.primary_cluster,
+                default_cluster = %multi_cluster_info.default_cluster,
+                "Multi-cluster mode enabled, Envoy will orchestrate sessions"
+            );
+        }
+
         self.check_feature_support(layer_config)?;
         let (do_copy_target, reason) = self
             .should_copy_target(layer_config, &target, progress)
@@ -1902,5 +1914,40 @@ mod test {
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
         assert_eq!(produced, expected)
+    }
+}
+
+/// Information about multi-cluster configuration
+#[derive(Debug, Clone)]
+pub struct MultiClusterInfo {
+    /// Whether this operator is the primary cluster (where Envoy runs)
+    pub is_primary: bool,
+    /// Logical name of this cluster
+    pub cluster_name: String,
+    /// Logical name of the primary cluster
+    pub primary_cluster: String,
+    /// Logical name of the default cluster (for stateful operations)
+    pub default_cluster: String,
+}
+
+impl<C: ClientCertificateState> OperatorApi<C> {
+    /// Check if the operator has multi-cluster enabled and return configuration
+    ///
+    /// This is called by the CLI to determine if it should create a multi-cluster session
+    /// or a regular single-cluster session.
+    #[tracing::instrument(level = Level::DEBUG, skip(self), ret)]
+    pub fn multi_cluster_info(&self) -> Option<MultiClusterInfo> {
+        let multi_cluster_config = self.operator.spec.multi_cluster.as_ref()?;
+
+        if !multi_cluster_config.enabled {
+            return None;
+        }
+
+        Some(MultiClusterInfo {
+            is_primary: multi_cluster_config.is_primary,
+            cluster_name: multi_cluster_config.cluster_name.clone(),
+            primary_cluster: multi_cluster_config.primary_cluster.clone(),
+            default_cluster: multi_cluster_config.default_cluster.clone(),
+        })
     }
 }

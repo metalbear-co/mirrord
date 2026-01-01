@@ -149,6 +149,10 @@ pub struct MirrordOperatorSpec {
     /// this field).
     #[deprecated(note = "use supported_features instead")]
     copy_target_enabled: Option<bool>,
+    /// Multi-cluster configuration (if enabled)
+    /// Contains information about whether this operator is part of a multi-cluster setup
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multi_cluster: Option<MultiClusterConfig>,
 }
 
 impl MirrordOperatorSpec {
@@ -173,6 +177,7 @@ impl MirrordOperatorSpec {
             protocol_version,
             features,
             copy_target_enabled,
+            multi_cluster: None, // Set by operator at runtime if multi-cluster is enabled
         }
     }
 
@@ -772,4 +777,26 @@ pub enum UserCredentialKind {
     #[schemars(skip)]
     #[serde(other)]
     Unknown,
+}
+
+/// Multi-cluster configuration for the operator
+/// This tells the CLI whether this operator is part of a multi-cluster setup
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MultiClusterConfig {
+    /// Whether multi-cluster is enabled on this operator
+    pub enabled: bool,
+    
+    /// Whether this operator instance is the primary cluster
+    /// The primary cluster is where users connect and where Envoy runs
+    pub is_primary: bool,
+    
+    /// Logical name of this cluster (e.g., "us-east-1")
+    pub cluster_name: String,
+    
+    /// Logical name of the primary cluster
+    pub primary_cluster: String,
+    
+    /// Logical name of the default cluster (for stateful operations)
+    pub default_cluster: String,
 }

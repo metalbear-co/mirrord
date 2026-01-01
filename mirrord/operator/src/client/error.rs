@@ -21,6 +21,7 @@ pub enum OperatorOperation {
     ListingTargets,
     MysqlBranching,
     PgBranching,
+    MultiClusterSession,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -35,6 +36,7 @@ impl fmt::Display for OperatorOperation {
             Self::ListingTargets => "listing targets",
             Self::MysqlBranching => "mysql branching",
             Self::PgBranching => "postgresql branching",
+            Self::MultiClusterSession => "multi-cluster session",
         };
 
         f.write_str(as_str)
@@ -87,7 +89,7 @@ pub enum OperatorApiError {
 
     #[error("operation timed out: {}", operation)]
     OperationTimeout { operation: OperatorOperation },
-
+    
     #[error(transparent)]
     InvalidBackoff(#[from] InvalidBackoff),
 
