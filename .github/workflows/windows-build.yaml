@@ -485,6 +485,41 @@ jobs:
           python3 -c "import os; print('PATH=', os.environ.get('PATH',''))"
           python3 -m pip list
 
+      - name: Setup Kubeconfig
+        run: |
+          $ErrorActionPreference = "Stop"
+          
+          Write-Host "Fetching k3s-tests-1 IP..."
+          $ip = gcloud compute instances describe k3s-tests-1 --zone=us-central1-a --format='get(networkInterfaces[0].accessConfigs[0].natIP)'
+          if (-not $ip) { throw "Could not get IP for k3s-tests-1" }
+          $ip = $ip.Trim()
+          Write-Host "IP: $ip"
+
+          Write-Host "Fetching kubeconfig..."
+          # Use --quiet to avoid prompts
+          $kubeconfig = gcloud --quiet compute ssh k3s-tests-1 --zone=us-central1-a --command "sudo cat /etc/rancher/k3s/k3s.yaml"
+          
+          if (-not $kubeconfig) {
+             throw "Failed to fetch kubeconfig or empty output."
+          }
+          
+          # $kubeconfig is likely an array of strings in PowerShell if multiple lines
+          $kubeconfigStr = $kubeconfig -join "`n"
+          
+          # Replace IP
+          $kubeconfigStr = $kubeconfigStr -replace '127.0.0.1', $ip
+          $kubeconfigStr = $kubeconfigStr -replace 'localhost', $ip
+          
+          $kubeDir = Join-Path $env:USERPROFILE ".kube"
+          if (-not (Test-Path $kubeDir)) {
+              New-Item -ItemType Directory -Force -Path $kubeDir | Out-Null
+          }
+          
+          $configPath = Join-Path $kubeDir "config"
+          $kubeconfigStr | Set-Content -Path $configPath -Encoding UTF8
+          
+          Write-Host "Kubeconfig saved to $configPath"
+
       - name: Run Rust e2e tests 
         run: |
           $ErrorActionPreference = "Stop"
