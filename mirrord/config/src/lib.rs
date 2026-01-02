@@ -134,7 +134,6 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 ///     "ephemeral": false,
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
-///     "network_interface": "eth0",
 ///     "flush_connections": true,
 ///     "metrics": "0.0.0.0:9000",
 ///   },

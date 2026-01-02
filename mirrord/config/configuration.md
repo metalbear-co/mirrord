@@ -67,7 +67,6 @@ configuration file containing all fields.
     "ephemeral": false,
     "communication_timeout": 30,
     "startup_timeout": 360,
-    "network_interface": "eth0",
     "flush_connections": true,
     "metrics": "0.0.0.0:9000",
   },
