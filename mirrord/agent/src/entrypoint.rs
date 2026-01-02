@@ -20,8 +20,7 @@ use mirrord_agent_iptables::{
     error::{IPTablesError, IPTablesResult},
 };
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage, ResponseError,
-    dns::ReverseDnsLookupResponse,
+    ClientMessage, DaemonMessage, GetEnvVarsRequest, ResponseError, dns::ReverseDnsLookupResponse,
 };
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
@@ -50,7 +49,6 @@ use crate::{
     namespace::NamespaceType,
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     runtime::{self, get_container},
-    sniffer::{api::TcpSnifferApi, messages::SnifferCommand},
     steal::{StealerCommand, TcpStealerApi},
     task::{BgTaskRuntime, RuntimeNamespace, status::BgTaskStatus},
     util::{ClientId, protocol_version::ClientProtocolVersion},
@@ -257,7 +255,6 @@ impl<Command> Clone for BackgroundTask<Command> {
 /// Handles to background tasks used by [`ClientConnectionHandler`].
 #[derive(Clone)]
 struct BackgroundTasks {
-    sniffer: BackgroundTask<SnifferCommand>,
     stealer: BackgroundTask<StealerCommand>,
     dns: BackgroundTask<DnsCommand>,
     mirror_handle: Option<MirrorHandle>,
@@ -303,14 +300,9 @@ impl ClientConnectionHandler {
 
         let file_manager = FileManager::new(pid.or_else(|| state.ephemeral.then_some(1)));
 
-        let mut tcp_mirror_api = bg_tasks
+        let tcp_mirror_api = bg_tasks
             .mirror_handle
-            .map(|handle| TcpMirrorApi::passthrough(handle, protocol_version.clone()));
-        if tcp_mirror_api.is_none() {
-            tcp_mirror_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection)
-                .await
-                .map(TcpMirrorApi::sniffer);
-        }
+            .map(|mirror_handle| TcpMirrorApi::new(mirror_handle, protocol_version.clone()));
         let tcp_stealer_api = Self::create_stealer_api(
             id,
             protocol_version.clone(),
@@ -340,35 +332,6 @@ impl ClientConnectionHandler {
         CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
 
         Ok(client_handler)
-    }
-
-    async fn create_sniffer_api(
-        id: ClientId,
-        task: BackgroundTask<SnifferCommand>,
-        connection: &mut ClientConnection,
-    ) -> Option<TcpSnifferApi> {
-        match task {
-            BackgroundTask::Running(sniffer_status, sniffer_sender) => {
-                match TcpSnifferApi::new(id, sniffer_sender, sniffer_status).await {
-                    Ok(api) => Some(api),
-                    Err(e) => {
-                        let message = format!(
-                            "Failed to create TcpSnifferApi: {e}, this could be due to kernel version."
-                        );
-
-                        warn!(message);
-
-                        // Ignore message send error.
-                        let _ = connection
-                            .send(DaemonMessage::LogMessage(LogMessage::warn(message)))
-                            .await;
-
-                        None
-                    }
-                }
-            }
-            _ => None,
-        }
     }
 
     async fn create_stealer_api(
@@ -815,13 +778,6 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         });
     }
 
-    let passthrough_mirroring_enabled = true; // todo
-    let sniffer = if state.container_pid().is_some() && passthrough_mirroring_enabled.not() {
-        setup::start_sniffer(&args, &state.network_runtime, cancellation_token.clone()).await
-    } else {
-        BackgroundTask::Disabled
-    };
-
     let (stealer, mirror_handle) = match state.container_pid() {
         None => (BackgroundTask::Disabled, None),
         Some(pid) => {
@@ -839,7 +795,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                     steal_handle,
                     cancellation_token.clone(),
                 ),
-                passthrough_mirroring_enabled.then_some(mirror_handle),
+                Some(mirror_handle),
             )
         }
     };
@@ -847,7 +803,6 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     let dns = setup::start_dns(&args, &state.network_runtime, cancellation_token.clone());
 
     let bg_tasks = BackgroundTasks {
-        sniffer,
         stealer,
         dns,
         mirror_handle,
@@ -934,10 +889,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     trace!("start_agent -> Agent shutting down, dropping cancellation token for background tasks");
     mem::drop(cancel_guard);
 
-    let (sniffer, stealer, dns) = tokio::join!(
-        bg_tasks.sniffer.wait().inspect_err(|error| {
-            error!(%error, "start_agent -> Sniffer task failed");
-        }),
+    let (stealer, dns) = tokio::join!(
         bg_tasks.stealer.wait().inspect_err(|error| {
             error!(%error, "start_agent -> Stealer task failed");
         }),
@@ -945,7 +897,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             error!(%error, "start_agent -> DNS task failed");
         }),
     );
-    debug!(?sniffer, ?stealer, ?dns, "BackgroundTasks have finished.");
+    debug!(?stealer, ?dns, "BackgroundTasks have finished.");
 
     trace!("start_agent -> Agent shutdown");
 

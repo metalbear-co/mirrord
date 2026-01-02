@@ -66,16 +66,6 @@ pub struct Args {
     pub clean_iptables_on_start: bool,
 }
 
-impl Args {
-    pub fn is_mesh(&self) -> bool {
-        self.is_mesh
-            || matches!(
-                self.mode,
-                Mode::Targeted { mesh: Some(_), .. } | Mode::Ephemeral { mesh: Some(_) }
-            )
-    }
-}
-
 #[derive(Clone, Debug, Default, Subcommand)]
 pub enum Mode {
     Targeted {
