@@ -54,9 +54,11 @@ pub struct MirrordMultiClusterSessionStatus {
     /// Status of each cluster's private session
     /// Key: cluster name
     /// Value: status of private session in that cluster
+    #[serde(default)]
     pub cluster_sessions: HashMap<String, ClusterSessionStatus>,
     
     /// Overall session state
+    #[serde(default)]
     pub phase: MultiClusterSessionPhase,
     
     /// Last time when at least one cluster had an active connection
