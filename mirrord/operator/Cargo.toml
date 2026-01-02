@@ -39,7 +39,7 @@ client = [
   "dep:tracing",
   "dep:serde_urlencoded",
   "dep:uuid",
-  "dep:tower"
+  "dep:tower",
 ]
 crd = [
   "dep:k8s-openapi",
