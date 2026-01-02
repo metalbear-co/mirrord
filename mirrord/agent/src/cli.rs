@@ -24,10 +24,6 @@ pub struct Args {
     #[arg(short = 't', long, default_value_t = 30)]
     pub communication_timeout: u16,
 
-    /// Interface to use
-    #[arg(short = 'i', long, env = envs::NETWORK_INTERFACE.name)]
-    pub network_interface: Option<String>,
-
     /// Controls whether metrics are enabled, and the address to set up the metrics server.
     #[arg(long, env = envs::METRICS.name)]
     pub metrics: Option<SocketAddr>,

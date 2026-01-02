@@ -815,7 +815,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         });
     }
 
-    let passthrough_mirroring_enabled = envs::PASSTHROUGH_MIRRORING.from_env_or_default();
+    let passthrough_mirroring_enabled = true; // todo
     let sniffer = if state.container_pid().is_some() && passthrough_mirroring_enabled.not() {
         setup::start_sniffer(&args, &state.network_runtime, cancellation_token.clone()).await
     } else {

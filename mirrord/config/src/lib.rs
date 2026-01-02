@@ -1052,7 +1052,6 @@ mod tests {
                 ephemeral: Some(false),
                 communication_timeout: None,
                 startup_timeout: None,
-                network_interface: None,
                 flush_connections: Some(false),
                 disabled_capabilities: None,
                 tolerations: None,

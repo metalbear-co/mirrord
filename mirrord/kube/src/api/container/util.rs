@@ -28,8 +28,7 @@ pub(super) fn get_capabilities(agent: &AgentConfig) -> Vec<LinuxCapability> {
     LinuxCapability::all()
         .iter()
         .copied()
-        .filter(|c| disabled.contains(c).not())
-        .filter(|c| matches!(c, LinuxCapability::NetRaw if agent.passthrough_mirroring).not())
+        .filter(|c| disabled.iter().any(|disabled| *disabled == c.as_spec_str()))
         .collect()
 }
 
@@ -40,7 +39,9 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
         envs::STEALER_FLUSH_CONNECTIONS.as_k8s_spec(&agent.flush_connections),
         envs::JSON_LOG.as_k8s_spec(&agent.json_log),
         envs::IPV6_SUPPORT.as_k8s_spec(&params.support_ipv6),
-        envs::PASSTHROUGH_MIRRORING.as_k8s_spec(&agent.passthrough_mirroring),
+        // TODO remove after some time.
+        // Left for compatibility with older agents.
+        envs::PASSTHROUGH_MIRRORING.as_k8s_spec(&true),
         envs::MAX_BODY_BUFFER_SIZE.as_k8s_spec(&agent.max_body_buffer_size),
         envs::MAX_BODY_BUFFER_TIMEOUT.as_k8s_spec(&agent.max_body_buffer_timeout),
     ];
@@ -51,10 +52,6 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
 
     if let Some(attempts) = agent.dns.attempts {
         env.push(envs::DNS_ATTEMPTS.as_k8s_spec(&attempts));
-    }
-
-    if let Some(interface) = agent.network_interface.as_ref() {
-        env.push(envs::NETWORK_INTERFACE.as_k8s_spec(interface));
     }
 
     if let Some(timeout) = agent.dns.timeout {

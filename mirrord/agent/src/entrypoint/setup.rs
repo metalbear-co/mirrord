@@ -70,7 +70,7 @@ pub(super) async fn start_sniffer(
 
     let sniffer = tokio::spawn(TcpConnectionSniffer::new(
         command_rx,
-        args.network_interface.clone(),
+        None, // todo
         args.is_mesh(),
     ))
     .await;
