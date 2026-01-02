@@ -9,7 +9,6 @@ mod cli;
 mod env;
 mod file_ops;
 mod http;
-mod issue1317;
 #[cfg(any(feature = "cli", feature = "operator"))]
 mod ls;
 mod targetless;

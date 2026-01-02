@@ -1,0 +1,1 @@
+Removed traffic mirroring implementation based on packet sniffing, along with related configuration options.

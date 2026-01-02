@@ -25,7 +25,6 @@ mod mirror;
 mod namespace;
 mod outgoing;
 mod runtime;
-mod sniffer;
 mod steal;
 mod task;
 mod util;

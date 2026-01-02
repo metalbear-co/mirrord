@@ -66,9 +66,6 @@ pub async fn run_exec(
     base_env.insert("MIRRORD_CHECK_VERSION", "false");
     base_env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
     base_env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
-    // We're using k8s portforwarding for sending traffic to test services.
-    // The packets arrive to loopback interface.
-    base_env.insert("MIRRORD_AGENT_NETWORK_INTERFACE", "lo");
     base_env.insert("RUST_LOG", "warn,mirrord=debug");
     base_env.insert("MIRRORD_PROGRESS_MODE", "off");
 

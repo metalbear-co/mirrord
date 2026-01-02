@@ -67,7 +67,6 @@ configuration file containing all fields.
     "ephemeral": false,
     "communication_timeout": 30,
     "startup_timeout": 360,
-    "network_interface": "eth0",
     "flush_connections": true,
     "metrics": "0.0.0.0:9000",
   },
@@ -158,7 +157,6 @@ We provide sane defaults for this option, so you don't have to set up anything h
     "ephemeral": false,
     "communication_timeout": 30,
     "startup_timeout": 360,
-    "network_interface": "eth0",
     "flush_connections": false,
     "exclude_from_mesh": false
     "inject_headers": false,
@@ -208,9 +206,8 @@ messages, the agent stays alive until there are no more heartbeat messages.
 
 If nothing is disabled here, agent uses:
 1. `NET_ADMIN`,
-2. `NET_RAW` (unless `passthrough_mirroring` is enabled),
-3. `SYS_PTRACE`,
-4. `SYS_ADMIN`.
+2. `SYS_PTRACE`,
+3. `SYS_ADMIN`.
 
 Has no effect when using the targetless mode,
 as targetless agent containers have no capabilities.
@@ -397,17 +394,6 @@ Namespace where the agent shall live.
 
 Defaults to the current kubernetes namespace.
 
-### agent.network_interface {#agent-network_interface}
-
-Which network interface to use for mirroring.
-
-The default behavior is try to access the internet and use that interface. If that fails
-it uses `eth0`.
-
-DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
-and will be removed in the future. This field will be removed, and the agent will always
-use iptables redirects for mirroring traffic.
-
 ### agent.nftables {#agent-nftables}
 
 Determines which iptables backend will be used for traffic redirection.
@@ -428,21 +414,6 @@ as targeted agent always runs on the same node as its target container.
   }
 }
 ```
-
-### agent.passthrough_mirroring {#agent-passthrough_mirroring}
-
-Enables an implementation of traffic mirroring based on iptables redirects.
-
-When used with `agent.flush_connections`, it might fix issues
-with mirroring non HTTP/1 traffic.
-
-When this is set, `network_interface` setting is ignored.
-
-Defaults to true.
-
-DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
-and will be removed in the future. This field will be removed, and the agent will always
-use iptables redirects for mirroring traffic.
 
 ### agent.priority_class {#agent-priority_class}
 
@@ -1201,6 +1172,202 @@ Example:
 
 With the config above, only alice and bob from the `users` table and orders
 created after the given timestamp will be copied.
+
+When configuring a branch for Redis, set `type` to `redis`.
+
+Example with URL-based connection:
+```json
+{
+  "type": "redis",
+  "location": "local",
+  "connection": {
+    "url": {
+      "type": "env",
+      "variable": "REDIS_URL"
+    }
+  }
+}
+```
+
+Example with separated settings:
+```json
+{
+  "type": "redis",
+  "location": "local",
+  "connection": {
+    "host": { "type": "env", "variable": "REDIS_HOST" },
+    "port": 6379,
+    "password": { "type": "env", "variable": "REDIS_PASSWORD" }
+  }
+}
+```
+
+Connection configuration for the Redis instance.
+
+Redis connection configuration.
+
+Supports either a complete URL or separated connection parameters.
+If both are provided, `url` takes precedence.
+
+Redis database number (default: 0).
+
+Redis host/hostname.
+
+Source for a Redis configuration value.
+
+Values can be specified directly or sourced from environment variables.
+
+Direct value.
+
+Value sourced from environment.
+
+Environment variable source for Redis values.
+
+Optional container name for multi-container pods.
+
+Must be "env" to indicate environment variable source.
+
+Type marker for environment variable sources.
+
+Name of the environment variable.
+
+Redis password for authentication.
+
+Source for a Redis configuration value.
+
+Values can be specified directly or sourced from environment variables.
+
+Direct value.
+
+Value sourced from environment.
+
+Environment variable source for Redis values.
+
+Optional container name for multi-container pods.
+
+Must be "env" to indicate environment variable source.
+
+Type marker for environment variable sources.
+
+Name of the environment variable.
+
+Redis port (default: 6379).
+
+Enable TLS/SSL connection.
+
+Complete Redis URL (e.g., `redis://user:pass@host:6379/0`).
+Can be sourced from an environment variable.
+
+Source for a Redis configuration value.
+
+Values can be specified directly or sourced from environment variables.
+
+Direct value.
+
+Value sourced from environment.
+
+Environment variable source for Redis values.
+
+Optional container name for multi-container pods.
+
+Must be "env" to indicate environment variable source.
+
+Type marker for environment variable sources.
+
+Name of the environment variable.
+
+Redis username (Redis 6+ ACL).
+
+Source for a Redis configuration value.
+
+Values can be specified directly or sourced from environment variables.
+
+Direct value.
+
+Value sourced from environment.
+
+Environment variable source for Redis values.
+
+Optional container name for multi-container pods.
+
+Must be "env" to indicate environment variable source.
+
+Type marker for environment variable sources.
+
+Name of the environment variable.
+
+Optional unique identifier for reusing branches across sessions.
+
+Local Redis runtime configuration.
+Only used when `location` is `local`.
+
+Configuration for local Redis runtime.
+
+Custom path to the container command.
+If not provided, uses the runtime name from PATH (e.g., "docker").
+Example: `/usr/local/bin/docker` or `/home/user/.local/bin/podman`
+
+Which container runtime to use (Docker, Podman, or nerdctl).
+Only applies when `runtime` is `container` or `auto`.
+
+Container runtimes supported by mirrord.
+
+Docker container runtime. (default)
+
+nerdctl container runtime (containerd).
+
+Podman container runtime.
+
+Additional Redis configuration options.
+
+Additional arguments passed to the Redis server.
+
+Example:
+```json
+{
+  "args": ["--maxmemory", "256mb", "--appendonly", "yes"]
+}
+```
+
+Raw arguments passed directly to redis-server or as Docker CMD args.
+Use standard Redis config syntax (e.g., "--maxmemory 256mb").
+
+Local port to bind Redis to (default: 6379).
+
+Runtime backend for local Redis: `container`, `redis_server`, or `auto`.
+
+Runtime backend for running local Redis.
+
+For container-based runtimes, mirrord spawns the Redis image in a container.
+For `redis_server`, it runs the native binary directly.
+
+Backends:
+- `container` (default) - Uses a container runtime (Docker/Podman/nerdctl)
+- `redis_server` - Uses native redis-server binary
+- `auto` - Tries container first, falls back to redis-server
+
+Auto-detect: try container first, fall back to redis-server.
+
+Use a container runtime (configure which one via `container_runtime`). (default)
+
+Use native redis-server binary.
+
+Custom path to the redis-server binary.
+If not provided, uses "redis-server" from PATH.
+Example: `/opt/redis/bin/redis-server`
+
+Redis version/tag to use (default: "7-alpine").
+Used as the container image tag.
+
+Where the Redis instance should run.
+- `local`: Spawns a local Redis instance.
+- `remote`: Uses the remote Redis (default behavior).
+
+Location for the Redis branch instance.
+
+Use a local Redis instance that mirrord manages.
+
+Use the remote Redis (default behavior, no-op).
 
 ### feature.env {#feature-env}
 
