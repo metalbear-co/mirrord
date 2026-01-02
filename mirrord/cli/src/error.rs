@@ -485,6 +485,10 @@ pub(crate) enum CliError {
 
     #[error(transparent)]
     ApiKey(#[from] ApiKeyError),
+
+    #[error("Local Redis error: {0}")]
+    #[diagnostic(help("Install redis-server with"))]
+    LocalRedisError(String),
 }
 
 impl CliError {
