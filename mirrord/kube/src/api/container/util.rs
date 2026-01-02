@@ -23,12 +23,18 @@ pub(super) static DEFAULT_TOLERATIONS: LazyLock<Vec<Toleration>> = LazyLock::new
 
 /// Retrieve a list of Linux capabilities for the agent container.
 pub(super) fn get_capabilities(agent: &AgentConfig) -> Vec<LinuxCapability> {
-    let disabled = agent.disabled_capabilities.clone().unwrap_or_default();
-
     LinuxCapability::all()
         .iter()
         .copied()
-        .filter(|c| disabled.iter().any(|disabled| *disabled == c.as_spec_str()))
+        .filter(|c| {
+            agent
+                .disabled_capabilities
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .any(|disabled| *disabled == c.as_spec_str())
+                .not()
+        })
         .collect()
 }
 
