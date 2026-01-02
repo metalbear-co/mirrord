@@ -371,7 +371,7 @@ jobs:
 
           $wxsPath    = "$Root\main.wxs"
           $wxsContent = Get-Content $wxsPath -Raw -Encoding UTF8
-          $wxsContent = $wxsContent -replace 'Version="[^"]*"', "Version=`"$msiVersion`""
+          + $wxsContent = $wxsContent -creplace 'Version="[^"]*"', "Version=`"$msiVersion`""
 
           $utf8NoBom = New-Object System.Text.UTF8Encoding $false
           [System.IO.File]::WriteAllText($wxsPath, $wxsContent, $utf8NoBom)
@@ -773,4 +773,3 @@ jobs:
           Write-Host "MSI HTTP URL:      $env:MSI_DOWNLOAD_URL"
           Write-Host "Publish Choco:     $env:PUBLISH_CHOCO"
           Write-Host "Publish WinGet:    $env:PUBLISH_WINGET"
-          
