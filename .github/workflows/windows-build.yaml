@@ -371,7 +371,7 @@ jobs:
 
           $wxsPath    = "$Root\main.wxs"
           $wxsContent = Get-Content $wxsPath -Raw -Encoding UTF8
-          $wxsContent = $wxsContent -creplace 'Version="[^"]*"', "Version=`"$msiVersion`""
+          $wxsContent = $wxsContent -creplace '\bVersion="[^"]*"', "Version=`"$msiVersion`""
 
           $utf8NoBom = New-Object System.Text.UTF8Encoding $false
           [System.IO.File]::WriteAllText($wxsPath, $wxsContent, $utf8NoBom)
