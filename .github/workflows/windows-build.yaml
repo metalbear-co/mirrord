@@ -58,7 +58,7 @@ env:
   WINGET_PACKAGE_ID: "MetalBear.mirrord"
 
 jobs:
-  windows_choco_winget_test:
+  windows_build:
     runs-on: [self-hosted, Windows]
     defaults:
       run:
