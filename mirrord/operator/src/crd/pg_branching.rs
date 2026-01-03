@@ -45,18 +45,10 @@ pub struct PgBranchDatabaseSpec {
     pub iam_auth: Option<IamAuthConfig>,
 }
 
-/// Source for reading a value from an environment variable.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EnvVarSource {
-    /// Read from an environment variable
-    Env {
-        /// Name of the environment variable
-        variable: String,
-    },
-}
-
 /// IAM authentication configuration for connecting to cloud-managed databases.
+/// Environment variable sources follow the same pattern as `connection.url`:
+/// - `Env` - direct env var from pod spec
+/// - `EnvFrom` - from configMapRef/secretRef
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IamAuthConfig {
@@ -65,20 +57,20 @@ pub enum IamAuthConfig {
     AwsRds {
         /// AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        region: Option<EnvVarSource>,
+        region: Option<ConnectionSourceKind>,
 
         /// AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        access_key_id: Option<EnvVarSource>,
+        access_key_id: Option<ConnectionSourceKind>,
 
         /// AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        secret_access_key: Option<EnvVarSource>,
+        secret_access_key: Option<ConnectionSourceKind>,
 
         /// AWS Session Token (for temporary credentials). If not specified, uses
         /// AWS_SESSION_TOKEN.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        session_token: Option<EnvVarSource>,
+        session_token: Option<ConnectionSourceKind>,
     },
     /// GCP Cloud SQL IAM authentication.
     /// Requires the init container to have GCP credentials (via Workload Identity or service
@@ -87,11 +79,16 @@ pub enum IamAuthConfig {
         /// Inline service account JSON key content.
         /// Specify the env var that contains the raw JSON content of the service account key.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        credentials_json: Option<EnvVarSource>,
+        credentials_json: Option<ConnectionSourceKind>,
+
+        /// Path to service account JSON key file.
+        /// Specify the env var that contains the file path to the service account key.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        credentials_path: Option<ConnectionSourceKind>,
 
         /// GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        project: Option<EnvVarSource>,
+        project: Option<ConnectionSourceKind>,
     },
 }
 

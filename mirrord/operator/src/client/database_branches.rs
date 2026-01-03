@@ -11,7 +11,7 @@ use kube::{
 use mirrord_config::{
     feature::database_branches::{
         ConnectionSource, ConnectionSourceKind, DatabaseBranchConfig, DatabaseBranchesConfig,
-        MysqlBranchConfig, PgBranchConfig, PgIamAuthConfig, pg::EnvVarSource as ConfigEnvVarSource,
+        MysqlBranchConfig, PgBranchConfig, PgIamAuthConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -32,8 +32,8 @@ use crate::{
         pg_branching::{
             BranchDatabasePhase as BranchDatabasePhasePg,
             ConnectionSource as CrdConnectionSourcePg,
-            ConnectionSourceKind as CrdConnectionSourceKindPg, EnvVarSource as CrdEnvVarSource,
-            IamAuthConfig as CrdIamAuthConfig, PgBranchDatabase, PgBranchDatabaseSpec,
+            ConnectionSourceKind as CrdConnectionSourceKindPg, IamAuthConfig as CrdIamAuthConfig,
+            PgBranchDatabase, PgBranchDatabaseSpec,
         },
     },
 };
@@ -467,10 +467,21 @@ impl PgBranchParams {
                 }),
             },
         };
-        // Helper to convert config EnvVarSource to CRD EnvVarSource
-        fn convert_env_source(src: &ConfigEnvVarSource) -> CrdEnvVarSource {
+        // Helper to convert config ConnectionSourceKind to CRD ConnectionSourceKind
+        fn convert_source_kind(src: &ConnectionSourceKind) -> CrdConnectionSourceKindPg {
             match src {
-                ConfigEnvVarSource::Env { variable } => CrdEnvVarSource::Env {
+                ConnectionSourceKind::Env {
+                    container,
+                    variable,
+                } => CrdConnectionSourceKindPg::Env {
+                    container: container.clone(),
+                    variable: variable.clone(),
+                },
+                ConnectionSourceKind::EnvFrom {
+                    container,
+                    variable,
+                } => CrdConnectionSourceKindPg::EnvFrom {
+                    container: container.clone(),
                     variable: variable.clone(),
                 },
             }
@@ -485,19 +496,26 @@ impl PgBranchParams {
                 secret_access_key,
                 session_token,
             } => CrdIamAuthConfig::AwsRds {
-                region: region.as_ref().map(convert_env_source),
-                access_key_id: access_key_id.as_ref().map(convert_env_source),
-                secret_access_key: secret_access_key.as_ref().map(convert_env_source),
-                session_token: session_token.as_ref().map(convert_env_source),
+                region: region.as_ref().map(convert_source_kind),
+                access_key_id: access_key_id.as_ref().map(convert_source_kind),
+                secret_access_key: secret_access_key.as_ref().map(convert_source_kind),
+                session_token: session_token.as_ref().map(convert_source_kind),
             },
             PgIamAuthConfig::GcpCloudSql {
                 credentials_json,
+                credentials_path,
                 project,
             } => {
-                tracing::info!(?credentials_json, ?project, "Converting GcpCloudSql config");
+                tracing::info!(
+                    ?credentials_json,
+                    ?credentials_path,
+                    ?project,
+                    "Converting GcpCloudSql config"
+                );
                 CrdIamAuthConfig::GcpCloudSql {
-                    credentials_json: credentials_json.as_ref().map(convert_env_source),
-                    project: project.as_ref().map(convert_env_source),
+                    credentials_json: credentials_json.as_ref().map(convert_source_kind),
+                    credentials_path: credentials_path.as_ref().map(convert_source_kind),
+                    project: project.as_ref().map(convert_source_kind),
                 }
             }
         });
