@@ -648,63 +648,6 @@ pub(crate) fn print_config<P>(
         incoming_info
     ));
 
-    // When the http filter is set, the rules of what ports get stolen are different, so make it
-    // clear to users in that case which ports are stolen.
-    if config.feature.network.incoming.is_steal()
-        && config.feature.network.incoming.http_filter.is_filter_set()
-    {
-        let filtered_ports = config
-            .feature
-            .network
-            .incoming
-            .http_filter
-            .get_filtered_ports()
-            .unwrap_or_default();
-        let filtered_ports_str = match filtered_ports.len() {
-            0 => None,
-            1 => Some(format!(
-                "port {} (filtered)",
-                filtered_ports.first().unwrap()
-            )),
-            _ => Some(format!("ports {filtered_ports:?} (filtered)")),
-        };
-
-        // since filter ports and `incoming.ports` are not required to be disjoint, let
-        // `unfiltered_ports_str` contain `incoming.ports` - filter ports
-        let unfiltered_ports_str =
-            config
-                .feature
-                .network
-                .incoming
-                .ports
-                .as_ref()
-                .and_then(|ports| {
-                    let filtered = filtered_ports.iter().copied().collect::<HashSet<_>>();
-                    let ports: Vec<&u16> = ports.difference(&filtered).collect();
-                    match ports.len() {
-                        0 => None,
-                        1 => Some(format!("port {} (unfiltered)", ports.first().unwrap())),
-                        _ => Some(format!(
-                            "ports [{}] (unfiltered)",
-                            ports
-                                .iter()
-                                .copied()
-                                .map(|n| n.to_string())
-                                .collect::<Vec<String>>()
-                                .join(", ")
-                        )),
-                    }
-                });
-        let and = if filtered_ports_str.is_some() && unfiltered_ports_str.is_some() {
-            " and "
-        } else {
-            ""
-        };
-        let filtered_port_str = filtered_ports_str.unwrap_or_default();
-        let unfiltered_ports_str = unfiltered_ports_str.unwrap_or_default();
-        progress.info(&format!("incoming: traffic will only be stolen from {filtered_port_str}{and}{unfiltered_ports_str}"));
-    }
-
     let outgoing_info = match (
         config.feature.network.outgoing.tcp,
         config.feature.network.outgoing.udp,

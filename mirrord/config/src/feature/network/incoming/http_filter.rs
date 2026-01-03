@@ -272,14 +272,16 @@ impl HttpFilterConfig {
             })
     }
 
-    pub fn get_filtered_ports(&self) -> Option<&[u16]> {
-        if let Some(ports) = self.ports.as_ref()
-            && self.is_filter_set()
-        {
-            Some(ports)
-        } else {
-            None
-        }
+    /// Returns `None` when we have no HTTP filter set.
+    ///
+    /// Returns `Some(None)` when we have an HTTP filter set, but
+    /// `http_filter.ports` is unset, i.e. we filter all ports.
+    ///
+    /// Returns `Some(&[u16])` when we have an HTTP filter set, AND
+    /// `http_filter.ports` is set, i.e. we filter only the selected
+    /// ports.
+    pub fn get_filtered_ports(&self) -> Option<Option<&[u16]>> {
+        self.is_filter_set().then_some(self.ports.as_deref())
     }
 }
 
