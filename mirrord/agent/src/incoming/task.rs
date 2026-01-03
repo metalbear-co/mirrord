@@ -129,7 +129,7 @@ where
                 },
 
                 Some(message) = self.internal_rx.recv() => match message {
-                    InternalMessage::DeadChannel(port)
+                    InternalMessage::MaybeDeadChannel(port)
                      => {
                         self.handle_dead_channel(port).await?;
                     }
@@ -407,7 +407,7 @@ where
                 let tx = self.internal_tx.clone();
                 tokio::spawn(async move {
                     conn_tx.closed().await;
-                    let _ = tx.send(InternalMessage::DeadChannel(port)).await;
+                    let _ = tx.send(InternalMessage::MaybeDeadChannel(port)).await;
                 });
 
                 let _ = receiver_tx.send(conn_rx);
@@ -438,7 +438,7 @@ where
                 let tx = self.internal_tx.clone();
                 tokio::spawn(async move {
                     conn_tx.closed().await;
-                    let _ = tx.send(InternalMessage::DeadChannel(port)).await;
+                    let _ = tx.send(InternalMessage::MaybeDeadChannel(port)).await;
                 });
 
                 let _ = receiver_tx.send(conn_rx);
@@ -508,7 +508,7 @@ where
         port_state.connections.spawn(async move {
             f.await;
 
-            tx.send(InternalMessage::DeadChannel(port))
+            tx.send(InternalMessage::MaybeDeadChannel(port))
                 .await
                 .expect("RedirectorTask exit before child task");
         });
@@ -629,16 +629,23 @@ impl fmt::Debug for TaskError {
 
 /// Messages sent by [`RedirectorTask`]'s helper tasks.
 enum InternalMessage {
-    /// One of the clients' channels was closed for a certain port.
+    /// Signals to [`RedirectorTask`] to reevaluate the state of the
+    /// given port subscription, and close it if no longer used. Sent
+    /// when one of the client's channels closes (i.e. end of a port
+    /// subscription), or one of the redirected connections on this
+    /// port terminates.
     ///
-    /// This means an end of port subscription.
     /// The related [`PortState`] should be inspected, adjusted, and possibly removed (if all
     /// subscriptions are gone).
     ///
-    /// Each port subscription results in spawning a separate helper task,
-    /// that waits for the subscription channel to close, and sends this message to the
-    /// [`RedirectorTask`].
-    DeadChannel(u16),
+    /// Each port subscription results in spawning a separate helper
+    /// task, that waits for the subscription channel to close, and
+    /// sends this message to the [`RedirectorTask`].
+
+    /// This message is also sent when one of the IO tasks for a
+    /// redirected connection (spawned using
+    /// [`RedirectorTask::spawn_tracked_connection`]) terminates.
+    MaybeDeadChannel(u16),
     /// HTTP detection finished on a redirected connection.
     ConnInitialized(MaybeHttp),
     /// An HTTP request was extracted from a redirected connection.
