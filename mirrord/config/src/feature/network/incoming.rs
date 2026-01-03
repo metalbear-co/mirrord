@@ -12,7 +12,7 @@ use crate::{
         ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result, from_env::FromEnv,
         source::MirrordConfigSource, unstable::Unstable,
     },
-    util::{MirrordToggleableConfig, ToggleableConfig, VecOrSingle},
+    util::{MirrordToggleableConfig, ToggleableConfig},
 };
 
 pub mod http_filter;

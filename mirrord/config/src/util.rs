@@ -159,7 +159,9 @@ impl<T> VecOrSingle<T> {
     pub fn push(&mut self, new: T) {
         match self {
             Self::Single(_) => {
-                let Self::Single(old) = std::mem::replace(self, Self::Multiple(Vec::with_capacity(2))) else {
+                let Self::Single(old) =
+                    std::mem::replace(self, Self::Multiple(Vec::with_capacity(2)))
+                else {
                     unreachable!("just checked that self is Self::Single")
                 };
 

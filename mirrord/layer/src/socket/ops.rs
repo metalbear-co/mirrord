@@ -26,7 +26,7 @@ use mirrord_protocol::{
 };
 use nix::{
     errno::Errno,
-    sys::socket::{SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage, sockopt},
+    sys::socket::{SockaddrLike, SockaddrStorage, sockopt},
 };
 use socket2::SockAddr;
 #[cfg(debug_assertions)]
