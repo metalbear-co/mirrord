@@ -852,4 +852,3 @@ jobs:
           Write-Host "MSI HTTP URL:      $env:MSI_DOWNLOAD_URL"
           Write-Host "Publish Choco:     $env:PUBLISH_CHOCO"
           Write-Host "Publish WinGet:    $env:PUBLISH_WINGET"
-        
