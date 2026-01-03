@@ -1,0 +1,1 @@
++ Unified `http_filter.ports` and `incoming.ports` behavior and made it more intuitive. Now, ports will be stolen unfiltered/not stolen when `http_filter.ports`/`incoming.ports` is set AND the port in question is not in the list.
