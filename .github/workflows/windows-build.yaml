@@ -138,7 +138,7 @@ jobs:
           # In PowerShell strings, double quotes are escaped by double quotes: ""path"" inside the string becomes "path" in the arg.
           Write-Host "Starting IAP tunnel on port 6443..."
           $tunnelProc = Start-Process -FilePath "cmd.exe" `
-              -ArgumentList "/c ""$gcloudCmd"" compute start-iap-tunnel k3s-tests-1 6443 --local-host-port=localhost:6443 --zone=us-central1-a --quiet" `
+              -ArgumentList "/c ""$gcloudCmd"" compute start-iap-tunnel k3s-tests-1 6443 --local-host-port=127.0.0.1:6443 --zone=us-central1-a --quiet" `
               -NoNewWindow -PassThru
           
           # Wait for tunnel to come up
@@ -146,7 +146,7 @@ jobs:
           $tunnelUp = $false
           while ($retries -gt 0) {
               try {
-                  $conn = New-Object System.Net.Sockets.TcpClient("localhost", 6443)
+                  $conn = New-Object System.Net.Sockets.TcpClient("127.0.0.1", 6443)
                   $conn.Close()
                   $tunnelUp = $true
                   Write-Host "Tunnel is up!"
@@ -168,10 +168,11 @@ jobs:
           # $kubeconfig is likely an array of strings in PowerShell if multiple lines
           $kubeconfigStr = $kubeconfig -join "`n"
           
-          # Replace IP with localhost (since we are tunneling)
-          # k3s.yaml usually has 127.0.0.1, but we ensure it matches the tunnel
-          $kubeconfigStr = $kubeconfigStr -replace '127.0.0.1', 'localhost'
-          $kubeconfigStr = $kubeconfigStr -replace '0.0.0.0', 'localhost'
+          # Replace IP with 127.0.0.1 (since we are tunneling)
+          # k3s.yaml usually has 127.0.0.1, we ensure it matches the tunnel IP strictly
+          $kubeconfigStr = $kubeconfigStr -replace '127.0.0.1', '127.0.0.1'
+          $kubeconfigStr = $kubeconfigStr -replace '0.0.0.0', '127.0.0.1'
+          $kubeconfigStr = $kubeconfigStr -replace 'localhost', '127.0.0.1'
           
           $kubeDir = Join-Path $env:USERPROFILE ".kube"
           if (-not (Test-Path $kubeDir)) {
@@ -181,7 +182,7 @@ jobs:
           $configPath = Join-Path $kubeDir "config"
           $kubeconfigStr | Set-Content -Path $configPath -Encoding UTF8
           
-          Write-Host "Kubeconfig saved to $configPath (pointing to localhost:6443)"
+          Write-Host "Kubeconfig saved to $configPath (pointing to 127.0.0.1:6443)"
 
           # Install kubectl and verify connection
           Write-Host "Installing kubectl..."
