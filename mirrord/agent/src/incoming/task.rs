@@ -224,7 +224,7 @@ where
             Self::spawn_tracked_connection(
                 self.internal_tx.clone(),
                 destination.port(),
-                e.get_mut(),
+                state,
                 async move {
                     tracing::debug!("connection arrived on inactive port, passing through");
                     if let Err(err) = RedirectedTcp::new(Box::new(conn.stream), info)

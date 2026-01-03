@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io, mem,
+    mem,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
     path::PathBuf,
