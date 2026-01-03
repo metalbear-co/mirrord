@@ -2330,6 +2330,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dns-lookup"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e39034cee21a2f5bbb66ba0e3689819c4bb5d00382a282006e802a7ffa6c41d"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "socket2 0.6.1",
+ "windows-sys 0.60.2",
+]
+
+[[package]]
 name = "dns_resolve"
 version = "0.1.0"
 
@@ -2642,7 +2654,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "libc",
 ]
@@ -3812,7 +3824,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "issue1317"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "actix-web",
  "env_logger",
@@ -3822,7 +3834,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "errno 0.3.14",
  "libc",
@@ -3831,7 +3843,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "libc",
  "socket2 0.5.10",
@@ -3839,14 +3851,14 @@ dependencies = [
 
 [[package]]
 name = "issue1899"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "issue2001"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "libc",
 ]
@@ -4196,7 +4208,7 @@ checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
 
 [[package]]
 name = "listen_ports"
-version = "3.178.0"
+version = "3.179.0"
 
 [[package]]
 name = "litemap"
@@ -4467,7 +4479,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "actix-codec",
  "axum 0.8.7",
@@ -4506,6 +4518,7 @@ dependencies = [
  "mirrord-operator",
  "mirrord-progress",
  "mirrord-protocol",
+ "mirrord-protocol-io",
  "mirrord-sip",
  "mirrord-tls-util",
  "mirrord-vpn",
@@ -4526,6 +4539,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
+ "tokio-retry",
  "tokio-rustls 0.26.4",
  "tokio-stream",
  "tokio-util",
@@ -4540,7 +4554,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "actix-codec",
  "axum 0.7.9",
@@ -4548,6 +4562,7 @@ dependencies = [
  "bytes",
  "clap",
  "containerd-client",
+ "dns-lookup",
  "enum_dispatch",
  "faccess",
  "fancy-regex",
@@ -4580,10 +4595,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_json_path",
- "serde_json_path_macros",
  "socket2 0.5.10",
  "streammap-ext",
- "strum_macros 0.27.2",
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
@@ -4600,7 +4613,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-env"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "base64 0.22.1",
  "k8s-openapi",
@@ -4613,7 +4626,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-iptables"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "async-trait",
  "caps",
@@ -4629,10 +4642,11 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "assert-json-diff",
  "base64 0.22.1",
+ "ci_info",
  "drain",
  "reqwest",
  "serde",
@@ -4644,7 +4658,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "base64 0.22.1",
  "bcder",
@@ -4668,11 +4682,12 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "base64 0.22.1",
  "bimap",
  "bitflags 2.10.0",
+ "clap",
  "fancy-regex",
  "ipnet",
  "k8s-openapi",
@@ -4699,7 +4714,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4709,7 +4724,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "bincode",
  "drain",
@@ -4725,7 +4740,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "bytes",
  "futures",
@@ -4739,6 +4754,7 @@ dependencies = [
  "mirrord-operator",
  "mirrord-progress",
  "mirrord-protocol",
+ "mirrord-protocol-io",
  "mirrord-tls-util",
  "rand 0.9.2",
  "rcgen",
@@ -4759,7 +4775,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy-protocol"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "bincode",
  "mirrord-protocol",
@@ -4769,9 +4785,8 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
- "actix-codec",
  "async-stream",
  "futures",
  "http 1.4.0",
@@ -4781,7 +4796,6 @@ dependencies = [
  "mirrord-agent-env",
  "mirrord-config",
  "mirrord-progress",
- "mirrord-protocol",
  "rand 0.9.2",
  "regex",
  "rstest",
@@ -4797,7 +4811,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "actix-codec",
  "apple-codesign",
@@ -4840,7 +4854,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-lib"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4871,7 +4885,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4880,7 +4894,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-win"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4911,7 +4925,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4921,7 +4935,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -4940,6 +4954,7 @@ dependencies = [
  "mirrord-kube",
  "mirrord-progress",
  "mirrord-protocol",
+ "mirrord-protocol-io",
  "rand 0.9.2",
  "rstest",
  "schemars 0.8.22",
@@ -4958,7 +4973,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "enum_dispatch",
  "indicatif",
@@ -4968,7 +4983,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.24.1"
+version = "1.25.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -4984,6 +4999,9 @@ dependencies = [
  "nix 0.29.0",
  "semver 1.0.27",
  "serde",
+ "serde_json",
+ "serde_json_path",
+ "serde_json_path_macros",
  "socket2 0.5.10",
  "strum 0.27.2",
  "strum_macros 0.27.2",
@@ -4993,8 +5011,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-protocol-io"
+version = "3.179.0"
+dependencies = [
+ "actix-codec",
+ "bincode",
+ "bytes",
+ "futures",
+ "mirrord-protocol",
+ "rand 0.9.2",
+ "rstest",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "mirrord-sip"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "apple-codesign",
  "fs4 0.12.0",
@@ -5050,7 +5085,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-tls-util"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "http 1.4.0",
  "pem",
@@ -5067,13 +5102,14 @@ dependencies = [
 
 [[package]]
 name = "mirrord-vpn"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "futures",
  "ipnet",
  "k8s-openapi",
  "kube",
  "mirrord-protocol",
+ "mirrord-protocol-io",
  "pnet_packet",
  "semver 1.0.27",
  "serde_yaml",
@@ -5507,7 +5543,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "tokio",
 ]
@@ -6666,14 +6702,14 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "libc",
 ]
@@ -6690,7 +6726,7 @@ dependencies = [
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.178.0"
+version = "3.179.0"
 dependencies = [
  "tokio",
 ]

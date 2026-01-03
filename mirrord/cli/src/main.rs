@@ -278,6 +278,7 @@ use mirrord_config::{
     LayerConfig,
     config::ConfigContext,
     feature::{
+        database_branches::{DatabaseBranchConfig, RedisBranchLocation},
         fs::FsModeConfig,
         network::{
             dns::{DnsConfig, DnsFilterConfig},
@@ -313,6 +314,7 @@ mod internal_proxy;
 #[cfg(target_os = "linux")]
 mod is_static;
 mod list;
+mod local_redis;
 mod logging;
 mod newsletter;
 mod operator;
@@ -781,6 +783,37 @@ async fn exec(
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
+    let _local_redis: Option<local_redis::LocalRedis> = if let Some(redis_config) =
+        config.feature.db_branches.iter().find_map(|branch| {
+            if let DatabaseBranchConfig::Redis(redis_config) = branch
+                && redis_config.location == RedisBranchLocation::Local
+            {
+                return Some(redis_config.clone());
+            }
+            None
+        }) {
+        let port = redis_config.local.port;
+
+        // Get the override variable and build the appropriate connection string
+        if let Some(variable) = redis_config.connection.override_variable() {
+            let local_conn =
+                local_redis::build_local_connection_string(port, &redis_config.connection);
+            config
+                .feature
+                .env
+                .r#override
+                .get_or_insert_with(Default::default)
+                .insert(variable.to_string(), local_conn);
+        }
+
+        // Auto-configure: ignore localhost so traffic goes directly to local Redis
+        config.feature.network.outgoing.ignore_localhost = true;
+
+        Some(local_redis::start(progress, &redis_config.local).await?)
+    } else {
+        None
+    };
+
     let mut analytics = AnalyticsReporter::only_error(
         config.telemetry,
         Default::default(),
@@ -788,8 +821,6 @@ async fn exec(
         user_data.machine_id(),
     );
     (&config).collect_analytics(analytics.get_mut());
-
-    analytics.get_mut().add("is_ci", ci_info::is_ci());
 
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
@@ -923,11 +954,10 @@ async fn port_forward(
                 CliError::PortForwardingSetupError,
             ),
             AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
+            AgentConnectionError::ProtocolError(protocol_error) => protocol_error.into(),
         })?;
-    let connection_2 = connection::AgentConnection {
-        sender: agent_conn.agent_tx,
-        receiver: agent_conn.agent_rx,
-    };
+
+    let connection_2 = agent_conn.connection;
 
     progress.success(Some("Ready!"));
     let _ = tokio::try_join!(

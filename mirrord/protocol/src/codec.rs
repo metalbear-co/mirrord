@@ -21,7 +21,10 @@ use semver::VersionReq;
 
 use crate::{
     ResponseError,
-    dns::{GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse},
+    dns::{
+        GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse, ReverseDnsLookupRequest,
+        ReverseDnsLookupResponse,
+    },
     file::*,
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -159,6 +162,10 @@ pub enum ClientMessage {
     ///
     /// Has the same ID that we got from the [`DaemonMessage::OperatorPing`].
     OperatorPong(u128),
+    /// Reverse DNS lookup request (IP to hostname).
+    ///
+    /// Sent by the operator when enforcing hostname-based outgoing network policies.
+    ReverseDnsLookup(ReverseDnsLookupRequest),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -219,6 +226,10 @@ pub enum DaemonMessage {
     ///
     /// Holds the unique id of this ping.
     OperatorPing(u128),
+    /// Reverse DNS lookup response.
+    ///
+    /// Sent by the agent in response to [`ClientMessage::ReverseDnsLookup`].
+    ReverseDnsLookup(RemoteResult<ReverseDnsLookupResponse>),
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone, From, Into, Deref)]
@@ -237,6 +248,13 @@ pub struct ProtocolCodec<I, O> {
     /// Phantom fields to make this struct generic over message types.
     _phantom_incoming_message: PhantomData<I>,
     _phantom_outgoing_message: PhantomData<O>,
+}
+
+impl<I, O> Copy for ProtocolCodec<I, O> {}
+impl<I, O> Clone for ProtocolCodec<I, O> {
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
 // Codec to be used by the client side to receive `DaemonMessage`s from the agent and send

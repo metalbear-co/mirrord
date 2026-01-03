@@ -18,7 +18,9 @@ use mirrord_config::{
 use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
     Port,
-    tcp::{Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, MirrorType, StealType},
+    tcp::{
+        Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, JsonPathQuery, MirrorType, StealType,
+    },
 };
 
 use crate::{
@@ -180,7 +182,7 @@ impl LayerSetup {
         &self.config.feature.fs
     }
 
-    /// Get access to network configuration  
+    /// Get access to network configuration
     pub fn network_config(&self) -> &mirrord_config::feature::network::NetworkConfig {
         &self.config.feature.network
     }
@@ -230,7 +232,7 @@ impl IncomingMode {
     fn parse_body_filter(filter: &BodyFilter) -> HttpBodyFilter {
         match filter {
             BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
-                query: query.clone(),
+                query: JsonPathQuery::new_unchecked(query.clone()),
                 matches: Filter::new(matches.clone())
                     .expect("invalid json body filter `matches` string"),
             },

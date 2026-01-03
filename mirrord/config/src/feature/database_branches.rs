@@ -9,9 +9,14 @@ use crate::config::{self, source::MirrordConfigSource};
 
 pub mod mysql;
 pub mod pg;
+pub mod redis;
 
 pub use mysql::{MysqlBranchConfig, MysqlBranchCopyConfig, MysqlBranchTableCopyConfig};
 pub use pg::{PgBranchConfig, PgBranchCopyConfig, PgBranchTableCopyConfig, PgIamAuthConfig};
+pub use redis::{
+    RedisBranchConfig, RedisBranchLocation, RedisConnectionConfig, RedisLocalConfig, RedisOptions,
+    RedisRuntime, RedisValueSource,
+};
 
 /// A list of configurations for database branches.
 ///
@@ -60,6 +65,13 @@ impl DatabaseBranchesConfig {
             .filter(|db| matches!(db, DatabaseBranchConfig::Pg { .. }))
             .count()
     }
+
+    pub fn count_redis(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::Redis { .. }))
+            .count()
+    }
 }
 
 /// Configuration for a database branch.
@@ -86,6 +98,7 @@ impl DatabaseBranchesConfig {
 pub enum DatabaseBranchConfig {
     Mysql(MysqlBranchConfig),
     Pg(PgBranchConfig),
+    Redis(RedisBranchConfig),
 }
 
 /// Despite the database type, all database branch config objects share the following fields.
@@ -196,6 +209,7 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
         analytics.add("mysql_branch_count", self.count_mysql());
         analytics.add("pg_branch_count", self.count_pg());
+        analytics.add("redis_branch_count", self.count_redis());
     }
 }
 
