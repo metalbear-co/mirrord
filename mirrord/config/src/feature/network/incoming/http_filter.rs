@@ -1,7 +1,4 @@
-use std::{
-    ops::Not,
-    sync::LazyLock,
-};
+use std::{ops::Not, sync::LazyLock};
 
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
