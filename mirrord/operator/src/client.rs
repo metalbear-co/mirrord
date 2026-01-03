@@ -775,15 +775,6 @@ impl OperatorApi<PreparedClientCert> {
                         .as_str(),
                     );
                 }
-                if let Some(modified_ports) = layer_config
-                    .feature
-                    .network
-                    .incoming
-                    .add_probe_ports_to_http_filter_ports(&runtime_data.containers_probe_ports)
-                {
-                    progress.info(&format!("`network.incoming.http_filter.ports` has been set to use ports {modified_ports}."));
-                }
-
                 let stolen_probes = runtime_data
                     .containers_probe_ports
                     .iter()

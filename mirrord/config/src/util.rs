@@ -155,6 +155,29 @@ pub enum VecOrSingle<T> {
     Multiple(Vec<T>),
 }
 
+impl<T> VecOrSingle<T> {
+    pub fn push(&mut self, new: T) {
+        match self {
+            Self::Single(_) => {
+                let Self::Single(old) =
+                    std::mem::replace(self, Self::Multiple(Vec::with_capacity(2)))
+                else {
+                    unreachable!("just checked that self is Self::Single")
+                };
+
+                let Self::Multiple(vec) = self else {
+                    unreachable!("just set self to Self::Multiple")
+                };
+                vec.push(old);
+                vec.push(new);
+            }
+            Self::Multiple(v) => {
+                v.push(new);
+            }
+        }
+    }
+}
+
 impl<T> Deref for VecOrSingle<T> {
     type Target = [T];
 
@@ -176,6 +199,44 @@ impl<T: Hash + Eq> From<VecOrSingle<T>> for HashSet<T> {
             }
             VecOrSingle::Multiple(vals) => vals.into_iter().collect(),
         }
+    }
+}
+
+impl<T> From<HashSet<T>> for VecOrSingle<T> {
+    fn from(value: HashSet<T>) -> Self {
+        Self::Multiple(Vec::from_iter(value))
+    }
+}
+
+impl<T> From<Vec<T>> for VecOrSingle<T> {
+    fn from(value: Vec<T>) -> Self {
+        Self::Multiple(value)
+    }
+}
+
+impl<T> From<VecOrSingle<T>> for Vec<T> {
+    fn from(value: VecOrSingle<T>) -> Self {
+        match value {
+            VecOrSingle::Single(item) => vec![item],
+            VecOrSingle::Multiple(items) => items,
+        }
+    }
+}
+
+impl<T: core::fmt::Display> core::fmt::Display for VecOrSingle<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        let mut first = true;
+        for item in self.iter() {
+            if first {
+                write!(f, "{item}")?;
+                first = false;
+            } else {
+                write!(f, ", {item}")?;
+            }
+        }
+        write!(f, "]")?;
+        Ok(())
     }
 }
 
