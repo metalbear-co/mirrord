@@ -99,7 +99,7 @@ impl RedirectedTcp {
                         tracing::error!(?err, "Error shutting down stolen tcp connection")
                     };
 
-                    Err(ConnError::Cancelled)
+                    Err(ConnError::AgentExiting)
                 }
             };
 
@@ -137,7 +137,7 @@ impl RedirectedTcp {
                 _ = shutdown.cancelled() => {
                     tracing::debug!("Gracefully shutting down passed-through connection during TCP/TLS handshake");
                     mirror_data_tx
-                        .send_item(IncomingStreamItem::Finished(Err(ConnError::Cancelled)));
+                        .send_item(IncomingStreamItem::Finished(Err(ConnError::AgentExiting)));
                     return;
                 }
             };
@@ -169,7 +169,7 @@ impl RedirectedTcp {
                     if let Err(err) = self.io.shutdown().await {
                         tracing::error!(?err, "Error shutting down passed-through tcp connection")
                     };
-                    Err(ConnError::Cancelled)
+                    Err(ConnError::AgentExiting)
                 }
             };
 
