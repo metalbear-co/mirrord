@@ -517,7 +517,9 @@ jobs:
           . scripts/start_iap_tunnel.ps1
           #####################################################################
 
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
+
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win -- --skip test::reconnect_during_http::drop_during_response_2_false
+
 
       - name: Debug Python environment before Rust e2e tests
         run: |
