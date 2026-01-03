@@ -59,7 +59,7 @@ env:
 
 jobs:
   windows_build:
-    runs-on: [self-hosted, Windows, win-build-spot-2]
+    runs-on: [self-hosted, Windows]
     defaults:
       run:
         shell: pwsh
