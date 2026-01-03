@@ -147,6 +147,12 @@ impl From<bool> for AnalyticValue {
     }
 }
 
+impl From<u16> for AnalyticValue {
+    fn from(n: u16) -> Self {
+        AnalyticValue::Number(n.into())
+    }
+}
+
 impl From<u32> for AnalyticValue {
     fn from(n: u32) -> Self {
         AnalyticValue::Number(n)

@@ -463,9 +463,12 @@ impl CollectAnalytics for &HttpFilterConfig {
         analytics.add("path_filter", self.path_filter.is_some());
         analytics.add(
             "ports",
-            self.get_filtered_ports()
-                .map(|p| p.len())
-                .unwrap_or_default(),
+            match self.get_filtered_ports() {
+                // Should never have more than u16::MAX ports
+                Some(Some(p)) => p.len() as u16,
+                Some(None) => u16::MAX,
+                None => 0,
+            },
         );
     }
 }
