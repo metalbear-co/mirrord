@@ -53,4 +53,6 @@ pub enum ConnError {
     BroadcastLag,
     #[error("bug in the mirrord-agent, please report it: {0}")]
     AgentBug(String),
+    #[error("connection cancelled because mirrord-agent is exiting")]
+    AgentExiting,
 }

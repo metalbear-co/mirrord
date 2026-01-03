@@ -3,12 +3,14 @@ use std::{error::Report, fmt};
 use bytes::{Bytes, BytesMut};
 use mirrord_tls_util::MaybeTls;
 use tokio::{
+    io::AsyncWriteExt,
     net::TcpStream,
     runtime::Handle,
     sync::{broadcast, mpsc},
     task::JoinHandle,
 };
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_util::sync::CancellationToken;
 
 use super::{ConnectionInfo, IncomingIO, IncomingStream};
 use crate::incoming::{
@@ -76,7 +78,8 @@ impl RedirectedTcp {
     /// and starts the connection task in the background.
     ///
     /// All data will be directed to this handle.
-    pub fn steal(mut self) -> StolenTcp {
+    /// The returned [`JoinHandle`] is for the spawned IO task.
+    pub fn steal(mut self, shutdown: CancellationToken) -> (StolenTcp, JoinHandle<()>) {
         let (incoming_tx, incoming_rx) = mpsc::channel(32);
         let (outgoing_tx, outgoing_rx) = mpsc::channel(32);
 
@@ -87,7 +90,19 @@ impl RedirectedTcp {
                 data_rx: outgoing_rx,
                 mirror_data_tx: self.mirror_tx.into(),
             };
-            let result = copy_bidirectional::copy_bidirectional(&mut self.io, &mut outgoing).await;
+
+            let result = tokio::select! {
+                r = copy_bidirectional::copy_bidirectional(&mut self.io, &mut outgoing) => r,
+                _ = shutdown.cancelled() => {
+                    tracing::debug!("Gracefully shutting down stolen tcp connection");
+                    if let Err(err) = self.io.shutdown().await {
+                        tracing::error!(?err, "Error shutting down stolen tcp connection")
+                    };
+
+                    Err(ConnError::AgentExiting)
+                }
+            };
+
             outgoing
                 .mirror_data_tx
                 .send_item(IncomingStreamItem::Finished(result.clone()));
@@ -96,24 +111,38 @@ impl RedirectedTcp {
                 .send(IncomingStreamItem::Finished(result))
                 .await;
         };
-        handle.spawn(task);
 
-        StolenTcp {
-            info: self.info,
-            stream: IncomingStream::Steal(incoming_rx),
-            data_tx: outgoing_tx,
-        }
+        let join_handle = handle.spawn(task);
+
+        (
+            StolenTcp {
+                info: self.info,
+                stream: IncomingStream::Steal(incoming_rx),
+                data_tx: outgoing_tx,
+            },
+            join_handle,
+        )
     }
 
     /// Starts the connection task in the background.
     ///
     /// All data will be directed to the original destination.
-    pub fn pass_through(mut self) -> JoinHandle<()> {
+    pub fn pass_through(mut self, shutdown: CancellationToken) -> JoinHandle<()> {
         let handle = self.runtime_handle.clone();
         handle.spawn(async move {
             let mut mirror_data_tx = OptionalBroadcast::from(self.mirror_tx.take());
 
-            let stream = match self.make_pass_through_connection().await {
+            let passthrough = tokio::select! {
+                conn = self.make_pass_through_connection() => conn,
+                _ = shutdown.cancelled() => {
+                    tracing::debug!("Gracefully shutting down passed-through connection during TCP/TLS handshake");
+                    mirror_data_tx
+                        .send_item(IncomingStreamItem::Finished(Err(ConnError::AgentExiting)));
+                    return;
+                }
+            };
+
+            let stream = match passthrough {
                 Ok(stream) => stream,
                 Err(error) => {
                     tracing::warn!(
@@ -131,7 +160,19 @@ impl RedirectedTcp {
                 buffer: BytesMut::with_capacity(64 * 1024),
                 mirror_data_tx,
             };
-            let result = copy_bidirectional::copy_bidirectional(&mut self.io, &mut outgoing).await;
+
+            let result = tokio::select! {
+                r = copy_bidirectional::copy_bidirectional(&mut self.io, &mut outgoing) => r,
+
+                _ = shutdown.cancelled() => {
+                    tracing::debug!("Gracefully shutting down passed-through tcp connection");
+                    if let Err(err) = self.io.shutdown().await {
+                        tracing::error!(?err, "Error shutting down passed-through tcp connection")
+                    };
+                    Err(ConnError::AgentExiting)
+                }
+            };
+
             outgoing
                 .mirror_data_tx
                 .send_item(IncomingStreamItem::Finished(result));
@@ -155,6 +196,11 @@ impl RedirectedTcp {
             }
             None => Ok(MaybeTls::NoTls(tcp_stream)),
         }
+    }
+
+    #[cfg(test)]
+    pub fn into_io(self) -> Box<dyn IncomingIO + 'static> {
+        self.io
     }
 }
 
