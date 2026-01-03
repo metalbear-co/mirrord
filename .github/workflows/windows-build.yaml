@@ -490,17 +490,25 @@ jobs:
           $ErrorActionPreference = "Stop"
           
           Write-Host "Fetching kubeconfig via IAP..."
+          # Pipe 'y' to accept potential host key prompts (PuTTY/Plink)
+          # Use cmd /c to handle piping robustly if needed, or just PS pipe
+          # We also verify gcloud path for later use
+          $gcloudCmd = (Get-Command gcloud).Source
+          Write-Host "Using gcloud at: $gcloudCmd"
+
           # Use --quiet to avoid prompts, --tunnel-through-iap for firewall bypass
-          $kubeconfig = gcloud --quiet compute ssh k3s-tests-1 --zone=us-central1-a --tunnel-through-iap --command "sudo cat /etc/rancher/k3s/k3s.yaml"
+          # Piping 'y' to handle the Plink host key prompt if it occurs
+          $kubeconfig = echo "y" | gcloud --quiet compute ssh k3s-tests-1 --zone=us-central1-a --tunnel-through-iap --command "sudo cat /etc/rancher/k3s/k3s.yaml"
           
           if (-not $kubeconfig) {
              throw "Failed to fetch kubeconfig or empty output."
           }
 
           # Start IAP Tunnel in background
+          # We use cmd.exe /c to invoke gcloud because it's likely a .cmd file, which Start-Process doesn't handle directly as an exe
           Write-Host "Starting IAP tunnel on port 6443..."
-          $tunnelProc = Start-Process -FilePath "gcloud" `
-              -ArgumentList "compute start-iap-tunnel k3s-tests-1 6443 --local-host-port=localhost:6443 --zone=us-central1-a --quiet" `
+          $tunnelProc = Start-Process -FilePath "cmd.exe" `
+              -ArgumentList "/c $gcloudCmd compute start-iap-tunnel k3s-tests-1 6443 --local-host-port=localhost:6443 --zone=us-central1-a --quiet" `
               -NoNewWindow -PassThru
           
           # Wait for tunnel to come up
@@ -534,8 +542,6 @@ jobs:
           # k3s.yaml usually has 127.0.0.1, but we ensure it matches the tunnel
           $kubeconfigStr = $kubeconfigStr -replace '127.0.0.1', 'localhost'
           $kubeconfigStr = $kubeconfigStr -replace '0.0.0.0', 'localhost'
-          # If the config uses the external IP for some reason, we'd replace that too, 
-          # but usually it's localhost/127.0.0.1 inside the VM.
           
           $kubeDir = Join-Path $env:USERPROFILE ".kube"
           if (-not (Test-Path $kubeDir)) {
