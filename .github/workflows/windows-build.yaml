@@ -95,6 +95,82 @@ jobs:
           Remove-Item $testDir -Recurse -Force
 
       ###########################################################################
+      - name: Setup Kubeconfig
+        run: |
+          $ErrorActionPreference = "Stop"
+          
+          Write-Host "Fetching kubeconfig via IAP..."
+          # Pipe 'y' to accept potential host key prompts (PuTTY/Plink)
+          
+          # Resolve gcloud.cmd to avoid issues with .ps1 and cmd.exe
+          $gcloudPath = (Get-Command gcloud).Source
+          if ($gcloudPath.EndsWith(".ps1")) {
+              $parent = Split-Path $gcloudPath -Parent
+              $gcloudCmd = Join-Path $parent "gcloud.cmd"
+          } else {
+              $gcloudCmd = $gcloudPath
+          }
+          Write-Host "Using gcloud at: $gcloudCmd"
+
+          # Use --quiet to avoid prompts, --tunnel-through-iap for firewall bypass
+          $kubeconfig = echo "y" | & "$gcloudCmd" --quiet compute ssh k3s-tests-1 --zone=us-central1-a --tunnel-through-iap --command "sudo cat /etc/rancher/k3s/k3s.yaml"
+          
+          if (-not $kubeconfig) {
+             throw "Failed to fetch kubeconfig or empty output."
+          }
+
+          # Start IAP Tunnel in background
+          # Use cmd.exe /c to execute the batch file.
+          # IMPORTANT: We must quote the path to gcloud.cmd because it likely contains spaces (Program Files).
+          # In PowerShell strings, double quotes are escaped by double quotes: ""path"" inside the string becomes "path" in the arg.
+          Write-Host "Starting IAP tunnel on port 6443..."
+          $tunnelProc = Start-Process -FilePath "cmd.exe" `
+              -ArgumentList "/c ""$gcloudCmd"" compute start-iap-tunnel k3s-tests-1 6443 --local-host-port=localhost:6443 --zone=us-central1-a --quiet" `
+              -NoNewWindow -PassThru
+          
+          # Wait for tunnel to come up
+          $retries = 30
+          $tunnelUp = $false
+          while ($retries -gt 0) {
+              try {
+                  $conn = New-Object System.Net.Sockets.TcpClient("localhost", 6443)
+                  $conn.Close()
+                  $tunnelUp = $true
+                  Write-Host "Tunnel is up!"
+                  break
+              } catch {
+                  Write-Host "Waiting for tunnel... ($retries)"
+                  Start-Sleep -Seconds 1
+                  $retries--
+              }
+          }
+          if (-not $tunnelUp) {
+              if ($tunnelProc.HasExited) {
+                  Write-Error "Tunnel process exited unexpectedly. Exit code: $($tunnelProc.ExitCode)"
+              }
+              Stop-Process -InputObject $tunnelProc -ErrorAction SilentlyContinue
+              throw "Tunnel failed to start on port 6443"
+          }
+          
+          # $kubeconfig is likely an array of strings in PowerShell if multiple lines
+          $kubeconfigStr = $kubeconfig -join "`n"
+          
+          # Replace IP with localhost (since we are tunneling)
+          # k3s.yaml usually has 127.0.0.1, but we ensure it matches the tunnel
+          $kubeconfigStr = $kubeconfigStr -replace '127.0.0.1', 'localhost'
+          $kubeconfigStr = $kubeconfigStr -replace '0.0.0.0', 'localhost'
+          
+          $kubeDir = Join-Path $env:USERPROFILE ".kube"
+          if (-not (Test-Path $kubeDir)) {
+              New-Item -ItemType Directory -Force -Path $kubeDir | Out-Null
+          }
+          
+          $configPath = Join-Path $kubeDir "config"
+          $kubeconfigStr | Set-Content -Path $configPath -Encoding UTF8
+          
+          Write-Host "Kubeconfig saved to $configPath (pointing to localhost:6443)"
+
+      ###########################################################################
       # PREPARE ARTIFACTS
       ###########################################################################
       
@@ -484,82 +560,6 @@ jobs:
           # Extra debug for next run: show PATH and pip list for the exact python3
           python3 -c "import os; print('PATH=', os.environ.get('PATH',''))"
           python3 -m pip list
-
-      - name: Setup Kubeconfig
-        run: |
-          $ErrorActionPreference = "Stop"
-          
-          Write-Host "Fetching kubeconfig via IAP..."
-          # Pipe 'y' to accept potential host key prompts (PuTTY/Plink)
-          
-          # Resolve gcloud.cmd to avoid issues with .ps1 and cmd.exe
-          $gcloudPath = (Get-Command gcloud).Source
-          if ($gcloudPath.EndsWith(".ps1")) {
-              $parent = Split-Path $gcloudPath -Parent
-              $gcloudCmd = Join-Path $parent "gcloud.cmd"
-          } else {
-              $gcloudCmd = $gcloudPath
-          }
-          Write-Host "Using gcloud at: $gcloudCmd"
-
-          # Use --quiet to avoid prompts, --tunnel-through-iap for firewall bypass
-          $kubeconfig = echo "y" | & "$gcloudCmd" --quiet compute ssh k3s-tests-1 --zone=us-central1-a --tunnel-through-iap --command "sudo cat /etc/rancher/k3s/k3s.yaml"
-          
-          if (-not $kubeconfig) {
-             throw "Failed to fetch kubeconfig or empty output."
-          }
-
-          # Start IAP Tunnel in background
-          # Use cmd.exe /c to execute the batch file.
-          # IMPORTANT: We must quote the path to gcloud.cmd because it likely contains spaces (Program Files).
-          # In PowerShell strings, double quotes are escaped by double quotes: ""path"" inside the string becomes "path" in the arg.
-          Write-Host "Starting IAP tunnel on port 6443..."
-          $tunnelProc = Start-Process -FilePath "cmd.exe" `
-              -ArgumentList "/c ""$gcloudCmd"" compute start-iap-tunnel k3s-tests-1 6443 --local-host-port=localhost:6443 --zone=us-central1-a --quiet" `
-              -NoNewWindow -PassThru
-          
-          # Wait for tunnel to come up
-          $retries = 30
-          $tunnelUp = $false
-          while ($retries -gt 0) {
-              try {
-                  $conn = New-Object System.Net.Sockets.TcpClient("localhost", 6443)
-                  $conn.Close()
-                  $tunnelUp = $true
-                  Write-Host "Tunnel is up!"
-                  break
-              } catch {
-                  Write-Host "Waiting for tunnel... ($retries)"
-                  Start-Sleep -Seconds 1
-                  $retries--
-              }
-          }
-          if (-not $tunnelUp) {
-              if ($tunnelProc.HasExited) {
-                  Write-Error "Tunnel process exited unexpectedly. Exit code: $($tunnelProc.ExitCode)"
-              }
-              Stop-Process -InputObject $tunnelProc -ErrorAction SilentlyContinue
-              throw "Tunnel failed to start on port 6443"
-          }
-          
-          # $kubeconfig is likely an array of strings in PowerShell if multiple lines
-          $kubeconfigStr = $kubeconfig -join "`n"
-          
-          # Replace IP with localhost (since we are tunneling)
-          # k3s.yaml usually has 127.0.0.1, but we ensure it matches the tunnel
-          $kubeconfigStr = $kubeconfigStr -replace '127.0.0.1', 'localhost'
-          $kubeconfigStr = $kubeconfigStr -replace '0.0.0.0', 'localhost'
-          
-          $kubeDir = Join-Path $env:USERPROFILE ".kube"
-          if (-not (Test-Path $kubeDir)) {
-              New-Item -ItemType Directory -Force -Path $kubeDir | Out-Null
-          }
-          
-          $configPath = Join-Path $kubeDir "config"
-          $kubeconfigStr | Set-Content -Path $configPath -Encoding UTF8
-          
-          Write-Host "Kubeconfig saved to $configPath (pointing to localhost:6443)"
-
 
       - name: Run Rust e2e tests 
         run: |
