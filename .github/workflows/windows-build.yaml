@@ -170,6 +170,20 @@ jobs:
           
           Write-Host "Kubeconfig saved to $configPath (pointing to localhost:6443)"
 
+          # Install kubectl and verify connection
+          Write-Host "Installing kubectl..."
+          $kubectlPath = Join-Path $env:RUNNER_TEMP "kubectl.exe"
+          Invoke-WebRequest -Uri "https://dl.k8s.io/release/v1.29.0/bin/windows/amd64/kubectl.exe" -OutFile $kubectlPath
+          
+          Write-Host "Verifying connection to cluster..."
+          # Use local kubectl to verify connection. Timeout if it hangs.
+          # Note: We use & to call the executable
+          & $kubectlPath get nodes
+          if ($LASTEXITCODE -ne 0) {
+              throw "kubectl failed to connect to the cluster."
+          }
+          Write-Host "Successfully connected to k3s-tests-1!"
+
       ###########################################################################
       # PREPARE ARTIFACTS
       ###########################################################################
