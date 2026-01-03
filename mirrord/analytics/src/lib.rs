@@ -223,6 +223,7 @@ impl AnalyticsReporter {
         let mut analytics = Analytics::default();
         analytics.add("execution_kind", execution_kind as u32);
         analytics.add("machine_id", machine_id);
+        analytics.add("is_ci", ci_info::is_ci());
 
         AnalyticsReporter {
             analytics,
