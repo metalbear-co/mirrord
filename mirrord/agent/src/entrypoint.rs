@@ -660,17 +660,39 @@ pub async fn notify_client_about_dirty_iptables(
 }
 
 /// Monitors the main container process and cancels `cancel` when it
-/// exits. This not only makes for a better UX (no unused agent pods
+/// exits.
+///
+/// This not only makes for a better UX (no unused agent pods
 /// lingering), but is important for terminating redirected
 /// connections gracefully. If we don't exit as soon as the main
 /// container dies, the veth interface will be deleted while
 /// redirected connections are still open, and thus the other ends
 /// will stay open with no way to terminate them correctly.
-fn monitor_main_container(cancel: CancellationToken, pid: libc::pid_t) -> io::Result<()> {
-    let fd = AsyncPidFd::from_pid(pid)?;
+fn monitor_main_container(cancel: CancellationToken, pid: libc::pid_t) {
+    let fd = match AsyncPidFd::from_pid(pid) {
+        Ok(fd) => fd,
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "Failed to get the target container process descriptor",
+            );
+            return;
+        }
+    };
+
     tokio::spawn(async move {
         tracing::trace!("Starting watcher task for main target process");
         match fd.wait().await {
+            Err(error) if error.raw_os_error() == Some(libc::ECHILD) => {
+                tracing::warn!(?error, "Target container process exited, shutting down");
+                cancel.cancel();
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "wait() on target container did not return expected value"
+                );
+            }
             Ok(status) => {
                 // ExitInfo doesn't impl Debug >:(
                 tracing::warn!(
@@ -679,19 +701,8 @@ fn monitor_main_container(cancel: CancellationToken, pid: libc::pid_t) -> io::Re
                     "wait() on target container did not return expected value"
                 );
             }
-            Err(error) => {
-                if error.raw_os_error() != Some(libc::ECHILD) {
-                    tracing::warn!(
-                        ?error,
-                        "wait() on target container did not return expected value"
-                    );
-                }
-            }
         }
-        tracing::debug!("Main target process exited, shutting down...");
-        cancel.cancel();
     });
-    Ok(())
 }
 
 /// Get existing iptable rules created by another (potentially still running) agent.
@@ -797,9 +808,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 
         // Casting u64 to i32 but linux pids shouldn't exceed 2^22
         let pid = target_pid.try_into().unwrap();
-        if let Err(err) = monitor_main_container(cancellation_token.clone(), pid) {
-            tracing::warn!(?err, "failed to monitor main container process for exit");
-        };
+        monitor_main_container(cancellation_token.clone(), pid);
     }
 
     // To make sure that background tasks are cancelled when we exit early from this function.
