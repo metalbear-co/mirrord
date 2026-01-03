@@ -214,8 +214,7 @@ fn bind_similar_address(
     Detour::Error(io::Error::last_os_error().into())
 }
 
-/// Checks if given TCP port needs to be ignored
-/// based on http_filter/ports logic
+/// Checks if given TCP port needs to be ignored based on ports logic
 fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
     let mapped_port = crate::setup()
         .incoming_config()
