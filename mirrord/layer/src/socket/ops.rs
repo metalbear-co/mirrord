@@ -376,64 +376,11 @@ pub(super) fn bind(
     Detour::Success(0)
 }
 
-/// Warn the user if they are filtering HTTP, and it looks like they might have intended to also
-/// steal another port unfiltered, but didn't know they had to set `feature.network.incoming.ports`
-/// for that.
-// FIXME
-fn warn_on_suspected_unintentional_ignore(sockfd: RawFd) {
-    let incoming_config = crate::setup().incoming_config();
-    let http_filter_used =
-        incoming_config.mode == IncomingMode::Steal && incoming_config.http_filter.is_filter_set();
-
-    // User specified a filter that does not include this port, and did not specify any
-    // unfiltered ports?
-    // It's plausible that the user did not know the port has to be in either port list to be
-    // stolen when an HTTP filter is set, so show a warning.
-    if http_filter_used && incoming_config.ports.is_none() {
-        let port_text = if let Some(port) = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd)
-            .inspect_err(|err| {
-                tracing::debug!(
-                    "Calling getsockname failed. Ignoring as this is not critical. Error: {err:?}."
-                )
-            })
-            .ok()
-            .and_then(|addr_storage| {
-                addr_storage
-                    .as_sockaddr_in()
-                    .map(SockaddrIn::port)
-                    .or_else(|| addr_storage.as_sockaddr_in6().map(SockaddrIn6::port))
-            }) {
-            if let Some(mapped_port) = incoming_config.port_mapping.get_by_left(&port) {
-                format!("Remote port {mapped_port} (mapped from local port {port})",)
-            } else {
-                format!("Port {port}")
-            }
-        } else {
-            // `getsockname` returned an error, or a non-IP address. Not stopping execution on
-            // that, as it does not mean anything else went wrong in this run. Just emitting a
-            // warning without the port number.
-            tracing::debug!(
-                "Could not determine the bound port of a socket, for the purpose of displaying it in a warning."
-            );
-            "A port".to_string()
-        };
-        warn!(
-            "{port_text} was not included in the filtered ports, and also not in the non-filtered \
-            ports, and will therefore be bound locally. If this is intentional, ignore this \
-            warning. If you want the http filter to apply to this port, add it to \
-            `feature.network.incoming.http_filter.ports`. \
-            If you want to steal all the traffic of this port, add it to \
-            `feature.network.incoming.ports`."
-        );
-    }
-}
-
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
 #[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     let Some(mut socket) = SOCKETS.lock()?.remove(&sockfd) else {
-        warn_on_suspected_unintentional_ignore(sockfd);
         return Detour::Bypass(Bypass::LocalFdNotFound(sockfd));
     };
 
