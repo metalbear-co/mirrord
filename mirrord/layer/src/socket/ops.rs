@@ -223,30 +223,13 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
         .get_by_left(&addr.port())
         .copied()
         .unwrap_or_else(|| addr.port());
-    let http_filter_used = (config.mode == IncomingMode::Steal
-        || config.mode == IncomingMode::Mirror)
-        && config.http_filter.is_filter_set();
 
-    // This is a bit weird, but it makes more sense configured ports are the remote port
-    // and not the local, so the check is done on the mapped port
-    // see https://github.com/metalbear-co/mirrord/issues/2397
-    let not_a_filtered_port = config
-        .http_filter
+    let have_whitelist_and_port_is_not_whitelisted = config
         .ports
         .as_ref()
-        .is_some_and(|filter_ports| filter_ports.contains(&mapped_port).not());
+        .is_some_and(|ports| ports.contains(&mapped_port).not());
 
-    let not_stolen_with_filter = !http_filter_used || not_a_filtered_port;
-
-    // Unfiltered ports were specified and the requested port is not one of them, or an HTTP filter
-    // is set and no unfiltered ports were specified.
-    let not_whitelisted = config
-        .ports
-        .as_ref()
-        .map(|ports| !ports.contains(&mapped_port))
-        .unwrap_or(http_filter_used);
-
-    is_ignored_port(addr) || (not_stolen_with_filter && not_whitelisted)
+    is_ignored_port(addr) || have_whitelist_and_port_is_not_whitelisted
 }
 
 /// If the socket is not found in [`SOCKETS`], bypass.
@@ -397,6 +380,7 @@ pub(super) fn bind(
 /// Warn the user if they are filtering HTTP, and it looks like they might have intended to also
 /// steal another port unfiltered, but didn't know they had to set `feature.network.incoming.ports`
 /// for that.
+// FIXME
 fn warn_on_suspected_unintentional_ignore(sockfd: RawFd) {
     let incoming_config = crate::setup().incoming_config();
     let http_filter_used =
