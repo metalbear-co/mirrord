@@ -277,11 +277,16 @@ unsafe extern "C" fn go_syscall_detour() {
 unsafe extern "C" fn gosave_systemstack_switch() {
     naked_asm!(
         "lea    r9, [rip+0xdd9]",
+        // [r14+0x40] g->gobuf->pc
         "mov    QWORD PTR [r14+0x40],r9",
         "lea    r9, [rsp+0x8]",
+        // [r14+0x38] g->gobuf->sp
         "mov    QWORD PTR [r14+0x38],r9",
+        // [r14+0x58] g->gobuf->ret
         "mov    QWORD PTR [r14+0x58],0x0",
+        // [r14+0x68] g->gobuf->bp
         "mov    QWORD PTR [r14+0x68],rbp",
+        // [r14+0x50] g->gobuf->ctxt
         "mov    r9, QWORD PTR [r14+0x50]",
         "test   r9, r9",
         "jz     4f",
@@ -407,55 +412,96 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "je 4f",
         "cmp rax, 231", // SYS_EXIT_GROUP
         "je 4f",
-        // Save rdi in r10
+        // func Syscall6(num, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2, errno uintptr)
+        // https://github.com/golang/go/blob/e84983fa40a6e97d3e169f1f3549af889b1b1f22/src/internal/runtime/syscall/linux/asm_linux_amd64.s
+        // rax = num
+        // rbx = a1
+        // rcx = a2
+        // rdi = a3
+        // rsi = a4
+        // r8  = a5
+        // r9  = a6
+        // r14 = g
+        // Save arguments to reserved registers
+        // r10 = a3
         "mov r10, rdi",
-        // Save r9 in r11
+        // r11 = a6
         "mov r11, r9",
-        // Save rax in r12
+        // r12 = num
         "mov r12, rax",
-        // save rsi in r13
+        // r13 = a4
         "mov r13, rsi",
-        // save rcx in r15
+        // r15 = a2
         "mov r15, rcx",
+        // And still, r8 = a5, rbx = a1
         // Save stack
         "mov rdx, rsp",
-        // in the past, we tried to retrieve g from fs:[-0x8]
+        // In the past, we tried to retrieve g from fs:[-0x8]
         // but this sometimes fails to get g for some reason
         // and r14 seems to be more correct
         "mov rdi, r14",
-        // for any case, store it there in case it isn't stored
+        // For any case, store it there in case it isn't stored
         "mov qword ptr fs:[0xfffffff8], rdi",
+        // Is g nil
         "cmp rdi, 0x0",
         "jz 2f",
+        // rax = g->m
+        // https://github.com/golang/go/blob/go1.19/src/runtime/runtime2.go#L421
         "mov rax, qword ptr [rdi + 0x30]",
+        // rsi = m->gsignal
+        // https://github.com/golang/go/blob/go1.19/src/runtime/runtime2.go#L527
         "mov rsi, qword ptr [rax + 0x50]",
+        // Is g == m->gsignal?
         "cmp rdi, rsi",
         "jz 2f",
+        // rsi = m->g0
         "mov rsi, qword ptr [rax]",
+        // Is g == m->g0
         "cmp rdi, rsi",
         "jz 2f",
+        // At this point, we are on a user g, switch to system stack.
+        // Save current user g state befor switching
         "call gosave_systemstack_switch",
+        // Store g0 in TLS
         "mov qword ptr FS:[0xfffffff8], rsi",
+        // rsp = g0->gobuf->sp
         "mov rsp, qword ptr [RSI + 0x38]",
+        // reserve space on system stack
         "sub rsp, 0x40",
         "and rsp, -0x10",
+        // save g->stack->lo on stack
         "mov qword ptr [rsp + 0x30], rdi",
+        // rdi = g->stack->hi
         "mov rdi, qword ptr [RDI + 0x8]",
+        // compute stack slice size: g->stack->hi - [previous rsp]
         "sub RDI, RDX",
+        // save the size on stack
         "mov qword ptr [rsp + 0x28], rdi",
-        // push the arguments of Rawsyscall from the stack to preserved registers
+        // push the saved arguments to preserved registers.
+        // a6 on stack
         "mov QWORD PTR [rsp], r11",
+        // a5 in r9
         "mov r9, r8",
+        // a4 in r8
         "mov r8, r13",
+        // a1 in rsi
         "mov rsi, rbx",
+        // a2 in rdx
         "mov rdx, r15",
+        // a3 in rcx
         "mov rcx, r10",
+        // syscall num in rdi
         "mov rdi, r12",
+        // Rust fn(rdi, rsi, rdx, rcx, r8, r9, [stack])
         "call c_abi_syscall6_handler",
         // Switch stack back
+        // rdi = g->stack->lo (also g itself)
         "mov rdi, qword ptr [rsp + 0x30]",
+        // rsi = g->stack->hi
         "mov rsi, qword ptr [rdi + 0x8]",
+        // set g->stack->hi to previous rsp
         "sub rsi, qword ptr [ rsp + 0x28]",
+        // store user g in TLS
         "mov qword ptr fs:[0xfffffff8], rdi",
         "mov rsp, rsi",
         // Regular flow
