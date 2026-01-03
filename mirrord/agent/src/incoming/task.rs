@@ -478,7 +478,7 @@ where
         }
 
         // Remove if the [`PortState`] is no longer needed.
-        if mirror_txs.is_empty() && connections.is_empty() && steal_tx.is_none() {
+        if mirror_txs.is_empty() && steal_tx.is_none() && connections.is_empty() {
             e.remove().graceful_shutdown().await;
             self.redirector.remove_redirection(port).await?;
             if self.ports.is_empty() {
