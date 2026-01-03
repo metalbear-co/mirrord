@@ -9,6 +9,7 @@
 use std::{collections::HashMap, io, net::SocketAddr, ops::Not, sync::Arc, time::Duration};
 
 use bound_socket::BoundTcpSocket;
+use futures::future::Either;
 use http::{ClientStore, ResponseMode, StreamingBody};
 use http_gateway::HttpGatewayTask;
 use metadata_store::MetadataStore;
@@ -21,9 +22,9 @@ use mirrord_protocol::{
     ClientMessage, ConnectionId, RequestId, ResponseError,
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
-        ChunkedResponse, DaemonTcp, HttpRequest, HttpRequestMetadata, IncomingTrafficTransportType,
+        DaemonTcp, HttpRequest, HttpRequestMetadata, IncomingTrafficTransportType,
         InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnectionV1,
-        NewTcpConnectionV2, TcpData,
+        NewTcpConnectionV2,
     },
 };
 use semver::Version;
@@ -40,7 +41,7 @@ use crate::{
     background_tasks::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
-    main_tasks::{LayerClosed, LayerForked, ToLayer},
+    main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
 };
 
 mod bound_socket;
@@ -108,7 +109,7 @@ pub enum IncomingProxyMessage {
     AgentSteal(DaemonTcp),
     /// Agent responded to [`ClientMessage::SwitchProtocolVersion`].
     AgentProtocolVersion(semver::Version),
-    ConnectionRefresh,
+    ConnectionRefresh(ConnectionRefresh),
 }
 
 /// Handle to a running [`HttpGatewayTask`].
@@ -191,10 +192,12 @@ pub struct IncomingProxy {
     /// Each entry here maps to a request that is in progress both locally and remotely.
     http_gateways: ConnectionMap<HashMap<RequestId, HttpGatewayHandle>>,
     /// Running [`BackgroundTask`]s utilized by this proxy.
-    tasks: BackgroundTasks<InProxyTask, InProxyTaskMessage, InProxyTaskError>,
+    tasks: Option<BackgroundTasks<InProxyTask, InProxyTaskMessage, InProxyTaskError>>,
 
     /// [`mirrord_protocol`] version negotiated with the agent.
     protocol_version: Option<Version>,
+
+    restore_subscriptions_on_protocol_version_switch: bool,
 }
 
 impl IncomingProxy {
@@ -206,7 +209,6 @@ impl IncomingProxy {
         https_delivery: LocalTlsDelivery,
     ) -> Self {
         let tls_setup = LocalTlsSetup::from_config(https_delivery);
-
         Self {
             subscriptions: Default::default(),
             metadata_store: Default::default(),
@@ -218,8 +220,9 @@ impl IncomingProxy {
             tls_setup,
             tcp_proxies: Default::default(),
             http_gateways: Default::default(),
-            tasks: Default::default(),
+            tasks: None,
             protocol_version: None,
+            restore_subscriptions_on_protocol_version_switch: false,
         }
     }
 
@@ -268,7 +271,7 @@ impl IncomingProxy {
                     request.port,
                 );
                 message_bus
-                    .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(
+                    .send_agent(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(
                         response,
                     )))
                     .await;
@@ -285,11 +288,10 @@ impl IncomingProxy {
             port: request.port,
             version: request.version(),
         };
-
         let server_addr = normalize_connection_address(subscription.listening_on);
         tracing::info!("Using server address {} for connection", server_addr);
 
-        let tx = self.tasks.register(
+        let tx = self.tasks.as_mut().unwrap().register(
             HttpGatewayTask::new(
                 request,
                 self.client_store.clone(),
@@ -354,7 +356,7 @@ impl IncomingProxy {
             } else {
                 ClientMessage::Tcp(LayerTcp::ConnectionUnsubscribe(connection_id))
             };
-            message_bus.send(message).await;
+            message_bus.send_agent(message).await;
 
             return Ok(());
         };
@@ -383,7 +385,7 @@ impl IncomingProxy {
         } else {
             InProxyTask::MirrorTcpProxy(connection_id)
         };
-        let tx = self.tasks.register(
+        let tx = self.tasks.as_mut().unwrap().register(
             TcpProxyTask::new(
                 connection_id,
                 LocalTcpConnection::FromTheStart {
@@ -652,17 +654,18 @@ impl IncomingProxy {
                         subscribe,
                         self.protocol_version.as_ref(),
                     );
-
-                    if let Some(msg) = msg {
-                        message_bus.send(msg).await;
-                    }
+                    match msg {
+                        Some(Either::Left(m)) => message_bus.send(m).await,
+                        Some(Either::Right(m)) => message_bus.send_agent(m).await,
+                        None => (),
+                    };
                 }
 
                 IncomingRequest::PortUnsubscribe(unsubscribe) => {
                     let msg = self.subscriptions.layer_unsubscribed(layer_id, unsubscribe);
 
                     if let Some(msg) = msg {
-                        message_bus.send(msg).await;
+                        message_bus.send_agent(msg).await;
                     }
                 }
                 IncomingRequest::ConnMetadata(req) => {
@@ -691,7 +694,7 @@ impl IncomingProxy {
                 let msgs = self.subscriptions.layer_closed(msg.id);
 
                 for msg in msgs {
-                    message_bus.send(msg).await;
+                    message_bus.send_agent(msg).await;
                 }
             }
 
@@ -702,23 +705,43 @@ impl IncomingProxy {
             IncomingProxyMessage::AgentProtocolVersion(protocol_version) => {
                 self.response_mode = ResponseMode::from(&protocol_version);
                 self.protocol_version.replace(protocol_version);
+
+                if self.restore_subscriptions_on_protocol_version_switch {
+                    for subscription in self.subscriptions.iter_mut() {
+                        tracing::info!(?subscription, "Resubscribing after connection refresh");
+
+                        message_bus
+                            .send_agent(
+                                subscription.resubscribe_message(self.protocol_version.as_ref()),
+                            )
+                            .await
+                    }
+                    self.restore_subscriptions_on_protocol_version_switch = false;
+                }
             }
 
-            IncomingProxyMessage::ConnectionRefresh => {
-                self.tcp_proxies.mirror.clear();
-                self.tcp_proxies.steal.clear();
-                self.http_gateways.mirror.clear();
-                self.http_gateways.steal.clear();
-                self.tasks.clear();
+            IncomingProxyMessage::ConnectionRefresh(refresh) => {
+                match refresh {
+                    ConnectionRefresh::Start => {
+                        self.tcp_proxies.mirror.clear();
+                        self.tcp_proxies.steal.clear();
+                        self.http_gateways.mirror.clear();
+                        self.http_gateways.steal.clear();
+                        self.tasks.as_mut().unwrap().clear();
 
-                for subscription in self.subscriptions.iter_mut() {
-                    tracing::info!(?subscription, "Resubscribing after connection refresh");
-
-                    message_bus
-                        .send(ProxyMessage::ToAgent(
-                            subscription.resubscribe_message(self.protocol_version.as_ref()),
-                        ))
-                        .await
+                        // Reset protocol version since we'll need another negotiation
+                        // round for the new connection.
+                        self.protocol_version = None;
+                        self.restore_subscriptions_on_protocol_version_switch = true;
+                    }
+                    ConnectionRefresh::End(tx_handle) => {
+                        message_bus.set_agent_tx(tx_handle);
+                        self.tasks
+                            .as_mut()
+                            .unwrap()
+                            .set_agent_tx(message_bus.clone_agent_tx());
+                    }
+                    ConnectionRefresh::Request => {}
                 }
             }
         }
@@ -756,13 +779,13 @@ impl IncomingProxy {
                     .is_some();
                 if send_close && is_steal {
                     message_bus
-                        .send(ClientMessage::TcpSteal(
+                        .send_agent(ClientMessage::TcpSteal(
                             LayerTcpSteal::ConnectionUnsubscribe(connection_id),
                         ))
                         .await;
                 } else if send_close {
                     message_bus
-                        .send(ClientMessage::Tcp(LayerTcp::ConnectionUnsubscribe(
+                        .send_agent(ClientMessage::Tcp(LayerTcp::ConnectionUnsubscribe(
                             connection_id,
                         )))
                         .await;
@@ -771,17 +794,6 @@ impl IncomingProxy {
 
             TaskUpdate::Message(..) if !is_steal => {
                 unreachable!("TcpProxyTask does not produce messages in mirror mode")
-            }
-
-            TaskUpdate::Message(InProxyTaskMessage::Tcp(bytes)) => {
-                if self.tcp_proxies.steal.contains_key(&connection_id) {
-                    message_bus
-                        .send(ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
-                            connection_id,
-                            bytes: bytes.into(),
-                        })))
-                        .await;
-                }
             }
 
             TaskUpdate::Message(InProxyTaskMessage::Http(..)) => {
@@ -830,7 +842,7 @@ impl IncomingProxy {
                                 id.port,
                             );
                             message_bus
-                                .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(
+                                .send_agent(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(
                                     response,
                                 )))
                                 .await;
@@ -852,7 +864,7 @@ impl IncomingProxy {
 
                 match message {
                     HttpOut::Upgraded(on_upgrade) => {
-                        let proxy = self.tasks.register(
+                        let proxy = self.tasks.as_mut().unwrap().register(
                             TcpProxyTask::new(
                                 id.connection_id,
                                 LocalTcpConnection::AfterUpgrade(on_upgrade),
@@ -870,55 +882,7 @@ impl IncomingProxy {
                             .get_mut(is_steal)
                             .insert(id.connection_id, proxy);
                     }
-                    _ if is_steal.not() => {
-                        unreachable!("HttpGatewayTask does not produce responses in mirror mode")
-                    }
-                    HttpOut::ResponseBasic(response) => {
-                        tracing::info!(
-                            full_headers = ?response.internal_response.headers,
-                            ?response,
-                            "Received an HTTP response from an HttpGatewayTask",
-                        );
-
-                        message_bus
-                            .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(
-                                response,
-                            )))
-                            .await
-                    }
-                    HttpOut::ResponseFramed(response) => {
-                        tracing::info!(
-                            full_headers = ?response.internal_response.headers,
-                            ?response,
-                            "Received an HTTP response from an HttpGatewayTask",
-                        );
-
-                        message_bus
-                            .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(
-                                response,
-                            )))
-                            .await
-                    }
-                    HttpOut::ResponseChunked(response) => {
-                        if let ChunkedResponse::Start(start) = &response {
-                            tracing::info!(
-                                full_headers = ?start.internal_response.headers,
-                                response = ?start,
-                                "Received an HTTP response from an HttpGatewayTask",
-                            );
-                        }
-
-                        message_bus
-                            .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
-                                response,
-                            )))
-                            .await;
-                    }
                 }
-            }
-
-            TaskUpdate::Message(InProxyTaskMessage::Tcp(..)) => {
-                unreachable!("HttpGatewayTask does not produce TCP messages")
             }
         }
     }
@@ -931,6 +895,11 @@ impl BackgroundTask for IncomingProxy {
 
     #[tracing::instrument(level = Level::INFO, name = "incoming_proxy_main_loop", skip_all, err)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+        match &mut self.tasks {
+            Some(tasks) => tasks.set_agent_tx(message_bus.clone_agent_tx()),
+            None => self.tasks = Some(BackgroundTasks::new(message_bus.clone_agent_tx())),
+        };
+
         loop {
             tokio::select! {
                 msg = message_bus.recv() => match msg {
@@ -941,7 +910,7 @@ impl BackgroundTask for IncomingProxy {
                     Some(message) => self.handle_message(message, message_bus).await?,
                 },
 
-                Some((id, update)) = self.tasks.next() => match id {
+                Some((id, update)) = self.tasks.as_mut().unwrap().next() => match id {
                     InProxyTask::MirrorTcpProxy(connection_id) => {
                         self.handle_tcp_proxy_update(connection_id, false, update, message_bus).await;
                     }

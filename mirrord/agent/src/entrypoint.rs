@@ -17,10 +17,13 @@ use futures::{TryFutureExt, future::OptionFuture};
 use metrics::{CLIENT_COUNT, start_metrics};
 use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{
-    SafeIpTables,
+    IPTablesWrapper, SafeIpTables,
     error::{IPTablesError, IPTablesResult},
 };
-use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
+use mirrord_protocol::{
+    ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage, ResponseError,
+    dns::ReverseDnsLookupResponse,
+};
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
     process::Command,
@@ -547,6 +550,22 @@ impl ClientConnectionHandler {
                     .make_request(ClientGetAddrInfoRequest::V2(request))
                     .await?;
             }
+            ClientMessage::ReverseDnsLookup(request) => {
+                let hostname = dns_lookup::lookup_addr(&request.ip_address).inspect_err(|error| {
+                    error!(
+                        address = ?request.ip_address,
+                        error = ?error,
+                        "Reverse DNS lookup failed",
+                    )
+                });
+
+                self.respond(DaemonMessage::ReverseDnsLookup(Ok(
+                    ReverseDnsLookupResponse {
+                        hostname: hostname.map_err(ResponseError::from),
+                    },
+                )))
+                .await?
+            }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             // Message handled exclusively by the operator, see its docs for details.
             ClientMessage::OperatorPong(_) => (),
@@ -705,10 +724,25 @@ fn monitor_main_container(cancel: CancellationToken, pid: libc::pid_t) {
     });
 }
 
+#[tracing::instrument(level = Level::TRACE, ret, err)]
+async fn get_rules(
+    iptables: &IPTablesWrapper,
+    ip6tables: Option<&IPTablesWrapper>,
+) -> IPTablesResult<Vec<String>> {
+    let rules_v4 = SafeIpTables::list_mirrord_rules(iptables).await?;
+    if let Some(ip6tables) = ip6tables {
+        let rules_v6 = SafeIpTables::list_mirrord_rules(ip6tables).await?;
+        Ok([rules_v4, rules_v6].concat())
+    } else {
+        Ok(rules_v4)
+    }
+}
+
 /// Get existing iptable rules created by another (potentially still running) agent.
 ///
 /// If `clean_existing_rules` is set, the iptables will be cleaned after fetching the existing
 /// rules. The rules from before the cleanup will be returned for logging.
+#[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn check_existing_rules(
     support_ipv6: bool,
     clean_existing_rules: bool,
@@ -716,19 +750,23 @@ async fn check_existing_rules(
 ) -> IPTablesResult<Vec<String>> {
     let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
     let iptables = mirrord_agent_iptables::get_iptables(nftables, false);
-    let ip6tables = mirrord_agent_iptables::get_iptables(nftables, true);
-    let rules_v4 = SafeIpTables::list_mirrord_rules(&iptables).await?;
-    let rules_v6 = if support_ipv6 {
-        SafeIpTables::list_mirrord_rules(&ip6tables).await?
-    } else {
-        vec![]
-    };
-    let rules = [rules_v4, rules_v6].concat();
-    if clean_existing_rules && rules.is_empty().not() {
-        clear_iptable_chain(support_ipv6, with_mesh_exclusion).await?;
+    let ip6tables = support_ipv6.then(|| mirrord_agent_iptables::get_iptables(nftables, true));
+    let rules = get_rules(&iptables, ip6tables.as_ref()).await?;
+    if clean_existing_rules
+        && rules.is_empty().not()
+        && let Err(err) = clear_iptable_chain(support_ipv6, with_mesh_exclusion).await
+    {
+        // the error could be because we tried to remove two rules and only one of them was
+        // present to begin with, so removing the other, non-existent one failed.
+        // So we check the rules after cleaning and only fail if there are still rules.
+        let rules = get_rules(&iptables, ip6tables.as_ref()).await?;
+        if rules.is_empty().not() {
+            // There are still rules after the cleanup, the cleanup was not successful.
+            return Err(err);
+        }
     }
 
-    Ok::<_, IPTablesError>(rules)
+    Ok(rules)
 }
 
 /// Real mirrord-agent routine.
@@ -786,9 +824,16 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
 
         if leftover_rules.is_empty().not() {
-            if args.clean_iptables_on_start.not() {
+            if args.clean_iptables_on_start {
+                warn!(
+                    leftover_rules = ?leftover_rules,
+                    "{}",
+                    DIRTY_IPTABLES_CLEANUP_WARNING_MESSAGE
+                );
+            } else {
                 error!(
                     leftover_rules = ?leftover_rules,
+                    "{}",
                     DIRTY_IPTABLES_ERROR_MESSAGE
                 );
                 let _ = notify_client_about_dirty_iptables(
@@ -798,11 +843,6 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                 )
                 .await;
                 return Err(AgentError::IPTablesDirty);
-            } else {
-                warn!(
-                    leftover_rules = ?leftover_rules,
-                    DIRTY_IPTABLES_CLEANUP_WARNING_MESSAGE
-                );
             }
         }
 

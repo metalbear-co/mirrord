@@ -103,7 +103,7 @@ layer injected into it. Some test apps need to be compiled before they can be us
 
 The basic command to run the E2E tests is:
 ```bash
-cargo test --package tests
+cargo test --package mirrord-tests
 ```
 
 However, when running on macOS a universal binary has to be created first:
@@ -161,7 +161,7 @@ IPv6 tests (they currently don't run in the CI):
 The Kubernetes resources created by the E2E tests are automatically deleted when the test exits. However, you can preserve resources from failed tests for debugging. To do this, set the `MIRRORD_E2E_PRESERVE_FAILED` variable to any value.
 
 ```bash
-MIRRORD_E2E_PRESERVE_FAILED=y cargo test --package tests
+MIRRORD_E2E_PRESERVE_FAILED=y cargo test --package mirrord-tests
 ```
 
 All test resources share a common label `mirrord-e2e-test-resource=true`. To delete them, simply run:
@@ -635,7 +635,10 @@ Add a changelog file in `changelog.d/` named `<identifier>.<category>.md`
 - Don't use Linear issues or private repo issue numbers
 
 **Category:**
-Check `towncrier.toml` for available categories (`added`, `changed`, `fixed`, etc.) and choose the one that fits your change.
+- `added` for new functionality
+- `fixed` for fixed bugs
+- `internal` for anything users don't care about, e.g. changes in tests or CI
+- `changed` for anything else
 
 # Architecture
 
@@ -738,6 +741,7 @@ flowchart TB
 ## Release PR
 
 1. Create a new branch named after the new version, e.g. `3.333.0`. This will trigger additional CI jobs.
+	1. If the new release only contains `internal` and `fixed` changes, bump a patch version. Otherwise, bump a minor version.
 2. On the new branch, bump the workspace version in `Cargo.toml` and run `cargo update -w` to update `Cargo.lock`.
 3. Generate the changelog with: `towncrier build --version <new-version>`.
 4. Review the generated changelog and fix any issues or typos.

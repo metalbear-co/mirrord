@@ -8,6 +8,8 @@
 
 use std::{collections::HashMap, fmt, future::Future, hash::Hash, ops::ControlFlow};
 
+use mirrord_protocol::ClientMessage;
+use mirrord_protocol_io::{Client, TxHandle};
 use thiserror::Error;
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
@@ -24,6 +26,7 @@ pub type MessageBus<T> =
 pub struct MessageBusInner<MessageIn, MessageOut> {
     tx: Sender<MessageOut>,
     rx: Receiver<MessageIn>,
+    agent_tx: TxHandle<Client>,
     token: CancellationToken,
 }
 
@@ -41,6 +44,21 @@ impl<MessageIn, MessageOut> MessageBusInner<MessageIn, MessageOut> {
             _ = self.tx.closed() => None,
             msg = self.rx.recv() => msg,
         }
+    }
+
+    /// Sends a message to the agent connection task.
+    pub async fn send_agent(&self, msg: ClientMessage) {
+        self.agent_tx.send(msg).await
+    }
+
+    /// Creates a clone of the agent tx handle
+    pub fn clone_agent_tx(&self) -> TxHandle<Client> {
+        self.agent_tx.clone()
+    }
+
+    /// Updates the agent tx handle
+    pub fn set_agent_tx(&mut self, new_agent_tx: TxHandle<Client>) {
+        self.agent_tx = new_agent_tx;
     }
 
     /// Returns a [`CancellationToken`] that will be cancelled once this message bus is closed.
@@ -136,15 +154,21 @@ pub struct BackgroundTasks<Id, MOut, Err> {
     suspended_streams: HashMap<Id, StreamNotifyClose<ReceiverStream<MOut>>>,
     streams: StreamMap<Id, StreamNotifyClose<ReceiverStream<MOut>>>,
     handles: HashMap<Id, JoinHandle<Result<(), Err>>>,
+    agent_tx: TxHandle<Client>,
 }
 
-impl<Id, MOut, Err> Default for BackgroundTasks<Id, MOut, Err> {
-    fn default() -> Self {
+impl<Id, MOut, Err> BackgroundTasks<Id, MOut, Err> {
+    pub fn new(agent_tx: TxHandle<Client>) -> Self {
         Self {
             suspended_streams: Default::default(),
             streams: Default::default(),
             handles: Default::default(),
+            agent_tx,
         }
+    }
+
+    pub fn set_agent_tx(&mut self, agent_tx: TxHandle<Client>) {
+        self.agent_tx = agent_tx;
     }
 }
 
@@ -191,6 +215,7 @@ where
             tx: out_msg_tx,
             rx: in_msg_rx,
             token: token.clone(),
+            agent_tx: self.agent_tx.another(),
         };
 
         self.handles.insert(

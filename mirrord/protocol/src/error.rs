@@ -101,6 +101,8 @@ pub static MIRROR_POLICY_REASON_VERSION: LazyLock<VersionReq> =
 pub enum BlockedAction {
     Steal(StealType),
     Mirror(Port),
+    OutgoingTcp(SocketAddress),
+    OutgoingUdp(SocketAddress),
 }
 
 /// Determines how a blocked action will be displayed to the user in an error.
@@ -124,6 +126,12 @@ impl fmt::Display for BlockedAction {
             }
             BlockedAction::Mirror(port) => {
                 write!(f, "Mirroring traffic from port {port}")
+            }
+            BlockedAction::OutgoingTcp(address) => {
+                write!(f, "Outgoing TCP connection to {address}")
+            }
+            BlockedAction::OutgoingUdp(address) => {
+                write!(f, "Outgoing UDP connection to {address}")
             }
         }
     }
