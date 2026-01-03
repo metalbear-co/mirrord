@@ -491,24 +491,31 @@ jobs:
           
           Write-Host "Fetching kubeconfig via IAP..."
           # Pipe 'y' to accept potential host key prompts (PuTTY/Plink)
-          # Use cmd /c to handle piping robustly if needed, or just PS pipe
-          # We also verify gcloud path for later use
-          $gcloudCmd = (Get-Command gcloud).Source
+          
+          # Resolve gcloud.cmd to avoid issues with .ps1 and cmd.exe
+          $gcloudPath = (Get-Command gcloud).Source
+          if ($gcloudPath.EndsWith(".ps1")) {
+              $parent = Split-Path $gcloudPath -Parent
+              $gcloudCmd = Join-Path $parent "gcloud.cmd"
+          } else {
+              $gcloudCmd = $gcloudPath
+          }
           Write-Host "Using gcloud at: $gcloudCmd"
 
           # Use --quiet to avoid prompts, --tunnel-through-iap for firewall bypass
-          # Piping 'y' to handle the Plink host key prompt if it occurs
-          $kubeconfig = echo "y" | gcloud --quiet compute ssh k3s-tests-1 --zone=us-central1-a --tunnel-through-iap --command "sudo cat /etc/rancher/k3s/k3s.yaml"
+          $kubeconfig = echo "y" | & "$gcloudCmd" --quiet compute ssh k3s-tests-1 --zone=us-central1-a --tunnel-through-iap --command "sudo cat /etc/rancher/k3s/k3s.yaml"
           
           if (-not $kubeconfig) {
              throw "Failed to fetch kubeconfig or empty output."
           }
 
           # Start IAP Tunnel in background
-          # We use cmd.exe /c to invoke gcloud because it's likely a .cmd file, which Start-Process doesn't handle directly as an exe
+          # Use cmd.exe /c to execute the batch file.
+          # IMPORTANT: We must quote the path to gcloud.cmd because it likely contains spaces (Program Files).
+          # In PowerShell strings, double quotes are escaped by double quotes: ""path"" inside the string becomes "path" in the arg.
           Write-Host "Starting IAP tunnel on port 6443..."
           $tunnelProc = Start-Process -FilePath "cmd.exe" `
-              -ArgumentList "/c $gcloudCmd compute start-iap-tunnel k3s-tests-1 6443 --local-host-port=localhost:6443 --zone=us-central1-a --quiet" `
+              -ArgumentList "/c ""$gcloudCmd"" compute start-iap-tunnel k3s-tests-1 6443 --local-host-port=localhost:6443 --zone=us-central1-a --quiet" `
               -NoNewWindow -PassThru
           
           # Wait for tunnel to come up
