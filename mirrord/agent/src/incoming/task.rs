@@ -160,7 +160,7 @@ where
         let source = conn.source;
         let destination = conn.destination;
 
-        let Entry::Occupied(mut e) = self.ports.entry(destination.port()) else {
+        let Some(state) = self.ports.get_mut(&destination.port()) else {
             tracing::warn!(
                 %source,
                 %destination,
@@ -169,7 +169,6 @@ where
             return;
         };
 
-        let state = e.get_mut();
         if state.mirror_txs.is_empty().not() || state.steal_tx.is_some() {
             let tx = self.internal_tx.clone();
             let tls_store = self.tls_store.clone();
