@@ -119,6 +119,19 @@ jobs:
              throw "Failed to fetch kubeconfig or empty output."
           }
 
+          # Clean up any existing process on port 6443 to avoid "Unable to open socket" errors
+          Write-Host "Checking for existing tunnel on port 6443..."
+          try {
+              $existing = Get-NetTCPConnection -LocalPort 6443 -ErrorAction Stop
+              if ($existing) {
+                  Write-Host "Found existing process on 6443 (PID: $($existing.OwningProcess)). Killing..."
+                  Stop-Process -Id $existing.OwningProcess -Force -ErrorAction SilentlyContinue
+                  Start-Sleep -Seconds 2
+              }
+          } catch {
+              Write-Host "No existing process found on port 6443."
+          }
+
           # Start IAP Tunnel in background
           # Use cmd.exe /c to execute the batch file.
           # IMPORTANT: We must quote the path to gcloud.cmd because it likely contains spaces (Program Files).
