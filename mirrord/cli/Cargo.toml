@@ -68,7 +68,7 @@ uuid.workspace = true
 fs4.workspace = true
 hex.workspace = true
 tower = { workspace = true, features = ["retry"] }
-ci_info = "0.14"
+ci_info.workspace = true
 opener = "0.8.3"
 tempfile = { workspace = true, optional = true }
 axum = { version = "0.8.4", optional = true }
