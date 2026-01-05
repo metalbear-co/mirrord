@@ -6,7 +6,7 @@ use std::{
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use mirrord_config::{
-    feature::database_branches::{MongodbBranchCopyConfig, MongodbBranchCollectionCopyConfig},
+    feature::database_branches::{MongodbBranchCollectionCopyConfig, MongodbBranchCopyConfig},
     target::Target,
 };
 use schemars::JsonSchema;
@@ -176,4 +176,3 @@ impl From<MongodbBranchCollectionCopyConfig> for CollectionCopyConfig {
         }
     }
 }
-

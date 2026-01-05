@@ -7,10 +7,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{self, source::MirrordConfigSource};
 
+pub mod mongodb;
 pub mod mysql;
 pub mod pg;
 pub mod redis;
 
+pub use mongodb::{
+    MongodbBranchCollectionCopyConfig, MongodbBranchConfig, MongodbBranchCopyConfig,
+};
 pub use mysql::{MysqlBranchConfig, MysqlBranchCopyConfig, MysqlBranchTableCopyConfig};
 pub use pg::{PgBranchConfig, PgBranchCopyConfig, PgBranchTableCopyConfig};
 pub use redis::{
