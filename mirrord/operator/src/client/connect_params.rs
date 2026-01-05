@@ -32,6 +32,10 @@ pub struct ConnectParams<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch_name: Option<String>,
 
+    /// Resource names of the MongoDB branch databases to use for the connection.
+    #[serde(with = "mongodb_branches_serde")]
+    pub mongodb_branch_names: Vec<String>,
+
     /// Resource names of the database branches to use for the connection.
     #[serde(with = "mysql_branches_serde")]
     pub mysql_branch_names: Vec<String>,
@@ -51,6 +55,7 @@ impl<'a> ConnectParams<'a> {
     pub fn new(
         config: &'a LayerConfig,
         branch_name: Option<String>,
+        mongodb_branch_names: Vec<String>,
         mysql_branch_names: Vec<String>,
         pg_branch_names: Vec<String>,
         session_ci_info: Option<SessionCiInfo>,
@@ -62,6 +67,7 @@ impl<'a> ConnectParams<'a> {
             kafka_splits: config.feature.split_queues.kafka().collect(),
             sqs_splits: config.feature.split_queues.sqs().collect(),
             branch_name,
+            mongodb_branch_names,
             mysql_branch_names,
             pg_branch_names,
             session_ci_info,
@@ -88,6 +94,23 @@ mod queue_splits_serde {
         let as_json =
             serde_json::to_string(queue_splits).expect("serialization to memory should not fail");
         serializer.serialize_str(as_json.as_str())
+    }
+}
+
+mod mongodb_branches_serde {
+    use serde::Serializer;
+
+    pub fn serialize<S>(mongodb_branches: &Vec<String>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if mongodb_branches.is_empty() {
+            serializer.serialize_none()
+        } else {
+            let as_json = serde_json::to_string(mongodb_branches)
+                .expect("serialization to memory should not fail");
+            serializer.serialize_str(&as_json)
+        }
     }
 }
 

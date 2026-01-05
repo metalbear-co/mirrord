@@ -19,6 +19,7 @@ pub enum OperatorOperation {
     GettingStatus,
     SessionManagement,
     ListingTargets,
+    MongodbBranching,
     MysqlBranching,
     PgBranching,
 }
@@ -33,6 +34,7 @@ impl fmt::Display for OperatorOperation {
             Self::GettingStatus => "getting status",
             Self::SessionManagement => "session management",
             Self::ListingTargets => "listing targets",
+            Self::MongodbBranching => "mongodb branching",
             Self::MysqlBranching => "mysql branching",
             Self::PgBranching => "postgresql branching",
         };

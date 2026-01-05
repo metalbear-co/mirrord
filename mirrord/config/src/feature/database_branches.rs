@@ -56,6 +56,13 @@ impl Deref for DatabaseBranchesConfig {
 }
 
 impl DatabaseBranchesConfig {
+    pub fn count_mongodb(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::Mongodb { .. }))
+            .count()
+    }
+
     pub fn count_mysql(&self) -> usize {
         self.0
             .iter()
@@ -100,6 +107,7 @@ impl DatabaseBranchesConfig {
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum DatabaseBranchConfig {
+    Mongodb(MongodbBranchConfig),
     Mysql(MysqlBranchConfig),
     Pg(PgBranchConfig),
     Redis(RedisBranchConfig),
@@ -211,6 +219,7 @@ impl config::FromMirrordConfig for DatabaseBranchesConfig {
 
 impl CollectAnalytics for &DatabaseBranchesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
+        analytics.add("mongodb_branch_count", self.count_mongodb());
         analytics.add("mysql_branch_count", self.count_mysql());
         analytics.add("pg_branch_count", self.count_pg());
         analytics.add("redis_branch_count", self.count_redis());
