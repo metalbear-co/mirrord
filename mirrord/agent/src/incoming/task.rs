@@ -378,7 +378,7 @@ where
     /// Handles a [`RedirectRequest`] coming from one of this task's handles.
     ///
     /// Spawns a helper task that waits for the subscription channel to close,
-    /// and sends [`InternalMessage::DeadChannel`] back to the [`RedirectorTask`].
+    /// and sends [`InternalMessage::MaybeDeadChannel`] back to the [`RedirectorTask`].
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn handle_client_request(&mut self, message: RedirectRequest) -> Result<(), R::Error> {
         match message {
@@ -448,7 +448,7 @@ where
         Ok(())
     }
 
-    /// Called when [`InternalMessage::DeadChannel`] is received from a helper task.
+    /// Called when [`InternalMessage::MaybeDeadChannel`] is received from a helper task.
     ///
     /// One of the subscription channels may be closed. We need to
     /// check the related [`PortState`].
