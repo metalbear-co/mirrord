@@ -479,7 +479,9 @@ pub struct IncomingConfig {
 
     /// **feature.network.incoming.ports {#feature-network-incoming-ports}
     ///
-    /// List of ports to mirror/steal traffic from. Other ports will remain local.
+    /// When set, traffic will only be mirrored/stolen on these ports,
+    /// and other ports will remain local. Otherwise, all ports are
+    /// mirrored/stolen.
     ///
     /// Mutually exclusive with
     /// [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).

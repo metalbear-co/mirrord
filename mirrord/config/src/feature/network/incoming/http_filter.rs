@@ -172,13 +172,6 @@ pub struct HttpFilterConfig {
     ///
     /// Activate the HTTP traffic filter only for these ports. When
     /// absent, filtering will be done for all ports.
-    ///
-    /// Other ports will *not* be stolen, unless listed in
-    /// [`feature.network.incoming.ports`](#feature-network-incoming-ports).
-    ///
-    /// We check the pod's health probe ports and automatically add them here, as they're
-    /// usually the same ports your app might be listening on. If your app ports and the
-    /// health probe ports don't match, then setting this option will override this behavior.
     #[config(env = "MIRRORD_HTTP_FILTER_PORTS")]
     pub ports: Option<VecOrSingle<u16>>,
 }
