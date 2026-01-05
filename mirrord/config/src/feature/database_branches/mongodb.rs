@@ -24,14 +24,10 @@ pub struct MongodbBranchConfig {
 ///   operator looks for the `name` field from the branch DB config object. This option is useful
 ///   for users that run DB migrations themselves before starting the application.
 ///
-/// - Schema
-///
-///   Creates an empty database and copies schema (indexes) of all collections.
-///
 /// - All
 ///
-///   Copies both schema and data of all collections. This option shall only be used
-///   when the data volume of the source database is minimal.
+///   Copies both schema and data of all collections. Supports optional collection filters
+///   to copy only specific collections or filter documents within collections.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "lowercase")]
 pub enum MongodbBranchCopyConfig {
@@ -39,11 +35,11 @@ pub enum MongodbBranchCopyConfig {
         collections: Option<HashMap<String, MongodbBranchCollectionCopyConfig>>,
     },
 
-    Schema {
+    All {
+        /// Optional collection filters. If not specified, all collections are copied.
+        /// If specified, only the listed collections are copied with their optional filters.
         collections: Option<HashMap<String, MongodbBranchCollectionCopyConfig>>,
     },
-
-    All,
 }
 
 impl Default for MongodbBranchCopyConfig {
@@ -54,8 +50,7 @@ impl Default for MongodbBranchCopyConfig {
     }
 }
 
-/// In addition to copying an empty database or all collections' schema, mirrord operator
-/// will copy data from the source DB when an array of collection configs are specified.
+/// Configuration for copying a specific collection.
 ///
 /// Example:
 ///
@@ -77,4 +72,3 @@ pub struct MongodbBranchCollectionCopyConfig {
     /// A MongoDB query filter in JSON format. Documents matching this filter will be copied.
     pub filter: Option<String>,
 }
-

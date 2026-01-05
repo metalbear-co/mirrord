@@ -104,11 +104,11 @@ pub struct SessionInfo {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BranchCopyConfig {
-    /// The default copy mode for the branch.
+    /// The copy mode for the branch.
     pub mode: BranchCopyMode,
 
-    /// An optional list of collections whose schema and data will be copied based on their
-    /// collection level copy config. Only compatible with `Empty` and `Schema` copy mode.
+    /// An optional list of collections to copy with their filters.
+    /// If not specified, all collections are copied (for `All` mode) or none (for `Empty` mode).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub collections: Option<BTreeMap<String, CollectionCopyConfig>>,
 }
@@ -118,10 +118,8 @@ pub struct BranchCopyConfig {
 pub enum BranchCopyMode {
     /// Create an empty database only.
     Empty,
-    /// Create a database with all collections' schema (indexes) copied from the source database.
-    Schema,
-    /// Create a database and copy all collections' schema and data from the source database.
-    /// With this copy mode, all collection specific copy configs are ignored.
+    /// Create a database and copy collections' schema and data from the source database.
+    /// Supports optional collection filters to copy specific collections or filter documents.
     All,
 }
 
@@ -145,17 +143,13 @@ impl From<MongodbBranchCopyConfig> for BranchCopyConfig {
                         .collect()
                 }),
             },
-            MongodbBranchCopyConfig::Schema { collections } => BranchCopyConfig {
-                mode: BranchCopyMode::Schema,
+            MongodbBranchCopyConfig::All { collections } => BranchCopyConfig {
+                mode: BranchCopyMode::All,
                 collections: collections.map(|c| {
                     c.into_iter()
                         .map(|(name, config)| (name, config.into()))
                         .collect()
                 }),
-            },
-            MongodbBranchCopyConfig::All => BranchCopyConfig {
-                mode: BranchCopyMode::All,
-                collections: None,
             },
         }
     }
