@@ -46,6 +46,7 @@ tokio-retry = { workspace = true, optional = true }
 tower = { workspace = true, features = ["retry"] }
 http.workspace = true
 itertools.workspace = true
+glob = "0.3"
 
 [dev-dependencies]
 rstest.workspace = true
