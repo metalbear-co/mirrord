@@ -468,7 +468,7 @@ jobs:
     needs: update_latest
     if: ${{ !cancelled() && !failure() }}
     permissions:
-      contents: write
+      contents: read
     uses: ./.github/workflows/windows-build.yaml
     with:
 
