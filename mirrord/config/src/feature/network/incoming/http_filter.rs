@@ -267,16 +267,17 @@ impl HttpFilterConfig {
             })
     }
 
-    /// Returns `None` when we have no HTTP filter set.
-    ///
-    /// Returns `Some(None)` when we have an HTTP filter set, but
-    /// `http_filter.ports` is unset, i.e. we filter all ports.
-    ///
-    /// Returns `Some(&[u16])` when we have an HTTP filter set, AND
-    /// `http_filter.ports` is set, i.e. we filter only the selected
-    /// ports.
-    pub fn get_filtered_ports(&self) -> Option<Option<&[u16]>> {
-        self.is_filter_set().then_some(self.ports.as_deref())
+    /// Returns the number of ports that get filtered.
+    pub fn count_filtered_ports(&self) -> u16 {
+        if self.is_filter_set() {
+            0
+        } else {
+            match &self.ports {
+                // "SAFETY": can't have more than u16::MAX ports
+                Some(list) => list.len() as u16,
+                None => u16::MAX,
+            }
+        }
     }
 }
 
@@ -456,14 +457,6 @@ impl CollectAnalytics for &HttpFilterConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("header_filter", self.header_filter.is_some());
         analytics.add("path_filter", self.path_filter.is_some());
-        analytics.add(
-            "ports",
-            match self.get_filtered_ports() {
-                // Should never have more than u16::MAX ports
-                Some(Some(p)) => p.len() as u16,
-                Some(None) => u16::MAX,
-                None => 0,
-            },
-        );
+        analytics.add("ports", self.count_filtered_ports());
     }
 }
