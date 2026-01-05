@@ -27,16 +27,7 @@ pub struct PgBranchConfig {
 /// - `{ "type": "env", "variable": "VAR_NAME" }` - direct env var from pod spec
 /// - `{ "type": "env_from", "variable": "VAR_NAME" }` - from configMapRef/secretRef
 ///
-/// Example for AWS RDS with defaults (uses AWS_REGION, AWS_ACCESS_KEY_ID, etc.):
-/// ```json
-/// {
-///   "iam_auth": {
-///     "type": "aws_rds"
-///   }
-/// }
-/// ```
-///
-/// Example with custom environment variables:
+/// Example:
 /// ```json
 /// {
 ///   "iam_auth": {

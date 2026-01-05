@@ -53,28 +53,26 @@ pub struct PgBranchDatabaseSpec {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IamAuthConfig {
     /// AWS RDS/Aurora IAM authentication.
-    /// Requires the init container to have AWS credentials (via IRSA or instance profile).
+    /// Requires the init container to have AWS credentials
     AwsRds {
-        /// AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
+        /// AWS region.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         region: Option<ConnectionSourceKind>,
 
-        /// AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
+        /// AWS Access Key ID.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         access_key_id: Option<ConnectionSourceKind>,
 
-        /// AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
+        /// AWS Secret Access Key.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         secret_access_key: Option<ConnectionSourceKind>,
 
-        /// AWS Session Token (for temporary credentials). If not specified, uses
-        /// AWS_SESSION_TOKEN.
+        /// AWS Session Token (for temporary credentials).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_token: Option<ConnectionSourceKind>,
     },
     /// GCP Cloud SQL IAM authentication.
-    /// Requires the init container to have GCP credentials (via Workload Identity or service
-    /// account).
+    /// Requires the init container to have GCP credentials
     GcpCloudSql {
         /// Inline service account JSON key content.
         /// Specify the env var that contains the raw JSON content of the service account key.
@@ -86,7 +84,7 @@ pub enum IamAuthConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         credentials_path: Option<ConnectionSourceKind>,
 
-        /// GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
+        /// GCP project ID.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project: Option<ConnectionSourceKind>,
     },
