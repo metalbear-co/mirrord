@@ -102,9 +102,6 @@ jobs:
             rustfmt.toml
             deny.toml
             .cargo/**
-            mirrord/**/win/**
-            scripts/**/*.ps1
-            **/*.ps1
       - name: get changed windows files
         id: changed-windows
         uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
@@ -695,7 +692,7 @@ jobs:
 
   windows_build:
     needs: changed_files
-    if: ${{ needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
+    if: ${{ needs.changed_files.outputs.rs_changed == 'true' ||needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
     uses: ./.github/workflows/windows-build.yaml
 
     secrets: inherit
