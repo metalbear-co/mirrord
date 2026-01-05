@@ -13,6 +13,7 @@ use std::{
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
+pub use mirrord_config::container::ContainerRuntime;
 use mirrord_config::{
     LayerConfig,
     feature::env::{
@@ -23,7 +24,6 @@ use mirrord_config::{
 };
 use mirrord_operator::setup::OperatorNamespace;
 use thiserror::Error;
-
 /// Macro to automatically handle Windows unsupported commands.
 /// Usage: `windows_unsupported!(args, "command_name", { command_execution })`
 #[macro_export]
@@ -984,24 +984,6 @@ pub(super) enum DiagnoseCommand {
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
         config_file: Option<PathBuf>,
     },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, serde::Serialize)]
-/// Runtimes supported by the `mirrord container` command.
-pub(super) enum ContainerRuntime {
-    Docker,
-    Podman,
-    Nerdctl,
-}
-
-impl std::fmt::Display for ContainerRuntime {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ContainerRuntime::Docker => write!(f, "docker"),
-            ContainerRuntime::Podman => write!(f, "podman"),
-            ContainerRuntime::Nerdctl => write!(f, "nerdctl"),
-        }
-    }
 }
 
 // `mirrord container` command

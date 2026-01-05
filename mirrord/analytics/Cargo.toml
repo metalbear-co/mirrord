@@ -24,6 +24,7 @@ tracing.workspace = true
 tokio.workspace = true
 drain.workspace = true
 uuid.workspace = true
+ci_info.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

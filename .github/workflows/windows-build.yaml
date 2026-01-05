@@ -116,7 +116,7 @@ jobs:
           py -3 -m pip show flask uvicorn fastapi
           py -3 -m pip list
 
-      - name: Prepare artifacts
+      - name: Build
         id: prep
         run: |
           $ErrorActionPreference = "Stop"

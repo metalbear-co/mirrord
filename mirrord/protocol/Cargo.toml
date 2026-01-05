@@ -1,6 +1,6 @@
 [package]
 name = "mirrord-protocol"
-version = "1.24.2"
+version = "1.25.0"
 authors.workspace = true
 description.workspace = true
 documentation.workspace = true
@@ -23,6 +23,9 @@ bytes.workspace = true
 thiserror.workspace = true
 futures.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+serde_json_path.workspace = true
+serde_json_path_macros.workspace = true
 tracing.workspace = true
 hyper = { workspace = true, features = ["client"] }
 http-serde = "2"
@@ -30,7 +33,12 @@ http-body-util = { workspace = true }
 fancy-regex = { workspace = true }
 socket2.workspace = true
 semver = { workspace = true, features = ["serde"] }
-derive_more = { workspace = true, features = ["from", "into", "deref", "display"] }
+derive_more = { workspace = true, features = [
+  "from",
+  "into",
+  "deref",
+  "display",
+] }
 uuid = { workspace = true, features = ["v4"] }
 
 mirrord-macros = { path = "../macros" }

@@ -44,31 +44,44 @@ async fn outgoing_udp(dylib_path: &Path) {
         .map(|s| s.parse::<SocketAddr>().unwrap())
         .collect::<Vec<_>>();
 
-    for peer in peers {
+    for (connection_id, peer) in peers.into_iter().enumerate() {
+        let connection_id = connection_id as u64;
+
         let (uid, addr) = intproxy.recv_udp_connect().await;
         assert_eq!(addr, peer);
         intproxy
-            .send_udp_connect_ok(uid, 0, addr, RUST_OUTGOING_LOCAL.parse().unwrap())
+            .send_udp_connect_ok(
+                uid,
+                connection_id,
+                addr,
+                RUST_OUTGOING_LOCAL.parse().unwrap(),
+            )
             .await;
 
         let msg = intproxy.recv().await;
         let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
-            connection_id: 0,
+            connection_id: response_connection_id,
             bytes,
         })) = msg
         else {
             panic!("Invalid message received from layer: {msg:?}");
         };
+
+        assert_eq!(response_connection_id, connection_id);
+
         intproxy
             .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
                 DaemonRead {
-                    connection_id: 0,
+                    connection_id,
                     bytes,
                 },
             ))))
             .await;
+
         intproxy
-            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(0)))
+            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(
+                connection_id,
+            )))
             .await;
     }
 

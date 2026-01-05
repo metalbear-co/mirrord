@@ -337,6 +337,7 @@ impl DatabaseBranchParams {
                     let params = PgBranchParams::new(id.as_ref(), pg_config, target);
                     pg.insert(id, params);
                 }
+                DatabaseBranchConfig::Redis(_) => {}
             };
         }
         Self { mysql, pg }

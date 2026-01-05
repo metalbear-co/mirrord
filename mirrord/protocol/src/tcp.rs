@@ -19,6 +19,11 @@ use hyper::{
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use serde_json_path::{
+    JsonPath,
+    functions::{NodesType, ValueType},
+};
 use strum_macros::{AsRefStr, EnumString};
 
 use crate::{ConnectionId, Payload, Port, RemoteResult, RequestId};
@@ -213,6 +218,85 @@ impl std::ops::Deref for Filter {
     }
 }
 
+/// Wraps the string that will become a [`serde_json_path::JsonPath`], providing a nice API in
+/// `JsonPathQuery::new` that validates the regex.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct JsonPathQuery(String);
+impl JsonPathQuery {
+    pub fn new(query_str: String) -> Result<Self, serde_json_path::ParseError> {
+        let _ = JsonPath::parse(&query_str)?;
+        Ok(Self(query_str))
+    }
+
+    /// Used in the layer, because the query has already been verified
+    /// by the CLI. We have to verify it in the CLI because
+    /// `serde_json_path` uses the `inventory` crate to register
+    /// extension functions, which in turn uses a constructor
+    /// functions that happen to run AFTER
+    /// `mirrord_layer_entry_point`, so when the CLI tries to verify
+    /// the query our extension functions haven't been registered yet,
+    /// giving us false errors.
+    pub fn new_unchecked(query_str: String) -> Self {
+        Self(query_str)
+    }
+}
+
+impl std::ops::Deref for JsonPathQuery {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[serde_json_path::function(name = "typeof")]
+fn type_of(nodes: NodesType) -> ValueType {
+    #[derive(PartialEq, strum_macros::Display)]
+    #[strum(serialize_all = "lowercase")]
+    enum Types {
+        Null,
+        Bool,
+        Number,
+        String,
+        Array,
+        Object,
+    }
+
+    impl From<Types> for ValueType<'static> {
+        fn from(t: Types) -> Self {
+            ValueType::Value(Value::String(t.to_string()))
+        }
+    }
+
+    impl From<&Value> for Types {
+        fn from(v: &Value) -> Self {
+            match v {
+                Value::Null => Self::Null,
+                Value::Bool(_) => Self::Bool,
+                Value::Number(_) => Self::Number,
+                Value::String(_) => Self::String,
+                Value::Array(_) => Self::Array,
+                Value::Object(_) => Self::Object,
+            }
+        }
+    }
+
+    let mut iter = nodes.iter();
+
+    let first_type = match iter.next() {
+        Some(first) => Types::from(*first),
+        None => return ValueType::Nothing,
+    };
+
+    for v in iter {
+        if Types::from(*v) != first_type {
+            return ValueType::Nothing;
+        }
+    }
+
+    first_type.into()
+}
+
 /// HTTP filter for HTTP methods.
 ///
 /// Supports all the standard methods, plus a `Other` variant for custom methods (why would anyone
@@ -244,7 +328,10 @@ pub enum HttpMethodFilter {
 /// Filter based on the contents of the body.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, strum_macros::Display)]
 pub enum HttpBodyFilter {
-    Json { query: String, matches: Filter },
+    Json {
+        query: JsonPathQuery,
+        matches: Filter,
+    },
 }
 
 /// Describes different types of HTTP filtering available

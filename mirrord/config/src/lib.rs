@@ -27,9 +27,16 @@ use std::{collections::HashMap, ops::Not, path::Path};
 use base64::prelude::*;
 use config::{ConfigContext, ConfigError, MirrordConfig};
 use experimental::ExperimentalConfig;
-use feature::{env::mapper::EnvVarsRemapper, network::outgoing::OutgoingFilterConfig};
+use feature::{
+    env::mapper::EnvVarsRemapper,
+    network::{
+        incoming::http_filter::{BodyFilter, InnerFilter},
+        outgoing::OutgoingFilterConfig,
+    },
+};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
+use mirrord_protocol::tcp::JsonPathQuery;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use target::Target;
@@ -475,6 +482,7 @@ impl LayerConfig {
             http_filter.header_filter.is_some(),
             http_filter.all_of.is_some(),
             http_filter.any_of.is_some(),
+            http_filter.body_filter.is_some(),
         ]
         .into_iter()
         .filter(|used| *used)
@@ -493,6 +501,41 @@ impl LayerConfig {
             Err(ConfigError::Conflict(
                 "Composite HTTP filter cannot be empty".to_string(),
             ))?;
+        }
+
+        let verify_body_filter = |filter: &BodyFilter| match filter {
+            BodyFilter::Json { query, .. } => {
+                // Only need to verify `query` as `matches` is later
+                // verified by the layer. `query` CANNOT be modified by the layer, see
+                // `mirrord_protocol::tcp::JsonPathQuery::new_unchecked`
+                JsonPathQuery::new(query.clone()).map(|_| ()).map_err(|e| {
+                    ConfigError::InvalidValue {
+                        name: "feature.network.incoming.http_filter.body_filter.query",
+                        provided: query.to_string(),
+                        error: Box::new(e),
+                    }
+                })
+            }
+        };
+
+        if let Some(body) = &http_filter.body_filter {
+            verify_body_filter(body)?;
+        }
+
+        if let Some(all_of) = &http_filter.all_of {
+            for filter in all_of {
+                if let InnerFilter::Body(body) = filter {
+                    verify_body_filter(body)?
+                }
+            }
+        }
+
+        if let Some(any_of) = &http_filter.any_of {
+            for filter in any_of {
+                if let InnerFilter::Body(body) = filter {
+                    verify_body_filter(body)?
+                }
+            }
         }
 
         if !self.feature.network.incoming.ignore_ports.is_empty()
