@@ -479,26 +479,17 @@ pub mod client {
         /// Decoding a CI API key by first checking the prefix to determine the version.
         /// Then follow the encoding process in reverse for each version.
         pub fn decode(encoded: &str) -> Result<Self, ApiKeyError> {
-            let (rest, version) = encoded
-                .strip_prefix(Self::V1_PREFIX)
-                .zip(Some(Self::V1_PREFIX))
-                .ok_or(ApiKeyError::InvalidFormat)?;
-
-            let compressed_bytes = BASE64_URL_SAFE_NO_PAD.decode(rest)?;
-
-            let mut compression_decoder = ZlibDecoder::new(&compressed_bytes[..]);
-            let mut bytes = Vec::new();
-            compression_decoder.read_to_end(&mut bytes)?;
-
-            match version {
-                Self::V1_PREFIX => {
-                    let (credentials, _) =
-                        bincode::decode_from_slice(&bytes, bincode::config::standard())?;
-
-                    Ok(CiApiKey::V1(credentials))
-                }
-                _ => unreachable!("BUG: we have already checked the CiApiKey prefix!"),
+            if let Some(rest) = encoded.strip_prefix(Self::V1_PREFIX) {
+                let compressed_bytes = BASE64_URL_SAFE_NO_PAD.decode(rest)?;
+                let mut compression_decoder = ZlibDecoder::new(&compressed_bytes[..]);
+                let mut bytes = Vec::new();
+                compression_decoder.read_to_end(&mut bytes)?;
+                let (credentials, _) =
+                    bincode::decode_from_slice(&bytes, bincode::config::standard())?;
+                return Ok(CiApiKey::V1(credentials));
             }
+
+            Err(ApiKeyError::InvalidFormat)
         }
     }
 }
