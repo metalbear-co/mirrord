@@ -20,7 +20,9 @@ use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_layer_lib::file::{filter::FileFilter, mapper::FileRemapper};
 use mirrord_protocol::{
     Port,
-    tcp::{Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, MirrorType, StealType},
+    tcp::{
+        Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, JsonPathQuery, MirrorType, StealType,
+    },
 };
 use regex::RegexSet;
 
@@ -239,7 +241,7 @@ impl IncomingMode {
     fn parse_body_filter(filter: &BodyFilter) -> HttpBodyFilter {
         match filter {
             BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
-                query: query.clone(),
+                query: JsonPathQuery::new_unchecked(query.clone()),
                 matches: Filter::new(matches.clone())
                     .expect("invalid json body filter `matches` string"),
             },

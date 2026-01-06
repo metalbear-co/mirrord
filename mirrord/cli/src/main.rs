@@ -822,8 +822,6 @@ async fn exec(
     );
     (&config).collect_analytics(analytics.get_mut());
 
-    analytics.get_mut().add("is_ci", ci_info::is_ci());
-
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
         progress.warning(&warning);
