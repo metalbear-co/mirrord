@@ -1,1 +1,0 @@
-This PR allows to trigger Windows build after a successful linux release.
