@@ -124,7 +124,7 @@ impl ClientConnection {
     }
 
     /// Receives a [`ClientMessage`] from the client.
-    #[tracing::instrument(level = "trace", err)]
+    #[tracing::instrument(level = Level::TRACE, err)]
     pub async fn receive(&mut self) -> io::Result<Option<ClientMessage>> {
         match &mut self.framed {
             ConnectionFramed::Tcp(framed) => framed.try_next().await,
