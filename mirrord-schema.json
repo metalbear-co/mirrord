@@ -1746,6 +1746,18 @@
             }
           ]
         },
+        "preview": {
+          "title": "feature.preview {#feature-preview}",
+          "description": "Configuration for preview environments.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PreviewFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "split_queues": {
           "title": "feature.split_queues {#feature-split_queues}",
           "description": "Define filters to split queues by, and make your local application consume only messages that match those filters. If you don't specify any filter for a queue that is however declared in the `MirrordWorkloadQueueRegistry` of the target you're using, a match-nothing filter will be used, and your local application will not receive any messages from that queue.",
@@ -2805,6 +2817,41 @@
         "pod": {
           "description": "<!--${internal}--> Pod to mirror.",
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PreviewFileConfig": {
+      "description": "Controls the lifetime and creation behavior of preview sessions.\n\n```json { \"feature\": { \"preview\": { \"image\": \"my-registry/my-app:latest\", \"ttl_mins\": 60, \"creation_timeout_secs\": 60 } } } ```",
+      "type": "object",
+      "properties": {
+        "creation_timeout_secs": {
+          "title": "feature.preview.creation_timeout_secs {#feature-preview-creation_timeout_secs}",
+          "description": "How long (in seconds) the CLI waits for the preview session to become ready. If the session hasn't reached `Ready` within this time, the CLI deletes it.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "image": {
+          "title": "feature.preview.image {#feature-preview-image}",
+          "description": "Container image to run in the preview pod. The image must be pre-built and pushed to a registry accessible by the cluster.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ttl_mins": {
+          "title": "feature.preview.ttl_mins {#feature-preview-ttl_mins}",
+          "description": "How long (in minutes) the preview session is allowed to live after creation. The operator will terminate the session when this time elapses.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
         }
       },
       "additionalProperties": false
