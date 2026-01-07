@@ -98,13 +98,12 @@ use load::ExecuteArgs;
 #[cfg(target_os = "macos")]
 use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
-    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
-    feature::env::mapper::EnvVarsRemapper,
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, feature::env::mapper::EnvVarsRemapper,
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_lib::{
     setup::{LayerSetup, init_layer_setup, setup},
-    trace_only::is_trace_only_mode
+    trace_only::is_trace_only_mode,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};

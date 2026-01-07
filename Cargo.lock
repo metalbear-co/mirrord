@@ -4785,6 +4785,7 @@ dependencies = [
  "tokio",
  "tracing",
  "winapi",
+ "windows-strings 0.4.2",
 ]
 
 [[package]]

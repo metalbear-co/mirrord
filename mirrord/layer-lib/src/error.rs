@@ -134,17 +134,11 @@ pub enum HostnameResolveError {
     #[error("Proxy connection not available")]
     ProxyConnectionUnavailable,
 
-    #[error("mirrord-layer: Proxy connection failed: `{0}`")]
-    ProxyError(#[from] ProxyError),
-
     #[error("Failed to open file {path}: {details}")]
     FileOpenError { path: String, details: String },
 
     #[error("Failed to read file {path}: {details}")]
     FileReadError { path: String, details: String },
-
-    #[error("Remote error while accessing file {path}: {error}")]
-    RemoteFileError { path: String, error: String },
 
     #[error("DNS resolution failed for hostname '{hostname}': {details}")]
     DnsResolutionFailed { hostname: String, details: String },
@@ -178,6 +172,123 @@ pub enum SendToError {
     Bypass,
     #[error("Send failed")]
     SendFailed(isize),
+}
+
+/// Soft-errors that can be recovered from by calling the raw FFI function.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Bypass {
+    /// We're dealing with a socket port value that should be ignored, according to the incoming
+    /// config.
+    IgnoredInIncoming(SocketAddr),
+
+    /// The socket type does not match one of our handled
+    /// [`SocketKind`](crate::socket::SocketKind)s.
+    Type(i32),
+
+    /// Either an invalid socket domain, or one that we don't handle.
+    Domain(i32),
+
+    /// Unix socket to address that was not configured to be connected remotely.
+    UnixSocket(Option<String>),
+
+    /// We could not find this [`RawFd`] in neither [`OPEN_FILES`](crate::file::OPEN_FILES), nor
+    /// [`SOCKETS`](crate::socket::SOCKETS).
+    #[cfg(unix)]
+    LocalFdNotFound(RawFd),
+
+    /// Similar to `LocalFdNotFound`, but for [`OPEN_DIRS`](crate::file::open_dirs::OPEN_DIRS).
+    LocalDirStreamNotFound(usize),
+
+    /// A conversion from [`SockAddr`](socket2::SockAddr) to
+    /// [`SocketAddr`] failed.
+    AddressConversion,
+
+    /// The socket [`RawFd`] is in an invalid state for the operation.
+    #[cfg(unix)]
+    InvalidState(RawFd),
+
+    /// We got an `Utf8Error` while trying to convert a `CStr` into a safer string type.
+    CStrConversion,
+
+    /// We hooked a file operation on a path in mirrord's bin directory. So do the operation
+    /// locally, but on the original path, not the one in mirrord's dir.
+    #[cfg(target_os = "macos")]
+    FileOperationInMirrordBinTempDir(*const c_char),
+
+    /// File [`PathBuf`] should be ignored (used for tests).
+    #[cfg(unix)]
+    IgnoredFile(CString),
+
+    /// Multiple file [`PathBuf`] that should be ignored.
+    ///
+    /// Used for functions that must apply `fs.mapping` to multiple files on bypass.
+    #[cfg(unix)]
+    IgnoredFiles(Option<CString>, Option<CString>),
+
+    /// Some operations only handle absolute [`PathBuf`]s.
+    #[cfg(unix)]
+    RelativePath(CString),
+
+    /// Started mirrord with [`FsModeConfig`](mirrord_config::feature::fs::mode::FsModeConfig) set
+    /// to [`FsModeConfig::Read`](mirrord_config::feature::fs::FsModeConfig::Read), but
+    /// operation requires more file permissions.
+    ///
+    /// The user will reach this case if they started mirrord with file operations as _read-only_,
+    /// but tried to perform a file operation that requires _write_ permissions (for example).
+    ///
+    /// When this happens, the file operation will be bypassed (will be handled locally, instead of
+    /// through the agent).
+    #[cfg(unix)]
+    ReadOnly(PathBuf),
+
+    /// Called [`write`](crate::file::ops::write) with `write_bytes` set to [`None`].
+    EmptyBuffer,
+
+    /// Operation received [`None`] for an [`Option`] that was required to be [`Some`].
+    EmptyOption,
+
+    /// Called `getaddrinfo` with `rawish_node` being [`None`].
+    NullNode,
+
+    /// Skip patching SIP for macOS.
+    #[cfg(target_os = "macos")]
+    NoSipDetected(String),
+
+    /// Tried patching SIP for a non-existing binary.
+    #[cfg(target_os = "macos")]
+    ExecOnNonExistingFile(String),
+
+    /// Reached `MAX_ARGC` while running
+    /// `intercept_tmp_dir`
+    #[cfg(target_os = "macos")]
+    TooManyArgs,
+
+    /// Application is binding a port, while mirrord is running targetless. A targetless agent does
+    /// is not exposed by a service, so bind locally.
+    BindWhenTargetless,
+
+    /// Hooked a `connect` to a target that is disabled in the configuration.
+    DisabledOutgoing,
+
+    /// Incoming traffic is disabled, bypass.
+    DisabledIncoming,
+
+    /// Hostname should be resolved locally.
+    /// Currently, this is the case only when the layer operates in the `trace only` mode.
+    LocalHostname,
+
+    /// DNS query should be done locally.
+    LocalDns,
+
+    /// Operation is not implemented, but it should not be a hard error.
+    ///
+    /// Useful for operations that are version gated, and we want to bypass when the protocol
+    /// doesn't support them.
+    NotImplemented,
+
+    /// File `open` (any `open`-ish operation) was forced to be local, instead of remote, most
+    /// likely due to an operator fs policy.
+    OpenLocal,
 }
 
 /// Errors that occur in the layer's hook functions, and will reach the user's application.
@@ -280,6 +391,9 @@ pub enum HookError {
 
     #[error("mirrord-layer: Hostname resolution failed with `{0}`!")]
     HostnameResolveError(#[from] HostnameResolveError),
+
+    #[error("mirrord-layer: Hook bypassed")]
+    Bypass(Bypass),
 }
 
 /// Errors internal to mirrord-layer.
@@ -582,6 +696,7 @@ fn get_platform_errno(fail: HookError) -> u32 {
         HookError::AddrInfoError(_) => WSAEFAULT,
         HookError::SendToError(_) => WSAEFAULT,
         HookError::HostnameResolveError(_) => WSAEFAULT,
+        HookError::Bypass(_) => todo!(),
     }
 }
 

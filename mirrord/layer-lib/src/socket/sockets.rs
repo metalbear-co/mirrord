@@ -252,7 +252,7 @@ pub fn is_socket_in_state(
 /// the requested address to maintain the mirrord illusion.
 pub fn get_bound_address(socket: SocketDescriptor) -> Option<SocketAddr> {
     get_socket_state(socket).and_then(|state| match state {
-        SocketState::Bound(bound) | SocketState::Listening(bound) => {
+        SocketState::Bound { bound, .. } | SocketState::Listening(bound) => {
             // For localhost binds to port 0, return the actual bound address
             // so that local clients (like Python's socketpair()) can connect
             if bound.requested_address.ip().is_loopback() && bound.requested_address.port() == 0 {
@@ -287,7 +287,7 @@ pub fn get_connected_addresses(
     socket: SocketDescriptor,
 ) -> Option<(
     mirrord_protocol::outgoing::SocketAddress,
-    mirrord_protocol::outgoing::SocketAddress,
+    Option<mirrord_protocol::outgoing::SocketAddress>,
     Option<mirrord_protocol::outgoing::SocketAddress>,
 )> {
     get_socket_state(socket).and_then(|state| match state {

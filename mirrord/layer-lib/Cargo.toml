@@ -56,6 +56,7 @@ winapi.workspace = true
 dll-syringe.workspace = true
 anyhow.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }
+windows-strings.workspace = true
 
 [dev-dependencies]
 mirrord-intproxy-protocol = { path = "../intproxy/protocol" }

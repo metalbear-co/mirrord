@@ -531,188 +531,22 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
     mut user_socket_info: Arc<UserSocket>,
     protocol: NetProtocol,
 ) -> Detour<ConnectResult> {
-    // Closure that performs the connection with mirrord messaging.
-    let remote_connection = |remote_address: SockAddr| {
-        // Prepare this socket to be intercepted.
-        let remote_address = SocketAddress::try_from(remote_address).unwrap();
-
-        let request = OutgoingConnectRequest {
-            remote_address: remote_address.clone(),
-            protocol,
-        };
-        let response = common::make_proxy_request_with_response(request)??;
-
-        let OutgoingConnectResponse {
-            connection_id,
-            mut layer_address,
-            in_cluster_address,
-        } = response;
-
-        if let SocketAddress::Ip(interceptor_addr) = &mut layer_address {
-            // Our socket can be bound to any local interface,
-            // so the interceptor listens on an unspecified IP address, e.g. 0.0.0.0
-            // We need to fill the exact IP here.
-            match &user_socket_info.state {
-                SocketState::Bound {
-                    bound: Bound { address, .. },
-                    ..
-                } => {
-                    if interceptor_addr.ip().is_unspecified() {
-                        if interceptor_addr.is_ipv4() {
-                            interceptor_addr.set_ip(Ipv4Addr::LOCALHOST.into())
-                        } else {
-                            interceptor_addr.set_ip(Ipv6Addr::LOCALHOST.into())
-                        }
-                    } else {
-                        interceptor_addr.set_ip(address.ip());
-                    }
-                }
-                _ if interceptor_addr.is_ipv4() => {
-                    interceptor_addr.set_ip(Ipv4Addr::LOCALHOST.into())
-                }
-                _ => interceptor_addr.set_ip(Ipv6Addr::LOCALHOST.into()),
-            }
-        }
-
-        // Connect to the socket prepared by the internal proxy.
-        let connect_result: ConnectResult = if CALL_CONNECT {
-            let layer_address = SockAddr::try_from(layer_address.clone())?;
-
+    let connect_fn = if CALL_CONNECT {
+        |layer_address: SockAddr| -> ConnectResult {
             unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
-        } else {
-            ConnectResult {
-                result: 0,
-                error: None,
-            }
-        };
-
-        if let Some(raw_error) = connect_result.error
-            && raw_error != libc::EINTR
-            && raw_error != libc::EINPROGRESS
-        {
-            // We failed to connect to the internal proxy socket.
-            // This is most likely a bug,
-            // so let's try and include here as much info as possible.
-
-            let error = io::Error::from_raw_os_error(raw_error);
-            let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
-            let socket_name =
-                nix::sys::socket::getsockname::<SockaddrStorage>(sockfd).map(|sockaddr| {
-                    // `Debug` implementation is not very helpful, `ToString` produces a nice
-                    // address.
-                    sockaddr.to_string()
-                });
-            let socket_type = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType);
-            error!(
-                sockfd,
-                ?user_socket_info,
-                ?socket_type,
-                socket_addr = ?socket_name,
-
-                outgoing_connect_request_id = connection_id,
-                internal_proxy_socket_address = %layer_address,
-                agent_peer_address = %remote_address,
-                agent_local_address = in_cluster_address.as_ref().map(ToString::to_string),
-
-                raw_error,
-                %error,
-
-                ?SOCKETS,
-
-                "Failed to connect to an internal proxy socket. \
-                This is most likely a bug, please report it.",
-            );
-            return Detour::Error(error.into());
         }
-
-        let connected = Connected {
-            connection_id: Some(connection_id),
-            remote_address,
-            local_address: in_cluster_address,
-            layer_address: Some(layer_address),
-        };
-
-        trace!("we are connected {connected:#?}");
-
-        Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
-        SOCKETS.lock()?.insert(sockfd, user_socket_info);
-
-        Detour::Success(connect_result)
+    } else {
+        nop_connect_fn
     };
 
-    if remote_address.is_unix() {
-        let connect_result = remote_connection(remote_address)?;
-        Detour::Success(connect_result)
-    } else {
-        // Can't just connect to whatever `remote_address` is, as it might be a remotely resolved
-        // address, in a local connection context (or vice versa), so we let `remote_connection`
-        // handle this address trickery.
-        match crate::setup()
-            .outgoing_selector()
-            .get_connection_through(remote_address.as_socket()?, protocol)?
-        {
-            ConnectionThrough::Remote(addr) => {
-                let connect_result = remote_connection(SockAddr::from(addr))?;
-                Detour::Success(connect_result)
-            }
-            ConnectionThrough::Local(addr) => {
-                let rawish_local_addr = SockAddr::from(addr);
-
-                let connect_result = ConnectResult::from(unsafe {
-                    FN_CONNECT(sockfd, rawish_local_addr.as_ptr(), rawish_local_addr.len())
-                });
-
-                Detour::Success(connect_result)
-            }
-        }
-    }
-}
-
-/// Iterate through sockets, if any of them has the requested port that the application is now
-/// trying to connect to - then don't forward this connection to the agent, and instead of
-/// connecting to the requested address, connect to the actual address where the application
-/// is locally listening.
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-fn connect_to_local_address(
-    sockfd: RawFd,
-    user_socket_info: &UserSocket,
-    ip_address: SocketAddr,
-) -> Detour<Option<ConnectResult>> {
-    if crate::setup().outgoing_config().ignore_localhost {
-        Detour::Bypass(Bypass::IgnoredInIncoming(ip_address))
-    } else {
-        Detour::Success(
-            SOCKETS
-                .lock()?
-                .iter()
-                .find_map(|(_, socket)| match socket.state {
-                    SocketState::Listening(Bound {
-                        requested_address,
-                        address,
-                    }) => (requested_address.port() == ip_address.port()
-                        && socket.protocol == user_socket_info.protocol)
-                        .then(|| SockAddr::from(address)),
-                    SocketState::Bound { .. }
-                    | SocketState::Initialized
-                    | SocketState::Connected(_) => None,
-                })
-                .map(|rawish_remote_address| unsafe {
-                    FN_CONNECT(
-                        sockfd,
-                        rawish_remote_address.as_ptr(),
-                        rawish_remote_address.len(),
-                    )
-                })
-                .map(|connect_result| {
-                    if connect_result != 0 {
-                        Detour::Error::<ConnectResult>(io::Error::last_os_error().into())
-                    } else {
-                        Detour::Success(connect_result.into())
-                    }
-                })
-                .transpose()?,
-        )
-    }
+    connect_outgoing_common(
+        sockfd,
+        remote_address,
+        user_socket_info,
+        protocol,
+        common::make_proxy_request_with_response.into(),
+        connect_fn,
+    )
 }
 
 /// Handles 3 different cases, depending on if the outgoing traffic feature is enabled or not:
