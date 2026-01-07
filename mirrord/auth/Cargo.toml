@@ -31,7 +31,7 @@ client = [
 	"dep:thiserror",
 	"dep:tokio",
 	"dep:tracing",
-	"dep:whoami"
+	"dep:whoami",
 ]
 
 [dependencies]
