@@ -11,6 +11,7 @@ mod file_ops;
 mod http;
 #[cfg(any(feature = "cli", feature = "operator"))]
 mod ls;
+mod target;
 mod targetless;
 mod traffic;
 

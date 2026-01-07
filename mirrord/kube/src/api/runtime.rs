@@ -24,6 +24,7 @@ use tracing::Level;
 use crate::{
     api::{
         container::{check_mesh_vendor, choose_container},
+        ext::ApiExt,
         kubernetes::get_k8s_resource_api,
     },
     error::{KubeApiError, Result},
@@ -439,7 +440,10 @@ where
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
         let api: Api<<Self as RuntimeDataFromLabels>::Resource> =
             get_k8s_resource_api(client, namespace);
-        let resource = api.get(&self.name()).await?;
+        let resource = match api.get_opt(&self.name()).await? {
+            Some(resource) => resource,
+            None => api.search_one(&self.name()).await?,
+        };
         let pods = Self::get_pods(&resource, client).await?;
 
         if pods.is_empty() {

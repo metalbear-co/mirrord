@@ -84,6 +84,10 @@ pub enum KubeApiError {
     /// Spawned agent pod was deleted during startup.
     #[error("Agent pod was unexpectedly deleted")]
     AgentPodDeleted,
+
+    /// Attempted to build glob pattern from provided target but it failed to parse.
+    #[error("Failed to parse target search pattern: {0}")]
+    InvalidTargetPattern(#[from] glob::PatternError),
 }
 
 impl KubeApiError {
