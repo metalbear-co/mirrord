@@ -191,6 +191,10 @@ pub(super) enum Commands {
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Ci(Box<CiArgs>),
 
+    /// Manage preview environments (requires operator).
+    #[cfg_attr(target_os = "windows", command(hide = true))]
+    Preview(Box<PreviewArgs>),
+
     /// Launch the config wizard.
     ///
     /// The config wizard is a web app that allows the user to create a mirrord config file by
@@ -1163,6 +1167,280 @@ pub struct FixKubeconfig {
     /// Do not make any actual changes, just print what would be changed
     #[arg(long = "dry-run")]
     pub dry_run: bool,
+}
+
+/// Arguments for `mirrord preview` command.
+#[derive(Args, Debug)]
+pub(super) struct PreviewArgs {
+    /// Subcommand to use with `mirrord preview`.
+    #[command(subcommand)]
+    pub command: PreviewCommand,
+}
+
+/// `mirrord preview` subcommands.
+#[derive(Subcommand, Debug)]
+pub(super) enum PreviewCommand {
+    /// Start a new preview environment or update an existing one.
+    Start(PreviewStartArgs),
+    /// Show the status of preview environments.
+    Status(PreviewStatusArgs),
+    /// Delete preview environments.
+    Stop(PreviewStopArgs),
+}
+
+/// Arguments for `mirrord preview start` command.
+#[derive(Args, Debug)]
+pub(super) struct PreviewStartArgs {
+    /// Container image to run in the preview pod.
+    ///
+    /// The image must be pre-built and pushed to a registry accessible by the cluster.
+    #[arg(short = 'i', long)]
+    pub image: Option<String>,
+
+    /// Environment key to identify the preview environment.
+    ///
+    /// Multiple preview pods can share the same key to form a preview environment.
+    /// If not provided, a new key will be generated.
+    #[arg(short = 'k', long)]
+    pub key: Option<String>,
+
+    /// Target to copy configuration from.
+    ///
+    /// Valid formats:
+    /// - `pod/{pod-name}[/container/{container-name}]`
+    /// - `deployment/{deployment-name}[/container/{container-name}]`
+    /// - `rollout/{rollout-name}[/container/{container-name}]`
+    /// - `statefulset/{statefulset-name}[/container/{container-name}]`
+    ///
+    /// The preview pod will be a copy of the target's pod spec with your image.
+    #[arg(short = 't', long)]
+    pub target: Option<String>,
+
+    /// Namespace of the target.
+    #[arg(short = 'n', long)]
+    pub target_namespace: Option<String>,
+
+    /// Load config from config file.
+    ///
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    pub config_file: Option<PathBuf>,
+
+    /// Kube context to use from Kubeconfig.
+    #[arg(long)]
+    pub context: Option<String>,
+
+    /// TTL in minutes for the preview session.
+    ///
+    /// The operator will terminate the session after this time elapses.
+    #[arg(long)]
+    pub ttl: Option<u64>,
+
+    /// How long (in seconds) to wait for the preview to become ready.
+    ///
+    /// If the session hasn't reached `Ready` within this time, the CLI deletes it.
+    #[arg(long)]
+    pub timeout: Option<u64>,
+}
+
+impl PreviewStartArgs {
+    /// Convert CLI arguments to environment variable overrides for config resolution.
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
+        let mut envs = HashMap::default();
+
+        if let Some(image) = &self.image {
+            envs.insert(
+                "MIRRORD_PREVIEW_IMAGE".as_ref(),
+                Cow::Borrowed(image.as_ref()),
+            );
+        }
+        if let Some(key) = &self.key {
+            envs.insert(
+                env_key::MIRRORD_ENV_KEY.as_ref(),
+                Cow::Borrowed(key.as_ref()),
+            );
+        }
+        if let Some(target) = &self.target {
+            envs.insert(
+                "MIRRORD_IMPERSONATED_TARGET".as_ref(),
+                Cow::Borrowed(target.as_ref()),
+            );
+        }
+        if let Some(namespace) = &self.target_namespace {
+            envs.insert(
+                "MIRRORD_TARGET_NAMESPACE".as_ref(),
+                Cow::Borrowed(namespace.as_ref()),
+            );
+        }
+        if let Some(config_file) = &self.config_file {
+            envs.insert(
+                LayerConfig::FILE_PATH_ENV.as_ref(),
+                Cow::Borrowed(config_file.as_ref()),
+            );
+        }
+        if let Some(context) = &self.context {
+            envs.insert(
+                "MIRRORD_KUBE_CONTEXT".as_ref(),
+                Cow::Borrowed(context.as_ref()),
+            );
+        }
+        if let Some(ttl) = &self.ttl {
+            #[cfg(not(target_os = "windows"))]
+            let ttl = OsString::from_vec(ttl.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let ttl = OsString::from(ttl.to_string());
+            envs.insert("MIRRORD_PREVIEW_TTL_MINS".as_ref(), Cow::Owned(ttl));
+        }
+        if let Some(timeout) = &self.timeout {
+            #[cfg(not(target_os = "windows"))]
+            let timeout = OsString::from_vec(timeout.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let timeout = OsString::from(timeout.to_string());
+            envs.insert(
+                "MIRRORD_PREVIEW_CREATION_TIMEOUT_SECS".as_ref(),
+                Cow::Owned(timeout),
+            );
+        }
+
+        envs
+    }
+}
+
+/// Arguments for `mirrord preview status` command.
+#[derive(Args, Debug)]
+pub(super) struct PreviewStatusArgs {
+    /// Filter by environment key.
+    ///
+    /// Can also be set via the `key` field in the mirrord config file.
+    #[arg(short = 'k', long)]
+    pub key: Option<String>,
+
+    /// Namespace to query. Can also be set via `target.namespace` in the mirrord config.
+    ///
+    /// When neither this flag nor the config set a namespace, the command implicitly searches
+    /// all namespaces (equivalent to `-A`).
+    #[arg(short = 'n', long = "namespace")]
+    pub namespace: Option<String>,
+
+    /// Query all namespaces.
+    #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
+    pub all_namespaces: bool,
+
+    /// Load config from config file.
+    ///
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    pub config_file: Option<PathBuf>,
+
+    /// Kube context to use from Kubeconfig.
+    #[arg(long)]
+    pub context: Option<String>,
+}
+
+impl PreviewStatusArgs {
+    /// Convert CLI arguments to environment variable overrides for config resolution.
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
+        let mut envs = HashMap::default();
+
+        if let Some(key) = &self.key {
+            envs.insert(
+                env_key::MIRRORD_ENV_KEY.as_ref(),
+                Cow::Borrowed(key.as_ref()),
+            );
+        }
+        if let Some(namespace) = &self.namespace {
+            envs.insert(
+                "MIRRORD_TARGET_NAMESPACE".as_ref(),
+                Cow::Borrowed(namespace.as_ref()),
+            );
+        }
+        if let Some(config_file) = &self.config_file {
+            envs.insert(
+                LayerConfig::FILE_PATH_ENV.as_ref(),
+                Cow::Borrowed(config_file.as_ref()),
+            );
+        }
+        if let Some(context) = &self.context {
+            envs.insert(
+                "MIRRORD_KUBE_CONTEXT".as_ref(),
+                Cow::Borrowed(context.as_ref()),
+            );
+        }
+
+        envs
+    }
+}
+
+/// Arguments for `mirrord preview stop` command.
+#[derive(Args, Debug)]
+pub(super) struct PreviewStopArgs {
+    /// Environment key used to filter the sessions that will be stopped.
+    ///
+    /// Can also be set via the `key` field in the mirrord config file.
+    #[arg(short = 'k', long)]
+    pub key: Option<String>,
+
+    /// Specific target to delete (optional).
+    ///
+    /// If provided, only the preview session matching both the key and this target will be
+    /// deleted. If not provided, all preview sessions with the given key will be deleted.
+    #[arg(short = 't', long)]
+    pub target: Option<String>,
+
+    /// Namespace to search. Can also be set via `target.namespace` in the mirrord config.
+    ///
+    /// When neither this flag nor the config set a namespace, the command implicitly searches
+    /// all namespaces (equivalent to `-A`).
+    #[arg(short = 'n', long = "namespace")]
+    pub namespace: Option<String>,
+
+    /// Operate on all namespaces.
+    #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
+    pub all_namespaces: bool,
+
+    /// Load config from config file.
+    ///
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    pub config_file: Option<PathBuf>,
+
+    /// Kube context to use from Kubeconfig.
+    #[arg(long)]
+    pub context: Option<String>,
+}
+
+impl PreviewStopArgs {
+    /// Convert CLI arguments to environment variable overrides for config resolution.
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
+        let mut envs = HashMap::default();
+
+        if let Some(key) = &self.key {
+            envs.insert(
+                env_key::MIRRORD_ENV_KEY.as_ref(),
+                Cow::Borrowed(key.as_ref()),
+            );
+        }
+        if let Some(namespace) = &self.namespace {
+            envs.insert(
+                "MIRRORD_TARGET_NAMESPACE".as_ref(),
+                Cow::Borrowed(namespace.as_ref()),
+            );
+        }
+        if let Some(config_file) = &self.config_file {
+            envs.insert(
+                LayerConfig::FILE_PATH_ENV.as_ref(),
+                Cow::Borrowed(config_file.as_ref()),
+            );
+        }
+        if let Some(context) = &self.context {
+            envs.insert(
+                "MIRRORD_KUBE_CONTEXT".as_ref(),
+                Cow::Borrowed(context.as_ref()),
+            );
+        }
+
+        envs
+    }
 }
 
 #[cfg(test)]
