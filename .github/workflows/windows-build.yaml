@@ -186,6 +186,27 @@ jobs:
           py -3 -m pip show flask uvicorn fastapi
           py -3 -m pip list
 
+      - name: Ensure SignTool
+        run: |
+          $ErrorActionPreference = "Stop"
+          $kitsRoot = "${env:ProgramFiles(x86)}\Windows Kits"
+          if (Test-Path $kitsRoot) {
+            $signtool = Get-ChildItem -Path $kitsRoot -Filter "signtool.exe" -Recurse -ErrorAction SilentlyContinue | 
+                        Where-Object { $_.FullName -like "*\x64\*" } | 
+                        Sort-Object FullName -Descending | 
+                        Select-Object -First 1
+            
+            if ($signtool) {
+                Write-Host "Found signtool at $($signtool.FullName)"
+                $dir = $signtool.DirectoryName
+                echo "$dir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            } else {
+                Write-Warning "signtool.exe not found in Windows Kits."
+            }
+          } else {
+             Write-Warning "Windows Kits directory not found."
+          }
+
       - name: Build
         id: prep
         run: |
