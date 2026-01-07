@@ -786,17 +786,17 @@ pub enum UserCredentialKind {
 pub struct MultiClusterConfig {
     /// Whether multi-cluster is enabled on this operator
     pub enabled: bool,
-    
+
     /// Whether this operator instance is the primary cluster
     /// The primary cluster is where users connect and where Envoy runs
     pub is_primary: bool,
-    
+
     /// Logical name of this cluster (e.g., "us-east-1")
     pub cluster_name: String,
-    
+
     /// Logical name of the primary cluster
     pub primary_cluster: String,
-    
+
     /// Logical name of the default cluster (for stateful operations)
     pub default_cluster: String,
 }
