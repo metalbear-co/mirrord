@@ -1,0 +1,1 @@
+mirrord now supports "preview environments" - a new type of mirrord session that lives directly in the cluster and can be shared with other users. Read more about it [here](PLACEHOLDER-THERE-ARE-NO-DOCS-YET).
