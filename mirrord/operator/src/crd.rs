@@ -33,6 +33,7 @@ pub mod mysql_branching;
 pub mod patch;
 pub mod pg_branching;
 pub mod policy;
+pub mod preview;
 pub mod profile;
 pub mod session;
 pub mod steal_tls;
