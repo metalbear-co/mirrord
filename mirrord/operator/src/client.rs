@@ -726,9 +726,17 @@ impl OperatorApi<PreparedClientCert> {
             // Serialize the feature config for the primary operator to create branches
             let feature_config_json = serde_json::to_string(&layer_config.feature)
                 .expect("FeatureConfig serialization should not fail");
+            let has_db_branches = !layer_config.feature.db_branches.is_empty();
             tracing::info!(
-                "Multi-cluster mode: sending feature_config to operator instead of creating branches locally"
+                has_db_branches = %has_db_branches,
+                feature_config_len = %feature_config_json.len(),
+                "[MULTICLUSTER] Sending feature_config to operator (NOT creating branches locally)"
             );
+            if has_db_branches {
+                tracing::info!(
+                    "[MULTICLUSTER] db_branches configured - primary operator will create them on default cluster"
+                );
+            }
             (None, None, Some(feature_config_json))
         } else {
             // Single-cluster mode: create branches locally as before
