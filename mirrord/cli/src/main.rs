@@ -310,6 +310,7 @@ mod logging;
 mod newsletter;
 mod operator;
 mod port_forward;
+mod preview;
 mod profile;
 mod teams;
 mod user_data;
@@ -1039,6 +1040,9 @@ fn main() -> miette::Result<()> {
             Commands::Newsletter => newsletter::newsletter_command().await,
             Commands::Ci(args) => windows_unsupported!(args, "ci", {
                 ci::ci_command(*args, watch, &mut user_data).await?
+            }),
+            Commands::Preview(args) => windows_unsupported!(args, "preview", {
+                preview::preview_command(*args, watch, &user_data).await?
             }),
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             #[cfg(feature = "wizard")]
