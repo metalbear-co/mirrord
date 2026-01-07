@@ -10,13 +10,10 @@ use k8s_openapi::{
     apimachinery::pkg::apis::meta::v1::MicroTime,
 };
 use kube::CustomResource;
-use mirrord_config::{
-    feature::network::incoming::ConcurrentSteal,
-    target::{
-        Target, TargetConfig, cron_job::CronJobTarget, deployment::DeploymentTarget,
-        job::JobTarget, pod::PodTarget, replica_set::ReplicaSetTarget, rollout::RolloutTarget,
-        service::ServiceTarget, stateful_set::StatefulSetTarget,
-    },
+use mirrord_config::target::{
+    Target, TargetConfig, cron_job::CronJobTarget, deployment::DeploymentTarget, job::JobTarget,
+    pod::PodTarget, replica_set::ReplicaSetTarget, rollout::RolloutTarget, service::ServiceTarget,
+    stateful_set::StatefulSetTarget,
 };
 use mirrord_kube::api::kubernetes::{AgentKubernetesConnectInfo, rollout::Rollout};
 use schemars::JsonSchema;
@@ -49,9 +46,6 @@ pub struct MirrordClusterSessionSpec {
     pub owner: SessionOwner,
     /// Kubernetes namespace of the session.
     pub namespace: String,
-    /// State of concurrent steal
-    #[serde(default)]
-    pub on_concurrent_steal: ConcurrentSteal,
     /// Target of the session.
     ///
     /// None for targetless sessions.
