@@ -45,6 +45,16 @@ pub struct MirrordMultiClusterSessionSpec {
     /// Each cluster deserializes and uses the parts relevant to its role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feature_config: Option<JsonValue>,
+
+    /// PostgreSQL branch database names (created by primary before session init).
+    /// These are passed to the default cluster's child session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pg_branch_names: Vec<String>,
+
+    /// MySQL branch database names (created by primary before session init).
+    /// These are passed to the default cluster's child session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mysql_branch_names: Vec<String>,
 }
 
 /// Target specification for a specific cluster in a multi-cluster session
