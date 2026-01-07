@@ -493,6 +493,21 @@ pub(crate) enum CliError {
 
     #[error("error while fixing kubeconfig")]
     FixKubeconfig(#[from] FixKubeconfigError),
+    #[error("Preview environment creation failed: {0}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    PreviewCreationFailed(String),
+    #[error("Preview environment creation timed out")]
+    #[diagnostic(help(
+        "The preview pod did not become ready within the timeout period. \
+        Check the operator logs for more details.{GENERAL_HELP}"
+    ))]
+    PreviewTimeout,
+    #[error("Operator is required for preview environments")]
+    #[diagnostic(help(
+        "Preview environments require the mirrord operator. \
+        Please install the operator first: https://metalbear.com/mirrord/docs/overview/teams/"
+    ))]
+    OperatorRequiredForPreview,
 }
 
 impl CliError {
