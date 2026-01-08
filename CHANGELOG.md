@@ -8,6 +8,49 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.180.0](https://github.com/metalbear-co/mirrord/tree/3.180.0) - 2026-01-06
+
+
+### Added
+
+- Add support local redis in db branches.
+- Added an experimental configuration for logging all Apple variables before
+  process start.
+- Support for limiting outgoing connections from mirrord sessions using a
+  kubernetes policy has been added to the operator.
+
+
+### Changed
+
+- Changed `experimental.force_hook_connect` default value to `true`.
+- Changed changelog instructions
+- Make file not found logs more detailed
+
+
+### Fixed
+
+- Fixed file not found Windows build regression
+- iptables cleanup would fail if some rules were already deleted.
+
+
+### Internal
+
+- CLI and Intproxy now queue and (almost) fairly schedule agent-bound messages.
+  Intproxy now also has proper flow control when receiving network traffic from
+  user apps.
+- Change from Prepare artifacts to build artifacts
+- Improve CI build times with cache
+- Improvements to the `outgoing_udp` test to make it less flaky.
+- JSONPath queries for JSON body filters are now also validated client-side, in
+  the CLI.
+- Move is_ci analytics reporting to analytics crate (and add it when building
+  the AnalyticsReporter).
+- New E2E test that verifies that when the cleanup on start setting is enabled,
+  the session is successful even when there are leftover rules on the target
+  pod.
+- Releases fix for windows builds
+- This PR allows to trigger Windows build after a successful linux release.
+
 ## [3.179.0](https://github.com/metalbear-co/mirrord/tree/3.179.0) - 2025-12-24
 
 

@@ -67,7 +67,6 @@ configuration file containing all fields.
     "ephemeral": false,
     "communication_timeout": 30,
     "startup_timeout": 360,
-    "network_interface": "eth0",
     "flush_connections": true,
     "metrics": "0.0.0.0:9000",
   },
@@ -158,7 +157,6 @@ We provide sane defaults for this option, so you don't have to set up anything h
     "ephemeral": false,
     "communication_timeout": 30,
     "startup_timeout": 360,
-    "network_interface": "eth0",
     "flush_connections": false,
     "exclude_from_mesh": false
     "inject_headers": false,
@@ -208,9 +206,8 @@ messages, the agent stays alive until there are no more heartbeat messages.
 
 If nothing is disabled here, agent uses:
 1. `NET_ADMIN`,
-2. `NET_RAW` (unless `passthrough_mirroring` is enabled),
-3. `SYS_PTRACE`,
-4. `SYS_ADMIN`.
+2. `SYS_PTRACE`,
+3. `SYS_ADMIN`.
 
 Has no effect when using the targetless mode,
 as targetless agent containers have no capabilities.
@@ -397,17 +394,6 @@ Namespace where the agent shall live.
 
 Defaults to the current kubernetes namespace.
 
-### agent.network_interface {#agent-network_interface}
-
-Which network interface to use for mirroring.
-
-The default behavior is try to access the internet and use that interface. If that fails
-it uses `eth0`.
-
-DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
-and will be removed in the future. This field will be removed, and the agent will always
-use iptables redirects for mirroring traffic.
-
 ### agent.nftables {#agent-nftables}
 
 Determines which iptables backend will be used for traffic redirection.
@@ -428,21 +414,6 @@ as targeted agent always runs on the same node as its target container.
   }
 }
 ```
-
-### agent.passthrough_mirroring {#agent-passthrough_mirroring}
-
-Enables an implementation of traffic mirroring based on iptables redirects.
-
-When used with `agent.flush_connections`, it might fix issues
-with mirroring non HTTP/1 traffic.
-
-When this is set, `network_interface` setting is ignored.
-
-Defaults to true.
-
-DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
-and will be removed in the future. This field will be removed, and the agent will always
-use iptables redirects for mirroring traffic.
 
 ### agent.priority_class {#agent-priority_class}
 
