@@ -287,7 +287,7 @@ jobs:
           }
 
           if ($shouldSign) {
-            & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+            & signtool.exe sign /csp "DigiCert Signing Manager KSP" /kc "key_1346827532" `
                 /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
           }
 
@@ -303,7 +303,7 @@ jobs:
           }
 
           if ($shouldSign) {
-            & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+            & signtool.exe sign /csp "DigiCert Signing Manager KSP" /kc "key_1346827532" `
                 /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
           }
 
@@ -543,7 +543,7 @@ jobs:
             throw "MSI_PATH '$msi' does not exist."
           }
 
-          & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+          & signtool.exe sign /csp "DigiCert Signing Manager KSP" /kc "key_1346827532" `
               /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$msi"
 
       ###########################################################################
