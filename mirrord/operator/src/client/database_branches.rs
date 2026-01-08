@@ -11,7 +11,7 @@ use kube::{
 use mirrord_config::{
     feature::database_branches::{
         ConnectionSource, ConnectionSourceKind, DatabaseBranchConfig, DatabaseBranchesConfig,
-        MysqlBranchConfig, PgBranchConfig, PgIamAuthConfig,
+        MysqlBranchConfig, PgBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -31,8 +31,7 @@ use crate::{
         },
         pg_branching::{
             BranchDatabasePhase as BranchDatabasePhasePg,
-            ConnectionSource as CrdConnectionSourcePg,
-            ConnectionSourceKind as CrdConnectionSourceKindPg, IamAuthConfig as CrdIamAuthConfig,
+            ConnectionSource as CrdConnectionSourcePg, IamAuthConfig as CrdIamAuthConfig,
             PgBranchDatabase, PgBranchDatabaseSpec,
         },
     },
@@ -90,14 +89,16 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let ready = branch_names
+    // Wait for either Ready or Failed phase
+    let ready_or_failed = branch_names
         .iter()
         .map(|name| {
             await_condition(api.clone(), name, |db: Option<&MysqlBranchDatabase>| {
                 db.and_then(|db| {
-                    db.status
-                        .as_ref()
-                        .map(|status| status.phase == BranchDatabasePhaseMysql::Ready)
+                    db.status.as_ref().map(|status| {
+                        status.phase == BranchDatabasePhaseMysql::Ready
+                            || status.phase == BranchDatabasePhaseMysql::Failed
+                    })
                 })
                 .unwrap_or(false)
             })
@@ -105,11 +106,30 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
         .collect::<Vec<_>>();
 
     subtask.info("waiting for readiness");
-    tokio::time::timeout(timeout, futures::future::join_all(ready))
+    let results = tokio::time::timeout(timeout, futures::future::join_all(ready_or_failed))
         .await
         .map_err(|_| OperatorApiError::OperationTimeout {
             operation: OperatorOperation::MysqlBranching,
         })?;
+
+    // Check if any branch failed
+    for result in results {
+        if let Some(db) = result? {
+            if let Some(status) = &db.status {
+                if status.phase == BranchDatabasePhaseMysql::Failed {
+                    let error_msg = status
+                        .error
+                        .clone()
+                        .unwrap_or_else(|| "Branch database creation failed".to_string());
+                    return Err(OperatorApiError::BranchCreationFailed {
+                        operation: OperatorOperation::MysqlBranching,
+                        message: error_msg,
+                    });
+                }
+            }
+        }
+    }
+
     subtask.success(Some("new MySQL branch databases ready"));
 
     Ok(created_branches)
@@ -224,14 +244,16 @@ pub(crate) async fn create_pg_branches<P: Progress>(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let ready = branch_names
+    // Wait for either Ready or Failed phase
+    let ready_or_failed = branch_names
         .iter()
         .map(|name| {
             await_condition(api.clone(), name, |db: Option<&PgBranchDatabase>| {
                 db.and_then(|db| {
-                    db.status
-                        .as_ref()
-                        .map(|status| status.phase == BranchDatabasePhasePg::Ready)
+                    db.status.as_ref().map(|status| {
+                        status.phase == BranchDatabasePhasePg::Ready
+                            || status.phase == BranchDatabasePhasePg::Failed
+                    })
                 })
                 .unwrap_or(false)
             })
@@ -239,11 +261,30 @@ pub(crate) async fn create_pg_branches<P: Progress>(
         .collect::<Vec<_>>();
 
     subtask.info("waiting for readiness");
-    tokio::time::timeout(timeout, futures::future::join_all(ready))
+    let results = tokio::time::timeout(timeout, futures::future::join_all(ready_or_failed))
         .await
         .map_err(|_| OperatorApiError::OperationTimeout {
             operation: OperatorOperation::PgBranching,
         })?;
+
+    // Check if any branch failed
+    for result in results {
+        if let Some(db) = result? {
+            if let Some(status) = &db.status {
+                if status.phase == BranchDatabasePhasePg::Failed {
+                    let error_msg = status
+                        .error
+                        .clone()
+                        .unwrap_or_else(|| "Branch database creation failed".to_string());
+                    return Err(OperatorApiError::BranchCreationFailed {
+                        operation: OperatorOperation::PgBranching,
+                        message: error_msg,
+                    });
+                }
+            }
+        }
+    }
+
     subtask.success(Some("new PostgreSQL branch databases ready"));
 
     Ok(created_branches)
@@ -450,76 +491,12 @@ impl PgBranchParams {
     pub(crate) fn new(id: &str, config: &PgBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
         let connection_source = match &config.base.connection {
-            ConnectionSource::Url(kind) => match kind {
-                ConnectionSourceKind::Env {
-                    container,
-                    variable,
-                } => CrdConnectionSourcePg::Url(CrdConnectionSourceKindPg::Env {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-                ConnectionSourceKind::EnvFrom {
-                    container,
-                    variable,
-                } => CrdConnectionSourcePg::Url(CrdConnectionSourceKindPg::EnvFrom {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-            },
+            ConnectionSource::Url(kind) => CrdConnectionSourcePg::Url(kind.into()),
         };
-        // Helper to convert config ConnectionSourceKind to CRD ConnectionSourceKind
-        fn convert_source_kind(src: &ConnectionSourceKind) -> CrdConnectionSourceKindPg {
-            match src {
-                ConnectionSourceKind::Env {
-                    container,
-                    variable,
-                } => CrdConnectionSourceKindPg::Env {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                },
-                ConnectionSourceKind::EnvFrom {
-                    container,
-                    variable,
-                } => CrdConnectionSourceKindPg::EnvFrom {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                },
-            }
-        }
 
         // Convert IAM auth config if present
-        tracing::info!(?config.iam_auth, "Converting IAM auth config from user config to CRD");
-        let iam_auth = config.iam_auth.as_ref().map(|iam| match iam {
-            PgIamAuthConfig::AwsRds {
-                region,
-                access_key_id,
-                secret_access_key,
-                session_token,
-            } => CrdIamAuthConfig::AwsRds {
-                region: region.as_ref().map(convert_source_kind),
-                access_key_id: access_key_id.as_ref().map(convert_source_kind),
-                secret_access_key: secret_access_key.as_ref().map(convert_source_kind),
-                session_token: session_token.as_ref().map(convert_source_kind),
-            },
-            PgIamAuthConfig::GcpCloudSql {
-                credentials_json,
-                credentials_path,
-                project,
-            } => {
-                tracing::info!(
-                    ?credentials_json,
-                    ?credentials_path,
-                    ?project,
-                    "Converting GcpCloudSql config"
-                );
-                CrdIamAuthConfig::GcpCloudSql {
-                    credentials_json: credentials_json.as_ref().map(convert_source_kind),
-                    credentials_path: credentials_path.as_ref().map(convert_source_kind),
-                    project: project.as_ref().map(convert_source_kind),
-                }
-            }
-        });
-        tracing::info!(?iam_auth, "Converted IAM auth for CRD");
+        let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
+        tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
         let spec = PgBranchDatabaseSpec {
             id: id.to_string(),
             database_name: config.base.name.clone(),

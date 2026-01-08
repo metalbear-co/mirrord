@@ -6,7 +6,10 @@ use std::{
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use mirrord_config::{
-    feature::database_branches::{PgBranchCopyConfig, PgBranchTableCopyConfig},
+    feature::database_branches::{
+        ConnectionSourceKind as ConfigConnectionSourceKind, PgBranchCopyConfig,
+        PgBranchTableCopyConfig, PgIamAuthConfig,
+    },
     target::Target,
 };
 use schemars::JsonSchema;
@@ -90,6 +93,52 @@ pub enum IamAuthConfig {
     },
 }
 
+impl From<&PgIamAuthConfig> for IamAuthConfig {
+    fn from(config: &PgIamAuthConfig) -> Self {
+        match config {
+            PgIamAuthConfig::AwsRds {
+                region,
+                access_key_id,
+                secret_access_key,
+                session_token,
+            } => {
+                tracing::debug!(
+                    ?region,
+                    ?access_key_id,
+                    ?secret_access_key,
+                    ?session_token,
+                    "Converting AwsRds config"
+                );
+
+                IamAuthConfig::AwsRds {
+                    region: region.as_ref().map(Into::into),
+                    access_key_id: access_key_id.as_ref().map(Into::into),
+                    secret_access_key: secret_access_key.as_ref().map(Into::into),
+                    session_token: session_token.as_ref().map(Into::into),
+                }
+            }
+            PgIamAuthConfig::GcpCloudSql {
+                credentials_json,
+                credentials_path,
+                project,
+            } => {
+                tracing::debug!(
+                    ?credentials_json,
+                    ?credentials_path,
+                    ?project,
+                    "Converting GcpCloudSql config"
+                );
+
+                IamAuthConfig::GcpCloudSql {
+                    credentials_json: credentials_json.as_ref().map(Into::into),
+                    credentials_path: credentials_path.as_ref().map(Into::into),
+                    project: project.as_ref().map(Into::into),
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ConnectionSource {
@@ -113,6 +162,48 @@ pub enum ConnectionSourceKind {
     },
 }
 
+impl From<ConfigConnectionSourceKind> for ConnectionSourceKind {
+    fn from(src: ConfigConnectionSourceKind) -> Self {
+        match src {
+            ConfigConnectionSourceKind::Env {
+                container,
+                variable,
+            } => ConnectionSourceKind::Env {
+                container,
+                variable,
+            },
+            ConfigConnectionSourceKind::EnvFrom {
+                container,
+                variable,
+            } => ConnectionSourceKind::EnvFrom {
+                container,
+                variable,
+            },
+        }
+    }
+}
+
+impl From<&ConfigConnectionSourceKind> for ConnectionSourceKind {
+    fn from(src: &ConfigConnectionSourceKind) -> Self {
+        match src {
+            ConfigConnectionSourceKind::Env {
+                container,
+                variable,
+            } => ConnectionSourceKind::Env {
+                container: container.clone(),
+                variable: variable.clone(),
+            },
+            ConfigConnectionSourceKind::EnvFrom {
+                container,
+                variable,
+            } => ConnectionSourceKind::EnvFrom {
+                container: container.clone(),
+                variable: variable.clone(),
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PgBranchDatabaseStatus {
@@ -122,6 +213,9 @@ pub struct PgBranchDatabaseStatus {
     /// Information of sessions that are using this branch database.
     #[serde(default)]
     pub session_info: HashMap<String, SessionInfo>,
+    /// Error message when phase is Failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
@@ -130,12 +224,15 @@ pub enum BranchDatabasePhase {
     Pending,
     /// The branch database is ready to use.
     Ready,
+    /// The branch database creation failed.
+    Failed,
 }
 
 impl std::fmt::Display for BranchDatabasePhase {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             BranchDatabasePhase::Pending => write!(f, "Pending"),
+            BranchDatabasePhase::Failed => write!(f, "Failed"),
             BranchDatabasePhase::Ready => write!(f, "Ready"),
         }
     }
