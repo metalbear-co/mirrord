@@ -203,9 +203,60 @@ jobs:
             } else {
                 Write-Warning "signtool.exe not found in Windows Kits."
             }
-          } else {
-             Write-Warning "Windows Kits directory not found."
+           } else {
+              Write-Warning "Windows Kits directory not found."
+           }
+
+      ###########################################################################
+      # SYNC DIGICERT CERTIFICATE TO SYSTEM STORE
+      ###########################################################################
+      - name: Sync DigiCert Certificate
+        if: env.SIGN_ARTIFACTS == 'true'
+        run: |
+          $ErrorActionPreference = "Stop"
+          
+          Write-Host "Syncing DigiCert certificate to system store..."
+          
+          # Find smctl.exe
+          $smctlPaths = @(
+              "C:\DigiCert\Tools\smctl.exe",
+              "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools\smctl.exe",
+              "C:\Program Files\DigiCert\DigiCert Keylocker Tools\smctl.exe"
+          )
+          
+          $smctl = $null
+          foreach ($path in $smctlPaths) {
+              if (Test-Path $path) {
+                  $smctl = $path
+                  Write-Host "Found smctl at: $smctl"
+                  break
+              }
           }
+          
+          if (-not $smctl) {
+              throw "smctl.exe not found. DigiCert Keylocker Tools may not be installed."
+          }
+          
+          # Sync certificate to system store for the runner service
+          & $smctl windows certsync --keypair-alias=key_1346827532 --store system
+          
+          if ($LASTEXITCODE -ne 0) {
+              throw "Certificate sync failed with exit code $LASTEXITCODE"
+          }
+          
+          Write-Host "Certificate synced successfully."
+          
+          # Verify the certificate is in the system store
+          $certHash = "BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB"
+          $cert = certutil -store my $certHash 2>&1
+          if ($cert -match "Provider DLL could not be found") {
+              throw "Certificate found but KSP DLL issue detected"
+          }
+          if ($cert -notmatch $certHash) {
+              throw "Certificate not found in system store after sync"
+          }
+          
+          Write-Host "Certificate verified in system store."
 
       - name: Build
         id: prep
