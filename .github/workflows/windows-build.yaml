@@ -145,6 +145,8 @@ jobs:
                    throw "Certificate not found in user store after sync"
               }
           } else {
+              Write-Host "Certificate verified in user store."
+          }
 
           # Export Thumbprint for subsequent steps
           "SM_CLIENT_CERT_THUMBPRINT=$certHash" | Out-File -Append -FilePath $env:GITHUB_ENV
