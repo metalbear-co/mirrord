@@ -59,7 +59,7 @@ env:
 
 jobs:
   windows_build:
-    runs-on: ["self-hosted", "win-build-spot-1"]
+    runs-on: ["self-hosted"]
     defaults:
       run:
         shell: powershell
