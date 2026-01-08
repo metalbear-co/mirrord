@@ -208,15 +208,14 @@ impl IncomingMode {
     /// # Params
     ///
     /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
-    pub fn new(config: &mut IncomingConfig) -> Self {
+    fn new(config: &mut IncomingConfig) -> Self {
         let http_settings = config.http_filter.is_filter_set().then(|| {
             let ports = config
                 .http_filter
                 .ports
-                .get_or_insert_default()
-                .iter()
-                .copied()
-                .collect();
+                .as_ref()
+                .cloned()
+                .map(HashSet::from);
 
             let filter = Self::parse_http_filter(&config.http_filter);
 
