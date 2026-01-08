@@ -606,7 +606,7 @@ jobs:
           #####################################################################
 
 
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win -- --skip test::reconnect_during_http::drop_during_response_2_false
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win -- --skip test::reconnect_during_http::drop_during_response_2_false --test-threads=1
 
 
       - name: Debug Python environment before Rust e2e tests
