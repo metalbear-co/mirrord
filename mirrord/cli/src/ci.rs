@@ -194,8 +194,8 @@ impl MirrordCi {
         self.ci_api_key.as_ref()
     }
 
-    /// When intproxy starts, we need to retrieve its pid and store it in the [`Self::store`], so we
-    /// can kill the intproxy later.
+    /// When intproxy starts, we need to retrieve its pid and store it in the `mirrord-for-ci.json`,
+    /// so we can kill the intproxy later.
     #[tracing::instrument(level = Level::TRACE, err)]
     pub(super) async fn prepare_intproxy() -> CiResult<()> {
         let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
