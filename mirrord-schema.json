@@ -394,7 +394,7 @@
         },
         "image": {
           "title": "agent.image {#agent-image}",
-          "description": "Name of the agent's docker image.\n\nUseful when a custom build of mirrord-agent is required, or when using an internal registry.\n\nDefaults to the latest stable image `\"ghcr.io/metalbear-co/mirrord:latest\"`.\n\n```json { \"agent\": { \"image\": \"internal.repo/images/mirrord:latest\" } } ```\n\nComplete setup:\n\n```json { \"agent\": { \"image\": { \"registry\": \"internal.repo/images/mirrord\", \"tag\": \"latest\" } } } ```",
+          "description": "Name of the agent's docker image.\n\nUseful when a custom build of mirrord-agent is required, or when using an internal registry.\n\nDefaults to the latest stable image `\"ghcr.io/metalbear-co/mirrord:latest\"`.\n\n```json { \"agent\": { \"image\": \"internal.repo/images/mirrord:latest\" } } ```\n\nComplete setup:\n\n```json { \"agent\": { \"image\": { \"registry\": \"internal.repo/images/mirrord\", \"tag\": \"latest\" } } } ```\n\nCan also be controlled via `MIRRORD_AGENT_IMAGE`, `MIRRORD_AGENT_IMAGE_REGISTRY`, and `MIRRORD_AGENT_IMAGE_TAG`. `MIRRORD_AGENT_IMAGE` takes precedence, followed by config values for registry/tag, then environment variables for registry/tag.",
           "anyOf": [
             {
               "$ref": "#/definitions/AgentImageFileConfig"
