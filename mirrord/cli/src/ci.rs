@@ -201,7 +201,7 @@ impl MirrordCi {
         let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
         mirrord_ci_store.intproxy_pids.insert(std::process::id());
 
-        Ok(mirrord_ci_store.write_to_file().await?)
+        mirrord_ci_store.write_to_file().await
     }
 
     /// Prepares and runs the user binary with mirrord.

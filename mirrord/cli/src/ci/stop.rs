@@ -71,22 +71,27 @@ impl CiStopCommandHandler {
                 .map_err(CiError::from)
         }
 
+        // We don't want to short-circuit on error, go to the next pid and try to `kill` it.
         let intproxies_killed = store
             .intproxy_pids
             .into_iter()
             .map(try_kill)
-            .collect::<CiResult<()>>();
+            .collect::<Vec<_>>();
 
         let users_killed = store
             .user_pids
             .into_iter()
             .filter_map(|user_pid| Some(try_kill(user_pid?)))
-            .collect::<CiResult<()>>();
+            .collect::<Vec<_>>();
 
         MirrordCiStore::remove_file().await?;
 
         progress.success(None);
-        intproxies_killed.and(users_killed)
+
+        intproxies_killed
+            .into_iter()
+            .try_collect::<()>()
+            .and(users_killed.into_iter().try_collect::<()>())
     }
 
     #[cfg_attr(windows, allow(unused))]
