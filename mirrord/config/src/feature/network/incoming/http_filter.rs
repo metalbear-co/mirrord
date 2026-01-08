@@ -262,7 +262,7 @@ impl HttpFilterConfig {
 
     /// Returns the number of ports that get filtered.
     pub fn count_filtered_ports(&self) -> u16 {
-        if self.is_filter_set() {
+        if self.is_filter_set().not() {
             0
         } else {
             match &self.ports {
