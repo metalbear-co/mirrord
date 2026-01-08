@@ -148,6 +148,9 @@ jobs:
               Write-Host "Certificate verified in user store."
           }
 
+          # Export Thumbprint for subsequent steps
+          "SM_CLIENT_CERT_THUMBPRINT=$certHash" | Out-File -Append -FilePath $env:GITHUB_ENV
+
 
       # Early sanity check that the runner account can write to C:.
       - name: Validate C write access
@@ -303,8 +306,8 @@ jobs:
           }
 
           if ($shouldSign) {
-            & signtool.exe sign /csp "DigiCert Signing Manager KSP" /kc "key_1346827532" `
-                /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
+             Write-Host "Signing DLL..."
+             & signtool.exe sign /sha1 $env:SM_CLIENT_CERT_THUMBPRINT /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
           }
 
           $env:MIRRORD_LAYER_FILE = $dll
@@ -319,8 +322,8 @@ jobs:
           }
 
           if ($shouldSign) {
-            & signtool.exe sign /csp "DigiCert Signing Manager KSP" /kc "key_1346827532" `
-                /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
+            Write-Host "Signing EXE..."
+            & signtool.exe sign /sha1 $env:SM_CLIENT_CERT_THUMBPRINT /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
           }
 
           Set-Env "MIRRORD_EXE" $exe
@@ -559,7 +562,7 @@ jobs:
             throw "MSI_PATH '$msi' does not exist."
           }
 
-          & signtool.exe sign /csp "DigiCert Signing Manager KSP" /kc "key_1346827532" `
+          & signtool.exe sign /sha1 $env:SM_CLIENT_CERT_THUMBPRINT `
               /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$msi"
 
       ###########################################################################
