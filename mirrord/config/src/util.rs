@@ -155,29 +155,6 @@ pub enum VecOrSingle<T> {
     Multiple(Vec<T>),
 }
 
-impl<T> VecOrSingle<T> {
-    pub fn push(&mut self, new: T) {
-        match self {
-            Self::Single(_) => {
-                let Self::Single(old) =
-                    std::mem::replace(self, Self::Multiple(Vec::with_capacity(2)))
-                else {
-                    unreachable!("just checked that self is Self::Single")
-                };
-
-                let Self::Multiple(vec) = self else {
-                    unreachable!("just set self to Self::Multiple")
-                };
-                vec.push(old);
-                vec.push(new);
-            }
-            Self::Multiple(v) => {
-                v.push(new);
-            }
-        }
-    }
-}
-
 impl<T> Deref for VecOrSingle<T> {
     type Target = [T];
 
