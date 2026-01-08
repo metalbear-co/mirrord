@@ -62,7 +62,7 @@ jobs:
     runs-on: ["self-hosted"]
     defaults:
       run:
-        shell: pwsh
+        shell: powershell
     env:
 
       RELEASE_TAG_INPUT: ${{ inputs.release_tag || '' }}
