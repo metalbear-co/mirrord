@@ -8,8 +8,10 @@
 #include <unistd.h>
 #include <string>
 #include <libgen.h>
+#include <cstdlib>
 
-#include "libgo_server.h"
+#include "server/libgo_server.h"
+#include "fileops/libgo_fileops.h"
 
 using namespace std;
 
@@ -28,10 +30,11 @@ string get_exe_dir() {
 }
 
 /**
- * This test app calls `dlopen()` to load a c-shared cgo library.
- * To compile the app:
- * 1. build the go c-shared library: `go build -buildmode=c-shared -o libgo_server.so server.go`.
- * 2. build the cpp app: `g++ main.cpp -o out.cpp_dlopen_cgo -ldl`.
+ * This test app calls `dlopen()` to load two different c-shared cgo libraries.
+ * To compile the app, run the script `./build_test_app.sh`, which does the following:
+ * 1. build the go c-shared server library: `go build -buildmode=c-shared -o server/libgo_server.so server/main.go`.
+ * 2. build the go c-shared file ops library: `go build -buildmode=c-shared -o fileops/libgo_fileops.so fileops/main.go`.
+ * 3. build the cpp app: `g++ main.cpp -o out.cpp_dlopen_cgo -ldl`.
 **/
 int main() {
     // Install signal handlers
@@ -39,23 +42,39 @@ int main() {
     signal(SIGTERM, signal_handler);
 
     string exe_dir = get_exe_dir();
-    string so_path = exe_dir + "/libgo_server.so";
+    string server_so_path = exe_dir + "/server/libgo_server.so";
+    string fileops_so_path = exe_dir + "/fileops/libgo_fileops.so";
 
-    // Load library
-    void* handle = dlopen(so_path.c_str(), RTLD_LAZY);
-    if (!handle) {
+	// These dlopen() flags are provided by the user.
+    void* server_so_handle = dlopen(server_so_path.c_str(), RTLD_LAZY | RTLD_NODELETE | RTLD_DEEPBIND);
+    if (!server_so_handle) {
+        cerr << "dlopen error: " << dlerror() << "\n";
+        return 1;
+    }
+    void* fileops_so_handle = dlopen(fileops_so_path.c_str(), RTLD_LAZY | RTLD_NODELETE | RTLD_DEEPBIND);
+    if (!fileops_so_handle) {
         cerr << "dlopen error: " << dlerror() << "\n";
         return 1;
     }
 
+	// Exported functions from the server library
     typedef int  (*StartServerFn)(char*, int);
-    typedef void (*RunFileOpsFn)();
     typedef void (*StopServerFn)();
+    StartServerFn StartServer = (StartServerFn)dlsym(server_so_handle, "StartServer");
+    if (!StartServer) {
+        cerr << "dlsym error: " << dlerror() << "\n";
+        return 1;
+    }
+    StopServerFn  StopServer  = (StopServerFn)dlsym(server_so_handle, "StopServer");
+    if (!StopServer) {
+        cerr << "dlsym error: " << dlerror() << "\n";
+        return 1;
+    }
 
-    StartServerFn StartServer = (StartServerFn)dlsym(handle, "StartServer");
-    StopServerFn  StopServer  = (StopServerFn)dlsym(handle, "StopServer");
-
-    if (!StartServer || !StopServer) {
+	// Exported function from the file ops library
+	typedef char* (*ReadFileToStringFn)(char*);
+	ReadFileToStringFn ReadFileToString = (ReadFileToStringFn)dlsym(fileops_so_handle, "ReadFileToString");
+    if (!ReadFileToString) {
         cerr << "dlsym error: " << dlerror() << "\n";
         return 1;
     }
@@ -69,9 +88,19 @@ int main() {
 
     cout << "Server started. Press Ctrl-C to stop.\n";
 
-    // Main thread waits until a signal is received
+    // Main thread waits until a signal is received while reading 
+	// the same file over and over.
     while (running) {
-        this_thread::sleep_for(std::chrono::milliseconds(200));
+        this_thread::sleep_for(std::chrono::milliseconds(1000));
+		char* file_content = ReadFileToString((char*)"/app/test.txt");
+		if (!file_content) {
+			cerr << "ReadFileToString returned null\n";
+		} else {
+			cout << "\n--- test.txt (via Go) ---\n";
+			cout << file_content;
+			cout << "\n--- EOF ---\n";
+		}
+		free(file_content);
     }
 
     // Graceful shutdown
