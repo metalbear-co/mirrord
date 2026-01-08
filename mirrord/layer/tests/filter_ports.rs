@@ -68,29 +68,29 @@ fn build_config(
     })
 }
 
-enum LayerAction {
-    BindLocally,
-    BindUnfiltered,
-    BindFiltered,
+enum BindMode {
+    Local,
+    Unfiltered,
+    Filtered,
 }
 
-fn expected_behavior(port: u16, incoming: &IncomingConfig) -> LayerAction {
+fn expected_behavior(port: u16, incoming: &IncomingConfig) -> BindMode {
     if let Some(remote_ports) = &incoming.ports
         && remote_ports.contains(&port).not()
     {
-        return LayerAction::BindLocally;
+        return BindMode::Local;
     }
 
     if incoming.http_filter.is_filter_set().not() {
-        return LayerAction::BindUnfiltered;
+        return BindMode::Unfiltered;
     };
 
     if let Some(filtered_ports) = &incoming.http_filter.ports
         && filtered_ports.contains(&port).not()
     {
-        LayerAction::BindUnfiltered
+        BindMode::Unfiltered
     } else {
-        LayerAction::BindFiltered
+        BindMode::Filtered
     }
 }
 
@@ -147,13 +147,13 @@ async fn filter_ports(
         .await;
 
     match expected_behavior(port, &incoming_config) {
-        LayerAction::BindLocally => {
+        BindMode::Local => {
             // Wait a little for test process
             tokio::time::sleep(Duration::from_millis(250)).await;
             let stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
             drop(stream);
         }
-        LayerAction::BindUnfiltered => {
+        BindMode::Unfiltered => {
             assert_matches!(
                 intproxy.recv().await,
                 ClientMessage::TcpSteal(
@@ -161,7 +161,7 @@ async fn filter_ports(
                 ) if stolen_port == port
             );
         }
-        LayerAction::BindFiltered => {
+        BindMode::Filtered => {
             assert_matches!(
                 intproxy.recv().await,
                 ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::FilteredHttpEx(
