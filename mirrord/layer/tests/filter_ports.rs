@@ -15,7 +15,6 @@ use mirrord_protocol::{
     tcp::{Filter, HttpFilter, LayerTcpSteal, StealType},
 };
 use rstest::rstest;
-
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
 
