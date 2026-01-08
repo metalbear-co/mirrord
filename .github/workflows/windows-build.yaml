@@ -145,11 +145,39 @@ jobs:
                    throw "Certificate not found in user store after sync"
               }
           } else {
-              Write-Host "Certificate verified in user store."
-          }
 
           # Export Thumbprint for subsequent steps
           "SM_CLIENT_CERT_THUMBPRINT=$certHash" | Out-File -Append -FilePath $env:GITHUB_ENV
+
+
+      ###########################################################################
+      # FAIL-FAST: TEST SIGNING NOW
+      ###########################################################################
+      - name: Test Signing (Fail Fast)
+        if: env.SIGN_ARTIFACTS == 'true'
+        run: |
+          $ErrorActionPreference = "Stop"
+          Write-Host "Verifying signing capability before starting build..."
+          
+          $testFile = "C:\test-signing-check.txt"
+          Set-Content $testFile "This is a dummy file to test signtool access."
+          
+          # Find Signtool
+          $kitsRoot = "${env:ProgramFiles(x86)}\Windows Kits"
+          $signtool = Get-ChildItem -Path $kitsRoot -Filter "signtool.exe" -Recurse -ErrorAction SilentlyContinue | 
+                      Where-Object { $_.FullName -like "*\x64\*" } | 
+                      Select-Object -First 1
+                      
+          if (-not $signtool) { throw "Signtool not found for test!" }
+          
+          Write-Host "Attempting to sign dummy file with SHA1 hash: $env:SM_CLIENT_CERT_THUMBPRINT"
+          & $signtool.FullName sign /sha1 $env:SM_CLIENT_CERT_THUMBPRINT /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 $testFile
+          
+          if ($LASTEXITCODE -ne 0) {
+             throw "Fail-Fast: Signing failed! Check permissions or certificate sync."
+          }
+          Write-Host "✅ Fail-Fast Check Passed: Signing is working."
+          Remove-Item $testFile -Force
 
 
       # Early sanity check that the runner account can write to C:.
