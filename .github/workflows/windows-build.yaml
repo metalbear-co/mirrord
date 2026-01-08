@@ -84,6 +84,71 @@ jobs:
           cargo -V
           rustup show
 
+      ###########################################################################
+      # SYNC DIGICERT CERTIFICATE (Moved Earlier for Fail-Fast)
+      ###########################################################################
+      - name: Sync DigiCert Certificate
+        if: env.SIGN_ARTIFACTS == 'true'
+        run: |
+          $ErrorActionPreference = "Stop"
+          
+          Write-Host "Syncing DigiCert certificate to system store..."
+          
+          # Prioritize MSI Paths
+          $smctlPaths = @(
+              "C:\Program Files\DigiCert\DigiCert Keylocker Tools\smctl.exe",
+              "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools\smctl.exe",
+              "C:\DigiCert\Tools\smctl.exe" 
+          )
+          
+          $smctl = $null
+          foreach ($path in $smctlPaths) {
+              if (Test-Path $path) {
+                  $smctl = $path
+                  Write-Host "Found smctl at: $smctl"
+                  break
+              }
+          }
+          
+          if (-not $smctl) {
+              throw "smctl.exe not found. DigiCert Keylocker Tools may not be installed."
+          }
+
+          # Clean up old manual tools if duplicate forces wrong version on verify
+          if ($smctl -like "*Program Files*" -and (Test-Path "C:\DigiCert\Tools")) {
+              Write-Warning "Found old manual tools at C:\DigiCert\Tools. Removing to prevent conflicts..."
+              Remove-Item "C:\DigiCert\Tools" -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Sync certificate to user store 
+          & $smctl windows certsync --keypair-alias=key_1346827532 --store user
+          
+          if ($LASTEXITCODE -ne 0) {
+              throw "Certificate sync failed with exit code $LASTEXITCODE"
+          }
+          
+          Write-Host "Certificate synced successfully to user store."
+          
+          # Verify the certificate is accessible
+          $certHash = "BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB"
+          $cert = certutil -user -store my $certHash 2>&1
+          if ($cert -match "Provider DLL could not be found") {
+              throw "Certificate found but KSP DLL issue detected"
+          }
+          if ($cert -notmatch $certHash) {
+              # Fallback check - sometimes user store is tricky for service accounts
+              Write-Warning "Certutil check failed. Attempting to verify via ChildItem..."
+              $certObj = Get-ChildItem -Path Cert:\CurrentUser\My\$certHash -ErrorAction SilentlyContinue
+              if ($certObj) {
+                   Write-Host "Certificate verified via PowerShell provider."
+              } else {
+                   throw "Certificate not found in user store after sync"
+              }
+          } else {
+              Write-Host "Certificate verified in user store."
+          }
+
+
       # Early sanity check that the runner account can write to C:.
       - name: Validate C write access
         run: |
@@ -207,56 +272,7 @@ jobs:
               Write-Warning "Windows Kits directory not found."
            }
 
-      ###########################################################################
-      # SYNC DIGICERT CERTIFICATE TO SYSTEM STORE
-      ###########################################################################
-      - name: Sync DigiCert Certificate
-        if: env.SIGN_ARTIFACTS == 'true'
-        run: |
-          $ErrorActionPreference = "Stop"
-          
-          Write-Host "Syncing DigiCert certificate to system store..."
-          
-          # Find smctl.exe
-          $smctlPaths = @(
-              "C:\DigiCert\Tools\smctl.exe",
-              "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools\smctl.exe",
-              "C:\Program Files\DigiCert\DigiCert Keylocker Tools\smctl.exe"
-          )
-          
-          $smctl = $null
-          foreach ($path in $smctlPaths) {
-              if (Test-Path $path) {
-                  $smctl = $path
-                  Write-Host "Found smctl at: $smctl"
-                  break
-              }
-          }
-          
-          if (-not $smctl) {
-              throw "smctl.exe not found. DigiCert Keylocker Tools may not be installed."
-          }
-          
-          # Sync certificate to user store (runner service has access to this)
-          & $smctl windows certsync --keypair-alias=key_1346827532 --store user
-          
-          if ($LASTEXITCODE -ne 0) {
-              throw "Certificate sync failed with exit code $LASTEXITCODE"
-          }
-          
-          Write-Host "Certificate synced successfully to user store."
-          
-          # Verify the certificate is accessible
-          $certHash = "BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB"
-          $cert = certutil -user -store my $certHash 2>&1
-          if ($cert -match "Provider DLL could not be found") {
-              throw "Certificate found but KSP DLL issue detected"
-          }
-          if ($cert -notmatch $certHash) {
-              throw "Certificate not found in user store after sync"
-          }
-          
-          Write-Host "Certificate verified in user store."
+
 
       - name: Build
         id: prep
