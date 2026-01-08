@@ -101,40 +101,21 @@ impl From<&PgIamAuthConfig> for IamAuthConfig {
                 access_key_id,
                 secret_access_key,
                 session_token,
-            } => {
-                tracing::debug!(
-                    ?region,
-                    ?access_key_id,
-                    ?secret_access_key,
-                    ?session_token,
-                    "Converting AwsRds config"
-                );
-
-                IamAuthConfig::AwsRds {
-                    region: region.as_ref().map(Into::into),
-                    access_key_id: access_key_id.as_ref().map(Into::into),
-                    secret_access_key: secret_access_key.as_ref().map(Into::into),
-                    session_token: session_token.as_ref().map(Into::into),
-                }
-            }
+            } => IamAuthConfig::AwsRds {
+                region: region.as_ref().map(Into::into),
+                access_key_id: access_key_id.as_ref().map(Into::into),
+                secret_access_key: secret_access_key.as_ref().map(Into::into),
+                session_token: session_token.as_ref().map(Into::into),
+            },
             PgIamAuthConfig::GcpCloudSql {
                 credentials_json,
                 credentials_path,
                 project,
-            } => {
-                tracing::debug!(
-                    ?credentials_json,
-                    ?credentials_path,
-                    ?project,
-                    "Converting GcpCloudSql config"
-                );
-
-                IamAuthConfig::GcpCloudSql {
-                    credentials_json: credentials_json.as_ref().map(Into::into),
-                    credentials_path: credentials_path.as_ref().map(Into::into),
-                    project: project.as_ref().map(Into::into),
-                }
-            }
+            } => IamAuthConfig::GcpCloudSql {
+                credentials_json: credentials_json.as_ref().map(Into::into),
+                credentials_path: credentials_path.as_ref().map(Into::into),
+                project: project.as_ref().map(Into::into),
+            },
         }
     }
 }
