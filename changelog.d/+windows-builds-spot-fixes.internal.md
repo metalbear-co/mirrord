@@ -1,0 +1,1 @@
+This PR fixes the issue with windows builds that don't work on spot instances
