@@ -237,26 +237,26 @@ jobs:
               throw "smctl.exe not found. DigiCert Keylocker Tools may not be installed."
           }
           
-          # Sync certificate to system store for the runner service
-          & $smctl windows certsync --keypair-alias=key_1346827532 --store system
+          # Sync certificate to user store (runner service has access to this)
+          & $smctl windows certsync --keypair-alias=key_1346827532 --store user
           
           if ($LASTEXITCODE -ne 0) {
               throw "Certificate sync failed with exit code $LASTEXITCODE"
           }
           
-          Write-Host "Certificate synced successfully."
+          Write-Host "Certificate synced successfully to user store."
           
-          # Verify the certificate is in the system store
+          # Verify the certificate is accessible
           $certHash = "BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB"
-          $cert = certutil -store my $certHash 2>&1
+          $cert = certutil -user -store my $certHash 2>&1
           if ($cert -match "Provider DLL could not be found") {
               throw "Certificate found but KSP DLL issue detected"
           }
           if ($cert -notmatch $certHash) {
-              throw "Certificate not found in system store after sync"
+              throw "Certificate not found in user store after sync"
           }
           
-          Write-Host "Certificate verified in system store."
+          Write-Host "Certificate verified in user store."
 
       - name: Build
         id: prep
