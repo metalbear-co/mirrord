@@ -175,6 +175,7 @@ jobs:
              throw "Fail-Fast: Signing failed with unexpected error!"
           }
           Remove-Item $testFile -Force
+          exit 0
 
       ###########################################################################
       - name: Smoke Test K8s Connection
