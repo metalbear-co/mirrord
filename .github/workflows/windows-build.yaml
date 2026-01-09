@@ -149,7 +149,7 @@ jobs:
       ###########################################################################
       - name: Install .NET runtime for wingetcreate
         # Skip on forks without WINGET_TOKEN so they don't fail
-        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' && env.WINGET_TOKEN != '' }}
+        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
         uses: actions/setup-dotnet@v4
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}\dotnet
@@ -161,8 +161,8 @@ jobs:
       ###########################################################################
 
       - name: Update WinGet manifest (wingetcreate)
-        # Skip on forks without WINGET_TOKEN so they don't fail
-        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' && env.WINGET_TOKEN != '' }}
+        # Force run to debug why it was skipping. We check token inside script anyway.
+        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
           $packageId = $env:WINGET_PACKAGE_ID
