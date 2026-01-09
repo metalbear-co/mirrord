@@ -55,15 +55,12 @@ jobs:
   windows_build:
     # Use generic label to target any available Windows runner
     runs-on: [self-hosted, Windows]
-    permissions:
-      contents: write
-    defaults:
-      run:
+    run:
         shell: pwsh
     env:
       RELEASE_TAG_INPUT: ${{ inputs.release_tag || '' }}
       SIGN_ARTIFACTS: ${{ inputs.sign_artifacts || 'false' }}
-      PUBLISH_CHOCO: ${{ inputs.choco_publish || 'true' }}
+      PUBLISH_CHOCO: ${{ inputs.choco_publish || 'false' }}
       PUBLISH_WINGET: ${{ inputs.winget_publish || 'false' }}
       CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
       WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
@@ -422,6 +419,8 @@ jobs:
       # UPLOAD MSI TO PUBLIC GCS BUCKET
       ###########################################################################
       - name: Upload MSI to GCS
+        # Only upload if we are releasing (tag provided) or publishing to Choco/WinGet
+        if: ${{ env.RELEASE_TAG_INPUT != '' || env.PUBLISH_WINGET == 'true' || env.PUBLISH_CHOCO == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -507,6 +506,8 @@ jobs:
       # COMPUTE MSI DOWNLOAD URL (Dynamic from Upload)
       ###########################################################################
       - name: Compute MSI Download URL
+        # Depends on Upload MSI to GCS
+        if: ${{ env.RELEASE_TAG_INPUT != '' || env.PUBLISH_WINGET == 'true' || env.PUBLISH_CHOCO == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
           
