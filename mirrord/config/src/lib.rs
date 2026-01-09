@@ -395,6 +395,20 @@ pub struct LayerConfig {
     /// ## ci {#root-ci}
     #[config(nested)]
     pub ci: CiConfig,
+
+    /// ## traceparent {#root-traceparent}
+    ///
+    /// OpenTelemetry (OTel) / W3C trace context.
+    /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
+    #[config(env = "TRACEPARENT")]
+    pub traceparnet: Option<String>,
+
+    /// ## baggage {#root-baggage}
+    ///
+    /// OpenTelemetry (OTel) / W3C baggage propagator.
+    /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
+    #[config(env = "BAGGAGE")]
+    pub baggage: Option<String>,
 }
 
 impl LayerConfig {
@@ -1102,6 +1116,8 @@ mod tests {
             skip_sip: None,
             startup_retry: None,
             ci: None,
+            traceparnet: None,
+            baggage: None,
         };
 
         assert_eq!(config, expect);
