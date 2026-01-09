@@ -107,39 +107,15 @@ jobs:
           # If the user meant the PARENT folder, I'll need to find the latest run.
           
           # Let's assume the user knows the path or we search for latest 'run-*'
-          $bucketBase = "gs://mirrord-windows-builds-public/release-windows-3.180.0"
-          
-          # List runs to find the latest
-          Write-Host "Listing runs in $bucketBase..."
-          # List runs to find the latest
-          Write-Host "Listing runs in $bucketBase..."
-          # List recursively to find the MSI file directly if possible, or run dirs
-          $runs = gcloud storage ls "$bucketBase/**/mirrord.msi"
-          $latestRun = $runs | Select-Object -Last 1
-          
-          if (-not $latestRun) { 
-             # Fallback to listing directories if no MSI found directly (rare)
-             $runs = gcloud storage ls "$bucketBase/run-*"
-             $latestRun = $runs | Select-Object -Last 1
-          }
-
-          if (-not $latestRun) { throw "No artifacts found in $bucketBase" }
-          
-          Write-Host "Found latest artifact/run: $latestRun"
-          
-          $Root = "C:\wix\mirrord"
-          New-Item -ItemType Directory -Force -Path $Root | Out-Null
-          
-          # Determine Source Path
-          $sourceMsi = $latestRun
-          if (-not $sourceMsi.EndsWith(".msi")) {
-             $sourceMsi = "$sourceMsi/mirrord.msi"
-             # Remove double slashes just in case
-             $sourceMsi = $sourceMsi -replace "(?<!:)//", "/"
-          }
+          # Hardcoded GCS source as requested by user
+          # Path: mirrord-windows-builds-public/3.180.0/run-20757133456
+          $sourceMsi = "gs://mirrord-windows-builds-public/3.180.0/run-20757133456/mirrord.msi"
           
           Write-Host "Downloading MSI from: $sourceMsi"
           
+          $Root = "C:\wix\mirrord"
+          New-Item -ItemType Directory -Force -Path $Root | Out-Null
+
           # Copy MSI
           gcloud storage cp "$sourceMsi" "$Root\mirrord.msi"
           if (-not (Test-Path "$Root\mirrord.msi")) { throw "Failed to download MSI" }
@@ -147,14 +123,11 @@ jobs:
           # Set Env Vars required for Publishing
           "MSI_PATH=$Root\mirrord.msi" | Out-File -Append -FilePath $env:GITHUB_ENV
           
-          # Reconstruct HTTP URL for WinGet
-          $httpBase = "https://storage.googleapis.com/mirrord-windows-builds-public"
+          # Construct HTTP URL (Manual construction is safest here)
+          # gs://mirrord-windows-builds-public/3.180.0/run-20757133456/mirrord.msi
+          # -> https://storage.googleapis.com/mirrord-windows-builds-public/3.180.0/run-20757133456/mirrord.msi
           
-          $relativePath = $sourceMsi.Replace("gs://mirrord-windows-builds-public/", "")
-          $url = "$httpBase/$relativePath"
-          
-          # Fix double slashes if any (except protocol)
-          $url = $url -replace "(?<!:)/{2,}", "/"
+          $url = "https://storage.googleapis.com/mirrord-windows-builds-public/3.180.0/run-20757133456/mirrord.msi"
           
           Write-Host "Computed MSI Download URL: $url"
           
