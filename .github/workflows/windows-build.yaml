@@ -184,7 +184,7 @@ jobs:
           if (-not $installerUrl) {
             throw "MSI_DOWNLOAD_URL env var is not set."
           }
-          $gitToken = "${{ env.WINGET_TOKEN }}"
+          $gitToken = $env:WINGET_TOKEN
           if (-not $gitToken) {
             throw "env.WINGET_TOKEN is not configured in this repo."
           }
