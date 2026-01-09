@@ -247,6 +247,13 @@ jobs:
             param([switch]$DeepSearch)
 
             Write-Host "Searching for WiX candle.exe in known locations..."
+            
+            # DEBUG: List Program Files directories matching WiX to find actual path
+            Get-ChildItem -Path "$Env:ProgramFiles(x86)" -Filter "WiX*" -ErrorAction SilentlyContinue | ForEach-Object {
+                Write-Host "DEBUG: Found WiX dir: $($_.FullName)"
+                Get-ChildItem -Path $_.FullName -Recurse -Filter "candle.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 | ForEach-Object { Write-Host "DEBUG: Found candle inside at: $($_.FullName)" }
+            }
+
             $candidateDirs = @()
 
             if ($Env:ChocolateyInstall -and (Test-Path $Env:ChocolateyInstall)) {
