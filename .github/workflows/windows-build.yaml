@@ -158,6 +158,48 @@ jobs:
           # Export Thumbprint specifically for SHA1 signing
           "SM_CLIENT_CERT_THUMBPRINT=$certHash" | Out-File -Append -FilePath $env:GITHUB_ENV
 
+
+      ###########################################################################
+      # ENSURE WIX TOOLSET IS INSTALLED (Full Build Only)
+      ###########################################################################
+      # Moved early for fail-fast behavior
+      - name: Ensure WiX Toolset
+        if: env.GCS_MSI_SOURCE == ''
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          function Write-Env([string]$k,[string]$v) {
+            "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV
+          }
+
+          $wixVersion = "wix3112rtm"
+          $wixUrl     = "https://github.com/wixtoolset/wix3/releases/download/$wixVersion/wix311-binaries.zip"
+          $wixDir     = Join-Path $env:RUNNER_TEMP "wix311"
+
+          if (-not (Test-Path $wixDir)) {
+              Write-Host "Downloading WiX binaries from $wixUrl ..."
+              New-Item -ItemType Directory -Force -Path $wixDir | Out-Null
+              $zipPath = Join-Path $wixDir "wix.zip"
+              Invoke-WebRequest -Uri $wixUrl -OutFile $zipPath
+              Expand-Archive -Path $zipPath -DestinationPath $wixDir -Force
+              Remove-Item $zipPath -Force
+              Write-Host "WiX installed to $wixDir"
+          } else {
+              Write-Host "WiX already present at $wixDir"
+          }
+
+          $candlePath = Join-Path $wixDir "candle.exe"
+          $lightPath  = Join-Path $wixDir "light.exe"
+
+          if (-not (Test-Path $candlePath)) { throw "candle.exe not found at $candlePath" }
+          if (-not (Test-Path $lightPath))  { throw "light.exe not found at $lightPath" }
+
+          Write-Host "Found candle.exe at $candlePath"
+          Write-Host "Found light.exe at $lightPath"
+
+          Write-Env "CANDLE_EXE" $candlePath
+          Write-Env "LIGHT_EXE"  $lightPath
+
       ###########################################################################
       # PREPARE ARTIFACTS (Full Build Only)
       ###########################################################################
@@ -257,89 +299,6 @@ jobs:
       ###########################################################################
       # ENSURE WIX TOOLSET IS INSTALLED (Full Build Only)
       ###########################################################################
-      - name: Ensure WiX Toolset
-        if: env.GCS_MSI_SOURCE == ''
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          function Write-Env([string]$k,[string]$v) {
-            "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV
-          }
-
-          function Find-Candle {
-            param([switch]$DeepSearch)
-
-            Write-Host "Searching for WiX candle.exe in known locations..."
-            
-            # DEBUG: List Program Files based paths to help diagnosis
-            Get-ChildItem -Path "$Env:ProgramFiles(x86)" -Filter "WiX*" -ErrorAction SilentlyContinue | ForEach-Object {
-                Write-Host "DEBUG: Found WiX dir: $($_.FullName)"
-            }
-
-            $candidateDirs = @()
-
-            if ($Env:ChocolateyInstall -and (Test-Path $Env:ChocolateyInstall)) {
-              $candidateDirs += @(
-                (Join-Path $Env:ChocolateyInstall "lib\wixtoolset\tools\bin"),
-                (Join-Path $Env:ChocolateyInstall "tools"),
-                (Join-Path $Env:ChocolateyInstall "bin")
-              )
-            }
-
-            $candidateDirs += @(
-              "$Env:ProgramFiles(x86)\WiX Toolset v3.14\bin",
-              "$Env:ProgramFiles(x86)\WiX Toolset v3.13\bin",
-              "$Env:ProgramFiles(x86)\WiX Toolset v3.12\bin",
-              "$Env:ProgramFiles(x86)\WiX Toolset v3.11\bin",
-              "$Env:ProgramFiles\WiX Toolset v3.14\bin",
-              "$Env:ProgramFiles\WiX Toolset v3.13\bin",
-              "$Env:ProgramFiles\WiX Toolset v3.12\bin",
-              "$Env:ProgramFiles\WiX Toolset v3.11\bin",
-              "$Env:ProgramData\chocolatey\lib\wixtoolset\tools\bin",
-              "$Env:ProgramData\chocolatey\bin"
-            )
-
-            $candidateDirs = $candidateDirs | Where-Object { $_ -and (Test-Path $_) }
-
-            foreach ($dir in $candidateDirs) {
-              $candlePath = Join-Path $dir "candle.exe"
-              if (Test-Path $candlePath) {
-                Write-Host "Found candle.exe at $candlePath."
-                return $candlePath
-              }
-            }
-
-            return $null
-          }
-
-          $candleCmd  = Get-Command candle.exe -ErrorAction SilentlyContinue
-          $candlePath = $null
-
-          if ($candleCmd) {
-            $candlePath = $candleCmd.Source
-          } else {
-            $candlePath = Find-Candle
-          }
-
-          if (-not $candlePath) {
-             Write-Host "Installing WiX Toolset via Chocolatey..."
-             choco install wixtoolset -y
-             $candlePath = Find-Candle
-          }
-
-          if (-not $candlePath) {
-            throw "Could not find candle.exe even after choco install."
-          }
-
-          $binDir = Split-Path -Parent $candlePath
-          $lightPath = Join-Path $binDir "light.exe"
-
-          if (-not (Test-Path $lightPath)) {
-            throw "Found candle.exe at $candlePath but light.exe is missing from $binDir"
-          }
-
-          Write-Env "CANDLE_EXE" $candlePath
-          Write-Env "LIGHT_EXE"  $lightPath
 
       - name: Build MSI
         if: env.GCS_MSI_SOURCE == ''
