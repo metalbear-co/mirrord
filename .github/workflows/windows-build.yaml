@@ -11,6 +11,13 @@ on:
         description: "GCS URI of the existing MSI to release (e.g. gs://mirrord-windows-builds-public/.../mirrord.msi)"
         required: true
         type: string
+      runner:
+        description: "Runner to execute on (Spot Instances)"
+        type: choice
+        options: 
+          - "win-build-spot-2"
+          - "win-build-spot-1"
+        default: "win-build-spot-2"
       sign_artifacts:
         description: "Code-sign EXE & DLL & MSI (Ignored in this mode, assumes signed artifact)"
         type: choice
@@ -37,6 +44,10 @@ on:
         description: "GCS URI of the existing MSI to release"
         required: false
         type: string
+      runner:
+        description: "Runner to execute on"
+        type: string
+        default: "win-build-spot-2"
       sign_artifacts:
         description: "Code-sign EXE & DLL & MSI"
         type: string
@@ -61,8 +72,8 @@ env:
 
 jobs:
   windows_build:
-    # Use generic label to target any available Windows runner (including spot-1 and spot-2)
-    runs-on: [self-hosted, Windows]
+    # Target selected spot instance (default spot-2)
+    runs-on: ${{ inputs.runner }}
     permissions:
       contents: write
     defaults:
