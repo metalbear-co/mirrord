@@ -55,7 +55,8 @@ jobs:
   windows_build:
     # Use generic label to target any available Windows runner
     runs-on: [self-hosted, Windows]
-    run:
+    defaults:
+      run:
         shell: pwsh
     env:
       RELEASE_TAG_INPUT: ${{ inputs.release_tag || '' }}
