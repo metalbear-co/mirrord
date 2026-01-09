@@ -53,8 +53,10 @@ env:
 
 jobs:
   windows_build:
-    # Use generic label to target any available Windows runner
-    runs-on: [self-hosted, Windows]
+    # Use specific spot instance as requested
+    runs-on: ['win-build-spot-1']
+    permissions:
+      contents: write
     defaults:
       run:
         shell: pwsh
