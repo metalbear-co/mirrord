@@ -61,8 +61,8 @@ env:
 
 jobs:
   windows_build:
-    # Use specific spot instance as requested
-    runs-on: ['win-build-spot-2']
+    # Use generic label to target any available Windows runner (including spot-1 and spot-2)
+    runs-on: [self-hosted, Windows]
     permissions:
       contents: write
     defaults:
