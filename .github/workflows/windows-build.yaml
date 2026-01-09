@@ -130,9 +130,16 @@ jobs:
           $url = "https://storage.googleapis.com/mirrord-windows-builds-public/3.180.0/run-20757133456/mirrord.msi"
           
           Write-Host "Computed MSI Download URL: $url"
-          
-          # Fix double slashes if any
-          $url = $url.Replace("//", "/")
+
+          # Verify URL accessibility
+          try {
+            $resp = Invoke-WebRequest -Uri $url -Method Head -ErrorAction Stop
+            Write-Host "URL Verification: OK ($($resp.StatusCode))"
+          } catch {
+             Write-Warning "URL Verification FAILED: $($_.Exception.Message)"
+             # We throw here to be safe, though wingetcreate would fail anyway
+             throw "Computed URL is not accessible from this runner."
+          }
           
           Write-Host "Computed MSI Download URL: $url"
           "MSI_DOWNLOAD_URL=$url" | Out-File -Append -FilePath $env:GITHUB_ENV
