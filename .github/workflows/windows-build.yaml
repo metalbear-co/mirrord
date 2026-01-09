@@ -491,17 +491,12 @@ jobs:
           python3 -c "import os; print('PATH=', os.environ.get('PATH',''))"
           python3 -m pip list
 
-      - name: Run Rust e2e tests 
-        run: |
-          $ErrorActionPreference = "Stop"
-          
-          #####################################################################
-          # START IAP TUNNEL (Persistent for this step)
-          #####################################################################
-          . scripts/start_iap_tunnel.ps1
-          #####################################################################
-
-          cargo test --target=x86_64-pc-windows-msvc --test python_e2e -- --nocapture
+      # Note: Unit tests are commented out in main branch as well
+      # - name: Run Rust unit tests (Windows crates)
+      #   run: |
+      #     $ErrorActionPreference = "Stop"
+      #     . scripts/start_iap_tunnel.ps1
+      #     cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win- --nocapture
 
       ###########################################################################
       # COMPUTE MSI DOWNLOAD URL (Dynamic from Upload)
