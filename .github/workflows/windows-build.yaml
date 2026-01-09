@@ -154,7 +154,7 @@ jobs:
           $url = "$httpBase/$relativePath"
           
           # Fix double slashes if any (except protocol)
-          $url = $url.Replace("//", "/")
+          $url = $url -replace "(?<!:)/{2,}", "/"
           
           Write-Host "Computed MSI Download URL: $url"
           
