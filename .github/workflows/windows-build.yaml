@@ -111,39 +111,52 @@ jobs:
           
           # List runs to find the latest
           Write-Host "Listing runs in $bucketBase..."
-          $runs = gcloud storage ls "$bucketBase/run-*"
+          # List runs to find the latest
+          Write-Host "Listing runs in $bucketBase..."
+          # List recursively to find the MSI file directly if possible, or run dirs
+          $runs = gcloud storage ls "$bucketBase/**/mirrord.msi"
           $latestRun = $runs | Select-Object -Last 1
           
-          if (-not $latestRun) { throw "No run folders found in $bucketBase" }
+          if (-not $latestRun) { 
+             # Fallback to listing directories if no MSI found directly (rare)
+             $runs = gcloud storage ls "$bucketBase/run-*"
+             $latestRun = $runs | Select-Object -Last 1
+          }
+
+          if (-not $latestRun) { throw "No artifacts found in $bucketBase" }
           
-          Write-Host "Downloading from latest run: $latestRun"
+          Write-Host "Found latest artifact/run: $latestRun"
           
           $Root = "C:\wix\mirrord"
           New-Item -ItemType Directory -Force -Path $Root | Out-Null
           
+          # Determine Source Path
+          $sourceMsi = $latestRun
+          if (-not $sourceMsi.EndsWith(".msi")) {
+             $sourceMsi = "$sourceMsi/mirrord.msi"
+             # Remove double slashes just in case
+             $sourceMsi = $sourceMsi -replace "(?<!:)//", "/"
+          }
+          
+          Write-Host "Downloading MSI from: $sourceMsi"
+          
           # Copy MSI
-          gcloud storage cp "$latestRun/mirrord.msi" "$Root\mirrord.msi"
+          gcloud storage cp "$sourceMsi" "$Root\mirrord.msi"
           if (-not (Test-Path "$Root\mirrord.msi")) { throw "Failed to download MSI" }
           
           # Set Env Vars required for Publishing
           "MSI_PATH=$Root\mirrord.msi" | Out-File -Append -FilePath $env:GITHUB_ENV
           
-          # MIRRORD_EXE / LAYER checks in publishing scripts (if any) might need these too
-          # Usually Choco/WinGet only need MSI or version.
-          
           # Reconstruct HTTP URL for WinGet
-          # gs://mirrord-windows-builds-public/release-windows-3.180.0/run-ID/mirrord.msi
-          # -> https://storage.googleapis.com/mirrord-windows-builds-public/release-windows-3.180.0/run-ID/mirrord.msi
-          
           $httpBase = "https://storage.googleapis.com/mirrord-windows-builds-public"
-          # $latestRun is like "gs://bucket/path/run-ID/"
-          # remove gs:// and bucket name to append to httpBase
           
-          # Easiest is to parse $latestRun string
-          # $latestRun = "gs://mirrord-windows-builds-public/release-windows-3.180.0/run-20841369696/"
+          $relativePath = $sourceMsi.Replace("gs://mirrord-windows-builds-public/", "")
+          $url = "$httpBase/$relativePath"
           
-          $relativePath = $latestRun.Replace("gs://mirrord-windows-builds-public/", "")
-          $url = "$httpBase/$relativePath/mirrord.msi"
+          # Fix double slashes if any (except protocol)
+          $url = $url.Replace("//", "/")
+          
+          Write-Host "Computed MSI Download URL: $url"
           
           # Fix double slashes if any
           $url = $url.Replace("//", "/")
