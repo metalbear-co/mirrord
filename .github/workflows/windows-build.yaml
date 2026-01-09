@@ -71,6 +71,9 @@ jobs:
       SIGN_ARTIFACTS: ${{ inputs.sign_artifacts || 'false' }}
       PUBLISH_CHOCO: ${{ inputs.choco_publish || 'true' }}
       PUBLISH_WINGET: ${{ inputs.winget_publish || 'false' }}
+      CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+      GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
 
     steps:
       - name: Checkout
