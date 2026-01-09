@@ -22,13 +22,13 @@ on:
         type: choice
         options: ["false", "true"]
         default: "false"
-  runner:
-    description: "Runner to execute on (Spot Instances)"
-    type: choice
-    options: 
-      - "win-build-spot-2"
-      - "win-build-spot-1"
-    default: "win-build-spot-2"
+    runner:
+      description: "Runner to execute on (Spot Instances)"
+      type: choice
+      options: 
+        - "win-build-spot-2"
+        - "win-build-spot-1"
+      default: "win-build-spot-2"
   workflow_call:
     inputs:
       release_tag:
