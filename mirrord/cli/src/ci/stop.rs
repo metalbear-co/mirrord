@@ -1,3 +1,4 @@
+use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
 
 use super::CiResult;
@@ -14,15 +15,20 @@ pub(super) struct CiStopCommandHandler {
     /// we can kill the intproxy and the user's process.
     #[cfg_attr(windows, allow(unused))]
     pub(crate) store: MirrordCiStore,
+
+    #[cfg_attr(windows, allow(unused))]
+    progress: ProgressTracker,
 }
 
 impl CiStopCommandHandler {
     /// Builds the [`MirrordCiStore`], checking if the mirrord-for-ci requirements have been met.
     #[tracing::instrument(level = Level::TRACE, err)]
     pub(super) async fn new() -> CiResult<Self> {
+        let progress = ProgressTracker::from_env("mirrord ci stop");
+
         let store = MirrordCiStore::read_from_file_or_default().await?;
 
-        Ok(Self { store })
+        Ok(Self { store, progress })
     }
 
     /// [`kill`](nix::sys::signal::kill)s the intproxy and the user's process, using the pids stored
@@ -36,9 +42,19 @@ impl CiStopCommandHandler {
             unistd::Pid,
         };
 
+        let Self {
+            store,
+            mut progress,
+        } = self;
+
         // If `ci stop` is issued multiple time, we should exit with success status.
-        if self.store.is_empty() {
-            println!("No mirrord ci process found.");
+        if store.is_empty() {
+            progress.success(Some(
+                "No mirrord ci processes found. \
+                You can also manually stop mirrord by searching for the pids with \
+                `ps | grep mirrord` and calling `kill [pid]`.
+                ",
+            ));
             return Ok(());
         }
 
@@ -55,19 +71,27 @@ impl CiStopCommandHandler {
                 .map_err(CiError::from)
         }
 
-        let intproxy_killed = match self.store.intproxy_pid {
-            Some(pid) => try_kill(pid),
-            None => Err(CiError::IntproxyPidMissing),
-        };
+        // We don't want to short-circuit on error, go to the next pid and try to `kill` it.
+        let intproxies_killed = store
+            .intproxy_pids
+            .into_iter()
+            .map(try_kill)
+            .collect::<Vec<_>>();
 
-        let user_killed = match self.store.user_pid {
-            Some(pid) => try_kill(pid),
-            None => Err(CiError::UserPidMissing),
-        };
+        let users_killed = store
+            .user_pids
+            .into_iter()
+            .filter_map(|user_pid| Some(try_kill(user_pid?)))
+            .collect::<Vec<_>>();
 
         MirrordCiStore::remove_file().await?;
 
-        intproxy_killed.and(user_killed)
+        progress.success(None);
+
+        intproxies_killed
+            .into_iter()
+            .try_collect::<()>()
+            .and(users_killed.into_iter().try_collect::<()>())
     }
 
     #[cfg_attr(windows, allow(unused))]
