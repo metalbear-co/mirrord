@@ -63,6 +63,7 @@ categories = ["development-tools", "backend", "devtool"]
 
 [workspace.dependencies]
 actix-codec = "0.5"
+async-pidfd = "0.1.5"
 
 # Used by `operator`, `layer`, `console`, `protocol`, `intproxy-protocol`, `auth`.
 bincode = { version = "2", features = ["serde"] }

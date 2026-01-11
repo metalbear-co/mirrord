@@ -89,6 +89,14 @@
         }
       ]
     },
+    "key": {
+      "title": "key {#root-key}",
+      "description": "An identifier for a mirrord session.\n\nThis key can be referenced in your configuration using the `{{ key }}` template variable. For example, you can use it in HTTP filters: `\"header_filter\": \"x-session: key-{{ key }}\"`.\n\nPriority (highest to lowest): 1. CLI argument: `mirrord exec --key my-key` 2. Config file: `{ \"key\": \"my-key\" }` 3. Fallback: A unique key is randomly generated if neither option is provided\n\n```json { \"key\": \"my-session-key\", \"feature\": { \"network\": { \"incoming\": { \"http_filter\": { \"header_filter\": \"x-session: key-{{ key }}\" } } } } } ```",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "kube_context": {
       "title": "kube_context {#root-kube_context}",
       "description": "Kube context to use from the kubeconfig file. Will use current context if not specified.\n\n```json { \"kube_context\": \"mycluster\" } ```",

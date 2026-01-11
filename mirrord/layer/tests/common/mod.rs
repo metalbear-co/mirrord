@@ -127,16 +127,17 @@ impl TestIntProxy {
     pub async fn new(listener: TcpListener, config: Option<&Path>) -> Self {
         let fake_agent_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let fake_agent_address = fake_agent_listener.local_addr().unwrap();
+        let mut context = ConfigContext::default();
         let experimental_config = match config {
             Some(path) => {
-                LayerFileConfig::from_path(path)
+                LayerFileConfig::from_path(path, &mut context)
                     .unwrap()
-                    .generate_config(&mut Default::default())
+                    .generate_config(&mut context)
                     .unwrap()
                     .experimental
             }
             None => ExperimentalFileConfig::default()
-                .generate_config(&mut Default::default())
+                .generate_config(&mut context)
                 .unwrap(),
         };
 
