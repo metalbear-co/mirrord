@@ -49,12 +49,10 @@ on:
 # permissions: contents: write - REMOVED to allow inheritance (Read in CI, Write in Release)
 
 env:
-  MSI_BUCKET_URI: gs://mirrord-windows-builds-public
   RUST_BACKTRACE: "1"
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: "false"
   LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
-  MSI_HTTP_BASE: "https://storage.googleapis.com/mirrord-windows-builds-public"
   WINGET_PACKAGE_ID: "MetalBear.mirrord"
 
 jobs:
@@ -403,37 +401,6 @@ jobs:
               /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$msi"
 
       ###########################################################################
-      # UPLOAD MSI TO PUBLIC GCS BUCKET
-      ###########################################################################
-      - name: Upload MSI to GCS
-        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $msi = $env:MSI_PATH
-          if (-not (Test-Path $msi)) {
-            throw "MSI_PATH '$msi' does not exist."
-          }
-
-          $runId   = $env:GITHUB_RUN_ID
-          $refName = $env:GITHUB_REF_NAME
-          if (-not $refName) {
-            $refName = "unknown"
-          }
-
-          $refSafe    = $refName -replace '[^A-Za-z0-9\.\-]', '_'
-          $bucketBase = $env:MSI_BUCKET_URI.TrimEnd('/')
-          $destFolder = "$bucketBase/$refSafe/run-$runId"
-          $destUri    = "$destFolder/mirrord.msi"
-
-          Write-Host "Uploading MSI to $destUri"
-          gcloud --quiet storage cp $msi $destUri
-
-          "MSI_GCS_REF_SAFE=$refSafe" | Out-File -Append -FilePath $env:GITHUB_ENV
-          "MSI_GCS_RUN_ID=$runId"     | Out-File -Append -FilePath $env:GITHUB_ENV
-          "MSI_GCS_URI=$destUri"      | Out-File -Append -FilePath $env:GITHUB_ENV
-
-      ###########################################################################
       # UNIT TESTS
       ###########################################################################
       - name: Run Rust unit tests (Windows crates)
@@ -507,20 +474,12 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $httpBase = $env:MSI_HTTP_BASE
-          if (-not $httpBase) {
-            throw "MSI_HTTP_BASE must be set for WinGet."
-          }
-          $httpBase = $httpBase.TrimEnd('/')
-
-          $refSafe = $env:MSI_GCS_REF_SAFE
-          $runId   = $env:MSI_GCS_RUN_ID
-
-          if (-not $refSafe -or -not $runId) {
-            throw "MSI_GCS_REF_SAFE/MSI_GCS_RUN_ID not set; ensure 'Upload MSI to GCS' ran."
+          $version = $env:RELEASE_TAG
+          if (-not $version) {
+            throw "RELEASE_TAG is not set."
           }
 
-          $url = "$httpBase/$refSafe/run-$runId/mirrord.msi"
+          $url = "https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord.msi"
           Write-Host "Computed MSI download URL for WinGet: $url"
 
           "MSI_DOWNLOAD_URL=$url" | Out-File -Append -FilePath $env:GITHUB_ENV
@@ -718,10 +677,9 @@ jobs:
         run: |
           Write-Host "MSI (local):       $env:MSI_PATH"
           Write-Host "MSI Version:       $env:MSI_VERSION"
-          Write-Host "MSI (GCS URI):     $env:MSI_GCS_URI"
           Write-Host "EXE:               $env:MIRRORD_EXE"
           Write-Host "DLL:               $env:MIRRORD_LAYER_FILE"
           Write-Host "Choco package:     $env:CHOCO_NUPKG_PATH"
-          Write-Host "MSI HTTP URL:      $env:MSI_DOWNLOAD_URL"
+          Write-Host "MSI Download URL:  $env:MSI_DOWNLOAD_URL"
           Write-Host "Publish Choco:     $env:PUBLISH_CHOCO"
           Write-Host "Publish WinGet:    $env:PUBLISH_WINGET"
