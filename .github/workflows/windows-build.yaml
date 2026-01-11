@@ -406,6 +406,7 @@ jobs:
       # UPLOAD MSI TO PUBLIC GCS BUCKET
       ###########################################################################
       - name: Upload MSI to GCS
+        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
 
