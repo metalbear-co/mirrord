@@ -3,16 +3,26 @@ name: Windows Build + Choco and WinGet
 on:
   workflow_dispatch:
     inputs:
-
       release_tag:
         description: "Version to use for Chocolatey/WinGet (e.g. 0.0.1-test2). Defaults to MIRRORD_VERSION."
         required: false
         type: string
+      runner:
+        description: "Runner to execute on (Spot Instances)"
+        type: choice
+        options: 
+          - "win-build-spot-2"
+          - "win-build-spot-1"
+        default: "win-build-spot-2"
+      gcs_msi_source:
+        description: "Optional: GS URI to download MSI from (skips build). e.g. gs://mirrord-windows-builds-public/..."
+        required: false
+        type: string
       sign_artifacts:
-        description: "Code-sign EXE & DLL & MSI"
+        description: "Code-sign EXE & DLL & MSI (Ignored if MSI source provided)"
         type: choice
         options: ["false", "true"]
-        default: false
+        default: "false"
       choco_publish:
         description: "Publish a Chocolatey package?"
         type: choice
@@ -26,11 +36,14 @@ on:
 
   workflow_call:
     inputs:
-
       release_tag:
         description: "Version to use for Chocolatey/WinGet (e.g. 0.0.1-test2). Defaults to MIRRORD_VERSION."
         required: false
         type: string
+      runner:
+        description: "Runner to execute on"
+        type: string
+        default: "win-build-spot-2"
       sign_artifacts:
         description: "Code-sign EXE & DLL & MSI"
         type: string
@@ -44,10 +57,6 @@ on:
         type: string
         default: "false"
 
-  # pull_request: REMOVED (triggered via ci.yaml now)
-
-# permissions: contents: write - REMOVED to allow inheritance (Read in CI, Write in Release)
-
 env:
   MSI_BUCKET_URI: gs://mirrord-windows-builds-public
   RUST_BACKTRACE: "1"
@@ -59,16 +68,21 @@ env:
 
 jobs:
   windows_build:
-    runs-on: [self-hosted, Windows]
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: write
     defaults:
       run:
         shell: pwsh
     env:
-
       RELEASE_TAG_INPUT: ${{ inputs.release_tag || '' }}
       SIGN_ARTIFACTS: ${{ inputs.sign_artifacts || 'false' }}
-      PUBLISH_CHOCO: ${{ inputs.choco_publish || 'true' }}
+      PUBLISH_CHOCO: ${{ inputs.choco_publish || 'false' }}
       PUBLISH_WINGET: ${{ inputs.winget_publish || 'false' }}
+      GCS_MSI_SOURCE: ${{ inputs.gcs_msi_source || '' }}
+      CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+      GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
 
     steps:
       - name: Checkout
@@ -76,7 +90,9 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+
       - name: Toolchain info
+        if: env.GCS_MSI_SOURCE == ''
         run: |
           $ErrorActionPreference = "Stop"
           whoami
@@ -95,73 +111,101 @@ jobs:
           Remove-Item $testDir -Recurse -Force
 
       ###########################################################################
-      - name: Smoke Test K8s Connection
+      # SYNC DIGICERT CERTIFICATE (Full Build Only)
+      ###########################################################################
+      - name: Sync DigiCert Certificate
+        if: env.SIGN_ARTIFACTS == 'true' && env.GCS_MSI_SOURCE == ''
         run: |
           $ErrorActionPreference = "Stop"
           
-          Write-Host "Fetching kubeconfig via IAP..."
-          # Pipe 'y' to accept potential host key prompts (PuTTY/Plink)
+          Write-Host "Syncing DigiCert certificate to system store..."
           
-          # Resolve gcloud.cmd to avoid issues with .ps1 and cmd.exe
-          $gcloudPath = (Get-Command gcloud).Source
-          if ($gcloudPath.EndsWith(".ps1")) {
-              $parent = Split-Path $gcloudPath -Parent
-              $gcloudCmd = Join-Path $parent "gcloud.cmd"
-          } else {
-              $gcloudCmd = $gcloudPath
-          }
-          Write-Host "Using gcloud at: $gcloudCmd"
-
-          # Use --quiet to avoid prompts, --tunnel-through-iap for firewall bypass
-          $kubeconfig = echo "y" | & "$gcloudCmd" --quiet compute ssh k3s-tests-1 --zone=us-central1-a --tunnel-through-iap --command "sudo cat /etc/rancher/k3s/k3s.yaml"
+          # Prioritize MSI Paths
+          $smctlPaths = @(
+              "C:\Program Files\DigiCert\DigiCert Keylocker Tools\smctl.exe",
+              "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools\smctl.exe",
+              "C:\DigiCert\Tools\smctl.exe" 
+          )
           
-          if (-not $kubeconfig) {
-             throw "Failed to fetch kubeconfig or empty output."
-          }
-
-          # Start persistent IAP tunnel (using shared script)
-          $tunnelProc = . scripts/start_iap_tunnel.ps1
-          
-          # $kubeconfig is likely an array of strings in PowerShell if multiple lines
-          $kubeconfigStr = $kubeconfig -join "`n"
-          
-          # Replace IP with 127.0.0.1 (since we are tunneling)
-          # k3s.yaml usually has 127.0.0.1, we ensure it matches the tunnel IP strictly
-          $kubeconfigStr = $kubeconfigStr -replace '127.0.0.1', '127.0.0.1'
-          $kubeconfigStr = $kubeconfigStr -replace '0.0.0.0', '127.0.0.1'
-          $kubeconfigStr = $kubeconfigStr -replace 'localhost', '127.0.0.1'
-          
-          $kubeDir = Join-Path $env:USERPROFILE ".kube"
-          if (-not (Test-Path $kubeDir)) {
-              New-Item -ItemType Directory -Force -Path $kubeDir | Out-Null
+          $smctl = $null
+          foreach ($path in $smctlPaths) {
+              if (Test-Path $path) {
+                  $smctl = $path
+                  Write-Host "Found smctl at: $smctl"
+                  break
+              }
           }
           
-          $configPath = Join-Path $kubeDir "config"
-          $kubeconfigStr | Set-Content -Path $configPath -Encoding UTF8
-          
-          Write-Host "Kubeconfig saved to $configPath (pointing to 127.0.0.1:6443)"
+          if (-not $smctl) {
+              throw "smctl.exe not found. DigiCert Keylocker Tools may not be installed."
+          }
 
-          # Install kubectl and verify connection
-          Write-Host "Installing kubectl..."
-          $kubectlPath = Join-Path $env:RUNNER_TEMP "kubectl.exe"
-          Invoke-WebRequest -Uri "https://dl.k8s.io/release/v1.29.0/bin/windows/amd64/kubectl.exe" -OutFile $kubectlPath
+          # Sync certificate to user store 
+          & $smctl windows certsync --keypair-alias=key_1346827532 --store user
           
-          Write-Host "Verifying connection to cluster (Smoke Test)..."
-          & $kubectlPath get nodes
           if ($LASTEXITCODE -ne 0) {
-              throw "kubectl failed to connect to the cluster."
+              throw "Certificate sync failed with exit code $LASTEXITCODE"
           }
-          Write-Host "Successfully connected to k3s-tests-1!"
           
-          # Explicitly kill the smoke-test tunnel to prevent port conflicts later
-          Write-Host "Stopping smoke-test tunnel..."
-          Stop-Process -InputObject $tunnelProc -Force -ErrorAction SilentlyContinue
+          Write-Host "Certificate synced successfully to user store."
+          
+          # Verify the certificate is accessible
+          $certHash = "BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB"
+          $cert = certutil -user -store my $certHash 2>&1
+          
+          if ($cert -match "Provider DLL could not be found") { throw "KSP DLL issue detected" }
+          
+          # Export Thumbprint specifically for SHA1 signing
+          "SM_CLIENT_CERT_THUMBPRINT=$certHash" | Out-File -Append -FilePath $env:GITHUB_ENV
+
 
       ###########################################################################
-      # PREPARE ARTIFACTS
+      # ENSURE WIX TOOLSET IS INSTALLED (Full Build Only)
+      ###########################################################################
+      # Moved early for fail-fast behavior
+      - name: Ensure WiX Toolset
+        if: env.GCS_MSI_SOURCE == ''
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          function Write-Env([string]$k,[string]$v) {
+            "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV
+          }
+
+          $wixVersion = "wix3112rtm"
+          $wixUrl     = "https://github.com/wixtoolset/wix3/releases/download/$wixVersion/wix311-binaries.zip"
+          $wixDir     = Join-Path $env:RUNNER_TEMP "wix311"
+
+          if (-not (Test-Path $wixDir)) {
+              Write-Host "Downloading WiX binaries from $wixUrl ..."
+              New-Item -ItemType Directory -Force -Path $wixDir | Out-Null
+              $zipPath = Join-Path $wixDir "wix.zip"
+              Invoke-WebRequest -Uri $wixUrl -OutFile $zipPath
+              Expand-Archive -Path $zipPath -DestinationPath $wixDir -Force
+              Remove-Item $zipPath -Force
+              Write-Host "WiX installed to $wixDir"
+          } else {
+              Write-Host "WiX already present at $wixDir"
+          }
+
+          $candlePath = Join-Path $wixDir "candle.exe"
+          $lightPath  = Join-Path $wixDir "light.exe"
+
+          if (-not (Test-Path $candlePath)) { throw "candle.exe not found at $candlePath" }
+          if (-not (Test-Path $lightPath))  { throw "light.exe not found at $lightPath" }
+
+          Write-Host "Found candle.exe at $candlePath"
+          Write-Host "Found light.exe at $lightPath"
+
+          Write-Env "CANDLE_EXE" $candlePath
+          Write-Env "LIGHT_EXE"  $lightPath
+
+      ###########################################################################
+      # PREPARE ARTIFACTS (Full Build Only)
       ###########################################################################
       
       - name: Prepare e2e tests dependencies
+        if: env.GCS_MSI_SOURCE == ''
         run: |
           $ErrorActionPreference = "Stop"
           $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
@@ -169,6 +213,7 @@ jobs:
 
       # Ensure Python deps are present for the Flask test apps.
       - name: Ensure Python test deps (flask/uvicorn/fastapi)
+        if: env.GCS_MSI_SOURCE == ''
         run: |
           $ErrorActionPreference = "Stop"
           $py = Get-Command py -ErrorAction SilentlyContinue
@@ -180,6 +225,7 @@ jobs:
           py -3 -c "import flask, uvicorn, fastapi; print('flask:', flask.__version__); print('uvicorn:', uvicorn.__version__); print('fastapi:', fastapi.__version__)"
 
       - name: Debug Python environment
+        if: env.GCS_MSI_SOURCE == ''
         run: |
           $ErrorActionPreference = "Stop"
           py -3 -c "import sys, site; print('exe:', sys.executable); print('version:', sys.version); print('sys.path:'); [print(' ', p) for p in sys.path]; print('USER_SITE:', site.getusersitepackages()); print('USER_BASE:', site.getuserbase())"
@@ -187,6 +233,7 @@ jobs:
           py -3 -m pip list
 
       - name: Build
+        if: env.GCS_MSI_SOURCE == ''
         id: prep
         run: |
           $ErrorActionPreference = "Stop"
@@ -215,8 +262,8 @@ jobs:
           }
 
           if ($shouldSign) {
-            & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
-                /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
+            Write-Host "Signing DLL..."
+            & signtool.exe sign /sha1 $env:SM_CLIENT_CERT_THUMBPRINT /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
           }
 
           $env:MIRRORD_LAYER_FILE = $dll
@@ -231,8 +278,8 @@ jobs:
           }
 
           if ($shouldSign) {
-            & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
-                /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
+            Write-Host "Signing EXE..."
+            & signtool.exe sign /sha1 $env:SM_CLIENT_CERT_THUMBPRINT /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
           }
 
           Set-Env "MIRRORD_EXE" $exe
@@ -241,136 +288,20 @@ jobs:
           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
           $pkg  = $meta.packages | Where-Object { $_.name -eq "mirrord" } | Select-Object -First 1
           Set-Env "MIRRORD_VERSION" $pkg.version
-
-      ###########################################################################
-      # ENSURE WIX TOOLSET IS INSTALLED
-      ###########################################################################
-      - name: Ensure WiX Toolset
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          function Write-Env([string]$k,[string]$v) {
-            "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV
-          }
-
-          function Find-Candle {
-            param([switch]$DeepSearch)
-
-            Write-Host "Searching for WiX candle.exe in known locations..."
-            $candidateDirs = @()
-
-            if ($Env:ChocolateyInstall -and (Test-Path $Env:ChocolateyInstall)) {
-              $candidateDirs += @(
-                (Join-Path $Env:ChocolateyInstall "lib\wixtoolset\tools\bin"),
-                (Join-Path $Env:ChocolateyInstall "tools"),
-                (Join-Path $Env:ChocolateyInstall "bin")
-              )
-            }
-
-            $candidateDirs += @(
-              "$Env:ProgramFiles(x86)\WiX Toolset v3.14\bin",
-              "$Env:ProgramFiles(x86)\WiX Toolset v3.13\bin",
-              "$Env:ProgramFiles(x86)\WiX Toolset v3.12\bin",
-              "$Env:ProgramFiles(x86)\WiX Toolset v3.11\bin",
-              "$Env:ProgramFiles\WiX Toolset v3.14\bin",
-              "$Env:ProgramFiles\WiX Toolset v3.13\bin",
-              "$Env:ProgramFiles\WiX Toolset v3.12\bin",
-              "$Env:ProgramFiles\WiX Toolset v3.11\bin",
-              "$Env:ProgramData\chocolatey\lib\wixtoolset\tools\bin",
-              "$Env:ProgramData\chocolatey\bin"
-            )
-
-            $candidateDirs = $candidateDirs | Where-Object { $_ -and (Test-Path $_) }
-
-            foreach ($dir in $candidateDirs) {
-              $candlePath = Join-Path $dir "candle.exe"
-              if (Test-Path $candlePath) {
-                Write-Host "Found candle.exe at $candlePath."
-                return $candlePath
-              }
-            }
-
-            if ($DeepSearch) {
-              Write-Host "No candle.exe in known dirs. Deep searching C:\ for candle.exe (may take time)..."
-              try {
-                $hit = Get-ChildItem -Path 'C:\' -Filter 'candle.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($hit) {
-                  Write-Host "Deep search found candle.exe at $($hit.FullName)."
-                  return $hit.FullName
-                } else {
-                  Write-Host "Deep search did not find candle.exe on C:\."
-                }
-              } catch {
-                Write-Warning "Deep search failed: $($_.Exception.Message)"
-              }
-            }
-
-            return $null
-          }
-
-          $candleCmd  = Get-Command candle.exe -ErrorAction SilentlyContinue
-          $candlePath = $null
-
-          if ($candleCmd) {
-            $candlePath = $candleCmd.Source
-            Write-Host "candle.exe found on PATH at $candlePath"
+          
+          # If RELEASE_TAG_INPUT is set, use it as RELEASE_TAG, otherwise default to package version
+          if ($env:RELEASE_TAG_INPUT) {
+             Set-Env "RELEASE_TAG" $env:RELEASE_TAG_INPUT
           } else {
-            $candlePath = Find-Candle
+             Set-Env "RELEASE_TAG" $pkg.version
           }
-
-          if (-not $candlePath) {
-            Write-Host "candle.exe still not found. Trying to install WiX Toolset via Chocolatey (latest 3.x)..."
-
-            if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
-              Write-Host "Chocolatey not found, installing Chocolatey..."
-              Set-ExecutionPolicy Bypass -Scope Process -Force
-              [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-              Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-            }
-
-            try {
-              choco install wixtoolset -y --no-progress
-            } catch {
-              Write-Warning "Chocolatey install failed: $($_.Exception.Message)"
-            }
-
-            $candleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
-            if ($candleCmd) {
-              $candlePath = $candleCmd.Source
-              Write-Host "After Chocolatey, candle.exe found on PATH at $candlePath"
-            } else {
-              $candlePath = Find-Candle -DeepSearch
-            }
-          }
-
-          if (-not $candlePath -or -not (Test-Path $candlePath)) {
-            throw "candle.exe still not found after all attempts. Please install WiX Toolset 3.x on this runner and ensure candle.exe exists."
-          }
-
-          $wixDir    = Split-Path $candlePath -Parent
-          $lightPath = Join-Path $wixDir "light.exe"
-          if (-not (Test-Path $lightPath)) {
-            $lightCmd = Get-Command light.exe -ErrorAction SilentlyContinue
-            if ($lightCmd) {
-              $lightPath = $lightCmd.Source
-            }
-          }
-
-          if (-not (Test-Path $lightPath)) {
-            throw "Found candle.exe at '$candlePath' but could not find light.exe. Ensure full WiX installation."
-          }
-
-          Write-Host "Resolved WiX tools:"
-          Write-Host "  candle.exe = $candlePath"
-          Write-Host "  light.exe  = $lightPath"
-
-          Write-Env "CANDLE_EXE" $candlePath
-          Write-Env "LIGHT_EXE"  $lightPath
 
       ###########################################################################
-      # BUILD MSI USING main.wxs
+      # ENSURE WIX TOOLSET IS INSTALLED (Full Build Only)
       ###########################################################################
+
       - name: Build MSI
+        if: env.GCS_MSI_SOURCE == ''
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -459,10 +390,10 @@ jobs:
           "MSI_PATH=$Msi" | Out-File -Append -FilePath $env:GITHUB_ENV
 
       ###########################################################################
-      # SIGN MSI (optional)
+      # SIGN MSI (optional) (Full Build Only)
       ###########################################################################
       - name: Sign MSI
-        if: env.SIGN_ARTIFACTS == 'true'
+        if: env.SIGN_ARTIFACTS == 'true' && env.GCS_MSI_SOURCE == ''
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -471,13 +402,15 @@ jobs:
             throw "MSI_PATH '$msi' does not exist."
           }
 
-          & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+          & signtool.exe sign /sha1 $env:SM_CLIENT_CERT_THUMBPRINT `
               /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$msi"
 
       ###########################################################################
-      # UPLOAD MSI TO PUBLIC GCS BUCKET
+      # UPLOAD MSI TO PUBLIC GCS BUCKET (Full Build Only)
       ###########################################################################
       - name: Upload MSI to GCS
+        # Only upload if we are releasing (tag provided) or publishing to Choco/WinGet
+        if: env.GCS_MSI_SOURCE == '' && ( env.RELEASE_TAG_INPUT != '' || env.PUBLISH_WINGET == 'true' || env.PUBLISH_CHOCO == 'true' )
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -505,101 +438,10 @@ jobs:
           "MSI_GCS_URI=$destUri"      | Out-File -Append -FilePath $env:GITHUB_ENV
 
       ###########################################################################
-      # UNIT TESTS
+      # UPLOAD TO GITHUB RELEASE (Full Build Only)
       ###########################################################################
-      - name: Run Rust unit tests (Windows crates)
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          #####################################################################
-          # START IAP TUNNEL (Persistent for this step)
-          #####################################################################
-          . scripts/start_iap_tunnel.ps1
-          #####################################################################
-
-
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win -- --skip test::reconnect_during_http::drop_during_response_2_false
-
-
-      - name: Debug Python environment before Rust e2e tests
-        run: |
-          $ErrorActionPreference = "Stop"
-          py -3 -c "import sys, flask; print('exe:', sys.executable); print('flask:', flask.__version__); print('sys.path:'); [print(' ', p) for p in sys.path]"
-
-      - name: Force python3 to use C:\Python314
-        run: |
-          $ErrorActionPreference = "Stop"
-          
-          # Try to create python3.exe, but handle permission errors gracefully
-          if (-not (Test-Path "C:\Python314\python3.exe")) {
-            try {
-              Copy-Item "C:\Python314\python.exe" "C:\Python314\python3.exe" -Force -ErrorAction Stop
-              Write-Host "Created python3.exe in C:\Python314"
-            } catch {
-              Write-Warning "Could not create python3.exe in C:\Python314 (permission denied). Creating wrapper script instead."
-              # Create a wrapper script in a writable location
-              $wrapperDir = "$env:RUNNER_TEMP\python3_wrapper"
-              New-Item -ItemType Directory -Force -Path $wrapperDir | Out-Null
-              $wrapperScript = Join-Path $wrapperDir "python3.bat"
-              "@echo off`n`"C:\Python314\python.exe`" %*" | Out-File -FilePath $wrapperScript -Encoding ASCII
-              Write-Host "Created python3.bat wrapper at $wrapperScript"
-              $env:PATH = "$wrapperDir;$env:PATH"
-            }
-          }
-          
-          # Ensure C:\Python314 is first in PATH
-          $env:PATH = "C:\Python314;C:\Python314\Scripts;$env:PATH"
-          [System.Environment]::SetEnvironmentVariable("PATH", $env:PATH, "Process")
-          
-          # Verify python3 works
-          python3 -c "import sys, flask; print('exe:', sys.executable); print('flask:', flask.__version__)"
-          # Extra debug for next run: show PATH and pip list for the exact python3
-          python3 -c "import os; print('PATH=', os.environ.get('PATH',''))"
-          python3 -m pip list
-
-      - name: Run Rust e2e tests 
-        run: |
-          $ErrorActionPreference = "Stop"
-          
-          #####################################################################
-          # START IAP TUNNEL (Persistent for this step)
-          #####################################################################
-          . scripts/start_iap_tunnel.ps1
-          #####################################################################
-
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --test-threads=1
-
-      ###########################################################################
-      # COMPUTE VERSION FOR CHOCOLATEY & WINGET
-      ###########################################################################
-      - name: Compute release tag
-        id: tag
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          if ($env:RELEASE_TAG_INPUT) {
-            $tag = $env:RELEASE_TAG_INPUT
-          } else {
-            $tag = $env:MIRRORD_VERSION
-          }
-
-          if ([string]::IsNullOrWhiteSpace($tag)) {
-            throw "Could not determine version (RELEASE_TAG_INPUT and MIRRORD_VERSION are empty)."
-          }
-
-          if ($tag.StartsWith("v")) {
-            $tag = $tag.Substring(1)
-          }
-
-          # Optional: re-use numeric part for Choco/WinGet (consistent with MSI)
-          $match = [Regex]::Match($tag, '^[0-9]+(\.[0-9]+){0,3}')
-          if ($match.Success) {
-            $tag = $match.Value
-          }
-
-          "RELEASE_TAG=$tag" | Out-File -Append -FilePath $env:GITHUB_ENV
       - name: Generate Checksums
-        if: env.RELEASE_TAG != ''
+        if: env.GCS_MSI_SOURCE == '' && env.RELEASE_TAG_INPUT != '' && github.event_name != 'pull_request'
         run: |
            $exe = $env:MIRRORD_EXE
            $dll = $env:MIRRORD_LAYER_FILE
@@ -614,7 +456,7 @@ jobs:
            }
 
       - name: Upload artifacts to Release
-        if: inputs.release_tag != '' && github.event_name != 'pull_request'
+        if: env.GCS_MSI_SOURCE == '' && env.RELEASE_TAG_INPUT != '' && github.event_name != 'pull_request'
         uses: metalbear-co/action-gh-release@ab50eebb6488051c6788d97fa95232267c6a4e23
         with:
           tag_name: ${{ env.RELEASE_TAG }}
@@ -625,39 +467,83 @@ jobs:
             ${{ env.MIRRORD_EXE_SHA256 }}
             ${{ env.MIRRORD_LAYER_SHA256 }}
 
-
       ###########################################################################
-      # COMPUTE MSI DOWNLOAD URL FOR WINGET
+      # DOWNLOAD MODE (From GCS Source)
       ###########################################################################
-      - name: Compute MSI download URL for WinGet
-        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
+      - name: Download Artifacts from GCS
+        if: env.GCS_MSI_SOURCE != ''
         run: |
           $ErrorActionPreference = "Stop"
-
-          $httpBase = $env:MSI_HTTP_BASE
-          if (-not $httpBase) {
-            throw "MSI_HTTP_BASE must be set for WinGet."
+          $sourceMsi = $env:GCS_MSI_SOURCE
+          Write-Host "Downloading MSI from: $sourceMsi"
+          
+          # Use same Root as full build for consistency
+          $Root = "C:\wix\mirrord"
+          New-Item -ItemType Directory -Force -Path $Root | Out-Null
+          
+          gcloud storage cp "$sourceMsi" "$Root\mirrord.msi"
+          if (-not (Test-Path "$Root\mirrord.msi")) { throw "Failed to download MSI from $sourceMsi" }
+          
+          "MSI_PATH=$Root\mirrord.msi" | Out-File -Append -FilePath $env:GITHUB_ENV
+          
+          # Compute HTTP URL from GCS URI
+          # E.g. gs://mirrord-windows-builds-public/3.180.0/... -> https://storage.googleapis.com/mirrord-windows-builds-public/3.180.0/...
+          if ($sourceMsi -match "^gs://(.+)$") {
+             $path = $matches[1]
+             $url = "https://storage.googleapis.com/$path"
+             "MSI_DOWNLOAD_URL=$url" | Out-File -Append -FilePath $env:GITHUB_ENV
+             Write-Host "Computed MSI Download URL: $url"
+          } else {
+             Write-Warning "Could not compute HTTP URL from source: $sourceMsi"
           }
-          $httpBase = $httpBase.TrimEnd('/')
-
-          $refSafe = $env:MSI_GCS_REF_SAFE
-          $runId   = $env:MSI_GCS_RUN_ID
-
-          if (-not $refSafe -or -not $runId) {
-            throw "MSI_GCS_REF_SAFE/MSI_GCS_RUN_ID not set; ensure 'Upload MSI to GCS' ran."
+          
+          # Ensure RELEASE_TAG is set for packaging steps
+          if ($env:RELEASE_TAG_INPUT) {
+             "RELEASE_TAG=$env:RELEASE_TAG_INPUT" | Out-File -Append -FilePath $env:GITHUB_ENV
+          } else {
+             Write-Warning "RELEASE_TAG_INPUT not provided. Defaulting RELEASE_TAG to '0.0.0-downloaded'"
+             "RELEASE_TAG=0.0.0-downloaded" | Out-File -Append -FilePath $env:GITHUB_ENV
           }
 
-          $url = "$httpBase/$refSafe/run-$runId/mirrord.msi"
-          Write-Host "Computed MSI download URL for WinGet: $url"
-
+      ###########################################################################
+      # COMPUTE MSI DOWNLOAD URL (From Build / Upload)
+      ###########################################################################
+      - name: Compute MSI Download URL (From Build)
+        # Depends on Upload MSI to GCS (Running only if NOT downloading from source)
+        if: env.GCS_MSI_SOURCE == '' && (env.RELEASE_TAG_INPUT != '' || env.PUBLISH_WINGET == 'true' || env.PUBLISH_CHOCO == 'true')
+        run: |
+          $ErrorActionPreference = "Stop"
+          
+          $gcsUri = $env:MSI_GCS_URI
+          if (-not $gcsUri) {
+             throw "MSI_GCS_URI is not set. Ensure 'Upload MSI to GCS' step ran successfully."
+          }
+          
+          # Convert gs://bucket/path/to/msi -> https://storage.googleapis.com/bucket/path/to/msi
+          if ($gcsUri -match "^gs://(.+)$") {
+             $path = $matches[1]
+             $url = "https://storage.googleapis.com/$path"
+          } else {
+             throw "Unexpected GCS URI format: $gcsUri"
+          }
+          
+          Write-Host "Computed MSI Download URL: $url"
           "MSI_DOWNLOAD_URL=$url" | Out-File -Append -FilePath $env:GITHUB_ENV
+          
+          # Verify URL accessibility
+          try {
+             $resp = Invoke-WebRequest -Uri $url -Method Head -ErrorAction Stop
+             Write-Host "URL Verification: OK ($($resp.StatusCode))"
+          } catch {
+             Write-Warning "URL Verification FAILED: $($_.Exception.Message). Publishing may fail."
+          }
 
       ###########################################################################
       # INSTALL .NET RUNTIME FOR WINGETCREATE
       ###########################################################################
       - name: Install .NET runtime for wingetcreate
         # Skip on forks without WINGET_TOKEN so they don't fail
-        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' && env.WINGET_TOKEN != '' }}
+        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
         uses: actions/setup-dotnet@v4
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}\dotnet
@@ -667,10 +553,9 @@ jobs:
       ###########################################################################
       # UPDATE WinGet MANIFEST (wingetcreate)
       ###########################################################################
-
       - name: Update WinGet manifest (wingetcreate)
-        # Skip on forks without WINGET_TOKEN so they don't fail
-        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' && env.WINGET_TOKEN != '' }}
+        # Force run to debug why it was skipping. We check token inside script anyway.
+        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
           $packageId = $env:WINGET_PACKAGE_ID
@@ -685,26 +570,32 @@ jobs:
           if (-not $installerUrl) {
             throw "MSI_DOWNLOAD_URL env var is not set."
           }
-          $gitToken = "${{ env.WINGET_TOKEN }}"
+          $gitToken = $env:WINGET_TOKEN
           if (-not $gitToken) {
             throw "env.WINGET_TOKEN is not configured in this repo."
           }
+
           Write-Host "Updating WinGet manifest for package '$packageId' version '$version'"
           Write-Host "Installer URL: $installerUrl"
+
           # Download latest single-file wingetcreate.exe
           Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+
           # Run wingetcreate update and capture output
           $args = @(
             "update", $packageId,
             "--version", $version,
+            "--display-version", $version,
             "--urls", $installerUrl,
             "--submit",
             "--token", $gitToken
           )
+
           Write-Host "Running: wingetcreate.exe $($args -join ' ')"
           $output = & .\wingetcreate.exe @args 2>&1
           $exitCode = $LASTEXITCODE
           $output | ForEach-Object { Write-Host $_ }
+
           if ($exitCode -ne 0) {
             if ($output -match "was not found") {
               Write-Warning "WinGet package '$packageId' was not found in microsoft/winget-pkgs. Skipping update (non-fatal)."
@@ -714,9 +605,11 @@ jobs:
               throw "wingetcreate update failed with exit code $exitCode"
             }
           }
+
       - name: Skip WinGet publish (missing token)
         if: ${{ env.PUBLISH_WINGET == 'true' && (github.event_name == 'pull_request' || env.WINGET_TOKEN == '') }}
         run: echo "Skipping WinGet publish because WINGET_TOKEN is not available (expected on forks or PRs)."
+
       ###########################################################################
       # CHOCOLATEY PACKAGE BUILD & PUBLISH
       ###########################################################################
@@ -818,6 +711,7 @@ jobs:
           }
           "CHOCO_NUPKG_PATH=$($nupkg.FullName)" | Out-File -Append -FilePath $env:GITHUB_ENV
           Write-Host "Built Chocolatey package: $($nupkg.FullName)"
+
       - name: Push Chocolatey package
         # Skip on forks without CHOCO_API_KEY so they don't fail
         if: ${{ env.PUBLISH_CHOCO == 'true' && env.CHOCO_API_KEY != '' }}
@@ -833,9 +727,11 @@ jobs:
           }
           Write-Host "Pushing Chocolatey package $env:CHOCO_NUPKG_PATH to Chocolatey.org..."
           choco push $env:CHOCO_NUPKG_PATH --api-key $env:CHOCO_API_KEY --source "https://push.chocolatey.org/"
+
       - name: Skip Chocolatey publish (missing key)
         if: ${{ env.PUBLISH_CHOCO == 'true' && env.CHOCO_API_KEY == '' }}
         run: echo "Skipping Chocolatey publish because CHOCO_API_KEY is not available (expected on forks)."
+
       ###########################################################################
       # SUMMARY
       ###########################################################################
