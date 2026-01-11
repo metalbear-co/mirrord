@@ -34,8 +34,12 @@ function Install-NasmPortable {
 }
 
 # Install everything except nasm via Chocolatey to reduce privilege needs; fetch nasm manually.
-choco install -y --force nodejs go python3 curl mingw cmake llvm
-Install-NasmPortable
+choco install -y nodejs go python3 curl mingw cmake llvm
+if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) {
+    Install-NasmPortable
+} else {
+    Write-Host 'nasm already installed.'
+}
 
 Write-Host 'Preparing Python virtual environment for test dependencies'
 $venvRoot = Join-Path $env:TEMP "mirrord-test-venv"
@@ -52,7 +56,7 @@ try {
 
     Write-Host 'Installing Python packages required by tests'
     python -m pip install --upgrade pip
-    python -m pip install uvicorn fastapi flask --ignore-installed
+    python -m pip install uvicorn fastapi flask
     Write-Host 'Installed Python packages:'
     python -c "import pkgutil, sys; [print(module.module_finder.path) for module in pkgutil.iter_modules()]"
 } finally {
