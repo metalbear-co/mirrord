@@ -144,6 +144,10 @@ pub struct AgentConfig {
     ///   }
     /// }
     /// ```
+    ///
+    /// Can also be controlled via `MIRRORD_AGENT_IMAGE`, `MIRRORD_AGENT_IMAGE_REGISTRY`, and
+    /// `MIRRORD_AGENT_IMAGE_TAG`. `MIRRORD_AGENT_IMAGE` takes precedence, followed by config
+    /// values for registry/tag, then environment variables for registry/tag.
     #[config(nested)]
     pub image: AgentImageConfig,
 
@@ -541,20 +545,29 @@ impl MirrordConfig for AgentImageFileConfig {
     /// Generates the [`AgentImageConfig`] from the `agent.image` config, or the
     /// `MIRRORD_AGENT_IMAGE` env var.
     fn generate_config(self, context: &mut ConfigContext) -> config::Result<Self::Generated> {
+        let env_registry = FromEnv::new("MIRRORD_AGENT_IMAGE_REGISTRY")
+            .source_value(context)
+            .transpose()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| DEFAULT_AGENT_IMAGE_REGISTRY.to_string());
+
+        let env_tag = FromEnv::new("MIRRORD_AGENT_IMAGE_TAG")
+            .source_value(context)
+            .transpose()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+
         let agent_image = match self {
             AgentImageFileConfig::Simple(registry_and_tag) => {
-                registry_and_tag.unwrap_or_else(|| {
-                    format!(
-                        "{DEFAULT_AGENT_IMAGE_REGISTRY}:{}",
-                        env!("CARGO_PKG_VERSION")
-                    )
-                })
+                registry_and_tag.unwrap_or_else(|| format!("{env_registry}:{env_tag}"))
             }
             AgentImageFileConfig::Advanced { registry, tag } => {
                 format!(
                     "{}:{}",
-                    registry.unwrap_or_else(|| DEFAULT_AGENT_IMAGE_REGISTRY.to_string()),
-                    tag.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
+                    registry.unwrap_or(env_registry),
+                    tag.unwrap_or(env_tag)
                 )
             }
         };

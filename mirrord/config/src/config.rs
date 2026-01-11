@@ -9,6 +9,7 @@ use std::{error::Error, fmt, io, path::PathBuf};
 pub use context::ConfigContext;
 use thiserror::Error;
 
+pub use crate::env_key::EnvKey;
 use crate::feature::split_queues::QueueSplittingVerificationError;
 
 /// <!--${internal}-->

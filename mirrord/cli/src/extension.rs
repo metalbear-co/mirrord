@@ -77,6 +77,10 @@ pub(crate) async fn extension_exec(
         user_data.machine_id(),
     );
 
+    analytics
+        .get_mut()
+        .add("key_length", config.key.analytics_len());
+
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
         progress.warning(&warning);
