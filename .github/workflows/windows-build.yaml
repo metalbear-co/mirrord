@@ -59,7 +59,7 @@ env:
 
 jobs:
   windows_build:
-    runs-on: [self-hosted, Windows]
+    runs-on: windows-latest
     defaults:
       run:
         shell: pwsh
@@ -76,6 +76,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+
       - name: Toolchain info
         run: |
           $ErrorActionPreference = "Stop"
@@ -84,83 +85,10 @@ jobs:
           cargo -V
           rustup show
 
-      # Early sanity check that the runner account can write to C:.
-      - name: Validate C write access
-        run: |
-          $ErrorActionPreference = "Stop"
-          whoami
-          $testDir = "C:\actions\workspace-test"
-          New-Item -ItemType Directory -Force -Path $testDir | Out-Null
-          New-Item -ItemType File -Force -Path (Join-Path $testDir "write-test.txt") -Value "ok" | Out-Null
-          Remove-Item $testDir -Recurse -Force
-
-      ###########################################################################
-      - name: Smoke Test K8s Connection
-        run: |
-          $ErrorActionPreference = "Stop"
-          
-          Write-Host "Fetching kubeconfig via IAP..."
-          # Pipe 'y' to accept potential host key prompts (PuTTY/Plink)
-          
-          # Resolve gcloud.cmd to avoid issues with .ps1 and cmd.exe
-          $gcloudPath = (Get-Command gcloud).Source
-          if ($gcloudPath.EndsWith(".ps1")) {
-              $parent = Split-Path $gcloudPath -Parent
-              $gcloudCmd = Join-Path $parent "gcloud.cmd"
-          } else {
-              $gcloudCmd = $gcloudPath
-          }
-          Write-Host "Using gcloud at: $gcloudCmd"
-
-          # Use --quiet to avoid prompts, --tunnel-through-iap for firewall bypass
-          $kubeconfig = echo "y" | & "$gcloudCmd" --quiet compute ssh k3s-tests-1 --zone=us-central1-a --tunnel-through-iap --command "sudo cat /etc/rancher/k3s/k3s.yaml"
-          
-          if (-not $kubeconfig) {
-             throw "Failed to fetch kubeconfig or empty output."
-          }
-
-          # Start persistent IAP tunnel (using shared script)
-          $tunnelProc = . scripts/start_iap_tunnel.ps1
-          
-          # $kubeconfig is likely an array of strings in PowerShell if multiple lines
-          $kubeconfigStr = $kubeconfig -join "`n"
-          
-          # Replace IP with 127.0.0.1 (since we are tunneling)
-          # k3s.yaml usually has 127.0.0.1, we ensure it matches the tunnel IP strictly
-          $kubeconfigStr = $kubeconfigStr -replace '127.0.0.1', '127.0.0.1'
-          $kubeconfigStr = $kubeconfigStr -replace '0.0.0.0', '127.0.0.1'
-          $kubeconfigStr = $kubeconfigStr -replace 'localhost', '127.0.0.1'
-          
-          $kubeDir = Join-Path $env:USERPROFILE ".kube"
-          if (-not (Test-Path $kubeDir)) {
-              New-Item -ItemType Directory -Force -Path $kubeDir | Out-Null
-          }
-          
-          $configPath = Join-Path $kubeDir "config"
-          $kubeconfigStr | Set-Content -Path $configPath -Encoding UTF8
-          
-          Write-Host "Kubeconfig saved to $configPath (pointing to 127.0.0.1:6443)"
-
-          # Install kubectl and verify connection
-          Write-Host "Installing kubectl..."
-          $kubectlPath = Join-Path $env:RUNNER_TEMP "kubectl.exe"
-          Invoke-WebRequest -Uri "https://dl.k8s.io/release/v1.29.0/bin/windows/amd64/kubectl.exe" -OutFile $kubectlPath
-          
-          Write-Host "Verifying connection to cluster (Smoke Test)..."
-          & $kubectlPath get nodes
-          if ($LASTEXITCODE -ne 0) {
-              throw "kubectl failed to connect to the cluster."
-          }
-          Write-Host "Successfully connected to k3s-tests-1!"
-          
-          # Explicitly kill the smoke-test tunnel to prevent port conflicts later
-          Write-Host "Stopping smoke-test tunnel..."
-          Stop-Process -InputObject $tunnelProc -Force -ErrorAction SilentlyContinue
-
       ###########################################################################
       # PREPARE ARTIFACTS
       ###########################################################################
-      
+
       - name: Prepare e2e tests dependencies
         run: |
           $ErrorActionPreference = "Stop"
@@ -511,63 +439,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          #####################################################################
-          # START IAP TUNNEL (Persistent for this step)
-          #####################################################################
-          . scripts/start_iap_tunnel.ps1
-          #####################################################################
-
-
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win -- --skip test::reconnect_during_http::drop_during_response_2_false
-
-
-      - name: Debug Python environment before Rust e2e tests
-        run: |
-          $ErrorActionPreference = "Stop"
-          py -3 -c "import sys, flask; print('exe:', sys.executable); print('flask:', flask.__version__); print('sys.path:'); [print(' ', p) for p in sys.path]"
-
-      - name: Force python3 to use C:\Python314
-        run: |
-          $ErrorActionPreference = "Stop"
-          
-          # Try to create python3.exe, but handle permission errors gracefully
-          if (-not (Test-Path "C:\Python314\python3.exe")) {
-            try {
-              Copy-Item "C:\Python314\python.exe" "C:\Python314\python3.exe" -Force -ErrorAction Stop
-              Write-Host "Created python3.exe in C:\Python314"
-            } catch {
-              Write-Warning "Could not create python3.exe in C:\Python314 (permission denied). Creating wrapper script instead."
-              # Create a wrapper script in a writable location
-              $wrapperDir = "$env:RUNNER_TEMP\python3_wrapper"
-              New-Item -ItemType Directory -Force -Path $wrapperDir | Out-Null
-              $wrapperScript = Join-Path $wrapperDir "python3.bat"
-              "@echo off`n`"C:\Python314\python.exe`" %*" | Out-File -FilePath $wrapperScript -Encoding ASCII
-              Write-Host "Created python3.bat wrapper at $wrapperScript"
-              $env:PATH = "$wrapperDir;$env:PATH"
-            }
-          }
-          
-          # Ensure C:\Python314 is first in PATH
-          $env:PATH = "C:\Python314;C:\Python314\Scripts;$env:PATH"
-          [System.Environment]::SetEnvironmentVariable("PATH", $env:PATH, "Process")
-          
-          # Verify python3 works
-          python3 -c "import sys, flask; print('exe:', sys.executable); print('flask:', flask.__version__)"
-          # Extra debug for next run: show PATH and pip list for the exact python3
-          python3 -c "import os; print('PATH=', os.environ.get('PATH',''))"
-          python3 -m pip list
-
-      - name: Run Rust e2e tests 
-        run: |
-          $ErrorActionPreference = "Stop"
-          
-          #####################################################################
-          # START IAP TUNNEL (Persistent for this step)
-          #####################################################################
-          . scripts/start_iap_tunnel.ps1
-          #####################################################################
-
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --test-threads=1
 
       ###########################################################################
       # COMPUTE VERSION FOR CHOCOLATEY & WINGET
