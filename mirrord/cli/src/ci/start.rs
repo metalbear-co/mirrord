@@ -1,9 +1,9 @@
 use drain::Watch;
-use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_progress::ProgressTracker;
 use tracing::Level;
 
 use super::{CiResult, MirrordCi};
-use crate::{CiStartArgs, CliResult, ExecArgs, ci::error::CiError, exec, user_data::UserData};
+use crate::{CiStartArgs, CliResult, ExecArgs, exec, user_data::UserData};
 
 /// Handles the `mirrord ci start` command.
 ///
@@ -38,25 +38,17 @@ impl<'a> CiStartCommandHandler<'a> {
         watch: Watch,
         user_data: &'a mut UserData,
     ) -> CiResult<Self> {
-        let mut progress = ProgressTracker::from_env("mirrord ci start");
+        let progress = ProgressTracker::from_env("mirrord ci start");
 
         let mirrord_for_ci = MirrordCi::new(&args).await?;
 
-        if mirrord_for_ci.store.intproxy_pid.is_some() {
-            progress.failure(Some("Detected existing intproxy pid file!"));
-            Err(CiError::IntproxyPidAlreadyPresent)
-        } else if mirrord_for_ci.store.user_pid.is_some() {
-            progress.failure(Some("Detected existing user pid file!"));
-            Err(CiError::UserPidAlreadyPresent)
-        } else {
-            Ok(Self {
-                mirrord_for_ci,
-                exec_args: args.exec_args,
-                watch,
-                user_data,
-                progress,
-            })
-        }
+        Ok(Self {
+            mirrord_for_ci,
+            exec_args: args.exec_args,
+            watch,
+            user_data,
+            progress,
+        })
     }
 
     /// Calls [`exec`] with [`MirrordCi`].
