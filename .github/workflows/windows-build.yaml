@@ -424,11 +424,15 @@ jobs:
            if (-not (Test-Path "$env:USERPROFILE\.kube")) {
                New-Item -Path "$env:USERPROFILE\.kube" -ItemType Directory -Force | Out-Null
            }
-           if ([string]::IsNullOrWhiteSpace($env:KUBECONFIG_CONTENT)) {
-               Write-Error "SECRET K3S_TESTS_KUBECONFIG IS EMPTY!"
+
+           if (-not [string]::IsNullOrWhiteSpace($env:KUBECONFIG_CONTENT)) {
+               Write-Host "Updating Kubeconfig from Secret..."
+               Set-Content -Path "$env:USERPROFILE\.kube\config" -Value $env:KUBECONFIG_CONTENT
+           } elseif (Test-Path "$env:USERPROFILE\.kube\config") {
+               Write-Host "Using existing Kubeconfig on runner."
+           } else {
+               Write-Error "KUBECONFIG not found! Neither Secret provided nor local file exists."
            }
-           Write-Host "Kubeconfig content length: $($env:KUBECONFIG_CONTENT.Length)"
-           Set-Content -Path "$env:USERPROFILE\.kube\config" -Value $env:KUBECONFIG_CONTENT
         env:
            KUBECONFIG_CONTENT: ${{ secrets.K3S_TESTS_KUBECONFIG }}
 
