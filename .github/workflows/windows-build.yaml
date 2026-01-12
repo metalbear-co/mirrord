@@ -91,7 +91,7 @@ jobs:
 
           rustup target add $Target
           # create dummy mirrord
-          echo.> %TMP%\dummy_layer.dll
+          echo . > %TMP%\dummy_layer.dll
 
           Set-Env "MIRRORD_LAYER_FILE" %TMP%\dummy_layer.dll
           cargo fmt --all -- --check
