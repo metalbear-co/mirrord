@@ -91,9 +91,8 @@ jobs:
 
           rustup target add $Target
           # create dummy mirrord
-          "content" | Out-File "$env:TEMP\dummy_layer.dll"
+          "content" | Out-File "target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll"
 
-          "MIRRORD_LAYER_FILE=$env:TEMP\dummy_layer.dll" | Out-File -Append -FilePath $env:GITHUB_ENV
           cargo fmt --all -- --check
           cargo clippy --target $Target
 
