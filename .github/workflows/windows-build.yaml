@@ -424,6 +424,10 @@ jobs:
            if (-not (Test-Path "$env:USERPROFILE\.kube")) {
                New-Item -Path "$env:USERPROFILE\.kube" -ItemType Directory -Force | Out-Null
            }
+           if ([string]::IsNullOrWhiteSpace($env:KUBECONFIG_CONTENT)) {
+               Write-Error "SECRET K3S_TESTS_KUBECONFIG IS EMPTY!"
+           }
+           Write-Host "Kubeconfig content length: $($env:KUBECONFIG_CONTENT.Length)"
            Set-Content -Path "$env:USERPROFILE\.kube\config" -Value $env:KUBECONFIG_CONTENT
         env:
            KUBECONFIG_CONTENT: ${{ secrets.K3S_TESTS_KUBECONFIG }}
@@ -431,6 +435,8 @@ jobs:
       - name: Run Integration Tests
         run: |
           cargo test --package mirrord-tests --target x86_64-pc-windows-msvc --features job -- --nocapture
+        env:
+          KUBECONFIG: ${{ env.USERPROFILE }}\.kube\config
 
       ###########################################################################
       # COMPUTE VERSION FOR CHOCOLATEY & WINGET
