@@ -24,6 +24,11 @@ on:
         options: ["false", "true"]
         default: "false"
 
+      runner:
+        description: "Runner to use"
+        type: string
+        default: "win-build-spot-1"
+
   workflow_call:
     inputs:
 
@@ -43,6 +48,11 @@ on:
         description: "Update WinGet manifest (wingetcreate)?"
         type: string
         default: "false"
+
+      runner:
+        description: "Runner to use"
+        type: string
+        default: "win-build-spot-1"
 
   # pull_request: REMOVED (triggered via ci.yaml now)
 
