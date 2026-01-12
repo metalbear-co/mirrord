@@ -165,16 +165,30 @@ jobs:
                exit 1
           }
           
+          
           # Verify Kubernetes API Connectivity immediately
           Write-Host "Verifying Kubernetes API..."
           $env:KUBECONFIG = "$env:USERPROFILE\.kube\config"
-          try {
-             kubectl get pods -A
-             Write-Host "Kubernetes API Connection Successful."
-          } catch {
-             Write-Error "Failed to connect to Kubernetes API via tunnel."
+          
+          if (-not (Test-Path $env:KUBECONFIG)) {
+              Write-Error "KUBECONFIG file not found at $env:KUBECONFIG"
+              exit 1
+          }
+          
+          $ConfigSize = (Get-Item $env:KUBECONFIG).Length
+          Write-Host "Kubeconfig found. Size: $ConfigSize bytes."
+          if ($ConfigSize -lt 10) {
+              Write-Error "Kubeconfig is empty or too small!"
+              Get-Content $env:KUBECONFIG
+              exit 1
+          }
+
+          kubectl get pods -A
+          if ($LASTEXITCODE -ne 0) {
+             Write-Error "Failed to connect to Kubernetes API via tunnel. Exit Code: $LASTEXITCODE"
              exit 1
           }
+          Write-Host "Kubernetes API Connection Successful."
 
       - name: Toolchain info
         run: |
