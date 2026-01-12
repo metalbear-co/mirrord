@@ -132,7 +132,7 @@ async fn filter_ports(
         .unwrap();
 
     let mut ctx = ConfigContext::default();
-    let config_parsed = LayerFileConfig::from_path(&config_file)
+    let config_parsed = LayerFileConfig::from_path(&config_file, &mut ctx)
         .unwrap()
         .generate_config(&mut ctx)
         .unwrap();
