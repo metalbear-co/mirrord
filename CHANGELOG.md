@@ -8,6 +8,54 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.181.0](https://github.com/metalbear-co/mirrord/tree/3.181.0) - 2026-01-12
+
+
+### Removed
+
+- Removed traffic mirroring implementation based on packet sniffing, along with
+  related configuration options.
+
+
+### Added
+
+- Control agent repository/tag via env vars
+  [#3843](https://github.com/metalbear-co/mirrord/issues/3843)
+- Added new operator feature that allows bypassing user credential verification
+  when running mirrord ci start.
+
+
+### Changed
+
+- Allows `mirrord ci start` to be run multiple times (now you can start
+  multiple mirrord ci sessions), and `mirrord ci stop` will stop every session.
+- Unified `http_filter.ports` and `incoming.ports` behavior and made it more
+  intuitive. Now, ports will be stolen unfiltered/not stolen when
+  `http_filter.ports`/`incoming.ports` is set AND the port in question is not
+  in the list.
+
+
+### Fixed
+
+- Agent dockerfile will now use sccache for the host architecture instead of
+  the target architecture
+- Connections redirected by the agent will now correctly terminate when the
+  target pod is killed
+- Ports will now be unsubscribed only when `close.2` has been called on all
+  handles referring to the matching socket.
+
+
+### Internal
+
+- Don't force install existing software on Windows CI
+- Don't run Windows e2e on CI
+- Run UT/IT for Windows in CI
+- Temporarily ignore `RUSTSEC-2025-0141` advisory until we migrate to a
+  `bincode` alternative.
+- mirrord sessions can now be identified by a "key", which can be provided by
+  the user in the config/cli or auto-generated. It can be used in the config's
+  templating engine as `{{ key }}`.
+
 ## [3.180.0](https://github.com/metalbear-co/mirrord/tree/3.180.0) - 2026-01-06
 
 
