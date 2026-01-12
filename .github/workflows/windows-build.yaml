@@ -419,22 +419,61 @@ jobs:
 
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win -- --skip test::reconnect_during_http::drop_during_response_2_false
 
-      - name: Configure Kubeconfig
+      - name: Close existing tunnels (Port 6443)
+        run: |
+          $port = 6443
+          $connections = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
+          if ($connections) {
+              Write-Host "Killing processes listening on port $port..."
+              foreach ($conn in $connections) {
+                  $procId = $conn.OwningProcess
+                  Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+              }
+          }
+
+      - name: Start SSH Tunnel to K3s
+        run: |
+          # Write Key
+          $keyPath = "$env:TEMP\k3s_key"
+          Set-Content -Path $keyPath -Value "$env:SSH_KEY"
+          # Fix line endings or format if needed? Assuming verified content.
+          
+          # Start Tunnel Background Job
+          # Use internal IP of k3s-tests-1: 10.128.0.62
+          # Local 6443 -> Remote 6443
+          $cmd = "ssh -i $keyPath -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -N -L 6443:10.128.0.62:6443 pavelz@10.128.0.62"
+          
+          # Start-Job or Start-Process logic? 
+          # Start-Process fits better for daemonizing
+          Start-Process ssh -ArgumentList "-i", "$keyPath", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-N", "-L", "6443:10.128.0.62:6443", "pavelz@10.128.0.62" -NoNewWindow
+          
+          # Wait for tunnel
+          Start-Sleep -Seconds 5
+          
+          # Verify connection
+          if (Test-NetConnection -ComputerName "127.0.0.1" -Port 6443 -InformationLevel Quiet) {
+              Write-Host "Tunnel Established."
+          } else {
+              Write-Error "Failed to establish tunnel."
+          }
+        env:
+           SSH_KEY: ${{ secrets.K3S_SSH_KEY }}
+  
+      - name: Configure Kubeconfig (Localhost)
         run: |
            if (-not (Test-Path "$env:USERPROFILE\.kube")) {
                New-Item -Path "$env:USERPROFILE\.kube" -ItemType Directory -Force | Out-Null
            }
-
-           if (-not [string]::IsNullOrWhiteSpace($env:KUBECONFIG_CONTENT)) {
-               Write-Host "Updating Kubeconfig from Secret..."
-               Set-Content -Path "$env:USERPROFILE\.kube\config" -Value $env:KUBECONFIG_CONTENT
-           } elseif (Test-Path "$env:USERPROFILE\.kube\config") {
+           # If secret is missing, we rely on the user-provided manual config checking 127.0.0.1
+           if (Test-Path "$env:USERPROFILE\.kube\config") {
                Write-Host "Using existing Kubeconfig on runner."
            } else {
-               Write-Error "KUBECONFIG not found! Neither Secret provided nor local file exists."
+               Write-Error "No Kubeconfig found and no secret provided. Please checking manual setup."
            }
-        env:
-           KUBECONFIG_CONTENT: ${{ secrets.K3S_TESTS_KUBECONFIG }}
+
+      - name: Verify Connection
+        run: |
+           kubectl get pods -A
 
       - name: Run Integration Tests
         run: |
