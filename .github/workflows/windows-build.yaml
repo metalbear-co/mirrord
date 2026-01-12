@@ -420,7 +420,6 @@ jobs:
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win -- --skip test::reconnect_during_http::drop_during_response_2_false
 
       - name: Configure Kubeconfig
-        if: inputs.runner != 'win-build-spot-1' && inputs.runner != 'win-build-spot-2'
         run: |
            if (-not (Test-Path "$env:USERPROFILE\.kube")) {
                New-Item -Path "$env:USERPROFILE\.kube" -ItemType Directory -Force | Out-Null
@@ -430,7 +429,6 @@ jobs:
            KUBECONFIG_CONTENT: ${{ secrets.K3S_TESTS_KUBECONFIG }}
 
       - name: Run Integration Tests
-        if: inputs.runner != 'win-build-spot-1' && inputs.runner != 'win-build-spot-2'
         run: |
           cargo test --package tests --target x86_64-pc-windows-msvc --features job -- --nocapture
 
