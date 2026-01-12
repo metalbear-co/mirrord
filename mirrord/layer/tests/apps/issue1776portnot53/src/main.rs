@@ -1,3 +1,4 @@
+#[cfg(target_family = "unix")]
 use std::{
     alloc::{self, Layout},
     mem::{self, size_of},
@@ -5,9 +6,12 @@ use std::{
     os::fd::AsRawFd,
 };
 
+#[cfg(target_family = "unix")]
 use libc::{c_void, iovec};
+#[cfg(target_family = "unix")]
 use socket2::SockAddr;
 
+#[cfg(target_family = "unix")]
 unsafe fn address_from_raw(
     raw_address: *const libc::sockaddr,
     address_length: libc::socklen_t,
@@ -24,6 +28,7 @@ unsafe fn address_from_raw(
     }
 }
 
+#[cfg(target_family = "unix")]
 fn main() {
     println!("test issue 1776 port not 53: START");
 
@@ -94,4 +99,10 @@ fn main() {
     recv_thread.join().unwrap();
 
     println!("test issue 1776 port not 53: SUCCESS");
+}
+
+#[cfg(not(target_family = "unix"))]
+fn main() {
+    eprintln!("ERROR: test issue 1776 port not 53 is not supported on non-Unix platforms");
+    std::process::exit(1);
 }

@@ -83,6 +83,19 @@ jobs:
           cargo -V
           rustup show
 
+      - name: Lint
+        id: lint
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Target = "x86_64-pc-windows-msvc"
+
+          rustup target add $Target
+          # create dummy mirrord
+          New-Item -ItemType File -Force -Path "target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll" -Value "content"
+
+          cargo fmt --all -- --check
+          cargo clippy --target $Target
+
       ###########################################################################
       # PREPARE ARTIFACTS
       ###########################################################################
@@ -452,6 +465,22 @@ jobs:
              (Get-FileHash $dll -Algorithm SHA256).Hash.ToLower() | Out-File -FilePath "$dll.sha256" -NoNewline -Encoding ascii
              "MIRRORD_LAYER_SHA256=$dll.sha256" | Out-File -Append -FilePath $env:GITHUB_ENV
            }
+
+      # Upload to workflow the artifacts. - Split into two because it requires shared parent directory (??)
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mirrord-windows-artifacts
+          path: |
+            ${{ env.MIRRORD_EXE }}
+            ${{ env.MIRRORD_LAYER_FILE }}
+
+      - name: Upload Artifact MSI
+        uses: actions/upload-artifact@v4
+        with:
+          name: mirrord-windows-msi-artifacts
+          path: |
+            ${{ env.MSI_PATH }}
 
       - name: Upload artifacts to Release
         if: inputs.release_tag != '' && github.event_name != 'pull_request'
