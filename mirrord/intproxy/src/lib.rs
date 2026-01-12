@@ -1540,11 +1540,11 @@ mod test {
         // `read_to_end` reads until EOF, which is the *graceful*
         // termination by of TCP connection by peer (a.k.a intproxy).
         // Note that the connection may terminate before we're able to
-        // read the entire request (and often it will terminate before
-        // we're able to read a single byte even), so we're only
-        // checking whatever we *do* manage to receive. In any case
-        // all we care about here is whether the intproxy closes the
-        // connection gracefully or not.
+        // read the entire request (and often before we're able to
+        // read a single byte), so we're only checking whatever we
+        // *do* manage to receive. In any case all we care about here
+        // is whether the intproxy closes the connection gracefully or
+        // not.
 
         let mut buf = vec![];
         let read_bytes = conn.read_to_end(&mut buf).await.unwrap();
