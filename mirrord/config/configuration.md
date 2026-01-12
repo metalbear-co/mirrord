@@ -1965,16 +1965,8 @@ If any of the two matches, the request is stolen.
 
 ##### feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}
 
-Activate the HTTP traffic filter only for these ports.
-
-Other ports will *not* be stolen, unless listed in
-[`feature.network.incoming.ports`](#feature-network-incoming-ports).
-
-We check the pod's health probe ports and automatically add them here, as they're
-usually the same ports your app might be listening on. If your app ports and the
-health probe ports don't match, then setting this option will override this behavior.
-
-Set to [80, 8080] by default.
+Activate the HTTP traffic filter only for these ports. When
+absent, filtering will be done for all ports.
 
 **feature.network.incoming.https_delivery** {#feature-network-incoming-https_delivery}
 
@@ -2133,7 +2125,9 @@ on port `80`. You'd use `[[9333, 80]]`
 
 **feature.network.incoming.ports {#feature-network-incoming-ports}
 
-List of ports to mirror/steal traffic from. Other ports will remain local.
+When set, traffic will only be mirrored/stolen on these ports,
+and other ports will remain local. Otherwise, all ports are
+mirrored/stolen.
 
 Mutually exclusive with
 [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
