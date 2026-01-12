@@ -1,5 +1,3 @@
-#![cfg(target_os = "windows")]
-
 use std::process::Command;
 
 /// Temporarily switches the Windows console host to legacy mode (ForceV2=0) and restores the
