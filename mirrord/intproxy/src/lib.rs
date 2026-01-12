@@ -1555,7 +1555,10 @@ mod test {
             // immediately.
             assert_eq!(read_bytes, 0);
         } else {
-            assert_eq!(buf[..read_bytes], EXPECTED_REQUEST[..read_bytes]);
+            assert_eq!(
+                buf.get(..read_bytes).unwrap(),
+                EXPECTED_REQUEST.get(..read_bytes).unwrap()
+            );
         }
 
         let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
