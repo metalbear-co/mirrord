@@ -422,42 +422,44 @@ jobs:
       - name: Close existing tunnels (Port 6443)
         run: |
           $port = 6443
+          # Kill gcloud IAP processes
+          Get-Process -Name "gcloud" -ErrorAction SilentlyContinue | Stop-Process -Force
+          # Kill anything else on 6443
           $connections = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
           if ($connections) {
               Write-Host "Killing processes listening on port $port..."
               foreach ($conn in $connections) {
-                  $procId = $conn.OwningProcess
-                  Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+                  Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
               }
           }
 
-      - name: Start SSH Tunnel to K3s
+      - name: Start IAP Tunnel to K3s
         run: |
-          # Write Key
-          $keyPath = "$env:TEMP\k3s_key"
-          Set-Content -Path $keyPath -Value "$env:SSH_KEY"
-          # Fix line endings or format if needed? Assuming verified content.
+          Write-Host "Starting IAP Tunnel..."
+          $Args = @("compute", "start-iap-tunnel", "k3s-tests-1", "6443", "--local-host-port=127.0.0.1:6443", "--zone=us-central1-a", "--quiet", "--no-user-output-enabled")
           
-          # Start Tunnel Background Job
-          # Use internal IP of k3s-tests-1: 10.128.0.62
-          # Local 6443 -> Remote 6443
-          $cmd = "ssh -i $keyPath -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -N -L 6443:10.128.0.62:6443 pavelz@10.128.0.62"
-          
-          # Start-Job or Start-Process logic? 
-          # Start-Process fits better for daemonizing
-          Start-Process ssh -ArgumentList "-i", "$keyPath", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-N", "-L", "6443:10.128.0.62:6443", "pavelz@10.128.0.62" -NoNewWindow
+          # Start in background job
+          $Job = Start-Job -ScriptBlock { 
+              param($Args)
+              Start-Process -FilePath "gcloud" -ArgumentList $Args -NoNewWindow -Wait 
+          } -ArgumentList (,$Args)
           
           # Wait for tunnel
-          Start-Sleep -Seconds 5
-          
-          # Verify connection
-          if (Test-NetConnection -ComputerName "127.0.0.1" -Port 6443 -InformationLevel Quiet) {
-              Write-Host "Tunnel Established."
-          } else {
-              Write-Error "Failed to establish tunnel."
+          for ($i=1; $i -le 10; $i++) {
+              Start-Sleep -Seconds 2
+              if (Test-NetConnection -ComputerName "127.0.0.1" -Port 6443 -InformationLevel Quiet) {
+                  Write-Host "Tunnel Established."
+                  break
+              }
+              Write-Host "Waiting for tunnel..."
           }
-        env:
-           SSH_KEY: ${{ secrets.K3S_SSH_KEY }}
+
+          if (-not (Test-NetConnection -ComputerName "127.0.0.1" -Port 6443 -InformationLevel Quiet)) {
+               Write-Error "Failed to establish IAP tunnel on port 6443."
+               if ($Job.State -ne 'Running') {
+                   Receive-Job $Job
+               }
+          }
   
       - name: Configure Kubeconfig (Localhost)
         run: |
