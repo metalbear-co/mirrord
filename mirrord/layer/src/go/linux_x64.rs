@@ -640,8 +640,14 @@ pub(crate) fn enable_hooks_in_loaded_module(hook_manager: &mut HookManager, modu
         return;
     };
 
+    tracing::trace!(version, module_name, "Detected Go");
     if version >= 1.25 {
         go_1_25::hook_in_module(hook_manager, module_name.as_str());
+    } else if version >= 1.24 {
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        crate::go::c_shared::go_1_24::hook(hook_manager, module_name.as_str());
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        post_go1_23(hook_manager, Some(module_name.as_str()));
     } else if version >= 1.23 {
         post_go1_23(hook_manager, Some(module_name.as_str()));
     } else if version >= 1.19 {
