@@ -85,6 +85,62 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
+      - name: Configure Kubeconfig (Localhost)
+        run: |
+           if (-not (Test-Path "$env:USERPROFILE\.kube")) {
+               New-Item -Path "$env:USERPROFILE\.kube" -ItemType Directory -Force -ErrorAction SilentlyContinue
+           }
+           Set-Content -Path "$env:USERPROFILE\.kube\config" -Value $env:KUBECONFIG_CONTENT
+        env:
+           KUBECONFIG_CONTENT: ${{ secrets.K3S_TESTS_KUBECONFIG }}
+
+      - name: Close existing tunnels (Port 6443)
+        run: |
+          $port = 6443
+          # Kill gcloud IAP processes
+          Get-Process -Name "gcloud" -ErrorAction SilentlyContinue | Stop-Process -Force
+          # Kill anything else on 6443
+          $connections = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
+          if ($connections) {
+              Write-Host "Killing processes listening on port $port..."
+              foreach ($conn in $connections) {
+                  Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
+              }
+          }
+
+      - name: Start IAP Tunnel to K3s
+        run: |
+          Write-Host "Checking gcloud identity..."
+          gcloud info
+          gcloud auth list
+
+          Write-Host "Starting IAP Tunnel..."
+          $Args = @("compute", "start-iap-tunnel", "k3s-tests-1", "6443", "--local-host-port=127.0.0.1:6443", "--zone=us-central1-a", "--quiet", "--no-user-output-enabled")
+          
+          # Start in background job
+          $Job = Start-Job -ScriptBlock { 
+              param($Args)
+              Start-Process -FilePath "gcloud" -ArgumentList $Args -NoNewWindow -Wait 
+          } -ArgumentList (,$Args)
+          
+          # Wait for tunnel (60s timeout)
+          for ($i=1; $i -le 30; $i++) {
+              Start-Sleep -Seconds 2
+              if (Test-NetConnection -ComputerName "127.0.0.1" -Port 6443 -InformationLevel Quiet) {
+                  Write-Host "Tunnel Established."
+                  break
+              }
+              Write-Host "Waiting for tunnel... ($i/30)"
+          }
+
+          if (-not (Test-NetConnection -ComputerName "127.0.0.1" -Port 6443 -InformationLevel Quiet)) {
+               Write-Error "Failed to establish IAP tunnel on port 6443."
+               Write-Host "--- Tunnel Job Output ---"
+               Receive-Job $Job
+               Write-Host "-------------------------"
+               exit 1
+          }
+
       - name: Toolchain info
         run: |
           $ErrorActionPreference = "Stop"
@@ -418,64 +474,6 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win -- --skip test::reconnect_during_http::drop_during_response_2_false
-
-      - name: Close existing tunnels (Port 6443)
-        run: |
-          $port = 6443
-          # Kill gcloud IAP processes
-          Get-Process -Name "gcloud" -ErrorAction SilentlyContinue | Stop-Process -Force
-          # Kill anything else on 6443
-          $connections = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
-          if ($connections) {
-              Write-Host "Killing processes listening on port $port..."
-              foreach ($conn in $connections) {
-                  Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
-              }
-          }
-
-      - name: Start IAP Tunnel to K3s
-        run: |
-          Write-Host "Checking gcloud identity..."
-          gcloud info
-          gcloud auth list
-
-          Write-Host "Starting IAP Tunnel..."
-          $Args = @("compute", "start-iap-tunnel", "k3s-tests-1", "6443", "--local-host-port=127.0.0.1:6443", "--zone=us-central1-a", "--quiet", "--no-user-output-enabled")
-          
-          # Start in background job
-          $Job = Start-Job -ScriptBlock { 
-              param($Args)
-              Start-Process -FilePath "gcloud" -ArgumentList $Args -NoNewWindow -Wait 
-          } -ArgumentList (,$Args)
-          
-          # Wait for tunnel (60s timeout)
-          for ($i=1; $i -le 30; $i++) {
-              Start-Sleep -Seconds 2
-              if (Test-NetConnection -ComputerName "127.0.0.1" -Port 6443 -InformationLevel Quiet) {
-                  Write-Host "Tunnel Established."
-                  break
-              }
-              Write-Host "Waiting for tunnel... ($i/30)"
-          }
-
-          if (-not (Test-NetConnection -ComputerName "127.0.0.1" -Port 6443 -InformationLevel Quiet)) {
-               Write-Error "Failed to establish IAP tunnel on port 6443."
-               Write-Host "--- Tunnel Job Output ---"
-               Receive-Job $Job
-               Write-Host "-------------------------"
-          }
-  
-      - name: Configure Kubeconfig (Localhost)
-        run: |
-           if (-not (Test-Path "$env:USERPROFILE\.kube")) {
-               New-Item -Path "$env:USERPROFILE\.kube" -ItemType Directory -Force | Out-Null
-           }
-           # If secret is missing, we rely on the user-provided manual config checking 127.0.0.1
-           if (Test-Path "$env:USERPROFILE\.kube\config") {
-               Write-Host "Using existing Kubeconfig on runner."
-           } else {
-               Write-Error "No Kubeconfig found and no secret provided. Please checking manual setup."
-           }
 
       - name: Verify Connection
         run: |
