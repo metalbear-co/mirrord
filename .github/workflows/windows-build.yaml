@@ -430,7 +430,7 @@ jobs:
 
       - name: Run Integration Tests
         run: |
-          cargo test --package tests --target x86_64-pc-windows-msvc --features job -- --nocapture
+          cargo test --package mirrord-tests --target x86_64-pc-windows-msvc --features job -- --nocapture
 
       ###########################################################################
       # COMPUTE VERSION FOR CHOCOLATEY & WINGET
