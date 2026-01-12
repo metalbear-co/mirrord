@@ -62,6 +62,7 @@ wsl = "0.1"
 chrono.workspace = true
 tempfile.workspace = true
 tokio-tungstenite.workspace = true
+tracing.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 mirrord-agent-env = { path = "../mirrord/agent/env", optional = true }

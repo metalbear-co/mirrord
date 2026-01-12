@@ -256,7 +256,6 @@ winapi = { version = "0.3.9", features = [
     "namedpipeapi",
 ] }
 
-
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 

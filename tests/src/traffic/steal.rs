@@ -8,6 +8,7 @@ mod steal_tests {
     use kube::{Api, Client};
     use reqwest::{header::HeaderMap, Url};
     use rstest::*;
+    use serde_json::json;
     use tokio::{
         io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
         net::TcpStream,
@@ -22,6 +23,7 @@ mod steal_tests {
         application::Application,
         config_dir,
         ipv6::{ipv6_service, portforward_http_requests},
+        json_to_path,
         kube_client,
         kube_service::KubeService,
         port_forwarder::PortForwarder,
@@ -499,7 +501,26 @@ mod steal_tests {
         let url = format!("http://{}", portforwarder.address());
 
         let mut config_path = config_dir.to_path_buf();
-        config_path.push("http_filter_path.json");
+        let config_json = json!({
+            "feature": {
+                "network": {
+                    "incoming": {
+                        "mode": "steal",
+                        "http_filter": {
+                            "path_filter": "api/v1" 
+                        }
+                    }
+                }
+            }
+        });
+        let tempfile_path = json_to_path(config_json);
+        config_path.push(tempfile_path);
+
+        println!("Tempfile path is: {:?}", &config_path);
+
+        if config_path.exists() == false {
+            assert!(false);
+        }
 
         let client = application
             .run(
@@ -509,6 +530,8 @@ mod steal_tests {
                 Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
             )
             .await;
+
+        let _ = std::fs::remove_file(config_path).unwrap_or_else(|_| println!("Failed to remove tempfile."));
 
         #[cfg(target_os = "windows")]
         application.wait_until_listening(&client).await;
