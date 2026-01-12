@@ -91,9 +91,9 @@ jobs:
 
           rustup target add $Target
           # create dummy mirrord
-          echo . > %TMP%\dummy_layer.dll
+          "content" | Out-File "$env:TEMP\dummy_layer.dll"
 
-          Set-Env "MIRRORD_LAYER_FILE" %TMP%\dummy_layer.dll
+          Set-Env "MIRRORD_LAYER_FILE" "$env:TEMP\dummy_layer.dll"
           cargo fmt --all -- --check
           cargo clippy --target $Target
 
