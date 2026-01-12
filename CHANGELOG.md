@@ -37,8 +37,6 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Fixed
 
-- Agent dockerfile will now use sccache for the host architecture instead of
-  the target architecture
 - Connections redirected by the agent will now correctly terminate when the
   target pod is killed
 - Ports will now be unsubscribed only when `close.2` has been called on all
@@ -55,6 +53,8 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 - mirrord sessions can now be identified by a "key", which can be provided by
   the user in the config/cli or auto-generated. It can be used in the config's
   templating engine as `{{ key }}`.
+- Agent dockerfile will now use sccache for the host architecture instead of
+  the target architecture
 
 ## [3.180.0](https://github.com/metalbear-co/mirrord/tree/3.180.0) - 2026-01-06
 
