@@ -129,13 +129,13 @@ jobs:
           $ErrFile = "$env:TEMP\iap_tunnel.err"
           
           # Remove --quiet to capture debug output in logs
-          $Args = @("compute", "start-iap-tunnel", "k3s-tests-1", "6443", "--local-host-port=127.0.0.1:6443", "--zone=us-central1-a")
+          $GcloudArgs = "compute start-iap-tunnel k3s-tests-1 6443 --local-host-port=127.0.0.1:6443 --zone=us-central1-a"
           
-          # Start process efficiently with redirection
-          $Process = Start-Process -FilePath "gcloud" -ArgumentList $Args -NoNewWindow -PassThru -RedirectStandardOutput $LogFile -RedirectStandardError $ErrFile
+          # Start process efficiently with redirection (Wrapped in cmd /c because gcloud is a batch file on Windows)
+          $Process = Start-Process -FilePath "cmd.exe" -ArgumentList "/c gcloud $GcloudArgs" -NoNewWindow -PassThru -RedirectStandardOutput $LogFile -RedirectStandardError $ErrFile
           
-          # Wait for tunnel (60s timeout)
-          for ($i=1; $i -le 30; $i++) {
+          # Wait for tunnel (10s timeout)
+          for ($i=1; $i -le 5; $i++) {
               Start-Sleep -Seconds 2
               
               if ($Process.HasExited) {
@@ -147,7 +147,7 @@ jobs:
                   Write-Host "Tunnel Established."
                   break
               }
-              Write-Host "Waiting for tunnel... ($i/30)"
+              Write-Host "Waiting for tunnel... ($i/5)"
           }
 
           if (-not (Test-NetConnection -ComputerName "127.0.0.1" -Port 6443 -InformationLevel Quiet)) {
