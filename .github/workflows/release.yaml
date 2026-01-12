@@ -123,6 +123,21 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
+          $Arch = ($env:RUNNER_ARCH).ToLower()
+          $SearchBase = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+
+          $Tool = Get-ChildItem $SearchBase -Recurse -Force -ErrorAction SilentlyContinue |
+              Where-Object {$_.Name -eq 'signtool.exe' -and $_.Directory -like "*\$Arch"} |
+              Sort-Object -Descending |
+              Select-Object -First 1
+
+          if (!($Tool)) {throw [System.IO.FileNotFoundException]::new('File not found.', 'signtool.exe')}
+
+
+          $Tool.Directory.FullName | Out-File $env:GITHUB_PATH -Append
+          "signtool-$Arch=$($Tool.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
+          $env:PATH = "$($Tool.Directory.FullName);$env:PATH"
+
           signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
             /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$env:MIRRORD_DLL"
 
