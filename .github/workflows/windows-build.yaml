@@ -85,14 +85,23 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Configure Kubeconfig (Localhost)
+      - name: Verify Kubeconfig (Existing)
         run: |
-           if (-not (Test-Path "$env:USERPROFILE\.kube")) {
-               New-Item -Path "$env:USERPROFILE\.kube" -ItemType Directory -Force -ErrorAction SilentlyContinue
+           $KubePath = "$env:USERPROFILE\.kube\config"
+           Write-Host "Checking for existing Kubeconfig at: $KubePath"
+           
+           if (-not (Test-Path $KubePath)) {
+               Write-Error "KUBECONFIG NOT FOUND on runner! User requested reliance on VM-resident config."
+               Write-Host "Please ensure ~/.kube/config is populated on the VM."
+               exit 1
            }
-           Set-Content -Path "$env:USERPROFILE\.kube\config" -Value $env:KUBECONFIG_CONTENT
-        env:
-           KUBECONFIG_CONTENT: ${{ secrets.K3S_TESTS_KUBECONFIG }}
+           
+           $Size = (Get-Item $KubePath).Length
+           if ($Size -lt 10) {
+               Write-Error "Kubeconfig is empty ($Size bytes)."
+               exit 1
+           }
+           Write-Host "Kubeconfig found ($Size bytes). Using existing file."
 
       - name: Close existing tunnels (Port 6443)
         run: |
