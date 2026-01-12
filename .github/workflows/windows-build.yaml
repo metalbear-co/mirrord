@@ -472,7 +472,6 @@ jobs:
         with:
           name: mirrord-windows-artifacts
           path: |
-            ${{ env.MSI_PATH }}
             ${{ env.MIRRORD_EXE }}
             ${{ env.MIRRORD_LAYER_FILE }}
 
