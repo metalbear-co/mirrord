@@ -466,6 +466,16 @@ jobs:
              "MIRRORD_LAYER_SHA256=$dll.sha256" | Out-File -Append -FilePath $env:GITHUB_ENV
            }
 
+      # Upload to workflow the artifacts.
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mirrord-windows-artifacts
+          path: |
+            ${{ env.MSI_PATH }}
+            ${{ env.MIRRORD_EXE }}
+            ${{ env.MIRRORD_LAYER_FILE }}
+
       - name: Upload artifacts to Release
         if: inputs.release_tag != '' && github.event_name != 'pull_request'
         uses: metalbear-co/action-gh-release@ab50eebb6488051c6788d97fa95232267c6a4e23
