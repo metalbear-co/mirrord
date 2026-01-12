@@ -477,9 +477,11 @@ jobs:
 
       - name: Run Integration Tests
         run: |
+          $env:KUBECONFIG = "$env:USERPROFILE\.kube\config"
+          if (-not (Test-Path $env:KUBECONFIG)) {
+              Write-Error "KUBECONFIG not found at $env:KUBECONFIG"
+          }
           cargo test --package mirrord-tests --target x86_64-pc-windows-msvc --features job -- --nocapture
-        env:
-          KUBECONFIG: ${{ env.USERPROFILE }}\.kube\config
 
       ###########################################################################
       # COMPUTE VERSION FOR CHOCOLATEY & WINGET
