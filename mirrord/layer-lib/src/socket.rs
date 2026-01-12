@@ -3,12 +3,13 @@ pub mod hostname;
 pub mod ops;
 pub mod sockets;
 
+#[cfg(windows)]
+use std::mem;
 use std::{
     collections::HashSet,
     net::{SocketAddr, ToSocketAddrs},
     ops::Deref,
     str::FromStr,
-    mem,
 };
 
 use bincode::{Decode, Encode};
@@ -39,19 +40,23 @@ pub use sockets::{
 #[cfg(windows)]
 pub use winapi::{
     shared::{
-        ws2def::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM, SOCKADDR, SOCKADDR_IN, SOCKADDR_STORAGE},
+        ws2def::{
+            AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM, SOCKADDR, SOCKADDR_IN, SOCKADDR_STORAGE,
+        },
         ws2ipdef::SOCKADDR_IN6,
     },
     um::{winnt::INT, winsock2::WSAEFAULT},
-    
 };
 
-pub use crate::{
-    ConnectError, HookError, HookResult, proxy_connection::make_proxy_request_no_response,
-    setup::setup, socket::dns::remote_getaddrinfo,
-};
+#[cfg(unix)]
+use crate::detour::DetourGuard;
 #[cfg(windows)]
 use crate::error::windows::{WindowsError, WindowsResult};
+pub use crate::{
+    ConnectError, HookError, HookResult, detour::Bypass,
+    proxy_connection::make_proxy_request_no_response, setup::setup,
+    socket::dns::remote_getaddrinfo,
+};
 
 /// Contains the addresses of a mirrord connected socket.
 ///
@@ -289,7 +294,6 @@ pub trait SocketAddrExt {
 impl SocketAddrExt for SockAddr {
     // Platform-specific implementations should override this
 }
-
 
 /// Windows-specific extensions for socket address handling on Windows
 #[cfg(windows)]

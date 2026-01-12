@@ -5,9 +5,7 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
-use mirrord_protocol::{
-    dns::{AddressFamily, GetAddrInfoRequestV2, SockType},
-};
+use mirrord_protocol::dns::{AddressFamily, GetAddrInfoRequestV2, SockType};
 use utils::{ManagedAddrInfo, ManagedAddrInfoAny, WindowsAddrInfo};
 use winapi::{
     shared::ws2def::{AF_INET, AF_INET6, SOCKADDR},
@@ -137,7 +135,6 @@ pub unsafe fn free_managed_addrinfo<T: WindowsAddrInfo>(addrinfo: *mut T) -> boo
         false
     }
 }
-
 
 /// Helper function to check if a UDP socket's remote address is reachable using GetNameInfoW
 /// This is a workaround for WSASend not failing on unreachable addresses (due to UDP being

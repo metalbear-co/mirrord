@@ -12,14 +12,14 @@ use std::{net::SocketAddr, ops::Not, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_intproxy_protocol::{
-    ConnMetadataRequest, ConnMetadataResponse, PortSubscribe, OutgoingConnMetadataRequest,
+    ConnMetadataRequest, ConnMetadataResponse, OutgoingConnMetadataRequest, PortSubscribe,
 };
 use mirrord_layer_lib::{
     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
     setup::{LayerSetup, NetworkHookConfig, setup},
     socket::{
-        Bound, Connected, SocketKind, SocketState, SocketAddrExtWin,
+        Bound, Connected, SocketAddrExtWin, SocketKind, SocketState,
         dns::{
             remote_dns_resolve_via_proxy,
             windows::{
@@ -60,8 +60,8 @@ use self::{
     hostname::{handle_hostname_ansi, handle_hostname_unicode, is_remote_hostname},
     ops::{WSABufferData, get_connectex_original, hook_connectex_extension, log_connection_result},
     utils::{
-        AutoCloseSocket, ERROR_SUCCESS_I32, create_thread_local_hostent,
-        determine_local_address, get_actual_bound_address,
+        AutoCloseSocket, ERROR_SUCCESS_I32, create_thread_local_hostent, determine_local_address,
+        get_actual_bound_address,
     },
 };
 use crate::{apply_hook, process::elevation::require_elevation};
@@ -372,12 +372,12 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
 
         res
     };
-    
+
     // Early return for non-managed sockets
     if !is_socket_managed(s) {
         return bind_fn(s, name, namelen, "non-managed socket");
     }
-    
+
     // Parse the requested address
     let requested_addr = match SocketAddr::try_from_raw(name, namelen) {
         Some(addr) => addr,
@@ -772,15 +772,18 @@ unsafe extern "system" fn getsockname_detour(
             SocketState::Connected(Connected {
                 connection_id: Some(id),
                 ..
-            }) => match make_proxy_request_with_response(OutgoingConnMetadataRequest { conn_id: id }) {
-                Ok(Some(res)) => Some(res.in_cluster_address.into()),
-                Ok(None) => {
-                    tracing::error!(id, "Protocol: could not locate outgoing metadata");
-                    None
-                }
-                Err(e) => {
-                    tracing::error!(?e, id, "Proxy: Error getting outgoing metadata");
-                    None
+            }) => {
+                match make_proxy_request_with_response(OutgoingConnMetadataRequest { conn_id: id })
+                {
+                    Ok(Some(res)) => Some(res.in_cluster_address.into()),
+                    Ok(None) => {
+                        tracing::error!(id, "Protocol: could not locate outgoing metadata");
+                        None
+                    }
+                    Err(e) => {
+                        tracing::error!(?e, id, "Proxy: Error getting outgoing metadata");
+                        None
+                    }
                 }
             }
             SocketState::Bound {

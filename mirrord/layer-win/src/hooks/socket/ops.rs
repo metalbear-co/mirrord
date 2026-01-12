@@ -1,7 +1,4 @@
-use std::{
-    net::SocketAddr,
-    sync::OnceLock,
-};
+use std::{net::SocketAddr, sync::OnceLock};
 
 use mirrord_intproxy_protocol::{OutgoingConnectRequest, OutgoingConnectResponse};
 use mirrord_layer_lib::{

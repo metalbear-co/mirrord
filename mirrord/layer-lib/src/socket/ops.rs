@@ -1,19 +1,24 @@
-#[cfg(unix)]
-use core::ffi::CStr;
-#[cfg(unix)]
-use std::os::unix::io::RawFd;
 use std::{
     convert::TryFrom,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
     sync::Arc,
 };
+#[cfg(unix)]
+use std::{
+    io,
+    os::{fd::BorrowedFd, unix::io::RawFd},
+};
 
 #[cfg(unix)]
-use libc::{AF_UNIX, c_int, c_void, sockaddr, socklen_t};
+use libc::{AF_UNIX, c_void, sockaddr, socklen_t};
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
 use mirrord_protocol::outgoing::SocketAddress;
+#[cfg(unix)]
+use nix::sys::socket::{SockaddrStorage, sockopt};
 use socket2::SockAddr;
+#[cfg(unix)]
+use tracing::error;
 use tracing::{debug, trace};
 /// Platform-specific connect function types
 #[cfg(windows)]
@@ -24,21 +29,16 @@ use winapi::{
 
 use super::sockets::{set_socket_state, socket_descriptor_to_i64};
 #[cfg(windows)]
-use crate::{
-    error::windows::WindowsError,
-};
-#[cfg(unix)]
-use crate::socket::sockets::SOCKETS;
+use crate::socket::dns::windows::check_address_reachability;
 use crate::{
     HookError, HookResult,
-    error::{Bypass, ConnectError},
+    detour::Bypass,
+    error::ConnectError,
     setup::setup,
-    socket::{
-        Bound, Connected, ConnectionThrough, SOCKETS, SocketState, UserSocket,
-        sockets::find_listener_address_by_port,
-        dns::windows::check_address_reachability,
-    },
+    socket::{Bound, Connected, ConnectionThrough, SOCKETS, SocketState, UserSocket},
 };
+#[cfg(windows)]
+use crate::{error::windows::WindowsError, socket::sockets::find_listener_address_by_port};
 
 // Platform-specific socket descriptor type
 #[cfg(unix)]
@@ -182,18 +182,32 @@ fn nop_connect_fn(_addr: SockAddr) -> ConnectResult {
     }
 }
 
+#[inline]
+fn invoke_connect_fn<F>(connect_fn: &mut Option<F>, addr: SockAddr) -> ConnectResult
+where
+    F: FnOnce(SockAddr) -> ConnectResult,
+{
+    connect_fn
+        .take()
+        .expect("connect_fn should only be called once")(addr)
+}
+
 /// Iterate through sockets, if any of them has the requested port that the application is now
 /// trying to connect to - then don't forward this connection to the agent, and instead of
 /// connecting to the requested address, connect to the actual address where the application
 /// is locally listening.
 #[cfg(unix)]
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-fn connect_to_local_address(
+#[mirrord_layer_macro::instrument(level = "trace", skip(connect_fn), ret)]
+fn connect_to_local_address<F>(
     sockfd: RawFd,
     user_socket_info: &UserSocket,
     ip_address: SocketAddr,
-) -> HookResult<Option<ConnectResult>> {
-    if crate::setup().outgoing_config().ignore_localhost {
+    connect_fn: &mut Option<F>,
+) -> HookResult<Option<ConnectResult>>
+where
+    F: FnOnce(SockAddr) -> ConnectResult,
+{
+    if setup().outgoing_config().ignore_localhost {
         Err(HookError::Bypass(Bypass::IgnoredInIncoming(ip_address)))
     } else {
         Ok(SOCKETS
@@ -210,20 +224,7 @@ fn connect_to_local_address(
                 | SocketState::Initialized
                 | SocketState::Connected(_) => None,
             })
-            .map(|rawish_remote_address| unsafe {
-                FN_CONNECT(
-                    sockfd,
-                    rawish_remote_address.as_ptr(),
-                    rawish_remote_address.len(),
-                )
-            })
-            .map(|connect_result| {
-                if connect_result != 0 {
-                    Err(ConnectResult(io::Error::last_os_error().into()))
-                } else {
-                    Ok(connect_result.into())
-                }
-            })?)
+            .map(|rawish_remote_address| invoke_connect_fn(connect_fn, rawish_remote_address)))
     }
 }
 
@@ -262,6 +263,7 @@ where
     let remote_address = SockAddr::from(remote_addr);
     let optional_ip_address = remote_address.as_socket();
     let unix_streams = setup().remote_unix_streams();
+    let mut connect_fn = Some(connect_fn);
 
     if let Some(ip_address) = optional_ip_address {
         if setup().experimental().tcp_ping4_mock && ip_address.port() == 7 {
@@ -278,7 +280,9 @@ where
             // unification, so i rather keep both and each platform will run its own flavoring of
             // it.
             #[cfg(unix)]
-            if let Some(result) = connect_to_local_address(socket, &user_socket_info, ip_address)? {
+            if let Some(result) =
+                connect_to_local_address(socket, &user_socket_info, ip_address, &mut connect_fn)?
+            {
                 // `result` here is always a success, as error and bypass are returned on the `?`
                 // above.
                 return Ok(result);
@@ -289,7 +293,7 @@ where
             {
                 tracing::debug!("connecting locally to listener at {}", local_address);
                 let local_sockaddr = SockAddr::from(local_address);
-                let connect_result = connect_fn(local_sockaddr);
+                let connect_result = invoke_connect_fn(&mut connect_fn, local_sockaddr);
                 return Ok(connect_result);
             }
         }
@@ -346,7 +350,7 @@ where
             user_socket_info,
             NetProtocol::Datagrams,
             proxy_request_fn,
-            connect_fn,
+            |addr| invoke_connect_fn(&mut connect_fn, addr),
         ),
 
         NetProtocol::Stream => match user_socket_info.state {
@@ -360,7 +364,7 @@ where
                     user_socket_info,
                     NetProtocol::Stream,
                     proxy_request_fn,
-                    connect_fn,
+                    |addr| invoke_connect_fn(&mut connect_fn, addr),
                 )
             }
 
@@ -500,7 +504,7 @@ where
                 "Failed to connect to an internal proxy socket. \
                 This is most likely a bug, please report it.",
             );
-            return Detour::Error(error.into());
+            return Err(error.into());
         }
 
         let connected = Connected {
@@ -534,7 +538,6 @@ where
         {
             ConnectionThrough::Remote(addr) => remote_connection(SockAddr::from(addr))?,
             ConnectionThrough::Local(addr) => {
-
                 #[cfg(windows)]
                 if check_address_reachability(sockfd, &addr) != 0 {
                     return Err(ConnectError::AddressUnreachable(format!("{}", addr)).into());

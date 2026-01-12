@@ -1,50 +1,28 @@
-/// Handles the remote communication part of [`getaddrinfo`], call this if you want to resolve a DNS
-/// through the agent, but don't need to deal with all the [`libc::getaddrinfo`] stuff.
-///
-/// # Note
-///
-/// This function updates the mapping in [`REMOTE_DNS_REVERSE_MAPPING`].
-/// TODO(Daniel): Use dns.rs version for both unix and windows and remove this implementation.
-#[cfg(unix)]
-#[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err)]
-pub(super) fn remote_getaddrinfo(
-    node: String,
-    service_port: u16,
-    flags: c_int,
-    family: c_int,
-    socktype: c_int,
-    protocol: c_int,
-) -> HookResult<Vec<(String, IpAddr)>> {
-    let family = match family {
-        libc::AF_INET => AddressFamily::Ipv4Only,
-        libc::AF_INET6 => AddressFamily::Ipv6Only,
-        _ => AddressFamily::Both,
-    };
-    let socktype = match socktype {
-        libc::SOCK_STREAM => SockType::Stream,
-        libc::SOCK_DGRAM => SockType::Dgram,
-        _ => SockType::Any,
-    };
-    let addr_info_list = common::make_proxy_request_with_response(GetAddrInfoRequestV2 {
-        node,
-        service_port,
-        flags,
-        family,
-        socktype,
-        protocol,
-    })?
-    .0?;
+use alloc::ffi::CString;
+use core::{ffi::CStr, mem};
+use std::{
+    collections::HashSet,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    ops::Not,
+    ptr,
+    sync::{LazyLock, Mutex},
+};
 
-    let mut remote_dns_reverse_mapping = REMOTE_DNS_REVERSE_MAPPING.lock()?;
-    addr_info_list.iter().for_each(|lookup| {
-        remote_dns_reverse_mapping.insert(lookup.ip, lookup.name.clone());
-    });
+//use nix::sys::socket::SockaddrLike;
+use socket2::SockAddr;
+use tracing::{trace, warn};
 
-    Ok(addr_info_list
-        .into_iter()
-        .map(|LookupRecord { name, ip }| (name, ip))
-        .collect())
-}
+use crate::{
+    detour::Bypass,
+    error::{HookError, HookResult},
+    setup::setup,
+    socket::{CheckQueryResult, remote_getaddrinfo},
+};
+
+/// Here we keep addr infos that we allocated so we'll know when to use the original
+/// freeaddrinfo function and when to use our implementation
+pub static MANAGED_ADDRINFO: LazyLock<Mutex<HashSet<usize>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
 
 /// Retrieves the result of calling `getaddrinfo` from a remote host (resolves remote DNS),
 /// converting the result into a `Box` allocated raw pointer of `libc::addrinfo` (which is basically
@@ -59,13 +37,13 @@ pub(super) fn remote_getaddrinfo(
 /// for the equivalent of this function).
 #[cfg(unix)]
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
-pub(super) fn getaddrinfo(
+pub fn getaddrinfo(
     rawish_node: Option<&CStr>,
     rawish_service: Option<&CStr>,
     raw_hints: Option<&libc::addrinfo>,
-) -> Detour<*mut libc::addrinfo> {
+) -> HookResult<*mut libc::addrinfo> {
     let node: String = rawish_node
-        .bypass(Bypass::NullNode)?
+        .ok_or(HookError::Bypass(Bypass::NullNode))?
         .to_str()
         .map_err(|fail| {
             warn!(
@@ -73,7 +51,7 @@ pub(super) fn getaddrinfo(
                 fail
             );
 
-            Bypass::CStrConversion
+            HookError::Bypass(Bypass::CStrConversion)
         })?
         .into();
 
@@ -87,15 +65,25 @@ pub(super) fn getaddrinfo(
                 fail
             );
 
-            Bypass::CStrConversion
+            HookError::Bypass(Bypass::CStrConversion)
         })?
         // TODO: according to the man page, service could also be a service name, it doesn't have to
         //   be a port number.
         .and_then(|service| service.parse::<u16>().ok())
         .unwrap_or(0);
 
-    let setup = crate::setup();
-    setup.dns_selector().check_query(&node, service)?;
+    let setup = setup();
+    match setup.dns_selector().check_query_result(&node, service) {
+        CheckQueryResult::Local => {
+            trace!("getaddrinfo -> bypassing to local DNS for {node}:{service}");
+
+            return Err(HookError::Bypass(Bypass::LocalDns));
+        }
+        CheckQueryResult::Remote => {
+            trace!("getaddrinfo -> resolving remotely for {node}:{service}");
+            //fallthrough
+        }
+    };
     let ipv6_enabled = setup.layer_config().feature.network.ipv6;
 
     let raw_hints = raw_hints
@@ -167,5 +155,5 @@ pub(super) fn getaddrinfo(
 
     trace!("getaddrinfo -> result {:#?}", result);
 
-    Detour::Success(result)
+    Ok(result)
 }

@@ -9,18 +9,11 @@
 
 use mirrord_layer_lib::{
     error::HookResult,
-    socket::{
-        hostname::{get_remote_netbios_name, remote_hostname_string},
-    },
+    socket::hostname::{get_remote_netbios_name, remote_hostname_string},
 };
 use winapi::{
-    shared::{
-        winerror::{ERROR_INVALID_PARAMETER, WSAEFAULT},
-    },
-    um::{
-        errhandlingapi::SetLastError,
-        winsock2::WSASetLastError,
-    },
+    shared::winerror::{ERROR_INVALID_PARAMETER, WSAEFAULT},
+    um::{errhandlingapi::SetLastError, winsock2::WSASetLastError},
 };
 
 use super::utils::validate_buffer_params;

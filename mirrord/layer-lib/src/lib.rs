@@ -1,6 +1,8 @@
 //! Common layer functionality shared between Unix layer and Windows layer-win.
+extern crate alloc;
 
 pub mod debugger_ports;
+pub mod detour;
 pub mod error;
 pub mod file;
 pub mod macros;

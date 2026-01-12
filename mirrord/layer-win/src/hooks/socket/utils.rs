@@ -17,13 +17,10 @@ use winapi::{
     shared::{
         minwindef::INT,
         winerror::ERROR_SUCCESS,
-        ws2def::{
-            AF_INET, AF_INET6, SOCKADDR, SOCKADDR_STORAGE,
-        },
+        ws2def::{AF_INET, AF_INET6, SOCKADDR, SOCKADDR_STORAGE},
     },
     um::winsock2::{
-        HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, closesocket,
-        getpeername, getsockname,
+        HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, closesocket, getpeername, getsockname,
     },
 };
 

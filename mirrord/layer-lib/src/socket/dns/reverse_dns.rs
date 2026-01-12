@@ -16,7 +16,7 @@ use std::{
 ///
 /// The cache helps avoid redundant DNS lookups and provides hostname information
 /// for debugging and logging purposes.
-static REMOTE_DNS_REVERSE_MAPPING: LazyLock<Mutex<HashMap<IpAddr, String>>> =
+pub static REMOTE_DNS_REVERSE_MAPPING: LazyLock<Mutex<HashMap<IpAddr, String>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Maximum number of entries in the DNS cache to prevent memory exhaustion
