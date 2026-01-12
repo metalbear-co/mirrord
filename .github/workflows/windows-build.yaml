@@ -110,25 +110,39 @@ jobs:
 
       - name: Start IAP Tunnel to K3s
         run: |
+          # Ensure kubectl is available for verification
+          if (-not (Get-Command kubectl -ErrorAction SilentlyContinue)) {
+              Write-Host "Installing kubectl..."
+              choco install kubernetes-cli -y
+          }
+
           Write-Host "Configuring gcloud..."
           # Switch to the Compute Engine Service Account to avoid interactive auth prompts
           gcloud config set account "174145836594-compute@developer.gserviceaccount.com"
           gcloud config set project "mirrord"
+          gcloud config set core/disable_prompts true
           gcloud info
           gcloud auth list
 
           Write-Host "Starting IAP Tunnel..."
-          $Args = @("compute", "start-iap-tunnel", "k3s-tests-1", "6443", "--local-host-port=127.0.0.1:6443", "--zone=us-central1-a", "--quiet", "--no-user-output-enabled")
+          $LogFile = "$env:TEMP\iap_tunnel.log"
+          $ErrFile = "$env:TEMP\iap_tunnel.err"
           
-          # Start in background job
-          $Job = Start-Job -ScriptBlock { 
-              param($Args)
-              Start-Process -FilePath "gcloud" -ArgumentList $Args -NoNewWindow -Wait 
-          } -ArgumentList (,$Args)
+          # Remove --quiet to capture debug output in logs
+          $Args = @("compute", "start-iap-tunnel", "k3s-tests-1", "6443", "--local-host-port=127.0.0.1:6443", "--zone=us-central1-a")
+          
+          # Start process efficiently with redirection
+          $Process = Start-Process -FilePath "gcloud" -ArgumentList $Args -NoNewWindow -PassThru -RedirectStandardOutput $LogFile -RedirectStandardError $ErrFile
           
           # Wait for tunnel (60s timeout)
           for ($i=1; $i -le 30; $i++) {
               Start-Sleep -Seconds 2
+              
+              if ($Process.HasExited) {
+                  Write-Error "Tunnel process exited prematurely (Exit Code: $($Process.ExitCode))"
+                  break
+              }
+
               if (Test-NetConnection -ComputerName "127.0.0.1" -Port 6443 -InformationLevel Quiet) {
                   Write-Host "Tunnel Established."
                   break
@@ -138,9 +152,16 @@ jobs:
 
           if (-not (Test-NetConnection -ComputerName "127.0.0.1" -Port 6443 -InformationLevel Quiet)) {
                Write-Error "Failed to establish IAP tunnel on port 6443."
-               Write-Host "--- Tunnel Job Output ---"
-               Receive-Job $Job
-               Write-Host "-------------------------"
+               
+               Write-Host "--- STDOUT ---"
+               if (Test-Path $LogFile) { Get-Content $LogFile }
+               Write-Host "--- STDERR ---"
+               if (Test-Path $ErrFile) { Get-Content $ErrFile }
+               Write-Host "--------------"
+               
+               if (-not $Process.HasExited) {
+                   Stop-Process -Id $Process.Id -Force
+               }
                exit 1
           }
           
