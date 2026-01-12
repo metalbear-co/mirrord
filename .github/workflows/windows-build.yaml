@@ -93,7 +93,7 @@ jobs:
           # create dummy mirrord
           "content" | Out-File "$env:TEMP\dummy_layer.dll"
 
-          Set-Env "MIRRORD_LAYER_FILE" "$env:TEMP\dummy_layer.dll"
+          "MIRRORD_LAYER_FILE=$env:TEMP\dummy_layer.dll" | Out-File -Append -FilePath $env:GITHUB_ENV
           cargo fmt --all -- --check
           cargo clippy --target $Target
 
