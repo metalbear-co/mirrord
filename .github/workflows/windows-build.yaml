@@ -67,7 +67,7 @@ env:
 
 jobs:
   windows_build:
-    runs-on: windows-latest
+    runs-on: ${{ inputs.runner }}
     defaults:
       run:
         shell: pwsh
