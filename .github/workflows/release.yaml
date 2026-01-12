@@ -119,30 +119,54 @@ jobs:
           echo "MIRRORD_DLL=$dll" >> $env:GITHUB_ENV
           echo "MIRRORD_EXE=$exe" >> $env:GITHUB_ENV
 
-      - name: Sign DLL and EXE
+      - name: Setup DigiCert signing
+        env:
+          DIGICERT_CLIENT_CERT_PFX_B64: ${{ secrets.DIGICERT_CLIENT_CERT_PFX_B64 }}
+          DIGICERT_CLIENT_CERT_PASSWORD: ${{ secrets.DIGICERT_CLIENT_CERT_PASSWORD }}
+          DIGICERT_API_KEY: ${{ secrets.DIGICERT_API_KEY }}
+          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          $Arch = ($env:RUNNER_ARCH).ToLower()
-          $SearchBase = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+          # Install DigiCert client certificate
+          $pfxBytes = [System.Convert]::FromBase64String($env:DIGICERT_CLIENT_CERT_PFX_B64)
+          $pfxPath = Join-Path $env:RUNNER_TEMP "digicert_client.pfx"
+          [System.IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
 
-          $Tool = Get-ChildItem $SearchBase -Recurse -Force -ErrorAction SilentlyContinue |
-              Where-Object {$_.Name -eq 'signtool.exe' -and $_.Directory -like "*\$Arch"} |
-              Sort-Object -Descending |
-              Select-Object -First 1
+          # Import certificate to CurrentUser store
+          $certPassword = ConvertTo-SecureString -String $env:DIGICERT_CLIENT_CERT_PASSWORD -Force -AsPlainText
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $certPassword
+          Remove-Item $pfxPath
 
-          if (!($Tool)) {throw [System.IO.FileNotFoundException]::new('File not found.', 'signtool.exe')}
+          # Install DigiCert Secure Software Manager (smctl)
+          $smctlUrl = "https://one.digicert.com/signingmanager/api-ui/v1/releases/smtools-windows-x64.msi/download"
+          $smctlInstaller = Join-Path $env:RUNNER_TEMP "smtools-windows-x64.msi"
 
+          Invoke-WebRequest -Uri $smctlUrl -OutFile $smctlInstaller
+          Start-Process msiexec.exe -Wait -ArgumentList "/i `"$smctlInstaller`" /quiet /qn"
 
-          $Tool.Directory.FullName | Out-File $env:GITHUB_PATH -Append
-          "signtool-$Arch=$($Tool.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
-          $env:PATH = "$($Tool.Directory.FullName);$env:PATH"
+          # Add smctl to PATH
+          $env:PATH = "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools;$env:PATH"
+          echo "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-          signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
-            /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$env:MIRRORD_DLL"
+          # Configure smctl
+          & smctl windows certsync
 
-          signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
-            /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$env:MIRRORD_EXE"
+      - name: Sign DLL and EXE
+        env:
+          DIGICERT_API_KEY: ${{ secrets.DIGICERT_API_KEY }}
+          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # Sign using DigiCert smctl
+          smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
+            --input="$env:MIRRORD_DLL" `
+            --verbose
+
+          smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
+            --input="$env:MIRRORD_EXE" `
+            --verbose
 
       - name: Build MSI
         run: |
@@ -202,11 +226,15 @@ jobs:
           echo "MIRRORD_MSI=$msi" >> $env:GITHUB_ENV
 
       - name: Sign MSI
+        env:
+          DIGICERT_API_KEY: ${{ secrets.DIGICERT_API_KEY }}
+          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
-            /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$env:MIRRORD_MSI"
+          smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
+            --input="$env:MIRRORD_MSI" `
+            --verbose
 
       - name: Generate checksums
         run: |
