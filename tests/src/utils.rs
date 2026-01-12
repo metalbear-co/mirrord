@@ -61,26 +61,28 @@ fn format_time() -> String {
     format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
 }
 
-/// Write config JSON to tempfile
-pub fn json_to_tempfile(config: Value) -> NamedTempFile {
-  let tempfile = NamedTempFile::new();
-  match tempfile {
-    Ok(mut tf) => {
-      let json_string = serde_json::to_string(&config).unwrap_or_default();
-      let _ = write!(tf, "{}", json_string);
-      tf
-    },
-    Err(e) => {
-      panic!("Error generating tempfile: {}", e);
-    }
-  }
-}
-
 /// Returns tempfile path
 pub fn json_to_path(config: Value) -> PathBuf {
-    let tempfile = json_to_tempfile(config);
-    let path = tempfile.path();
-    PathBuf::from(path)
+    let tempfile = NamedTempFile::new();
+    match tempfile {
+      Ok(mut tf) => {
+        let json_string = serde_json::to_string(&config).unwrap_or_default();
+        let _ = write!(tf, "{}", json_string);
+        let tf_keep = tf.keep();
+        match tf_keep {
+          Ok(tf_kept) => {
+            let path = tf_kept.1;
+            path
+          },
+          Err(e) => {
+            panic!("Error persisting tempfile: {}", e);
+          }
+        }
+      },
+      Err(e) => {
+        panic!("Error generating tempfile: {}", e);
+      }
+    }
 }
 
 static CRYPTO_PROVIDER_INSTALLED: Once = Once::new();

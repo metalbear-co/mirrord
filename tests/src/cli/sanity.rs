@@ -14,8 +14,11 @@ mod cli {
 
     use rstest::rstest;
 
+    use tracing::debug;
+
     use crate::utils::{config_dir, json_to_path, run_command::run_verify_config};
 
+    /// DELETE OLD TEST - PP
     /// Tests `verify-config` with `path` and `--ide` args, which should be:
     ///
     /// ```sh
@@ -49,6 +52,8 @@ mod cli {
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
     pub async fn tempfile_ide_verify_config() {
+        debug!("Debug statements initiating...");
+
         let config_json = json!({
             "feature": {
                 "network": {
@@ -61,15 +66,22 @@ mod cli {
         });
         let config_path = json_to_path(config_json);
 
+        println!("Tempfile path is: {:?}", &config_path);
+
+        if config_path.exists() == false {
+            assert!(false);
+        }
+
         let mut process = run_verify_config(Some(vec![
             "--ide",
             config_path.to_str().expect("Valid config path!"),
         ]))
         .await;
 
+        let _ = std::fs::remove_file(config_path).unwrap_or_else(|_| println!("Failed to remove tempfile."));
+
         assert!(process.wait().await.success());
     }
-
     
     /// Tests `verify-config` with only `path` as an arg:
     ///
