@@ -108,7 +108,7 @@ jobs:
           }
 
           # Build EXE in release mode
-          $env:MIRRORD_LAYER_FILE = $dll
+          $env:MIRRORD_LAYER_FILE = (Resolve-Path $dll).Path
           cargo build --release -p mirrord --bin mirrord --target x86_64-pc-windows-msvc
           $exe = "target\x86_64-pc-windows-msvc\release\mirrord.exe"
           if (-not (Test-Path $exe)) {
