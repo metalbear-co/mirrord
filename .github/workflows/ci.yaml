@@ -715,7 +715,7 @@ jobs:
       - name: run UT
         run: |
           $ErrorActionPreference = "Stop"
-          
+
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
 
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
