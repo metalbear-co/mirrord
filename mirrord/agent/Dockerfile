@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y mold && rm -rf /var/lib/apt/lists/*
 
 # Install sccache for compilation caching with GCS
 ENV SCCACHE_VERSION=0.12.0
-RUN SCCACHE_ARCH=$(case ${TARGETARCH} in \
+RUN SCCACHE_ARCH=$(case ${BUILDARCH} in \
     amd64) echo "x86_64" ;; \
     arm64) echo "aarch64" ;; \
     *) echo "x86_64" ;; \
