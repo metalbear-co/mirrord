@@ -16,7 +16,7 @@ pub(crate) mod go_1_24 {
     /// Detour of `internal/runtime/syscall.Syscall6`.
     ///
     /// func Syscall6(num, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2, errno uintptr)
-    /// https://github.com/golang/go/blob/go1.24.11/src/internal/runtime/syscall/asm_linux_amd64.s#L27
+    /// <https://github.com/golang/go/blob/go1.24.11/src/internal/runtime/syscall/asm_linux_amd64.s#L27>
     ///
     /// Function arguments are mapped as the following:
     /// rax = num
@@ -161,7 +161,7 @@ pub(crate) mod go_1_24 {
     ///
     /// We expect rdi stores the address of the start of function args on the stack.
     ///
-    /// C ABI: fn(rdi, rsi, rdx, rcx, r8, r9, [stack])
+    /// C ABI: fn(rdi, rsi, rdx, rcx, r8, r9, stack)
     #[unsafe(naked)]
     unsafe extern "C" fn c_abi_wrapper() {
         naked_asm!(
@@ -240,7 +240,7 @@ pub(crate) mod go_1_24 {
             "nop",
             "nop",
             "nop",
-            "pop rbp",
+            "pop    rbp",
             "ret",
         );
     }
