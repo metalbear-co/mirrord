@@ -514,7 +514,7 @@ mod steal_tests {
             }
         });
         let tempfile_path = json_to_path(config_json);
-        config_path.push(tempfile_path);
+        config_path.push(&tempfile_path);
 
         println!("Tempfile path is: {:?}", &config_path);
 
@@ -531,7 +531,7 @@ mod steal_tests {
             )
             .await;
 
-        let _ = std::fs::remove_file(config_path).unwrap_or_else(|_| println!("Failed to remove tempfile."));
+        let _ = std::fs::remove_file(&tempfile_path).unwrap_or_else(|_| println!("Failed to remove tempfile."));
 
         #[cfg(target_os = "windows")]
         application.wait_until_listening(&client).await;
