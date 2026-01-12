@@ -110,7 +110,10 @@ jobs:
 
       - name: Start IAP Tunnel to K3s
         run: |
-          Write-Host "Checking gcloud identity..."
+          Write-Host "Configuring gcloud..."
+          # Switch to the Compute Engine Service Account to avoid interactive auth prompts
+          gcloud config set account "174145836594-compute@developer.gserviceaccount.com"
+          gcloud config set project "mirrord"
           gcloud info
           gcloud auth list
 
@@ -139,6 +142,17 @@ jobs:
                Receive-Job $Job
                Write-Host "-------------------------"
                exit 1
+          }
+          
+          # Verify Kubernetes API Connectivity immediately
+          Write-Host "Verifying Kubernetes API..."
+          $env:KUBECONFIG = "$env:USERPROFILE\.kube\config"
+          try {
+             kubectl get pods -A
+             Write-Host "Kubernetes API Connection Successful."
+          } catch {
+             Write-Error "Failed to connect to Kubernetes API via tunnel."
+             exit 1
           }
 
       - name: Toolchain info
