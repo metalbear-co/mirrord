@@ -90,7 +90,10 @@ jobs:
           $Target = "x86_64-pc-windows-msvc"
 
           rustup target add $Target
+          # create dummy mirrord
+          echo.> %TMP%\dummy_layer.dll
 
+          Set-Env "MIRRORD_LAYER_FILE" %TMP%\dummy_layer.dll
           cargo fmt --all -- --check
           cargo clippy --target $Target
 
