@@ -191,13 +191,14 @@ pub(crate) mod go_1_24 {
     #[unsafe(naked)]
     unsafe extern "C" fn gosave_systemstack_switch() {
         naked_asm!(
-            // FIXME: In Go's implementation, it loads the address of `runtime.systemstack_switch` + 8 bytes.
+            // TODO: In Go's implementation, it loads the address of `runtime.systemstack_switch` + 8 bytes.
             // [`runtime.systemstack_switch`](https://github.com/golang/go/blob/go1.24.11/src/runtime/asm_amd64.s#L475)
-            // is a dummy marker function that shall never be called.
-            // Go runtime uses it to determine if a g is curently switched to systemstack.
+            // is a dummy marker function. If it is directly called, it will hit a `ud2` trap.
+            // Go only cares that g->sched->pc is set to an address between the prologue and epilogue.
             //
-            // In case of dlopen() multiple c-shared go libs, I don't know how to do it yet :)
-            "lea    r9, [rip + {runtime_abort}]",
+            // I don't know if it matters for the address to be between the actual `systemstack_switch` function.
+            // Or a simple dummy function will work?
+            "lea    r9, [rip + {dummy} + 0x8]",
             // Store r9 in g->sched->pc.
             "mov    QWORD PTR [r14+0x40],r9",
             "lea    r9, [rsp+0x8]",
@@ -217,6 +218,7 @@ pub(crate) mod go_1_24 {
             "ret",
 
             runtime_abort = sym runtime_abort,
+            dummy = sym dummy,
         );
     }
 
@@ -227,5 +229,19 @@ pub(crate) mod go_1_24 {
     #[unsafe(naked)]
     unsafe extern "C" fn runtime_abort() {
         naked_asm!("int3", "1:", "jmp 1b",);
+    }
+
+    /// A dummy function that wraps some `nop` between prologue and epilogue.
+    #[unsafe(naked)]
+    unsafe extern "C" fn dummy() {
+        naked_asm!(
+            "push   rbp",
+            "mov    rbp,rsp",
+            "nop",
+            "nop",
+            "nop",
+            "pop rbp",
+            "ret",
+        );
     }
 }
