@@ -91,7 +91,7 @@ jobs:
 
           rustup target add $Target
           # create dummy mirrord
-          "content" | Out-File "target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll"
+          New-Item -ItemType File -Force -Path "target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll" -Value "content"
 
           cargo fmt --all -- --check
           cargo clippy --target $Target
