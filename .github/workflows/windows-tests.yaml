@@ -1,13 +1,14 @@
 name: E2E Tests
 
-permissions:
-  contents: read
 
 on:
   workflow_call:
   pull_request:
     types: [labeled]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
   RUST_BACKTRACE: "1"

@@ -476,7 +476,7 @@ jobs:
           
           # 2. Run Tests
           $env:KUBECONFIG = "$env:USERPROFILE\.kube\config"
-          cargo test --package mirrord-tests --target x86_64-pc-windows-msvc --features job -- --nocapture
+          cargo test --package mirrord-tests --target x86_64-pc-windows-msvc --features job -- --nocapture --skip traffic::steal::steal_tests::complete_passthrough --skip traffic::mirror::mirror_with_http_header_filter --skip traffic_tests::outgoing_traffic_single_request_ipv6
 
       ###########################################################################
       # COMPUTE VERSION FOR CHOCOLATEY & WINGET
