@@ -204,9 +204,10 @@ jobs:
 
           # Update version in WXS file
           $wxsPath = "$wixDir\main.wxs"
-          $wxsContent = Get-Content $wxsPath -Raw -Encoding UTF8
+          $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+          $wxsContent = [System.IO.File]::ReadAllText($wxsPath, $utf8NoBom)
           $wxsContent = $wxsContent -replace 'Version="[^"]*"', "Version=`"$msiVersion`""
-          [System.IO.File]::WriteAllText($wxsPath, $wxsContent, [System.Text.UTF8Encoding]::new($false))
+          [System.IO.File]::WriteAllText($wxsPath, $wxsContent, $utf8NoBom)
 
           # Build MSI
           $obj = "$wixDir\main.wixobj"
