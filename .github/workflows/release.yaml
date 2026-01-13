@@ -140,15 +140,32 @@ jobs:
           SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
+          $Arch = ($env:RUNNER_ARCH).ToLower()
+          $SearchBase = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+
+          "Searching `"$SearchBase`" for signtool ($Arch)..."
+          $Tool = Get-ChildItem $SearchBase -Recurse -Force -ErrorAction SilentlyContinue |
+              Where-Object {$_.Name -eq 'signtool.exe' -and $_.Directory -like "*\$Arch"} |
+              Sort-Object -Descending |
+              Select-Object -First 1
+
+          if (!($Tool)) {throw [System.IO.FileNotFoundException]::new('File not found.', 'signtool.exe')}
+
+          'Adding signtool to PATH'
+          $Tool.Directory.FullName | Out-File $env:GITHUB_PATH -Append
+          "signtool-$Arch=$($Tool.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
+          $env:PATH = "$($Tool.Directory.FullName);$env:PATH"
+
+          echo "PATH=$PATH" >> $env:GITHUB_ENV
 
           # Sign using DigiCert smctl
           smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
             --input="$env:MIRRORD_DLL" `
-            --verbose
+            --verbose --exit-non-zero-on-fail
 
           smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
             --input="$env:MIRRORD_EXE" `
-            --verbose
+            --verbose --exit-non-zero-on-fail
 
       - name: Build MSI
         run: |
@@ -209,14 +226,32 @@ jobs:
 
       - name: Sign MSI
         env:
-          DIGICERT_API_KEY: ${{ secrets.DIGICERT_API_KEY }}
           DIGICERT_KEYPAIR_ALIAS: ${{ secrets.SM_KEYPAIR_ALIAS }}
+          SM_HOST: https://clientauth.one.digicert.com/
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
 
+          $Arch = ($env:RUNNER_ARCH).ToLower()
+          $SearchBase = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+
+          "Searching `"$SearchBase`" for signtool ($Arch)..."
+          $Tool = Get-ChildItem $SearchBase -Recurse -Force -ErrorAction SilentlyContinue |
+              Where-Object {$_.Name -eq 'signtool.exe' -and $_.Directory -like "*\$Arch"} |
+              Sort-Object -Descending |
+              Select-Object -First 1
+
+          if (!($Tool)) {throw [System.IO.FileNotFoundException]::new('File not found.', 'signtool.exe')}
+
+          'Adding signtool to PATH'
+          $Tool.Directory.FullName | Out-File $env:GITHUB_PATH -Append
+          "signtool-$Arch=$($Tool.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
+          $env:PATH = "$($Tool.Directory.FullName);$env:PATH"
+
           smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
             --input="$env:MIRRORD_MSI" `
-            --verbose
+            --exit-non-zero-on-fail --verbose
 
       - name: Generate checksums
         run: |
