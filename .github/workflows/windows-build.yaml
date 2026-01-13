@@ -73,9 +73,9 @@ jobs:
       actions: read
       checks: write
     runs-on: ${{ inputs.runner || '[self-hosted, Windows]' }}
-    # defaults:
-    #   run:
-    #     shell: pwsh
+    defaults:
+      run:
+        shell: pwsh
     env:
 
       RELEASE_TAG_INPUT: ${{ inputs.release_tag || '' }}
@@ -626,6 +626,8 @@ jobs:
       # CHOCOLATEY PACKAGE BUILD & PUBLISH
       ###########################################################################
 
+      - name: Build Chocolatey package
+        if: ${{ env.PUBLISH_CHOCO == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
           if (-not $env:MSI_PATH -or -not (Test-Path $env:MSI_PATH)) {
