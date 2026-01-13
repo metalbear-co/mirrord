@@ -616,14 +616,17 @@ jobs:
             }
           }
       - name: Skip WinGet publish (missing token)
-        if: ${{ env.PUBLISH_WINGET == 'true' && (github.event_name == 'pull_request' || env.WINGET_TOKEN == '') }}
+        if: ${{ contains(github.event.pull_request.labels.*.name, 'windows-e2e') || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+        permissions:
+          contents: write
+          actions: read
+          checks: write
+        runs-on: ${{ inputs.runner || 'win-build-spot-1' }}
         run: echo "Skipping WinGet publish because WINGET_TOKEN is not available (expected on forks or PRs)."
       ###########################################################################
       # CHOCOLATEY PACKAGE BUILD & PUBLISH
       ###########################################################################
 
-      - name: Build Chocolatey package
-        if: ${{ env.PUBLISH_CHOCO == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
           if (-not $env:MSI_PATH -or -not (Test-Path $env:MSI_PATH)) {
