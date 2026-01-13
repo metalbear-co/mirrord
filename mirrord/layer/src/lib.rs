@@ -449,6 +449,21 @@ fn layer_start(mut config: LayerConfig) {
             }
         });
     }
+
+    #[cfg(target_os = "macos")]
+    if setup().experimental().applev.as_ref().is_some() {
+        unsafe {
+            let mut applev = exec_utils::extract_applev();
+            let mut count: usize = 0;
+            while !(*applev).is_null() {
+                let c_str = std::ffi::CStr::from_ptr(*applev);
+                tracing::info!("applev[{}]: {}", count, c_str.to_string_lossy());
+                applev = applev.add(1);
+                count = count.saturating_add(1);
+            }
+            tracing::info!(count, "Finished reading Apple variables");
+        }
+    }
 }
 
 /// Name of environment variable used to mark whether remote environment has already been fetched.
@@ -665,9 +680,14 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         Some(socket) => {
             // Closed file is a socket, so if it's already bound to a port - notify agent to stop
             // mirroring/stealing that port.
-            socket.close();
+
+            // [`UserSocket::close`] will be called in its `Drop` impl,
+            // when all handles (possibly created through `dup` and
+            // friends) have been closed.
+            drop(socket);
         }
         _ => {
+            // `close` called in [`RemoteFile::drop`]
             if setup().fs_config().is_active() {
                 OPEN_FILES
                     .lock()

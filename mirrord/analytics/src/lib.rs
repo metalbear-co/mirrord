@@ -41,6 +41,7 @@ pub enum ExecutionKind {
     Exec = 2,
     PortForward = 3,
     Dump = 4,
+    Wizard = 5,
     Other = 0,
 }
 
@@ -51,6 +52,7 @@ impl From<u32> for ExecutionKind {
             2 => ExecutionKind::Exec,
             3 => ExecutionKind::PortForward,
             4 => ExecutionKind::Dump,
+            5 => ExecutionKind::Wizard,
             _ => ExecutionKind::Other,
         }
     }
@@ -145,6 +147,12 @@ impl From<bool> for AnalyticValue {
     }
 }
 
+impl From<u16> for AnalyticValue {
+    fn from(n: u16) -> Self {
+        AnalyticValue::Number(n.into())
+    }
+}
+
 impl From<u32> for AnalyticValue {
     fn from(n: u32) -> Self {
         AnalyticValue::Number(n)
@@ -215,6 +223,7 @@ impl AnalyticsReporter {
         let mut analytics = Analytics::default();
         analytics.add("execution_kind", execution_kind as u32);
         analytics.add("machine_id", machine_id);
+        analytics.add("is_ci", ci_info::is_ci());
 
         AnalyticsReporter {
             analytics,

@@ -4,13 +4,17 @@
 //! 2. Socket is first bound to an address `0.0.0.0:80`, that goes through `bind` detour completely
 //!    (socket **could not** later be used for port subscription)
 
+#[cfg(target_family = "unix")]
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
     os::fd::{FromRawFd, IntoRawFd},
 };
 
+#[cfg(target_family = "unix")]
 use nix::sys::socket::{self, AddressFamily, SockFlag, SockType, SockaddrStorage};
+
+#[cfg(target_family = "unix")]
 fn main() {
     let bind_addresses: [SocketAddr; 2] =
         ["0.0.0.0:0".parse().unwrap(), "0.0.0.0:80".parse().unwrap()];
@@ -47,4 +51,10 @@ fn main() {
         assert_eq!(buf.as_slice(), message);
         println!("RECEIVED ECHO");
     }
+}
+
+#[cfg(not(target_family = "unix"))]
+fn main() {
+    eprintln!("ERROR: test issue 2438 is not supported on non-Unix platforms");
+    std::process::exit(1);
 }

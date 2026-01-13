@@ -42,6 +42,9 @@ concurrency:
   group: ${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
@@ -68,11 +71,12 @@ jobs:
     if: github.event.pull_request.draft == false
     outputs:
       rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
+      windows_changed: ${{ steps.changed-windows.outputs.any_changed }}
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
-      windows_changed: ${{ steps.changed-windows.outputs.any_changed }}   # <-- ADDED
+      wizard_frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -98,6 +102,19 @@ jobs:
             rustfmt.toml
             deny.toml
             .cargo/**
+      - name: get changed windows files
+        id: changed-windows
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        with:
+          files: |
+            mirrord/layer-win/**
+            mirrord/str-win/**
+            mirrord/**/windows/**
+            mirrord/**/win32/**
+            mirrord/**/win/**
+            scripts/**/*.ps1
+            **/*.ps1
+            .github/workflows/windows-build.yaml
       - name: get markdown changes
         id: changed-markdown
         uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
@@ -123,20 +140,13 @@ jobs:
           files: |
             mirrord/agent/Dockerfile
             mirrord/cli/Dockerfile
-      # Detect Windows-related changes so Linux tests run when Windows code changes
-      - name: get Windows-related changes
-        id: changed-windows
+
+      - name: get wizard frontend changes
+        id: changed-wizard-frontend
         uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
         with:
           files: |
-            mirrord/layer-win/**
-            mirrord/str-win/**
-            mirrord/**/windows/**
-            mirrord/**/win32/**
-            mirrord/**/win/**
-            scripts/**/*.ps1
-            **/*.ps1
-            .github/workflows/windows-build.yaml
+            wizard-frontend/**
       - name: verify protocol bump
         run: |
           if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
@@ -153,16 +163,20 @@ jobs:
           echo ${{ steps.changed-ci.outputs.all_changed_files }};
           echo ${{ steps.changed-protocol.outputs.any_changed }};
           echo ${{ steps.changed-protocol-toml.outputs.any_changed }};
+          echo ${{ steps.changed-windows.outputs.any_changed }};
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
-          echo ${{ steps.changed-windows.outputs.any_changed }};           # <-- ADDED
-          echo ${{ steps.changed-windows.outputs.all_changed_files }};     # <-- ADDED
 
+          echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
+          
   lint:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 24
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -183,6 +197,21 @@ jobs:
       - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
       # Check whether `mirrord-operator` crate compiles the way it's used in the operator
       - run: cargo-zigbuild check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
+
+  wizard-frontend-lint:
+    runs-on: ubuntu-24.04
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.wizard_frontend_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 24
+      - run: npm install
+        working-directory: ./wizard-frontend
+      - run: npm run lint
+        working-directory: ./wizard-frontend
+  
 
   # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
   # the output of this test is a boolean indicating if it's a release branch
@@ -205,14 +234,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: metalbear-co/cargo-deny-action@34899fc7ba81ca6268d5947a7a16b4649013fea1
+      - uses: metalbear-co/cargo-deny-action@76cd80eb775d7bbbd2d80292136d74d39e1b4918
         with:
           rust-version: nightly-2025-08-01
 
   check-rust-docs:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       # enables the creation of a workspace index.html page.
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options -Dwarnings"
@@ -230,7 +259,7 @@ jobs:
   test_agent:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     container:
       image: ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9
     steps:
@@ -251,12 +280,37 @@ jobs:
   test_agent_image:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true' }}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+      - name: Sanitize branch name for cache prefix
+        id: sanitize
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          SANITIZED=$(echo "$BRANCH_NAME" | sed 's/\//-/g')
+          echo "cache_tag=$SANITIZED" >> "$GITHUB_OUTPUT"
+      - name: Check sccache secrets
+        env:
+          GCS_BUCKET: ${{ secrets.SCCACHE_GCS_BUCKET }}
+          GCP_CREDENTIALS: ${{ secrets.GCP_SCCACHE_CREDENTIALS }}
+        run: |
+          echo "Checking sccache GCS secrets"
+          if [[ -n "$GCS_BUCKET" ]]; then
+            echo "SCCACHE_GCS_BUCKET is set (length: ${#GCS_BUCKET})"
+          else
+            echo "SCCACHE_GCS_BUCKET is NOT set or empty"
+          fi
+          if [[ -n "$GCP_CREDENTIALS" ]]; then
+            echo "GCP_SCCACHE_CREDENTIALS is set (length: ${#GCP_CREDENTIALS})"
+          else
+            echo "GCP_SCCACHE_CREDENTIALS is NOT set or empty"
+          fi
+          echo "End secrets check"
       - name: build and export
         uses: docker/build-push-action@v6
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_SCCACHE_CREDENTIALS }}
         with:
           context: .
           tags: test
@@ -264,6 +318,12 @@ jobs:
           outputs: type=docker,dest=/tmp/test.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          secret-envs: |
+            gcp_credentials=GCP_CREDENTIALS
+          build-args: |
+            GCS_BUCKET=${{ secrets.SCCACHE_GCS_BUCKET }}
+            GCS_RW_MODE=READ_WRITE
+            GCS_PATH_PREFIX=mirrord-agent/${{ steps.sanitize.outputs.cache_tag }}
       - name: upload image
         uses: actions/upload-artifact@v4
         with:
@@ -273,7 +333,7 @@ jobs:
   test_cli_image:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true' }}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -290,7 +350,7 @@ jobs:
   integration_tests:
     runs-on: ubuntu-24.04
     needs: [changed_files]
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
@@ -394,6 +454,8 @@ jobs:
       - run: ./mirrord/layer/tests/apps/dlopen_cgo/build_test_app.sh
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
+      - name: create dummy file to compile wizard feature
+        run: touch wizard-frontend.tar.gz
       - name: mirrord protocol UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
       - name: mirrord config UT
@@ -407,7 +469,9 @@ jobs:
       - name: mirrord operator UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
       - name: mirrord cli UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord --features "wizard"
+      - name: mirrord protocol-io UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
@@ -564,11 +628,14 @@ jobs:
         container-runtime: ["docker", "containerd"]
     name: e2e
     needs: [test_agent_image, changed_files]
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
       - uses: metalbear-co/ci/e2e-setup-action@main
         with:
@@ -584,6 +651,15 @@ jobs:
         if: ${{ matrix.container-runtime == 'docker' }}
         run: |
           cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features cli -- --test-threads=6
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: cargo build --manifest-path=./Cargo.toml -p mirrord --features wizard
+      # This needs improving to prevent flakiness! e.g. examining output for progress messages
+      # `sleep` is used here to give the wizard enough time to start before curl
+      - run: |
+          ./target/debug/mirrord wizard &
+          sleep 2 && curl localhost:3000
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test
         run: |
@@ -614,6 +690,12 @@ jobs:
           config: ".markdownlint.json"
           globs: "README.md"
 
+  windows_build:
+    needs: changed_files
+    if: ${{ needs.changed_files.outputs.rs_changed == 'true' ||needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
+    uses: ./.github/workflows/windows-build.yaml
+    secrets: inherit
+
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
   # building concurrently can run faster the release ide tests
   build_mirrord_on_release_branch:
@@ -621,6 +703,8 @@ jobs:
     name: build mirrord CLI
     needs: check_if_release_branch
     if: ${{ needs.check_if_release_branch.outputs.release_branch == 'true' }}
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
@@ -676,6 +760,7 @@ jobs:
         lint_markdown,
         check-rust-docs,
         cargo-deny,
+        windows_build,
       ]
     runs-on: ubuntu-24.04
     steps:
@@ -696,5 +781,6 @@ jobs:
             (needs.intellij_e2e_on_release_branch.result == 'success' || needs.intellij_e2e_on_release_branch.result == 'skipped') &&
             (needs.vscode_e2e_on_release_branch.result == 'success' || needs.vscode_e2e_on_release_branch.result == 'skipped') &&
             (needs.check-rust-docs.result == 'success' || needs.check-rust-docs.result == 'skipped') &&
-            (needs.cargo-deny.result == 'success' || needs.cargo-deny.result == 'skipped') }}
+            (needs.cargo-deny.result == 'success' || needs.cargo-deny.result == 'skipped') &&
+            (needs.windows_build.result == 'success' || needs.windows_build.result == 'skipped') }}
         run: echo $CI_SUCCESS && if [ "$CI_SUCCESS" == "true" ]; then echo "SUCCESS" && exit 0; else echo "Failure" && exit 1; fi

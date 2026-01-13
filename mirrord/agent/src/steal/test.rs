@@ -12,7 +12,10 @@ use http_body_util::{BodyExt, Full, StreamBody};
 use hyper::body::SizeHint;
 use mirrord_protocol::{
     DaemonMessage, LogLevel,
-    tcp::{DaemonTcp, Filter, HttpBodyFilter, HttpFilter, IncomingTrafficTransportType, StealType},
+    tcp::{
+        DaemonTcp, Filter, HttpBodyFilter, HttpFilter, IncomingTrafficTransportType, JsonPathQuery,
+        StealType,
+    },
 };
 use mirrord_tls_util::MaybeTls;
 use rand::distr::{Alphanumeric, SampleString};
@@ -670,7 +673,7 @@ async fn body_filters_fail(
         StealType::FilteredHttpEx(
             setup.original_server.local_addr().unwrap().port(),
             HttpFilter::Body(HttpBodyFilter::Json {
-                query: "$.pass".into(),
+                query: JsonPathQuery::new_unchecked("$.pass".into()),
                 matches: Filter::new("true".into()).unwrap(),
             }),
         ),
@@ -773,7 +776,7 @@ async fn body_filters_pass(
         StealType::FilteredHttpEx(
             setup.original_server.local_addr().unwrap().port(),
             HttpFilter::Body(HttpBodyFilter::Json {
-                query: "$.pass".into(),
+                query: JsonPathQuery::new_unchecked("$.pass".into()),
                 matches: Filter::new("rue".into()).unwrap(),
             }),
         ),

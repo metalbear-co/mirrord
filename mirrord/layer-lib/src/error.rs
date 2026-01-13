@@ -233,8 +233,8 @@ pub enum HookError {
 
     /// When the user's application tries to access a file filtered out by the `not-found` file
     /// filter.
-    #[error("mirrord-layer: Ignored file")]
-    FileNotFound,
+    #[error("mirrord-layer: Ignored file `{0}`")]
+    FileNotFound(String),
 
     #[error("mirrord-layer: Proxy connection failed: `{0}`")]
     ProxyError(#[from] ProxyError),
@@ -482,7 +482,7 @@ fn get_platform_errno(fail: HookError) -> i32 {
         HookError::UnsupportedSocketType => libc::EAFNOSUPPORT,
         HookError::BadPointer => libc::EFAULT,
         HookError::AddressAlreadyBound(_) => libc::EADDRINUSE,
-        HookError::FileNotFound => libc::ENOENT,
+        HookError::FileNotFound(_) => libc::ENOENT,
         #[cfg(target_os = "linux")]
         HookError::BadDescriptor => libc::EBADF,
         #[cfg(target_os = "linux")]
@@ -567,7 +567,7 @@ fn get_platform_errno(fail: HookError) -> u32 {
         HookError::UnsupportedSocketType => WSAEAFNOSUPPORT,
         HookError::BadPointer => WSAEFAULT,
         HookError::AddressAlreadyBound(_) => WSAEADDRINUSE,
-        HookError::FileNotFound => ERROR_FILE_NOT_FOUND,
+        HookError::FileNotFound(_) => ERROR_FILE_NOT_FOUND,
         #[cfg(target_os = "linux")]
         HookError::BadDescriptor => WSAEBADF,
         #[cfg(target_os = "linux")]
@@ -603,8 +603,8 @@ impl From<HookError> for i64 {
             HookError::IO(ref e) if (ignore_codes::is_ignored_code(e.raw_os_error())) => {
                 info!("libc error (doesn't indicate a problem) >> {fail:#?}")
             }
-            HookError::FileNotFound => {
-                info!("mirrord file not found triggered")
+            HookError::FileNotFound(ref path) => {
+                info!("mirrord file not found triggered: {path}")
             }
             HookError::SocketUnsuportedIpv6 => {
                 info!("{fail}")

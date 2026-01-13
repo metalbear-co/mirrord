@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "LayerFileConfig",
-  "description": "mirrord allows for a high degree of customization when it comes to which features you want to enable, and how they should function.\n\nAll of the configuration fields have a default value, so a minimal configuration would be no configuration at all.\n\nThe configuration supports templating using the [Tera](https://keats.github.io/tera/docs/) template engine. Currently we don't provide additional values to the context, if you have anything you want us to provide please let us know.\n\nTo use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag. Or if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file or use the UI.\n\nTo help you get started, here are examples of a basic configuration file, and a complete configuration file containing all fields.\n\n### Basic `config.json` {#root-basic}\n\n```json { \"target\": \"pod/bear-pod\", \"feature\": { \"env\": true, \"fs\": \"read\", \"network\": true } } ```\n\n### Basic `config.json` with templating {#root-basic-templating}\n\n```json { \"target\": \"{{ get_env(name=\"TARGET\", default=\"pod/fallback\") }}\", \"feature\": { \"env\": true, \"fs\": \"read\", \"network\": true } } ```\n\n### Complete `config.json` {#root-complete}\n\nDon't use this example as a starting point, it's just here to show you all the available options. ```json { \"accept_invalid_certificates\": false, \"skip_processes\": \"ide-debugger\", \"target\": { \"path\": \"pod/bear-pod\", \"namespace\": \"default\" }, \"connect_tcp\": null, \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"labels\": { \"user\": \"meow\" }, \"annotations\": { \"cats.io/inject\": \"enabled\" }, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"flush_connections\": true, \"metrics\": \"0.0.0.0:9000\", }, \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" }, \"mapping\": { \".+_TIMEOUT\": \"1000\" } }, \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\\\.json\" , \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ], \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ] }, \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": { \"enabled\": true, \"filter\": { \"local\": [\"1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\"] } } }, \"copy_target\": { \"scale_down\": false } }, \"operator\": true, \"kubeconfig\": \"~/.kube/config\", \"sip_binaries\": \"bash\", \"telemetry\": true, \"kube_context\": \"my-cluster\" } ```\n\n# Options {#root-options}",
+  "description": "mirrord allows for a high degree of customization when it comes to which features you want to enable, and how they should function.\n\nAll of the configuration fields have a default value, so a minimal configuration would be no configuration at all.\n\nThe configuration supports templating using the [Tera](https://keats.github.io/tera/docs/) template engine. Currently we don't provide additional values to the context, if you have anything you want us to provide please let us know.\n\nTo use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag. Or if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file or use the UI.\n\nTo help you get started, here are examples of a basic configuration file, and a complete configuration file containing all fields.\n\n### Basic `config.json` {#root-basic}\n\n```json { \"target\": \"pod/bear-pod\", \"feature\": { \"env\": true, \"fs\": \"read\", \"network\": true } } ```\n\n### Basic `config.json` with templating {#root-basic-templating}\n\n```json { \"target\": \"{{ get_env(name=\"TARGET\", default=\"pod/fallback\") }}\", \"feature\": { \"env\": true, \"fs\": \"read\", \"network\": true } } ```\n\n### Complete `config.json` {#root-complete}\n\nDon't use this example as a starting point, it's just here to show you all the available options. ```json { \"accept_invalid_certificates\": false, \"skip_processes\": \"ide-debugger\", \"target\": { \"path\": \"pod/bear-pod\", \"namespace\": \"default\" }, \"connect_tcp\": null, \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"labels\": { \"user\": \"meow\" }, \"annotations\": { \"cats.io/inject\": \"enabled\" }, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"flush_connections\": true, \"metrics\": \"0.0.0.0:9000\", }, \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" }, \"mapping\": { \".+_TIMEOUT\": \"1000\" } }, \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\\\.json\" , \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ], \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ] }, \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": { \"enabled\": true, \"filter\": { \"local\": [\"1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\"] } } }, \"copy_target\": { \"scale_down\": false } }, \"operator\": true, \"kubeconfig\": \"~/.kube/config\", \"sip_binaries\": \"bash\", \"telemetry\": true, \"kube_context\": \"my-cluster\" } ```\n\n# Options {#root-options}",
   "type": "object",
   "properties": {
     "accept_invalid_certificates": {
@@ -87,6 +87,14 @@
         {
           "type": "null"
         }
+      ]
+    },
+    "key": {
+      "title": "key {#root-key}",
+      "description": "An identifier for a mirrord session.\n\nThis key can be referenced in your configuration using the `{{ key }}` template variable. For example, you can use it in HTTP filters: `\"header_filter\": \"x-session: key-{{ key }}\"`.\n\nPriority (highest to lowest): 1. CLI argument: `mirrord exec --key my-key` 2. Config file: `{ \"key\": \"my-key\" }` 3. Fallback: A unique key is randomly generated if neither option is provided\n\n```json { \"key\": \"my-session-key\", \"feature\": { \"network\": { \"incoming\": { \"http_filter\": { \"header_filter\": \"x-session: key-{{ key }}\" } } } } } ```",
+      "type": [
+        "string",
+        "null"
       ]
     },
     "kube_context": {
@@ -306,7 +314,7 @@
       "additionalProperties": false
     },
     "AgentFileConfig": {
-      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator. Agent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"flush_connections\": false, \"exclude_from_mesh\": false \"inject_headers\": false, \"max_body_buffer_size\": 65535, \"max_body_buffer_timeout\": 1000 } } ```",
+      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator. Agent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"flush_connections\": false, \"exclude_from_mesh\": false \"inject_headers\": false, \"max_body_buffer_size\": 65535, \"max_body_buffer_timeout\": 1000 } } ```",
       "type": "object",
       "properties": {
         "annotations": {
@@ -328,6 +336,14 @@
             "null"
           ]
         },
+        "clean_iptables_on_start": {
+          "title": "agent.clean_iptables_on_start {#agent-clean_iptables_on_start}",
+          "description": "Clean leftover iptables rules and start the new agent instead of erroring out when there are existing mirrord rules in the target's iptables.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "communication_timeout": {
           "title": "agent.communication_timeout {#agent-communication_timeout}",
           "description": "Controls how long the agent lives when there are no connections.\n\nEach connection has its own heartbeat mechanism, so even if the local application has no messages, the agent stays alive until there are no more heartbeat messages.",
@@ -340,13 +356,13 @@
         },
         "disabled_capabilities": {
           "title": "agent.disabled_capabilities {#agent-disabled_capabilities}",
-          "description": "If nothing is disabled here, agent uses: 1. `NET_ADMIN`, 2. `NET_RAW` (unless `passthrough_mirroring` is enabled), 3. `SYS_PTRACE`, 4. `SYS_ADMIN`.\n\nHas no effect when using the targetless mode, as targetless agent containers have no capabilities.",
+          "description": "If nothing is disabled here, agent uses: 1. `NET_ADMIN`, 2. `SYS_PTRACE`, 3. `SYS_ADMIN`.\n\nHas no effect when using the targetless mode, as targetless agent containers have no capabilities.",
           "type": [
             "array",
             "null"
           ],
           "items": {
-            "$ref": "#/definitions/LinuxCapability"
+            "type": "string"
           }
         },
         "dns": {
@@ -386,7 +402,7 @@
         },
         "image": {
           "title": "agent.image {#agent-image}",
-          "description": "Name of the agent's docker image.\n\nUseful when a custom build of mirrord-agent is required, or when using an internal registry.\n\nDefaults to the latest stable image `\"ghcr.io/metalbear-co/mirrord:latest\"`.\n\n```json { \"agent\": { \"image\": \"internal.repo/images/mirrord:latest\" } } ```\n\nComplete setup:\n\n```json { \"agent\": { \"image\": { \"registry\": \"internal.repo/images/mirrord\", \"tag\": \"latest\" } } } ```",
+          "description": "Name of the agent's docker image.\n\nUseful when a custom build of mirrord-agent is required, or when using an internal registry.\n\nDefaults to the latest stable image `\"ghcr.io/metalbear-co/mirrord:latest\"`.\n\n```json { \"agent\": { \"image\": \"internal.repo/images/mirrord:latest\" } } ```\n\nComplete setup:\n\n```json { \"agent\": { \"image\": { \"registry\": \"internal.repo/images/mirrord\", \"tag\": \"latest\" } } } ```\n\nCan also be controlled via `MIRRORD_AGENT_IMAGE`, `MIRRORD_AGENT_IMAGE_REGISTRY`, and `MIRRORD_AGENT_IMAGE_TAG`. `MIRRORD_AGENT_IMAGE` takes precedence, followed by config values for registry/tag, then environment variables for registry/tag.",
           "anyOf": [
             {
               "$ref": "#/definitions/AgentImageFileConfig"
@@ -486,14 +502,6 @@
             "null"
           ]
         },
-        "network_interface": {
-          "title": "agent.network_interface {#agent-network_interface}",
-          "description": "Which network interface to use for mirroring.\n\nThe default behavior is try to access the internet and use that interface. If that fails it uses `eth0`.\n\nDEPRECATED: The mirroring implementation based on raw sockets is deprecated, and will be removed in the future. This field will be removed, and the agent will always use iptables redirects for mirroring traffic.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "nftables": {
           "title": "agent.nftables {#agent-nftables}",
           "description": "Determines which iptables backend will be used for traffic redirection.\n\nIf set to `true`, the agent will use iptables-nft. If set to `false`, the agent will use iptables-legacy. If not set, the agent will try to detect the correct backend at runtime.",
@@ -512,14 +520,6 @@
           "additionalProperties": {
             "type": "string"
           }
-        },
-        "passthrough_mirroring": {
-          "title": "agent.passthrough_mirroring {#agent-passthrough_mirroring}",
-          "description": "Enables an implementation of traffic mirroring based on iptables redirects.\n\nWhen used with `agent.flush_connections`, it might fix issues with mirroring non HTTP/1 traffic.\n\nWhen this is set, `network_interface` setting is ignored.\n\nDefaults to true.\n\nDEPRECATED: The mirroring implementation based on raw sockets is deprecated, and will be removed in the future. This field will be removed, and the agent will always use iptables redirects for mirroring traffic.",
-          "type": [
-            "boolean",
-            "null"
-          ]
         },
         "priority_class": {
           "title": "agent.priority_class {#agent-priority_class}",
@@ -646,6 +646,9 @@
           "type": "string"
         }
       }
+    },
+    "AppleVariablesConfig": {
+      "type": "object"
     },
     "BodyFilter": {
       "oneOf": [
@@ -782,6 +785,32 @@
         }
       },
       "additionalProperties": false
+    },
+    "ContainerRuntime": {
+      "description": "Container runtimes supported by mirrord.",
+      "oneOf": [
+        {
+          "description": "Docker container runtime. (default)",
+          "type": "string",
+          "enum": [
+            "docker"
+          ]
+        },
+        {
+          "description": "Podman container runtime.",
+          "type": "string",
+          "enum": [
+            "podman"
+          ]
+        },
+        {
+          "description": "nerdctl container runtime (containerd).",
+          "type": "string",
+          "enum": [
+            "nerdctl"
+          ]
+        }
+      ]
     },
     "CopyTargetFileConfig": {
       "title": "feature.copy_target {#copy_target}",
@@ -1006,6 +1035,74 @@
               ]
             }
           }
+        },
+        {
+          "description": "When configuring a branch for Redis, set `type` to `redis`.\n\nExample with URL-based connection: ```json { \"type\": \"redis\", \"location\": \"local\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"REDIS_URL\" } } } ```\n\nExample with separated settings: ```json { \"type\": \"redis\", \"location\": \"local\", \"connection\": { \"host\": { \"type\": \"env\", \"variable\": \"REDIS_HOST\" }, \"port\": 6379, \"password\": { \"type\": \"env\", \"variable\": \"REDIS_PASSWORD\" } } } ```",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "connection": {
+              "description": "Connection configuration for the Redis instance.",
+              "default": {
+                "database": null,
+                "host": null,
+                "password": null,
+                "port": null,
+                "tls": null,
+                "url": null,
+                "username": null
+              },
+              "allOf": [
+                {
+                  "$ref": "#/definitions/RedisConnectionConfig"
+                }
+              ]
+            },
+            "id": {
+              "description": "Optional unique identifier for reusing branches across sessions.",
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "local": {
+              "description": "Local Redis runtime configuration. Only used when `location` is `local`.",
+              "default": {
+                "container_command": null,
+                "container_runtime": "docker",
+                "options": {
+                  "args": []
+                },
+                "port": 6379,
+                "runtime": "container",
+                "server_command": null,
+                "version": "7-alpine"
+              },
+              "allOf": [
+                {
+                  "$ref": "#/definitions/RedisLocalConfig"
+                }
+              ]
+            },
+            "location": {
+              "description": "Where the Redis instance should run. - `local`: Spawns a local Redis instance. - `remote`: Uses the remote Redis (default behavior).",
+              "default": "remote",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/RedisBranchLocation"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "redis"
+              ]
+            }
+          }
         }
       ]
     },
@@ -1034,7 +1131,7 @@
       ]
     },
     "DbBranchingConnectionSourceKind": {
-      "description": "Different ways to source the connection options.",
+      "description": "Different ways to source the connection options.\n\nSupport: - `env` in the target's pod spec. - `envFrom` in the target's pod spec.",
       "oneOf": [
         {
           "type": "object",
@@ -1053,6 +1150,30 @@
               "type": "string",
               "enum": [
                 "env"
+              ]
+            },
+            "variable": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "variable"
+          ],
+          "properties": {
+            "container": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "env_from"
               ]
             },
             "variable": {
@@ -1222,6 +1343,18 @@
       "description": "mirrord Experimental features. This shouldn't be used unless someone from MetalBear/mirrord tells you to.",
       "type": "object",
       "properties": {
+        "applev": {
+          "title": "_experimental_ applev {#experimental-applev}",
+          "description": "Configuraiton for inspecting and modifying apple variables. macOS only.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AppleVariablesConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "browser_extension_config": {
           "title": "_experimental_ browser_extension_config {#experimental-browser_extension_config}",
           "description": "mirrord will open a URL for initiating mirrord browser extension to automatically inject HTTP header that matches the HTTP filter configured in `feature.network.incoming.http_filter.header_filter`.",
@@ -1644,10 +1777,10 @@
         },
         "ports": {
           "title": "feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}",
-          "description": "Activate the HTTP traffic filter only for these ports.\n\nOther ports will *not* be stolen, unless listed in [`feature.network.incoming.ports`](#feature-network-incoming-ports).\n\nWe check the pod's health probe ports and automatically add them here, as they're usually the same ports your app might be listening on. If your app ports and the health probe ports don't match, then setting this option will override this behavior.\n\nSet to [80, 8080] by default.",
+          "description": "Activate the HTTP traffic filter only for these ports. When absent, filtering will be done for all ports.",
           "anyOf": [
             {
-              "$ref": "#/definitions/PortList"
+              "$ref": "#/definitions/VecOrSingle_for_uint16"
             },
             {
               "type": "null"
@@ -1991,15 +2124,6 @@
         }
       },
       "additionalProperties": false
-    },
-    "LinuxCapability": {
-      "type": "string",
-      "enum": [
-        "SYS_ADMIN",
-        "SYS_PTRACE",
-        "NET_RAW",
-        "NET_ADMIN"
-      ]
     },
     "LocalTlsDelivery": {
       "description": "Stolen TLS traffic can be delivered to the local application either as TLS or as plain TCP. Note that stealing TLS traffic requires mirrord Operator support.\n\nTo have the stolen TLS traffic delivered with plain TCP, use:\n\n```json { \"protocol\": \"tcp\" } ```\n\nTo have the traffic delivered with TLS, use: ```json { \"protocol\": \"tls\" } ```\n\nBy default, the local mirrord TLS client will trust any certificate presented by the local application's TLS server. To override this behavior, you can either:\n\n1. Specify a list of paths to trust roots. These paths can lead either to PEM files or PEM file directories. Each found certificate will be used as a trust anchor. 2. Specify a path to the cartificate chain used by the server.\n\nExample with trust roots: ```json { \"protocol\": \"tls\", \"trust_roots\": [\"/path/to/cert.pem\", \"/path/to/cert/dir\"] } ```\n\nExample with certificate chain: ```json { \"protocol\": \"tls\", \"server_cert\": \"/path/to/cert.pem\" } ```\n\nTo make a TLS connection to the local application's server, mirrord's TLS client needs a server name. You can supply it manually like this: ```json { \"protocol\": \"tls\", \"server_name\": \"my.test.server.name\" } ```\n\nIf you don't supply the server name:\n\n1. If `server_cert` is given, and the found end-entity certificate contains a valid server name, this server name will be used; 2. Otherwise, if the original client supplied an SNI extension, the server name from that extension will be used; 3. Otherwise, if the stolen request's URL contains a valid server name, that server name will be used; 4. Otherwise, `localhost` will be used.",
@@ -2348,14 +2472,6 @@
       },
       "additionalProperties": false
     },
-    "PortList": {
-      "description": "<!--${internal}--> Helper struct for setting up ports configuration (part of the HTTP traffic stealer feature).\n\nDefaults to a list of ports `[80, 8080]`.\n\nWe use this to allow implementing a custom [`Default`] initialization, as the [`MirrordConfig`] macro (currently) doesn't support more intricate expressions.",
-      "allOf": [
-        {
-          "$ref": "#/definitions/VecOrSingle_for_uint16"
-        }
-      ]
-    },
     "QueueFilter": {
       "description": "Amazon Simple Queue Service and Kafka are supported.\n\nMore queue types might be added in the future.",
       "oneOf": [
@@ -2402,6 +2518,264 @@
               ]
             }
           }
+        }
+      ]
+    },
+    "RedisBranchLocation": {
+      "description": "Location for the Redis branch instance.",
+      "oneOf": [
+        {
+          "description": "Use a local Redis instance that mirrord manages.",
+          "type": "string",
+          "enum": [
+            "local"
+          ]
+        },
+        {
+          "description": "Use the remote Redis (default behavior, no-op).",
+          "type": "string",
+          "enum": [
+            "remote"
+          ]
+        }
+      ]
+    },
+    "RedisConnectionConfig": {
+      "description": "Redis connection configuration.\n\nSupports either a complete URL or separated connection parameters. If both are provided, `url` takes precedence.",
+      "type": "object",
+      "properties": {
+        "database": {
+          "description": "Redis database number (default: 0).",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "host": {
+          "description": "Redis host/hostname.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RedisValueSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "password": {
+          "description": "Redis password for authentication.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RedisValueSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "port": {
+          "description": "Redis port (default: 6379).",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "tls": {
+          "description": "Enable TLS/SSL connection.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "Complete Redis URL (e.g., `redis://user:pass@host:6379/0`). Can be sourced from an environment variable.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RedisValueSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "username": {
+          "description": "Redis username (Redis 6+ ACL).",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RedisValueSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RedisEnvSource": {
+      "description": "Environment variable source for Redis values.",
+      "type": "object",
+      "required": [
+        "type",
+        "variable"
+      ],
+      "properties": {
+        "container": {
+          "description": "Optional container name for multi-container pods.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "description": "Must be \"env\" to indicate environment variable source.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RedisEnvSourceType"
+            }
+          ]
+        },
+        "variable": {
+          "description": "Name of the environment variable.",
+          "type": "string"
+        }
+      }
+    },
+    "RedisEnvSourceType": {
+      "description": "Type marker for environment variable sources.",
+      "type": "string",
+      "enum": [
+        "env"
+      ]
+    },
+    "RedisLocalConfig": {
+      "description": "Configuration for local Redis runtime.",
+      "type": "object",
+      "properties": {
+        "container_command": {
+          "description": "Custom path to the container command. If not provided, uses the runtime name from PATH (e.g., \"docker\"). Example: `/usr/local/bin/docker` or `/home/user/.local/bin/podman`",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "container_runtime": {
+          "description": "Which container runtime to use (Docker, Podman, or nerdctl). Only applies when `runtime` is `container` or `auto`.",
+          "default": "docker",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContainerRuntime"
+            }
+          ]
+        },
+        "options": {
+          "description": "Additional Redis configuration options.",
+          "default": {
+            "args": []
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/RedisOptions"
+            }
+          ]
+        },
+        "port": {
+          "description": "Local port to bind Redis to (default: 6379).",
+          "default": 6379,
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "runtime": {
+          "description": "Runtime backend for local Redis: `container`, `redis_server`, or `auto`.",
+          "default": "container",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RedisRuntime"
+            }
+          ]
+        },
+        "server_command": {
+          "description": "Custom path to the redis-server binary. If not provided, uses \"redis-server\" from PATH. Example: `/opt/redis/bin/redis-server`",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "description": "Redis version/tag to use (default: \"7-alpine\"). Used as the container image tag.",
+          "default": "7-alpine",
+          "type": "string"
+        }
+      }
+    },
+    "RedisOptions": {
+      "description": "Additional arguments passed to the Redis server.\n\nExample: ```json { \"args\": [\"--maxmemory\", \"256mb\", \"--appendonly\", \"yes\"] } ```",
+      "type": "object",
+      "properties": {
+        "args": {
+          "description": "Raw arguments passed directly to redis-server or as Docker CMD args. Use standard Redis config syntax (e.g., \"--maxmemory 256mb\").",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "RedisRuntime": {
+      "description": "Runtime backend for running local Redis.\n\nFor container-based runtimes, mirrord spawns the Redis image in a container. For `redis_server`, it runs the native binary directly.\n\nBackends: - `container` (default) - Uses a container runtime (Docker/Podman/nerdctl) - `redis_server` - Uses native redis-server binary - `auto` - Tries container first, falls back to redis-server",
+      "oneOf": [
+        {
+          "description": "Use a container runtime (configure which one via `container_runtime`). (default)",
+          "type": "string",
+          "enum": [
+            "container"
+          ]
+        },
+        {
+          "description": "Use native redis-server binary.",
+          "type": "string",
+          "enum": [
+            "redis_server"
+          ]
+        },
+        {
+          "description": "Auto-detect: try container first, fall back to redis-server.",
+          "type": "string",
+          "enum": [
+            "auto"
+          ]
+        }
+      ]
+    },
+    "RedisValueSource": {
+      "description": "Source for a Redis configuration value.\n\nValues can be specified directly or sourced from environment variables.",
+      "anyOf": [
+        {
+          "description": "Direct value.",
+          "type": "string"
+        },
+        {
+          "description": "Value sourced from environment.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RedisEnvSource"
+            }
+          ]
         }
       ]
     },
@@ -2592,7 +2966,6 @@
           "$ref": "#/definitions/ReplicaSetTarget"
         },
         {
-          "type": "string",
           "enum": [
             "targetless"
           ]

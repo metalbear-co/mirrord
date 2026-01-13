@@ -9,9 +9,12 @@ use std::{
 use futures::{FutureExt, StreamExt, future::Shared};
 use hyper_util::rt::TokioIo;
 use mirrord_agent_env::envs;
-use tokio::sync::{
-    mpsc::{self, error::TrySendError},
-    oneshot,
+use tokio::{
+    sync::{
+        mpsc::{self, error::TrySendError},
+        oneshot,
+    },
+    task::JoinSet,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
@@ -126,7 +129,7 @@ where
                 },
 
                 Some(message) = self.internal_rx.recv() => match message {
-                    InternalMessage::DeadChannel(port)
+                    InternalMessage::MaybeDeadChannel(port)
                      => {
                         self.handle_dead_channel(port).await?;
                     }
@@ -148,44 +151,100 @@ where
     ///
     /// # Unsubscribed connections
     ///
-    /// If port is no longer stolen/mirrored, this functions simply drops it.
-    /// We consider this to be an unlikely race condition.
+    /// If port is no longer stolen/mirrored but there are other
+    /// active connections on the same port, the connection is
+    /// unconditionally passed through. Otherwise, the connection is
+    /// dropped. We consider this to be an unlikely race condition.
     #[tracing::instrument(level = Level::TRACE, ret)]
-    fn handle_connection(&self, conn: Redirected) {
+    fn handle_connection(&mut self, conn: Redirected) {
         let source = conn.source;
         let destination = conn.destination;
 
-        if self.ports.contains_key(&conn.destination.port()).not() {
+        let Some(state) = self.ports.get_mut(&destination.port()) else {
             tracing::warn!(
                 %source,
                 %destination,
-                "Redirected connection port is no longer subscribed, dropping",
+                "Redirected connection port is no longer subscribed and has no active connections, dropping",
             );
             return;
         };
 
-        let tx = self.internal_tx.clone();
-        let tls_store = self.tls_store.clone();
-        tokio::spawn(async move {
-            match MaybeHttp::detect(conn, &tls_store).await {
-                Ok(conn) => {
-                    let _ = tx.send(InternalMessage::ConnInitialized(conn)).await;
+        if state.mirror_txs.is_empty().not() || state.steal_tx.is_some() {
+            let tx = self.internal_tx.clone();
+            let tls_store = self.tls_store.clone();
+            let shutdown = state.shutdown.child_token();
+            Self::spawn_tracked_connection(
+                self.internal_tx.clone(),
+                destination.port(),
+                state,
+                async move {
+                    let detection_result = tokio::select! {
+                        r = MaybeHttp::detect(conn, &tls_store) => r,
+                        _ = shutdown.cancelled() => {
+                            tracing::debug!("Shutting down redirected connection during HTTP detection");
+                            return;
+                        }
+                    };
+
+                    match detection_result {
+                        Ok(conn) => {
+                            let _ = tx.send(InternalMessage::ConnInitialized(conn)).await;
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                %error,
+                                %source,
+                                %destination,
+                                "HTTP detection failed on a redirected connection",
+                            )
+                        }
+                    }
+                },
+            );
+        } else {
+            let local_addr = match conn.stream.local_addr() {
+                Ok(addr) => addr,
+                Err(err) => {
+                    tracing::error!(
+                        ?err,
+                        "failed to acquire local address for connection arriving on inactive port."
+                    );
+                    return;
                 }
-                Err(error) => {
-                    tracing::warn!(
-                        %error,
-                        %source,
-                        %destination,
-                        "HTTP detection failed on a redirected connection",
-                    )
-                }
-            }
-        });
+            };
+
+            let info = ConnectionInfo {
+                original_destination: destination,
+                local_addr,
+                peer_addr: source,
+                tls_connector: None,
+            };
+
+            let shutdown = state.shutdown.child_token();
+            Self::spawn_tracked_connection(
+                self.internal_tx.clone(),
+                destination.port(),
+                state,
+                async move {
+                    tracing::debug!("connection arrived on inactive port, passing through");
+                    if let Err(err) = RedirectedTcp::new(Box::new(conn.stream), info)
+                        .pass_through(shutdown)
+                        .await
+                    {
+                        tracing::error!(
+                            ?err,
+                            "error joining inactive port redirected connection IO task"
+                        );
+                    }
+                },
+            );
+        }
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]
-    async fn handle_initialized_connection(&self, conn: MaybeHttp) {
-        let Some(port_state) = self.ports.get(&conn.info.original_destination.port()) else {
+    async fn handle_initialized_connection(&mut self, conn: MaybeHttp) {
+        let port = conn.info.original_destination.port();
+        let Some(port_state) = self.ports.get_mut(&port) else {
             tracing::warn!(
                 connection = ?conn,
                 "Redirected connection port is no longer subscribed, dropping",
@@ -208,22 +267,36 @@ where
                 }
             }
 
-            match &port_state.steal_tx {
+            let join_handle = match &port_state.steal_tx {
                 Some(steal_tx) => {
-                    let _ = steal_tx.send(StolenTraffic::Tcp(redirected)).await;
+                    let (tx, rx) = oneshot::channel();
+                    let _ = steal_tx
+                        .send(StolenTraffic::Tcp {
+                            conn: redirected,
+                            join_handle_tx: tx,
+                            shutdown: port_state.shutdown.child_token(),
+                        })
+                        .await;
+
+                    rx.await.expect("TcpStealerTask dropped oneshot tx for returning JoinHandle to IO task for TCP connection")
                 }
-                None => {
-                    redirected.pass_through();
+                None => redirected.pass_through(port_state.shutdown.child_token()),
+            };
+
+            Self::spawn_tracked_connection(self.internal_tx.clone(), port, port_state, async {
+                if let Err(err) = join_handle.await {
+                    tracing::warn!(?err, "Redirected passthrough task returned JoinError");
                 }
-            }
+            });
 
             return;
         };
 
         let tx = self.internal_tx.clone();
-        let token = port_state.http_shutdown.clone();
+        let token = port_state.shutdown.clone();
         let mut requests = ExtractedRequests::new(TokioIo::new(conn.stream), http_version);
-        tokio::spawn(async move {
+
+        Self::spawn_tracked_connection(self.internal_tx.clone(), port, port_state, async move {
             let mut shutting_down = false;
             loop {
                 let result = tokio::select! {
@@ -305,7 +378,7 @@ where
     /// Handles a [`RedirectRequest`] coming from one of this task's handles.
     ///
     /// Spawns a helper task that waits for the subscription channel to close,
-    /// and sends [`InternalMessage::DeadChannel`] back to the [`RedirectorTask`].
+    /// and sends [`InternalMessage::MaybeDeadChannel`] back to the [`RedirectorTask`].
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn handle_client_request(&mut self, message: RedirectRequest) -> Result<(), R::Error> {
         match message {
@@ -322,7 +395,8 @@ where
                         e.insert_entry(PortState {
                             steal_tx: None,
                             mirror_txs: vec![conn_tx.clone()],
-                            http_shutdown: Default::default(),
+                            shutdown: Default::default(),
+                            connections: Default::default(),
                         });
                     }
                     Entry::Occupied(mut e) => {
@@ -333,7 +407,7 @@ where
                 let tx = self.internal_tx.clone();
                 tokio::spawn(async move {
                     conn_tx.closed().await;
-                    let _ = tx.send(InternalMessage::DeadChannel(port)).await;
+                    let _ = tx.send(InternalMessage::MaybeDeadChannel(port)).await;
                 });
 
                 let _ = receiver_tx.send(conn_rx);
@@ -352,7 +426,8 @@ where
                         e.insert_entry(PortState {
                             steal_tx: Some(conn_tx.clone()),
                             mirror_txs: Default::default(),
-                            http_shutdown: Default::default(),
+                            shutdown: Default::default(),
+                            connections: Default::default(),
                         });
                     }
                     Entry::Occupied(mut e) => {
@@ -363,7 +438,7 @@ where
                 let tx = self.internal_tx.clone();
                 tokio::spawn(async move {
                     conn_tx.closed().await;
-                    let _ = tx.send(InternalMessage::DeadChannel(port)).await;
+                    let _ = tx.send(InternalMessage::MaybeDeadChannel(port)).await;
                 });
 
                 let _ = receiver_tx.send(conn_rx);
@@ -373,26 +448,38 @@ where
         Ok(())
     }
 
-    /// Called when [`InternalMessage::DeadChannel`] is received from a helper task.
+    /// Called when [`InternalMessage::MaybeDeadChannel`] is received from a helper task.
     ///
-    /// One of the subscription channels is closed. We need to check the related [`PortState`].
+    /// One of the subscription channels may be closed. We need to
+    /// check the related [`PortState`].
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn handle_dead_channel(&mut self, port: u16) -> Result<(), R::Error> {
         let Entry::Occupied(mut e) = self.ports.entry(port) else {
             return Ok(());
         };
 
+        let state = e.get_mut();
+
         let PortState {
             steal_tx,
             mirror_txs,
+            connections,
             ..
-        } = e.get_mut();
+        } = state;
 
         *steal_tx = steal_tx.take().filter(|tx| tx.is_closed().not());
         mirror_txs.retain(|tx| tx.is_closed().not());
 
-        if steal_tx.is_none() && mirror_txs.is_empty() {
-            e.remove();
+        // Drain finished connections
+        while let Some(joined) = connections.try_join_next() {
+            if let Err(err) = joined {
+                tracing::warn!(?err, "IO task returned JoinError");
+            }
+        }
+
+        // Remove if the [`PortState`] is no longer needed.
+        if mirror_txs.is_empty() && steal_tx.is_none() && connections.is_empty() {
+            e.remove().graceful_shutdown().await;
             self.redirector.remove_redirection(port).await?;
             if self.ports.is_empty() {
                 self.redirector.cleanup().await?;
@@ -403,12 +490,37 @@ where
         Ok(())
     }
 
+    fn spawn_tracked_connection<F>(
+        tx: mpsc::Sender<InternalMessage>,
+        port: u16,
+        port_state: &mut PortState,
+        f: F,
+    ) where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        // Drain any finished connections to prevent OOM
+        while let Some(joined) = port_state.connections.try_join_next() {
+            if let Err(err) = joined {
+                tracing::warn!(?err, "IO task returned JoinError");
+            }
+        }
+
+        port_state.connections.spawn(async move {
+            f.await;
+
+            tx.send(InternalMessage::MaybeDeadChannel(port))
+                .await
+                .expect("RedirectorTask exit before child task");
+        });
+    }
+
     /// Called when all handles are dropped and this task is about to exit.
     ///
     /// Cleans the redirections in [`Self::redirector`].
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn cleanup(&mut self) -> Result<(), R::Error> {
-        for port in std::mem::take(&mut self.ports).into_keys() {
+        for (port, state) in std::mem::take(&mut self.ports) {
+            state.graceful_shutdown().await;
             self.redirector.remove_redirection(port).await?;
         }
 
@@ -517,16 +629,23 @@ impl fmt::Debug for TaskError {
 
 /// Messages sent by [`RedirectorTask`]'s helper tasks.
 enum InternalMessage {
-    /// One of the clients' channels was closed for a certain port.
+    /// Signals to [`RedirectorTask`] to reevaluate the state of the
+    /// given port subscription, and close it if no longer used. Sent
+    /// when one of the client's channels closes (i.e. end of a port
+    /// subscription), or one of the redirected connections on this
+    /// port terminates.
     ///
-    /// This means an end of port subscription.
     /// The related [`PortState`] should be inspected, adjusted, and possibly removed (if all
     /// subscriptions are gone).
     ///
-    /// Each port subscription results in spawning a separate helper task,
-    /// that waits for the subscription channel to close, and sends this message to the
-    /// [`RedirectorTask`].
-    DeadChannel(u16),
+    /// Each port subscription results in spawning a separate helper
+    /// task, that waits for the subscription channel to close, and
+    /// sends this message to the [`RedirectorTask`].
+
+    /// This message is also sent when one of the IO tasks for a
+    /// redirected connection (spawned using
+    /// [`RedirectorTask::spawn_tracked_connection`]) terminates.
+    MaybeDeadChannel(u16),
     /// HTTP detection finished on a redirected connection.
     ConnInitialized(MaybeHttp),
     /// An HTTP request was extracted from a redirected connection.
@@ -539,9 +658,11 @@ struct PortState {
     steal_tx: Option<mpsc::Sender<StolenTraffic>>,
     /// Mirrorers' traffic channel.
     mirror_txs: Vec<mpsc::Sender<MirroredTraffic>>,
-    /// Used to initiate a graceful shutdown of stolen HTTP connections,
-    /// once the all clients cancel their subscriptions.
-    http_shutdown: CancellationToken,
+    /// Used to initiate a graceful shutdown of redirected
+    /// connections, once the all clients cancel their subscriptions.
+    shutdown: CancellationToken,
+    /// Used to track connection IO tasks and wait for their graceful shutdown.
+    connections: JoinSet<()>,
 }
 
 impl fmt::Debug for PortState {
@@ -559,9 +680,17 @@ impl fmt::Debug for PortState {
     }
 }
 
-impl Drop for PortState {
-    fn drop(&mut self) {
-        self.http_shutdown.cancel();
+impl PortState {
+    /// Tell and wait for all connections to gracefully shut down.
+    /// This function is essentially `AsyncDrop`, and it should always
+    /// be called before removing the redirection.
+    async fn graceful_shutdown(mut self) {
+        self.shutdown.cancel();
+        while let Some(joined) = self.connections.join_next().await {
+            if let Err(err) = joined {
+                tracing::warn!(?err, "IO task returned JoinError");
+            }
+        }
     }
 }
 
@@ -573,10 +702,109 @@ mod test {
     use http_body_util::Empty;
     use hyper_util::rt::TokioIo;
     use rstest::rstest;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
 
     use crate::incoming::{
         RedirectorTask, RedirectorTaskConfig, StolenTraffic, test::DummyRedirector,
     };
+
+    #[rstest]
+    #[timeout(Duration::from_secs(5))]
+    #[tokio::test]
+    async fn passthrough_connections_on_inactive_ports(
+        #[values(true, false)] first_one_first: bool,
+    ) {
+        let (redirector, mut state, mut tx) = DummyRedirector::new();
+        let (task, mut handle, _) = RedirectorTask::new(
+            redirector,
+            Default::default(),
+            RedirectorTaskConfig::from_env(),
+        );
+        tokio::spawn(task.run());
+
+        // Make sure connections are now passed through
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        handle.steal(port).await.unwrap();
+        assert!(state.borrow().has_redirections([port]));
+
+        let mut tcp = tx.make_connection(listener.local_addr().unwrap()).await;
+        tcp.write_all(b"def not http\r\n\r\n").await.unwrap();
+
+        let StolenTraffic::Tcp {
+            conn: rtcp,
+            join_handle_tx,
+            shutdown,
+        } = handle.next().await.unwrap().unwrap()
+        else {
+            panic!("falsely detected HTTP traffic");
+        };
+
+        join_handle_tx
+            .send(tokio::spawn(async move {
+                let mut io = rtcp.into_io();
+                let mut buf = [0; 16];
+                io.read_exact(&mut buf).await.unwrap();
+                assert_eq!(&buf, b"def not http\r\n\r\n");
+
+                io.read_exact(&mut buf[..4]).await.unwrap();
+                assert_eq!(&buf[..4], b"ping");
+
+                io.write_all(b"pong").await.unwrap();
+
+                tokio::select! {
+                    _ = shutdown.cancelled() => {},
+                    r = io.read(&mut buf) => {
+                        // We never rx any data, just use this to
+                        // detect termination.
+                        assert!(r.is_ok_and(|c| c == 0))
+                    }
+                }
+            }))
+            .unwrap();
+
+        handle.stop_steal(port);
+        // Wait a little, ensure redirection hasn't been removed.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(state.borrow().has_redirections([port]));
+
+        // Make sure connection is stil alive.
+        tcp.write_all(b"ping").await.unwrap();
+        let mut buf = [0; 4];
+        tcp.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"pong");
+
+        // Make sure connections are now being passed through.
+        let tcp2 = tx.make_connection(listener.local_addr().unwrap()).await;
+        let (rtcp2, _) = listener.accept().await.unwrap();
+
+        if first_one_first {
+            drop(tcp);
+
+            // Wait a little, ensure redirection still hasn't been removed.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert!(state.borrow().has_redirections([port]));
+
+            drop((tcp2, rtcp2));
+        } else {
+            drop((tcp2, rtcp2));
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert!(state.borrow().has_redirections([port]));
+
+            drop(tcp);
+        }
+
+        // NOW the redirection should be gone (because there are no more active connections).
+        state
+            .wait_for(|state| state.has_redirections([]))
+            .await
+            .unwrap();
+    }
 
     #[rstest]
     #[timeout(Duration::from_secs(5))]
@@ -650,17 +878,19 @@ mod test {
         let StolenTraffic::Http(http) = handle.next().await.unwrap().unwrap() else {
             unreachable!()
         };
+
         // Stealing client unsubscribes the port.
         // This should trigger graceful shutdown on the HTTP connection.
         handle.stop_steal(80);
-        // Wait for the RedirectorTask to process.
-        state.wait_for(|state| state.dirty.not()).await.unwrap();
 
         // Stealing client exits.
         // The HTTP client should get 502.
         std::mem::drop(http);
         let response_code = http_client_task.await.unwrap();
         assert_eq!(response_code, hyper::StatusCode::BAD_GATEWAY);
+
+        // Wait for the RedirectorTask to process.
+        state.wait_for(|state| state.dirty.not()).await.unwrap();
 
         // The whole agent exits.
         // Redirector task should exit.

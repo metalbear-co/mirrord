@@ -16,7 +16,7 @@ use mirrord_protocol::{
 };
 use tokio::task::JoinSet;
 use tokio_stream::StreamMap;
-use tracing::instrument;
+use tracing::{Level, instrument};
 
 use crate::{
     AgentError,
@@ -26,31 +26,20 @@ use crate::{
         IncomingStream, IncomingStreamItem, MirrorHandle, MirroredHttp, MirroredTraffic,
         RedirectorTaskError,
     },
-    sniffer::api::TcpSnifferApi,
     util::protocol_version::ClientProtocolVersion,
 };
 
 /// Agent client's API for using the TCP mirror feature.
-pub enum TcpMirrorApi {
-    /// Wrapper over a [`MirrorHandle`].
-    ///
-    /// Mirroring is done with iptables redirections.
-    Passthrough {
-        mirror_handle: MirrorHandle,
-        incoming_streams: StreamMap<ConnectionId, IncomingStream>,
-        protocol_version: ClientProtocolVersion,
-        connection_ids_iter: RangeInclusive<ConnectionId>,
-        queued_messages: VecDeque<DaemonTcp>,
-        port_filters: HashMap<Port, HttpFilter>,
-        ongoing_requests: JoinSet<MirroredHttp>,
-    },
-    /// Wrapper over a [`TcpSnifferApi`].
-    ///
-    /// Mirroring is done with a raw socket.
-    Sniffer {
-        api: TcpSnifferApi,
-        queued_messages: VecDeque<DaemonMessage>,
-    },
+///
+/// Wrapper over a [`MirrorHandle`].
+pub struct TcpMirrorApi {
+    mirror_handle: MirrorHandle,
+    incoming_streams: StreamMap<ConnectionId, IncomingStream>,
+    protocol_version: ClientProtocolVersion,
+    connection_ids_iter: RangeInclusive<ConnectionId>,
+    queued_messages: VecDeque<DaemonTcp>,
+    port_filters: HashMap<Port, HttpFilter>,
+    ongoing_requests: JoinSet<MirroredHttp>,
 }
 
 impl TcpMirrorApi {
@@ -62,11 +51,8 @@ impl TcpMirrorApi {
     /// Since `mirrord-intproxy` processes requests independently, this is fine.
     const REQUEST_ID: RequestId = 0;
 
-    pub fn passthrough(
-        mirror_handle: MirrorHandle,
-        protocol_version: ClientProtocolVersion,
-    ) -> Self {
-        Self::Passthrough {
+    pub fn new(mirror_handle: MirrorHandle, protocol_version: ClientProtocolVersion) -> Self {
+        Self {
             mirror_handle,
             incoming_streams: Default::default(),
             protocol_version,
@@ -77,69 +63,37 @@ impl TcpMirrorApi {
         }
     }
 
-    pub fn sniffer(api: TcpSnifferApi) -> Self {
-        Self::Sniffer {
-            api,
-            queued_messages: Default::default(),
-        }
-    }
-
     pub async fn handle_client_message(&mut self, message: LayerTcp) -> AgentResult<()> {
-        match self {
-            Self::Passthrough {
-                mirror_handle,
-                incoming_streams,
-                queued_messages,
-                port_filters,
-                ..
-            } => match message {
-                LayerTcp::ConnectionUnsubscribe(id) => {
-                    incoming_streams.remove(&id);
-                }
-                LayerTcp::PortSubscribe(port) => {
-                    mirror_handle.mirror(port).await?;
-                    queued_messages.push_back(DaemonTcp::SubscribeResult(Ok(port)));
-                }
-                LayerTcp::PortSubscribeFilteredHttp(port, filter) => {
-                    // Convert from protocol HttpFilter to agent HttpFilter
-                    let agent_filter = HttpFilter::try_from(&filter)
-                        .map_err(Box::new)
-                        .map_err(AgentError::InvalidHttpFilter)?;
+        match message {
+            LayerTcp::ConnectionUnsubscribe(id) => {
+                self.incoming_streams.remove(&id);
+            }
+            LayerTcp::PortSubscribe(port) => {
+                self.mirror_handle.mirror(port).await?;
+                self.queued_messages
+                    .push_back(DaemonTcp::SubscribeResult(Ok(port)));
+            }
+            LayerTcp::PortSubscribeFilteredHttp(port, filter) => {
+                // Convert from protocol HttpFilter to agent HttpFilter
+                let agent_filter = HttpFilter::try_from(&filter)
+                    .map_err(Box::new)
+                    .map_err(AgentError::InvalidHttpFilter)?;
 
-                    mirror_handle.mirror(port).await?;
-
-                    port_filters.insert(port, agent_filter);
-
-                    queued_messages.push_back(DaemonTcp::SubscribeResult(Ok(port)));
-                }
-                LayerTcp::PortUnsubscribe(port) => {
-                    port_filters.remove(&port);
-                    mirror_handle.stop_mirror(port);
-                }
-            },
-            Self::Sniffer {
-                api,
-                queued_messages,
-            } => {
-                let message = match message {
-                    LayerTcp::PortSubscribeFilteredHttp(port, ..) => {
-                        queued_messages.push_back(DaemonMessage::LogMessage(
-                            LogMessage::warn(
-                                "mirrord-agent is not configured to use passthrough mirroring, HTTP filter will be ignored".into())
-                            )
-                        );
-                        LayerTcp::PortSubscribe(port)
-                    }
-                    other => other,
-                };
-                api.handle_client_message(message).await?;
+                self.mirror_handle.mirror(port).await?;
+                self.port_filters.insert(port, agent_filter);
+                self.queued_messages
+                    .push_back(DaemonTcp::SubscribeResult(Ok(port)));
+            }
+            LayerTcp::PortUnsubscribe(port) => {
+                self.port_filters.remove(&port);
+                self.mirror_handle.stop_mirror(port);
             }
         }
 
         Ok(())
     }
 
-    #[instrument(level = "trace", ret)]
+    #[instrument(level = Level::TRACE, ret)]
     async fn next(
         handle: &mut MirrorHandle,
         ongoing: &mut JoinSet<MirroredHttp>,
@@ -204,7 +158,7 @@ impl TcpMirrorApi {
                             if filter.needs_body() {
                                 ongoing.spawn(async move {
                                     if let Err(error) = http.buffer_body().await {
-                                        tracing::warn!(?error, "failed to buffer request body");
+                                        tracing::debug!(?error, "failed to buffer request body");
                                     };
                                     http
                                 });
@@ -223,172 +177,144 @@ impl TcpMirrorApi {
     }
 
     pub async fn recv(&mut self) -> AgentResult<DaemonMessage> {
-        let message = match self {
-            Self::Passthrough {
-                mirror_handle,
-                incoming_streams,
-                protocol_version,
-                connection_ids_iter,
-                queued_messages,
-                port_filters,
-                ongoing_requests,
-            } => {
-                if let Some(message) = queued_messages.pop_front() {
-                    return Ok(DaemonMessage::Tcp(message));
+        if let Some(message) = self.queued_messages.pop_front() {
+            return Ok(DaemonMessage::Tcp(message));
+        }
+
+        let message = tokio::select! {
+            Some((id, item)) = self.incoming_streams.next() => match item {
+                IncomingStreamItem::Data(data) => DaemonTcp::Data(TcpData {
+                    connection_id: id,
+                    bytes: data.into(),
+                }),
+                IncomingStreamItem::NoMoreData => DaemonTcp::Data(TcpData {
+                    connection_id: id,
+                    bytes: Default::default(),
+                }),
+                IncomingStreamItem::Frame(frame) => {
+                    DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
+                        frames: vec![frame],
+                        is_last: false,
+                        connection_id: id,
+                        request_id: Self::REQUEST_ID,
+                    }))
+                }
+                IncomingStreamItem::NoMoreFrames => {
+                    DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
+                        frames: Default::default(),
+                        is_last: true,
+                        connection_id: id,
+                        request_id: Self::REQUEST_ID,
+                    }))
+                }
+                IncomingStreamItem::Finished(Ok(())) => {
+                    DaemonTcp::Close(TcpClose { connection_id: id })
+                }
+                IncomingStreamItem::Finished(Err(error)) => {
+                    self.queued_messages.push_back(DaemonTcp::Close(TcpClose { connection_id: id }));
+                    return Ok(DaemonMessage::LogMessage(LogMessage::warn(format!(
+                        "Mirrored connection {id} failed: {}",
+                        Report::new(error)
+                    ))));
+                }
+            },
+
+            traffic = Self::next(&mut self.mirror_handle, &mut self.ongoing_requests, &self.protocol_version, &self.port_filters) => match traffic? {
+                MirroredTraffic::Tcp(tcp) if self.protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
+                    let id = self.connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
+                    let connection = NewTcpConnectionV1 {
+                        connection_id: id,
+                        remote_address: tcp.info.peer_addr.ip(),
+                        destination_port: tcp.info.original_destination.port(),
+                        source_port: tcp.info.peer_addr.port(),
+                        local_address: tcp.info.local_addr.ip(),
+                    };
+                    let message = NewTcpConnectionV2 {
+                        connection,
+                        transport: tcp
+                            .info
+                            .tls_connector
+                            .map(|tls| IncomingTrafficTransportType::Tls {
+                                alpn_protocol: tls.alpn_protocol().map(From::from),
+                                server_name: tls.server_name().map(|s| s.to_str().into_owned()),
+                            })
+                            .unwrap_or(IncomingTrafficTransportType::Tcp),
+                    };
+                    self.incoming_streams.insert(id, tcp.stream);
+                    DaemonTcp::NewConnectionV2(message)
                 }
 
-                tokio::select! {
-                    Some((id, item)) = incoming_streams.next() => match item {
-                        IncomingStreamItem::Data(data) => DaemonTcp::Data(TcpData {
-                            connection_id: id,
-                            bytes: data.into(),
-                        }),
-                        IncomingStreamItem::NoMoreData => DaemonTcp::Data(TcpData {
-                            connection_id: id,
-                            bytes: Default::default(),
-                        }),
-                        IncomingStreamItem::Frame(frame) => {
-                            DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
-                                frames: vec![frame],
-                                is_last: false,
-                                connection_id: id,
-                                request_id: Self::REQUEST_ID,
-                            }))
-                        }
-                        IncomingStreamItem::NoMoreFrames => {
-                            DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
-                                frames: Default::default(),
-                                is_last: true,
-                                connection_id: id,
-                                request_id: Self::REQUEST_ID,
-                            }))
-                        }
-                        IncomingStreamItem::Finished(Ok(())) => {
-                            DaemonTcp::Close(TcpClose { connection_id: id })
-                        }
-                        IncomingStreamItem::Finished(Err(error)) => {
-                            queued_messages.push_back(DaemonTcp::Close(TcpClose { connection_id: id }));
-                            return Ok(DaemonMessage::LogMessage(LogMessage::warn(format!(
-                                "Mirrored connection {id} failed: {}",
-                                Report::new(error)
-                            ))));
-                        }
-                    },
+                MirroredTraffic::Tcp(tcp) => {
+                    if tcp.info.tls_connector.is_some() {
+                        return Ok(DaemonMessage::LogMessage(LogMessage::error(format!(
+                            "A TLS connection was not mirrored due to mirrord-protocol version requirement: {}",
+                            &*MODE_AGNOSTIC_HTTP_REQUESTS,
+                        ))));
+                    }
 
-                    traffic = Self::next(mirror_handle, ongoing_requests, protocol_version, port_filters) => match traffic? {
-                        MirroredTraffic::Tcp(tcp) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
-                            let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
-                            let connection = NewTcpConnectionV1 {
-                                connection_id: id,
-                                remote_address: tcp.info.peer_addr.ip(),
-                                destination_port: tcp.info.original_destination.port(),
-                                source_port: tcp.info.peer_addr.port(),
-                                local_address: tcp.info.local_addr.ip(),
-                            };
-                            let message = NewTcpConnectionV2 {
-                                connection,
-                                transport: tcp
-                                    .info
-                                    .tls_connector
-                                    .map(|tls| IncomingTrafficTransportType::Tls {
-                                        alpn_protocol: tls.alpn_protocol().map(From::from),
-                                        server_name: tls.server_name().map(|s| s.to_str().into_owned()),
-                                    })
-                                    .unwrap_or(IncomingTrafficTransportType::Tcp),
-                            };
-                            incoming_streams.insert(id, tcp.stream);
-                            DaemonTcp::NewConnectionV2(message)
-                        }
+                    if self.port_filters.contains_key(&tcp.info.original_destination.port()) {
+                        return Ok(DaemonMessage::LogMessage(LogMessage::warn(
+                            "TCP traffic skipped due to HTTP filter on this port".to_string()
+                        )));
+                    }
 
-                        MirroredTraffic::Tcp(tcp) => {
-                            if tcp.info.tls_connector.is_some() {
-                                return Ok(DaemonMessage::LogMessage(LogMessage::error(format!(
-                                    "A TLS connection was not mirrored due to mirrord-protocol version requirement: {}",
-                                    &*MODE_AGNOSTIC_HTTP_REQUESTS,
-                                ))));
-                            }
+                    let id = self.connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
+                    self.incoming_streams.insert(id, tcp.stream);
 
-                            if port_filters.contains_key(&tcp.info.original_destination.port()) {
-                                return Ok(DaemonMessage::LogMessage(LogMessage::warn(
-                                    "TCP traffic skipped due to HTTP filter on this port".to_string()
-                                )));
-                            }
-
-                            let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
-                            incoming_streams.insert(id, tcp.stream);
-
-                            let message = NewTcpConnectionV1 {
-                                connection_id: id,
-                                remote_address: tcp.info.peer_addr.ip(),
-                                destination_port: tcp.info.original_destination.port(),
-                                source_port: tcp.info.peer_addr.port(),
-                                local_address: tcp.info.local_addr.ip(),
-                            };
-                            DaemonTcp::NewConnectionV1(message)
-                        }
-
-                        MirroredTraffic::Http(http) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
-                            let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
-
-                            incoming_streams.insert(id, http.stream);
-
-                            let message = ChunkedRequestStartV2 {
-                                connection_id: id,
-                                request_id: Self::REQUEST_ID,
-                                metadata: HttpRequestMetadata::V1 {
-                                    source: http.info.peer_addr,
-                                    destination: http.info.original_destination,
-                                },
-                                transport: http
-                                    .info
-                                    .tls_connector
-                                    .as_ref()
-                                    .map(|tls| IncomingTrafficTransportType::Tls {
-                                        alpn_protocol: tls.alpn_protocol().map(From::from),
-                                        server_name: tls.server_name().map(|s| s.to_str().into_owned()),
-                                    })
-                                    .unwrap_or(IncomingTrafficTransportType::Tcp),
-                                request: InternalHttpRequest {
-                                    method: http.request_head.parts.method,
-                                    uri: http.request_head.parts.uri,
-                                    headers: http.request_head.parts.headers,
-                                    version: http.request_head.parts.version,
-                                    body: InternalHttpBodyNew {
-                                        frames: http.request_head.body_head,
-                                        is_last: http.request_head.body_finished,
-                                    },
-                                },
-                            };
-                            DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(message))
-                        }
-
-                        MirroredTraffic::Http(..) => {
-                            return Ok(DaemonMessage::LogMessage(LogMessage::error(format!(
-                                "An HTTP request was not mirrored due to mirrord-protocol version requirement: {}",
-                                &*MODE_AGNOSTIC_HTTP_REQUESTS,
-                            ))));
-                        }
-                    },
-
-                    else => std::future::pending().await,
-                }
-            }
-
-            Self::Sniffer {
-                api,
-                queued_messages,
-            } => {
-                if let Some(message) = queued_messages.pop_front() {
-                    return Ok(message);
+                    let message = NewTcpConnectionV1 {
+                        connection_id: id,
+                        remote_address: tcp.info.peer_addr.ip(),
+                        destination_port: tcp.info.original_destination.port(),
+                        source_port: tcp.info.peer_addr.port(),
+                        local_address: tcp.info.local_addr.ip(),
+                    };
+                    DaemonTcp::NewConnectionV1(message)
                 }
 
-                let (message, log) = api.recv().await?;
-                if let Some(log) = log {
-                    queued_messages.push_back(DaemonMessage::Tcp(message));
-                    return Ok(DaemonMessage::LogMessage(log));
+                MirroredTraffic::Http(http) if self.protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
+                    let id = self.connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
+
+                    self.incoming_streams.insert(id, http.stream);
+
+                    let message = ChunkedRequestStartV2 {
+                        connection_id: id,
+                        request_id: Self::REQUEST_ID,
+                        metadata: HttpRequestMetadata::V1 {
+                            source: http.info.peer_addr,
+                            destination: http.info.original_destination,
+                        },
+                        transport: http
+                            .info
+                            .tls_connector
+                            .as_ref()
+                            .map(|tls| IncomingTrafficTransportType::Tls {
+                                alpn_protocol: tls.alpn_protocol().map(From::from),
+                                server_name: tls.server_name().map(|s| s.to_str().into_owned()),
+                            })
+                            .unwrap_or(IncomingTrafficTransportType::Tcp),
+                        request: InternalHttpRequest {
+                            method: http.request_head.parts.method,
+                            uri: http.request_head.parts.uri,
+                            headers: http.request_head.parts.headers,
+                            version: http.request_head.parts.version,
+                            body: InternalHttpBodyNew {
+                                frames: http.request_head.body_head,
+                                is_last: http.request_head.body_finished,
+                            },
+                        },
+                    };
+                    DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(message))
                 }
-                message
-            }
+
+                MirroredTraffic::Http(..) => {
+                    return Ok(DaemonMessage::LogMessage(LogMessage::error(format!(
+                        "An HTTP request was not mirrored due to mirrord-protocol version requirement: {}",
+                        &*MODE_AGNOSTIC_HTTP_REQUESTS,
+                    ))));
+                }
+            },
+
+            else => std::future::pending().await,
         };
 
         Ok(DaemonMessage::Tcp(message))

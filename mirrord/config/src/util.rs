@@ -179,6 +179,44 @@ impl<T: Hash + Eq> From<VecOrSingle<T>> for HashSet<T> {
     }
 }
 
+impl<T> From<HashSet<T>> for VecOrSingle<T> {
+    fn from(value: HashSet<T>) -> Self {
+        Self::Multiple(Vec::from_iter(value))
+    }
+}
+
+impl<T> From<Vec<T>> for VecOrSingle<T> {
+    fn from(value: Vec<T>) -> Self {
+        Self::Multiple(value)
+    }
+}
+
+impl<T> From<VecOrSingle<T>> for Vec<T> {
+    fn from(value: VecOrSingle<T>) -> Self {
+        match value {
+            VecOrSingle::Single(item) => vec![item],
+            VecOrSingle::Multiple(items) => items,
+        }
+    }
+}
+
+impl<T: core::fmt::Display> core::fmt::Display for VecOrSingle<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        let mut first = true;
+        for item in self.iter() {
+            if first {
+                write!(f, "{item}")?;
+                first = false;
+            } else {
+                write!(f, ", {item}")?;
+            }
+        }
+        write!(f, "]")?;
+        Ok(())
+    }
+}
+
 impl<T> FromStr for VecOrSingle<T>
 where
     T: FromStr,

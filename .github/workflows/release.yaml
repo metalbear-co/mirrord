@@ -6,6 +6,8 @@ on:
   # Running from workflow dispatch (AKA manual) will not publish anything.
   # This is intended for testing changes to this flow.
   workflow_dispatch:
+    inputs:
+
 
 jobs:
   build_binaries_aarch64-unknown-linux-gnu:
@@ -15,16 +17,29 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           rustflags: ""
-      - uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
+
+      #      - uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
+      #        with:
+      #          tool: cross
+      # We used to install the latest cross version (0.2.5) but it's too old (Feb 2023) and is missing essential bug fixes
+      # When 0.3.0 (or 0.2.6, but it seems unlikely) is released, we should use that
+      - name: Install cross from a recent commit
+        run: cargo install --git https://github.com/cross-rs/cross cross --rev 154b4ead7e639c7597d9e4e626b9c1c1e37608c0
+      - uses: actions/setup-node@v3
         with:
-          tool: cross
+          node-version: 24
+      - run: npm install
+        working-directory: ./wizard-frontend
+      - run: npm run build
+        working-directory: ./wizard-frontend
       # building layer and cli together leads to weird situation where embedded layer is x64, so split.
       - name: build mirrord-layer
         run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord-layer --target=aarch64-unknown-linux-gnu
       - name: build mirrord cli
         env:
           MIRRORD_LAYER_FILE: ../../../target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
-        run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord --target=aarch64-unknown-linux-gnu
+          WIZARD_DIST_DIR: ./wizard-frontend/dist
+        run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord --target=aarch64-unknown-linux-gnu --features "wizard"
       - uses: actions/upload-artifact@v4
         with:
           name: aarch64-unknown-linux-gnu
@@ -39,11 +54,24 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           rustflags: ""
-      - uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
+      #      - uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
+      #        with:
+      #          tool: cross
+      # We used to install the latest cross version (0.2.5) but it's too old (Feb 2023) and is missing essential bug fixes
+      # When 0.3.0 (or 0.2.6, but it seems unlikely) is released, we should use that
+      - name: Install cross from a recent commit
+        run: cargo install --git https://github.com/cross-rs/cross cross --rev 154b4ead7e639c7597d9e4e626b9c1c1e37608c0
+      - uses: actions/setup-node@v3
         with:
-          tool: cross
+          node-version: 24
+      - run: npm install
+        working-directory: ./wizard-frontend
+      - run: npm run build
+        working-directory: ./wizard-frontend
       - name: build mirrord-layer and cli
-        run: cross build --release -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu
+        env:
+          WIZARD_DIST_DIR: ./wizard-frontend/dist
+        run: cross build --release -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu --features "wizard"
       - uses: actions/upload-artifact@v4
         with:
           name: x86_64-unknown-linux-gnu
@@ -92,16 +120,21 @@ jobs:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: gon -log-level=debug -log-json .github/workflows/universal_dylib_sign.json
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 24
+      - run: npm install
+        working-directory: ./wizard-frontend
       - name: build macOS arm cli with universal dylib
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
           MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/aarch64-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo +nightly-2025-07-28 build --release -p mirrord --target=aarch64-apple-darwin
+        run: cargo +nightly-2025-07-28 build --release -p mirrord --target=aarch64-apple-darwin --features "wizard"
       - name: build macOS x86-64 cli with universal dylib
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
           MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/aarch64-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo +nightly-2025-07-28 build --release -p mirrord --target=x86_64-apple-darwin
+        run: cargo +nightly-2025-07-28 build --release -p mirrord --target=x86_64-apple-darwin --features "wizard"
       - name: Sign cli binaries
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
@@ -430,3 +463,17 @@ jobs:
           update-latest: true
           # Don't update the vX.Y tags
           update-minor: false
+
+  trigger_windows_build:
+    needs: update_latest
+    if: ${{ !cancelled() && !failure() }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/windows-build.yaml
+    with:
+
+      release_tag: ${{ github.event_name == 'push' && github.ref_name || '' }}
+      sign_artifacts: "true"
+      choco_publish: ${{ github.event_name == 'push' && 'true' || 'false' }}
+      winget_publish: ${{ github.event_name == 'push' && 'true' || 'false' }}
+    secrets: inherit

@@ -28,10 +28,11 @@ use mirrord_protocol::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
     tcp::{
-        Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, MIRROR_HTTP_FILTER_VERSION,
-        MirrorType, StealType,
+        Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, JsonPathQuery,
+        MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType,
     },
 };
+use mirrord_protocol_io::{Client, Connection};
 use semver::Version;
 use thiserror::Error;
 use tokio::{
@@ -50,7 +51,7 @@ use tokio_stream::{StreamMap, wrappers::TcpListenerStream};
 use tokio_util::io::ReaderStream;
 use tracing::Level;
 
-use crate::{AddrPortMapping, LocalPort, RemoteAddr, RemotePort, connection::AgentConnection};
+use crate::{AddrPortMapping, LocalPort, RemoteAddr, RemotePort};
 
 /// Connection address pair
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -69,7 +70,7 @@ struct ConnectionPortMapping {
 
 pub struct PortForwarder {
     /// communicates with the agent (only TCP supported)
-    agent_connection: AgentConnection,
+    agent_connection: Connection<Client>,
     /// associates local ports with destination ports
     /// destinations may contain unresolved hostnames
     raw_mappings: HashMap<SocketAddr, (RemoteAddr, u16)>,
@@ -96,7 +97,7 @@ pub struct PortForwarder {
 
 impl PortForwarder {
     pub(crate) async fn new(
-        agent_connection: AgentConnection,
+        agent_connection: Connection<Client>,
         mappings: HashMap<SocketAddr, (RemoteAddr, u16)>,
     ) -> Result<Self, PortForwardError> {
         // open tcp listener for local addrs
@@ -132,19 +133,17 @@ impl PortForwarder {
     pub(crate) async fn run(&mut self) -> Result<(), PortForwardError> {
         // setup agent connection
         self.agent_connection
-            .sender
             .send(ClientMessage::SwitchProtocolVersion(
                 mirrord_protocol::VERSION.clone(),
             ))
-            .await?;
-        match self.agent_connection.receiver.recv().await {
+            .await;
+        match self.agent_connection.recv().await {
             Some(DaemonMessage::SwitchProtocolVersionResponse(version))
                 if CLIENT_READY_FOR_LOGS.matches(&version) =>
             {
                 self.agent_connection
-                    .sender
                     .send(ClientMessage::ReadyForLogs)
-                    .await?;
+                    .await;
             }
             _ => return Err(PortForwardError::AgentConnectionFailed),
         }
@@ -156,12 +155,12 @@ impl PortForwarder {
                         // no pong received before timeout
                         break Err(PortForwardError::AgentError("agent failed to respond to Ping".into()));
                     }
-                    self.agent_connection.sender.send(ClientMessage::Ping).await?;
+                    self.agent_connection.send(ClientMessage::Ping).await;
                     self.waiting_for_pong = true;
                     self.ping_pong_timeout = Instant::now() + Duration::from_secs(30);
                 },
 
-                message = self.agent_connection.receiver.recv() => match message {
+                message = self.agent_connection.recv() => match message {
                     Some(message) => self.handle_msg_from_agent(message).await?,
                     None => {
                         break Err(PortForwardError::AgentError("unexpected end of connection with agent".into()));
@@ -211,11 +210,10 @@ impl PortForwarder {
                             Ok(_) => (),
                             Err(_) => {
                                 self.agent_connection
-                                    .sender
                                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(
                                         LayerClose { connection_id },
                                     )))
-                                    .await?;
+                                    .await;
                                 self.task_txs.remove(&socket_pair);
                                 self.sockets.remove(&connection_id);
                                 tracing::warn!(
@@ -259,13 +257,12 @@ impl PortForwarder {
                                 self.task_txs.remove(socket_pair);
                                 self.sockets.remove(&res.connection_id);
                                 self.agent_connection
-                                    .sender
                                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(
                                         LayerClose {
                                             connection_id: res.connection_id,
                                         },
                                     )))
-                                    .await?;
+                                    .await;
                                 tracing::error!(
                                     "failed to send response from remote to local port"
                                 );
@@ -350,10 +347,8 @@ impl PortForwarder {
             }
             DaemonMessage::OperatorPing(id) => {
                 self.agent_connection
-                    .sender
                     .send(ClientMessage::OperatorPong(id))
                     .await
-                    .ok();
             }
             message @ (DaemonMessage::File(..)
             | DaemonMessage::Pong
@@ -363,7 +358,8 @@ impl PortForwarder {
             | DaemonMessage::SwitchProtocolVersionResponse(..)
             | DaemonMessage::UdpOutgoing(..)
             | DaemonMessage::Vpn(..)
-            | DaemonMessage::TcpSteal(..)) => {
+            | DaemonMessage::TcpSteal(..)
+            | DaemonMessage::ReverseDnsLookup(..)) => {
                 // includes unexpected DaemonMessage::Pong
                 return Err(PortForwardError::AgentError(format!(
                     "unexpected message from agent: {message:?}"
@@ -439,42 +435,38 @@ impl PortForwarder {
             PortForwardMessage::Lookup(socket_pair, node, oneshot) => {
                 self.dns_oneshots.push_back((socket_pair, oneshot));
                 self.agent_connection
-                    .sender
                     .send(ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
                         node,
                     }))
-                    .await?;
+                    .await;
             }
             PortForwardMessage::Connect(port_mapping, oneshot) => {
                 let remote_address = SocketAddress::Ip(port_mapping.remote);
                 self.id_oneshots.push_back((port_mapping.pair, oneshot));
                 self.agent_connection
-                    .sender
                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
                         LayerConnect { remote_address },
                     )))
-                    .await?;
+                    .await;
             }
             PortForwardMessage::Send(connection_id, bytes) => {
                 self.agent_connection
-                    .sender
                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(
                         LayerWrite {
                             connection_id,
                             bytes,
                         },
                     )))
-                    .await?;
+                    .await;
             }
             PortForwardMessage::Close(socket_pair, connection_id) => {
                 self.task_txs.remove(&socket_pair);
                 if let Some(connection_id) = connection_id {
                     self.agent_connection
-                        .sender
                         .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(
                             LayerClose { connection_id },
                         )))
-                        .await?;
+                        .await;
                     self.sockets.remove(&connection_id);
                 }
             }
@@ -485,7 +477,7 @@ impl PortForwarder {
 
 pub struct ReversePortForwarder {
     /// communicates with the agent (only TCP supported).
-    agent_connection: AgentConnection,
+    agent_connection: Connection<Client>,
     /// background task (uses [`IncomingProxy`] to communicate with layer)
     background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError>,
     /// incoming proxy background task tx
@@ -498,13 +490,14 @@ pub struct ReversePortForwarder {
 
 impl ReversePortForwarder {
     pub(crate) async fn new(
-        mut agent_connection: AgentConnection,
+        mut agent_connection: Connection<Client>,
         mappings: HashMap<RemotePort, LocalPort>,
         mut network_config: IncomingConfig,
         idle_local_http_connection_timeout: Duration,
     ) -> Result<Self, PortForwardError> {
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError> =
-            Default::default();
+            BackgroundTasks::new(agent_connection.tx_handle());
+
         let incoming = background_tasks.register(
             IncomingProxy::new(
                 idle_local_http_connection_timeout,
@@ -519,21 +512,17 @@ impl ReversePortForwarder {
         );
 
         agent_connection
-            .sender
             .send(ClientMessage::SwitchProtocolVersion(
                 mirrord_protocol::VERSION.clone(),
             ))
-            .await?;
-        let protocol_version = match agent_connection.receiver.recv().await {
+            .await;
+        let protocol_version = match agent_connection.recv().await {
             Some(DaemonMessage::SwitchProtocolVersionResponse(version)) => version,
             _ => return Err(PortForwardError::AgentConnectionFailed),
         };
 
         if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
-            agent_connection
-                .sender
-                .send(ClientMessage::ReadyForLogs)
-                .await?;
+            agent_connection.send(ClientMessage::ReadyForLogs).await;
         }
 
         let incoming_mode = IncomingMode::new(&mut network_config, &protocol_version);
@@ -574,14 +563,15 @@ impl ReversePortForwarder {
                         // no pong received before timeout
                         break Err(PortForwardError::AgentError("agent failed to respond to Ping".into()));
                     }
-                    self.agent_connection.sender.send(ClientMessage::Ping).await?;
+                    self.agent_connection.send(ClientMessage::Ping).await;
                     self.waiting_for_pong = true;
                     self.ping_pong_timeout = Instant::now() + Duration::from_secs(30);
                 },
 
-                message = self.agent_connection.receiver.recv() => match message {
+                message = self.agent_connection.recv() => match message {
                     Some(message) => {
-                        self.handle_msg_from_agent(message).await?},
+                        self.handle_msg_from_agent(message).await?
+                    },
                     None => {
                         break Err(PortForwardError::AgentError("unexpected end of connection with agent".into()));
                     },
@@ -612,10 +602,8 @@ impl ReversePortForwarder {
             }
             DaemonMessage::OperatorPing(id) => {
                 self.agent_connection
-                    .sender
                     .send(ClientMessage::OperatorPong(id))
                     .await
-                    .ok();
             }
             DaemonMessage::LogMessage(log_message) => match log_message.level {
                 LogLevel::Warn => tracing::warn!("agent log: {}", log_message.message),
@@ -636,7 +624,8 @@ impl ReversePortForwarder {
             | message @ DaemonMessage::PauseTarget(_)
             | message @ DaemonMessage::SwitchProtocolVersionResponse(_)
             | message @ DaemonMessage::Vpn(_)
-            | message @ DaemonMessage::Pong => {
+            | message @ DaemonMessage::Pong
+            | message @ DaemonMessage::ReverseDnsLookup(_) => {
                 return Err(PortForwardError::AgentError(format!(
                     "unexpected message from agent: {message:?}"
                 )));
@@ -653,9 +642,6 @@ impl ReversePortForwarder {
     ) -> Result<(), PortForwardError> {
         match update {
             TaskUpdate::Message(message) => match message {
-                ProxyMessage::ToAgent(message) => {
-                    self.agent_connection.sender.send(message).await?;
-                }
                 ProxyMessage::ToLayer(ToLayer {
                     message: ProxyToLayerMessage::Incoming(IncomingResponse::PortSubscribe(res)),
                     ..
@@ -912,7 +898,7 @@ pub struct HttpSettings {
     /// The HTTP filter to use.
     pub filter: HttpFilter,
     /// Ports to filter HTTP on.
-    pub ports: HashSet<Port>,
+    pub ports: Option<HashSet<Port>>,
 }
 
 impl IncomingMode {
@@ -941,10 +927,9 @@ impl IncomingMode {
         let ports = config
             .http_filter
             .ports
-            .get_or_insert_default()
-            .iter()
-            .copied()
-            .collect();
+            .as_ref()
+            .cloned()
+            .map(HashSet::from);
 
         let http_filter_config = &config.http_filter;
 
@@ -995,7 +980,8 @@ impl IncomingMode {
                 // TODO(areg) unification
                 match filter {
                     BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
-                        query: query.clone(),
+                        query: JsonPathQuery::new(query.clone())
+                            .expect("invalid json body filter `query` string"),
                         matches: Filter::new(matches.clone())
                             .expect("invalid json body filter `matches` string"),
                     },
@@ -1049,7 +1035,8 @@ impl IncomingMode {
                     // TODO(areg) unify
                     match body_filter {
                         BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
-                            query: query.clone(),
+                            query: JsonPathQuery::new(query.clone())
+                                .expect("invalid json body filter `query` string"),
                             matches: Filter::new(matches.clone())
                                 .expect("invalid json body filter `matches` string"),
                         },
@@ -1067,10 +1054,14 @@ impl IncomingMode {
             let steal_type = match &self.http_settings {
                 None => StealType::All(port),
                 Some(settings) => {
-                    if settings.ports.contains(&port) {
-                        StealType::FilteredHttpEx(port, settings.filter.clone())
-                    } else {
+                    if settings
+                        .ports
+                        .as_ref()
+                        .is_some_and(|p| p.contains(&port).not())
+                    {
                         StealType::All(port)
+                    } else {
+                        StealType::FilteredHttpEx(port, settings.filter.clone())
                     }
                 }
             };
@@ -1079,10 +1070,14 @@ impl IncomingMode {
             let mirror_type = match &self.http_settings {
                 None => MirrorType::All(port),
                 Some(settings) => {
-                    if settings.ports.contains(&port) {
-                        MirrorType::FilteredHttp(port, settings.filter.clone())
-                    } else {
+                    if settings
+                        .ports
+                        .as_ref()
+                        .is_some_and(|p| p.contains(&port).not())
+                    {
                         MirrorType::All(port)
+                    } else {
+                        MirrorType::FilteredHttp(port, settings.filter.clone())
                     }
                 }
             };
@@ -1152,6 +1147,7 @@ mod test {
             StealType, TcpClose, TcpData,
         },
     };
+    use mirrord_protocol_io::{Client, Connection, ConnectionOutput};
     use reqwest::{Method, StatusCode, Version, header::HeaderMap};
     use rstest::rstest;
     use tokio::{
@@ -1162,7 +1158,6 @@ mod test {
 
     use crate::{
         RemoteAddr,
-        connection::AgentConnection,
         port_forward::{PortForwarder, ReversePortForwarder},
     };
 
@@ -1175,27 +1170,19 @@ mod test {
     }
 
     impl TestAgentConnection {
-        fn new() -> (Self, AgentConnection) {
-            let (daemon_to_forwarder, daemon_from_forwarder) = mpsc::channel::<DaemonMessage>(8);
-            let (client_task_to_test, client_task_from_test) = mpsc::channel::<ClientMessage>(8);
-            let (client_forwarder_to_task, client_task_from_forwarder) =
-                mpsc::channel::<ClientMessage>(8);
+        fn new() -> (Self, Connection<Client>) {
+            let (connection, tx, rx) = Connection::dummy();
 
-            tokio::spawn(Self::auto_responder(
-                client_task_from_forwarder,
-                client_task_to_test,
-                daemon_to_forwarder.clone(),
-            ));
+            let (filtered_tx, filtered_rx) = mpsc::channel(8);
+
+            tokio::spawn(Self::auto_responder(rx, filtered_tx, tx.clone()));
 
             (
                 Self {
-                    daemon_msg_tx: daemon_to_forwarder,
-                    client_msg_rx: client_task_from_test,
+                    daemon_msg_tx: tx,
+                    client_msg_rx: filtered_rx,
                 },
-                AgentConnection {
-                    sender: client_forwarder_to_task,
-                    receiver: daemon_from_forwarder,
-                },
+                connection,
             )
         }
 
@@ -1215,12 +1202,12 @@ mod test {
         }
 
         async fn auto_responder(
-            mut rx: mpsc::Receiver<ClientMessage>,
+            rx: ConnectionOutput<Client>,
             tx_to_test_code: mpsc::Sender<ClientMessage>,
             tx_to_port_forwarder: mpsc::Sender<DaemonMessage>,
         ) {
             loop {
-                let Some(message) = rx.recv().await else {
+                let Some(message) = rx.next().await else {
                     break;
                 };
 

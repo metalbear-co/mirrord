@@ -1,5 +1,7 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
+#[cfg(feature = "wizard")]
+use axum::response::{IntoResponse, Response};
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
@@ -11,6 +13,7 @@ use mirrord_intproxy::{
 };
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
+use mirrord_protocol_io::ProtocolError;
 use mirrord_tls_util::SecureChannelError;
 use mirrord_vpn::error::VpnError;
 use reqwest::StatusCode;
@@ -392,6 +395,12 @@ pub(crate) enum CliError {
     #[error("An error occurred in the port-forwarding process: {0}")]
     PortForwardingError(#[from] PortForwardError),
 
+    #[error("An error occurred in the wizard while serving the wizard app: {0}")]
+    WizardServeError(#[from] io::Error),
+
+    #[error("An error occurred in the wizard while fetching target data: {0}")]
+    WizardTargetError(#[from] KubeApiError),
+
     #[error("Failed to execute authentication command specified in kubeconfig: {0}")]
     #[diagnostic(help("
         mirrord failed to execute Kube authentication command.
@@ -476,6 +485,10 @@ pub(crate) enum CliError {
 
     #[error(transparent)]
     ApiKey(#[from] ApiKeyError),
+
+    #[error("Local Redis error: {0}")]
+    #[diagnostic(help("Install redis-server with"))]
+    LocalRedisError(String),
 }
 
 impl CliError {
@@ -563,9 +576,23 @@ impl From<OperatorApiError> for CliError {
                 operation: operation.to_string(),
             },
             OperatorApiError::InvalidBackoff(fail) => Self::InvalidBackoff(fail.to_string()),
+            OperatorApiError::ProtocolError(error) => Self::from(error),
             OperatorApiError::ApiKey(fail) => Self::ApiKey(fail),
             OperatorApiError::SerdeJson(fail) => Self::JsonSerializeError(fail),
         }
+    }
+}
+
+impl From<ProtocolError> for CliError {
+    fn from(e: ProtocolError) -> Self {
+        Self::InitialAgentCommFailed(e.to_string())
+    }
+}
+
+#[cfg(feature = "wizard")]
+impl IntoResponse for CliError {
+    fn into_response(self) -> Response {
+        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
     }
 }
 

@@ -20,7 +20,7 @@ use composed::ComposedRedirector;
 pub use connection::{
     IncomingStream, IncomingStreamItem,
     http::{MirroredHttp, RedirectedHttp, ResponseBodyProvider, ResponseProvider, StolenHttp},
-    tcp::StolenTcp,
+    tcp::{RedirectedTcp, StolenTcp},
 };
 pub use error::{ConnError, RedirectorTaskError};
 use iptables::IpTablesRedirector;

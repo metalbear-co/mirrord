@@ -13,6 +13,7 @@ pub mod agent;
 pub mod ci;
 pub mod config;
 pub mod container;
+pub mod env_key;
 pub mod experimental;
 pub mod external_proxy;
 pub mod feature;
@@ -22,14 +23,21 @@ pub mod retry;
 pub mod target;
 pub mod util;
 
-use std::{collections::HashMap, ops::Not, path::Path};
+use std::{collections::HashMap, ffi::OsStr, ops::Not, path::Path};
 
 use base64::prelude::*;
 use config::{ConfigContext, ConfigError, MirrordConfig};
 use experimental::ExperimentalConfig;
-use feature::{env::mapper::EnvVarsRemapper, network::outgoing::OutgoingFilterConfig};
+use feature::{
+    env::mapper::EnvVarsRemapper,
+    network::{
+        incoming::http_filter::{BodyFilter, InnerFilter},
+        outgoing::OutgoingFilterConfig,
+    },
+};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
+use mirrord_protocol::tcp::JsonPathQuery;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use target::Target;
@@ -41,6 +49,7 @@ use crate::{
     ci::CiConfig,
     config::{FromFileError, source::MirrordConfigSource},
     container::ContainerConfig,
+    env_key::EnvKey,
     external_proxy::ExternalProxyConfig,
     feature::{
         FeatureConfig,
@@ -127,7 +136,6 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 ///     "ephemeral": false,
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
-///     "network_interface": "eth0",
 ///     "flush_connections": true,
 ///     "metrics": "0.0.0.0:9000",
 ///   },
@@ -389,6 +397,35 @@ pub struct LayerConfig {
     /// ## ci {#root-ci}
     #[config(nested)]
     pub ci: CiConfig,
+
+    /// ## key {#root-key}
+    ///
+    /// An identifier for a mirrord session.
+    ///
+    /// This key can be referenced in your configuration using the `{{ key }}` template variable.
+    /// For example, you can use it in HTTP filters: `"header_filter": "x-session: key-{{ key }}"`.
+    ///
+    /// Priority (highest to lowest):
+    /// 1. CLI argument: `mirrord exec --key my-key`
+    /// 2. Config file: `{ "key": "my-key" }`
+    /// 3. Fallback: A unique key is randomly generated if neither option is provided
+    ///
+    /// ```json
+    /// {
+    ///   "key": "my-session-key",
+    ///   "feature": {
+    ///     "network": {
+    ///       "incoming": {
+    ///         "http_filter": {
+    ///           "header_filter": "x-session: key-{{ key }}"
+    ///         }
+    ///       }
+    ///     }
+    ///   }
+    /// }
+    /// ```
+    #[config(nested)]
+    pub key: EnvKey,
 }
 
 impl LayerConfig {
@@ -440,7 +477,7 @@ impl LayerConfig {
     /// [`LayerConfig::decode`]. It resolves the config from scratch.
     pub fn resolve(context: &mut ConfigContext) -> Result<Self, ConfigError> {
         if let Ok(path) = context.get_env(Self::FILE_PATH_ENV) {
-            LayerFileConfig::from_path(path)?.generate_config(context)
+            LayerFileConfig::from_path(path, context)?.generate_config(context)
         } else {
             LayerFileConfig::default().generate_config(context)
         }
@@ -475,6 +512,7 @@ impl LayerConfig {
             http_filter.header_filter.is_some(),
             http_filter.all_of.is_some(),
             http_filter.any_of.is_some(),
+            http_filter.body_filter.is_some(),
         ]
         .into_iter()
         .filter(|used| *used)
@@ -493,6 +531,41 @@ impl LayerConfig {
             Err(ConfigError::Conflict(
                 "Composite HTTP filter cannot be empty".to_string(),
             ))?;
+        }
+
+        let verify_body_filter = |filter: &BodyFilter| match filter {
+            BodyFilter::Json { query, .. } => {
+                // Only need to verify `query` as `matches` is later
+                // verified by the layer. `query` CANNOT be modified by the layer, see
+                // `mirrord_protocol::tcp::JsonPathQuery::new_unchecked`
+                JsonPathQuery::new(query.clone()).map(|_| ()).map_err(|e| {
+                    ConfigError::InvalidValue {
+                        name: "feature.network.incoming.http_filter.body_filter.query",
+                        provided: query.to_string(),
+                        error: Box::new(e),
+                    }
+                })
+            }
+        };
+
+        if let Some(body) = &http_filter.body_filter {
+            verify_body_filter(body)?;
+        }
+
+        if let Some(all_of) = &http_filter.all_of {
+            for filter in all_of {
+                if let InnerFilter::Body(body) = filter {
+                    verify_body_filter(body)?
+                }
+            }
+        }
+
+        if let Some(any_of) = &http_filter.any_of {
+            for filter in any_of {
+                if let InnerFilter::Body(body) = filter {
+                    verify_body_filter(body)?
+                }
+            }
         }
 
         if !self.feature.network.incoming.ignore_ports.is_empty()
@@ -726,20 +799,85 @@ impl CollectAnalytics for &LayerConfig {
 }
 
 impl LayerFileConfig {
-    pub fn from_path<P>(path: P) -> Result<Self, FromFileError>
+    /// Parses a [`LayerFileConfig`] from a file path, rendering any Tera templates.
+    ///
+    /// # Key Resolution for Template Rendering
+    ///
+    /// Config files can reference `{{ key }}` in templates (e.g., for HTTP header filters).
+    /// This creates a chicken-and-egg problem: we need the key value to render templates,
+    /// but the key might be defined *in* the config file we're trying to parse.
+    ///
+    /// To solve this, we resolve the key *before* parsing the full config:
+    /// 1. Check if CLI provided a key via `MIRRORD_ENV_KEY` in the context
+    /// 2. Otherwise, extract just the `key` field from the raw file (no template rendering)
+    /// 3. Otherwise, auto-generate a UUID (with [`EnvKey::AUTOGENERATED_MARKER`] prefix)
+    ///
+    /// The resolved key is then:
+    /// - Passed to Tera for template rendering
+    /// - Stored in the context so [`env_key::EnvKeyFileConfig::generate_config`] finds the same
+    ///   value
+    ///
+    /// The marker prefix on auto-generated keys allows `generate_config` to distinguish them
+    /// from user-provided keys (see [`EnvKey::AUTOGENERATED_MARKER`] for details).
+    pub fn from_path<P>(path: P, context: &mut ConfigContext) -> Result<Self, FromFileError>
     where
         P: AsRef<Path>,
     {
+        let key = context
+            .get_env(env_key::MIRRORD_ENV_KEY)
+            .ok()
+            .or_else(|| Self::extract_key_from_file(path.as_ref()))
+            .unwrap_or_else(EnvKey::autogenerated_with_marker);
+
+        context.override_env_mut(env_key::MIRRORD_ENV_KEY, &key);
+
         let mut template_engine = Tera::default();
         template_engine.add_template_file(path.as_ref(), Some("main"))?;
-        let rendered = template_engine.render("main", &tera::Context::new())?;
 
-        match path.as_ref().extension().and_then(|os_val| os_val.to_str()) {
+        let mut tera_context = tera::Context::new();
+        tera_context.insert("key", &key);
+
+        let rendered = template_engine.render("main", &tera_context)?;
+
+        match path.as_ref().extension().and_then(OsStr::to_str) {
             // No Extension? assume json
             Some("json") | None => Ok(serde_json::from_str::<Self>(&rendered)?),
             Some("toml") => Ok(toml::from_str::<Self>(&rendered)?),
             Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&rendered)?),
             ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
+        }
+    }
+
+    /// Extracts just the `key` field from a config file without template rendering.
+    ///
+    /// This is used in the first pass of config loading to determine the key value
+    /// before rendering templates that might reference `{{ key }}`.
+    ///
+    /// Returns `None` if the file doesn't contain a `key` field or if parsing fails.
+    fn extract_key_from_file(path: &Path) -> Option<String> {
+        // Read the raw file content
+        let content = std::fs::read_to_string(path).ok()?;
+
+        // Try to parse based on extension to extract just the key field
+        let extension = path.extension().and_then(OsStr::to_str);
+
+        match extension {
+            Some("json") | None => serde_json::from_str::<serde_json::Value>(&content)
+                .ok()?
+                .get("key")?
+                .as_str()
+                .map(String::from),
+            Some("toml") => toml::from_str::<toml::Value>(&content)
+                .ok()?
+                .get("key")?
+                .as_str()
+                .map(String::from),
+            Some("yaml" | "yml") => serde_yaml::from_str::<serde_yaml::Value>(&content)
+                .ok()?
+                .get("key")?
+                .as_str()
+                .map(String::from),
+            _ => None,
         }
     }
 }
@@ -753,6 +891,7 @@ mod tests {
 
     use rstest::*;
     use schemars::schema::RootSchema;
+    use tempfile::NamedTempFile;
 
     use super::*;
     use crate::{
@@ -982,6 +1121,7 @@ mod tests {
         let config = config_type.parse(input);
 
         let expect = LayerFileConfig {
+            key: None,
             accept_invalid_certificates: Some(false),
             kubeconfig: None,
             telemetry: None,
@@ -1009,7 +1149,6 @@ mod tests {
                 ephemeral: Some(false),
                 communication_timeout: None,
                 startup_timeout: None,
-                network_interface: None,
                 flush_connections: Some(false),
                 disabled_capabilities: None,
                 tolerations: None,
@@ -1229,4 +1368,73 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     const USER_ENVVAR: &str = "USERNAME";
+
+    /// Test key resolution priority: CLI > config file > auto-generated
+    #[test]
+    fn test_key_resolution_priority() {
+        use crate::config::MirrordConfig;
+
+        // 1: Auto-generated key (no CLI, no config file)
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(br#"{}"#).unwrap();
+
+        let mut ctx = ConfigContext::default().strict_env(true);
+        let file_config = LayerFileConfig::from_path(temp_file.path(), &mut ctx).unwrap();
+        let config = file_config.generate_config(&mut ctx).unwrap();
+        assert!(config.key.is_generated());
+        assert_eq!(config.key.analytics_len(), 0);
+
+        // 2: Key from config file
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file
+            .write_all(br#"{"key": "config-file-key"}"#)
+            .unwrap();
+
+        let mut ctx = ConfigContext::default().strict_env(true);
+        let file_config = LayerFileConfig::from_path(temp_file.path(), &mut ctx).unwrap();
+        let config = file_config.generate_config(&mut ctx).unwrap();
+        assert_eq!(config.key.as_str(), "config-file-key");
+        assert!(config.key.is_provided());
+        assert_eq!(config.key.analytics_len(), "config-file-key".len());
+
+        // 3: CLI key (env var) overrides config file key
+        let mut ctx = ConfigContext::default()
+            .override_env(env_key::MIRRORD_ENV_KEY, "cli-key")
+            .strict_env(true);
+        let file_config = LayerFileConfig::from_path(temp_file.path(), &mut ctx).unwrap();
+        let config = file_config.generate_config(&mut ctx).unwrap();
+        assert_eq!(config.key.as_str(), "cli-key");
+        assert!(config.key.is_provided());
+        assert_eq!(config.key.analytics_len(), "cli-key".len());
+
+        // 4: CLI key alone (no config file value)
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(br#"{}"#).unwrap();
+
+        let mut ctx = ConfigContext::default()
+            .override_env(env_key::MIRRORD_ENV_KEY, "only-cli-key")
+            .strict_env(true);
+        let file_config = LayerFileConfig::from_path(temp_file.path(), &mut ctx).unwrap();
+        let config = file_config.generate_config(&mut ctx).unwrap();
+        assert_eq!(config.key.as_str(), "only-cli-key");
+        assert!(config.key.is_provided());
+        assert_eq!(config.key.analytics_len(), "only-cli-key".len());
+    }
+
+    #[test]
+    fn test_template_rendering_with_key() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file
+            .write_all(br#"{"target": "pod/test-{{ key }}", "feature": {"network": false}}"#)
+            .unwrap();
+
+        let mut ctx = ConfigContext::default().override_env(env_key::MIRRORD_ENV_KEY, "my-session");
+        let config = LayerFileConfig::from_path(temp_file.path(), &mut ctx).unwrap();
+
+        let Some(TargetFileConfig::Simple(Some(Target::Pod(pod_target)))) = config.target else {
+            panic!("Bad target");
+        };
+
+        assert_eq!(pod_target.pod, "test-my-session");
+    }
 }

@@ -1,12 +1,17 @@
 #![feature(vec_into_raw_parts)]
 #![warn(clippy::indexing_slicing)]
 
+#[cfg(target_family = "unix")]
 extern crate alloc;
+#[cfg(target_family = "unix")]
 use alloc::ffi::CString;
+#[cfg(target_family = "unix")]
 use std::{fs::OpenOptions, os::unix::prelude::*};
 
+#[cfg(target_family = "unix")]
 static FILE_PATH: &str = "/tmp/test_file.txt";
 
+#[cfg(target_family = "unix")]
 fn pwrite() {
     println!(">> test_pwrite");
 
@@ -28,6 +33,7 @@ fn pwrite() {
     };
 }
 
+#[cfg(target_family = "unix")]
 // Test that fclose flushes correctly, no need to run remotely for all we care
 fn ffunctions() {
     println!(">> test_ffunctions");
@@ -70,6 +76,7 @@ fn stat() {
     assert_eq!(metadata.blocks(), 7);
 }
 
+#[cfg(target_family = "unix")]
 fn main() {
     pwrite();
     ffunctions();
@@ -80,4 +87,10 @@ fn main() {
     }
     // let close message get called
     std::thread::sleep(std::time::Duration::from_millis(10));
+}
+
+#[cfg(not(target_family = "unix"))]
+fn main() {
+    eprintln!("ERROR: fileops test is not supported on non-Unix platforms");
+    std::process::exit(1);
 }

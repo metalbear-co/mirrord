@@ -10,13 +10,19 @@ use std::{
     },
 };
 
+use async_pidfd::AsyncPidFd;
 use client_connection::AgentTlsConnector;
 use dns::{ClientGetAddrInfoRequest, DnsCommand};
 use futures::{TryFutureExt, future::OptionFuture};
 use metrics::{CLIENT_COUNT, start_metrics};
 use mirrord_agent_env::envs;
-use mirrord_agent_iptables::{SafeIpTables, error::IPTablesError};
-use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
+use mirrord_agent_iptables::{
+    IPTablesWrapper, SafeIpTables,
+    error::{IPTablesError, IPTablesResult},
+};
+use mirrord_protocol::{
+    ClientMessage, DaemonMessage, GetEnvVarsRequest, ResponseError, dns::ReverseDnsLookupResponse,
+};
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
     process::Command,
@@ -44,7 +50,6 @@ use crate::{
     namespace::NamespaceType,
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     runtime::{self, get_container},
-    sniffer::{api::TcpSnifferApi, messages::SnifferCommand},
     steal::{StealerCommand, TcpStealerApi},
     task::{BgTaskRuntime, RuntimeNamespace, status::BgTaskStatus},
     util::{ClientId, protocol_version::ClientProtocolVersion},
@@ -61,10 +66,16 @@ pub(crate) const IPTABLES_DIRTY_EXIT_CODE: u8 = 99;
 /// agent. The child agent performs normal agent behaviour.
 const CHILD_PROCESS_ENV: &str = "MIRRORD_AGENT_CHILD_PROCESS";
 
-/// Error message to display when dirty IP tables are detected (OSS only).
+/// Error message to display when dirty IP tables are detected.
 const DIRTY_IPTABLES_ERROR_MESSAGE: &str = "Detected dirty iptables. Either some other mirrord agent is running \
 or the previous agent failed to clean up before exit. \
 If no other mirrord agent is targeting this pod, please delete the pod. \
+To allow concurrent sessions, consider using the operator available in mirrord for Teams.";
+
+/// Warning when dirty IP tables were detected and cleaned.
+const DIRTY_IPTABLES_CLEANUP_WARNING_MESSAGE: &str = "Detected dirty iptables. Either some other mirrord agent is running \
+or the previous agent failed to clean up before exit. \
+The leftover rules were cleaned and the agent is starting. \
 To allow concurrent sessions, consider using the operator available in mirrord for Teams.";
 
 /// Keeps track of next client id.
@@ -245,7 +256,6 @@ impl<Command> Clone for BackgroundTask<Command> {
 /// Handles to background tasks used by [`ClientConnectionHandler`].
 #[derive(Clone)]
 struct BackgroundTasks {
-    sniffer: BackgroundTask<SnifferCommand>,
     stealer: BackgroundTask<StealerCommand>,
     dns: BackgroundTask<DnsCommand>,
     mirror_handle: Option<MirrorHandle>,
@@ -291,14 +301,9 @@ impl ClientConnectionHandler {
 
         let file_manager = FileManager::new(pid.or_else(|| state.ephemeral.then_some(1)));
 
-        let mut tcp_mirror_api = bg_tasks
+        let tcp_mirror_api = bg_tasks
             .mirror_handle
-            .map(|handle| TcpMirrorApi::passthrough(handle, protocol_version.clone()));
-        if tcp_mirror_api.is_none() {
-            tcp_mirror_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection)
-                .await
-                .map(TcpMirrorApi::sniffer);
-        }
+            .map(|mirror_handle| TcpMirrorApi::new(mirror_handle, protocol_version.clone()));
         let tcp_stealer_api = Self::create_stealer_api(
             id,
             protocol_version.clone(),
@@ -328,35 +333,6 @@ impl ClientConnectionHandler {
         CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
 
         Ok(client_handler)
-    }
-
-    async fn create_sniffer_api(
-        id: ClientId,
-        task: BackgroundTask<SnifferCommand>,
-        connection: &mut ClientConnection,
-    ) -> Option<TcpSnifferApi> {
-        match task {
-            BackgroundTask::Running(sniffer_status, sniffer_sender) => {
-                match TcpSnifferApi::new(id, sniffer_sender, sniffer_status).await {
-                    Ok(api) => Some(api),
-                    Err(e) => {
-                        let message = format!(
-                            "Failed to create TcpSnifferApi: {e}, this could be due to kernel version."
-                        );
-
-                        warn!(message);
-
-                        // Ignore message send error.
-                        let _ = connection
-                            .send(DaemonMessage::LogMessage(LogMessage::warn(message)))
-                            .await;
-
-                        None
-                    }
-                }
-            }
-            _ => None,
-        }
     }
 
     async fn create_stealer_api(
@@ -537,6 +513,22 @@ impl ClientConnectionHandler {
                     .make_request(ClientGetAddrInfoRequest::V2(request))
                     .await?;
             }
+            ClientMessage::ReverseDnsLookup(request) => {
+                let hostname = dns_lookup::lookup_addr(&request.ip_address).inspect_err(|error| {
+                    error!(
+                        address = ?request.ip_address,
+                        error = ?error,
+                        "Reverse DNS lookup failed",
+                    )
+                });
+
+                self.respond(DaemonMessage::ReverseDnsLookup(Ok(
+                    ReverseDnsLookupResponse {
+                        hostname: hostname.map_err(ResponseError::from),
+                    },
+                )))
+                .await?
+            }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             // Message handled exclusively by the operator, see its docs for details.
             ClientMessage::OperatorPong(_) => (),
@@ -649,6 +641,97 @@ pub async fn notify_client_about_dirty_iptables(
     Ok(())
 }
 
+/// Monitors the main container process and cancels `cancel` when it
+/// exits.
+///
+/// This not only makes for a better UX (no unused agent pods
+/// lingering), but is important for terminating redirected
+/// connections gracefully. If we don't exit as soon as the main
+/// container dies, the veth interface will be deleted while
+/// redirected connections are still open, and thus the other ends
+/// will stay open with no way to terminate them correctly.
+fn monitor_main_container(cancel: CancellationToken, pid: libc::pid_t) {
+    let fd = match AsyncPidFd::from_pid(pid) {
+        Ok(fd) => fd,
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "Failed to get the target container process descriptor",
+            );
+            return;
+        }
+    };
+
+    tokio::spawn(async move {
+        tracing::trace!("Starting watcher task for main target process");
+        match fd.wait().await {
+            Err(error) if error.raw_os_error() == Some(libc::ECHILD) => {
+                tracing::warn!(?error, "Target container process exited, shutting down");
+                cancel.cancel();
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "wait() on target container did not return expected value"
+                );
+            }
+            Ok(status) => {
+                // ExitInfo doesn't impl Debug >:(
+                tracing::warn!(
+                    siginifo = ?status.siginfo,
+                    rusage = ?status.rusage,
+                    "wait() on target container did not return expected value"
+                );
+            }
+        }
+    });
+}
+
+#[tracing::instrument(level = Level::TRACE, ret, err)]
+async fn get_rules(
+    iptables: &IPTablesWrapper,
+    ip6tables: Option<&IPTablesWrapper>,
+) -> IPTablesResult<Vec<String>> {
+    let rules_v4 = SafeIpTables::list_mirrord_rules(iptables).await?;
+    if let Some(ip6tables) = ip6tables {
+        let rules_v6 = SafeIpTables::list_mirrord_rules(ip6tables).await?;
+        Ok([rules_v4, rules_v6].concat())
+    } else {
+        Ok(rules_v4)
+    }
+}
+
+/// Get existing iptable rules created by another (potentially still running) agent.
+///
+/// If `clean_existing_rules` is set, the iptables will be cleaned after fetching the existing
+/// rules. The rules from before the cleanup will be returned for logging.
+#[tracing::instrument(level = Level::TRACE, ret, err)]
+async fn check_existing_rules(
+    support_ipv6: bool,
+    clean_existing_rules: bool,
+    with_mesh_exclusion: bool,
+) -> IPTablesResult<Vec<String>> {
+    let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
+    let iptables = mirrord_agent_iptables::get_iptables(nftables, false);
+    let ip6tables = support_ipv6.then(|| mirrord_agent_iptables::get_iptables(nftables, true));
+    let rules = get_rules(&iptables, ip6tables.as_ref()).await?;
+    if clean_existing_rules
+        && rules.is_empty().not()
+        && let Err(err) = clear_iptable_chain(support_ipv6, with_mesh_exclusion).await
+    {
+        // the error could be because we tried to remove two rules and only one of them was
+        // present to begin with, so removing the other, non-existent one failed.
+        // So we check the rules after cleaning and only fail if there are still rules.
+        let rules = get_rules(&iptables, ip6tables.as_ref()).await?;
+        if rules.is_empty().not() {
+            // There are still rules after the cleanup, the cleanup was not successful.
+            return Err(err);
+        }
+    }
+
+    Ok(rules)
+}
+
 /// Real mirrord-agent routine.
 ///
 /// Obtains the PID of the target container (if there is any),
@@ -684,51 +767,52 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 
     let state = State::new(&args).await?;
 
+    let cancellation_token = CancellationToken::new();
+
     // Check that chain names won't conflict with another agent or failed cleanup.
     // This check is only relevant if we have a target.
     // If we don't have any target, the agent should be running in a fresh network namespace,
     // and you should **not** expect that it can access iptables.
-    if state.container_pid().is_some() {
+    if let Some(target_pid) = state.container_pid() {
         let leftover_rules = state
             .network_runtime
             .handle()
-            .spawn(async move {
-                let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
-                let rules_v4 = SafeIpTables::list_mirrord_rules(
-                    &mirrord_agent_iptables::get_iptables(nftables, false),
-                )
-                .await?;
-                let rules_v6 = if args.ipv6 {
-                    SafeIpTables::list_mirrord_rules(&mirrord_agent_iptables::get_iptables(
-                        nftables, true,
-                    ))
-                    .await?
-                } else {
-                    vec![]
-                };
-
-                Ok::<_, IPTablesError>([rules_v4, rules_v6].concat())
-            })
+            .spawn(check_existing_rules(
+                args.ipv6,
+                args.clean_iptables_on_start,
+                state.is_with_mesh_exclusion(),
+            ))
             .await
             .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
             .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
 
-        if !leftover_rules.is_empty() {
-            error!(
-                leftover_rules = ?leftover_rules,
-                DIRTY_IPTABLES_ERROR_MESSAGE
-            );
-            let _ = notify_client_about_dirty_iptables(
-                listener,
-                args.communication_timeout,
-                state.tls_connector.clone(),
-            )
-            .await;
-            return Err(AgentError::IPTablesDirty);
+        if leftover_rules.is_empty().not() {
+            if args.clean_iptables_on_start {
+                warn!(
+                    leftover_rules = ?leftover_rules,
+                    "{}",
+                    DIRTY_IPTABLES_CLEANUP_WARNING_MESSAGE
+                );
+            } else {
+                error!(
+                    leftover_rules = ?leftover_rules,
+                    "{}",
+                    DIRTY_IPTABLES_ERROR_MESSAGE
+                );
+                let _ = notify_client_about_dirty_iptables(
+                    listener,
+                    args.communication_timeout,
+                    state.tls_connector.clone(),
+                )
+                .await;
+                return Err(AgentError::IPTablesDirty);
+            }
         }
-    }
 
-    let cancellation_token = CancellationToken::new();
+        // Casting u64 to i32 but linux pids shouldn't exceed 2^22
+        let pid = target_pid.try_into().unwrap();
+        monitor_main_container(cancellation_token.clone(), pid);
+    }
 
     // To make sure that background tasks are cancelled when we exit early from this function.
     let cancel_guard = cancellation_token.clone().drop_guard();
@@ -744,13 +828,6 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                 })
         });
     }
-
-    let passthrough_mirroring_enabled = envs::PASSTHROUGH_MIRRORING.from_env_or_default();
-    let sniffer = if state.container_pid().is_some() && passthrough_mirroring_enabled.not() {
-        setup::start_sniffer(&args, &state.network_runtime, cancellation_token.clone()).await
-    } else {
-        BackgroundTask::Disabled
-    };
 
     let (stealer, mirror_handle) = match state.container_pid() {
         None => (BackgroundTask::Disabled, None),
@@ -769,7 +846,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                     steal_handle,
                     cancellation_token.clone(),
                 ),
-                passthrough_mirroring_enabled.then_some(mirror_handle),
+                Some(mirror_handle),
             )
         }
     };
@@ -777,7 +854,6 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     let dns = setup::start_dns(&args, &state.network_runtime, cancellation_token.clone());
 
     let bg_tasks = BackgroundTasks {
-        sniffer,
         stealer,
         dns,
         mirror_handle,
@@ -864,10 +940,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     trace!("start_agent -> Agent shutting down, dropping cancellation token for background tasks");
     mem::drop(cancel_guard);
 
-    let (sniffer, stealer, dns) = tokio::join!(
-        bg_tasks.sniffer.wait().inspect_err(|error| {
-            error!(%error, "start_agent -> Sniffer task failed");
-        }),
+    let (stealer, dns) = tokio::join!(
         bg_tasks.stealer.wait().inspect_err(|error| {
             error!(%error, "start_agent -> Stealer task failed");
         }),
@@ -875,7 +948,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             error!(%error, "start_agent -> DNS task failed");
         }),
     );
-    debug!(?sniffer, ?stealer, ?dns, "BackgroundTasks have finished.");
+    debug!(?stealer, ?dns, "BackgroundTasks have finished.");
 
     trace!("start_agent -> Agent shutdown");
 

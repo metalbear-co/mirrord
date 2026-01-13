@@ -231,20 +231,25 @@
 //!
 //! > For users interested in getting mirrord for teams, which is a paid feature.
 //!
-//! Opens a browser window to our mirrord for teams intro page, if we fail to open it, then it
+//! Opens a browser window to our mirrord for teams intro page. If we fail to open it, then it
 //! prints a nice little message to stdout.
+//!
+//! ### `mirrord wizard [OPTIONS]`
+//!
+//! - `wizard::wizard_command`
+//!
+//! > Opens the onboarding wizard, for setting up a config file via a UI.
+//!
+//! Opens a browser window for the wizard. The wizard is served on `localhost` and has various
+//! endpoints that are accessed by the frontend. This is all gated behind the `wizard` feature.
 #![feature(try_blocks)]
+#![feature(iterator_try_collect)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
-use std::{
-    collections::{HashMap, HashSet},
-    env::vars,
-    net::SocketAddr,
-    time::Duration,
-};
+use std::{collections::HashMap, env::vars, net::SocketAddr, time::Duration};
 #[cfg(not(target_os = "windows"))]
 use std::{ffi::CString, os::unix::ffi::OsStrExt};
 #[cfg(target_os = "macos")]
@@ -268,6 +273,7 @@ use mirrord_config::{
     LayerConfig,
     config::ConfigContext,
     feature::{
+        database_branches::{DatabaseBranchConfig, RedisBranchLocation},
         fs::FsModeConfig,
         network::{
             dns::{DnsConfig, DnsFilterConfig},
@@ -303,6 +309,7 @@ mod internal_proxy;
 #[cfg(target_os = "linux")]
 mod is_static;
 mod list;
+mod local_redis;
 mod logging;
 mod newsletter;
 mod operator;
@@ -314,6 +321,9 @@ mod util;
 mod verify_config;
 mod vpn;
 mod wsl;
+
+#[cfg(feature = "wizard")]
+mod wizard;
 
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
@@ -635,63 +645,6 @@ pub(crate) fn print_config<P>(
         incoming_info
     ));
 
-    // When the http filter is set, the rules of what ports get stolen are different, so make it
-    // clear to users in that case which ports are stolen.
-    if config.feature.network.incoming.is_steal()
-        && config.feature.network.incoming.http_filter.is_filter_set()
-    {
-        let filtered_ports = config
-            .feature
-            .network
-            .incoming
-            .http_filter
-            .get_filtered_ports()
-            .unwrap_or_default();
-        let filtered_ports_str = match filtered_ports.len() {
-            0 => None,
-            1 => Some(format!(
-                "port {} (filtered)",
-                filtered_ports.first().unwrap()
-            )),
-            _ => Some(format!("ports {filtered_ports:?} (filtered)")),
-        };
-
-        // since filter ports and `incoming.ports` are not required to be disjoint, let
-        // `unfiltered_ports_str` contain `incoming.ports` - filter ports
-        let unfiltered_ports_str =
-            config
-                .feature
-                .network
-                .incoming
-                .ports
-                .as_ref()
-                .and_then(|ports| {
-                    let filtered = filtered_ports.iter().copied().collect::<HashSet<_>>();
-                    let ports: Vec<&u16> = ports.difference(&filtered).collect();
-                    match ports.len() {
-                        0 => None,
-                        1 => Some(format!("port {} (unfiltered)", ports.first().unwrap())),
-                        _ => Some(format!(
-                            "ports [{}] (unfiltered)",
-                            ports
-                                .iter()
-                                .copied()
-                                .map(|n| n.to_string())
-                                .collect::<Vec<String>>()
-                                .join(", ")
-                        )),
-                    }
-                });
-        let and = if filtered_ports_str.is_some() && unfiltered_ports_str.is_some() {
-            " and "
-        } else {
-            ""
-        };
-        let filtered_port_str = filtered_ports_str.unwrap_or_default();
-        let unfiltered_ports_str = unfiltered_ports_str.unwrap_or_default();
-        progress.info(&format!("incoming: traffic will only be stolen from {filtered_port_str}{and}{unfiltered_ports_str}"));
-    }
-
     let outgoing_info = match (
         config.feature.network.outgoing.tcp,
         config.feature.network.outgoing.udp,
@@ -727,10 +680,13 @@ pub(crate) fn print_config<P>(
         } => "remotely with exceptions",
     };
     progress.info(&format!("dns: DNS will be resolved {}", dns_info));
+
     progress.info(&format!(
         "internal proxy: logs will be written to {}",
         config.internal_proxy.log_destination.display()
     ));
+
+    progress.info(&format!("key: {}", config.key.as_str()));
 }
 
 async fn exec(
@@ -768,6 +724,37 @@ async fn exec(
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
+    let _local_redis: Option<local_redis::LocalRedis> = if let Some(redis_config) =
+        config.feature.db_branches.iter().find_map(|branch| {
+            if let DatabaseBranchConfig::Redis(redis_config) = branch
+                && redis_config.location == RedisBranchLocation::Local
+            {
+                return Some(redis_config.clone());
+            }
+            None
+        }) {
+        let port = redis_config.local.port;
+
+        // Get the override variable and build the appropriate connection string
+        if let Some(variable) = redis_config.connection.override_variable() {
+            let local_conn =
+                local_redis::build_local_connection_string(port, &redis_config.connection);
+            config
+                .feature
+                .env
+                .r#override
+                .get_or_insert_with(Default::default)
+                .insert(variable.to_string(), local_conn);
+        }
+
+        // Auto-configure: ignore localhost so traffic goes directly to local Redis
+        config.feature.network.outgoing.ignore_localhost = true;
+
+        Some(local_redis::start(progress, &redis_config.local).await?)
+    } else {
+        None
+    };
+
     let mut analytics = AnalyticsReporter::only_error(
         config.telemetry,
         Default::default(),
@@ -775,6 +762,10 @@ async fn exec(
         user_data.machine_id(),
     );
     (&config).collect_analytics(analytics.get_mut());
+
+    analytics
+        .get_mut()
+        .add("key_length", config.key.analytics_len());
 
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
@@ -908,11 +899,10 @@ async fn port_forward(
                 CliError::PortForwardingSetupError,
             ),
             AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
+            AgentConnectionError::ProtocolError(protocol_error) => protocol_error.into(),
         })?;
-    let connection_2 = connection::AgentConnection {
-        sender: agent_conn.agent_tx,
-        receiver: agent_conn.agent_rx,
-    };
+
+    let connection_2 = agent_conn.connection;
 
     progress.success(Some("Ready!"));
     let _ = tokio::try_join!(
@@ -1051,6 +1041,16 @@ fn main() -> miette::Result<()> {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
             Commands::DbBranches(args) => db_branches_command(*args).await?,
+            #[cfg(feature = "wizard")]
+            Commands::Wizard(args) => {
+                wizard::wizard_command(
+                    *args,
+                    watch,
+                    user_data,
+                    &mut ProgressTracker::from_env("wizard"),
+                )
+                .await?
+            }
         };
 
         Ok(())
@@ -1095,10 +1095,9 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
 
             let sent = client
                 .get(format!(
-                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={version}&platform={platform}&ci={is_ci}",
+                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={version}&platform={platform}",
                     version = CURRENT_VERSION,
                     platform = std::env::consts::OS,
-                    is_ci = ci_info::is_ci(),
                 ))
                 .timeout(Duration::from_secs(1))
                 .send().await?;

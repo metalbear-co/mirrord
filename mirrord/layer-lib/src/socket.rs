@@ -243,18 +243,17 @@ impl UserSocket {
     /// Closes the socket and performs necessary cleanup.
     /// If this socket was listening and bound to a port, notifies agent to stop
     /// mirroring/stealing that port by sending PortUnsubscribe.
-    pub fn close(&self) {
+    pub fn close(&self) -> HookResult<()> {
         match self {
             Self {
                 state: SocketState::Listening(bound),
                 kind: SocketKind::Tcp(..),
                 ..
-            } => {
-                let _ = make_proxy_request_no_response(PortUnsubscribe {
-                    port: bound.requested_address.port(),
-                    listening_on: bound.address,
-                });
-            }
+            } => make_proxy_request_no_response(PortUnsubscribe {
+                port: bound.requested_address.port(),
+                listening_on: bound.address,
+            })
+            .map(|_| ()),
             Self {
                 state:
                     SocketState::Connected(Connected {
@@ -262,11 +261,20 @@ impl UserSocket {
                         ..
                     }),
                 ..
-            } => {
-                let _ = make_proxy_request_no_response(OutgoingConnCloseRequest { conn_id: *id });
-            }
-            _ => {}
+            } => make_proxy_request_no_response(OutgoingConnCloseRequest { conn_id: *id })
+                .map(|_| ()),
+            _ => Ok(()),
         }
+    }
+}
+
+impl Drop for UserSocket {
+    fn drop(&mut self) {
+        let result = self.close();
+        assert!(
+            result.is_ok(),
+            "mirrord failed to send close socket message. Error: {result:?}",
+        )
     }
 }
 
