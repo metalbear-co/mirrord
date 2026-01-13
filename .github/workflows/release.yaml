@@ -126,7 +126,7 @@ jobs:
           echo "SM_CLIENT_CERT_FILE=$certPath" >> $env:GITHUB_ENV
 
       - name: Setup Software Trust Manager
-        uses: digicert/code-signing-software-trust-action@v1
+        uses: digicert/code-signing-software-trust-action@v1.0.1
         env:
           SM_HOST: https://clientauth.one.digicert.com/
           SM_API_KEY: ${{ secrets.SM_API_KEY }}
