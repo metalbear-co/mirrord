@@ -96,6 +96,12 @@ jobs:
           $env:PATH = "C:\Program Files (x86)\WiX Toolset v3.14\bin;$env:PATH"
           echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      - name: Get release version
+        id: version
+        run: |
+          $version = (Select-String -Path "Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
       - name: Build mirrord DLL and EXE
         run: |
           $ErrorActionPreference = "Stop"
@@ -181,11 +187,8 @@ jobs:
           Copy-Item "mirrord\cli\wix\mirrord.ico" "$wixDir\mirrord.ico" -Force
           Copy-Item "mirrord\cli\wix\License.rtf" "$wixDir\License.rtf" -Force
 
-          # Get version from tag
-          $version = "${{ github.ref_name }}"
-          if ($version.StartsWith("v")) {
-            $version = $version.Substring(1)
-          }
+          # Get version from step output
+          $version = "${{ steps.version.outputs.version }}"
 
           # Extract numeric version (e.g., "3.174.0-alpha" -> "3.174.0.0")
           if ($version -match '^([0-9]+\.[0-9]+\.[0-9]+)') {
@@ -206,11 +209,11 @@ jobs:
           $wxsPath = "$wixDir\main.wxs"
           $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
           $wxsContent = [System.IO.File]::ReadAllText($wxsSource, $utf8NoBom)
-          $wxsContent = $wxsContent -replace 'Version="[^"]*"', "Version=`"$msiVersion`""
+          # Replace Product Version attribute (case-sensitive to avoid XML declaration)
+          $wxsContent = $wxsContent -creplace '(<Product[^>]+Version=)"[^"]*"', "`$1`"$msiVersion`""
           [System.IO.File]::WriteAllText($wxsPath, $wxsContent, $utf8NoBom)
 
-          Write-Host "Updated WXS version to: $msiVersion"
-          Write-Host "First line of WXS: $((Get-Content $wxsPath -TotalCount 1))"
+          Write-Host "Updated WXS Product Version to: $msiVersion"
 
           # Build MSI
           $obj = "$wixDir\main.wixobj"
@@ -660,17 +663,20 @@ jobs:
           name: x86_64-pc-windows-msvc
           path: artifacts/windows
 
+      - name: Get release version
+        id: version
+        run: |
+          $version = (Select-String -Path "Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
       - name: Build and publish Chocolatey package
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          # Get version from tag
-          $version = "${{ github.ref_name }}"
-          if ($version.StartsWith("v")) {
-            $version = $version.Substring(1)
-          }
+          # Get version from step output
+          $version = "${{ steps.version.outputs.version }}"
 
           # Find the MSI file
           $msi = Get-ChildItem "artifacts/windows" -Filter "mirrord.msi" -Recurse | Select-Object -First 1
@@ -783,20 +789,23 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Get release version
+        id: version
+        run: |
+          $version = (Select-String -Path "Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
       - name: Update WinGet manifest
         env:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          # Get version from tag
-          $version = "${{ github.ref_name }}"
-          if ($version.StartsWith("v")) {
-            $version = $version.Substring(1)
-          }
+          # Get version from step output
+          $version = "${{ steps.version.outputs.version }}"
 
           # Construct MSI download URL from GitHub release
-          $installerUrl = "https://github.com/metalbear-co/mirrord/releases/download/${{ github.ref_name }}/mirrord.msi"
+          $installerUrl = "https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord.msi"
           $packageId = "MetalBear.mirrord"
 
           Write-Host "Updating WinGet manifest for package '$packageId' version '$version'"
