@@ -120,7 +120,7 @@ jobs:
           $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
           & "$ScriptsDir\start_iap_tunnel.ps1"
 
-          Write-Host "Running Integration/E2E tests..."
+          Write-Host "Running E2E tests..."
           # Note: skipping the specific test skipped in windows-build.yaml
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win --release -- --nocapture --skip test::reconnect_during_http::drop_during_response_2_false
         env:
