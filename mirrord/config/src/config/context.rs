@@ -37,9 +37,20 @@ impl ConfigContext {
     /// This override will only affect [`Self::get_env`] behavior,
     /// it will **not** change the process environment.
     pub fn override_env<K: AsRef<OsStr>, V: AsRef<OsStr>>(mut self, key: K, value: V) -> Self {
+        self.override_env_mut(key, value);
+        self
+    }
+
+    /// Adds an override for an environment variable via mutable reference.
+    ///
+    /// Like [`override_env`](Self::override_env), but takes `&mut self` instead of consuming
+    /// `self`. Useful when you only have a mutable reference to the context.
+    ///
+    /// This override will only affect [`Self::get_env`] behavior,
+    /// it will **not** change the process environment.
+    pub fn override_env_mut<K: AsRef<OsStr>, V: AsRef<OsStr>>(&mut self, key: K, value: V) {
         self.env_override
             .insert(key.as_ref().into(), value.as_ref().into());
-        self
     }
 
     /// Adds overrides for multiple environment variables.

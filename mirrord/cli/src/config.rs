@@ -15,7 +15,7 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 pub use mirrord_config::container::ContainerRuntime;
 use mirrord_config::{
-    LayerConfig,
+    LayerConfig, env_key,
     feature::env::{
         MIRRORD_OVERRIDE_ENV_FILE_ENV, MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV,
         MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV,
@@ -301,6 +301,13 @@ pub(super) struct ExecParams {
     /// These variables will override environment fetched from the remote target.
     #[arg(long, value_hint = ValueHint::FilePath)]
     pub env_file: Option<PathBuf>,
+
+    /// An identifier for this mirrord session.
+    ///
+    /// Available as the `{{ key }}` template variable in config files.
+    /// If not provided here or in the config file, a unique key is generated automatically.
+    #[arg(long)]
+    pub key: Option<String>,
 }
 
 impl ExecParams {
@@ -401,6 +408,12 @@ impl ExecParams {
             envs.insert(
                 MIRRORD_OVERRIDE_ENV_FILE_ENV.as_ref(),
                 Cow::Borrowed(env_file.as_ref()),
+            );
+        }
+        if let Some(key) = &self.key {
+            envs.insert(
+                env_key::MIRRORD_ENV_KEY.as_ref(),
+                Cow::Borrowed(key.as_ref()),
             );
         }
 

@@ -36,7 +36,7 @@ resolver = "2"
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.179.0"
+version = "3.181.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -63,6 +63,7 @@ categories = ["development-tools", "backend", "devtool"]
 
 [workspace.dependencies]
 actix-codec = "0.5"
+async-pidfd = "0.1.5"
 
 # Used by `operator`, `layer`, `console`, `protocol`, `intproxy-protocol`, `auth`.
 bincode = { version = "2", features = ["serde"] }

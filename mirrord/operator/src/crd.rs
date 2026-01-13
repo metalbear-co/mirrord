@@ -391,6 +391,14 @@ pub enum NewOperatorFeature {
     MySqlBranching,
     ExtendableUserCredentials,
     PgBranching,
+
+    /// The operator supports bypassing user license validation (skips the `user_license.verify()`).
+    ///
+    /// Useful when the `CiApiKey::V1` is being used for `mirrord ci start`, since this user's
+    /// credentials are tied to a specific operator license, and thus it breaks whenever the
+    /// operator's license gets updated (on validity extension, for example).
+    BypassCiCertificateVerification,
+
     MongodbBranching,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
@@ -419,6 +427,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::PgBranching => "PostgreSQL branching",
             NewOperatorFeature::MongodbBranching => "MongoDB branching",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
+            NewOperatorFeature::BypassCiCertificateVerification => {
+                "BypassCiCertificateVerification"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

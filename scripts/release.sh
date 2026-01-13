@@ -9,6 +9,7 @@
 #
 # Requirements:
 # - `git`
+# - `cargo-get` for querying information from a `Cargo.toml` file
 # - `cargo-set` for setting workspace package version
 # - `towncrier` for changelog generation
 #

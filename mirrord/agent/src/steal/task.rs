@@ -23,7 +23,7 @@ use super::{
 };
 use crate::{
     http::filter::HttpFilter,
-    incoming::{RedirectedHttp, RedirectorTaskError, StealHandle, StolenTraffic},
+    incoming::{RedirectedHttp, RedirectedTcp, RedirectorTaskError, StealHandle, StolenTraffic},
     util::{ChannelClosedFuture, ClientId, protocol_version::ClientProtocolVersion},
 };
 
@@ -101,23 +101,24 @@ impl TcpStealerTask {
     /// for the client to receive this traffic. Otherwise, the client will not be able to handle
     /// the traffic.
     #[tracing::instrument(level = Level::TRACE, ret)]
-    fn protocol_version_req(
+    fn protocol_version_req_tcp(
         subscription: &PortSubscription,
-        traffic: &StolenTraffic,
+        tcp: &RedirectedTcp,
     ) -> Cow<'static, semver::VersionReq> {
-        match traffic {
-            StolenTraffic::Tcp(tcp) => tcp
-                .info()
-                .tls_connector
-                .is_some()
-                .then_some(&*MODE_AGNOSTIC_HTTP_REQUESTS)
-                .map(Cow::Borrowed)
-                .unwrap_or(Cow::Owned(semver::VersionReq::STAR)),
-
-            StolenTraffic::Http(http) => Self::protocol_version_req_http(subscription, http),
-        }
+        tcp.info()
+            .tls_connector
+            .is_some()
+            .then_some(&*MODE_AGNOSTIC_HTTP_REQUESTS)
+            .map(Cow::Borrowed)
+            .unwrap_or(Cow::Owned(semver::VersionReq::STAR))
     }
 
+    /// Returns a [`semver::VersionReq`] for the given subscription and stolen traffic.
+    ///
+    /// Client's [`mirrord_protocol`] version must match the requirement
+    /// for the client to receive this traffic. Otherwise, the client will not be able to handle
+    /// the traffic.
+    #[tracing::instrument(level = Level::TRACE, ret)]
     fn protocol_version_req_http(
         subscription: &PortSubscription,
         http: &RedirectedHttp,
@@ -147,17 +148,36 @@ impl TcpStealerTask {
         subscription: &PortSubscription,
         ongoing: &mut JoinSet<RedirectedHttp>,
     ) {
-        let protocol_version_req = Self::protocol_version_req(subscription, &traffic);
+        let protocol_version_req = match &traffic {
+            StolenTraffic::Tcp { conn, .. } => Self::protocol_version_req_tcp(subscription, conn),
+            StolenTraffic::Http(http) => Self::protocol_version_req_http(subscription, http),
+        };
 
         let (filters, mut http) = match (subscription, traffic) {
             (PortSubscription::Filtered(filters), StolenTraffic::Http(http)) => (filters, http),
 
-            (PortSubscription::Filtered(..), StolenTraffic::Tcp(tcp)) => {
-                tcp.pass_through();
+            (
+                PortSubscription::Filtered(..),
+                StolenTraffic::Tcp {
+                    conn,
+                    join_handle_tx,
+                    shutdown,
+                },
+            ) => {
+                join_handle_tx.
+                    send(conn.pass_through(shutdown))
+                    .expect("RedirectorTask dropped oneshot rx for receiving JoinHandle to IO task for TCP connection");
                 return;
             }
 
-            (PortSubscription::Unfiltered(client_id), StolenTraffic::Tcp(tcp)) => {
+            (
+                PortSubscription::Unfiltered(client_id),
+                StolenTraffic::Tcp {
+                    conn,
+                    join_handle_tx,
+                    shutdown,
+                },
+            ) => {
                 let Some(client) = clients.get(client_id) else {
                     tracing::error!(
                         client_id,
@@ -165,14 +185,24 @@ impl TcpStealerTask {
                         the connection will be passed through to its original destination. \
                         This is a bug in the agent, please report it.",
                     );
-                    tcp.pass_through();
+                    join_handle_tx
+                        .send(conn.pass_through(shutdown))
+                        .expect("RedirectorTask dropped oneshot rx for receiving JoinHandle to IO task for TCP connection");
                     return;
                 };
 
                 let message = if client.protocol_version.matches(&protocol_version_req) {
-                    StealerMessage::StolenTcp(tcp.steal())
+                    let (steal_handle, join_handle) = conn.steal(shutdown);
+                    join_handle_tx
+                        .send(join_handle)
+                        .expect("RedirectorTask dropped oneshot rx for receiving JoinHandle to IO task for TCP connection");
+
+                    StealerMessage::StolenTcp(steal_handle)
                 } else {
-                    tcp.pass_through();
+                    join_handle_tx
+                        .send(conn.pass_through(shutdown))
+                        .expect("RedirectorTask dropped oneshot rx for receiving JoinHandle to IO task for TCP connection");
+
                     StealerMessage::Log(LogMessage::error(format!(
                         "A TCP connection was not stolen due to mirrord-protocol version requirement: {}",
                         protocol_version_req,

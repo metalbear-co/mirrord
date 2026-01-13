@@ -296,9 +296,7 @@ impl OperatorApi<NoClientCert> {
         R: Reporter,
         P: Progress,
     {
-        let certificate = match ci_api_key {
-            CiApiKey::V1(credentials) => credentials.as_ref(),
-        };
+        let certificate = ci_api_key.credentials().as_ref();
 
         reporter.set_operator_properties(AnalyticsOperatorProperties {
             client_hash: Some(AnalyticsHash::from_bytes(&certificate.public_key_data())),
@@ -500,7 +498,7 @@ where
             });
         }
 
-        let api_key: CiApiKey = Credentials::init_ci::<MirrordClusterOperatorUserCredential>(
+        let credentials = Credentials::init_ci::<MirrordClusterOperatorUserCredential>(
             self.client.clone(),
             &format!(
                 "mirrord-ci@{}",
@@ -512,10 +510,11 @@ where
             OperatorApiError::ClientCertError(format!(
                 "failed to create credentials for CI: {error}"
             ))
-        })?
-        .into();
+        })?;
 
-        let encoded = api_key.encode().map_err(|error| {
+        let api_key = CiApiKey::V1(credentials);
+
+        let encoded = api_key.encode_as_url_safe_string().map_err(|error| {
             OperatorApiError::ClientCertError(format!("failed to encode api key: {error}"))
         })?;
 
@@ -785,15 +784,6 @@ impl OperatorApi<PreparedClientCert> {
                         .as_str(),
                     );
                 }
-                if let Some(modified_ports) = layer_config
-                    .feature
-                    .network
-                    .incoming
-                    .add_probe_ports_to_http_filter_ports(&runtime_data.containers_probe_ports)
-                {
-                    progress.info(&format!("`network.incoming.http_filter.ports` has been set to use ports {modified_ports}."));
-                }
-
                 let stolen_probes = runtime_data
                     .containers_probe_ports
                     .iter()

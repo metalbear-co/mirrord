@@ -19,32 +19,6 @@ pub(crate) enum CiError {
     ))]
     EnvVar(&'static str, std::env::VarError),
 
-    #[error("mirrord-intproxy may be running already!")]
-    IntproxyPidAlreadyPresent,
-
-    #[error("mirrord user process may be running already!")]
-    UserPidAlreadyPresent,
-
-    #[cfg_attr(windows, allow(unused))]
-    #[error("`mirrord ci stop` could not retrieve the mirrord-intproxy pid!")]
-    #[diagnostic(help(
-        "`mirrord ci stop` reads the file `/tmp/mirrord/mirrord-for-ci-intproxy-pid` to stop \
-        the running mirrord session, and we could not retrieve this pid. You can manually stop mirrord \
-        by searching for the pid with `ps | grep mirrord` and calling `kill [pid]`."
-    ))]
-    #[cfg(not(target_os = "windows"))]
-    IntproxyPidMissing,
-
-    #[cfg_attr(windows, allow(unused))]
-    #[error("`mirrord ci stop` could not retrieve the mirrord-intproxy pid!")]
-    #[diagnostic(help(
-        "`mirrord ci stop` reads the file `/tmp/mirrord/mirrord-for-ci-intproxy-pid` to stop \
-        the running mirrord session, and we could not retrieve this pid. You can manually stop mirrord \
-        by searching for the pid with `ps | grep mirrord` and calling `kill [pid]`."
-    ))]
-    #[cfg(not(target_os = "windows"))]
-    UserPidMissing,
-
     #[cfg_attr(windows, allow(unused))]
     #[error("Failed to execute binary `{0}` with args {1:?}")]
     BinaryExecuteFailed(String, Vec<String>),
