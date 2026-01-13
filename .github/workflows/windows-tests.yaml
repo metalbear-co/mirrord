@@ -21,10 +21,7 @@ jobs:
     if: ${{ contains(github.event.pull_request.labels.*.name, 'windows-e2e') || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
     permissions:
       contents: read
-    runs-on: [self-hosted, Windows]
-    defaults:
-      run:
-        shell: pwsh
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -96,10 +93,6 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $Target = "x86_64-pc-windows-msvc"
-          rustup target add $Target
-
-          Write-Host "Building mirrord-layer-win..."
-          cargo build -p mirrord-layer-win --target $Target --release
 
           Write-Host "Building mirrord binary..."
           cargo build -p mirrord --bin mirrord --target $Target --release
