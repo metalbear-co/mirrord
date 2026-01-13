@@ -117,87 +117,8 @@ jobs:
               }
           }
 
-      - name: Start IAP Tunnel to K3s
-        run: |
-          # Ensure kubectl is available for verification
-          if (-not (Get-Command kubectl -ErrorAction SilentlyContinue)) {
-              Write-Host "Installing kubectl..."
-              choco install kubernetes-cli -y
-          }
-
-          Write-Host "Configuring gcloud..."
-          # Switch to the Compute Engine Service Account to avoid interactive auth prompts
-          gcloud config set account "174145836594-compute@developer.gserviceaccount.com"
-          gcloud config set project "mirrord"
-          gcloud config set core/disable_prompts true
-          gcloud info
-          gcloud auth list
-
-          Write-Host "Starting IAP Tunnel..."
-          $LogFile = "$env:TEMP\iap_tunnel.log"
-          $ErrFile = "$env:TEMP\iap_tunnel.err"
-          
-          # Remove --quiet to capture debug output in logs
-          $GcloudArgs = "compute start-iap-tunnel k3s-tests-1 6443 --local-host-port=127.0.0.1:6443 --zone=us-central1-a"
-          
-          # Start process efficiently with redirection (Wrapped in cmd /c because gcloud is a batch file on Windows)
-          $Process = Start-Process -FilePath "cmd.exe" -ArgumentList "/c gcloud $GcloudArgs" -NoNewWindow -PassThru -RedirectStandardOutput $LogFile -RedirectStandardError $ErrFile
-          
-          # Wait for tunnel (10s timeout)
-          for ($i=1; $i -le 5; $i++) {
-              Start-Sleep -Seconds 2
-              
-              if ($Process.HasExited) {
-                  Write-Error "Tunnel process exited prematurely (Exit Code: $($Process.ExitCode))"
-                  break
-              }
-
-              if (Test-NetConnection -ComputerName "127.0.0.1" -Port 6443 -InformationLevel Quiet) {
-                  Write-Host "Tunnel Established."
-                  break
-              }
-              Write-Host "Waiting for tunnel... ($i/5)"
-          }
-
-          if (-not (Test-NetConnection -ComputerName "127.0.0.1" -Port 6443 -InformationLevel Quiet)) {
-               Write-Error "Failed to establish IAP tunnel on port 6443."
-               
-               Write-Host "--- STDOUT ---"
-               if (Test-Path $LogFile) { Get-Content $LogFile }
-               Write-Host "--- STDERR ---"
-               if (Test-Path $ErrFile) { Get-Content $ErrFile }
-               Write-Host "--------------"
-               
-               if (-not $Process.HasExited) {
-                   Stop-Process -Id $Process.Id -Force
-               }
-               exit 1
-          }
-          
-          
-          # Verify Kubernetes API Connectivity immediately
-          Write-Host "Verifying Kubernetes API..."
-          $env:KUBECONFIG = "$env:USERPROFILE\.kube\config"
-          
-          if (-not (Test-Path $env:KUBECONFIG)) {
-              Write-Error "KUBECONFIG file not found at $env:KUBECONFIG"
-              exit 1
-          }
-          
-          $ConfigSize = (Get-Item $env:KUBECONFIG).Length
-          Write-Host "Kubeconfig found. Size: $ConfigSize bytes."
-          if ($ConfigSize -lt 10) {
-              Write-Error "Kubeconfig is empty or too small!"
-              Get-Content $env:KUBECONFIG
-              exit 1
-          }
-
-          kubectl get pods -A
-          if ($LASTEXITCODE -ne 0) {
-             Write-Error "Failed to connect to Kubernetes API via tunnel. Exit Code: $LASTEXITCODE"
-             exit 1
-          }
-          Write-Host "Kubernetes API Connection Successful."
+          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
+          & "$ScriptsDir\start_iap_tunnel.ps1"
 
       - name: Toolchain info
         run: |
@@ -533,16 +454,14 @@ jobs:
 
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win -- --skip test::reconnect_during_http::drop_during_response_2_false
 
-      - name: Verify Connection
+      - name: Verify Connection & Run Integration Tests
         run: |
-           kubectl get pods -A
-
-      - name: Run Integration Tests
-        run: |
+          # 1. Ensure/Restart Tunnel
+          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
+          & "$ScriptsDir\start_iap_tunnel.ps1"
+          
+          # 2. Run Tests
           $env:KUBECONFIG = "$env:USERPROFILE\.kube\config"
-          if (-not (Test-Path $env:KUBECONFIG)) {
-              Write-Error "KUBECONFIG not found at $env:KUBECONFIG"
-          }
           cargo test --package mirrord-tests --target x86_64-pc-windows-msvc --features job -- --nocapture
 
       ###########################################################################
