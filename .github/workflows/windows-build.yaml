@@ -27,7 +27,7 @@ on:
       runner:
         description: "Runner to use"
         type: string
-        default: "win-build-vm"
+        default: "win-build-spot-1"
 
   workflow_call:
     inputs:
@@ -52,7 +52,7 @@ on:
       runner:
         description: "Runner to use"
         type: string
-        default: "win-build-vm"
+        default: "win-build-spot-1"
 
   # pull_request: REMOVED (triggered via ci.yaml now)
 
