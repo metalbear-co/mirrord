@@ -651,6 +651,7 @@
       "type": "object"
     },
     "BodyFilter": {
+      "description": "Currently only JSON body filtering is supported.",
       "oneOf": [
         {
           "title": "feature.network.incoming.inner_filter.body_filter.json {#feature-network-incoming-inner-body-filter-json}",
@@ -1762,7 +1763,7 @@
         },
         "body_filter": {
           "title": "feature.network.incoming.http_filter.body_filter {#feature-network-incoming-http-body-filter}",
-          "description": "Matches the request based on the contents of its body. Currently only JSON body filtering is supported.",
+          "description": "Matches the request based on the contents of its body.",
           "anyOf": [
             {
               "$ref": "#/definitions/BodyFilter"

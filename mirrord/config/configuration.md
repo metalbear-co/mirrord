@@ -1903,8 +1903,102 @@ Example:
 
 ##### feature.network.incoming.http_filter.body_filter {#feature-network-incoming-http-body-filter}
 
-Matches the request based on the contents of its body. Currently only JSON body filtering
-is supported.
+Matches the request based on the contents of its body.
+
+Currently only JSON body filtering is supported.
+
+##### feature.network.incoming.inner_filter.body_filter.json {#feature-network-incoming-inner-body-filter-json}
+
+Tries to parse the body as a JSON object and find (a) matching subobjects(s).
+
+`query` should be a valid JSONPath (RFC 9535) query string.
+`matches` should be a regex. Supports regexes validated by the
+[`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate
+
+Example:
+```json
+"http_filter": {
+  "body_filter": {
+    "body": "json",
+    "query": "$.library.books[*]",
+    "matches": "^\\d{3,5}$"
+  }
+}
+```
+will match
+```json
+{
+  "library": {
+    "books": [
+      34555,
+      1233,
+      234
+      23432
+    ]
+  }
+}
+```
+
+The filter will match if there is at least one query result.
+
+Non-string matches are stringified before being compared to
+the regex. To filter query results by type, the `typeof`
+[function extension](https://www.rfc-editor.org/rfc/rfc9535.html#name-function-extensions)
+is provided. It takes in a single `NodesType` parameter and
+returns `"null" | "bool" | "number" | "string" | "array" | "object"`,
+depending on the type of the argument. If not all nodes in the
+argument have the same type, it returns `nothing`.
+
+Example:
+
+```json
+"body_filter": {
+  "body": "json",
+  "query": "$.books[?(typeof(@) == 'number')]",
+  "matches": "4$"
+}
+```
+will match
+
+```json
+{
+  "books": [
+    1111,
+    2222,
+    4444
+  ]
+}
+```
+
+but not
+
+```json
+{
+  "books": [
+    "1111",
+    "2222",
+    "4444"
+  ]
+}
+```
+
+
+
+To use with with `all_of` or `any_of`, use the following syntax:
+```json
+"http_filter": {
+  "all_of": [
+    {
+      "path": "/buildings"
+    },
+    {
+      "body": "json",
+      "query": "$.library.books[*]",
+      "matches": "^\\d{3,5}$"
+    }
+  ]
+}
+```
 
 ##### feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}
 
