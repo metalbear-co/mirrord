@@ -581,7 +581,8 @@ fn get_platform_errno(fail: HookError) -> u32 {
         HookError::AddrInfoError(_) => WSAEFAULT,
         HookError::SendToError(_) => WSAEFAULT,
         HookError::HostnameResolveError(_) => WSAEFAULT,
-        HookError::Bypass(_) => todo!(),
+        // Note: temporary mapping, will be removed once Detour is migrated to windows
+        HookError::Bypass(_) => WSAEPROTONOSUPPORT,
     }
 }
 
