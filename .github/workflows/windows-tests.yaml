@@ -21,10 +21,6 @@ jobs:
     if: ${{ contains(github.event.pull_request.labels.*.name, 'windows-e2e') || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
     permissions:
       contents: read
-    runs-on: [self-hosted, Windows]
-    defaults:
-      run:
-        shell: pwsh
 
     steps:
       - name: Checkout
@@ -36,8 +32,6 @@ jobs:
       - name: Verify Kubeconfig (Existing)
         run: |
            $KubePath = "$env:USERPROFILE\.kube\config"
-           
-           # ... (keeping context lines correct)
            Write-Host "Checking for existing Kubeconfig at: $KubePath"
            
            if (-not (Test-Path $KubePath)) {
@@ -96,8 +90,6 @@ jobs:
           py -3 -m pip install --upgrade flask uvicorn fastapi
 
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
-
-      - name: Build (Release)
         run: |
           $ErrorActionPreference = "Stop"
           $Target = "x86_64-pc-windows-msvc"
