@@ -1538,7 +1538,7 @@ mod test {
         // Assert intproxy closes the connection.
         //
         // `read_to_end` reads until EOF, which is the *graceful*
-        // termination by of TCP connection by peer (a.k.a intproxy).
+        // termination of TCP connection by peer (a.k.a intproxy).
         // Note that the connection may terminate before we're able to
         // read the entire request (and often before we're able to
         // read a single byte), so we're only checking whatever we
