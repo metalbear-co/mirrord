@@ -118,54 +118,54 @@ jobs:
           # Save paths for next steps
           echo "MIRRORD_DLL=$dll" >> $env:GITHUB_ENV
           echo "MIRRORD_EXE=$exe" >> $env:GITHUB_ENV
-      - name: Setup SM_CLIENT_CERT_FILE from base64 secret data
-        run: |
-          $certPath = Join-Path $env:RUNNER_TEMP "sm_client_cert.p12"
-          $certBytes = [System.Convert]::FromBase64String("${{ secrets.SM_CLIENT_CERT_FILE_B64 }}")
-          [System.IO.File]::WriteAllBytes($certPath, $certBytes)
-          echo "SM_CLIENT_CERT_FILE=$certPath" >> $env:GITHUB_ENV
+      # - name: Setup SM_CLIENT_CERT_FILE from base64 secret data
+      #   run: |
+      #     $certPath = Join-Path $env:RUNNER_TEMP "sm_client_cert.p12"
+      #     $certBytes = [System.Convert]::FromBase64String("${{ secrets.SM_CLIENT_CERT_FILE_B64 }}")
+      #     [System.IO.File]::WriteAllBytes($certPath, $certBytes)
+      #     echo "SM_CLIENT_CERT_FILE=$certPath" >> $env:GITHUB_ENV
 
-      - name: Setup Software Trust Manager
-        uses: digicert/code-signing-software-trust-action@v1.0.1
-        env:
-          SM_HOST: https://clientauth.one.digicert.com/
-          SM_API_KEY: ${{ secrets.SM_API_KEY }}
-          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+      # - name: Setup Software Trust Manager
+      #   uses: digicert/code-signing-software-trust-action@v1.0.1
+      #   env:
+      #     SM_HOST: https://clientauth.one.digicert.com/
+      #     SM_API_KEY: ${{ secrets.SM_API_KEY }}
+      #     SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
 
-      - name: Sign DLL and EXE
-        env:
-          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.SM_KEYPAIR_ALIAS }}
-          SM_HOST: https://clientauth.one.digicert.com/
-          SM_API_KEY: ${{ secrets.SM_API_KEY }}
-          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          $Arch = ($env:RUNNER_ARCH).ToLower()
-          $SearchBase = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+      # - name: Sign DLL and EXE
+      #   env:
+      #     DIGICERT_KEYPAIR_ALIAS: ${{ secrets.SM_KEYPAIR_ALIAS }}
+      #     SM_HOST: https://clientauth.one.digicert.com/
+      #     SM_API_KEY: ${{ secrets.SM_API_KEY }}
+      #     SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+      #   run: |
+      #     $ErrorActionPreference = "Stop"
+      #     $Arch = ($env:RUNNER_ARCH).ToLower()
+      #     $SearchBase = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
 
-          "Searching `"$SearchBase`" for signtool ($Arch)..."
-          $Tool = Get-ChildItem $SearchBase -Recurse -Force -ErrorAction SilentlyContinue |
-              Where-Object {$_.Name -eq 'signtool.exe' -and $_.Directory -like "*\$Arch"} |
-              Sort-Object -Descending |
-              Select-Object -First 1
+      #     "Searching `"$SearchBase`" for signtool ($Arch)..."
+      #     $Tool = Get-ChildItem $SearchBase -Recurse -Force -ErrorAction SilentlyContinue |
+      #         Where-Object {$_.Name -eq 'signtool.exe' -and $_.Directory -like "*\$Arch"} |
+      #         Sort-Object -Descending |
+      #         Select-Object -First 1
 
-          if (!($Tool)) {throw [System.IO.FileNotFoundException]::new('File not found.', 'signtool.exe')}
+      #     if (!($Tool)) {throw [System.IO.FileNotFoundException]::new('File not found.', 'signtool.exe')}
 
-          'Adding signtool to PATH'
-          $Tool.Directory.FullName | Out-File $env:GITHUB_PATH -Append
-          "signtool-$Arch=$($Tool.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
-          $env:PATH = "$($Tool.Directory.FullName);$env:PATH"
+      #     'Adding signtool to PATH'
+      #     $Tool.Directory.FullName | Out-File $env:GITHUB_PATH -Append
+      #     "signtool-$Arch=$($Tool.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
+      #     $env:PATH = "$($Tool.Directory.FullName);$env:PATH"
 
-          echo "PATH=$PATH" >> $env:GITHUB_ENV
+      #     echo "PATH=$PATH" >> $env:GITHUB_ENV
 
-          # Sign using DigiCert smctl
-          smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
-            --input="$env:MIRRORD_DLL" `
-            --verbose --exit-non-zero-on-fail
+      #     # Sign using DigiCert smctl
+      #     smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
+      #       --input="$env:MIRRORD_DLL" `
+      #       --verbose --exit-non-zero-on-fail
 
-          smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
-            --input="$env:MIRRORD_EXE" `
-            --verbose --exit-non-zero-on-fail
+      #     smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
+      #       --input="$env:MIRRORD_EXE" `
+      #       --verbose --exit-non-zero-on-fail
 
       - name: Build MSI
         run: |
@@ -175,12 +175,11 @@ jobs:
           $wixDir = "$env:RUNNER_TEMP\wix"
           New-Item -ItemType Directory -Force -Path $wixDir | Out-Null
 
-          # Copy files needed for MSI
+          # Copy binary files
           Copy-Item $env:MIRRORD_EXE "$wixDir\mirrord.exe" -Force
           Copy-Item $env:MIRRORD_DLL "$wixDir\mirrord_layer_win.dll" -Force
           Copy-Item "mirrord\cli\wix\mirrord.ico" "$wixDir\mirrord.ico" -Force
           Copy-Item "mirrord\cli\wix\License.rtf" "$wixDir\License.rtf" -Force
-          Copy-Item "mirrord\cli\wix\main.wxs" "$wixDir\main.wxs" -Force
 
           # Get version from tag
           $version = "${{ github.ref_name }}"
@@ -202,12 +201,16 @@ jobs:
           }
           $msiVersion = ($parts[0..3] -join '.')
 
-          # Update version in WXS file
+          # Read WXS file directly and write with updated version (avoid Copy-Item encoding issues)
+          $wxsSource = "mirrord\cli\wix\main.wxs"
           $wxsPath = "$wixDir\main.wxs"
           $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-          $wxsContent = [System.IO.File]::ReadAllText($wxsPath, $utf8NoBom)
+          $wxsContent = [System.IO.File]::ReadAllText($wxsSource, $utf8NoBom)
           $wxsContent = $wxsContent -replace 'Version="[^"]*"', "Version=`"$msiVersion`""
           [System.IO.File]::WriteAllText($wxsPath, $wxsContent, $utf8NoBom)
+
+          Write-Host "Updated WXS version to: $msiVersion"
+          Write-Host "First line of WXS: $((Get-Content $wxsPath -TotalCount 1))"
 
           # Build MSI
           $obj = "$wixDir\main.wixobj"
