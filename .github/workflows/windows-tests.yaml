@@ -1,6 +1,7 @@
-name: Windows E2E Tests
+name: E2E Tests
 
 on:
+  workflow_call:
   pull_request:
     types: [labeled]
   workflow_dispatch:
@@ -13,7 +14,7 @@ env:
 
 jobs:
   windows_e2e:
-    if: contains(github.event.pull_request.labels.*.name, 'windows-e2e')
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'windows-e2e') || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
     runs-on: win-build-spot-1
     defaults:
       run:
