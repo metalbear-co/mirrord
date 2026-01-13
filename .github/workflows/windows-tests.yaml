@@ -21,7 +21,7 @@ jobs:
     if: ${{ contains(github.event.pull_request.labels.*.name, 'windows-e2e') || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
     permissions:
       contents: read
-    runs-on: win-build-spot-1
+    runs-on: [self-hosted, Windows]
     defaults:
       run:
         shell: pwsh

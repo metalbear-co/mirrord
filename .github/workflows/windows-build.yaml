@@ -27,7 +27,7 @@ on:
       runner:
         description: "Runner to use"
         type: string
-        default: "win-build-spot-1"
+        default: "[self-hosted, Windows]"
 
   workflow_call:
     inputs:
@@ -52,7 +52,7 @@ on:
       runner:
         description: "Runner to use"
         type: string
-        default: "win-build-spot-1"
+        default: "[self-hosted, Windows]"
 
   # pull_request: REMOVED (triggered via ci.yaml now)
 
@@ -72,7 +72,7 @@ jobs:
       contents: write
       actions: read
       checks: write
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner || '[self-hosted, Windows]' }}
     defaults:
       run:
         shell: pwsh
