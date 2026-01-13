@@ -1,8 +1,12 @@
 use std::fmt;
 
 use futures::StreamExt;
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
 use tokio_stream::{StreamMap, StreamNotifyClose, wrappers::ReceiverStream};
+use tokio_util::sync::CancellationToken;
 
 use super::{
     connection::{ConnectionInfo, http::RedirectedHttp, tcp::RedirectedTcp},
@@ -90,14 +94,22 @@ impl StealHandle {
 
 #[derive(Debug)]
 pub enum StolenTraffic {
-    Tcp(RedirectedTcp),
+    Tcp {
+        conn: RedirectedTcp,
+        /// Used for returning the [`JoinHandle`] to the spawned IO
+        /// task so [`RedirectorTask`](super::RedirectorTask) can join it before flushing
+        /// iptables.
+        join_handle_tx: oneshot::Sender<JoinHandle<()>>,
+        /// Used for gracefully shutting down the IO task.
+        shutdown: CancellationToken,
+    },
     Http(RedirectedHttp),
 }
 
 impl StolenTraffic {
     pub fn info(&self) -> &ConnectionInfo {
         match self {
-            StolenTraffic::Tcp(conn) => conn.info(),
+            StolenTraffic::Tcp { conn, .. } => conn.info(),
             StolenTraffic::Http(conn) => conn.info(),
         }
     }

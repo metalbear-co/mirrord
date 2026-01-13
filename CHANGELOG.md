@@ -8,6 +8,97 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.181.0](https://github.com/metalbear-co/mirrord/tree/3.181.0) - 2026-01-12
+
+
+### Removed
+
+- Removed traffic mirroring implementation based on packet sniffing, along with
+  related configuration options.
+
+
+### Added
+
+- Control agent repository/tag via env vars
+  [#3843](https://github.com/metalbear-co/mirrord/issues/3843)
+- Added new operator feature that allows bypassing user credential verification
+  when running mirrord ci start.
+
+
+### Changed
+
+- Allows `mirrord ci start` to be run multiple times (now you can start
+  multiple mirrord ci sessions), and `mirrord ci stop` will stop every session.
+- Unified `http_filter.ports` and `incoming.ports` behavior and made it more
+  intuitive. Now, ports will be stolen unfiltered/not stolen when
+  `http_filter.ports`/`incoming.ports` is set AND the port in question is not
+  in the list.
+
+
+### Fixed
+
+- Connections redirected by the agent will now correctly terminate when the
+  target pod is killed
+- Ports will now be unsubscribed only when `close.2` has been called on all
+  handles referring to the matching socket.
+
+
+### Internal
+
+- Don't force install existing software on Windows CI
+- Don't run Windows e2e on CI
+- Run UT/IT for Windows in CI
+- Temporarily ignore `RUSTSEC-2025-0141` advisory until we migrate to a
+  `bincode` alternative.
+- mirrord sessions can now be identified by a "key", which can be provided by
+  the user in the config/cli or auto-generated. It can be used in the config's
+  templating engine as `{{ key }}`.
+- Agent dockerfile will now use sccache for the host architecture instead of
+  the target architecture
+
+## [3.180.0](https://github.com/metalbear-co/mirrord/tree/3.180.0) - 2026-01-06
+
+
+### Added
+
+- Add support local redis in db branches.
+- Added an experimental configuration for logging all Apple variables before
+  process start.
+- Support for limiting outgoing connections from mirrord sessions using a
+  kubernetes policy has been added to the operator.
+
+
+### Changed
+
+- Changed `experimental.force_hook_connect` default value to `true`.
+- Changed changelog instructions
+- Make file not found logs more detailed
+
+
+### Fixed
+
+- Fixed file not found Windows build regression
+- iptables cleanup would fail if some rules were already deleted.
+
+
+### Internal
+
+- CLI and Intproxy now queue and (almost) fairly schedule agent-bound messages.
+  Intproxy now also has proper flow control when receiving network traffic from
+  user apps.
+- Change from Prepare artifacts to build artifacts
+- Improve CI build times with cache
+- Improvements to the `outgoing_udp` test to make it less flaky.
+- JSONPath queries for JSON body filters are now also validated client-side, in
+  the CLI.
+- Move is_ci analytics reporting to analytics crate (and add it when building
+  the AnalyticsReporter).
+- New E2E test that verifies that when the cleanup on start setting is enabled,
+  the session is successful even when there are leftover rules on the target
+  pod.
+- Releases fix for windows builds
+- This PR allows to trigger Windows build after a successful linux release.
+
 ## [3.179.0](https://github.com/metalbear-co/mirrord/tree/3.179.0) - 2025-12-24
 
 

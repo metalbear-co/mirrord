@@ -11,37 +11,33 @@ use crate::config::{
     source::MirrordConfigSource,
 };
 
+/// Linux capabilities used by the mirrord-agent container.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum LinuxCapability {
     SysAdmin,
     SysPtrace,
-    NetRaw,
     NetAdmin,
 }
 
 impl LinuxCapability {
     /// All capabilities that can be used by the agent.
     pub fn all() -> &'static [Self] {
-        &[
-            Self::SysAdmin,
-            Self::SysPtrace,
-            Self::NetRaw,
-            Self::NetAdmin,
-        ]
+        &[Self::SysAdmin, Self::SysPtrace, Self::NetAdmin]
+    }
+
+    pub fn as_spec_str(self) -> &'static str {
+        match self {
+            Self::SysAdmin => "SYS_ADMIN",
+            Self::SysPtrace => "SYS_PTRACE",
+            Self::NetAdmin => "NET_ADMIN",
+        }
     }
 }
 
 impl fmt::Display for LinuxCapability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let as_str = match self {
-            Self::SysAdmin => "SYS_ADMIN",
-            Self::SysPtrace => "SYS_PTRACE",
-            Self::NetRaw => "NET_RAW",
-            Self::NetAdmin => "NET_ADMIN",
-        };
-
-        f.write_str(as_str)
+        f.write_str(self.as_spec_str())
     }
 }
 
@@ -65,7 +61,6 @@ impl fmt::Display for LinuxCapability {
 ///     "ephemeral": false,
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
-///     "network_interface": "eth0",
 ///     "flush_connections": false,
 ///     "exclude_from_mesh": false
 ///     "inject_headers": false,
@@ -149,6 +144,10 @@ pub struct AgentConfig {
     ///   }
     /// }
     /// ```
+    ///
+    /// Can also be controlled via `MIRRORD_AGENT_IMAGE`, `MIRRORD_AGENT_IMAGE_REGISTRY`, and
+    /// `MIRRORD_AGENT_IMAGE_TAG`. `MIRRORD_AGENT_IMAGE` takes precedence, followed by config
+    /// values for registry/tag, then environment variables for registry/tag.
     #[config(nested)]
     pub image: AgentImageConfig,
 
@@ -223,22 +222,6 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_STARTUP_TIMEOUT", default = 60)]
     pub startup_timeout: u64,
 
-    /// ### agent.network_interface {#agent-network_interface}
-    ///
-    /// Which network interface to use for mirroring.
-    ///
-    /// The default behavior is try to access the internet and use that interface. If that fails
-    /// it uses `eth0`.
-    ///
-    /// DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
-    /// and will be removed in the future. This field will be removed, and the agent will always
-    /// use iptables redirects for mirroring traffic.
-    #[config(
-        env = "MIRRORD_AGENT_NETWORK_INTERFACE",
-        deprecated = "agent.network_interface is deprecated and will be removed when the raw-socket-based mirroring implementation is retired"
-    )]
-    pub network_interface: Option<String>,
-
     /// ### agent.flush_connections {#agent-flush_connections}
     ///
     /// Flushes existing connections when starting to steal, might fix issues where connections
@@ -257,13 +240,12 @@ pub struct AgentConfig {
     ///
     /// If nothing is disabled here, agent uses:
     /// 1. `NET_ADMIN`,
-    /// 2. `NET_RAW` (unless `passthrough_mirroring` is enabled),
-    /// 3. `SYS_PTRACE`,
-    /// 4. `SYS_ADMIN`.
+    /// 2. `SYS_PTRACE`,
+    /// 3. `SYS_ADMIN`.
     ///
     /// Has no effect when using the targetless mode,
     /// as targetless agent containers have no capabilities.
-    pub disabled_capabilities: Option<Vec<LinuxCapability>>,
+    pub disabled_capabilities: Option<Vec<String>>,
 
     /// ### agent.tolerations {#agent-tolerations}
     ///
@@ -445,26 +427,6 @@ pub struct AgentConfig {
     /// to other workloads.
     pub priority_class: Option<String>,
 
-    /// ### agent.passthrough_mirroring {#agent-passthrough_mirroring}
-    ///
-    /// Enables an implementation of traffic mirroring based on iptables redirects.
-    ///
-    /// When used with `agent.flush_connections`, it might fix issues
-    /// with mirroring non HTTP/1 traffic.
-    ///
-    /// When this is set, `network_interface` setting is ignored.
-    ///
-    /// Defaults to true.
-    ///
-    /// DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
-    /// and will be removed in the future. This field will be removed, and the agent will always
-    /// use iptables redirects for mirroring traffic.
-    #[config(
-        default = true,
-        deprecated = "agent.passthrough_mirroring is deprecated and will be removed when the raw-socket-based mirroring implementation is retired"
-    )]
-    pub passthrough_mirroring: bool,
-
     /// ### agent.inject_headers {#agent-inject_headers}
     ///
     /// Sets whether `Mirrord-Agent` headers are injected into HTTP
@@ -583,20 +545,29 @@ impl MirrordConfig for AgentImageFileConfig {
     /// Generates the [`AgentImageConfig`] from the `agent.image` config, or the
     /// `MIRRORD_AGENT_IMAGE` env var.
     fn generate_config(self, context: &mut ConfigContext) -> config::Result<Self::Generated> {
+        let env_registry = FromEnv::new("MIRRORD_AGENT_IMAGE_REGISTRY")
+            .source_value(context)
+            .transpose()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| DEFAULT_AGENT_IMAGE_REGISTRY.to_string());
+
+        let env_tag = FromEnv::new("MIRRORD_AGENT_IMAGE_TAG")
+            .source_value(context)
+            .transpose()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+
         let agent_image = match self {
             AgentImageFileConfig::Simple(registry_and_tag) => {
-                registry_and_tag.unwrap_or_else(|| {
-                    format!(
-                        "{DEFAULT_AGENT_IMAGE_REGISTRY}:{}",
-                        env!("CARGO_PKG_VERSION")
-                    )
-                })
+                registry_and_tag.unwrap_or_else(|| format!("{env_registry}:{env_tag}"))
             }
             AgentImageFileConfig::Advanced { registry, tag } => {
                 format!(
                     "{}:{}",
-                    registry.unwrap_or_else(|| DEFAULT_AGENT_IMAGE_REGISTRY.to_string()),
-                    tag.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
+                    registry.unwrap_or(env_registry),
+                    tag.unwrap_or(env_tag)
                 )
             }
         };
