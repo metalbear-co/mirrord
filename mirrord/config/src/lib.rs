@@ -432,7 +432,7 @@ pub struct LayerConfig {
     /// OpenTelemetry (OTel) / W3C trace context.
     /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
     #[config(env = "TRACEPARENT")]
-    pub traceparnet: Option<String>,
+    pub traceparent: Option<String>,
 
     /// ## baggage {#root-baggage}
     ///
@@ -1214,7 +1214,7 @@ mod tests {
             skip_sip: None,
             startup_retry: None,
             ci: None,
-            traceparnet: None,
+            traceparent: None,
             baggage: None,
         };
 

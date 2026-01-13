@@ -776,7 +776,7 @@ impl OperatorApi<PreparedClientCert> {
             let session = self.make_operator_session(
                 id,
                 connect_url,
-                layer_config.traceparnet.clone(),
+                layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
             )?;
 
@@ -839,7 +839,7 @@ impl OperatorApi<PreparedClientCert> {
             let session = self.make_operator_session(
                 None,
                 connect_url,
-                layer_config.traceparnet.clone(),
+                layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
             )?;
 
@@ -876,7 +876,7 @@ impl OperatorApi<PreparedClientCert> {
                 let session = self.make_operator_session(
                     session_id,
                     connect_url,
-                    layer_config.traceparnet.clone(),
+                    layer_config.traceparent.clone(),
                     layer_config.baggage.clone(),
                 )?;
 
