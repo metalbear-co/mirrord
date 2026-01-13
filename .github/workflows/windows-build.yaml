@@ -129,6 +129,19 @@ jobs:
           cargo -V
           rustup show
 
+      - name: Lint
+        id: lint
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Target = "x86_64-pc-windows-msvc"
+
+          rustup target add $Target
+          # create dummy mirrord
+          New-Item -ItemType File -Force -Path "target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll" -Value "content"
+
+          cargo fmt --all -- --check
+          cargo clippy --target $Target
+
       ###########################################################################
       # PREPARE ARTIFACTS
       ###########################################################################
