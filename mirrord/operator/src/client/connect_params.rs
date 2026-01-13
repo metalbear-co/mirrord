@@ -155,10 +155,7 @@ mod feature_config_serde {
     use serde::Serializer;
 
     /// Serialize feature_config - it's already a JSON string, so we just pass it through.
-    pub fn serialize<S>(
-        feature_config: &Option<String>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(feature_config: &Option<String>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {

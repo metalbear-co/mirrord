@@ -89,7 +89,7 @@ pub enum OperatorApiError {
 
     #[error("operation timed out: {}", operation)]
     OperationTimeout { operation: OperatorOperation },
-    
+
     #[error(transparent)]
     InvalidBackoff(#[from] InvalidBackoff),
 
