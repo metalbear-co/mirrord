@@ -73,9 +73,6 @@ jobs:
       actions: read
       checks: write
     runs-on: ${{ inputs.runner || '[self-hosted, Windows]' }}
-    defaults:
-      run:
-        shell: pwsh
     env:
 
       RELEASE_TAG_INPUT: ${{ inputs.release_tag || '' }}
