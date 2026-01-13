@@ -118,44 +118,26 @@ jobs:
           # Save paths for next steps
           echo "MIRRORD_DLL=$dll" >> $env:GITHUB_ENV
           echo "MIRRORD_EXE=$exe" >> $env:GITHUB_ENV
-
-      - name: Setup DigiCert signing
-        env:
-          DIGICERT_CLIENT_CERT_PFX_B64: ${{ secrets.DIGICERT_CLIENT_CERT_PFX_B64 }}
-          DIGICERT_CLIENT_CERT_PASSWORD: ${{ secrets.DIGICERT_CLIENT_CERT_PASSWORD }}
-          DIGICERT_API_KEY: ${{ secrets.DIGICERT_API_KEY }}
-          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
+      - name: Setup SM_CLIENT_CERT_FILE from base64 secret data
         run: |
-          $ErrorActionPreference = "Stop"
+          $certPath = Join-Path $env:RUNNER_TEMP "sm_client_cert.p12"
+          $certBytes = [System.Convert]::FromBase64String("${{ secrets.SM_CLIENT_CERT_FILE_B64 }}")
+          [System.IO.File]::WriteAllBytes($certPath, $certBytes)
+          echo "SM_CLIENT_CERT_FILE=$certPath" >> $env:GITHUB_ENV
 
-          # Install DigiCert client certificate
-          $pfxBytes = [System.Convert]::FromBase64String($env:DIGICERT_CLIENT_CERT_PFX_B64)
-          $pfxPath = Join-Path $env:RUNNER_TEMP "digicert_client.pfx"
-          [System.IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
-
-          # Import certificate to CurrentUser store
-          $certPassword = ConvertTo-SecureString -String $env:DIGICERT_CLIENT_CERT_PASSWORD -Force -AsPlainText
-          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $certPassword
-          Remove-Item $pfxPath
-
-          # Install DigiCert Secure Software Manager (smctl)
-          $smctlUrl = "https://one.digicert.com/signingmanager/api-ui/v1/releases/smtools-windows-x64.msi/download"
-          $smctlInstaller = Join-Path $env:RUNNER_TEMP "smtools-windows-x64.msi"
-
-          Invoke-WebRequest -Uri $smctlUrl -OutFile $smctlInstaller
-          Start-Process msiexec.exe -Wait -ArgumentList "/i `"$smctlInstaller`" /quiet /qn"
-
-          # Add smctl to PATH
-          $env:PATH = "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools;$env:PATH"
-          echo "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-          # Configure smctl
-          & smctl windows certsync
+      - name: Setup Software Trust Manager
+        uses: digicert/code-signing-software-trust-action@v1
+        env:
+          SM_HOST: https://clientauth.one.digicert.com/
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
 
       - name: Sign DLL and EXE
         env:
-          DIGICERT_API_KEY: ${{ secrets.DIGICERT_API_KEY }}
-          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
+          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.SM_KEYPAIR_ALIAS }}
+          SM_HOST: https://clientauth.one.digicert.com/
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -228,7 +210,7 @@ jobs:
       - name: Sign MSI
         env:
           DIGICERT_API_KEY: ${{ secrets.DIGICERT_API_KEY }}
-          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
+          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.SM_KEYPAIR_ALIAS }}
         run: |
           $ErrorActionPreference = "Stop"
 
