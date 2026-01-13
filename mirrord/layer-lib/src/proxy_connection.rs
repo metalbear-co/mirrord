@@ -5,7 +5,7 @@ use std::{
     fmt::Debug,
     net::{SocketAddr, TcpStream},
     sync::{
-        Mutex,
+        Mutex, OnceLock,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
@@ -20,7 +20,7 @@ use mirrord_intproxy_protocol::{
 use crate::error::{HookError, HookResult, ProxyError, ProxyResult};
 
 /// Global proxy connection instance, shared across the layer
-pub static PROXY_CONNECTION: std::sync::OnceLock<ProxyConnection> = std::sync::OnceLock::new();
+pub static PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
 
 #[derive(Debug)]
 pub struct ProxyConnection {
@@ -162,13 +162,11 @@ where
 {
     // SAFETY: mutation happens only on initialization.
     #[allow(static_mut_refs)]
-    unsafe {
-        PROXY_CONNECTION
-            .get()
-            .ok_or(HookError::CannotGetProxyConnection)?
-            .make_request_with_response(request)
-            .map_err(Into::into)
-    }
+    PROXY_CONNECTION
+        .get()
+        .ok_or(HookError::CannotGetProxyConnection)?
+        .make_request_with_response(request)
+        .map_err(Into::into)
 }
 
 /// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
@@ -178,11 +176,9 @@ pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
 ) -> HookResult<MessageId> {
     // SAFETY: mutation happens only on initialization.
     #[allow(static_mut_refs)]
-    unsafe {
-        PROXY_CONNECTION
-            .get()
-            .ok_or(HookError::CannotGetProxyConnection)?
-            .make_request_no_response(request)
-            .map_err(Into::into)
-    }
+    PROXY_CONNECTION
+        .get()
+        .ok_or(HookError::CannotGetProxyConnection)?
+        .make_request_no_response(request)
+        .map_err(Into::into)
 }
