@@ -2232,8 +2232,6 @@ unsafe extern "system" fn sendto_detour(
 /// Socket management detour for closesocket() - closes a socket
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
-    // Get socket info BEFORE closing to send PortUnsubscribe if needed
-    let _socket_info = get_socket(s);
 
     let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();
     let res = unsafe { original(s) };
