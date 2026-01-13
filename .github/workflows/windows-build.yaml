@@ -56,7 +56,8 @@ on:
 
   # pull_request: REMOVED (triggered via ci.yaml now)
 
-# permissions: contents: write - REMOVED to allow inheritance (Read in CI, Write in Release)
+permissions:
+  contents: write
 
 env:
   RUST_BACKTRACE: "1"
