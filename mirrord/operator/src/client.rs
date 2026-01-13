@@ -1069,6 +1069,7 @@ impl OperatorApi<PreparedClientCert> {
     }
 
     /// Produces the URL for making a copied target connection request to the operator.
+    #[allow(clippy::too_many_arguments)]
     fn copy_target_connect_url(
         crd: &CopyTargetCrd,
         use_proxy: bool,
