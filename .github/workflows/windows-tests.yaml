@@ -21,13 +21,18 @@ jobs:
     if: ${{ contains(github.event.pull_request.labels.*.name, 'windows-e2e') || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
     permissions:
       contents: read
-
+    runs-on: [self-hosted, Windows]
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
+
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
 
       - name: Verify Kubeconfig (Existing)
         run: |
@@ -93,6 +98,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $Target = "x86_64-pc-windows-msvc"
+
 
           Write-Host "Building mirrord binary..."
           cargo build -p mirrord --bin mirrord --target $Target --release
