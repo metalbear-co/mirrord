@@ -16,7 +16,9 @@ use std::{
 
 #[cfg(target_os = "macos")]
 use libc::c_char;
-use mirrord_layer_lib::detour::Bypass;
+
+// Re-exporting until detour will move entirely to layer-lib
+pub use mirrord_layer_lib::detour::{Bypass, DetourGuard};
 
 use crate::error::HookError;
 
