@@ -117,17 +117,17 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
         let Ok(Some(db)) = result else {
             continue;
         };
-        if let Some(status) = &db.status {
-            if status.phase == BranchDatabasePhaseMysql::Failed {
-                let error_msg = status
-                    .error
-                    .clone()
-                    .unwrap_or_else(|| "Branch database creation failed".to_string());
-                return Err(OperatorApiError::BranchCreationFailed {
-                    operation: OperatorOperation::MysqlBranching,
-                    message: error_msg,
-                });
-            }
+        if let Some(status) = &db.status
+            && status.phase == BranchDatabasePhaseMysql::Failed
+        {
+            let error_msg = status
+                .error
+                .clone()
+                .unwrap_or_else(|| "Branch database creation failed".to_string());
+            return Err(OperatorApiError::BranchCreationFailed {
+                operation: OperatorOperation::MysqlBranching,
+                message: error_msg,
+            });
         }
     }
 
@@ -273,17 +273,17 @@ pub(crate) async fn create_pg_branches<P: Progress>(
         let Ok(Some(db)) = result else {
             continue;
         };
-        if let Some(status) = &db.status {
-            if status.phase == BranchDatabasePhasePg::Failed {
-                let error_msg = status
-                    .error
-                    .clone()
-                    .unwrap_or_else(|| "Branch database creation failed".to_string());
-                return Err(OperatorApiError::BranchCreationFailed {
-                    operation: OperatorOperation::PgBranching,
-                    message: error_msg,
-                });
-            }
+        if let Some(status) = &db.status
+            && status.phase == BranchDatabasePhasePg::Failed
+        {
+            let error_msg = status
+                .error
+                .clone()
+                .unwrap_or_else(|| "Branch database creation failed".to_string());
+            return Err(OperatorApiError::BranchCreationFailed {
+                operation: OperatorOperation::PgBranching,
+                message: error_msg,
+            });
         }
     }
 
