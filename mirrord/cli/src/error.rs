@@ -2,7 +2,7 @@ use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
 #[cfg(feature = "wizard")]
 use axum::response::{IntoResponse, Response};
-use kube::core::ErrorResponse;
+use kube::{self, core::ErrorResponse};
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
 use mirrord_config::config::ConfigError;
@@ -23,6 +23,7 @@ use crate::{
     ci::error::CiError,
     container::{CommandDisplay, IntproxySidecarError},
     dump::DumpSessionError,
+    fix::FixKubeconfigError,
     port_forward::PortForwardError,
     profile::ProfileError,
 };
@@ -489,6 +490,9 @@ pub(crate) enum CliError {
     #[error("Local Redis error: {0}")]
     #[diagnostic(help("Install redis-server with"))]
     LocalRedisError(String),
+
+    #[error("error while fixing kubeconfig")]
+    FixKubeconfig(#[from] FixKubeconfigError),
 }
 
 impl CliError {

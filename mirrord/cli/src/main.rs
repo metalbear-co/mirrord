@@ -325,6 +325,8 @@ mod wsl;
 #[cfg(feature = "wizard")]
 mod wizard;
 
+mod fix;
+
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
 use mirrord_layer_lib::process::windows::{console, execution::LayerManagedProcess};
@@ -1051,6 +1053,7 @@ fn main() -> miette::Result<()> {
                 )
                 .await?
             }
+            Commands::Fix(args) => fix::fix_command(args).await?,
         };
 
         Ok(())
