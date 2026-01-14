@@ -93,21 +93,27 @@ jobs:
           py -3 -m pip install --upgrade pip
           py -3 -m pip install --upgrade flask uvicorn fastapi
 
-      - name: Build (Release)
+      - name: Build (Debug)
         run: |
           $ErrorActionPreference = "Stop"
           $Target = "x86_64-pc-windows-msvc"
 
-          Write-Host "Building mirrord binary..."
-          cargo build -p mirrord --bin mirrord --target $Target --release
-          
-          # Set Env Vars for tests
-          $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\release"
-          $exe = Join-Path $RelDir "mirrord.exe"
+          Write-Host "Building mirrord-layer-win..."
+          cargo build -p mirrord-layer-win --target $Target --debug
+
+          $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\debug"
           $dll = Join-Path $RelDir "mirrord_layer_win.dll"
+          if (-not (Test-Path $dll)) { throw "mirrord_layer_win.dll not found" }
+
+          # Set for the next build command in this session
+          $env:MIRRORD_LAYER_FILE = $dll
+
+          Write-Host "Building mirrord binary..."
+          cargo build -p mirrord --bin mirrord --target $Target --debug
+          
+          $exe = Join-Path $RelDir "mirrord.exe"
           
           if (-not (Test-Path $exe)) { throw "mirrord.exe not found" }
-          if (-not (Test-Path $dll)) { throw "mirrord_layer_win.dll not found" }
           
           "MIRRORD_EXE=$exe" | Out-File -Append -FilePath $env:GITHUB_ENV
           "MIRRORD_LAYER_FILE=$dll" | Out-File -Append -FilePath $env:GITHUB_ENV
@@ -115,13 +121,6 @@ jobs:
       - name: Run Windows E2E Tests
         run: |
           $ErrorActionPreference = "Stop"
-          
-          # 1. Ensure/Restart Tunnel
-          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
-          & "$ScriptsDir\start_iap_tunnel.ps1"
-
           Write-Host "Running E2E tests..."
           # Note: skipping the specific test skipped in windows-build.yaml
           cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --nocapture
-        env:
-          KUBECONFIG: ${{ env.USERPROFILE }}\.kube\config
