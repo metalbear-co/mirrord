@@ -586,12 +586,12 @@ jobs:
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
 
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/target/x86_64-pc-windows-msvc/release/mirrord.exe /tmp/release/mirrord.exe
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/target/x86_64-pc-windows-msvc/release/mirrord_layer_win.dll /tmp/release/mirrord_layer_win.dll
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/*/mirrord.msi /tmp/release/mirrord.msi
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/target/x86_64-pc-windows-msvc/release/mirrord.exe.sha256 /tmp/release/mirrord.exe.sha256
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/target/x86_64-pc-windows-msvc/release/mirrord_layer_win.dll.sha256 /tmp/release/mirrord_layer_win.dll.sha256
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/*/mirrord.msi.sha256 /tmp/release/mirrord.msi.sha256
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord.exe /tmp/release/mirrord.exe
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord_layer_win.dll /tmp/release/mirrord_layer_win.dll
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/_temp/wix/mirrord.msi /tmp/release/mirrord.msi
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord.exe.sha256 /tmp/release/mirrord.exe.sha256
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord_layer_win.dll.sha256 /tmp/release/mirrord_layer_win.dll.sha256
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/_temp/wix/mirrord.msi.sha256 /tmp/release/mirrord.msi.sha256
 
       # Consider to add changelog generation..
       - name: Release
