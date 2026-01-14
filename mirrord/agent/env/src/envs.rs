@@ -78,7 +78,7 @@ pub const PASSTHROUGH_MIRRORING: CheckedEnv<bool> =
 /// Controls how long the agent should keep running after all client connections have been closed.
 ///
 /// Specified in seconds.
-pub const IDDLE_TTL: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_AGENT_IDLE_TTL");
+pub const IDLE_TTL: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_AGENT_IDLE_TTL");
 
 /// Sets whether `Mirrord-Agent` headers are injected into HTTP
 /// responses that went through the agent.
