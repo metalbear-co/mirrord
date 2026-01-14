@@ -10,7 +10,6 @@ use crate::{
         self, MirrorHandle, RedirectorTask, RedirectorTaskConfig, StealHandle,
         tls::StealTlsHandlerStore,
     },
-    sniffer::{TcpConnectionSniffer, messages::SnifferCommand},
     steal::{StealerCommand, TcpStealerTask},
     task::{BgTaskRuntime, status::IntoStatus},
     util::path_resolver::InTargetPathResolver,
@@ -55,44 +54,6 @@ pub(super) async fn start_traffic_redirector(
     tokio::spawn(task.run());
 
     Ok((steal_handle, mirror_handle))
-}
-
-pub(super) async fn start_sniffer(
-    args: &super::Args,
-    runtime: &BgTaskRuntime,
-    cancellation_token: CancellationToken,
-) -> BackgroundTask<SnifferCommand> {
-    // IMPORTANT: this makes tokio tasks spawn on `runtime`.
-    // Do not remove this.
-    let _rt = runtime.handle().enter();
-
-    let (command_tx, command_rx) = mpsc::channel::<SnifferCommand>(1000);
-
-    let sniffer = tokio::spawn(TcpConnectionSniffer::new(
-        command_rx,
-        args.network_interface.clone(),
-        args.is_mesh(),
-    ))
-    .await;
-
-    match sniffer {
-        Ok(Ok(sniffer)) => {
-            let task_status = runtime
-                .handle()
-                .spawn(sniffer.start(cancellation_token.clone()))
-                .into_status("TcpSnifferTask");
-
-            BackgroundTask::Running(task_status, command_tx)
-        }
-        Ok(Err(error)) => {
-            tracing::error!(%error, "Failed to create a TCP sniffer");
-            BackgroundTask::Disabled
-        }
-        Err(error) => {
-            tracing::error!(%error, "Failed to create a TCP sniffer");
-            BackgroundTask::Disabled
-        }
-    }
 }
 
 pub(super) fn start_stealer(

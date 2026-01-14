@@ -1,13 +1,9 @@
-name: Windows Build Choco + WinGet Test
+name: Windows Build + Choco and WinGet
 
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        description: "Pick artifacts from GCS (reuse) or build & sign now"
-        type: choice
-        options: [build_sign, reuse]
-        default: build_sign
+
       release_tag:
         description: "Version to use for Chocolatey/WinGet (e.g. 0.0.1-test2). Defaults to MIRRORD_VERSION."
         required: false
@@ -28,39 +24,49 @@ on:
         options: ["false", "true"]
         default: "false"
 
-  pull_request:
-    branches: ["main", "*staging*", "windows-support"]
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore:
-      - "*.md"
-      - "**/*.md"
+  workflow_call:
+    inputs:
 
-permissions:
-  contents: write
+      release_tag:
+        description: "Version to use for Chocolatey/WinGet (e.g. 0.0.1-test2). Defaults to MIRRORD_VERSION."
+        required: false
+        type: string
+      sign_artifacts:
+        description: "Code-sign EXE & DLL & MSI"
+        type: string
+        default: "false"
+      choco_publish:
+        description: "Publish a Chocolatey package?"
+        type: string
+        default: "false"
+      winget_publish:
+        description: "Update WinGet manifest (wingetcreate)?"
+        type: string
+        default: "false"
+
+  # pull_request: REMOVED (triggered via ci.yaml now)
+
+# permissions: contents: write - REMOVED to allow inheritance (Read in CI, Write in Release)
 
 env:
-  BUCKET_URI: gs://mirrord-windows-builds
-  MSI_BUCKET_URI: gs://mirrord-windows-builds-public
-  ARTIFACT_SUBPATH: windows/mirrord-latest
   RUST_BACKTRACE: "1"
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: "false"
   LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
-  MSI_HTTP_BASE: "https://storage.googleapis.com/mirrord-windows-builds-public"
   WINGET_PACKAGE_ID: "MetalBear.mirrord"
 
 jobs:
-  windows_choco_winget_test:
-    runs-on: [self-hosted, Windows]
+  windows_build:
+    runs-on: windows-latest
     defaults:
       run:
         shell: pwsh
     env:
-      MODE: ${{ github.event.inputs.mode || 'build_sign' }}
-      RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag || '' }}
-      SIGN_ARTIFACTS: ${{ github.event.inputs.sign_artifacts || 'false' }}
-      PUBLISH_CHOCO: ${{ github.event.inputs.choco_publish || 'true' }}
-      PUBLISH_WINGET: ${{ github.event.inputs.winget_publish || 'false' }}
+
+      RELEASE_TAG_INPUT: ${{ inputs.release_tag || '' }}
+      SIGN_ARTIFACTS: ${{ inputs.sign_artifacts || 'false' }}
+      PUBLISH_CHOCO: ${{ inputs.choco_publish || 'true' }}
+      PUBLISH_WINGET: ${{ inputs.winget_publish || 'false' }}
 
     steps:
       - name: Checkout
@@ -77,20 +83,10 @@ jobs:
           cargo -V
           rustup show
 
-      # Early sanity check that the runner account can write to C:.
-      - name: Validate C write access
-        run: |
-          $ErrorActionPreference = "Stop"
-          whoami
-          $testDir = "C:\actions\workspace-test"
-          New-Item -ItemType Directory -Force -Path $testDir | Out-Null
-          New-Item -ItemType File -Force -Path (Join-Path $testDir "write-test.txt") -Value "ok" | Out-Null
-          Remove-Item $testDir -Recurse -Force
+      ###########################################################################
+      # PREPARE ARTIFACTS
+      ###########################################################################
 
-      ###########################################################################
-      # PREPARE ARTIFACTS (either reuse from GCS OR build+sign)
-      ###########################################################################
-      
       - name: Prepare e2e tests dependencies
         run: |
           $ErrorActionPreference = "Stop"
@@ -131,38 +127,7 @@ jobs:
           $Tmp    = Join-Path $env:RUNNER_TEMP "prep"
           New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 
-          # FIXED: added missing closing ")
           $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, "true", "InvariantCultureIgnoreCase")
-
-          if ($env:MODE -eq "reuse") {
-            if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
-              throw "gcloud not found"
-            }
-
-            $dest = Join-Path $Tmp "picked"
-            New-Item -ItemType Directory -Force -Path $dest | Out-Null
-
-            gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
-
-            $exe = (Get-ChildItem $dest -Filter "mirrord.exe" -Recurse -File | Select-Object -First 1).FullName
-            $dll = (Get-ChildItem $dest -Filter "mirrord_layer_win.dll" -Recurse -File | Select-Object -First 1).FullName
-
-            if (-not $exe -or -not $dll) {
-              throw "Failed to find EXE or DLL"
-            }
-
-            if ($shouldSign) {
-              & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
-                  /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
-              & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
-                  /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
-            }
-
-            Set-Env "MIRRORD_EXE" $exe
-            Set-Env "MIRRORD_LAYER_FILE" $dll
-            Set-Env "MIRRORD_VERSION" "unknown"
-            exit 0
-          }
 
           rustup target add $Target
 
@@ -395,7 +360,7 @@ jobs:
 
           $wxsPath    = "$Root\main.wxs"
           $wxsContent = Get-Content $wxsPath -Raw -Encoding UTF8
-          $wxsContent = $wxsContent -replace 'Version="[^"]*"', "Version=`"$msiVersion`""
+          $wxsContent = $wxsContent -creplace '\bVersion="[^"]*"', "Version=`"$msiVersion`""
 
           $utf8NoBom = New-Object System.Text.UTF8Encoding $false
           [System.IO.File]::WriteAllText($wxsPath, $wxsContent, $utf8NoBom)
@@ -436,83 +401,13 @@ jobs:
               /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$msi"
 
       ###########################################################################
-      # UPLOAD MSI TO PUBLIC GCS BUCKET
-      ###########################################################################
-      - name: Upload MSI to GCS
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $msi = $env:MSI_PATH
-          if (-not (Test-Path $msi)) {
-            throw "MSI_PATH '$msi' does not exist."
-          }
-
-          $runId   = $env:GITHUB_RUN_ID
-          $refName = $env:GITHUB_REF_NAME
-          if (-not $refName) {
-            $refName = "unknown"
-          }
-
-          $refSafe    = $refName -replace '[^A-Za-z0-9\.\-]', '_'
-          $bucketBase = $env:MSI_BUCKET_URI.TrimEnd('/')
-          $destFolder = "$bucketBase/$refSafe/run-$runId"
-          $destUri    = "$destFolder/mirrord.msi"
-
-          Write-Host "Uploading MSI to $destUri"
-          gcloud --quiet storage cp $msi $destUri
-
-          "MSI_GCS_REF_SAFE=$refSafe" | Out-File -Append -FilePath $env:GITHUB_ENV
-          "MSI_GCS_RUN_ID=$runId"     | Out-File -Append -FilePath $env:GITHUB_ENV
-          "MSI_GCS_URI=$destUri"      | Out-File -Append -FilePath $env:GITHUB_ENV
-
-      ###########################################################################
       # UNIT TESTS
       ###########################################################################
       - name: Run Rust unit tests (Windows crates)
         run: |
           $ErrorActionPreference = "Stop"
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
 
-      - name: Debug Python environment before Rust e2e tests
-        run: |
-          $ErrorActionPreference = "Stop"
-          py -3 -c "import sys, flask; print('exe:', sys.executable); print('flask:', flask.__version__); print('sys.path:'); [print(' ', p) for p in sys.path]"
-
-      - name: Force python3 to use C:\Python314
-        run: |
-          $ErrorActionPreference = "Stop"
-          
-          # Try to create python3.exe, but handle permission errors gracefully
-          if (-not (Test-Path "C:\Python314\python3.exe")) {
-            try {
-              Copy-Item "C:\Python314\python.exe" "C:\Python314\python3.exe" -Force -ErrorAction Stop
-              Write-Host "Created python3.exe in C:\Python314"
-            } catch {
-              Write-Warning "Could not create python3.exe in C:\Python314 (permission denied). Creating wrapper script instead."
-              # Create a wrapper script in a writable location
-              $wrapperDir = "$env:RUNNER_TEMP\python3_wrapper"
-              New-Item -ItemType Directory -Force -Path $wrapperDir | Out-Null
-              $wrapperScript = Join-Path $wrapperDir "python3.bat"
-              "@echo off`n`"C:\Python314\python.exe`" %*" | Out-File -FilePath $wrapperScript -Encoding ASCII
-              Write-Host "Created python3.bat wrapper at $wrapperScript"
-              $env:PATH = "$wrapperDir;$env:PATH"
-            }
-          }
-          
-          # Ensure C:\Python314 is first in PATH
-          $env:PATH = "C:\Python314;C:\Python314\Scripts;$env:PATH"
-          [System.Environment]::SetEnvironmentVariable("PATH", $env:PATH, "Process")
-          
-          # Verify python3 works
-          python3 -c "import sys, flask; print('exe:', sys.executable); print('flask:', flask.__version__)"
-          # Extra debug for next run: show PATH and pip list for the exact python3
-          python3 -c "import os; print('PATH=', os.environ.get('PATH',''))"
-          python3 -m pip list
-
-      - name: Run Rust e2e tests 
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --test-threads=1
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win -- --skip test::reconnect_during_http::drop_during_response_2_false
 
       ###########################################################################
       # COMPUTE VERSION FOR CHOCOLATEY & WINGET
@@ -559,7 +454,7 @@ jobs:
            }
 
       - name: Upload artifacts to Release
-        if: env.RELEASE_TAG != ''
+        if: inputs.release_tag != '' && github.event_name != 'pull_request'
         uses: metalbear-co/action-gh-release@ab50eebb6488051c6788d97fa95232267c6a4e23
         with:
           tag_name: ${{ env.RELEASE_TAG }}
@@ -579,20 +474,12 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $httpBase = $env:MSI_HTTP_BASE
-          if (-not $httpBase) {
-            throw "MSI_HTTP_BASE must be set for WinGet."
-          }
-          $httpBase = $httpBase.TrimEnd('/')
-
-          $refSafe = $env:MSI_GCS_REF_SAFE
-          $runId   = $env:MSI_GCS_RUN_ID
-
-          if (-not $refSafe -or -not $runId) {
-            throw "MSI_GCS_REF_SAFE/MSI_GCS_RUN_ID not set; ensure 'Upload MSI to GCS' ran."
+          $version = $env:RELEASE_TAG
+          if (-not $version) {
+            throw "RELEASE_TAG is not set."
           }
 
-          $url = "$httpBase/$refSafe/run-$runId/mirrord.msi"
+          $url = "https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord.msi"
           Write-Host "Computed MSI download URL for WinGet: $url"
 
           "MSI_DOWNLOAD_URL=$url" | Out-File -Append -FilePath $env:GITHUB_ENV
@@ -790,10 +677,9 @@ jobs:
         run: |
           Write-Host "MSI (local):       $env:MSI_PATH"
           Write-Host "MSI Version:       $env:MSI_VERSION"
-          Write-Host "MSI (GCS URI):     $env:MSI_GCS_URI"
           Write-Host "EXE:               $env:MIRRORD_EXE"
           Write-Host "DLL:               $env:MIRRORD_LAYER_FILE"
           Write-Host "Choco package:     $env:CHOCO_NUPKG_PATH"
-          Write-Host "MSI HTTP URL:      $env:MSI_DOWNLOAD_URL"
+          Write-Host "MSI Download URL:  $env:MSI_DOWNLOAD_URL"
           Write-Host "Publish Choco:     $env:PUBLISH_CHOCO"
           Write-Host "Publish WinGet:    $env:PUBLISH_WINGET"

@@ -742,10 +742,13 @@ pub(crate) fn print_config<P>(
         } => "remotely with exceptions",
     };
     progress.info(&format!("dns: DNS will be resolved {}", dns_info));
+
     progress.info(&format!(
         "internal proxy: logs will be written to {}",
         config.internal_proxy.log_destination.display()
     ));
+
+    progress.info(&format!("key: {}", config.key.as_str()));
 }
 
 async fn exec(
@@ -821,6 +824,10 @@ async fn exec(
         user_data.machine_id(),
     );
     (&config).collect_analytics(analytics.get_mut());
+
+    analytics
+        .get_mut()
+        .add("key_length", config.key.analytics_len());
 
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {

@@ -37,7 +37,8 @@ client = [
   "dep:tokio-tungstenite",
   "dep:tracing",
   "dep:serde_urlencoded",
-  "dep:tower"
+  "dep:uuid",
+  "dep:tower",
 ]
 crd = [
   "dep:k8s-openapi",

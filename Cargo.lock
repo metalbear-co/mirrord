@@ -560,6 +560,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-io"
+version = "2.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "456b8a8feb6f42d237746d4b3e9a178494627745c3c56c6ea55d92ba50d026fc"
+dependencies = [
+ "autocfg",
+ "cfg-if",
+ "concurrent-queue",
+ "futures-io",
+ "futures-lite",
+ "parking",
+ "polling",
+ "rustix 1.1.2",
+ "slab",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "async-pidfd"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "958321a23896f573a3f1809437af5816f3bc90dd2d5ffe8b1cd5645f42230c17"
+dependencies = [
+ "async-io",
+ "libc",
+]
+
+[[package]]
 name = "async-socks5"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1407,15 +1435,6 @@ checksum = "874bb8112abecc98cbd6d81ea4fa7e94fb9449648c93cc89aa40c81c24d7de03"
 dependencies = [
  "alloc-no-stdlib",
  "alloc-stdlib",
-]
-
-[[package]]
-name = "bs-filter"
-version = "0.1.0"
-source = "git+https://github.com/metalbear-co/rawsocket.git?rev=86bba7dbe971e166d5153227dd0099fe47da4489#86bba7dbe971e166d5153227dd0099fe47da4489"
-dependencies = [
- "libc",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2654,7 +2673,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "libc",
 ]
@@ -3762,15 +3781,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "469fb0b9cefa57e3ef31275ee7cacb78f2fdca44e4765491884a2b119d4eb130"
 
 [[package]]
-name = "ipnetwork"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf466541e9d546596ee94f9f69590f89473455f88372423e0008fc1a7daf100e"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "iptables"
 version = "0.5.1"
 source = "git+https://github.com/metalbear-co/rust-iptables.git?rev=e66c7332e361df3c61a194f08eefe3f40763d624#e66c7332e361df3c61a194f08eefe3f40763d624"
@@ -3824,7 +3834,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "issue1317"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "actix-web",
  "env_logger",
@@ -3834,7 +3844,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "errno 0.3.14",
  "libc",
@@ -3843,7 +3853,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "libc",
  "socket2 0.5.10",
@@ -3851,14 +3861,14 @@ dependencies = [
 
 [[package]]
 name = "issue1899"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "issue2001"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "libc",
 ]
@@ -4208,7 +4218,7 @@ checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
 
 [[package]]
 name = "listen_ports"
-version = "3.179.0"
+version = "3.180.0"
 
 [[package]]
 name = "litemap"
@@ -4335,15 +4345,6 @@ name = "memchr"
 version = "2.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
-
-[[package]]
-name = "memoffset"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5de893c32cde5f383baa4c04c5d6dbdd735cfd4a794b0debdb2bb1b421da5ff4"
-dependencies = [
- "autocfg",
-]
 
 [[package]]
 name = "memoffset"
@@ -4479,7 +4480,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "actix-codec",
  "axum 0.8.7",
@@ -4554,9 +4555,10 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "actix-codec",
+ "async-pidfd",
  "axum 0.7.9",
  "bollard",
  "bytes",
@@ -4582,11 +4584,9 @@ dependencies = [
  "nix 0.29.0",
  "oci-spec",
  "pem",
- "pnet",
  "procfs",
  "prometheus",
  "rand 0.9.2",
- "rawsocket",
  "rcgen",
  "reqwest",
  "rstest",
@@ -4613,7 +4613,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-env"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "base64 0.22.1",
  "k8s-openapi",
@@ -4626,7 +4626,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-iptables"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "async-trait",
  "caps",
@@ -4642,7 +4642,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "assert-json-diff",
  "base64 0.22.1",
@@ -4658,7 +4658,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "base64 0.22.1",
  "bcder",
@@ -4682,7 +4682,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "base64 0.22.1",
  "bimap",
@@ -4710,11 +4710,12 @@ dependencies = [
  "thiserror 2.0.17",
  "toml 0.8.23",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4724,7 +4725,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "bincode",
  "drain",
@@ -4740,7 +4741,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "bytes",
  "futures",
@@ -4775,7 +4776,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy-protocol"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "bincode",
  "mirrord-protocol",
@@ -4785,7 +4786,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "async-stream",
  "futures",
@@ -4812,7 +4813,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "actix-codec",
  "apple-codesign",
@@ -4855,7 +4856,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-lib"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4886,7 +4887,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4895,7 +4896,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-win"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4926,7 +4927,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4936,7 +4937,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -4974,7 +4975,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "enum_dispatch",
  "indicatif",
@@ -5013,7 +5014,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol-io"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -5030,7 +5031,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "apple-codesign",
  "fs4 0.12.0",
@@ -5086,7 +5087,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-tls-util"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "http 1.4.0",
  "pem",
@@ -5103,7 +5104,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-vpn"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "futures",
  "ipnet",
@@ -5179,19 +5180,6 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "598beaf3cc6fdd9a5dfb1630c2800c7acd31df7aaf0f565796fba2b53ca1af1b"
-dependencies = [
- "bitflags 1.3.2",
- "cfg-if",
- "libc",
- "memoffset 0.7.1",
- "pin-utils",
-]
-
-[[package]]
-name = "nix"
 version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
@@ -5211,7 +5199,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
- "memoffset 0.9.1",
+ "memoffset",
 ]
 
 [[package]]
@@ -5544,7 +5532,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "tokio",
 ]
@@ -5892,39 +5880,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "pnet"
-version = "0.35.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "682396b533413cc2e009fbb48aadf93619a149d3e57defba19ff50ce0201bd0d"
-dependencies = [
- "ipnetwork",
- "pnet_base",
- "pnet_datalink",
- "pnet_packet",
- "pnet_sys",
- "pnet_transport",
-]
-
-[[package]]
 name = "pnet_base"
 version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffc190d4067df16af3aba49b3b74c469e611cad6314676eaf1157f31aa0fb2f7"
 dependencies = [
  "no-std-net",
-]
-
-[[package]]
-name = "pnet_datalink"
-version = "0.35.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e79e70ec0be163102a332e1d2d5586d362ad76b01cec86f830241f2b6452a7b7"
-dependencies = [
- "ipnetwork",
- "libc",
- "pnet_base",
- "pnet_sys",
- "winapi",
 ]
 
 [[package]]
@@ -5961,25 +5922,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "pnet_sys"
-version = "0.35.0"
+name = "polling"
+version = "3.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d4643d3d4db6b08741050c2f3afa9a892c4244c085a72fcda93c9c2c9a00f4b"
+checksum = "5d0e4f59085d47d8241c88ead0f274e8a0cb551f3625263c05eb8dd897c34218"
 dependencies = [
- "libc",
- "winapi",
-]
-
-[[package]]
-name = "pnet_transport"
-version = "0.35.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f604d98bc2a6591cf719b58d3203fd882bdd6bf1db696c4ac97978e9f4776bf"
-dependencies = [
- "libc",
- "pnet_base",
- "pnet_packet",
- "pnet_sys",
+ "cfg-if",
+ "concurrent-queue",
+ "hermit-abi",
+ "pin-project-lite",
+ "rustix 1.1.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6431,20 +6384,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rawsocket"
-version = "0.1.0"
-source = "git+https://github.com/metalbear-co/rawsocket.git?rev=86bba7dbe971e166d5153227dd0099fe47da4489#86bba7dbe971e166d5153227dd0099fe47da4489"
-dependencies = [
- "bs-filter",
- "bytes",
- "ipnetwork",
- "libc",
- "nix 0.26.4",
- "socket2 0.5.10",
- "tokio",
-]
-
-[[package]]
 name = "rayon"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6703,14 +6642,14 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "libc",
 ]
@@ -6727,7 +6666,7 @@ dependencies = [
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.179.0"
+version = "3.180.0"
 dependencies = [
  "tokio",
 ]

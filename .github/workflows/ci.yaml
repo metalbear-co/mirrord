@@ -42,6 +42,9 @@ concurrency:
   group: ${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
@@ -68,11 +71,11 @@ jobs:
     if: github.event.pull_request.draft == false
     outputs:
       rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
+      windows_changed: ${{ steps.changed-windows.outputs.any_changed }}
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
-      windows_changed: ${{ steps.changed-windows.outputs.any_changed }}
       wizard_frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
     steps:
       - uses: actions/checkout@v4
@@ -99,6 +102,19 @@ jobs:
             rustfmt.toml
             deny.toml
             .cargo/**
+      - name: get changed windows files
+        id: changed-windows
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        with:
+          files: |
+            mirrord/layer-win/**
+            mirrord/str-win/**
+            mirrord/**/windows/**
+            mirrord/**/win32/**
+            mirrord/**/win/**
+            scripts/**/*.ps1
+            **/*.ps1
+            .github/workflows/windows-build.yaml
       - name: get markdown changes
         id: changed-markdown
         uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
@@ -124,20 +140,7 @@ jobs:
           files: |
             mirrord/agent/Dockerfile
             mirrord/cli/Dockerfile
-      # Detect Windows-related changes so Linux tests run when Windows code changes
-      - name: get Windows-related changes
-        id: changed-windows
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
-        with:
-          files: |
-            mirrord/layer-win/**
-            mirrord/str-win/**
-            mirrord/**/windows/**
-            mirrord/**/win32/**
-            mirrord/**/win/**
-            scripts/**/*.ps1
-            **/*.ps1
-            .github/workflows/windows-build.yaml
+
       - name: get wizard frontend changes
         id: changed-wizard-frontend
         uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
@@ -160,15 +163,15 @@ jobs:
           echo ${{ steps.changed-ci.outputs.all_changed_files }};
           echo ${{ steps.changed-protocol.outputs.any_changed }};
           echo ${{ steps.changed-protocol-toml.outputs.any_changed }};
-          echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-windows.outputs.any_changed }};
-          echo ${{ steps.changed-windows.outputs.all_changed_files }};
+          echo ${{ steps.changed-dockerfile.outputs.any_changed }};
+
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
           
   lint:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v3
@@ -238,7 +241,7 @@ jobs:
   check-rust-docs:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       # enables the creation of a workspace index.html page.
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options -Dwarnings"
@@ -256,7 +259,7 @@ jobs:
   test_agent:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     container:
       image: ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9
     steps:
@@ -277,7 +280,7 @@ jobs:
   test_agent_image:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true' }}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -330,7 +333,7 @@ jobs:
   test_cli_image:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true' }}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -347,7 +350,7 @@ jobs:
   integration_tests:
     runs-on: ubuntu-24.04
     needs: [changed_files]
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
@@ -625,7 +628,7 @@ jobs:
         container-runtime: ["docker", "containerd"]
     name: e2e
     needs: [test_agent_image, changed_files]
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
@@ -687,6 +690,13 @@ jobs:
           config: ".markdownlint.json"
           globs: "README.md"
 
+  # windows_build:
+  #   needs: changed_files
+  #   if: ${{ needs.changed_files.outputs.rs_changed == 'true' ||needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
+  #   uses: ./.github/workflows/windows-build.yaml
+
+  #   secrets: inherit
+
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
   # building concurrently can run faster the release ide tests
   build_mirrord_on_release_branch:
@@ -694,6 +704,8 @@ jobs:
     name: build mirrord CLI
     needs: check_if_release_branch
     if: ${{ needs.check_if_release_branch.outputs.release_branch == 'true' }}
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
@@ -749,6 +761,7 @@ jobs:
         lint_markdown,
         check-rust-docs,
         cargo-deny,
+        # windows_build,
       ]
     runs-on: ubuntu-24.04
     steps:
@@ -769,5 +782,6 @@ jobs:
             (needs.intellij_e2e_on_release_branch.result == 'success' || needs.intellij_e2e_on_release_branch.result == 'skipped') &&
             (needs.vscode_e2e_on_release_branch.result == 'success' || needs.vscode_e2e_on_release_branch.result == 'skipped') &&
             (needs.check-rust-docs.result == 'success' || needs.check-rust-docs.result == 'skipped') &&
-            (needs.cargo-deny.result == 'success' || needs.cargo-deny.result == 'skipped') }}
+            (needs.cargo-deny.result == 'success' || needs.cargo-deny.result == 'skipped') }} # &&
+            # (needs.windows_build.result == 'success' || needs.windows_build.result == 'skipped') 
         run: echo $CI_SUCCESS && if [ "$CI_SUCCESS" == "true" ]; then echo "SUCCESS" && exit 0; else echo "Failure" && exit 1; fi

@@ -12,9 +12,6 @@ use crate::{checked_env::CheckedEnv, steal_tls::StealPortTlsConfig};
 /// operator that spawned it.
 pub const OPERATOR_CERT: CheckedEnv<String> = CheckedEnv::new("AGENT_OPERATOR_CERT_ENV");
 
-/// Determines a network interface for mirroring.
-pub const NETWORK_INTERFACE: CheckedEnv<String> = CheckedEnv::new("AGENT_NETWORK_INTERFACE_ENV");
-
 /// Enables Prometheus metrics export point and sets its address.
 pub const METRICS: CheckedEnv<SocketAddr> = CheckedEnv::new("MIRRORD_AGENT_METRICS");
 
@@ -71,7 +68,10 @@ pub const EPHEMERAL_TARGET_CONTAINER_ID: CheckedEnv<String> =
 /// Exclude agent's port from service mesh sidecar proxy.
 pub const EXCLUDE_FROM_MESH: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_EXCLUDE_FROM_MESH");
 
-/// Enables mirroring implementation based on iptables.
+/// TODO remove
+///
+/// Deprecated, used to control mirroring mode.
+/// Should always be set to `true` for compatibility with older agents.
 pub const PASSTHROUGH_MIRRORING: CheckedEnv<bool> =
     CheckedEnv::new("MIRRORD_AGENT_PASSTHROUGH_MIRRORING");
 
