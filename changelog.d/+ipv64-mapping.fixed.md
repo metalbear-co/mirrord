@@ -1,0 +1,1 @@
+`getsockname`/`getpeername` will now correctly report IPv4-mapped-IPv6 addresses when necessary. When the client receives an IPv6 connection on an IPv4 server socket, `127.0.0.1` will be reported instead.
