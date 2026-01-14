@@ -63,7 +63,7 @@ jobs:
           $Target = "x86_64-pc-windows-msvc"
 
           Write-Host "Building mirrord-layer-win..."
-          cargo build -p mirrord-layer-win --target $Target --debug
+          cargo build -p mirrord-layer-win --target $Target
 
           $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\debug"
           $dll = Join-Path $RelDir "mirrord_layer_win.dll"
@@ -73,7 +73,7 @@ jobs:
           $env:MIRRORD_LAYER_FILE = $dll
 
           Write-Host "Building mirrord binary..."
-          cargo build -p mirrord --bin mirrord --target $Target --debug
+          cargo build -p mirrord --bin mirrord --target $Target
           
           $exe = Join-Path $RelDir "mirrord.exe"
           
