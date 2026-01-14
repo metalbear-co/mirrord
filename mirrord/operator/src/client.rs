@@ -698,7 +698,7 @@ impl OperatorApi<PreparedClientCert> {
         // The CLI just connects normally - if multi-cluster is enabled, Envoy orchestrates.
         // User doesn't need to know or care about multi-cluster configuration.
         let is_multi_cluster = self.multi_cluster_info().is_some();
-        tracing::error!(
+        tracing::debug!(
             is_multi_cluster = %is_multi_cluster,
             has_multi_cluster_in_spec = %self.operator.spec.multi_cluster.is_some(),
             "[MULTICLUSTER] CLI connect_in_new_session"
