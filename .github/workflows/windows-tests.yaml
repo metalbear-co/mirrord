@@ -122,7 +122,6 @@ jobs:
 
           Write-Host "Running E2E tests..."
           # Note: skipping the specific test skipped in windows-build.yaml
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests
-          # cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win --release -- --nocapture --skip test::reconnect_during_http::drop_during_response_2_false
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests --nocapture
         env:
           KUBECONFIG: ${{ env.USERPROFILE }}\.kube\config
