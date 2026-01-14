@@ -13,7 +13,6 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Fixed
 
-- Fixed flaky intproxy reconnect flow test
 - `mirrord` now unsets env from process even if the process is skipped on
   macOS.
 
@@ -22,9 +21,10 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 - Added a `CLAUDE.md` file to contextualize AI agents in mirrord's codebase.
 - Small refactor to make a struct member name make sense.
-- cleanup windows ci - move windows CI into ci.yaml
-- cleanup windows ci - move windows release into release.yaml
-- remove legacy windows_build.yaml
+- Clean up windows ci - move windows CI into ci.yaml
+- Clean up windows ci - move windows release into release.yaml
+- Remove legacy windows_build.yaml
+- Fixed flaky intproxy reconnect flow test
 
 ## [3.181.0](https://github.com/metalbear-co/mirrord/tree/3.181.0) - 2026-01-12
 
