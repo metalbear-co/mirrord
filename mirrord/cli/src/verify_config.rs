@@ -2,6 +2,9 @@
 //! [`VerifyConfig`](crate::Commands::VerifyConfig) enum after checking the config file passed in
 //! `path`. It's used by the IDE plugins to display errors/warnings quickly, without having to start
 //! mirrord-layer.
+
+use std::ops::Not;
+
 use error::CliResult;
 use futures::TryFutureExt;
 use mirrord_config::{
@@ -165,7 +168,7 @@ pub(super) async fn verify_config(
     VerifyConfigArgs { ide, path }: VerifyConfigArgs,
 ) -> CliResult<()> {
     let mut config_context = ConfigContext::default()
-        .empty_target_final(ide)
+        .empty_target_final(ide.not())
         .override_env(LayerConfig::FILE_PATH_ENV, path);
 
     let layer_config =
