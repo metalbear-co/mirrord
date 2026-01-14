@@ -90,41 +90,6 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Verify Kubeconfig (Existing)
-        run: |
-           $KubePath = "$env:USERPROFILE\.kube\config"
-           Write-Host "Checking for existing Kubeconfig at: $KubePath"
-           
-           if (-not (Test-Path $KubePath)) {
-               Write-Error "KUBECONFIG NOT FOUND on runner! User requested reliance on VM-resident config."
-               Write-Host "Please ensure ~/.kube/config is populated on the VM."
-               exit 1
-           }
-           
-           $Size = (Get-Item $KubePath).Length
-           if ($Size -lt 10) {
-               Write-Error "Kubeconfig is empty ($Size bytes)."
-               exit 1
-           }
-           Write-Host "Kubeconfig found ($Size bytes). Using existing file."
-
-      - name: Close existing tunnels (Port 6443)
-        run: |
-          $port = 6443
-          # Kill gcloud IAP processes
-          Get-Process -Name "gcloud" -ErrorAction SilentlyContinue | Stop-Process -Force
-          # Kill anything else on 6443
-          $connections = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
-          if ($connections) {
-              Write-Host "Killing processes listening on port $port..."
-              foreach ($conn in $connections) {
-                  Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
-              }
-          }
-
-          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
-          & "$ScriptsDir\start_iap_tunnel.ps1"
-
       - name: Toolchain info
         run: |
           $ErrorActionPreference = "Stop"
@@ -472,14 +437,8 @@ jobs:
 
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win -- --skip test::reconnect_during_http::drop_during_response_2_false
 
-      - name: Verify Connection & Run Integration Tests
+      - name: Run Integration Tests
         run: |
-          # 1. Ensure/Restart Tunnel
-          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
-          & "$ScriptsDir\start_iap_tunnel.ps1"
-          
-          # 2. Run Tests
-          $env:KUBECONFIG = "$env:USERPROFILE\.kube\config"
           cargo test --package mirrord-tests --target x86_64-pc-windows-msvc --features job -- --nocapture --skip traffic::steal::steal_tests::complete_passthrough --skip traffic::mirror::mirror_with_http_header_filter --skip traffic_tests::outgoing_traffic_single_request_ipv6
 
       ###########################################################################
