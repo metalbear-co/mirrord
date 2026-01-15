@@ -4823,7 +4823,6 @@ dependencies = [
  "exec",
  "frida-gum",
  "futures",
- "http 1.4.0",
  "libc",
  "mirrord-config",
  "mirrord-console",
@@ -4839,7 +4838,6 @@ dependencies = [
  "num-traits",
  "objc2-core-foundation",
  "rand 0.9.2",
- "regex",
  "resolv-conf",
  "rstest",
  "serde_json",
@@ -4847,7 +4845,6 @@ dependencies = [
  "syscalls",
  "tempfile",
  "test-cdylib",
- "thiserror 2.0.17",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -4986,7 +4983,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.25.0"
+version = "1.25.1"
 dependencies = [
  "actix-codec",
  "bincode",
