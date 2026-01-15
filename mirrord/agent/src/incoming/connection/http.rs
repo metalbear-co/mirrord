@@ -18,7 +18,11 @@ use mirrord_agent_env::envs;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
     runtime::Handle,
-    sync::{broadcast, mpsc, oneshot},
+    sync::{
+        broadcast,
+        mpsc::{self, error::SendError},
+        oneshot,
+    },
     time::error::Elapsed,
 };
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
@@ -395,8 +399,8 @@ pub struct ResponseBodyProvider {
 }
 
 impl ResponseBodyProvider {
-    pub async fn send_frame(&self, frame: Frame<Bytes>) {
-        let _ = self.frame_tx.send(frame).await;
+    pub async fn send_frame(&self, frame: Frame<Bytes>) -> Result<(), SendError<Frame<Bytes>>> {
+        self.frame_tx.send(frame).await
     }
 
     /// Signals that the response body is finished.

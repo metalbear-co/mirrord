@@ -523,7 +523,7 @@
         },
         "priority_class": {
           "title": "agent.priority_class {#agent-priority_class}",
-          "description": "Specifies the priority class to assign to the agent pod.\n\nThis option is only applicable when running in the targetless mode.\n\n```json { \"agent\": { \"priority_class\": \"my-priority-class-name\" } } ```\n\nIn some cases, the targetless agent pod may fail to schedule due to node resource constraints. Setting a priority class allows you to explicitly assign an existing priority class from your cluster to the agent pod, increasing its priority relative to other workloads.",
+          "description": "Specifies the priority class to assign to the agent pod.\n\n```json { \"agent\": { \"priority_class\": \"my-priority-class-name\" } } ```\n\nIn some cases, the agent pod may fail to schedule due to node resource constraints. Setting a priority class allows you to explicitly assign an existing priority class from your cluster to the agent pod, increasing its priority relative to other workloads.",
           "type": [
             "string",
             "null"
@@ -995,6 +995,17 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0.0
+            },
+            "iam_auth": {
+              "description": "IAM authentication for the source database. Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication instead of password-based authentication.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/PgIamAuthConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "id": {
               "title": "feature.db_branches.base.id {#feature-db_branches-base-id}",
@@ -2451,6 +2462,118 @@
           ]
         }
       }
+    },
+    "PgIamAuthConfig": {
+      "description": "IAM authentication configuration for cloud-managed PostgreSQL databases.\n\nEnvironment variable sources follow the same pattern as `connection.url`: - `{ \"type\": \"env\", \"variable\": \"VAR_NAME\" }` - direct env var from pod spec - `{ \"type\": \"env_from\", \"variable\": \"VAR_NAME\" }` - from configMapRef/secretRef\n\nExample: ```json { \"iam_auth\": { \"type\": \"aws_rds\", \"region\": { \"type\": \"env\", \"variable\": \"MY_AWS_REGION\" }, \"access_key_id\": { \"type\": \"env_from\", \"variable\": \"AWS_KEY\" } } } ```\n\nExample for GCP Cloud SQL with credentials from a secret: ```json { \"iam_auth\": { \"type\": \"gcp_cloud_sql\", \"credentials_json\": { \"type\": \"env_from\", \"variable\": \"GOOGLE_APPLICATION_CREDENTIALS_JSON\" } } } ```",
+      "oneOf": [
+        {
+          "description": "AWS RDS/Aurora IAM authentication. The init container must have AWS credentials (via IRSA, instance profile, or env vars).",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "access_key_id": {
+              "description": "AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "region": {
+              "description": "AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "secret_access_key": {
+              "description": "AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "session_token": {
+              "description": "AWS Session Token (for temporary credentials). If not specified, uses AWS_SESSION_TOKEN.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "aws_rds"
+              ]
+            }
+          }
+        },
+        {
+          "description": "GCP Cloud SQL IAM authentication. The init container must have GCP credentials (via Workload Identity or service account key). Use either `credentials_json` OR `credentials_path`, not both.",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "credentials_json": {
+              "description": "Inline service account JSON key content. Specify the env var that contains the raw JSON content of the service account key. Example: `{\"type\": \"env\", \"variable\": \"GOOGLE_APPLICATION_CREDENTIALS_JSON\"}`",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "credentials_path": {
+              "description": "Path to service account JSON key file. Specify the env var that contains the file path to the service account key. The file must be accessible from the init container. Example: `{\"type\": \"env\", \"variable\": \"GOOGLE_APPLICATION_CREDENTIALS\"}`",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "project": {
+              "description": "GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "gcp_cloud_sql"
+              ]
+            }
+          }
+        }
+      ]
     },
     "PodTarget": {
       "description": "<!--${internal}--> Mirror the pod specified by [`PodTarget::pod`].",

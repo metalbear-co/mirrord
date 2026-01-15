@@ -269,11 +269,6 @@ impl ContainerVariant for PodTargetedVariant<'_> {
         let mut pod = self.inner.as_update();
         pod.merge_from(update);
 
-        // Remove priority class from spec if it's targeted.
-        pod.spec
-            .as_mut()
-            .map(|pod_spec| pod_spec.priority_class_name.take());
-
         pod
     }
 }
@@ -309,14 +304,12 @@ mod test {
             idle_ttl: Default::default(),
         };
 
-        // targetless agent pod can be configured with priority class name.
         let update = PodVariant::new(&agent, &params).as_update();
         assert_eq!(
             update.spec.unwrap().priority_class_name.unwrap(),
             "test-priority-profile"
         );
 
-        // cannot configure priority class for targeted.
         let update = PodTargetedVariant::new(
             &agent,
             &params,
@@ -335,7 +328,10 @@ mod test {
             },
         )
         .as_update();
-        assert!(update.spec.unwrap().priority_class_name.is_none());
+        assert_eq!(
+            update.spec.unwrap().priority_class_name.unwrap(),
+            "test-priority-profile"
+        );
         Ok(())
     }
 }

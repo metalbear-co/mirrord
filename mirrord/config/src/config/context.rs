@@ -12,6 +12,7 @@ use std::{
 /// See:
 /// 1. [`LayerConfig::verify`](crate::LayerConfig::verify)
 /// 2. [`MirrordConfig::generate_config`](crate::config::MirrordConfig::generate_config)
+#[derive(Default)]
 pub struct ConfigContext {
     /// Whether an empty [TargetConfig::path](crate::target::TargetConfig::path) should be
     /// considered final.
@@ -144,16 +145,5 @@ impl ConfigContext {
     /// Returns whether this context stores any warnings.
     pub fn has_warnings(&self) -> bool {
         self.warnings.is_empty().not()
-    }
-}
-
-impl Default for ConfigContext {
-    fn default() -> Self {
-        Self {
-            empty_target_final: true,
-            env_override: Default::default(),
-            strict_env: false,
-            warnings: Default::default(),
-        }
     }
 }

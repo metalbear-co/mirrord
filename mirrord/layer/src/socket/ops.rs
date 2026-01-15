@@ -20,10 +20,13 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnMetadataRequest,
     PortSubscribe,
 };
-use mirrord_layer_lib::socket::{
-    Bound, Connected, SocketKind, SocketState, SocketAddrExt,
-    dns::{remote_getaddrinfo, unix::getaddrinfo as getaddrinfo_common},
-    ops::{ConnectResult, connect_common, connect_outgoing_common, nop_connect_fn},
+use mirrord_layer_lib::{
+    graceful_exit,
+    socket::{
+        Bound, Connected, SocketKind, SocketState, SocketAddrExt,
+        dns::{remote_getaddrinfo, unix::getaddrinfo as getaddrinfo_common},
+        ops::{ConnectResult, connect_common, connect_outgoing_common, nop_connect_fn},
+    }
 };
 use mirrord_protocol::file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse};
 use nix::{
@@ -492,6 +495,41 @@ pub(super) fn connect(
     connect_common(sockfd, user_socket_info, remote_address, connect_fn).into()
 }
 
+/// For IPv6 server / IPv4 client connections, translate IPv4
+/// addresses to IPv4-mapped-IPv6 addresses, inline with what happens
+/// without mirrord.
+///
+/// For IPv4 server / IPv6 client, we map the peer address to
+/// localhost, since we cannot map IPv6 to IPv4. Without mirrord, IPv4
+/// servers cannot accept IPv6 connections anyway, so this is fine.
+fn map_ipv64(domain: c_int, ip: SocketAddr) -> SocketAddr {
+    match (domain, ip) {
+        (libc::AF_INET, SocketAddr::V4(..)) | (libc::AF_INET6, SocketAddr::V6(..)) => ip,
+        (libc::AF_INET6, SocketAddr::V4(v4)) => {
+            SocketAddr::new(v4.ip().to_ipv6_mapped().into(), v4.port())
+        }
+
+        (libc::AF_INET, SocketAddr::V6(v6)) => {
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), v6.port())
+        }
+
+        (domain, _) => {
+            // Something has gone *very* wrong
+            graceful_exit!("IP socket domain was {domain}, which is neither AF_INET nor AF_INET6");
+        }
+    }
+}
+
+/// Thin wrapper around [`map_ipv64`] to bypass non-IP [`SocketAddr`]s
+/// and do return type mapping.
+fn map_socketaddress_ipv64(domain: c_int, addr: SocketAddress) -> SocketAddress {
+    // Bypass any non-IP stuff
+    let SocketAddress::Ip(ip) = addr else {
+        return addr;
+    };
+    map_ipv64(domain, ip).into()
+}
+
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
 /// cluster)
 #[mirrord_layer_macro::instrument(level = Level::TRACE, skip(address, address_len))]
@@ -506,9 +544,10 @@ pub(super) fn getpeername(
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => {
-                    Detour::Success(connected.remote_address.clone())
-                }
+                SocketState::Connected(connected) => Detour::Success(map_socketaddress_ipv64(
+                    socket.domain,
+                    connected.remote_address.clone(),
+                )),
                 SocketState::Bound { .. }
                 | SocketState::Initialized
                 | SocketState::Listening(_) => Detour::Bypass(Bypass::InvalidState(sockfd)),
@@ -541,14 +580,14 @@ pub(super) fn getsockname(
         SocketState::Connected(Connected {
             local_address: Some(addr),
             ..
-        }) => addr.clone().try_into()?,
+        }) => map_socketaddress_ipv64(socket.domain, addr.clone()).try_into()?,
         SocketState::Connected(Connected {
             connection_id: Some(id),
             ..
         }) => {
             let response =
                 make_proxy_request_with_response(OutgoingConnMetadataRequest { conn_id: *id })??;
-            response.in_cluster_address.into()
+            map_ipv64(socket.domain, response.in_cluster_address).into()
         }
         SocketState::Bound {
             bound: Bound {
