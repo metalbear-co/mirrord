@@ -64,7 +64,7 @@ async fn fix_kubeconfig(args: FixKubeconfig) -> Result<(), FixKubeconfigError> {
             continue;
         };
 
-        let cmd_path = PathBuf::from(&*command);
+        let cmd_path = PathBuf::from(command);
 
         if cmd_path.is_absolute() {
             continue;
