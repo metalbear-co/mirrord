@@ -71,7 +71,7 @@ async fn fix_kubeconfig(args: FixKubeconfig) -> Result<(), FixKubeconfigError> {
         }
 
         let absolute = match which::which(&cmd_path) {
-            Ok(a) => a
+            Ok(path) => path
                 .into_os_string()
                 .into_string()
                 .map_err(FixKubeconfigError::StringConversion)?,
