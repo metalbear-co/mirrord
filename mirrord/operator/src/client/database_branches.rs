@@ -330,7 +330,6 @@ pub(crate) async fn create_mongodb_branches<P: Progress>(
 
     for (id, params) in params {
         let name_prefix = params.name_prefix;
-        let ttl_secs = params.spec.ttl_secs;
         let branch = MongodbBranchDatabase {
             metadata: ObjectMeta {
                 generate_name: Some(name_prefix),
