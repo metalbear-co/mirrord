@@ -1218,7 +1218,7 @@ pub struct FixArgs {
 /// `mirrord fix` commands.
 #[derive(Subcommand, Debug)]
 pub enum FixCommand {
-    /// Look for non-absolute paths in kubeconfig and make them absolute
+    /// Look for non-absolute paths in kubeconfig and interactively make them absolute.
     Kubeconfig(FixKubeconfig),
 }
 
