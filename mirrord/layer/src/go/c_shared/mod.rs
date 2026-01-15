@@ -240,6 +240,10 @@ pub(crate) mod go_1_24 {
             "nop",
             "nop",
             "nop",
+            "nop",
+            "nop", // this is the address we save in g->sched->pc
+            "nop",
+            "nop",
             "pop    rbp",
             "ret",
         );
