@@ -23,7 +23,7 @@ pub mod retry;
 pub mod target;
 pub mod util;
 
-use std::{collections::HashMap, ffi::OsStr, ops::Not, path::Path};
+use std::{collections::HashMap, ffi::OsStr, path::Path};
 
 use base64::prelude::*;
 use config::{ConfigContext, ConfigError, MirrordConfig};
@@ -613,7 +613,7 @@ impl LayerConfig {
 
         let is_targetless = match self.target.path.as_ref() {
             Some(Target::Targetless) => true,
-            None => context.is_empty_target_final().not(),
+            None => context.is_empty_target_final(),
             _ => false,
         };
 

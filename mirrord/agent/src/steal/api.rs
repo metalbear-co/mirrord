@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, VecDeque, hash_map::Entry},
     error::Report,
     fmt,
     ops::{Not, RangeInclusive},
@@ -9,7 +9,7 @@ use std::{
 use bytes::Bytes;
 use futures::{StreamExt, stream::FuturesUnordered};
 use http_body_util::{BodyExt, combinators::BoxBody};
-use hyper::Response;
+use hyper::{Response, body::Frame};
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, LogMessage, Payload, RequestId,
     tcp::{
@@ -21,7 +21,7 @@ use mirrord_protocol::{
         StealType, TcpClose, TcpData,
     },
 };
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc::{self, Receiver, Sender, error::SendError};
 use tokio_stream::StreamMap;
 use tracing::Level;
 
@@ -536,23 +536,53 @@ impl TcpStealerApi {
                 if response.request_id != Self::REQUEST_ID {
                     return Ok(());
                 }
-                let Some(connection) = self.connections.get_mut(&response.connection_id) else {
+                let Entry::Occupied(mut connection) =
+                    self.connections.entry(response.connection_id)
+                else {
                     return Ok(());
                 };
                 let response =
                     response.map_body(|body| std::iter::once(InternalHttpBodyFrame::Data(body)));
-                connection.send_response(response, true).await;
+
+                if let Err(SendResponseError::Terminated) =
+                    connection.get_mut().send_response(response, true).await
+                {
+                    tracing::debug!(
+                        "connection terminated by http client before response could be sent"
+                    );
+                    self.queued_messages
+                        .push_back(DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
+                            connection_id: *connection.key(),
+                        })));
+                    connection.remove();
+                };
             }
 
             LayerTcpSteal::HttpResponseFramed(response) => {
                 if response.request_id != Self::REQUEST_ID {
                     return Ok(());
                 }
-                let Some(connection) = self.connections.get_mut(&response.connection_id) else {
+
+                let Entry::Occupied(mut connection) =
+                    self.connections.entry(response.connection_id)
+                else {
                     return Ok(());
                 };
+
                 let response = response.map_body(|body| body.0);
-                connection.send_response(response, true).await;
+
+                if let Err(SendResponseError::Terminated) =
+                    connection.get_mut().send_response(response, true).await
+                {
+                    tracing::debug!(
+                        "connection terminated by http client before response could be sent"
+                    );
+                    self.queued_messages
+                        .push_back(DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
+                            connection_id: *connection.key(),
+                        })));
+                    connection.remove();
+                };
             }
 
             LayerTcpSteal::HttpResponseChunked(response) => match response {
@@ -560,23 +590,58 @@ impl TcpStealerApi {
                     if response.request_id != Self::REQUEST_ID {
                         return Ok(());
                     }
-                    let Some(connection) = self.connections.get_mut(&response.connection_id) else {
+
+                    let Entry::Occupied(mut connection) =
+                        self.connections.entry(response.connection_id)
+                    else {
                         return Ok(());
                     };
-                    connection.send_response(response, false).await;
+
+                    if let Err(SendResponseError::Terminated) =
+                        connection.get_mut().send_response(response, false).await
+                    {
+                        tracing::debug!(
+                            "connection terminated by http client before response could be sent"
+                        );
+                        self.queued_messages
+                            .push_back(DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
+                                connection_id: *connection.key(),
+                            })));
+                        connection.remove();
+                    };
                 }
                 ChunkedResponse::Body(body) => {
                     if body.request_id != 0 {
                         return Ok(());
                     }
-                    let Some(connection) = self.connections.get_mut(&body.connection_id) else {
+
+                    let Entry::Occupied(mut connection) =
+                        self.connections.entry(body.connection_id)
+                    else {
                         return Ok(());
                     };
-                    for frame in body.frames {
-                        connection.send_response_frame(Some(frame)).await;
-                    }
-                    if body.is_last {
-                        connection.send_response_frame(None).await;
+
+                    let status = try {
+                        for frame in body.frames {
+                            connection
+                                .get_mut()
+                                .send_response_frame(Some(frame))
+                                .await?;
+                        }
+                        if body.is_last {
+                            connection.get_mut().send_response_frame(None).await?;
+                        }
+                    };
+
+                    if let Err(SendResponseError::Terminated) = status {
+                        tracing::debug!(
+                            "connection terminated by http client while sending response chunks"
+                        );
+                        self.queued_messages
+                            .push_back(DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
+                                connection_id: *connection.key(),
+                            })));
+                        connection.remove();
                     }
                 }
                 ChunkedResponse::Error(error) => {
@@ -618,6 +683,18 @@ enum ClientConnectionState {
     Closed,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum SendResponseError {
+    #[error("Connection has been terminated")]
+    Terminated,
+}
+
+impl From<SendError<Frame<Bytes>>> for SendResponseError {
+    fn from(_: SendError<Frame<Bytes>>) -> Self {
+        Self::Terminated
+    }
+}
+
 impl ClientConnectionState {
     async fn send_data(&mut self, data: Bytes) {
         let sender = match self {
@@ -634,19 +711,22 @@ impl ClientConnectionState {
         let _ = sender.send(data).await;
     }
 
-    async fn send_response_frame(&mut self, frame: Option<InternalHttpBodyFrame>) {
+    async fn send_response_frame(
+        &mut self,
+        frame: Option<InternalHttpBodyFrame>,
+    ) -> Result<(), SendResponseError> {
         let state = std::mem::replace(self, Self::Closed);
         let body_provider = match state {
             Self::HttpResponseReceived { body_provider } => body_provider,
             state => {
                 *self = state;
-                return;
+                return Ok(());
             }
         };
 
         match frame {
             Some(frame) => {
-                body_provider.send_frame(frame.into()).await;
+                body_provider.send_frame(frame.into()).await?;
                 *self = Self::HttpResponseReceived { body_provider }
             }
             None => match body_provider.finish() {
@@ -655,10 +735,16 @@ impl ClientConnectionState {
                     *self = Self::Closed;
                 }
             },
-        }
+        };
+
+        Ok(())
     }
 
-    async fn send_response<B>(&mut self, response: HttpResponse<B>, body_finished: bool)
+    async fn send_response<B>(
+        &mut self,
+        response: HttpResponse<B>,
+        body_finished: bool,
+    ) -> Result<(), SendResponseError>
     where
         B: IntoIterator<Item = InternalHttpBodyFrame>,
     {
@@ -670,7 +756,7 @@ impl ClientConnectionState {
             } => (response_provider, redirector_config),
             state => {
                 *self = state;
-                return;
+                return Ok(());
             }
         };
 
@@ -700,10 +786,12 @@ impl ClientConnectionState {
         } else {
             let body_provider = response_provider.send(parts);
             for frame in response.internal_response.body {
-                body_provider.send_frame(frame.into()).await;
+                body_provider.send_frame(frame.into()).await?;
             }
             *self = Self::HttpResponseReceived { body_provider };
         }
+
+        Ok(())
     }
 
     /// Used for applying transformations on the response returned

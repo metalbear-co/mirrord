@@ -75,7 +75,7 @@ pub(crate) enum HookError {
     #[error("mirrord-layer: SIP patch failed with error `{0}`!")]
     FailedSipPatch(#[from] SipError),
 
-    #[error("mirrord-layer: IPv6 can't be used with mirrord")]
+    #[error("mirrord-layer: IPv6 support disabled")]
     SocketUnsuportedIpv6,
 
     // `From` implemented below, not with `#[from]` so that when new variants of
