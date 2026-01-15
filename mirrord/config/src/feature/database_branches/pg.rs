@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{ConnectionSourceKind, DatabaseBranchBaseConfig};
+use super::{DatabaseBranchBaseConfig, TargetEnviromentVariableSource};
 
 /// When configuring a branch for PostgreSQL, set `type` to `pg`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
@@ -55,20 +55,20 @@ pub enum PgIamAuthConfig {
     AwsRds {
         /// AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        region: Option<ConnectionSourceKind>,
+        region: Option<TargetEnviromentVariableSource>,
 
         /// AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        access_key_id: Option<ConnectionSourceKind>,
+        access_key_id: Option<TargetEnviromentVariableSource>,
 
         /// AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        secret_access_key: Option<ConnectionSourceKind>,
+        secret_access_key: Option<TargetEnviromentVariableSource>,
 
         /// AWS Session Token (for temporary credentials). If not specified, uses
         /// AWS_SESSION_TOKEN.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        session_token: Option<ConnectionSourceKind>,
+        session_token: Option<TargetEnviromentVariableSource>,
     },
     /// GCP Cloud SQL IAM authentication.
     /// The init container must have GCP credentials (via Workload Identity or service account key).
@@ -78,18 +78,18 @@ pub enum PgIamAuthConfig {
         /// Specify the env var that contains the raw JSON content of the service account key.
         /// Example: `{"type": "env", "variable": "GOOGLE_APPLICATION_CREDENTIALS_JSON"}`
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        credentials_json: Option<ConnectionSourceKind>,
+        credentials_json: Option<TargetEnviromentVariableSource>,
 
         /// Path to service account JSON key file.
         /// Specify the env var that contains the file path to the service account key.
         /// The file must be accessible from the init container.
         /// Example: `{"type": "env", "variable": "GOOGLE_APPLICATION_CREDENTIALS"}`
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        credentials_path: Option<ConnectionSourceKind>,
+        credentials_path: Option<TargetEnviromentVariableSource>,
 
         /// GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        project: Option<ConnectionSourceKind>,
+        project: Option<TargetEnviromentVariableSource>,
     },
 }
 

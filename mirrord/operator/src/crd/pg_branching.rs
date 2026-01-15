@@ -7,8 +7,8 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use mirrord_config::{
     feature::database_branches::{
-        ConnectionSourceKind as ConfigConnectionSourceKind, PgBranchCopyConfig,
-        PgBranchTableCopyConfig, PgIamAuthConfig,
+        PgBranchCopyConfig, PgBranchTableCopyConfig, PgIamAuthConfig,
+        TargetEnviromentVariableSource,
     },
     target::Target,
 };
@@ -143,17 +143,17 @@ pub enum ConnectionSourceKind {
     },
 }
 
-impl From<ConfigConnectionSourceKind> for ConnectionSourceKind {
-    fn from(src: ConfigConnectionSourceKind) -> Self {
+impl From<TargetEnviromentVariableSource> for ConnectionSourceKind {
+    fn from(src: TargetEnviromentVariableSource) -> Self {
         match src {
-            ConfigConnectionSourceKind::Env {
+            TargetEnviromentVariableSource::Env {
                 container,
                 variable,
             } => ConnectionSourceKind::Env {
                 container,
                 variable,
             },
-            ConfigConnectionSourceKind::EnvFrom {
+            TargetEnviromentVariableSource::EnvFrom {
                 container,
                 variable,
             } => ConnectionSourceKind::EnvFrom {
@@ -164,17 +164,17 @@ impl From<ConfigConnectionSourceKind> for ConnectionSourceKind {
     }
 }
 
-impl From<&ConfigConnectionSourceKind> for ConnectionSourceKind {
-    fn from(src: &ConfigConnectionSourceKind) -> Self {
+impl From<&TargetEnviromentVariableSource> for ConnectionSourceKind {
+    fn from(src: &TargetEnviromentVariableSource) -> Self {
         match src {
-            ConfigConnectionSourceKind::Env {
+            TargetEnviromentVariableSource::Env {
                 container,
                 variable,
             } => ConnectionSourceKind::Env {
                 container: container.clone(),
                 variable: variable.clone(),
             },
-            ConfigConnectionSourceKind::EnvFrom {
+            TargetEnviromentVariableSource::EnvFrom {
                 container,
                 variable,
             } => ConnectionSourceKind::EnvFrom {

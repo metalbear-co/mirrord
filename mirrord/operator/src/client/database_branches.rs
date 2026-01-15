@@ -10,8 +10,8 @@ use kube::{
 };
 use mirrord_config::{
     feature::database_branches::{
-        ConnectionSource, ConnectionSourceKind, DatabaseBranchConfig, DatabaseBranchesConfig,
-        MysqlBranchConfig, PgBranchConfig,
+        ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig, MysqlBranchConfig,
+        PgBranchConfig, TargetEnviromentVariableSource,
     },
     target::{Target, TargetDisplay},
 };
@@ -445,14 +445,14 @@ impl MysqlBranchParams {
         let name_prefix = format!("{}-mysql-branch-", target.name());
         let connection_source = match &config.base.connection {
             ConnectionSource::Url(kind) => match kind {
-                ConnectionSourceKind::Env {
+                TargetEnviromentVariableSource::Env {
                     container,
                     variable,
                 } => CrdConnectionSourceMysql::Url(CrdConnectionSourceKindMysql::Env {
                     container: container.clone(),
                     variable: variable.clone(),
                 }),
-                ConnectionSourceKind::EnvFrom {
+                TargetEnviromentVariableSource::EnvFrom {
                     container,
                     variable,
                 } => CrdConnectionSourceMysql::Url(CrdConnectionSourceKindMysql::EnvFrom {
