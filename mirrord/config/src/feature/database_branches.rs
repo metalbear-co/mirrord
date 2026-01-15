@@ -171,6 +171,7 @@ pub enum ConnectionSource {
     Url(TargetEnviromentVariableSource),
 }
 
+/// <!--${internal}-->
 /// Different ways to source the connection options.
 ///
 /// Support:
