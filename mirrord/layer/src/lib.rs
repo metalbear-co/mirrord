@@ -369,11 +369,8 @@ fn init_tracing() {
 ///
 /// 5. Fetches remote environment from the agent (if enabled with
 ///    [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
-fn layer_start(mut config: LayerConfig) {
+fn layer_start(config: LayerConfig) {
     init_tracing();
-
-    // initialize LayerSetup from config
-    init_layer_setup(&mut config).expect("init_layer_setup failed");
 
     let proxy_connection_timeout = *PROXY_CONNECTION_TIMEOUT
         .get_or_init(|| Duration::from_secs(config.internal_proxy.socket_timeout));
@@ -382,6 +379,9 @@ fn layer_start(mut config: LayerConfig) {
         .get()
         .expect("EXECUTABLE_ARGS MUST BE SET")
         .to_process_info(&config);
+
+    // initialize LayerSetup from config
+    init_layer_setup(config, false);
 
     let state = setup();
     enable_hooks(state);

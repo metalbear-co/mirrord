@@ -16,7 +16,7 @@ use crate::{
     detour::Bypass,
     error::{HookError, HookResult},
     setup::setup,
-    socket::{CheckQueryResult, remote_getaddrinfo},
+    socket::remote_getaddrinfo,
 };
 
 /// Here we keep addr infos that we allocated so we'll know when to use the original
@@ -73,17 +73,7 @@ pub fn getaddrinfo(
         .unwrap_or(0);
 
     let setup = setup();
-    match setup.dns_selector().check_query_result(&node, service) {
-        CheckQueryResult::Local => {
-            trace!("getaddrinfo -> bypassing to local DNS for {node}:{service}");
-
-            return Err(HookError::Bypass(Bypass::LocalDns));
-        }
-        CheckQueryResult::Remote => {
-            trace!("getaddrinfo -> resolving remotely for {node}:{service}");
-            //fallthrough
-        }
-    };
+    setup.dns_selector().check_query(&node, service)?;
     let ipv6_enabled = setup.layer_config().feature.network.ipv6;
 
     let raw_hints = raw_hints

@@ -63,7 +63,7 @@ pub struct DetourGuard;
 #[cfg(unix)]
 impl DetourGuard {
     /// Create a new DetourGuard if it's not already enabled.
-    pub(crate) fn new() -> Option<Self> {
+    pub fn new() -> Option<Self> {
         DETOUR_BYPASS.with(|enabled| {
             if let Ok(bypass) = enabled.try_borrow()
                 && *bypass

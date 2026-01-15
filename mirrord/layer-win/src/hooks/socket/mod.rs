@@ -19,7 +19,7 @@ use mirrord_layer_lib::{
     proxy_connection::make_proxy_request_with_response,
     setup::{LayerSetup, NetworkHookConfig, setup},
     socket::{
-        Bound, Connected, SocketAddrExtWin, SocketKind, SocketState,
+        Bound, Connected, SocketAddrExt, SocketKind, SocketState,
         dns::{
             remote_dns_resolve_via_proxy,
             windows::{
@@ -1479,14 +1479,6 @@ unsafe extern "system" fn wsa_send_to_detour(
         iTolen
     );
 
-    let proxy_request_fn = |request| -> HookResult<_> {
-        match make_proxy_request_with_response(request) {
-            Ok(Ok(response)) => Ok(response),
-            Ok(Err(e)) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-            Err(e) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-        }
-    };
-
     // Helper function to consolidate all fallback calls to original WSASendTo
     let fallback_to_original = |reason: &str| {
         tracing::debug!("wsa_send_to_detour -> falling back to original: {}", reason);
@@ -1609,7 +1601,6 @@ unsafe extern "system" fn wsa_send_to_detour(
             first_buf_len as usize,
             dwFlags as i32,
             raw_destination,
-            proxy_request_fn,
             wsa_sendto_fn,
         ) {
             Ok(sendto_result) => {
@@ -1849,27 +1840,17 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
     }
 
     // Check if we should resolve this hostname remotely using the DNS selector
-    let should_resolve_remotely = {
-        let result = setup()
-            .dns_selector()
-            .should_resolve_remotely(hostname_cstr, 0);
-        tracing::debug!(
-            "is_remote_hostname DNS selector check for '{}': {}",
-            hostname_cstr,
-            result
-        );
-        result
-    };
-
-    tracing::warn!(
-        "DNS selector decision for {}: resolve_remotely={}",
-        hostname_cstr,
-        should_resolve_remotely
-    );
-
-    if !should_resolve_remotely {
-        return fallback_to_original();
+    match setup().dns_selector().check_query(&hostname_cstr, 0) {
+        Err(_) => {
+            tracing::debug!(
+                "DNS selector check returned local for '{}'",
+                hostname_cstr,
+            );
+            return fallback_to_original();
+        }
+        _ => {}
     }
+    
     // Try to resolve the hostname using mirrord's remote DNS resolution
     match remote_dns_resolve_via_proxy(hostname_cstr) {
         Ok(results) => {
@@ -2166,12 +2147,6 @@ unsafe extern "system" fn sendto_detour(
         tolen
     );
 
-    let proxy_request_fn = |request| match make_proxy_request_with_response(request) {
-        Ok(Ok(response)) => Ok(response),
-        Ok(Err(e)) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-        Err(e) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-    };
-
     // Helper function to consolidate all fallback calls to original sendto
     let fallback_to_original = |reason: &str| -> INT {
         tracing::debug!("sendto_detour -> falling back to original: {}", reason);
@@ -2215,7 +2190,6 @@ unsafe extern "system" fn sendto_detour(
         len as usize,
         flags,
         raw_destination,
-        proxy_request_fn,
         sendto_fn,
     ) {
         Ok(result) => {

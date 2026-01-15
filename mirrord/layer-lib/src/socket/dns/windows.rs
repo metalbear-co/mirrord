@@ -17,7 +17,7 @@ use crate::{
     error::{AddrInfoError, HookResult},
     proxy_connection::make_proxy_request_with_response,
     setup::setup,
-    socket::SocketAddrExtWin,
+    socket::SocketAddrExt,
 };
 
 /// Keep track of managed address info structures for proper cleanup.
@@ -52,24 +52,7 @@ pub fn getaddrinfo<T: WindowsAddrInfo>(
     );
 
     // Check DNS selector to determine if this should be resolved remotely
-    let should_resolve_remotely = {
-        let result = setup().dns_selector().should_resolve_remotely(&node, port);
-        tracing::debug!("DNS selector check for '{}': {}", node, result);
-        result
-    };
-
-    tracing::warn!(
-        "DNS selector decision for {} (port {}): resolve_remotely={}",
-        node,
-        port,
-        should_resolve_remotely
-    );
-
-    if !should_resolve_remotely {
-        tracing::warn!("Using local DNS resolution for {}", node);
-        return Err(AddrInfoError::ResolveDisabled(node).into());
-    }
-
+    setup().dns_selector().check_query(&node, port)?;
     tracing::warn!("Using remote DNS resolution for {}", node);
 
     // Convert hints to mirrord protocol types

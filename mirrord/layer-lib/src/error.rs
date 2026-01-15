@@ -10,7 +10,6 @@ pub mod windows;
 use std::ptr;
 use std::{
     env::VarError,
-    io,
     net::{AddrParseError, SocketAddr},
     str::ParseBoolError,
     sync::{MutexGuard, PoisonError},
@@ -19,7 +18,6 @@ use std::{
 #[cfg(unix)]
 use libc::{DIR, FILE, c_char, hostent};
 use mirrord_config::config::ConfigError;
-use mirrord_intproxy_protocol::{ProxyToLayerMessage, codec::CodecError};
 use mirrord_protocol::{ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
@@ -28,9 +26,7 @@ use nix::errno::Errno;
 use thiserror::Error;
 use tracing::{error, info};
 
-#[cfg(windows)]
-use crate::setup::setup;
-use crate::{detour::Bypass, graceful_exit};
+use crate::{detour::Bypass, graceful_exit, proxy_connection::ProxyError, setup::setup};
 
 mod ignore_codes {
     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
@@ -62,28 +58,6 @@ mod ignore_codes {
         } else {
             false
         }
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum ProxyError {
-    #[error("{0}")]
-    CodecError(#[from] CodecError),
-    #[error("connection closed")]
-    ConnectionClosed,
-    #[error("unexpected response: {0:?}")]
-    UnexpectedResponse(Box<ProxyToLayerMessage>),
-    #[error("critical error: {0}")]
-    ProxyFailure(String),
-    #[error("connection lock poisoned")]
-    LockPoisoned,
-    #[error("{0}")]
-    IoFailed(#[from] io::Error),
-}
-
-impl<T> From<PoisonError<T>> for ProxyError {
-    fn from(_value: PoisonError<T>) -> Self {
-        Self::LockPoisoned
     }
 }
 
@@ -279,10 +253,17 @@ pub enum HookError {
     Bypass(Bypass),
 }
 
+// mirrord/layer-lib/src/error.rs
+impl From<Bypass> for HookError {
+    fn from(bypass: Bypass) -> Self {
+        HookError::Bypass(bypass)
+    }
+}
+
 /// Errors internal to mirrord-layer.
 ///
 /// You'll encounter these when the layer is performing some of its internal operations, mostly when
-/// handling [`ProxyToLayerMessage`].
+/// handling [`ProxyToLayerMessage`](mirrord_intproxy_protocol::ProxyToLayerMessage).
 #[derive(Error, Debug)]
 pub enum LayerError {
     #[error("mirrord-layer: `{0}`")]
@@ -298,6 +279,10 @@ pub enum LayerError {
     #[cfg(target_os = "linux")]
     #[error("mirrord-layer: Failed to find symbol for name `{0}`!")]
     NoSymbolName(String),
+
+    #[cfg(target_os = "linux")]
+    #[error("mirrord-layer: Failed to find module for name `{0}`!")]
+    NoModuleName(String),
 
     #[error("mirrord-layer: Environment variable interaction failed with `{0}`!")]
     VarError(#[from] VarError),
@@ -414,16 +399,9 @@ impl<T> From<PoisonError<MutexGuard<'_, T>>> for HookError {
     }
 }
 
-#[cfg(unix)]
-impl From<frida_gum::Error> for LayerError {
-    fn from(err: frida_gum::Error) -> Self {
-        LayerError::Frida(err)
-    }
-}
-
+pub type Result<T, E = LayerError> = std::result::Result<T, E>;
 pub type LayerResult<T, E = LayerError> = std::result::Result<T, E>;
 pub type HookResult<T, E = HookError> = std::result::Result<T, E>;
-pub type ProxyResult<T, E = ProxyError> = std::result::Result<T, E>;
 
 #[cfg(unix)]
 fn get_platform_errno(fail: HookError) -> i32 {
@@ -621,7 +599,6 @@ impl From<HookError> for i64 {
                     }
                     err => format!("Proxy error, connectivity issue or a bug: {err}"),
                 };
-                #[cfg(target_os = "windows")]
                 graceful_exit!(
                     r"{reason}.
                     Please report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml
@@ -631,11 +608,6 @@ impl From<HookError> for i64 {
                         .internal_proxy
                         .log_destination
                         .display()
-                );
-                #[cfg(not(target_os = "windows"))]
-                graceful_exit!(
-                    r"{reason}.
-                    Please report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml"
                 );
             }
             _ => error!("Error occured in Layer >> {fail:?}"),
@@ -699,6 +671,13 @@ impl From<HookError> for *mut c_char {
         let _ = i64::from(fail);
 
         ptr::null_mut()
+    }
+}
+
+#[cfg(unix)]
+impl From<frida_gum::Error> for LayerError {
+    fn from(err: frida_gum::Error) -> Self {
+        LayerError::Frida(err)
     }
 }
 

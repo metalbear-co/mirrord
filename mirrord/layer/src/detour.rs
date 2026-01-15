@@ -9,18 +9,13 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::{
-    cell::RefCell, ffi::CString, net::SocketAddr, ops::Deref, os::unix::prelude::*, path::PathBuf,
-    sync::OnceLock,
-};
+use std::{ops::Deref, sync::OnceLock};
 
 #[cfg(target_os = "macos")]
 use libc::c_char;
-
 // Re-exporting until detour will move entirely to layer-lib
 pub use mirrord_layer_lib::detour::{Bypass, DetourGuard};
-
-use crate::error::HookError;
+use mirrord_layer_lib::error::HookError;
 
 /// Wrapper around [`OnceLock`], mainly used for the [`Deref`] implementation
 /// to simplify calls to the original functions as `FN_ORIGINAL()`, instead of
@@ -101,13 +96,25 @@ where
     E: Into<HookError>,
 {
     fn from_residual(Err(e): Result<convert::Infallible, E>) -> Self {
-        Detour::Error(e.into())
+        match e.into() {
+            HookError::Bypass(bypass) => Detour::Bypass(bypass),
+            error => Detour::Error(error),
+        }
     }
 }
 
-impl<S> FromResidual<Result<convert::Infallible, Bypass>> for Detour<S> {
-    fn from_residual(Err(e): Result<convert::Infallible, Bypass>) -> Self {
-        Detour::Bypass(e)
+impl<S, E> From<Result<S, E>> for Detour<S>
+where
+    E: Into<HookError>,
+{
+    fn from(res: Result<S, E>) -> Self {
+        match res {
+            Ok(s) => Detour::Success(s),
+            Err(e) => match e.into() {
+                HookError::Bypass(b) => Detour::Bypass(b),
+                err => Detour::Error(err),
+            },
+        }
     }
 }
 

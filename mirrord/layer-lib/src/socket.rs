@@ -1,4 +1,5 @@
 pub mod dns;
+pub mod dns_selector;
 pub mod hostname;
 pub mod ops;
 pub mod sockets;
@@ -20,7 +21,7 @@ pub use dns::reverse_dns::{
 use libc::c_int;
 // Cross-platform socket constants
 #[cfg(unix)]
-pub use libc::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
+pub use libc::{sockaddr, socklen_t, AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
 use mirrord_config::feature::network::{
     dns::{DnsConfig, DnsFilterConfig},
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
@@ -30,6 +31,7 @@ use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnCloseRequest, PortUnsub
 use mirrord_protocol::{
     DnsLookupError, ResolveErrorKindInternal, ResponseError, outgoing::SocketAddress,
 };
+#[cfg(unix)]
 use socket2::SockAddr;
 // Re-export sockets module items
 pub use sockets::{
@@ -71,7 +73,11 @@ pub struct Connected {
     /// but use this address in the `recvfrom` handling of `fill_address`.
     pub remote_address: SocketAddress,
 
-    /// Local address (pod-wise)
+    /// Local address of the agent's socket.
+    ///
+    /// Whenever the user calls `getsockname`, this is the address we return to them.
+    ///
+    /// Not available in case of experimental non-blocking TCP connections.
     ///
     /// ## Example
     ///
@@ -243,6 +249,7 @@ impl UserSocket {
     /// Closes the socket and performs necessary cleanup.
     /// If this socket was listening and bound to a port, notifies agent to stop
     /// mirroring/stealing that port by sending PortUnsubscribe.
+    #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()), ret)]
     pub fn close(&self) -> HookResult<()> {
         match self {
             Self {
@@ -278,34 +285,49 @@ impl Drop for UserSocket {
     }
 }
 
-/// Trait for DNS resolution functionality that can be implemented by platform-specific layers
-pub trait DnsResolver {
-    type Error;
-
-    /// Resolve a hostname to IP addresses
-    fn resolve_hostname(
-        hostname: &str,
-        port: u16,
-        family: i32,
-        protocol: i32,
-    ) -> Result<Vec<std::net::IpAddr>, Self::Error>;
-
-    /// Check if remote DNS is enabled
-    fn remote_dns_enabled() -> bool;
-}
-
-/// Cross-platform address conversion utilities
+#[cfg(unix)]
 pub trait SocketAddrExt {
-    // Platform-specific implementations should provide their own address conversion methods
+    /// Converts a raw [`sockaddr`] pointer into a more _Rusty_ type
+    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> HookResult<Self>
+    where
+        Self: Sized;
 }
 
+#[cfg(unix)]
 impl SocketAddrExt for SockAddr {
-    // Platform-specific implementations should override this
+    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> HookResult<SockAddr> {
+        unsafe {
+            SockAddr::try_init(|storage, len| {
+                // storage and raw_address size is dynamic.
+                (storage as *mut u8)
+                    .copy_from_nonoverlapping(raw_address as *const u8, address_length as usize);
+                *len = address_length;
+                Ok(())
+            })
+        }
+        .map_err(|_| HookError::Bypass(Bypass::AddressConversion))
+        .map(|((), address)| address)
+
+    }
 }
 
-/// Windows-specific extensions for socket address handling on Windows
+
+#[cfg(unix)]
+impl SocketAddrExt for SocketAddr {
+    fn try_from_raw(
+        raw_address: *const sockaddr,
+        address_length: socklen_t,
+    ) -> HookResult<SocketAddr> {
+        SockAddr::try_from_raw(raw_address, address_length)
+            .and_then(|address| {
+                address.as_socket().ok_or(HookError::Bypass(Bypass::AddressConversion))
+            })
+            .map_err(|_| HookError::Bypass(Bypass::AddressConversion))
+    }
+}
+
 #[cfg(windows)]
-pub trait SocketAddrExtWin {
+pub trait SocketAddrExt {
     /// Converts a raw Windows SOCKADDR pointer into a more _Rusty_ type
     fn try_from_raw(raw_address: *const SOCKADDR, address_length: INT) -> Option<Self>
     where
@@ -324,7 +346,7 @@ pub trait SocketAddrExtWin {
 }
 
 #[cfg(windows)]
-impl SocketAddrExtWin for SocketAddr {
+impl SocketAddrExt for SocketAddr {
     fn try_from_raw(raw_address: *const SOCKADDR, address_length: INT) -> Option<SocketAddr> {
         unsafe { sockaddr_to_socket_addr(raw_address, address_length) }
     }
@@ -334,7 +356,7 @@ impl SocketAddrExtWin for SocketAddr {
 }
 
 #[cfg(windows)]
-impl SocketAddrExtWin for SocketAddress {
+impl SocketAddrExt for SocketAddress {
     fn try_from_raw(raw_address: *const SOCKADDR, address_length: INT) -> Option<Self> {
         SocketAddr::try_from_raw(raw_address, address_length).map(SocketAddress::from)
     }

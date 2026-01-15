@@ -10,7 +10,7 @@ use std::{
 
 use mirrord_layer_lib::{
     error::{AddrInfoError, HookError, HookResult},
-    socket::SocketAddrExtWin,
+    socket::SocketAddrExt,
     unsafe_alloc,
 };
 use winapi::{

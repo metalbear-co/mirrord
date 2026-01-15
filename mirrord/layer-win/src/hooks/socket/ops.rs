@@ -1,11 +1,9 @@
 use std::{net::SocketAddr, sync::OnceLock};
 
-use mirrord_intproxy_protocol::{OutgoingConnectRequest, OutgoingConnectResponse};
 use mirrord_layer_lib::{
     error::ConnectError,
-    proxy_connection::make_proxy_request_with_response,
     socket::{
-        HookResult, SocketAddrExtWin, get_socket,
+        HookResult, SocketAddrExt, get_socket,
         ops::{ConnectResult, connect_common},
     },
 };
@@ -261,16 +259,6 @@ where
         }
     };
 
-    // Create the proxy request function that matches layer-lib expectations
-    let proxy_request_fn =
-        |request: OutgoingConnectRequest| -> HookResult<OutgoingConnectResponse> {
-            match make_proxy_request_with_response(request) {
-                Ok(Ok(response)) => Ok(response),
-                Ok(Err(e)) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-                Err(e) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-            }
-        };
-
     // Convert Windows sockaddr to Rust SocketAddr
     let remote_addr = match SocketAddr::try_from_raw(name, namelen) {
         Some(addr) => addr,
@@ -284,11 +272,5 @@ where
     };
 
     // Try to connect through the mirrord proxy using layer-lib integration
-    connect_common(
-        socket,
-        user_socket,
-        remote_addr,
-        proxy_request_fn,
-        connect_fn,
-    )
+    connect_common(socket, user_socket, remote_addr, connect_fn)
 }

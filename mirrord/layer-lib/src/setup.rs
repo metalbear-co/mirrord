@@ -29,7 +29,7 @@ use regex::RegexSet;
 use crate::{
     debugger_ports::DebuggerPorts,
     file::{filter::FileFilter, mapper::FileRemapper},
-    socket::{DnsSelector, OutgoingSelector},
+    socket::{OutgoingSelector, dns_selector::DnsSelector},
     trace_only::{is_trace_only_mode, modify_config_for_trace_only},
 };
 

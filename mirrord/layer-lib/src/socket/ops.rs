@@ -34,6 +34,7 @@ use crate::{
     HookError, HookResult,
     detour::Bypass,
     error::ConnectError,
+    proxy_connection::make_proxy_request_with_response,
     setup::setup,
     socket::{Bound, Connected, ConnectionThrough, SOCKETS, SocketState, UserSocket},
 };
@@ -175,21 +176,11 @@ fn set_last_error(error: i32) {
     };
 }
 
-fn nop_connect_fn(_addr: SockAddr) -> ConnectResult {
+pub fn nop_connect_fn(_addr: SockAddr) -> ConnectResult {
     ConnectResult {
         result: 0,
         error: None,
     }
-}
-
-#[inline]
-fn invoke_connect_fn<F>(connect_fn: &mut Option<F>, addr: SockAddr) -> ConnectResult
-where
-    F: FnOnce(SockAddr) -> ConnectResult,
-{
-    connect_fn
-        .take()
-        .expect("connect_fn should only be called once")(addr)
 }
 
 /// Iterate through sockets, if any of them has the requested port that the application is now
@@ -198,11 +189,11 @@ where
 /// is locally listening.
 #[cfg(unix)]
 #[mirrord_layer_macro::instrument(level = "trace", skip(connect_fn), ret)]
-fn connect_to_local_address<F>(
+pub fn connect_to_local_address<F>(
     sockfd: RawFd,
     user_socket_info: &UserSocket,
     ip_address: SocketAddr,
-    connect_fn: &mut Option<F>,
+    connect_fn: F,
 ) -> HookResult<Option<ConnectResult>>
 where
     F: FnOnce(SockAddr) -> ConnectResult,
@@ -224,7 +215,7 @@ where
                 | SocketState::Initialized
                 | SocketState::Connected(_) => None,
             })
-            .map(|rawish_remote_address| invoke_connect_fn(connect_fn, rawish_remote_address)))
+            .map(|rawish_remote_address| connect_fn(rawish_remote_address)))
     }
 }
 
@@ -244,26 +235,26 @@ pub fn is_ignored_port(addr: &SocketAddr) -> bool {
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
 #[allow(clippy::result_large_err)]
-#[mirrord_layer_macro::instrument(
-    level = "trace",
-    skip(user_socket_info, proxy_request_fn, connect_fn),
-    ret
-)]
-pub fn connect_common<P, F>(
+#[mirrord_layer_macro::instrument(level = "trace", skip(user_socket_info, connect_fn), ret)]
+pub fn connect_common<F>(
     socket: SOCKET,
     user_socket_info: Arc<UserSocket>,
     remote_addr: SocketAddr,
-    proxy_request_fn: P,
     connect_fn: F,
 ) -> HookResult<ConnectResult>
 where
-    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
     F: FnOnce(SockAddr) -> ConnectResult,
 {
     let remote_address = SockAddr::from(remote_addr);
     let optional_ip_address = remote_address.as_socket();
     let unix_streams = setup().remote_unix_streams();
+
     let mut connect_fn = Some(connect_fn);
+    let mut call_connect_fn = |addr: SockAddr| -> ConnectResult {
+        connect_fn
+            .take()
+            .expect("connect_fn should only be called once")(addr)
+    };
 
     if let Some(ip_address) = optional_ip_address {
         if setup().experimental().tcp_ping4_mock && ip_address.port() == 7 {
@@ -272,17 +263,20 @@ where
 
         // Handle localhost/unspecified addresses first -
         //  if applicable, connect locally without proxy
-        if !setup().outgoing_config().ignore_localhost
-            && (ip_address.ip().is_loopback() || ip_address.ip().is_unspecified())
+        let ip = ip_address.ip();
+        if !setup().outgoing_config().ignore_localhost && (ip.is_loopback() || ip.is_unspecified())
         {
             // Note(Daniel): the next 2 if blocks are logically equivalent but were brought from
             // layer and layer-win separately, they work and im only doing plumbing
             // unification, so i rather keep both and each platform will run its own flavoring of
             // it.
             #[cfg(unix)]
-            if let Some(result) =
-                connect_to_local_address(socket, &user_socket_info, ip_address, &mut connect_fn)?
-            {
+            if let Some(result) = connect_to_local_address(
+                socket,
+                &user_socket_info,
+                ip_address,
+                &mut call_connect_fn,
+            )? {
                 // `result` here is always a success, as error and bypass are returned on the `?`
                 // above.
                 return Ok(result);
@@ -293,7 +287,7 @@ where
             {
                 tracing::debug!("connecting locally to listener at {}", local_address);
                 let local_sockaddr = SockAddr::from(local_address);
-                let connect_result = invoke_connect_fn(&mut connect_fn, local_sockaddr);
+                let connect_result = call_connect_fn(local_sockaddr);
                 return Ok(connect_result);
             }
         }
@@ -349,8 +343,7 @@ where
             remote_address,
             user_socket_info,
             NetProtocol::Datagrams,
-            proxy_request_fn,
-            |addr| invoke_connect_fn(&mut connect_fn, addr),
+            |addr| call_connect_fn(addr),
         ),
 
         NetProtocol::Stream => match user_socket_info.state {
@@ -363,15 +356,14 @@ where
                     remote_address,
                     user_socket_info,
                     NetProtocol::Stream,
-                    proxy_request_fn,
-                    |addr| invoke_connect_fn(&mut connect_fn, addr),
+                    |addr| call_connect_fn(addr),
                 )
             }
 
-            _ => Err(ConnectError::DisabledOutgoing(socket_descriptor_to_i64(socket)).into()),
+            _ => Err(HookError::Bypass(Bypass::DisabledOutgoing)),
         },
 
-        _ => Err(ConnectError::DisabledOutgoing(socket_descriptor_to_i64(socket)).into()),
+        _ => Err(HookError::Bypass(Bypass::DisabledOutgoing)),
     }
 }
 
@@ -386,25 +378,18 @@ where
 /// - `user_socket_info`: The socket information structure
 /// - `protocol`: The network protocol (TCP/UDP)
 /// - `connect_fn`: Platform-specific function to perform the actual socket connection
-/// - `proxy_request_fn`: Function to make proxy requests to the agent
 ///
 /// ## Returns
 /// A `ConnectResult` containing the connection result and any error information
-#[mirrord_layer_macro::instrument(
-    level = "debug",
-    ret,
-    skip(user_socket_info, proxy_request_fn, connect_fn)
-)]
-pub fn connect_outgoing_common<P, F>(
+#[mirrord_layer_macro::instrument(level = "debug", ret, skip(user_socket_info, connect_fn))]
+pub fn connect_outgoing_common<F>(
     sockfd: SocketDescriptor,
     remote_address: SockAddr,
     user_socket_info: Arc<UserSocket>,
     protocol: NetProtocol,
-    proxy_request_fn: P,
     connect_fn: F,
 ) -> HookResult<ConnectResult>
 where
-    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
     F: FnOnce(SockAddr) -> ConnectResult,
 {
     debug!("preparing {protocol:?} connection to {remote_address:?}");
@@ -417,7 +402,7 @@ where
     };
 
     // Closure that performs the connection with mirrord messaging.
-    let remote_connection = |remote_addr: SockAddr| -> HookResult<ConnectResult> {
+    let mut remote_connection = |remote_addr: SockAddr| -> HookResult<ConnectResult> {
         // Prepare this socket to be intercepted.
         let remote_address = SocketAddress::try_from(remote_addr.clone()).unwrap();
 
@@ -426,7 +411,7 @@ where
             protocol,
         };
 
-        let response = match proxy_request_fn(request) {
+        let response = match make_proxy_request_with_response(request)? {
             Ok(response) => response,
             Err(e) => return Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
         };
@@ -684,26 +669,19 @@ pub type SendtoFn = unsafe extern "system" fn(
 /// - `flags`: Send flags
 /// - `raw_destination`: Pointer to destination address
 /// - `sendto_fn`: Platform-specific sendto function
-/// - `proxy_request_fn`: Function to make proxy requests
 ///
 /// ## Returns
 /// `HookResult<isize>`
-#[mirrord_layer_macro::instrument(
-    level = "debug",
-    ret,
-    skip(raw_message, destination, sendto_fn, proxy_request_fn)
-)]
-pub fn send_to<P, F>(
+#[mirrord_layer_macro::instrument(level = "debug", ret, skip(raw_message, destination, sendto_fn))]
+pub fn send_to<F>(
     sockfd: SocketDescriptor,
     raw_message: *const u8,
     message_length: usize,
     flags: i32,
     destination: SocketAddr,
-    proxy_request_fn: P,
     sendto_fn: F,
 ) -> HookResult<isize>
 where
-    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
     F: FnOnce(SocketDescriptor, *const u8, usize, i32, SockAddr) -> HookResult<isize>,
 {
     let raw_destination = SockAddr::from(destination);
@@ -753,7 +731,6 @@ where
             destination.into(),
             user_socket_info,
             NetProtocol::Datagrams,
-            proxy_request_fn,
             nop_connect_fn,
         )?;
 
