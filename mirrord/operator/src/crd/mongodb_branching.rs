@@ -77,7 +77,9 @@ pub struct MongodbBranchDatabaseStatus {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
 pub enum BranchDatabasePhase {
-    /// The controller is creating the branch database.
+    /// Initial phase set by CLI. Controller will create the database pod.
+    Init,
+    /// The controller is creating the branch database pod.
     Pending,
     /// The branch database is ready to use.
     Ready,
@@ -86,6 +88,7 @@ pub enum BranchDatabasePhase {
 impl std::fmt::Display for BranchDatabasePhase {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            BranchDatabasePhase::Init => write!(f, "Init"),
             BranchDatabasePhase::Pending => write!(f, "Pending"),
             BranchDatabasePhase::Ready => write!(f, "Ready"),
         }

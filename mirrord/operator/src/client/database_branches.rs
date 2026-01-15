@@ -330,6 +330,7 @@ pub(crate) async fn create_mongodb_branches<P: Progress>(
 
     for (id, params) in params {
         let name_prefix = params.name_prefix;
+        let ttl_secs = params.spec.ttl_secs;
         let branch = MongodbBranchDatabase {
             metadata: ObjectMeta {
                 generate_name: Some(name_prefix),
@@ -340,8 +341,8 @@ pub(crate) async fn create_mongodb_branches<P: Progress>(
             status: None,
         };
 
-        match api.create(&kube::api::PostParams::default(), &branch).await {
-            Ok(branch) => created_branches.insert(id, branch),
+        let created = match api.create(&kube::api::PostParams::default(), &branch).await {
+            Ok(branch) => branch,
             Err(e) => {
                 return Err(OperatorApiError::KubeError {
                     error: e,
@@ -349,6 +350,38 @@ pub(crate) async fn create_mongodb_branches<P: Progress>(
                 });
             }
         };
+
+        // Initialize status with Init phase so controller knows to create the pod
+        let name = created.metadata.name.as_ref().ok_or_else(|| {
+            mirrord_kube::error::KubeApiError::missing_field(&created, ".metadata.name")
+        })?;
+        let initial_status = crate::crd::mongodb_branching::MongodbBranchDatabaseStatus {
+            phase: crate::crd::mongodb_branching::BranchDatabasePhase::Init,
+            expire_time: k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime(
+                chrono::Utc::now() + chrono::Duration::seconds(ttl_secs as i64),
+            ),
+            session_info: HashMap::new(),
+        };
+        api.patch_status(
+            name,
+            &kube::api::PatchParams::default(),
+            &kube::api::Patch::Merge(serde_json::json!({ "status": initial_status })),
+        )
+        .await
+        .map_err(|e| OperatorApiError::KubeError {
+            error: e,
+            operation: OperatorOperation::MongodbBranching,
+        })?;
+
+        // Refetch to get the updated resource with status
+        let updated = api
+            .get(name)
+            .await
+            .map_err(|e| OperatorApiError::KubeError {
+                error: e,
+                operation: OperatorOperation::MongodbBranching,
+            })?;
+        created_branches.insert(id, updated);
     }
     subtask.info("databases created");
 
