@@ -201,7 +201,7 @@ pub(super) enum Commands {
     #[cfg(feature = "wizard")]
     Wizard(Box<WizardArgs>),
 
-    /// Fix something related to mirrord
+    /// Fix issues related to mirrord.
     Fix(FixArgs),
 }
 
@@ -1207,18 +1207,22 @@ pub struct WizardArgs {
     pub telemetry: bool,
 }
 
+/// `mirrord fix` args.
 #[derive(Args, Debug)]
 pub struct FixArgs {
+    /// Command to use with `mirrord fix`.
     #[command(subcommand)]
     pub command: FixCommand,
 }
 
+/// `mirrord fix` commands.
 #[derive(Subcommand, Debug)]
 pub enum FixCommand {
     /// Look for non-absolute paths in kubeconfig and make them absolute
     Kubeconfig(FixKubeconfig),
 }
 
+/// `mirrord fix kubeconfig` args
 #[derive(Args, Debug)]
 pub struct FixKubeconfig {
     #[arg(env = "MIRRORD_KUBECONFIG", long = "kubeconfig")]
