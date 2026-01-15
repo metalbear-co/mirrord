@@ -88,6 +88,12 @@ pub enum OperatorApiError {
     #[error("operation timed out: {}", operation)]
     OperationTimeout { operation: OperatorOperation },
 
+    #[error("{operation} failed: {message}")]
+    BranchCreationFailed {
+        operation: OperatorOperation,
+        message: String,
+    },
+
     #[error(transparent)]
     InvalidBackoff(#[from] InvalidBackoff),
 

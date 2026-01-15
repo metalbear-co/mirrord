@@ -10,8 +10,8 @@ use kube::{
 };
 use mirrord_config::{
     feature::database_branches::{
-        ConnectionSource, ConnectionSourceKind, DatabaseBranchConfig, DatabaseBranchesConfig,
-        MysqlBranchConfig, PgBranchConfig,
+        ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig, MysqlBranchConfig,
+        PgBranchConfig, TargetEnviromentVariableSource,
     },
     target::{Target, TargetDisplay},
 };
@@ -31,9 +31,8 @@ use crate::{
         },
         pg_branching::{
             BranchDatabasePhase as BranchDatabasePhasePg,
-            ConnectionSource as CrdConnectionSourcePg,
-            ConnectionSourceKind as CrdConnectionSourceKindPg, PgBranchDatabase,
-            PgBranchDatabaseSpec,
+            ConnectionSource as CrdConnectionSourcePg, IamAuthConfig as CrdIamAuthConfig,
+            PgBranchDatabase, PgBranchDatabaseSpec,
         },
     },
 };
@@ -90,14 +89,16 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let ready = branch_names
+    // Wait for either Ready or Failed phase
+    let ready_or_failed = branch_names
         .iter()
         .map(|name| {
             await_condition(api.clone(), name, |db: Option<&MysqlBranchDatabase>| {
                 db.and_then(|db| {
-                    db.status
-                        .as_ref()
-                        .map(|status| status.phase == BranchDatabasePhaseMysql::Ready)
+                    db.status.as_ref().map(|status| {
+                        status.phase == BranchDatabasePhaseMysql::Ready
+                            || status.phase == BranchDatabasePhaseMysql::Failed
+                    })
                 })
                 .unwrap_or(false)
             })
@@ -105,11 +106,31 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
         .collect::<Vec<_>>();
 
     subtask.info("waiting for readiness");
-    tokio::time::timeout(timeout, futures::future::join_all(ready))
+    let results = tokio::time::timeout(timeout, futures::future::join_all(ready_or_failed))
         .await
         .map_err(|_| OperatorApiError::OperationTimeout {
             operation: OperatorOperation::MysqlBranching,
         })?;
+
+    // Check if any branch failed
+    for result in results {
+        let Ok(Some(db)) = result else {
+            continue;
+        };
+        if let Some(status) = &db.status
+            && status.phase == BranchDatabasePhaseMysql::Failed
+        {
+            let error_msg = status
+                .error
+                .clone()
+                .unwrap_or_else(|| "Branch database creation failed".to_string());
+            return Err(OperatorApiError::BranchCreationFailed {
+                operation: OperatorOperation::MysqlBranching,
+                message: error_msg,
+            });
+        }
+    }
+
     subtask.success(Some("new MySQL branch databases ready"));
 
     Ok(created_branches)
@@ -224,14 +245,16 @@ pub(crate) async fn create_pg_branches<P: Progress>(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let ready = branch_names
+    // Wait for either Ready or Failed phase
+    let ready_or_failed = branch_names
         .iter()
         .map(|name| {
             await_condition(api.clone(), name, |db: Option<&PgBranchDatabase>| {
                 db.and_then(|db| {
-                    db.status
-                        .as_ref()
-                        .map(|status| status.phase == BranchDatabasePhasePg::Ready)
+                    db.status.as_ref().map(|status| {
+                        status.phase == BranchDatabasePhasePg::Ready
+                            || status.phase == BranchDatabasePhasePg::Failed
+                    })
                 })
                 .unwrap_or(false)
             })
@@ -239,11 +262,31 @@ pub(crate) async fn create_pg_branches<P: Progress>(
         .collect::<Vec<_>>();
 
     subtask.info("waiting for readiness");
-    tokio::time::timeout(timeout, futures::future::join_all(ready))
+    let results = tokio::time::timeout(timeout, futures::future::join_all(ready_or_failed))
         .await
         .map_err(|_| OperatorApiError::OperationTimeout {
             operation: OperatorOperation::PgBranching,
         })?;
+
+    // Check if any branch failed
+    for result in results {
+        let Ok(Some(db)) = result else {
+            continue;
+        };
+        if let Some(status) = &db.status
+            && status.phase == BranchDatabasePhasePg::Failed
+        {
+            let error_msg = status
+                .error
+                .clone()
+                .unwrap_or_else(|| "Branch database creation failed".to_string());
+            return Err(OperatorApiError::BranchCreationFailed {
+                operation: OperatorOperation::PgBranching,
+                message: error_msg,
+            });
+        }
+    }
+
     subtask.success(Some("new PostgreSQL branch databases ready"));
 
     Ok(created_branches)
@@ -402,14 +445,14 @@ impl MysqlBranchParams {
         let name_prefix = format!("{}-mysql-branch-", target.name());
         let connection_source = match &config.base.connection {
             ConnectionSource::Url(kind) => match kind {
-                ConnectionSourceKind::Env {
+                TargetEnviromentVariableSource::Env {
                     container,
                     variable,
                 } => CrdConnectionSourceMysql::Url(CrdConnectionSourceKindMysql::Env {
                     container: container.clone(),
                     variable: variable.clone(),
                 }),
-                ConnectionSourceKind::EnvFrom {
+                TargetEnviromentVariableSource::EnvFrom {
                     container,
                     variable,
                 } => CrdConnectionSourceMysql::Url(CrdConnectionSourceKindMysql::EnvFrom {
@@ -450,23 +493,12 @@ impl PgBranchParams {
     pub(crate) fn new(id: &str, config: &PgBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
         let connection_source = match &config.base.connection {
-            ConnectionSource::Url(kind) => match kind {
-                ConnectionSourceKind::Env {
-                    container,
-                    variable,
-                } => CrdConnectionSourcePg::Url(CrdConnectionSourceKindPg::Env {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-                ConnectionSourceKind::EnvFrom {
-                    container,
-                    variable,
-                } => CrdConnectionSourcePg::Url(CrdConnectionSourceKindPg::EnvFrom {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-            },
+            ConnectionSource::Url(kind) => CrdConnectionSourcePg::Url(kind.into()),
         };
+
+        // Convert IAM auth config if present
+        let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
+        tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
         let spec = PgBranchDatabaseSpec {
             id: id.to_string(),
             database_name: config.base.name.clone(),
@@ -475,6 +507,7 @@ impl PgBranchParams {
             ttl_secs: config.base.ttl_secs,
             postgres_version: config.base.version.clone(),
             copy: config.copy.clone().into(),
+            iam_auth,
         };
         let labels = BTreeMap::from([(
             labels::MIRRORD_PG_BRANCH_ID_LABEL.to_string(),

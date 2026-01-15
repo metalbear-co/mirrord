@@ -335,6 +335,10 @@ pub(crate) enum CliError {
         operator_version: String,
     },
 
+    #[error("mirrord operator {0} failed: {1}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    OperatorBranchCreationFailed(OperatorOperation, String),
+
     #[error("mirrord operator API failed: {0} failed with {1}")]
     #[diagnostic(help(
     "Please check the following:
@@ -525,6 +529,9 @@ impl From<OperatorApiError> for CliError {
         use kube::{Error, client::AuthError};
 
         match value {
+            OperatorApiError::BranchCreationFailed { operation, message } => {
+                Self::OperatorBranchCreationFailed(operation, message)
+            }
             OperatorApiError::UnsupportedFeature {
                 feature,
                 operator_version,
