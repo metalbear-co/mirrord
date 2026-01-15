@@ -8,6 +8,26 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.181.1](https://github.com/metalbear-co/mirrord/tree/3.181.1) - 2026-01-14
+
+
+### Fixed
+
+- `mirrord` now unsets env from process even if the process is skipped on
+  macOS.
+- `getsockname`/`getpeername` will now correctly report IPv4-mapped-IPv6 addresses when necessary. 
+  When the client receives an IPv6 connection on an IPv4 server socket, `127.0.0.1` will be reported instead.
+
+
+### Internal
+
+- Added a `CLAUDE.md` file to contextualize AI agents in mirrord's codebase.
+- Small refactor to make a struct member name make sense.
+- Clean up windows ci - move windows CI into ci.yaml
+- Clean up windows ci - move windows release into release.yaml
+- Remove legacy windows_build.yaml
+- Fixed flaky intproxy reconnect flow test
+
 ## [3.181.0](https://github.com/metalbear-co/mirrord/tree/3.181.0) - 2026-01-12
 
 
