@@ -624,7 +624,7 @@ This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 
 ### _experimental_ applev {#experimental-applev}
 
-Configuraiton for inspecting and modifying apple variables. macOS only.
+Configuration for inspecting and modifying apple variables. macOS only.
 
 ### _experimental_ browser_extension_config {#experimental-browser_extension_config}
 

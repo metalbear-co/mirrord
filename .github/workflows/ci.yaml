@@ -160,7 +160,7 @@ jobs:
         with:
           files: |
             mirrord-schema.json
-      - name: get configuraiton.md changes
+      - name: get configuration.md changes
         id: changed-configuration-md
         uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
         with:

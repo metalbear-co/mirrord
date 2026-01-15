@@ -1363,7 +1363,7 @@
       "properties": {
         "applev": {
           "title": "_experimental_ applev {#experimental-applev}",
-          "description": "Configuraiton for inspecting and modifying apple variables. macOS only.",
+          "description": "Configuration for inspecting and modifying apple variables. macOS only.",
           "anyOf": [
             {
               "$ref": "#/definitions/AppleVariablesConfig"
