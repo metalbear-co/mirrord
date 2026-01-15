@@ -16,31 +16,7 @@ mod cli {
 
     use tracing::debug;
 
-    use crate::utils::{config_dir, json_to_path, run_command::run_verify_config};
-
-    /// DELETE OLD TEST - PP
-    /// Tests `verify-config` with `path` and `--ide` args, which should be:
-    ///
-    /// ```sh
-    /// mirrord verify-config --ide /path/to/config.json
-    /// ```
-    #[cfg_attr(target_os = "windows", ignore)]
-    #[rstest]
-    #[tokio::test]
-    #[timeout(Duration::from_secs(30))]
-    pub async fn path_ide_verify_config(config_dir: &Path) {
-
-        let mut config_path = config_dir.to_path_buf();
-        config_path.push("default_ide.json");
-
-        let mut process = run_verify_config(Some(vec![
-            "--ide",
-            config_path.to_str().expect("Valid config path!"),
-        ]))
-        .await;
-
-        assert!(process.wait().await.success());
-    }
+    use crate::utils::{config_dir, ManagedTempFile, run_command::run_verify_config};
 
     /// Tests `verify-config` with tempfile and `--ide` args, which should be:
     ///
@@ -64,21 +40,19 @@ mod cli {
                 "env": true
             }
         });
-        let config_path = json_to_path(config_json);
+        let tempfile = ManagedTempFile::new(config_json);
 
-        println!("Tempfile path is: {:?}", &config_path);
+        println!("Tempfile path is: {:?}", &tempfile.path);
 
-        if config_path.exists() == false {
+        if tempfile.path.exists() == false {
             assert!(false);
         }
 
         let mut process = run_verify_config(Some(vec![
             "--ide",
-            config_path.to_str().expect("Valid config path!"),
+            tempfile.path.to_str().expect("Valid config path!"),
         ]))
         .await;
-
-        let _ = std::fs::remove_file(config_path).unwrap_or_else(|_| println!("Failed to remove tempfile."));
 
         assert!(process.wait().await.success());
     }

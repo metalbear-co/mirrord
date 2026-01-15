@@ -2324,6 +2324,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dns-lookup"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e39034cee21a2f5bbb66ba0e3689819c4bb5d00382a282006e802a7ffa6c41d"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "socket2 0.6.1",
+ "windows-sys 0.60.2",
+]
+
+[[package]]
 name = "dns_resolve"
 version = "0.1.0"
 
@@ -4530,6 +4542,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
+ "tokio-retry",
  "tokio-rustls 0.26.4",
  "tokio-stream",
  "tokio-util",
@@ -4552,6 +4565,7 @@ dependencies = [
  "bytes",
  "clap",
  "containerd-client",
+ "dns-lookup",
  "enum_dispatch",
  "faccess",
  "fancy-regex",
@@ -4584,10 +4598,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_json_path",
- "serde_json_path_macros",
  "socket2 0.5.10",
  "streammap-ext",
- "strum_macros 0.27.2",
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
@@ -4637,6 +4649,7 @@ version = "3.179.0"
 dependencies = [
  "assert-json-diff",
  "base64",
+ "ci_info",
  "drain",
  "reqwest",
  "serde",
@@ -4677,6 +4690,7 @@ dependencies = [
  "base64",
  "bimap",
  "bitflags 2.10.0",
+ "clap",
  "fancy-regex",
  "ipnet",
  "k8s-openapi",
@@ -4972,7 +4986,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.24.2"
+version = "1.25.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -4988,6 +5002,9 @@ dependencies = [
  "nix 0.29.0",
  "semver 1.0.27",
  "serde",
+ "serde_json",
+ "serde_json_path",
+ "serde_json_path_macros",
  "socket2 0.5.10",
  "strum 0.27.2",
  "strum_macros 0.27.2",

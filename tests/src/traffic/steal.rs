@@ -23,9 +23,9 @@ mod steal_tests {
         application::Application,
         config_dir,
         ipv6::{ipv6_service, portforward_http_requests},
-        json_to_path,
         kube_client,
         kube_service::KubeService,
+        ManagedTempFile,
         port_forwarder::PortForwarder,
         send_request, send_requests,
         services::{basic_service, http2_service, tcp_echo_service, websocket_service},
@@ -513,12 +513,12 @@ mod steal_tests {
                 }
             }
         });
-        let tempfile_path = json_to_path(config_json);
-        config_path.push(&tempfile_path);
+        let tempfile = ManagedTempFile::new(config_json); 
+        config_path.push(&tempfile.path);
 
-        println!("Tempfile path is: {:?}", &config_path);
+        println!("Tempfile path is: {:?}", &tempfile.path);
 
-        if config_path.exists() == false {
+        if tempfile.path.exists() == false {
             assert!(false);
         }
 
@@ -530,8 +530,6 @@ mod steal_tests {
                 Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
             )
             .await;
-
-        let _ = std::fs::remove_file(&tempfile_path).unwrap_or_else(|_| println!("Failed to remove tempfile."));
 
         #[cfg(target_os = "windows")]
         application.wait_until_listening(&client).await;

@@ -1,7 +1,7 @@
 #![allow(clippy::unused_io_amount)]
 #![allow(clippy::indexing_slicing)]
 
-use std::{collections::BTreeMap, io::Write, path::PathBuf, sync::Once};
+use std::{collections::BTreeMap, fs::File, io::Write, path::PathBuf, sync::Once};
 
 use chrono::{Timelike, Utc};
 use k8s_openapi::api::core::v1::Service;
@@ -61,27 +61,43 @@ fn format_time() -> String {
     format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
 }
 
-/// Returns tempfile path
-pub fn json_to_path(config: Value) -> PathBuf {
-    let tempfile = NamedTempFile::new();
-    match tempfile {
-      Ok(mut tf) => {
-        let json_string = serde_json::to_string(&config).unwrap_or_default();
-        let _ = write!(tf, "{}", json_string);
-        let tf_keep = tf.keep();
-        match tf_keep {
-          Ok(tf_kept) => {
-            let path = tf_kept.1;
-            path
+pub struct ManagedTempFile {
+    pub file: File,
+    pub path: PathBuf
+}
+
+impl ManagedTempFile {
+    /// Returns tempfile path
+    pub fn new(config: Value) -> Self {
+        let tempfile = NamedTempFile::new();
+        match tempfile {
+          Ok(mut tf) => {
+            let json_string = serde_json::to_string(&config).unwrap_or_default();
+            let _ = write!(tf, "{}", json_string);
+            let tf_keep = tf.keep();
+            match tf_keep {
+              Ok(tf_kept) => {
+                let file = tf_kept.0;
+                let path = tf_kept.1;
+                Self { file, path }
+              },
+              Err(e) => {
+                panic!("Error persisting tempfile: {}", e);
+              }
+            }
           },
           Err(e) => {
-            panic!("Error persisting tempfile: {}", e);
+            panic!("Error generating tempfile: {}", e);
           }
         }
-      },
-      Err(e) => {
-        panic!("Error generating tempfile: {}", e);
-      }
+    }
+}
+
+impl Drop for ManagedTempFile {
+    /// Removes tempfile from fs
+    /// Then, drops ManagedTempfile 
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path).unwrap_or_else(|_| panic!("Failed to remove tempfile.")); 
     }
 }
 
