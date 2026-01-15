@@ -399,6 +399,7 @@ pub(crate) enum CliError {
     #[error("An error occurred in the port-forwarding process: {0}")]
     PortForwardingError(#[from] PortForwardError),
 
+    #[cfg(feature = "wizard")]
     #[error("An IO error occurred while serving the wizard app: {0}")]
     WizardIoError(io::Error),
 
