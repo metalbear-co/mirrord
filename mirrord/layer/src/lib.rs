@@ -105,6 +105,8 @@ use mirrord_layer_lib::{
     setup::{LayerSetup, init_layer_setup, setup},
     trace_only::is_trace_only_mode,
 };
+#[cfg(doc)]
+use mirrord_layer_lib::setup::SETUP;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use nix::errno::Errno;
