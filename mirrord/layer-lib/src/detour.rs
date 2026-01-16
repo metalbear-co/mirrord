@@ -106,12 +106,13 @@ pub enum Bypass {
     /// Unix socket to address that was not configured to be connected remotely.
     UnixSocket(Option<String>),
 
-    /// We could not find this [`RawFd`] in neither [`OPEN_FILES`](mirrord_layer::file::OPEN_FILES), nor
-    /// [`SOCKETS`](crate::socket::SOCKETS).
+    /// We could not find this [`RawFd`] in neither [`OPEN_FILES`](mirrord_layer::file::OPEN_FILES),
+    /// nor [`SOCKETS`](crate::socket::SOCKETS).
     #[cfg(unix)]
     LocalFdNotFound(RawFd),
 
-    /// Similar to `LocalFdNotFound`, but for [`OPEN_DIRS`](mirrord_layer::file::open_dirs::OPEN_DIRS).
+    /// Similar to `LocalFdNotFound`, but for
+    /// [`OPEN_DIRS`](mirrord_layer::file::open_dirs::OPEN_DIRS).
     LocalDirStreamNotFound(usize),
 
     /// A conversion from [`SockAddr`](socket2::SockAddr) to

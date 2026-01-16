@@ -364,7 +364,10 @@ pub trait SocketAddrExt {
 
 #[cfg(windows)]
 impl SocketAddrExt for SocketAddr {
-    unsafe fn try_from_raw(raw_address: *const SOCKADDR, address_length: INT) -> Option<SocketAddr> {
+    unsafe fn try_from_raw(
+        raw_address: *const SOCKADDR,
+        address_length: INT,
+    ) -> Option<SocketAddr> {
         unsafe { sockaddr_to_socket_addr(raw_address, address_length) }
     }
     unsafe fn copy_to(&self, name: *mut SOCKADDR, namelen: *mut INT) -> WindowsResult<()> {

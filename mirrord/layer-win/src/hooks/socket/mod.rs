@@ -1840,7 +1840,11 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
     }
 
     // Check if we should resolve this hostname remotely using the DNS selector
-    if setup().dns_selector().check_query(hostname_cstr.as_ref(), 0).is_err() {
+    if setup()
+        .dns_selector()
+        .check_query(hostname_cstr.as_ref(), 0)
+        .is_err()
+    {
         tracing::debug!("DNS selector check returned local for '{}'", hostname_cstr,);
         return fallback_to_original();
     }
