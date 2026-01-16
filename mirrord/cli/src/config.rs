@@ -1231,7 +1231,7 @@ pub struct FixKubeconfig {
 
     /// Do not make any actual changes, just print what would be changed
     #[arg(long = "dry-run")]
-    pub dry_run: bool
+    pub dry_run: bool,
 }
 
 #[cfg(test)]
