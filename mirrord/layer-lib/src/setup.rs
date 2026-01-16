@@ -33,8 +33,8 @@ use crate::{
     trace_only::{is_trace_only_mode, modify_config_for_trace_only},
 };
 
-#[cfg_attr(doc, pub)]
-static SETUP: OnceLock<LayerSetup> = OnceLock::new();
+// note: pub only for doc purposes, please use setup() in code
+pub static SETUP: OnceLock<LayerSetup> = OnceLock::new();
 
 pub fn setup() -> &'static LayerSetup {
     SETUP.get().expect("layer is not initialized")
