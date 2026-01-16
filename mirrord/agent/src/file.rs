@@ -10,11 +10,11 @@ use std::{
         fd::{AsRawFd, RawFd},
         unix::{ffi::OsStrExt, fs::MetadataExt, prelude::FileExt},
     },
-    path::{Path, PathBuf},
+    path::{Path, PathBuf, StripPrefixError},
     ptr,
 };
 
-use faccess::{AccessMode, PathExt};
+use faccess::{AccessMode, PathExt as _};
 use libc::DT_DIR;
 use mirrord_protocol::{FileRequest, FileResponse, RemoteResult, ResponseError, file::*};
 use nix::unistd::UnlinkatFlags;
@@ -23,6 +23,29 @@ use tracing::{Level, error, trace};
 use crate::{
     error::AgentResult, metrics::OPEN_FD_COUNT, util::path_resolver::InTargetPathResolver,
 };
+
+trait PathExt {
+    /// Equivalent to `Path::strip_prefix("/")` but doesn't remove
+    /// trailing slash.
+    ///
+    /// [`Path::strip_prefix`] has a bug that also strips trailing
+    /// slashes ([`https://github.com/rust-lang/rust/issues/148267`]).
+    /// Apparently Rust's path API hates trailing slashes so we have
+    /// to do this overcomplicated trickery.
+    fn strip_prefix_root(&self) -> Result<PathBuf, StripPrefixError>;
+}
+
+impl PathExt for Path {
+    fn strip_prefix_root(&self) -> Result<PathBuf, StripPrefixError> {
+        let mut stripped = self.strip_prefix("/")?.to_owned();
+
+        if self.as_os_str().as_bytes().ends_with(b"/") {
+            stripped.push("");
+        }
+
+        Ok(stripped)
+    }
+}
 
 #[derive(Debug)]
 pub enum RemoteFile {
@@ -99,17 +122,9 @@ impl FileManager {
         Ok(match request {
             FileRequest::Open(OpenFileRequest { path, open_options }) => {
                 // TODO: maybe not agent error on this?
-                let mut path_stripped = path
-                    .strip_prefix("/")
-                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?
-                    .to_owned();
-
-                // [`Path::strip_prefix`] has a bug that also strips trailing slashes
-                // https://github.com/rust-lang/rust/issues/148267. Apparently Rust's path
-                // API hates trailing slashes so we have to do this overcomplicated trickery.
-                if path.as_os_str().as_bytes().ends_with(b"/") {
-                    path_stripped.push("");
-                }
+                let path_stripped = path
+                    .strip_prefix_root()
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
                 let open_result = self.open(path_stripped, open_options);
                 Some(FileResponse::Open(open_result))
@@ -161,7 +176,7 @@ impl FileManager {
             FileRequest::Close(CloseFileRequest { fd }) => self.close(fd),
             FileRequest::Access(AccessFileRequest { pathname, mode }) => {
                 let pathname = pathname
-                    .strip_prefix("/")
+                    .strip_prefix_root()
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
                 let access_result = self.access(pathname.into(), mode);
@@ -405,7 +420,7 @@ impl FileManager {
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     pub(crate) fn read_link(&mut self, path: PathBuf) -> RemoteResult<ReadLinkFileResponse> {
         let relative_path = path
-            .strip_prefix("/")
+            .strip_prefix_root()
             .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
         let full_path = self
@@ -779,11 +794,11 @@ impl FileManager {
             // invalid
             _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into()),
         };
-        let path = path.strip_prefix("/").map_err(|_| {
+        let path = path.strip_prefix_root().map_err(|_| {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "couldn't strip prefix")
         })?;
         let res = if follow_symlink {
-            self.resolve_path(path)?.metadata()
+            self.resolve_path(&path)?.metadata()
         } else if let Some(resolver) = self.path_resolver.as_ref() {
             resolver.root_path().join(path).symlink_metadata()
         } else {
