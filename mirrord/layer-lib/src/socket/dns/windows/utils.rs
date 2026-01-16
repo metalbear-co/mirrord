@@ -19,14 +19,35 @@ use crate::{
     unsafe_alloc,
 };
 
-/// Trait to abstract over Windows ADDRINFO types (ADDRINFOA and ADDRINFOW)
+/// Trait to abstract over Windows ADDRINFO types (ADDRINFOA and ADDRINFOW).
+/// Prefer interacting with these pointers through [`ManagedAddrInfo`], which provides the RAII
+/// semantics and enforces the ownership rules described in each method's safety contract.
 pub trait WindowsAddrInfo: Sized {
     type CanonName;
 
     /// Allocate a new instance
+    ///
+    /// # Safety
+    /// - Returned pointer must be initialized with [`WindowsAddrInfo::fill`] and ultimately owned
+    ///   by [`ManagedAddrInfo::drop`], which will free the entire linked list that starts at the
+    ///   pointer. Handing it to any other deallocator or freeing it twice is UB.
+    /// - The allocation must come from the global allocator so `drop` can release it with
+    ///   `std::alloc::dealloc`.
     unsafe fn alloc() -> Result<*mut Self, AddrInfoError>;
 
     /// Fill the structure with the given parameters
+    ///
+    /// # Safety
+    /// - `ptr` must come from [`WindowsAddrInfo::alloc`] and the resulting node becomes part of the
+    ///   singly linked list that [`ManagedAddrInfo::drop`] walks and frees. Sharing nodes between
+    ///   lists or forming cycles will cause double frees or leaks.
+    /// - `addr` must point to memory allocated for the concrete socket family (AF_INET or AF_INET6)
+    ///   so that `drop` can select the correct layout when it calls `std::alloc::dealloc`.
+    /// - `canonname` must have been allocated with the global allocator (via
+    ///   [`WindowsAddrInfo::string_to_canonname`] or similar) because `drop` releases it through
+    ///   [`WindowsAddrInfo::free_canonname`].
+    /// - `next` must either be null or another pointer allocated by this trait; it will be followed
+    ///   and freed recursively.
     unsafe fn fill(
         ptr: *mut Self,
         flags: i32,
