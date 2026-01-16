@@ -215,7 +215,7 @@ where
                 | SocketState::Initialized
                 | SocketState::Connected(_) => None,
             })
-            .map(|rawish_remote_address| connect_fn(rawish_remote_address)))
+            .map(connect_fn))
     }
 }
 
@@ -343,7 +343,7 @@ where
             remote_address,
             user_socket_info,
             NetProtocol::Datagrams,
-            |addr| call_connect_fn(addr),
+            &mut call_connect_fn,
         ),
 
         NetProtocol::Stream => match user_socket_info.state {
@@ -356,7 +356,7 @@ where
                     remote_address,
                     user_socket_info,
                     NetProtocol::Stream,
-                    |addr| call_connect_fn(addr),
+                    call_connect_fn,
                 )
             }
 
