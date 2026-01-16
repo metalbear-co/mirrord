@@ -379,7 +379,7 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
     }
 
     // Parse the requested address
-    let requested_addr = match SocketAddr::try_from_raw(name, namelen) {
+    let requested_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
         None => {
             tracing::error!("bind_detour -> failed to convert address");
@@ -581,7 +581,7 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
         tracing::debug!("connect_detour -> socket {} is not managed", s);
     }
 
-    let socket_addr = match SocketAddr::try_from_raw(name, namelen) {
+    let socket_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
         None => {
             tracing::error!(
@@ -737,7 +737,7 @@ unsafe extern "system" fn accept_detour(
 
     // Fill in the address structure with the real remote address (not intproxy's address)
     if !addr.is_null() && !addrlen.is_null() {
-        match remote_source.copy_to(addr, addrlen) {
+        match unsafe { remote_source.copy_to(addr, addrlen) } {
             Ok(()) => {
                 tracing::trace!(
                     "accept_detour -> filled address with real remote source: {}",
@@ -775,7 +775,7 @@ unsafe extern "system" fn getsockname_detour(
             }) => {
                 match make_proxy_request_with_response(OutgoingConnMetadataRequest { conn_id: id })
                 {
-                    Ok(Some(res)) => Some(res.in_cluster_address.into()),
+                    Ok(Some(res)) => Some(res.in_cluster_address),
                     Ok(None) => {
                         tracing::error!(id, "Protocol: could not locate outgoing metadata");
                         None
@@ -798,9 +798,9 @@ unsafe extern "system" fn getsockname_detour(
                 requested_address,
                 address,
             }) => Some(if requested_address.port() == 0 {
-                SocketAddr::new(requested_address.ip(), address.port()).into()
+                SocketAddr::new(requested_address.ip(), address.port())
             } else {
-                requested_address.into()
+                requested_address
             }),
 
             SocketState::Initialized | SocketState::Connected(_) => {
@@ -817,7 +817,7 @@ unsafe extern "system" fn getsockname_detour(
         }
     };
     if let Some(local_address) = local_address {
-        match local_address.copy_to(name, namelen) {
+        match unsafe { local_address.copy_to(name, namelen) } {
             Ok(()) => {
                 tracing::trace!("getsockname_detour -> returned mirrord local address");
                 // Success
@@ -867,7 +867,7 @@ unsafe extern "system" fn getpeername_detour(
     if let Some((remote_addr, _, _)) = get_connected_addresses(s) {
         // Return the remote address for connected sockets
 
-        match remote_addr.copy_to(name, namelen) {
+        match unsafe { remote_addr.copy_to(name, namelen) } {
             Ok(()) => {
                 tracing::trace!("getpeername_detour -> returned mirrord remote address");
                 // Success
@@ -1092,7 +1092,7 @@ unsafe extern "system" fn connectex_detour(
         }
     };
 
-    let socket_addr = match SocketAddr::try_from_raw(name, namelen) {
+    let socket_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
         None => {
             tracing::error!(
@@ -1269,7 +1269,7 @@ unsafe extern "system" fn wsa_connect_detour(
         ConnectResult::from(result)
     };
 
-    let socket_addr = match SocketAddr::try_from_raw(name, namelen) {
+    let socket_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
         None => {
             tracing::error!(
@@ -1545,7 +1545,7 @@ unsafe extern "system" fn wsa_send_to_detour(
     }
 
     // Convert Windows destination address to cross-platform format
-    let raw_destination = match SocketAddr::try_from_raw(lpTo as *const _, iTolen as _) {
+    let raw_destination = match unsafe { SocketAddr::try_from_raw(lpTo as *const _, iTolen as _) } {
         Some(addr) => addr,
         None => unreachable!(),
     };
@@ -1840,12 +1840,9 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
     }
 
     // Check if we should resolve this hostname remotely using the DNS selector
-    match setup().dns_selector().check_query(&hostname_cstr, 0) {
-        Err(_) => {
-            tracing::debug!("DNS selector check returned local for '{}'", hostname_cstr,);
-            return fallback_to_original();
-        }
-        _ => {}
+    if setup().dns_selector().check_query(hostname_cstr.as_ref(), 0).is_err() {
+        tracing::debug!("DNS selector check returned local for '{}'", hostname_cstr,);
+        return fallback_to_original();
     }
 
     // Try to resolve the hostname using mirrord's remote DNS resolution
@@ -2152,7 +2149,7 @@ unsafe extern "system" fn sendto_detour(
     };
 
     // Convert Windows parameters to cross-platform format
-    let raw_destination = match SocketAddr::try_from_raw(to as *const _, tolen as _) {
+    let raw_destination = match unsafe { SocketAddr::try_from_raw(to as *const _, tolen as _) } {
         Some(addr) => addr,
         None => {
             return fallback_to_original("failed to parse destination address");

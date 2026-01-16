@@ -260,7 +260,7 @@ where
     };
 
     // Convert Windows sockaddr to Rust SocketAddr
-    let remote_addr = match SocketAddr::try_from_raw(name, namelen) {
+    let remote_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
         None => {
             tracing::warn!(

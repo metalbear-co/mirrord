@@ -381,7 +381,7 @@ pub fn get_peer_address_from_socket(socket: SOCKET) -> HookResult<SocketAddr> {
         return Err(HookError::IO(std::io::Error::last_os_error()));
     }
 
-    SocketAddr::try_from_raw(&addr_storage as *const _ as *const SOCKADDR, addr_len)
+    unsafe { SocketAddr::try_from_raw(&addr_storage as *const _ as *const SOCKADDR, addr_len) }
         .ok_or_else(|| HookError::IO(std::io::Error::last_os_error()))
 }
 
@@ -399,10 +399,12 @@ pub unsafe fn get_actual_bound_address(socket: SOCKET, requested_addr: SocketAdd
     };
 
     if getsockname_result == ERROR_SUCCESS_I32 {
-        match SocketAddr::try_from_raw(
-            &actual_addr_storage as *const _ as *const SOCKADDR,
-            actual_addr_len,
-        ) {
+        match unsafe {
+            SocketAddr::try_from_raw(
+                &actual_addr_storage as *const _ as *const SOCKADDR,
+                actual_addr_len,
+            )
+        } {
             Some(addr) => addr,
             None => {
                 tracing::error!(

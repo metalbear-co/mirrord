@@ -333,42 +333,54 @@ impl SocketAddrExt for SocketAddr {
 
 #[cfg(windows)]
 pub trait SocketAddrExt {
-    /// Converts a raw Windows SOCKADDR pointer into a more _Rusty_ type
-    fn try_from_raw(raw_address: *const SOCKADDR, address_length: INT) -> Option<Self>
+    /// Converts a raw Windows SOCKADDR pointer into a more _Rusty_ type.
+    ///
+    /// # Safety
+    /// The caller must guarantee that `raw_address` points to readable memory for at least
+    /// `address_length` bytes containing a valid `SOCKADDR` (or larger) structure originating from
+    /// the OS. Passing dangling or undersized pointers causes undefined behavior.
+    unsafe fn try_from_raw(raw_address: *const SOCKADDR, address_length: INT) -> Option<Self>
     where
         Self: Sized;
 
-    /// Copies the socket address data into a Windows SOCKADDR structure for API calls
-    fn copy_to(&self, name: *mut SOCKADDR, namelen: *mut INT) -> WindowsResult<()>;
+    /// Copies the socket address data into a Windows SOCKADDR structure for API calls.
+    ///
+    /// # Safety
+    /// `name` must point to writable memory of size `*namelen`, and `namelen` must be a valid
+    /// pointer to an `INT`. The buffer must be large enough for the address family stored in
+    /// `self`.
+    unsafe fn copy_to(&self, name: *mut SOCKADDR, namelen: *mut INT) -> WindowsResult<()>;
 
     /// Creates an owned SOCKADDR representation of this address
     fn to_sockaddr(&self) -> WindowsResult<(SOCKADDR_STORAGE, INT)> {
         let mut storage: SOCKADDR_STORAGE = unsafe { mem::zeroed() };
         let mut len = mem::size_of::<SOCKADDR_STORAGE>() as INT;
-        self.copy_to(&mut storage as *mut _ as *mut SOCKADDR, &mut len)?;
+        unsafe {
+            self.copy_to(&mut storage as *mut _ as *mut SOCKADDR, &mut len)?;
+        }
         Ok((storage, len))
     }
 }
 
 #[cfg(windows)]
 impl SocketAddrExt for SocketAddr {
-    fn try_from_raw(raw_address: *const SOCKADDR, address_length: INT) -> Option<SocketAddr> {
+    unsafe fn try_from_raw(raw_address: *const SOCKADDR, address_length: INT) -> Option<SocketAddr> {
         unsafe { sockaddr_to_socket_addr(raw_address, address_length) }
     }
-    fn copy_to(&self, name: *mut SOCKADDR, namelen: *mut INT) -> WindowsResult<()> {
+    unsafe fn copy_to(&self, name: *mut SOCKADDR, namelen: *mut INT) -> WindowsResult<()> {
         unsafe { socketaddr_to_windows_sockaddr(self, name, namelen) }
     }
 }
 
 #[cfg(windows)]
 impl SocketAddrExt for SocketAddress {
-    fn try_from_raw(raw_address: *const SOCKADDR, address_length: INT) -> Option<Self> {
-        SocketAddr::try_from_raw(raw_address, address_length).map(SocketAddress::from)
+    unsafe fn try_from_raw(raw_address: *const SOCKADDR, address_length: INT) -> Option<Self> {
+        unsafe { SocketAddr::try_from_raw(raw_address, address_length) }.map(SocketAddress::from)
     }
-    fn copy_to(&self, name: *mut SOCKADDR, namelen: *mut INT) -> WindowsResult<()> {
+    unsafe fn copy_to(&self, name: *mut SOCKADDR, namelen: *mut INT) -> WindowsResult<()> {
         let std_addr =
             SocketAddr::try_from(self.clone()).map_err(|_| WindowsError::WinSock(WSAEFAULT))?;
-        std_addr.copy_to(name, namelen)
+        unsafe { std_addr.copy_to(name, namelen) }
     }
     fn to_sockaddr(&self) -> WindowsResult<(SOCKADDR_STORAGE, INT)> {
         let std_addr =
@@ -409,6 +421,10 @@ unsafe fn sockaddr_to_socket_addr(addr: *const SOCKADDR, addrlen: INT) -> Option
 }
 
 /// Convert SocketAddr to Windows SOCKADDR for address return functions
+///
+/// # Safety
+/// `name` and `namelen` must be valid writable pointers, and the caller must provide enough space
+/// in `name` for the resulting `SOCKADDR`.
 #[cfg(windows)]
 pub unsafe fn socketaddr_to_windows_sockaddr(
     addr: &SocketAddr,
