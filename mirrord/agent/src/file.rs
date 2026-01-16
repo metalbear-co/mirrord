@@ -8,7 +8,7 @@ use std::{
     ops::RangeInclusive,
     os::{
         fd::{AsRawFd, RawFd},
-        unix::{fs::MetadataExt, prelude::FileExt},
+        unix::{ffi::OsStrExt, fs::MetadataExt, prelude::FileExt},
     },
     path::{Path, PathBuf},
     ptr,
@@ -99,11 +99,19 @@ impl FileManager {
         Ok(match request {
             FileRequest::Open(OpenFileRequest { path, open_options }) => {
                 // TODO: maybe not agent error on this?
-                let path = path
+                let mut path_stripped = path
                     .strip_prefix("/")
-                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?
+                    .to_owned();
 
-                let open_result = self.open(path.into(), open_options);
+                // [`Path::strip_prefix`] has a bug that also strips trailing slashes
+                // https://github.com/rust-lang/rust/issues/148267. Apparently Rust's path
+                // API hates trailing slashes so we have to do this overcomplicated trickery.
+                if path.as_os_str().as_bytes().ends_with(b"/") {
+                    path_stripped.push("");
+                }
+
+                let open_result = self.open(path_stripped, open_options);
                 Some(FileResponse::Open(open_result))
             }
             FileRequest::OpenRelative(OpenRelativeFileRequest {

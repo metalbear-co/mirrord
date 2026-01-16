@@ -1,5 +1,6 @@
 use std::{
     io,
+    os::unix::ffi::OsStrExt,
     path::{Component, Path, PathBuf},
 };
 
@@ -68,6 +69,14 @@ impl InTargetPathResolver {
                     }
                 }
             }
+        }
+
+        // Append trailing slash that was removed by [`PathBuf::components`].
+        // Rust doesn't believe in trailing slashes in paths. See
+        // https://github.com/rust-lang/rust/issues/148267,
+        // https://github.com/rust-lang/rust/issues/142503
+        if path.as_os_str().as_bytes().ends_with(b"/") {
+            temp_path.push("");
         }
 
         Ok(self.root.join(temp_path))
