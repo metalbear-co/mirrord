@@ -1225,8 +1225,13 @@ pub enum FixCommand {
 /// `mirrord fix kubeconfig` args
 #[derive(Args, Debug)]
 pub struct FixKubeconfig {
+    /// Explicitly set path of the kubeconfig file
     #[arg(env = "MIRRORD_KUBECONFIG", long = "kubeconfig")]
     pub file_path: Option<PathBuf>,
+
+    /// Do not make any actual changes, just print what would be changed
+    #[arg(long = "dry-run")]
+    pub dry_run: bool
 }
 
 #[cfg(test)]

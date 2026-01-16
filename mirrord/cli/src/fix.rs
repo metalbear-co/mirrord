@@ -138,11 +138,16 @@ async fn fix_kubeconfig<P: Progress>(
 
     let patched = apply_yaml_patches(&document, &[patch])?;
 
-    tokio::fs::write(&kubeconfig_path, patched.source()).await?;
+    let mut msg =
+        format!("Replace user {current_ctx_name:?}'s exec {cmd_path:?} with {absolute:?}");
 
-    progress.success(Some(&format!(
-        "Replaced user {current_ctx_name:?}'s exec {cmd_path:?} with {absolute:?}"
-    )));
+    if args.dry_run {
+        msg.push_str(" (dry run, no actual changes made)");
+    } else {
+        tokio::fs::write(&kubeconfig_path, patched.source()).await?;
+    }
+
+    progress.success(Some(&msg));
 
     Ok(())
 }
