@@ -97,6 +97,11 @@ pub fn getaddrinfo<T: WindowsAddrInfo>(
 ///
 /// This follows the same pattern as the Unix layer - it checks if the structure
 /// was allocated by us (tracked in MANAGED_ADDRINFO) and frees it properly.
+///
+/// # Safety
+/// `addrinfo` must be a pointer that originated from `ManagedAddrInfo` (i.e., from `alloc` plus the
+/// bookkeeping map). Passing any other pointer will either fail the lookup or, worse, cause us to
+/// free memory we do not own.
 pub unsafe fn free_managed_addrinfo<T: WindowsAddrInfo>(addrinfo: *mut T) -> bool {
     let mut managed_addr_info = match MANAGED_ADDRINFO.lock() {
         Ok(guard) => guard,

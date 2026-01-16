@@ -33,6 +33,9 @@ pub trait WindowsAddrInfo: Sized {
     ///   pointer. Handing it to any other deallocator or freeing it twice is UB.
     /// - The allocation must come from the global allocator so `drop` can release it with
     ///   `std::alloc::dealloc`.
+    /// - Implementations must zero/initialize auxiliary fields (`ai_flags`, `ai_socktype`,
+    ///   `ai_protocol`, and `ai_next`) so the caller can rely on deterministic defaults before
+    ///   invoking [`WindowsAddrInfo::fill`] or [`WindowsAddrInfo::set_next`].
     unsafe fn alloc() -> Result<*mut Self, AddrInfoError>;
 
     /// Fill the structure with the given parameters
@@ -46,21 +49,19 @@ pub trait WindowsAddrInfo: Sized {
     /// - `canonname` must have been allocated with the global allocator (via
     ///   [`WindowsAddrInfo::string_to_canonname`] or similar) because `drop` releases it through
     ///   [`WindowsAddrInfo::free_canonname`].
-    /// - `next` must either be null or another pointer allocated by this trait; it will be followed
-    ///   and freed recursively.
     unsafe fn fill(
         ptr: *mut Self,
-        flags: i32,
         family: i32,
-        socktype: i32,
-        protocol: i32,
         addrlen: usize,
         canonname: Self::CanonName,
         addr: *mut SOCKADDR,
-        next: *mut Self,
     );
 
     /// Set the next pointer
+    ///
+    /// # Safety
+    /// `ptr` and `next` must either be null or originate from [`WindowsAddrInfo::alloc`]; linking
+    /// nodes allocated elsewhere will confuse [`ManagedAddrInfo::drop`] and may lead to UB.
     unsafe fn set_next(ptr: *mut Self, next: *mut Self);
 
     /// Convert a string to the appropriate canonical name type
@@ -74,18 +75,38 @@ pub trait WindowsAddrInfo: Sized {
 
     // Field accessor methods for Drop implementation
     /// Get the ai_next field
+    ///
+    /// # Safety
+    /// `self` must be a valid reference obtained from a node allocated by this trait. Returning the
+    /// raw pointer transfers responsibility back to [`ManagedAddrInfo`] for traversal.
     unsafe fn ai_next(&self) -> *mut Self;
 
     /// Get the ai_addr field
+    ///
+    /// # Safety
+    /// Caller must ensure `self` is valid and respect the returned pointer's lifetime; it is freed
+    /// by [`ManagedAddrInfo::drop`] according to the `ai_family` layout.
     unsafe fn ai_addr(&self) -> *mut SOCKADDR;
 
     /// Get the ai_family field
+    ///
+    /// # Safety
+    /// `self` must be valid. The returned family dictates how Drop will interpret `ai_addr`.
     unsafe fn ai_family(&self) -> i32;
 
     /// Get the ai_canonname field
+    ///
+    /// # Safety
+    /// Caller must hold a valid reference; the returned pointer remains owned by
+    /// [`ManagedAddrInfo`] and will be released through [`WindowsAddrInfo::free_canonname`].
     unsafe fn ai_canonname(&self) -> Self::CanonName;
 
     /// Free the canonical name
+    ///
+    /// # Safety
+    /// `canonname` must have been allocated through the canonical allocation path for the concrete
+    /// implementation (e.g., [`WindowsAddrInfo::string_to_canonname`]). Passing any other pointer
+    /// causes undefined behavior.
     unsafe fn free_canonname(canonname: Self::CanonName);
 }
 
@@ -93,29 +114,28 @@ impl WindowsAddrInfo for ADDRINFOA {
     type CanonName = *mut i8;
 
     unsafe fn alloc() -> Result<*mut Self, AddrInfoError> {
-        unsafe_alloc!(ADDRINFOA, AddrInfoError::AllocationFailed)
+        let ptr = unsafe_alloc!(ADDRINFOA, AddrInfoError::AllocationFailed)?;
+        unsafe {
+            (*ptr).ai_flags = 0;
+            (*ptr).ai_socktype = SOCK_STREAM;
+            (*ptr).ai_protocol = 0;
+            (*ptr).ai_next = ptr::null_mut();
+        }
+        Ok(ptr)
     }
 
     unsafe fn fill(
         ptr: *mut Self,
-        flags: i32,
         family: i32,
-        socktype: i32,
-        protocol: i32,
         addrlen: usize,
         canonname: Self::CanonName,
         addr: *mut SOCKADDR,
-        next: *mut Self,
     ) {
         unsafe {
-            (*ptr).ai_flags = flags;
             (*ptr).ai_family = family;
-            (*ptr).ai_socktype = socktype;
-            (*ptr).ai_protocol = protocol;
             (*ptr).ai_addrlen = addrlen;
             (*ptr).ai_canonname = canonname;
             (*ptr).ai_addr = addr;
-            (*ptr).ai_next = next;
         }
     }
 
@@ -174,29 +194,28 @@ impl WindowsAddrInfo for ADDRINFOW {
     type CanonName = *mut u16;
 
     unsafe fn alloc() -> Result<*mut Self, AddrInfoError> {
-        unsafe_alloc!(ADDRINFOW, AddrInfoError::AllocationFailed)
+        let ptr = unsafe_alloc!(ADDRINFOW, AddrInfoError::AllocationFailed)?;
+        unsafe {
+            (*ptr).ai_flags = 0;
+            (*ptr).ai_socktype = SOCK_STREAM;
+            (*ptr).ai_protocol = 0;
+            (*ptr).ai_next = ptr::null_mut();
+        }
+        Ok(ptr)
     }
 
     unsafe fn fill(
         ptr: *mut Self,
-        flags: i32,
         family: i32,
-        socktype: i32,
-        protocol: i32,
         addrlen: usize,
         canonname: Self::CanonName,
         addr: *mut SOCKADDR,
-        next: *mut Self,
     ) {
         unsafe {
-            (*ptr).ai_flags = flags;
             (*ptr).ai_family = family;
-            (*ptr).ai_socktype = socktype;
-            (*ptr).ai_protocol = protocol;
             (*ptr).ai_addrlen = addrlen;
             (*ptr).ai_canonname = canonname;
             (*ptr).ai_addr = addr;
-            (*ptr).ai_next = next;
         }
     }
 
@@ -411,14 +430,10 @@ impl<T: WindowsAddrInfo> TryFrom<GetAddrInfoResponse> for ManagedAddrInfo<T> {
             unsafe {
                 T::fill(
                     addrinfo_ptr,
-                    0,                     // ai_flags
                     family,                // ai_family
-                    SOCK_STREAM,           // ai_socktype (default to STREAM)
-                    0,                     // ai_protocol
                     sockaddr_len as usize, // ai_addrlen
                     canonname,             // ai_canonname
                     sockaddr_ptr,          // ai_addr
-                    ptr::null_mut(),       // ai_next (will be set in linking)
                 );
             }
 
