@@ -26,8 +26,8 @@ build/
 
 ### VSCode ###
 vscode-ext/bin
-.vscode/settings.json
-.vscode/launch.json
+!.vscode/settings.json
+!.vscode/launch.json
 
 ### Intellij ###
 intellij-ext/.gradle
