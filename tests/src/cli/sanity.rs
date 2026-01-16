@@ -10,11 +10,15 @@
 mod cli {
     use std::{path::Path, time::Duration};
 
+    use serde_json::json;
+
     use rstest::rstest;
 
-    use crate::utils::{config_dir, run_command::run_verify_config};
+    use tracing::debug;
 
-    /// Tests `verify-config` with `path` and `--ide` args, which should be:
+    use crate::utils::{config_dir, ManagedTempFile, run_command::run_verify_config};
+
+    /// Tests `verify-config` with tempfile and `--ide` args, which should be:
     ///
     /// ```sh
     /// mirrord verify-config --ide /path/to/config.json
@@ -23,19 +27,36 @@ mod cli {
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
-    pub async fn path_ide_verify_config(config_dir: &Path) {
-        let mut config_path = config_dir.to_path_buf();
-        config_path.push("default_ide.json");
+    pub async fn tempfile_ide_verify_config() {
+        debug!("Debug statements initiating...");
+
+        let config_json = json!({
+            "feature": {
+                "network": {
+                    "incoming": "mirror",
+                    "outgoing": true
+                },
+                "fs": "read",
+                "env": true
+            }
+        });
+        let tempfile = ManagedTempFile::new(config_json);
+
+        println!("Tempfile path is: {:?}", &tempfile.path);
+
+        if tempfile.path.exists() == false {
+            assert!(false);
+        }
 
         let mut process = run_verify_config(Some(vec![
             "--ide",
-            config_path.to_str().expect("Valid config path!"),
+            tempfile.path.to_str().expect("Valid config path!"),
         ]))
         .await;
 
         assert!(process.wait().await.success());
     }
-
+    
     /// Tests `verify-config` with only `path` as an arg:
     ///
     /// ```sh

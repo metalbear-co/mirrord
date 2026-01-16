@@ -1,7 +1,7 @@
 #![allow(clippy::unused_io_amount)]
 #![allow(clippy::indexing_slicing)]
 
-use std::{collections::BTreeMap, path::PathBuf, sync::Once};
+use std::{collections::BTreeMap, fs::File, io::Write, path::PathBuf, sync::Once};
 
 use chrono::{Timelike, Utc};
 use k8s_openapi::api::core::v1::Service;
@@ -11,7 +11,9 @@ pub use process::TestProcess;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest::{RequestBuilder, StatusCode};
 use rstest::*;
+use serde_json;
 use serde_json::{json, Value};
+use tempfile::NamedTempFile;
 
 pub mod application;
 pub mod cluster_resource;
@@ -57,6 +59,46 @@ pub fn random_string() -> String {
 fn format_time() -> String {
     let now = Utc::now();
     format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
+}
+
+pub struct ManagedTempFile {
+    pub file: File,
+    pub path: PathBuf
+}
+
+impl ManagedTempFile {
+    /// Returns tempfile path
+    pub fn new(config: Value) -> Self {
+        let tempfile = NamedTempFile::new();
+        match tempfile {
+          Ok(mut tf) => {
+            let json_string = serde_json::to_string(&config).unwrap_or_default();
+            let _ = write!(tf, "{}", json_string);
+            let tf_keep = tf.keep();
+            match tf_keep {
+              Ok(tf_kept) => {
+                let file = tf_kept.0;
+                let path = tf_kept.1;
+                Self { file, path }
+              },
+              Err(e) => {
+                panic!("Error persisting tempfile: {}", e);
+              }
+            }
+          },
+          Err(e) => {
+            panic!("Error generating tempfile: {}", e);
+          }
+        }
+    }
+}
+
+impl Drop for ManagedTempFile {
+    /// Removes tempfile from fs
+    /// Then, drops ManagedTempfile 
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path).unwrap_or_else(|_| panic!("Failed to remove tempfile.")); 
+    }
 }
 
 static CRYPTO_PROVIDER_INSTALLED: Once = Once::new();

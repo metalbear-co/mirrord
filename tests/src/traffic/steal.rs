@@ -8,6 +8,7 @@ mod steal_tests {
     use kube::{Api, Client};
     use reqwest::{header::HeaderMap, Url};
     use rstest::*;
+    use serde_json::json;
     use tokio::{
         io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
         net::TcpStream,
@@ -24,6 +25,7 @@ mod steal_tests {
         ipv6::{ipv6_service, portforward_http_requests},
         kube_client,
         kube_service::KubeService,
+        ManagedTempFile,
         port_forwarder::PortForwarder,
         send_request, send_requests,
         services::{basic_service, http2_service, tcp_echo_service, websocket_service},
@@ -499,7 +501,26 @@ mod steal_tests {
         let url = format!("http://{}", portforwarder.address());
 
         let mut config_path = config_dir.to_path_buf();
-        config_path.push("http_filter_path.json");
+        let config_json = json!({
+            "feature": {
+                "network": {
+                    "incoming": {
+                        "mode": "steal",
+                        "http_filter": {
+                            "path_filter": "api/v1" 
+                        }
+                    }
+                }
+            }
+        });
+        let tempfile = ManagedTempFile::new(config_json); 
+        config_path.push(&tempfile.path);
+
+        println!("Tempfile path is: {:?}", &tempfile.path);
+
+        if tempfile.path.exists() == false {
+            assert!(false);
+        }
 
         let client = application
             .run(
