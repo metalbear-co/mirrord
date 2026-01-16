@@ -1,10 +1,7 @@
-use std::{
-    ffi::OsString,
-    io::{BufRead, BufReader, Write, stdin, stdout},
-    path::PathBuf,
-};
+use std::{ffi::OsString, path::PathBuf};
 
 use kube::config::{Kubeconfig, KubeconfigError};
+use mirrord_progress::{Progress, ProgressTracker};
 use serde_yaml::Value;
 use yamlpatch::{Op, Patch, apply_yaml_patches};
 use yamlpath::{Document, route};
@@ -15,8 +12,9 @@ use crate::{
 };
 
 pub async fn fix_command(args: FixArgs) -> CliResult<()> {
+    let mut progress = ProgressTracker::from_env("mirrord fix");
     match args.command {
-        FixCommand::Kubeconfig(args) => fix_kubeconfig(args).await?,
+        FixCommand::Kubeconfig(args) => fix_kubeconfig(args, &mut progress).await?,
     }
 
     Ok(())
@@ -64,7 +62,10 @@ pub enum FixKubeconfigError {
     },
 }
 
-async fn fix_kubeconfig(args: FixKubeconfig) -> Result<(), FixKubeconfigError> {
+async fn fix_kubeconfig<P: Progress>(
+    args: FixKubeconfig,
+    progress: &mut P,
+) -> Result<(), FixKubeconfigError> {
     let kubeconfig_path = args.file_path.unwrap_or(
         std::env::home_dir()
             .ok_or(FixKubeconfigError::Home)?
@@ -87,7 +88,7 @@ async fn fix_kubeconfig(args: FixKubeconfig) -> Result<(), FixKubeconfigError> {
         .ok_or_else(|| FixKubeconfigError::MalformedCtx(current_ctx_name.clone()))?;
 
     let Some(current_user_name) = current_ctx.user else {
-        println!("Currently selected context has no user credentials");
+        progress.warning("Currently selected context has no user credentials");
         return Ok(());
     };
 
@@ -106,7 +107,7 @@ async fn fix_kubeconfig(args: FixKubeconfig) -> Result<(), FixKubeconfigError> {
     let command = match command {
         Some(cmd) => cmd,
         None => {
-            println!("Currently selected user has no `exec` command, nothing to do.");
+            progress.info("Currently selected user has no `exec` command, nothing to do.");
             return Ok(());
         }
     };
@@ -114,7 +115,7 @@ async fn fix_kubeconfig(args: FixKubeconfig) -> Result<(), FixKubeconfigError> {
     let cmd_path = PathBuf::from(command);
 
     if cmd_path.is_absolute() {
-        println!("Currently selected user's `exec` command already uses an absolute path.");
+        progress.info("Currently selected user's `exec` command already uses an absolute path.");
         return Ok(());
     }
 
@@ -139,7 +140,9 @@ async fn fix_kubeconfig(args: FixKubeconfig) -> Result<(), FixKubeconfigError> {
 
     tokio::fs::write(&kubeconfig_path, patched.source()).await?;
 
-    println!("Replaced user {current_ctx_name:?}'s exec {cmd_path:?} with {absolute:?}");
+    progress.success(Some(&format!(
+        "Replaced user {current_ctx_name:?}'s exec {cmd_path:?} with {absolute:?}"
+    )));
 
     Ok(())
 }
