@@ -179,7 +179,7 @@ impl FileManager {
                     .strip_prefix_root()
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
-                let access_result = self.access(pathname.into(), mode);
+                let access_result = self.access(pathname, mode);
                 Some(FileResponse::Access(access_result))
             }
             FileRequest::Xstat(XstatRequest {
