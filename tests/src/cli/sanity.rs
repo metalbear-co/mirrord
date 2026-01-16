@@ -8,15 +8,28 @@
 /// You should probably only add new tests here.
 #[cfg(test)]
 mod cli {
-    use std::{path::Path, time::Duration};
+    use std::{path::Path, sync::LazyLock, time::Duration};
 
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     use rstest::rstest;
 
     use tracing::debug;
 
     use crate::utils::{config_dir, ManagedTempFile, run_command::run_verify_config};
+
+    static CONFIG_JSON: LazyLock<Value> = LazyLock::new(|| {
+        json!({
+            "feature": {
+                "network": {
+                    "incoming": "mirror",
+                    "outgoing": true
+                },
+                "fs": "read",
+                "env": true
+            }
+        })
+    });
 
     /// Tests `verify-config` with tempfile and `--ide` args, which should be:
     ///
@@ -30,17 +43,7 @@ mod cli {
     pub async fn tempfile_ide_verify_config() {
         debug!("Debug statements initiating...");
 
-        let config_json = json!({
-            "feature": {
-                "network": {
-                    "incoming": "mirror",
-                    "outgoing": true
-                },
-                "fs": "read",
-                "env": true
-            }
-        });
-        let tempfile = ManagedTempFile::new(config_json);
+        let tempfile = ManagedTempFile::new(CONFIG_JSON.clone());
 
         println!("Tempfile path is: {:?}", &tempfile.path);
 
@@ -67,8 +70,9 @@ mod cli {
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
     pub async fn no_ide_verify_config(config_dir: &Path) {
+        let tempfile = ManagedTempFile::new(CONFIG_JSON.clone());
         let mut config_path = config_dir.to_path_buf();
-        config_path.push("default_ide.json");
+        config_path.push(&tempfile.path);
 
         let mut process = run_verify_config(Some(vec![config_path
             .to_str()
@@ -90,8 +94,9 @@ mod cli {
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
     pub async fn no_path_verify_config(config_dir: &Path) {
+        let tempfile = ManagedTempFile::new(CONFIG_JSON.clone());
         let mut config_path = config_dir.to_path_buf();
-        config_path.push("default_ide.json");
+        config_path.push(&tempfile.path);
 
         let mut process = run_verify_config(Some(vec!["--ide"])).await;
 
@@ -110,8 +115,9 @@ mod cli {
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
     pub async fn no_path_no_ide_verify_config(config_dir: &Path) {
+        let tempfile = ManagedTempFile::new(CONFIG_JSON.clone());
         let mut config_path = config_dir.to_path_buf();
-        config_path.push("default_ide.json");
+        config_path.push(&tempfile.path);
 
         let mut process = run_verify_config(None).await;
 

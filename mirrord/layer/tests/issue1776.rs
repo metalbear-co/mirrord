@@ -1,6 +1,6 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
-use std::{path::Path, time::Duration};
+use std::{path::Path, sync::LazyLock, time::Duration};
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
@@ -11,9 +11,26 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
+use serde_json::{json, Value};
+
+use mirrord_tests::utils::ManagedTempFile;
+
 mod common;
 
 pub use common::*;
+
+static CONFIG_JSON: LazyLock<Value> = LazyLock::new(|| {
+    json!({
+        "feature": {
+            "fs": false,
+            "network": {
+                "outgoing": {
+                    "udp": false
+                }
+            }
+        }
+    })
+});
 
 /// Verify that issue [#1776](https://github.com/metalbear-co/mirrord/issues/1776) is fixed.
 ///
@@ -27,7 +44,8 @@ async fn test_issue1776(
     dylib_path: &Path,
     config_dir: &Path,
 ) {
-    let config_path = config_dir.join("issue1776.json");
+    let tempfile = ManagedTempFile::new(CONFIG_JSON.clone());
+    let config_path = config_dir.join(&tempfile.path);
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![], Some(&config_path))
         .await;
@@ -81,7 +99,8 @@ async fn test_issue1776_port_not_53(
     dylib_path: &Path,
     config_dir: &Path,
 ) {
-    let config_path = config_dir.join("issue1776.json");
+    let tempfile = ManagedTempFile::new(CONFIG_JSON.clone());
+    let config_path = config_dir.join(&tempfile.path);
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![], Some(&config_path))
         .await;

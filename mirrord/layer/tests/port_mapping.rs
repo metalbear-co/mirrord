@@ -5,6 +5,10 @@ use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 
+use serde_json::json;
+
+use mirrord_tests::utils::ManagedTempFile;
+
 mod common;
 pub use common::*;
 
@@ -16,11 +20,24 @@ async fn port_mapping(
     dylib_path: &Path,
     config_dir: &Path,
 ) {
+    let config_json = json!({
+        "feature": {
+            "network": {
+                "incoming": {
+                    "mode": "mirror",
+                    "port_mapping": [[9999, 1234]]]
+                }
+            }
+        }
+    });
+    let tempfile = ManagedTempFile::new(config_json);
+    let config_path = config_dir.join(&tempfile.path); 
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer_and_port(
             dylib_path,
             vec![],
-            Some(&config_dir.join("port_mapping.json")),
+            Some(&config_path),
         )
         .await;
 

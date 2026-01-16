@@ -6,6 +6,10 @@ use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 
+use serde_json::json;
+
+use mirrord_tests::utils::ManagedTempFile;
+
 mod common;
 
 pub use common::*;
@@ -32,6 +36,19 @@ async fn mirroring_with_http(
 ) {
     let _guard = init_tracing();
 
+    let config_json = json!({
+        "feature": {
+            "network": {
+                "incoming": {
+                    "mode": "mirror",
+                    "port_mapping": [[9999, 1234]]
+                }
+            }
+        }
+    });
+    let tempfile = ManagedTempFile::new(config_json);
+    let config_path = config_dir.join(&tempfile.path); 
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer_and_port(
             dylib_path,
@@ -41,7 +58,7 @@ async fn mirroring_with_http(
                 ("MIRRORD_UDP_OUTGOING", "false"),
                 ("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES"),
             ],
-            Some(&config_dir.join("port_mapping.json")),
+            Some(&config_path),
         )
         .await;
 

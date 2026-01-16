@@ -11,6 +11,7 @@ use mirrord_protocol::{
 #[cfg(target_os = "macos")]
 use mirrord_sip::{SipPatchOptions, sip_patch};
 use rstest::rstest;
+use serde_json::json;
 use tokio::net::TcpListener;
 
 mod common;
@@ -28,7 +29,16 @@ async fn bash_script(dylib_path: &Path, config_dir: &Path) {
     // use a config file since cat sometimes opens some weird paths
     // before opening the file we want to read, and it makes testing easier
     // to ignore those paths.
-    config_path.push("bash_script.json");
+    let config_json = json!({
+        "feature": {
+            "fs": {
+                "mode": "read",
+                "local": ["/var/db/"]
+            }
+        }
+    });
+    let tempfile = ManagedTempFile::new(config_json);
+    config_path.push(&tempfile.path);
     let application = Application::EnvBashCat;
     let executable = application.get_executable().await; // Own it.
     println!("Using executable: {}", &executable);

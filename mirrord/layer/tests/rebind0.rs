@@ -3,6 +3,10 @@ use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 
+use serde_json::json;
+
+use mirrord_tests::utils::ManagedTempFile;
+
 mod common;
 
 pub use common::*;
@@ -20,7 +24,24 @@ async fn rebind0(dylib_path: &Path, config_dir: &Path) {
 
     // This configuration used to trigger a false warning, it is not used for any functionality,
     // just to make sure it does not result in a warning anymore.
-    config_path.push("http_filter_for_rebind0.json");
+    let config_json = json!({
+        "feature": {
+            "network": {
+                "incoming": {
+                    "mode": "steal",
+                    "http_filter": {
+                        "header_filter": "this is just to trigger a wrong warning log, there are not requests in the test"
+                    }
+                }
+            }
+        }
+    });
+    let tempfile = ManagedTempFile::new(config_json);
+    config_path.push(&tempfile.path);
+
+    if tempfile.path.exists() == false {
+        assert!(false);
+    }
 
     let application = Application::RustRebind0;
     let (mut test_process, _intproxy) = application

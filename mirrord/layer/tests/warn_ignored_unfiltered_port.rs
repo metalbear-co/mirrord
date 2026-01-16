@@ -4,6 +4,10 @@ mod common;
 
 use std::{path::Path, time::Duration};
 
+use serde_json::json;
+
+use mirrord_tests::utils::ManagedTempFile;
+
 pub use common::*;
 use rstest::rstest;
 
@@ -16,7 +20,23 @@ use rstest::rstest;
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
 async fn warn_ignored_unfiltered_port(dylib_path: &Path, config_dir: &Path) {
-    let config_path = config_dir.join("http_filter_port_3000.json");
+    let config_json = json!({
+        "feature": {
+            "network": {
+                "incoming": {
+                    "mode": "steal",
+                    "http_filter": {
+                        "ports": [
+                            3000
+                        ],
+                        "header_filter": "whatever"
+                    }
+                }
+            }
+        }
+    });
+    let tempfile = ManagedTempFile::new(config_json);
+    let config_path = config_dir.join(&tempfile.path);
 
     // reusing existing application for this test. This test is unrelated to issue 2058.
     let application = Application::RustIssue2058;

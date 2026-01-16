@@ -9,6 +9,10 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
+use serde_json::json;
+
+use mirrord_tests::utils::ManagedTempFile;
+
 mod common;
 
 pub use common::*;
@@ -22,7 +26,22 @@ async fn test_issue2283(
     dylib_path: &Path,
     config_dir: &Path,
 ) {
-    let config_path = config_dir.join("outgoing_filter_local_not_existing_host.json");
+    let config_json = json!({
+        "feature": {
+            "network": {
+                "dns": true,
+                "outgoing": {
+                    "tcp": true,
+                    "filter": {
+                        "local": ["i-do-not-exist-at-all"]
+                    }
+                }
+            },
+            "fs": "local"
+        }
+    });
+    let tempfile = ManagedTempFile::new(config_json);
+    let config_path = config_dir.join(&tempfile.path);
 
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(

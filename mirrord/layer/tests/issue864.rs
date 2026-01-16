@@ -10,6 +10,10 @@ use nix::{
 };
 use rstest::rstest;
 
+use serde_json::json;
+
+use mirrord_tests::utils::ManagedTempFile;
+
 mod common;
 
 pub use common::*;
@@ -27,6 +31,21 @@ async fn test_issue864(
     dylib_path: &Path,
     config_dir: &Path,
 ) {
+    let config_json = json!({
+        "feature": {
+            "network": {
+                "incoming": {
+                    "mode": "mirror",
+                    "port_mapping": [[9999, 1234]]
+                }
+            }
+        },
+        "experimental": {
+            "enable_exec_hooks_linux": true
+        }
+    });
+    let tempfile = ManagedTempFile::new(config_json);
+    let config_path = config_dir.join(&tempfile.path);
     let (test_process, mut intproxy) = application
         .start_process_with_layer_and_port(
             dylib_path,
@@ -36,7 +55,7 @@ async fn test_issue864(
                 ("MIRRORD_UDP_OUTGOING", "false"),
                 ("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES"),
             ],
-            Some(&config_dir.join("port_mapping_shared_sockets.json")),
+            Some(&config_path),
         )
         .await;
 

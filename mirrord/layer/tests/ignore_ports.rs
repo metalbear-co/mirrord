@@ -6,6 +6,10 @@ use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 
+use serde_json::json;
+
+use mirrord_tests::utils::ManagedTempFile;
+
 mod common;
 
 pub use common::*;
@@ -20,7 +24,17 @@ async fn ignore_ports(
     dylib_path: &Path,
     config_dir: &Path,
 ) {
-    let config_path = config_dir.join("ignore_ports.json");
+    let config_json = json!({
+        "feature": {
+            "network": {
+                "incoming": {
+                    "ignore_ports": [21232]
+                }
+            }
+        }
+    });
+    let tempfile = ManagedTempFile::new(config_json);
+    let config_path = config_dir.join(&tempfile.path);
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,

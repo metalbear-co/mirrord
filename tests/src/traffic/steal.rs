@@ -453,7 +453,24 @@ mod steal_tests {
         let url = format!("http://{}", portforwarder.address());
 
         let mut config_path = config_dir.to_path_buf();
-        config_path.push("http_filter_header.json");
+        let config_json = json!({
+            "feature": {
+                "network": {
+                    "incoming": {
+                        "mode": "steal",
+                        "http_filter": {
+                            "header_filter": "x-filter: yes"
+                        }
+                    }
+                }
+            }
+        });
+        let tempfile = ManagedTempFile::new(config_json);
+        config_path.push(&tempfile.path);
+
+        if tempfile.path.exists() == false {
+            assert!(false);
+        }
 
         let client = application
             .run(
