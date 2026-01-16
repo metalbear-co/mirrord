@@ -23,10 +23,10 @@ use mirrord_intproxy_protocol::{
 use mirrord_layer_lib::{
     graceful_exit,
     socket::{
-        Bound, Connected, SocketKind, SocketState, SocketAddrExt,
+        Bound, Connected, SocketAddrExt, SocketKind, SocketState,
         dns::{remote_getaddrinfo, unix::getaddrinfo as getaddrinfo_common},
         ops::{ConnectResult, connect_common, connect_outgoing_common, nop_connect_fn},
-    }
+    },
 };
 use mirrord_protocol::file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse};
 use nix::{

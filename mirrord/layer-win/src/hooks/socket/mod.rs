@@ -1842,15 +1842,12 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
     // Check if we should resolve this hostname remotely using the DNS selector
     match setup().dns_selector().check_query(&hostname_cstr, 0) {
         Err(_) => {
-            tracing::debug!(
-                "DNS selector check returned local for '{}'",
-                hostname_cstr,
-            );
+            tracing::debug!("DNS selector check returned local for '{}'", hostname_cstr,);
             return fallback_to_original();
         }
         _ => {}
     }
-    
+
     // Try to resolve the hostname using mirrord's remote DNS resolution
     match remote_dns_resolve_via_proxy(hostname_cstr) {
         Ok(results) => {

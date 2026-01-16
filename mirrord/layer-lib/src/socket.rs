@@ -21,7 +21,7 @@ pub use dns::reverse_dns::{
 use libc::c_int;
 // Cross-platform socket constants
 #[cfg(unix)]
-pub use libc::{sockaddr, socklen_t, AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
+pub use libc::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM, sockaddr, socklen_t};
 use mirrord_config::feature::network::{
     dns::{DnsConfig, DnsFilterConfig},
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
@@ -295,7 +295,10 @@ pub trait SocketAddrExt {
 
 #[cfg(unix)]
 impl SocketAddrExt for SockAddr {
-    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> HookResult<SockAddr> {
+    fn try_from_raw(
+        raw_address: *const sockaddr,
+        address_length: socklen_t,
+    ) -> HookResult<SockAddr> {
         unsafe {
             SockAddr::try_init(|storage, len| {
                 // storage and raw_address size is dynamic.
@@ -307,10 +310,8 @@ impl SocketAddrExt for SockAddr {
         }
         .map_err(|_| HookError::Bypass(Bypass::AddressConversion))
         .map(|((), address)| address)
-
     }
 }
-
 
 #[cfg(unix)]
 impl SocketAddrExt for SocketAddr {
@@ -320,7 +321,9 @@ impl SocketAddrExt for SocketAddr {
     ) -> HookResult<SocketAddr> {
         SockAddr::try_from_raw(raw_address, address_length)
             .and_then(|address| {
-                address.as_socket().ok_or(HookError::Bypass(Bypass::AddressConversion))
+                address
+                    .as_socket()
+                    .ok_or(HookError::Bypass(Bypass::AddressConversion))
             })
             .map_err(|_| HookError::Bypass(Bypass::AddressConversion))
     }
