@@ -20,8 +20,6 @@ use crate::{
     error::{HookError, HookResult},
 };
 
-#[cfg(target_os = "macos")]
-mod apple_dnsinfo;
 pub(super) mod hooks;
 pub(crate) mod ops;
 

@@ -11,8 +11,6 @@ use core::{
 };
 use std::{ops::Deref, sync::OnceLock};
 
-#[cfg(target_os = "macos")]
-use libc::c_char;
 // Re-exporting until detour will move entirely to layer-lib
 pub use mirrord_layer_lib::detour::{Bypass, DetourGuard};
 use mirrord_layer_lib::error::HookError;

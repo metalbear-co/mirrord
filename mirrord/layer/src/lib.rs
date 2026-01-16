@@ -95,7 +95,7 @@ use hooks::HookManager;
 use libc::c_char;
 use libc::{c_int, pid_t};
 use load::ExecuteArgs;
-#[cfg(target_os = "macos")]
+#[cfg(doc)]
 use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, feature::env::mapper::EnvVarsRemapper,
@@ -530,7 +530,7 @@ fn fetch_env_vars() -> HashMap<String, String> {
 /// mirrord-layer on a process where specified to skip with MIRRORD_SKIP_PROCESSES
 #[cfg(target_os = "macos")]
 fn sip_only_layer_start(
-    mut config: LayerConfig,
+    config: LayerConfig,
     patch_binaries: Vec<String>,
     skip_patch_binaries: Vec<String>,
 ) {
