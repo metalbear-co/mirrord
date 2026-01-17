@@ -36,7 +36,7 @@ resolver = "2"
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.181.1"
+version = "3.182.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
