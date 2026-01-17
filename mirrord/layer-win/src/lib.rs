@@ -67,9 +67,14 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
     let process_context = detect_process_context()?;
     let connection = create_proxy_connection(&process_context)?;
 
-    PROXY_CONNECTION.set(connection).map_err(|_| {
-        LayerError::GlobalAlreadyInitialized("Proxy connection already initialized")
-    })?;
+    unsafe {
+        // SAFETY
+        // Called only from library constructor.
+        #[allow(static_mut_refs)]
+        PROXY_CONNECTION
+            .set(connection)
+            .expect("setting PROXY_CONNECTION singleton")
+    }
 
     Ok(())
 }

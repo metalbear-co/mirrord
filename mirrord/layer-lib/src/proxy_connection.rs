@@ -21,7 +21,20 @@ use thiserror::Error;
 use crate::error::{HookError, HookResult};
 
 /// Global proxy connection instance, shared across the layer
-pub static PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
+
+// TODO: We don't really need a lock, we just need a type that:
+//  1. Can be initialized as static (with a const constructor or whatever)
+//  2. Is `Sync` (because shared static vars have to be).
+//  3. Can replace the held [`ProxyConnection`] with a different one (because we need to reset it on
+//     `fork`).
+//  We only ever set it in the ctor or in the `fork` hook (in the child process), and in both cases
+//  there are no other threads yet in that process, so we don't need write synchronization.
+//  Assuming it's safe to call `send` simultaneously from two threads, on two references to the
+//  same `Sender` (is it), we also don't need read synchronization.
+/// Global connection to the internal proxy.
+/// Should not be used directly. Use [`make_proxy_request_with_response`] or
+/// [`make_proxy_request_no_response`] functions instead.
+pub static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
 
 #[derive(Debug, Error)]
 pub enum ProxyError {
@@ -194,11 +207,13 @@ where
 {
     // SAFETY: mutation happens only on initialization.
     #[allow(static_mut_refs)]
-    PROXY_CONNECTION
-        .get()
-        .ok_or(HookError::CannotGetProxyConnection)?
-        .make_request_with_response(request)
-        .map_err(Into::into)
+    unsafe {
+        PROXY_CONNECTION
+            .get()
+            .ok_or(HookError::CannotGetProxyConnection)?
+            .make_request_with_response(request)
+            .map_err(Into::into)
+    }
 }
 
 /// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
@@ -208,9 +223,11 @@ pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
 ) -> HookResult<MessageId> {
     // SAFETY: mutation happens only on initialization.
     #[allow(static_mut_refs)]
-    PROXY_CONNECTION
-        .get()
-        .ok_or(HookError::CannotGetProxyConnection)?
-        .make_request_no_response(request)
-        .map_err(Into::into)
+    unsafe {
+        PROXY_CONNECTION
+            .get()
+            .ok_or(HookError::CannotGetProxyConnection)?
+            .make_request_no_response(request)
+            .map_err(Into::into)
+    }
 }

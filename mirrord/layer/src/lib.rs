@@ -110,7 +110,7 @@ use mirrord_layer_lib::{
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use nix::errno::Errno;
-use proxy_connection::ProxyConnection;
+use proxy_connection::{PROXY_CONNECTION, ProxyConnection};
 use socket::SOCKETS;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
@@ -168,20 +168,6 @@ use crate::go::go_hooks;
 /// if this env var exists, we exit.
 /// This to allow a way to protect from mirrord being used in destructive tests and such.
 const FAILSAFE_ENV: &str = "MIRRORD_DONT_LOAD";
-
-// TODO: We don't really need a lock, we just need a type that:
-//  1. Can be initialized as static (with a const constructor or whatever)
-//  2. Is `Sync` (because shared static vars have to be).
-//  3. Can replace the held [`ProxyConnection`] with a different one (because we need to reset it on
-//     `fork`).
-//  We only ever set it in the ctor or in the `fork` hook (in the child process), and in both cases
-//  there are no other threads yet in that process, so we don't need write synchronization.
-//  Assuming it's safe to call `send` simultaneously from two threads, on two references to the
-//  same `Sender` (is it), we also don't need read synchronization.
-/// Global connection to the internal proxy.
-/// Should not be used directly. Use [`common::make_proxy_request_with_response`] or
-/// [`common::make_proxy_request_no_response`] functions instead.
-static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
 
 // The following statics are to avoid using CoreFoundation or high level macOS APIs
 // that aren't safe to use after fork.
