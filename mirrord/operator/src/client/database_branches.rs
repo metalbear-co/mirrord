@@ -10,8 +10,8 @@ use kube::{
 };
 use mirrord_config::{
     feature::database_branches::{
-        ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig, MysqlBranchConfig,
-        MongodbBranchConfig, PgBranchConfig, TargetEnviromentVariableSource,
+        ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig, MongodbBranchConfig,
+        MysqlBranchConfig, PgBranchConfig, TargetEnviromentVariableSource,
     },
     target::{Target, TargetDisplay},
 };
@@ -684,14 +684,14 @@ impl MongodbBranchParams {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
         let connection_source = match &config.base.connection {
             ConnectionSource::Url(kind) => match kind {
-                ConnectionSourceKind::Env {
+                TargetEnviromentVariableSource::Env {
                     container,
                     variable,
                 } => CrdConnectionSourceMongodb::Url(CrdConnectionSourceKindMongodb::Env {
                     container: container.clone(),
                     variable: variable.clone(),
                 }),
-                ConnectionSourceKind::EnvFrom {
+                TargetEnviromentVariableSource::EnvFrom {
                     container,
                     variable,
                 } => CrdConnectionSourceMongodb::Url(CrdConnectionSourceKindMongodb::EnvFrom {
