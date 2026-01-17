@@ -189,18 +189,21 @@ pub(crate) async fn connect_and_ping(
                 )));
             }
 
-            message @ Some(DaemonMessage::UdpOutgoing(_))
-            | message @ Some(DaemonMessage::Tcp(_))
-            | message @ Some(DaemonMessage::TcpSteal(_))
-            | message @ Some(DaemonMessage::TcpOutgoing(_))
-            | message @ Some(DaemonMessage::File(_))
-            | message @ Some(DaemonMessage::LogMessage(_))
-            | message @ Some(DaemonMessage::GetEnvVarsResponse(_))
-            | message @ Some(DaemonMessage::GetAddrInfoResponse(_))
-            | message @ Some(DaemonMessage::PauseTarget(_))
-            | message @ Some(DaemonMessage::SwitchProtocolVersionResponse(_))
-            | message @ Some(DaemonMessage::Vpn(_))
-            | message @ Some(DaemonMessage::ReverseDnsLookup(_)) => {
+            message @ Some(
+                DaemonMessage::UdpOutgoing(_)
+                | DaemonMessage::Tcp(_)
+                | DaemonMessage::TcpSteal(_)
+                | DaemonMessage::TcpOutgoing(_)
+                | DaemonMessage::File(_)
+                | DaemonMessage::LogMessage(_)
+                | DaemonMessage::GetEnvVarsResponse(_)
+                | DaemonMessage::GetAddrInfoResponse(_)
+                | DaemonMessage::PauseTarget(_)
+                | DaemonMessage::SwitchProtocolVersionResponse(_)
+                | DaemonMessage::Vpn(_)
+                | DaemonMessage::ReverseDnsLookup(_)
+                | DaemonMessage::Metrics(_),
+            ) => {
                 break Err(InternalProxyError::InitialPingPongFailed(format!(
                     "agent sent an unexpected message: {message:?}"
                 )));

@@ -45,7 +45,7 @@ use crate::{
     error::{AgentError, AgentResult},
     file::FileManager,
     incoming::MirrorHandle,
-    metrics,
+    metrics::{self, request_metric},
     mirror::TcpMirrorApi,
     namespace::NamespaceType,
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
@@ -583,6 +583,10 @@ impl ClientConnectionHandler {
             }
             ClientMessage::Vpn(_message) => {
                 self.respond(DaemonMessage::Close("VPN is not supported".into()))
+                    .await?;
+            }
+            ClientMessage::Metrics(request) => {
+                self.respond(DaemonMessage::Metrics(request_metric(request)))
                     .await?;
             }
         }

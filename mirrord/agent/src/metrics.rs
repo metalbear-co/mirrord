@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     net::SocketAddr,
     sync::{
         Arc,
@@ -8,6 +9,7 @@ use std::{
 
 use axum::{Router, extract::State, routing::get};
 use http::StatusCode;
+use mirrord_protocol::metrics::{MetricsRequest, MetricsResponse, WhichMetric};
 use prometheus::{IntGauge, Registry, proto::MetricFamily};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -45,6 +47,8 @@ pub(crate) static TCP_OUTGOING_CONNECTION: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) static UDP_OUTGOING_CONNECTION: AtomicUsize = AtomicUsize::new(0);
 
+pub(crate) static BYPASSED_HTTP_REQUESTS: AtomicUsize = AtomicUsize::new(0);
+
 /// Convenience trait for static metrics variables.
 ///
 /// We store them as [`AtomicUsize`], which is the correct type (they're all counters).
@@ -80,6 +84,7 @@ struct Metrics {
     redirected_requests: IntGauge,
     tcp_outgoing_connection: IntGauge,
     udp_outgoing_connection: IntGauge,
+    bypassed_http_requests: IntGauge,
 }
 
 impl Metrics {
@@ -177,6 +182,14 @@ impl Metrics {
             IntGauge::with_opts(opts).expect("Valid at initialization!")
         };
 
+        let bypassed_http_requests = {
+            let opts = Opts::new(
+                "mirrord_agent_bypassed_http_requests_count",
+                "amount of incoming HTTP requests currently bypassed by mirrord-agent",
+            );
+            IntGauge::with_opts(opts).expect("Valid at initialization!")
+        };
+
         registry
             .register(Box::new(client_count.clone()))
             .expect("Register must be valid at initialization!");
@@ -210,6 +223,9 @@ impl Metrics {
         registry
             .register(Box::new(udp_outgoing_connection.clone()))
             .expect("Register must be valid at initialization!");
+        registry
+            .register(Box::new(bypassed_http_requests.clone()))
+            .expect("Register must be valid at initialization!");
 
         Self {
             registry,
@@ -224,6 +240,7 @@ impl Metrics {
             redirected_requests,
             tcp_outgoing_connection,
             udp_outgoing_connection,
+            bypassed_http_requests,
         }
     }
 
@@ -246,6 +263,7 @@ impl Metrics {
             redirected_requests,
             tcp_outgoing_connection,
             udp_outgoing_connection,
+            bypassed_http_requests,
         } = self;
 
         client_count.set(CLIENT_COUNT.load_as_i64());
@@ -259,6 +277,7 @@ impl Metrics {
         redirected_requests.set(REDIRECTED_REQUESTS.load_as_i64());
         tcp_outgoing_connection.set(TCP_OUTGOING_CONNECTION.load_as_i64());
         udp_outgoing_connection.set(UDP_OUTGOING_CONNECTION.load_as_i64());
+        bypassed_http_requests.set(BYPASSED_HTTP_REQUESTS.load_as_i64());
 
         registry.gather()
     }
@@ -280,6 +299,128 @@ async fn get_metrics(State(state): State<Arc<Metrics>>) -> (StatusCode, String) 
             (StatusCode::INTERNAL_SERVER_ERROR, fail.to_string())
         }
     }
+}
+
+pub(crate) fn request_metric(
+    MetricsRequest { agent_id, metric }: MetricsRequest,
+) -> MetricsResponse {
+    let mut metrics = HashMap::default();
+
+    match metric {
+        WhichMetric::ClientCount => {
+            metrics.insert(WhichMetric::ClientCount, CLIENT_COUNT.load_as_i64());
+        }
+        WhichMetric::DnsRequestCount => {
+            metrics.insert(
+                WhichMetric::DnsRequestCount,
+                DNS_REQUEST_COUNT.load_as_i64(),
+            );
+        }
+        WhichMetric::OpenFdCount => {
+            metrics.insert(WhichMetric::OpenFdCount, OPEN_FD_COUNT.load_as_i64());
+        }
+        WhichMetric::MirrorPortSubscription => {
+            metrics.insert(
+                WhichMetric::MirrorPortSubscription,
+                MIRROR_PORT_SUBSCRIPTION.load_as_i64(),
+            );
+        }
+        WhichMetric::MirrorConnectionSubscription => {
+            metrics.insert(
+                WhichMetric::MirrorConnectionSubscription,
+                MIRROR_CONNECTION_SUBSCRIPTION.load_as_i64(),
+            );
+        }
+        WhichMetric::StealFilteredPortSubscription => {
+            metrics.insert(
+                WhichMetric::StealFilteredPortSubscription,
+                STEAL_FILTERED_PORT_SUBSCRIPTION.load_as_i64(),
+            );
+        }
+        WhichMetric::StealUnfilteredPortSubscription => {
+            metrics.insert(
+                WhichMetric::StealUnfilteredPortSubscription,
+                STEAL_UNFILTERED_PORT_SUBSCRIPTION.load_as_i64(),
+            );
+        }
+        WhichMetric::RedirectedConnections => {
+            metrics.insert(
+                WhichMetric::RedirectedConnections,
+                REDIRECTED_CONNECTIONS.load_as_i64(),
+            );
+        }
+        WhichMetric::RedirectedRequests => {
+            metrics.insert(
+                WhichMetric::RedirectedRequests,
+                REDIRECTED_REQUESTS.load_as_i64(),
+            );
+        }
+        WhichMetric::TcpOutgoingConnection => {
+            metrics.insert(
+                WhichMetric::TcpOutgoingConnection,
+                TCP_OUTGOING_CONNECTION.load_as_i64(),
+            );
+        }
+        WhichMetric::UdpOutgoingConnection => {
+            metrics.insert(
+                WhichMetric::UdpOutgoingConnection,
+                UDP_OUTGOING_CONNECTION.load_as_i64(),
+            );
+        }
+        WhichMetric::BypassedHttpRequests => {
+            metrics.insert(
+                WhichMetric::BypassedHttpRequests,
+                BYPASSED_HTTP_REQUESTS.load_as_i64(),
+            );
+        }
+        WhichMetric::All => {
+            metrics.insert(WhichMetric::ClientCount, CLIENT_COUNT.load_as_i64());
+            metrics.insert(
+                WhichMetric::DnsRequestCount,
+                DNS_REQUEST_COUNT.load_as_i64(),
+            );
+            metrics.insert(WhichMetric::OpenFdCount, OPEN_FD_COUNT.load_as_i64());
+            metrics.insert(
+                WhichMetric::MirrorPortSubscription,
+                MIRROR_PORT_SUBSCRIPTION.load_as_i64(),
+            );
+            metrics.insert(
+                WhichMetric::MirrorConnectionSubscription,
+                MIRROR_CONNECTION_SUBSCRIPTION.load_as_i64(),
+            );
+            metrics.insert(
+                WhichMetric::StealFilteredPortSubscription,
+                STEAL_FILTERED_PORT_SUBSCRIPTION.load_as_i64(),
+            );
+            metrics.insert(
+                WhichMetric::StealUnfilteredPortSubscription,
+                STEAL_UNFILTERED_PORT_SUBSCRIPTION.load_as_i64(),
+            );
+            metrics.insert(
+                WhichMetric::RedirectedConnections,
+                REDIRECTED_CONNECTIONS.load_as_i64(),
+            );
+            metrics.insert(
+                WhichMetric::RedirectedRequests,
+                REDIRECTED_REQUESTS.load_as_i64(),
+            );
+            metrics.insert(
+                WhichMetric::TcpOutgoingConnection,
+                TCP_OUTGOING_CONNECTION.load_as_i64(),
+            );
+            metrics.insert(
+                WhichMetric::UdpOutgoingConnection,
+                UDP_OUTGOING_CONNECTION.load_as_i64(),
+            );
+            metrics.insert(
+                WhichMetric::BypassedHttpRequests,
+                BYPASSED_HTTP_REQUESTS.load_as_i64(),
+            );
+        }
+        WhichMetric::Unknown => (),
+    };
+
+    MetricsResponse { agent_id, metrics }
 }
 
 /// Starts the mirrord-agent prometheus metrics service.

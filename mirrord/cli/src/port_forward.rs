@@ -359,7 +359,8 @@ impl PortForwarder {
             | DaemonMessage::UdpOutgoing(..)
             | DaemonMessage::Vpn(..)
             | DaemonMessage::TcpSteal(..)
-            | DaemonMessage::ReverseDnsLookup(..)) => {
+            | DaemonMessage::ReverseDnsLookup(..)
+            | DaemonMessage::Metrics(..)) => {
                 // includes unexpected DaemonMessage::Pong
                 return Err(PortForwardError::AgentError(format!(
                     "unexpected message from agent: {message:?}"
@@ -616,16 +617,17 @@ impl ReversePortForwarder {
             DaemonMessage::Pong if self.waiting_for_pong => {
                 self.waiting_for_pong = false;
             }
-            message @ DaemonMessage::UdpOutgoing(_)
-            | message @ DaemonMessage::TcpOutgoing(_)
-            | message @ DaemonMessage::File(_)
-            | message @ DaemonMessage::GetEnvVarsResponse(_)
-            | message @ DaemonMessage::GetAddrInfoResponse(_)
-            | message @ DaemonMessage::PauseTarget(_)
-            | message @ DaemonMessage::SwitchProtocolVersionResponse(_)
-            | message @ DaemonMessage::Vpn(_)
-            | message @ DaemonMessage::Pong
-            | message @ DaemonMessage::ReverseDnsLookup(_) => {
+            message @ (DaemonMessage::UdpOutgoing(_)
+            | DaemonMessage::TcpOutgoing(_)
+            | DaemonMessage::File(_)
+            | DaemonMessage::GetEnvVarsResponse(_)
+            | DaemonMessage::GetAddrInfoResponse(_)
+            | DaemonMessage::PauseTarget(_)
+            | DaemonMessage::SwitchProtocolVersionResponse(_)
+            | DaemonMessage::Vpn(_)
+            | DaemonMessage::Pong
+            | DaemonMessage::ReverseDnsLookup(_)
+            | DaemonMessage::Metrics(_)) => {
                 return Err(PortForwardError::AgentError(format!(
                     "unexpected message from agent: {message:?}"
                 )));

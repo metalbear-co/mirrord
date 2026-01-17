@@ -577,9 +577,12 @@ impl IntProxy {
                     .send(SimpleProxyMessage::GetEnvRes(res.map(Into::into)))
                     .await
             }
-            message @ DaemonMessage::PauseTarget(_)
-            | message @ DaemonMessage::Vpn(_)
-            | message @ DaemonMessage::ReverseDnsLookup(_) => {
+            // These messages are either not used anymore, or they're handled by the agent/operator,
+            // and should never reach intproxy.
+            message @ (DaemonMessage::PauseTarget(_)
+            | DaemonMessage::Vpn(_)
+            | DaemonMessage::ReverseDnsLookup(_)
+            | DaemonMessage::Metrics(_)) => {
                 Err(ProxyRuntimeError::UnexpectedAgentMessage(
                     UnexpectedAgentMessage(message.into()),
                 ))?;

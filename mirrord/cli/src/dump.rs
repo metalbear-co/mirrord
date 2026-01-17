@@ -437,7 +437,8 @@ impl DumpSession {
                 | DaemonMessage::UdpOutgoing(..)
                 | DaemonMessage::Vpn(..)
                 | DaemonMessage::TcpSteal(..)
-                | DaemonMessage::ReverseDnsLookup(..)) => {
+                | DaemonMessage::ReverseDnsLookup(..)
+                | DaemonMessage::Metrics(..)) => {
                     return Err(DumpSessionError::UnexpectedAgentMessage(Box::new(message)));
                 }
             }
