@@ -45,12 +45,6 @@ mod cli {
 
         let tempfile = ManagedTempFile::new(CONFIG_JSON.clone());
 
-        println!("Tempfile path is: {:?}", &tempfile.path);
-
-        if tempfile.path.exists() == false {
-            assert!(false);
-        }
-
         let mut process = run_verify_config(Some(vec![
             "--ide",
             tempfile.path.to_str().expect("Valid config path!"),

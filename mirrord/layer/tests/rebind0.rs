@@ -39,10 +39,6 @@ async fn rebind0(dylib_path: &Path, config_dir: &Path) {
     let tempfile = ManagedTempFile::new(config_json);
     config_path.push(&tempfile.path);
 
-    if tempfile.path.exists() == false {
-        assert!(false);
-    }
-
     let application = Application::RustRebind0;
     let (mut test_process, _intproxy) = application
         .start_process_with_layer(dylib_path, vec![], Some(&config_path))

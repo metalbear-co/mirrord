@@ -468,10 +468,6 @@ mod steal_tests {
         let tempfile = ManagedTempFile::new(config_json);
         config_path.push(&tempfile.path);
 
-        if tempfile.path.exists() == false {
-            assert!(false);
-        }
-
         let client = application
             .run(
                 &service.pod_container_target(),
@@ -532,12 +528,6 @@ mod steal_tests {
         });
         let tempfile = ManagedTempFile::new(config_json); 
         config_path.push(&tempfile.path);
-
-        println!("Tempfile path is: {:?}", &tempfile.path);
-
-        if tempfile.path.exists() == false {
-            assert!(false);
-        }
 
         let client = application
             .run(
