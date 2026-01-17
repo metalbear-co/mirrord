@@ -97,7 +97,7 @@ impl Drop for ManagedTempFile {
     /// Removes tempfile from fs
     /// Then, drops ManagedTempfile 
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path).unwrap_or_else(|_| panic!("Failed to remove tempfile.")); 
+        std::fs::remove_file(&self.path).unwrap_or_else(|_| panic!("Failed to remove tempfile.")); 
     }
 }
 
