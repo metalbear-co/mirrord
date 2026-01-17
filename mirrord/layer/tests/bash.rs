@@ -10,6 +10,7 @@ use mirrord_protocol::{
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::{SipPatchOptions, sip_patch};
+use mirrord_tests::utils::ManagedTempFile;
 use rstest::rstest;
 use serde_json::json;
 use tokio::net::TcpListener;
