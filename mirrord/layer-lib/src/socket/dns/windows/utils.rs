@@ -1,10 +1,7 @@
 //! Utility functions for Windows socket operations
-use std::{alloc::Layout, convert::TryFrom, mem, ptr};
+use std::{alloc::Layout, convert::TryFrom, mem, net::IpAddr, ptr};
 
-use mirrord_protocol::{
-    dns::GetAddrInfoResponse,
-    error::{DnsLookupError, ResolveErrorKindInternal, ResponseError},
-};
+use mirrord_protocol::error::{DnsLookupError, ResolveErrorKindInternal, ResponseError};
 use winapi::{
     shared::{
         minwindef::INT,
@@ -355,31 +352,27 @@ impl<T: WindowsAddrInfo> ManagedAddrInfo<T> {
     }
 }
 
-impl<T: WindowsAddrInfo> TryFrom<GetAddrInfoResponse> for ManagedAddrInfo<T> {
+impl<T: WindowsAddrInfo> TryFrom<Vec<(String, IpAddr)>> for ManagedAddrInfo<T> {
     type Error = HookError;
 
-    fn try_from(response: GetAddrInfoResponse) -> HookResult<Self> {
-        // Check if the response was successful and ensure we have addresses to process
-        let dns_lookup = (*response).clone().and_then(|lookup| {
-            if lookup.is_empty() {
-                Err(ResponseError::DnsLookup(DnsLookupError {
-                    kind: ResolveErrorKindInternal::NoRecordsFound(0),
-                }))
-            } else {
-                Ok(lookup)
-            }
-        })?;
+    fn try_from(records: Vec<(String, IpAddr)>) -> HookResult<Self> {
+        if records.is_empty() {
+            return Err(ResponseError::DnsLookup(DnsLookupError {
+                kind: ResolveErrorKindInternal::NoRecordsFound(0),
+            })
+            .into());
+        }
 
         let mut first_addrinfo: *mut T = ptr::null_mut();
         let mut current_addrinfo: *mut T = ptr::null_mut();
 
-        for lookup_record in dns_lookup.into_iter() {
+        for (name, ip) in records.into_iter() {
             // Allocate ADDRINFO structure
             let addrinfo_ptr = unsafe { T::alloc()? };
 
             // Parse the IP address and create sockaddr
-            let (sockaddr_ptr, sockaddr_len, family) = match lookup_record.ip {
-                std::net::IpAddr::V4(ipv4) => {
+            let (sockaddr_ptr, sockaddr_len, family) = match ip {
+                IpAddr::V4(ipv4) => {
                     let sockaddr_in_ptr =
                         unsafe_alloc!(SOCKADDR_IN, AddrInfoError::AllocationFailed)?;
 
@@ -397,7 +390,7 @@ impl<T: WindowsAddrInfo> TryFrom<GetAddrInfoResponse> for ManagedAddrInfo<T> {
                         AF_INET,
                     )
                 }
-                std::net::IpAddr::V6(ipv6) => {
+                IpAddr::V6(ipv6) => {
                     let sockaddr_in6_ptr =
                         unsafe_alloc!(SOCKADDR_IN6, AddrInfoError::AllocationFailed)?;
 
@@ -420,8 +413,8 @@ impl<T: WindowsAddrInfo> TryFrom<GetAddrInfoResponse> for ManagedAddrInfo<T> {
             };
 
             // Create canonical name if available
-            let canonname = if !lookup_record.name.is_empty() {
-                T::string_to_canonname(lookup_record.name)?
+            let canonname = if !name.is_empty() {
+                T::string_to_canonname(name)?
             } else {
                 T::null_canonname()
             };

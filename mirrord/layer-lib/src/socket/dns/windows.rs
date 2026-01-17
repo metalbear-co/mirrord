@@ -5,19 +5,17 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
-use mirrord_protocol::dns::{AddressFamily, GetAddrInfoRequestV2, SockType};
 use utils::{ManagedAddrInfo, ManagedAddrInfoAny, WindowsAddrInfo};
 use winapi::{
-    shared::ws2def::{AF_INET, AF_INET6, SOCKADDR},
-    um::winsock2::{SOCK_DGRAM, SOCK_STREAM, SOCKET, SOCKET_ERROR, WSAGetLastError},
+    shared::ws2def::SOCKADDR,
+    um::winsock2::{SOCKET, SOCKET_ERROR, WSAGetLastError},
 };
 use windows_strings::PCWSTR;
 
 use crate::{
     error::{AddrInfoError, HookResult},
-    proxy_connection::make_proxy_request_with_response,
     setup::setup,
-    socket::SocketAddrExt,
+    socket::{SocketAddrExt, dns::remote_getaddrinfo},
 };
 
 /// Keep track of managed address info structures for proper cleanup.
@@ -55,40 +53,14 @@ pub fn getaddrinfo<T: WindowsAddrInfo>(
     setup().dns_selector().check_query(&node, port)?;
     tracing::warn!("Using remote DNS resolution for {}", node);
 
-    // Convert hints to mirrord protocol types
-    let (address_family, socket_type, protocol) = match raw_hints {
-        Some(hints) => {
-            let (ai_family, ai_socktype, ai_protocol) = hints.get_family_socktype_protocol();
-            let af = match ai_family {
-                AF_INET => AddressFamily::Ipv4Only,
-                AF_INET6 => AddressFamily::Ipv6Only,
-                _ => AddressFamily::Any,
-            };
+    let (ai_family, ai_socktype, ai_protocol) = raw_hints
+        .map(|hints| hints.get_family_socktype_protocol())
+        .unwrap_or((0, 0, 0));
 
-            let sock_type = match ai_socktype {
-                SOCK_STREAM => SockType::Stream,
-                SOCK_DGRAM => SockType::Dgram,
-                _ => SockType::Any,
-            };
+    let lookups = remote_getaddrinfo(node, port, 0, ai_family, ai_socktype, ai_protocol)?;
 
-            (af, sock_type, ai_protocol)
-        }
-        None => (AddressFamily::Any, SockType::Any, 0),
-    };
-
-    // Make DNS request through mirrord agent
-    let request = GetAddrInfoRequestV2 {
-        node,
-        service_port: port,
-        family: address_family,
-        socktype: socket_type,
-        protocol,
-        flags: 0,
-    };
-
-    let response = make_proxy_request_with_response(request)?;
     // Convert response back to Windows ADDRINFO structures using trait method
-    let mut managed = ManagedAddrInfo::<T>::try_from(response)?;
+    let mut managed = ManagedAddrInfo::<T>::try_from(lookups)?;
     managed.apply_port(port);
     Ok(managed)
 }
