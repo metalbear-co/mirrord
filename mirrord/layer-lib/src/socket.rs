@@ -41,6 +41,7 @@ pub use sockets::{
     get_socket, get_socket_state, is_socket_in_state, is_socket_managed, register_socket,
     remove_socket, set_socket_state, shared_sockets,
 };
+use tracing::warn;
 #[cfg(windows)]
 pub use winapi::{
     shared::{
@@ -253,7 +254,7 @@ impl UserSocket {
     /// mirroring/stealing that port by sending PortUnsubscribe.
     #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()), ret)]
     pub fn close(&self) -> HookResult<()> {
-        match self {
+        let result = match self {
             Self {
                 state: SocketState::Listening(bound),
                 kind: SocketKind::Tcp(..),
@@ -273,17 +274,16 @@ impl UserSocket {
             } => make_proxy_request_no_response(OutgoingConnCloseRequest { conn_id: *id })
                 .map(|_| ()),
             _ => Ok(()),
-        }
+        };
+
+        result.inspect_err(|error| warn!(?error, "mirrord failed to send close socket message."))
     }
 }
 
 impl Drop for UserSocket {
     fn drop(&mut self) {
-        let result = self.close();
-        assert!(
-            result.is_ok(),
-            "mirrord failed to send close socket message. Error: {result:?}",
-        )
+        // Do not fail if error is returned, as other processes might have closed it already.
+        let _ = self.close();
     }
 }
 

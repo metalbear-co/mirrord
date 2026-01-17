@@ -14,6 +14,8 @@ pub struct PgBranchConfig {
     #[serde(default)]
     pub copy: PgBranchCopyConfig,
 
+    /// #### feature.db_branches[].iam_auth (type: pg) {#feature-db_branches-pg-iam_auth}
+    ///
     /// IAM authentication for the source database.
     /// Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication
     /// instead of password-based authentication.
@@ -21,73 +23,76 @@ pub struct PgBranchConfig {
     pub iam_auth: Option<PgIamAuthConfig>,
 }
 
-/// IAM authentication configuration for cloud-managed PostgreSQL databases.
-///
 /// Environment variable sources follow the same pattern as `connection.url`:
 /// - `{ "type": "env", "variable": "VAR_NAME" }` - direct env var from pod spec
 /// - `{ "type": "env_from", "variable": "VAR_NAME" }` - from configMapRef/secretRef
-///
-/// Example:
-/// ```json
-/// {
-///   "iam_auth": {
-///     "type": "aws_rds",
-///     "region": { "type": "env", "variable": "MY_AWS_REGION" },
-///     "access_key_id": { "type": "env_from", "variable": "AWS_KEY" }
-///   }
-/// }
-/// ```
-///
-/// Example for GCP Cloud SQL with credentials from a secret:
-/// ```json
-/// {
-///   "iam_auth": {
-///     "type": "gcp_cloud_sql",
-///     "credentials_json": { "type": "env_from", "variable": "GOOGLE_APPLICATION_CREDENTIALS_JSON" }
-///   }
-/// }
-/// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PgIamAuthConfig {
-    /// AWS RDS/Aurora IAM authentication.
+    /// For AWS RDS/Aurora IAM authentication, set `type` to `"aws_rds"`.
+    ///
+    /// Example:
+    /// ```json
+    /// {
+    ///   "iam_auth": {
+    ///     "type": "aws_rds",
+    ///     "region": { "type": "env", "variable": "MY_AWS_REGION" },
+    ///     "access_key_id": { "type": "env_from", "variable": "AWS_KEY" }
+    ///   }
+    /// }
+    /// ```
+    ///
     /// The init container must have AWS credentials (via IRSA, instance profile, or env vars).
+    ///
+    /// Parameters:
+    /// - `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
+    /// - `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
+    /// - `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
+    /// - `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses
+    ///   AWS_SESSION_TOKEN.
     AwsRds {
-        /// AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         region: Option<TargetEnviromentVariableSource>,
 
-        /// AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         access_key_id: Option<TargetEnviromentVariableSource>,
 
-        /// AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         secret_access_key: Option<TargetEnviromentVariableSource>,
 
-        /// AWS Session Token (for temporary credentials). If not specified, uses
-        /// AWS_SESSION_TOKEN.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_token: Option<TargetEnviromentVariableSource>,
     },
-    /// GCP Cloud SQL IAM authentication.
+    /// For GCP Cloud SQL IAM authentication, set `type` to `"gcp_cloud_sql"`.
+    ///
+    /// Example for GCP Cloud SQL with credentials from a secret:
+    /// ```json
+    /// {
+    ///   "iam_auth": {
+    ///     "type": "gcp_cloud_sql",
+    ///     "credentials_json": { "type": "env_from", "variable": "GOOGLE_APPLICATION_CREDENTIALS_JSON" }
+    ///   }
+    /// }
+    /// ```
+    ///
     /// The init container must have GCP credentials (via Workload Identity or service account key).
     /// Use either `credentials_json` OR `credentials_path`, not both.
+    ///
+    /// Parameters:
+    /// - `credentials_json`: Inline service account JSON key content. Specify the env var that
+    ///   contains the raw JSON content of the service account key. Example: ` { "type": "env",
+    ///   "variable": "GOOGLE_APPLICATION_CREDENTIALS_JSON" } `.
+    /// - `credentials_path`: Path to service account JSON key file. Specify the env var that
+    ///   contains the file path to the service account key. The file must be accessible from the
+    ///   init container. Example: `{"type": "env", "variable": "GOOGLE_APPLICATION_CREDENTIALS"}`.
+    /// - `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
     GcpCloudSql {
-        /// Inline service account JSON key content.
-        /// Specify the env var that contains the raw JSON content of the service account key.
-        /// Example: `{"type": "env", "variable": "GOOGLE_APPLICATION_CREDENTIALS_JSON"}`
         #[serde(default, skip_serializing_if = "Option::is_none")]
         credentials_json: Option<TargetEnviromentVariableSource>,
 
-        /// Path to service account JSON key file.
-        /// Specify the env var that contains the file path to the service account key.
-        /// The file must be accessible from the init container.
-        /// Example: `{"type": "env", "variable": "GOOGLE_APPLICATION_CREDENTIALS"}`
         #[serde(default, skip_serializing_if = "Option::is_none")]
         credentials_path: Option<TargetEnviromentVariableSource>,
 
-        /// GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project: Option<TargetEnviromentVariableSource>,
     },

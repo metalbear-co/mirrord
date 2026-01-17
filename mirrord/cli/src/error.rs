@@ -399,8 +399,9 @@ pub(crate) enum CliError {
     #[error("An error occurred in the port-forwarding process: {0}")]
     PortForwardingError(#[from] PortForwardError),
 
-    #[error("An error occurred in the wizard while serving the wizard app: {0}")]
-    WizardServeError(#[from] io::Error),
+    #[cfg(feature = "wizard")]
+    #[error("An IO error occurred while serving the wizard app: {0}")]
+    WizardIoError(io::Error),
 
     #[error("An error occurred in the wizard while fetching target data: {0}")]
     WizardTargetError(#[from] KubeApiError),
