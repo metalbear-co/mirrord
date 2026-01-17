@@ -1,1 +1,0 @@
-Refactor Windows CI workflows to use robust IAP tunneling with Service Account authentication and VM-resident Kubeconfig. Added `windows-tests.yaml` for on-demand E2E testing triggered by label or manual dispatch.
