@@ -998,7 +998,7 @@ Mirrord operator uses a default version of the database image unless `version` i
 Users can choose from the following copy mode to bootstrap their MongoDB branch database:
 
 - Empty
-
+ 
   Creates an empty database. If the source DB connection options are found from the chosen
   target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord
   operator looks for the `name` field from the branch DB config object. This option is useful
