@@ -25,7 +25,7 @@ async fn port_mapping(
             "network": {
                 "incoming": {
                     "mode": "mirror",
-                    "port_mapping": [[9999, 1234]]]
+                    "port_mapping": [[9999, 1234]]
                 }
             }
         }
