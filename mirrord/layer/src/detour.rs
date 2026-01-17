@@ -227,25 +227,25 @@ pub(crate) trait OptionExt {
     fn bypass(self, value: Bypass) -> Detour<Self::Opt>;
 }
 
-/// Note(Daniel): Comment out will be reverted in WIN-76
 /// Extends `Option<T>` with `Detour<T>` conversion methods.
-// pub(crate) trait OptionDetourExt<T>: OptionExt {
-//     /// Transposes an `Option` of a [`Detour`] into a [`Detour`] of an `Option`.
-//     ///
-//     /// - [`None`] will be mapped to `Success(None)`;
-//     /// - `Some(Success)` will be mapped to `Success(Some)`;
-//     /// - `Some(Error)` will be mapped to `Error`;
-//     /// - `Some(Bypass)` will be mapped to `Bypass`;
-//     ///
-//     /// # Examples
-//     ///
-//     /// ```no_run
-//     /// let x: Detour<Option<i32>> = Detour::Sucess(Some(5));
-//     /// let y: Option<Detour<i32>> = Some(Detour::Success(5));
-//     /// assert_eq!(x, y.transpose());
-//     /// ```
-//     fn transpose(self) -> Detour<Option<T>>;
-// }
+#[cfg(target_os = "linux")]
+pub(crate) trait OptionDetourExt<T>: OptionExt {
+    /// Transposes an `Option` of a [`Detour`] into a [`Detour`] of an `Option`.
+    ///
+    /// - [`None`] will be mapped to `Success(None)`;
+    /// - `Some(Success)` will be mapped to `Success(Some)`;
+    /// - `Some(Error)` will be mapped to `Error`;
+    /// - `Some(Bypass)` will be mapped to `Bypass`;
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let x: Detour<Option<i32>> = Detour::Sucess(Some(5));
+    /// let y: Option<Detour<i32>> = Some(Detour::Success(5));
+    /// assert_eq!(x, y.transpose());
+    /// ```
+    fn transpose(self) -> Detour<Option<T>>;
+}
 
 impl<T> OptionExt for Option<T> {
     type Opt = T;
@@ -258,18 +258,18 @@ impl<T> OptionExt for Option<T> {
     }
 }
 
-// Note(Daniel): Comment out will be reverted in WIN-76
-// impl<T> OptionDetourExt<T> for Option<Detour<T>> {
-//     #[inline]
-//     fn transpose(self) -> Detour<Option<T>> {
-//         match self {
-//             Some(Detour::Success(s)) => Detour::Success(Some(s)),
-//             Some(Detour::Error(e)) => Detour::Error(e),
-//             Some(Detour::Bypass(b)) => Detour::Bypass(b),
-//             None => Detour::Success(None),
-//         }
-//     }
-// }
+#[cfg(target_os = "linux")]
+impl<T> OptionDetourExt<T> for Option<Detour<T>> {
+    #[inline]
+    fn transpose(self) -> Detour<Option<T>> {
+        match self {
+            Some(Detour::Success(s)) => Detour::Success(Some(s)),
+            Some(Detour::Error(e)) => Detour::Error(e),
+            Some(Detour::Bypass(b)) => Detour::Bypass(b),
+            None => Detour::Success(None),
+        }
+    }
+}
 
 /// Extends [`OnceLock`] with a helper function to initialize it with a [`Detour`].
 pub(crate) trait OnceLockExt<T> {
