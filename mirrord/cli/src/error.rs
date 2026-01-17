@@ -335,6 +335,10 @@ pub(crate) enum CliError {
         operator_version: String,
     },
 
+    #[error("mirrord operator {0} failed: {1}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    OperatorBranchCreationFailed(OperatorOperation, String),
+
     #[error("mirrord operator API failed: {0} failed with {1}")]
     #[diagnostic(help(
     "Please check the following:
@@ -395,8 +399,9 @@ pub(crate) enum CliError {
     #[error("An error occurred in the port-forwarding process: {0}")]
     PortForwardingError(#[from] PortForwardError),
 
-    #[error("An error occurred in the wizard while serving the wizard app: {0}")]
-    WizardServeError(#[from] io::Error),
+    #[cfg(feature = "wizard")]
+    #[error("An IO error occurred while serving the wizard app: {0}")]
+    WizardIoError(io::Error),
 
     #[error("An error occurred in the wizard while fetching target data: {0}")]
     WizardTargetError(#[from] KubeApiError),
@@ -525,6 +530,9 @@ impl From<OperatorApiError> for CliError {
         use kube::{Error, client::AuthError};
 
         match value {
+            OperatorApiError::BranchCreationFailed { operation, message } => {
+                Self::OperatorBranchCreationFailed(operation, message)
+            }
             OperatorApiError::UnsupportedFeature {
                 feature,
                 operator_version,

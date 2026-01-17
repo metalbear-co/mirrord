@@ -94,7 +94,7 @@ pub struct DnsConfig {
     #[config(env = "MIRRORD_REMOTE_DNS", default = true)]
     pub enabled: bool,
 
-    /// **feature.network.dns.filter** {#feature-network-dns-filter}
+    /// ##### feature.network.dns.filter {#feature-network-dns-filter}
     ///
     /// Unstable: the precise syntax of this config is subject to change.
     #[config(default, unstable)]

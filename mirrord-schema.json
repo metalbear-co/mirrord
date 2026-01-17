@@ -523,7 +523,7 @@
         },
         "priority_class": {
           "title": "agent.priority_class {#agent-priority_class}",
-          "description": "Specifies the priority class to assign to the agent pod.\n\nThis option is only applicable when running in the targetless mode.\n\n```json { \"agent\": { \"priority_class\": \"my-priority-class-name\" } } ```\n\nIn some cases, the targetless agent pod may fail to schedule due to node resource constraints. Setting a priority class allows you to explicitly assign an existing priority class from your cluster to the agent pod, increasing its priority relative to other workloads.",
+          "description": "Specifies the priority class to assign to the agent pod.\n\n```json { \"agent\": { \"priority_class\": \"my-priority-class-name\" } } ```\n\nIn some cases, the agent pod may fail to schedule due to node resource constraints. Setting a priority class allows you to explicitly assign an existing priority class from your cluster to the agent pod, increasing its priority relative to other workloads.",
           "type": [
             "string",
             "null"
@@ -651,6 +651,7 @@
       "type": "object"
     },
     "BodyFilter": {
+      "description": "Currently only JSON body filtering is supported.",
       "oneOf": [
         {
           "title": "feature.network.incoming.inner_filter.body_filter.json {#feature-network-incoming-inner-body-filter-json}",
@@ -683,7 +684,7 @@
       "type": "object",
       "properties": {
         "output_dir": {
-          "title": "ci.output_dir{#ci-output_dir}",
+          "title": "ci.output_dir {#ci-output_dir}",
           "description": "Path to a directory where `mirrord ci` will flush application's stdout and stderr.\n\nDefaults to `/tmp/mirrord/`.",
           "type": [
             "string",
@@ -969,7 +970,7 @@
           ],
           "properties": {
             "connection": {
-              "title": "feature.db_branches.base.connection {#feature-db_branches-base-connection}",
+              "title": "feature.db_branches[].connection (type: mysql, pg) {#feature-db_branches-sql-connection}",
               "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
               "allOf": [
                 {
@@ -989,7 +990,7 @@
               ]
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}",
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg) {#feature-db_branches-sql-creation_timeout_secs}",
               "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
               "default": 60,
               "type": "integer",
@@ -997,7 +998,7 @@
               "minimum": 0.0
             },
             "id": {
-              "title": "feature.db_branches.base.id {#feature-db_branches-base-id}",
+              "title": "feature.db_branches[].id (type: mysql, pg) {#feature-db_branches-sql-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
               "type": [
                 "string",
@@ -1005,7 +1006,7 @@
               ]
             },
             "name": {
-              "title": "feature.db_branches.base.name {#feature-db_branches-base-name}",
+              "title": "feature.db_branches[].name (type: mysql, pg) {#feature-db_branches-sql-name}",
               "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
               "type": [
                 "string",
@@ -1013,7 +1014,7 @@
               ]
             },
             "ttl_secs": {
-              "title": "feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}",
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg) {#feature-db_branches-sql-ttl_secs}",
               "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
               "default": 300,
               "type": "integer",
@@ -1027,7 +1028,7 @@
               ]
             },
             "version": {
-              "title": "feature.db_branches.base.version {#feature-db_branches-base-version}",
+              "title": "feature.db_branches[].version (type: mysql, pg) {#feature-db_branches-sql-version}",
               "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
               "type": [
                 "string",
@@ -1045,7 +1046,7 @@
           ],
           "properties": {
             "connection": {
-              "title": "feature.db_branches.base.connection {#feature-db_branches-base-connection}",
+              "title": "feature.db_branches[].connection (type: mysql, pg) {#feature-db_branches-sql-connection}",
               "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
               "allOf": [
                 {
@@ -1065,15 +1066,27 @@
               ]
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}",
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg) {#feature-db_branches-sql-creation_timeout_secs}",
               "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
               "default": 60,
               "type": "integer",
               "format": "uint64",
               "minimum": 0.0
             },
+            "iam_auth": {
+              "title": "feature.db_branches[].iam_auth (type: pg) {#feature-db_branches-pg-iam_auth}",
+              "description": "IAM authentication for the source database. Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication instead of password-based authentication.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/PgIamAuthConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "id": {
-              "title": "feature.db_branches.base.id {#feature-db_branches-base-id}",
+              "title": "feature.db_branches[].id (type: mysql, pg) {#feature-db_branches-sql-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
               "type": [
                 "string",
@@ -1081,7 +1094,7 @@
               ]
             },
             "name": {
-              "title": "feature.db_branches.base.name {#feature-db_branches-base-name}",
+              "title": "feature.db_branches[].name (type: mysql, pg) {#feature-db_branches-sql-name}",
               "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
               "type": [
                 "string",
@@ -1089,7 +1102,7 @@
               ]
             },
             "ttl_secs": {
-              "title": "feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}",
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg) {#feature-db_branches-sql-ttl_secs}",
               "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
               "default": 300,
               "type": "integer",
@@ -1103,7 +1116,7 @@
               ]
             },
             "version": {
-              "title": "feature.db_branches.base.version {#feature-db_branches-base-version}",
+              "title": "feature.db_branches[].version (type: mysql, pg) {#feature-db_branches-sql-version}",
               "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
               "type": [
                 "string",
@@ -1120,6 +1133,7 @@
           ],
           "properties": {
             "connection": {
+              "title": "feature.db_branches[].connection (type: redis) {#feature-db_branches-redis-connection}",
               "description": "Connection configuration for the Redis instance.",
               "default": {
                 "database": null,
@@ -1137,6 +1151,7 @@
               ]
             },
             "id": {
+              "title": "feature.db_branches[].id (type: redis) {#feature-db_branches-redis-id}",
               "description": "Optional unique identifier for reusing branches across sessions.",
               "default": null,
               "type": [
@@ -1145,6 +1160,7 @@
               ]
             },
             "local": {
+              "title": "feature.db_branches[].local (type: redis) {#feature-db_branches-redis-local}",
               "description": "Local Redis runtime configuration. Only used when `location` is `local`.",
               "default": {
                 "container_command": null,
@@ -1164,7 +1180,8 @@
               ]
             },
             "location": {
-              "description": "Where the Redis instance should run. - `local`: Spawns a local Redis instance. - `remote`: Uses the remote Redis (default behavior).",
+              "title": "feature.db_branches[].location (type: redis) {#feature-db_branches-redis-location}",
+              "description": "Where the Redis instance should run. - `local`: Spawns a local Redis instance managed by mirrord. - `remote`: Uses the remote Redis (default behavior, no-op).",
               "default": "remote",
               "allOf": [
                 {
@@ -1207,7 +1224,7 @@
       ]
     },
     "DbBranchingConnectionSourceKind": {
-      "description": "Different ways to source the connection options.\n\nSupport: - `env` in the target's pod spec. - `envFrom` in the target's pod spec.",
+      "description": "<!--${internal}--> Different ways to source the connection options.\n\nSupport: - `env` in the target's pod spec. - `envFrom` in the target's pod spec.",
       "oneOf": [
         {
           "type": "object",
@@ -1290,7 +1307,8 @@
           ]
         },
         "filter": {
-          "description": "**feature.network.dns.filter** {#feature-network-dns-filter}\n\nUnstable: the precise syntax of this config is subject to change.",
+          "title": "feature.network.dns.filter {#feature-network-dns-filter}",
+          "description": "Unstable: the precise syntax of this config is subject to change.",
           "anyOf": [
             {
               "$ref": "#/definitions/DnsFilterConfig"
@@ -1421,7 +1439,7 @@
       "properties": {
         "applev": {
           "title": "_experimental_ applev {#experimental-applev}",
-          "description": "Configuraiton for inspecting and modifying apple variables. macOS only.",
+          "description": "Configuration for inspecting and modifying apple variables. macOS only.",
           "anyOf": [
             {
               "$ref": "#/definitions/AppleVariablesConfig"
@@ -1735,31 +1753,36 @@
       "additionalProperties": false
     },
     "FsModeConfig": {
+      "title": "feature.fs.mode {#feature-fs-mode}",
       "description": "Configuration for enabling read-only or read-write file operations.\n\nThese options are overriden by user specified overrides and mirrord default overrides.\n\nIf you set [`\"localwithoverrides\"`](#feature-fs-mode-localwithoverrides) then some files can be read/write remotely based on our default/user specified. Default option for general file configuration.\n\nThe accepted values are: `\"local\"`, `\"localwithoverrides`, `\"read\"`, or `\"write`.",
       "oneOf": [
         {
-          "description": "**feature.fs.mode.local** {#feature-fs-mode-local}\n\nmirrord won't do anything fs-related, all operations will be local.",
+          "title": "feature.fs.mode.local {#feature-fs-mode-local}",
+          "description": "mirrord won't do anything fs-related, all operations will be local.",
           "type": "string",
           "enum": [
             "local"
           ]
         },
         {
-          "description": "**feature.fs.mode.localwithoverrides** {#feature-fs-mode-localwithoverrides}\n\nmirrord will run overrides on some file operations, but most will be local.",
+          "title": "feature.fs.mode.localwithoverrides {#feature-fs-mode-localwithoverrides}",
+          "description": "mirrord will run overrides on some file operations, but most will be local.",
           "type": "string",
           "enum": [
             "localwithoverrides"
           ]
         },
         {
-          "description": "**feature.fs.mode.read** {#feature-fs-mode-read}\n\nmirrord will read files from the remote, but won't write to them.",
+          "title": "feature.fs.mode.read {#feature-fs-mode-read}",
+          "description": "mirrord will read files from the remote, but won't write to them.",
           "type": "string",
           "enum": [
             "read"
           ]
         },
         {
-          "description": "**feature.fs.mode.write** {#feature-fs-mode-write}\n\nmirrord will read/write from the remote.",
+          "title": "feature.fs.mode.write {#feature-fs-mode-write}",
+          "description": "mirrord will read/write from the remote.",
           "type": "string",
           "enum": [
             "write"
@@ -1817,7 +1840,7 @@
         },
         "body_filter": {
           "title": "feature.network.incoming.http_filter.body_filter {#feature-network-incoming-http-body-filter}",
-          "description": "Matches the request based on the contents of its body. Currently only JSON body filtering is supported.",
+          "description": "Matches the request based on the contents of its body.",
           "anyOf": [
             {
               "$ref": "#/definitions/BodyFilter"
@@ -2440,7 +2463,8 @@
       "type": "object",
       "properties": {
         "filter": {
-          "description": "**feature.network.outgoing.filter** {#feature.network.outgoing.filter}\n\nFilters that are used to send specific traffic from either the remote pod or the local app",
+          "title": "feature.network.outgoing.filter {#feature.network.outgoing.filter}",
+          "description": "Filters that are used to send specific traffic from either the remote pod or the local app",
           "anyOf": [
             {
               "$ref": "#/definitions/OutgoingFilterConfig"
@@ -2451,28 +2475,32 @@
           ]
         },
         "ignore_localhost": {
-          "description": "**feature.network.outgoing.ignore_localhost** {#feature.network.outgoing.ignore_localhost}\n\nDefaults to `false`.",
+          "title": "feature.network.outgoing.ignore_localhost {#feature.network.outgoing.ignore_localhost}",
+          "description": "Defaults to `false`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "tcp": {
-          "description": "**feature.network.outgoing.tcp** {#feature.network.outgoing.tcp}\n\nDefaults to `true`.",
+          "title": "feature.network.outgoing.tcp {#feature.network.outgoing.tcp}",
+          "description": "Defaults to `true`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "udp": {
-          "description": "**feature.network.outgoing.udp** {#feature.network.outgoing.udp}\n\nDefaults to `true`.",
+          "title": "feature.network.outgoing.udp {#feature.network.outgoing.udp}",
+          "description": "Defaults to `true`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "unix_streams": {
-          "description": "**feature.network.outgoing.unix_streams** {#feature.network.outgoing.unix_streams}\n\nConnect to these unix streams remotely (and to all other paths locally).\n\nYou can either specify a single value or an array of values. Each value is interpreted as a regular expression ([Supported Syntax](https://docs.rs/regex/1.7.1/regex/index.html#syntax)).\n\nWhen your application connects to a unix socket, the target address will be converted to a string (non-utf8 bytes are replaced by a placeholder character) and matched against the set of regexes specified here. If there is a match, mirrord will connect your application with the target unix socket address on the target pod. Otherwise, it will leave the connection to happen locally on your machine.",
+          "title": "feature.network.outgoing.unix_streams {#feature.network.outgoing.unix_streams}",
+          "description": "Connect to these unix streams remotely (and to all other paths locally).\n\nYou can either specify a single value or an array of values. Each value is interpreted as a regular expression ([Supported Syntax](https://docs.rs/regex/1.7.1/regex/index.html#syntax)).\n\nWhen your application connects to a unix socket, the target address will be converted to a string (non-utf8 bytes are replaced by a placeholder character) and matched against the set of regexes specified here. If there is a match, mirrord will connect your application with the target unix socket address on the target pod. Otherwise, it will leave the connection to happen locally on your machine.",
           "anyOf": [
             {
               "$ref": "#/definitions/VecOrSingle_for_String"
@@ -2593,6 +2621,111 @@
         }
       }
     },
+    "PgIamAuthConfig": {
+      "description": "Environment variable sources follow the same pattern as `connection.url`: - `{ \"type\": \"env\", \"variable\": \"VAR_NAME\" }` - direct env var from pod spec - `{ \"type\": \"env_from\", \"variable\": \"VAR_NAME\" }` - from configMapRef/secretRef",
+      "oneOf": [
+        {
+          "description": "For AWS RDS/Aurora IAM authentication, set `type` to `\"aws_rds\"`.\n\nExample: ```json { \"iam_auth\": { \"type\": \"aws_rds\", \"region\": { \"type\": \"env\", \"variable\": \"MY_AWS_REGION\" }, \"access_key_id\": { \"type\": \"env_from\", \"variable\": \"AWS_KEY\" } } } ```\n\nThe init container must have AWS credentials (via IRSA, instance profile, or env vars).\n\nParameters: - `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION. - `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID. - `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY. - `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses AWS_SESSION_TOKEN.",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "access_key_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "region": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "secret_access_key": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "session_token": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "aws_rds"
+              ]
+            }
+          }
+        },
+        {
+          "description": "For GCP Cloud SQL IAM authentication, set `type` to `\"gcp_cloud_sql\"`.\n\nExample for GCP Cloud SQL with credentials from a secret: ```json { \"iam_auth\": { \"type\": \"gcp_cloud_sql\", \"credentials_json\": { \"type\": \"env_from\", \"variable\": \"GOOGLE_APPLICATION_CREDENTIALS_JSON\" } } } ```\n\nThe init container must have GCP credentials (via Workload Identity or service account key). Use either `credentials_json` OR `credentials_path`, not both.\n\nParameters: - `credentials_json`: Inline service account JSON key content. Specify the env var that contains the raw JSON content of the service account key. Example: ` { \"type\": \"env\", \"variable\": \"GOOGLE_APPLICATION_CREDENTIALS_JSON\" } `. - `credentials_path`: Path to service account JSON key file. Specify the env var that contains the file path to the service account key. The file must be accessible from the init container. Example: `{\"type\": \"env\", \"variable\": \"GOOGLE_APPLICATION_CREDENTIALS\"}`. - `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "credentials_json": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "credentials_path": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "project": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "gcp_cloud_sql"
+              ]
+            }
+          }
+        }
+      ]
+    },
     "PodTarget": {
       "description": "<!--${internal}--> Mirror the pod specified by [`PodTarget::pod`].",
       "type": "object",
@@ -2663,29 +2796,18 @@
       ]
     },
     "RedisBranchLocation": {
-      "description": "Location for the Redis branch instance.",
-      "oneOf": [
-        {
-          "description": "Use a local Redis instance that mirrord manages.",
-          "type": "string",
-          "enum": [
-            "local"
-          ]
-        },
-        {
-          "description": "Use the remote Redis (default behavior, no-op).",
-          "type": "string",
-          "enum": [
-            "remote"
-          ]
-        }
+      "type": "string",
+      "enum": [
+        "local",
+        "remote"
       ]
     },
     "RedisConnectionConfig": {
-      "description": "Redis connection configuration.\n\nSupports either a complete URL or separated connection parameters. If both are provided, `url` takes precedence.",
+      "description": "Supports either a complete URL or separated connection parameters. If both are provided, `url` takes precedence.\n\nThe following fields can be sourced via remote environment variable: - url - host - password - username\n\nExample: ```json \"connection\": { \"host\": { \"type\": \"env\", \"variable\": \"REDIS_HOST\" }, \"port\": 6379, \"password\": { \"type\": \"env\", \"variable\": \"REDIS_PASSWORD\" } } ```",
       "type": "object",
       "properties": {
         "database": {
+          "title": "feature.db_branches[].connection.database (type: redis)",
           "description": "Redis database number (default: 0).",
           "default": null,
           "type": [
@@ -2696,7 +2818,8 @@
           "minimum": 0.0
         },
         "host": {
-          "description": "Redis host/hostname.",
+          "title": "feature.db_branches[].connection.host (type: redis)",
+          "description": "Redis host/hostname. Can be sourced from an environment variable.",
           "default": null,
           "anyOf": [
             {
@@ -2708,7 +2831,8 @@
           ]
         },
         "password": {
-          "description": "Redis password for authentication.",
+          "title": "feature.db_branches[].connection.password (type: redis)",
+          "description": "Redis password for authentication. Can be sourced from an environment variable.",
           "default": null,
           "anyOf": [
             {
@@ -2720,6 +2844,7 @@
           ]
         },
         "port": {
+          "title": "feature.db_branches[].connection.port (type: redis)",
           "description": "Redis port (default: 6379).",
           "default": null,
           "type": [
@@ -2730,6 +2855,7 @@
           "minimum": 0.0
         },
         "tls": {
+          "title": "feature.db_branches[].connection.tls (type: redis)",
           "description": "Enable TLS/SSL connection.",
           "default": null,
           "type": [
@@ -2738,6 +2864,7 @@
           ]
         },
         "url": {
+          "title": "feature.db_branches[].connection.url (type: redis)",
           "description": "Complete Redis URL (e.g., `redis://user:pass@host:6379/0`). Can be sourced from an environment variable.",
           "default": null,
           "anyOf": [
@@ -2750,7 +2877,8 @@
           ]
         },
         "username": {
-          "description": "Redis username (Redis 6+ ACL).",
+          "title": "feature.db_branches[].connection.username (type: redis)",
+          "description": "Redis username (Redis 6+ ACL). Can be sourced from an environment variable.",
           "default": null,
           "anyOf": [
             {
@@ -2764,7 +2892,7 @@
       }
     },
     "RedisEnvSource": {
-      "description": "Environment variable source for Redis values.",
+      "description": "<!--${internal}--> Environment variable source for Redis values.",
       "type": "object",
       "required": [
         "type",
@@ -2772,7 +2900,6 @@
       ],
       "properties": {
         "container": {
-          "description": "Optional container name for multi-container pods.",
           "default": null,
           "type": [
             "string",
@@ -2780,21 +2907,15 @@
           ]
         },
         "type": {
-          "description": "Must be \"env\" to indicate environment variable source.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/RedisEnvSourceType"
-            }
-          ]
+          "$ref": "#/definitions/RedisEnvSourceType"
         },
         "variable": {
-          "description": "Name of the environment variable.",
           "type": "string"
         }
       }
     },
     "RedisEnvSourceType": {
-      "description": "Type marker for environment variable sources.",
+      "description": "<!--${internal}--> Type marker for environment variable sources.",
       "type": "string",
       "enum": [
         "env"
@@ -2805,6 +2926,7 @@
       "type": "object",
       "properties": {
         "container_command": {
+          "title": "feature.db_branches[].local.container_command (type: redis)",
           "description": "Custom path to the container command. If not provided, uses the runtime name from PATH (e.g., \"docker\"). Example: `/usr/local/bin/docker` or `/home/user/.local/bin/podman`",
           "default": null,
           "type": [
@@ -2813,6 +2935,7 @@
           ]
         },
         "container_runtime": {
+          "title": "feature.db_branches[].local.container_runtime (type: redis)",
           "description": "Which container runtime to use (Docker, Podman, or nerdctl). Only applies when `runtime` is `container` or `auto`.",
           "default": "docker",
           "allOf": [
@@ -2822,6 +2945,7 @@
           ]
         },
         "options": {
+          "title": "feature.db_branches[].local.options (type: redis)",
           "description": "Additional Redis configuration options.",
           "default": {
             "args": []
@@ -2833,6 +2957,7 @@
           ]
         },
         "port": {
+          "title": "feature.db_branches[].local.port (type: redis)",
           "description": "Local port to bind Redis to (default: 6379).",
           "default": 6379,
           "type": "integer",
@@ -2840,6 +2965,7 @@
           "minimum": 0.0
         },
         "runtime": {
+          "title": "feature.db_branches[].local.runtime (type: redis)",
           "description": "Runtime backend for local Redis: `container`, `redis_server`, or `auto`.",
           "default": "container",
           "allOf": [
@@ -2849,6 +2975,7 @@
           ]
         },
         "server_command": {
+          "title": "feature.db_branches[].local.server_command (type: redis)",
           "description": "Custom path to the redis-server binary. If not provided, uses \"redis-server\" from PATH. Example: `/opt/redis/bin/redis-server`",
           "default": null,
           "type": [
@@ -2857,6 +2984,7 @@
           ]
         },
         "version": {
+          "title": "feature.db_branches[].local.version (type: redis)",
           "description": "Redis version/tag to use (default: \"7-alpine\"). Used as the container image tag.",
           "default": "7-alpine",
           "type": "string"
@@ -2864,7 +2992,7 @@
       }
     },
     "RedisOptions": {
-      "description": "Additional arguments passed to the Redis server.\n\nExample: ```json { \"args\": [\"--maxmemory\", \"256mb\", \"--appendonly\", \"yes\"] } ```",
+      "description": "Example: ```json { \"args\": [\"--maxmemory\", \"256mb\", \"--appendonly\", \"yes\"] } ```",
       "type": "object",
       "properties": {
         "args": {
@@ -2878,45 +3006,22 @@
       }
     },
     "RedisRuntime": {
-      "description": "Runtime backend for running local Redis.\n\nFor container-based runtimes, mirrord spawns the Redis image in a container. For `redis_server`, it runs the native binary directly.\n\nBackends: - `container` (default) - Uses a container runtime (Docker/Podman/nerdctl) - `redis_server` - Uses native redis-server binary - `auto` - Tries container first, falls back to redis-server",
-      "oneOf": [
-        {
-          "description": "Use a container runtime (configure which one via `container_runtime`). (default)",
-          "type": "string",
-          "enum": [
-            "container"
-          ]
-        },
-        {
-          "description": "Use native redis-server binary.",
-          "type": "string",
-          "enum": [
-            "redis_server"
-          ]
-        },
-        {
-          "description": "Auto-detect: try container first, fall back to redis-server.",
-          "type": "string",
-          "enum": [
-            "auto"
-          ]
-        }
+      "description": "For container-based runtimes, mirrord spawns the Redis image in a container. For `redis_server`, it runs the native binary directly.\n\nBackends: - `container` (default) - Uses a container runtime (Docker/Podman/nerdctl), configured via `container_runtime`. - `redis_server` - Uses native redis-server binary - `auto` - Tries container first, falls back to redis-server",
+      "type": "string",
+      "enum": [
+        "container",
+        "redis_server",
+        "auto"
       ]
     },
     "RedisValueSource": {
-      "description": "Source for a Redis configuration value.\n\nValues can be specified directly or sourced from environment variables.",
+      "description": "<!--${internal}--> Source for a Redis configuration value.\n\nValues can be specified directly or sourced from environment variables.",
       "anyOf": [
         {
-          "description": "Direct value.",
           "type": "string"
         },
         {
-          "description": "Value sourced from environment.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/RedisEnvSource"
-            }
-          ]
+          "$ref": "#/definitions/RedisEnvSource"
         }
       ]
     },

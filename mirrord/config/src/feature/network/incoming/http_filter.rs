@@ -122,8 +122,7 @@ pub struct HttpFilterConfig {
 
     /// ##### feature.network.incoming.http_filter.body_filter {#feature-network-incoming-http-body-filter}
     ///
-    /// Matches the request based on the contents of its body. Currently only JSON body filtering
-    /// is supported.
+    /// Matches the request based on the contents of its body.
     pub body_filter: Option<BodyFilter>,
 
     /// ##### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
@@ -312,6 +311,7 @@ pub enum InnerFilter {
     Body(BodyFilter),
 }
 
+/// Currently only JSON body filtering is supported.
 #[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "body", rename_all = "lowercase")]
 pub enum BodyFilter {

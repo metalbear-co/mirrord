@@ -240,7 +240,7 @@ impl UserSocket {
     /// Inform internal proxy about closing a listening port.
     #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()), ret)]
     pub(crate) fn close(&self) -> HookResult<()> {
-        match self {
+        let result = match self {
             Self {
                 state: SocketState::Listening(bound),
                 kind: SocketKind::Tcp(..),
@@ -260,17 +260,16 @@ impl UserSocket {
             } => common::make_proxy_request_no_response(OutgoingConnCloseRequest { conn_id: *id })
                 .map(|_| ()),
             _ => Ok(()),
-        }
+        };
+
+        result.inspect_err(|error| warn!(?error, "mirrord failed to send close socket message."))
     }
 }
 
 impl Drop for UserSocket {
     fn drop(&mut self) {
-        let result = self.close();
-        assert!(
-            result.is_ok(),
-            "mirrord failed to send close socket message. Error: {result:?}",
-        )
+        // Do not fail if error is returned, as other processes might have closed it already.
+        let _ = self.close();
     }
 }
 

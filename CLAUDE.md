@@ -16,6 +16,9 @@ cargo test -p mirrord-layer
 
 # Format (run after every change)
 cargo fmt
+
+# Run the CLI
+cargo run -p mirrord
 ```
 
 **Key paths:**
