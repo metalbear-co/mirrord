@@ -894,7 +894,7 @@
           ],
           "properties": {
             "connection": {
-              "title": "feature.db_branches.base.connection {#feature-db_branches-base-connection}",
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
               "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
               "allOf": [
                 {
@@ -914,7 +914,7 @@
               ]
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}",
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
               "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
               "default": 60,
               "type": "integer",
@@ -922,7 +922,7 @@
               "minimum": 0.0
             },
             "id": {
-              "title": "feature.db_branches.base.id {#feature-db_branches-base-id}",
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
               "type": [
                 "string",
@@ -930,7 +930,7 @@
               ]
             },
             "name": {
-              "title": "feature.db_branches.base.name {#feature-db_branches-base-name}",
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
               "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
               "type": [
                 "string",
@@ -938,7 +938,7 @@
               ]
             },
             "ttl_secs": {
-              "title": "feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}",
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
               "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
               "default": 300,
               "type": "integer",
@@ -952,7 +952,7 @@
               ]
             },
             "version": {
-              "title": "feature.db_branches.base.version {#feature-db_branches-base-version}",
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
               "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
               "type": [
                 "string",
@@ -970,7 +970,7 @@
           ],
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg) {#feature-db_branches-sql-connection}",
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
               "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
               "allOf": [
                 {
@@ -990,7 +990,7 @@
               ]
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg) {#feature-db_branches-sql-creation_timeout_secs}",
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
               "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
               "default": 60,
               "type": "integer",
@@ -998,7 +998,7 @@
               "minimum": 0.0
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg) {#feature-db_branches-sql-id}",
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
               "type": [
                 "string",
@@ -1006,7 +1006,7 @@
               ]
             },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg) {#feature-db_branches-sql-name}",
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
               "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
               "type": [
                 "string",
@@ -1014,7 +1014,7 @@
               ]
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg) {#feature-db_branches-sql-ttl_secs}",
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
               "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
               "default": 300,
               "type": "integer",
@@ -1028,7 +1028,7 @@
               ]
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg) {#feature-db_branches-sql-version}",
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
               "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
               "type": [
                 "string",
@@ -1046,7 +1046,7 @@
           ],
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg) {#feature-db_branches-sql-connection}",
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
               "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
               "allOf": [
                 {
@@ -1066,7 +1066,7 @@
               ]
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg) {#feature-db_branches-sql-creation_timeout_secs}",
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
               "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
               "default": 60,
               "type": "integer",
@@ -1086,7 +1086,7 @@
               ]
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg) {#feature-db_branches-sql-id}",
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
               "type": [
                 "string",
@@ -1094,7 +1094,7 @@
               ]
             },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg) {#feature-db_branches-sql-name}",
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
               "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
               "type": [
                 "string",
@@ -1102,7 +1102,7 @@
               ]
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg) {#feature-db_branches-sql-ttl_secs}",
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
               "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
               "default": 300,
               "type": "integer",
@@ -1116,7 +1116,7 @@
               ]
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg) {#feature-db_branches-sql-version}",
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
               "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
               "type": [
                 "string",
