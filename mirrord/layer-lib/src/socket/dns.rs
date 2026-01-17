@@ -19,12 +19,13 @@ use crate::{
     },
 };
 
-/// Handles the remote communication part of [`getaddrinfo`], call this if you want to resolve a DNS
-/// through the agent, but don't need to deal with all the [`libc::getaddrinfo`] stuff.
+/// Handles the remote communication part of [`libc::getaddrinfo`], call this if you want to resolve
+/// a DNS query through the agent, but don't need to deal with all the [`libc::getaddrinfo`] stuff.
 ///
 /// # Note
 ///
-/// This function updates the mapping in [`REMOTE_DNS_REVERSE_MAPPING`].
+/// This function updates the mapping in
+/// [`reverse_dns::REMOTE_DNS_REVERSE_MAPPING`](crate::socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING).
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err)]
 pub fn remote_getaddrinfo(
     node: String,

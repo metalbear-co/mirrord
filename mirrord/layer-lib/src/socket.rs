@@ -626,7 +626,9 @@ impl OutgoingSelector {
         }
     }
 
-    /// Helper function that looks into the [`REMOTE_DNS_REVERSE_MAPPING`] for `address`, so we can
+    /// Helper function that looks into
+    /// [`reverse_dns::REMOTE_DNS_REVERSE_MAPPING`](crate::socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING)
+    /// for `address`, so we can
     /// retrieve the hostname and resolve it locally (when applicable).
     ///
     /// - `address`: the [`SocketAddr`] that was passed to `connect`;
@@ -636,9 +638,13 @@ impl OutgoingSelector {
     ///
     /// Returns 1 of 2 possibilities:
     ///
-    /// 1. `address` is in [`REMOTE_DNS_REVERSE_MAPPING`]: resolves the hostname locally, then
+    /// 1. `address` is in
+    /// [`reverse_dns::REMOTE_DNS_REVERSE_MAPPING`](crate::socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING):
+    ///    resolves the hostname locally, then
     /// return the first result
-    /// 2. `address` is **NOT** in [`REMOTE_DNS_REVERSE_MAPPING`]: return the `address` as is;
+    /// 2. `address` is **NOT** in
+    /// [`reverse_dns::REMOTE_DNS_REVERSE_MAPPING`](crate::socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING):
+    ///    return the `address` as is;
     #[mirrord_layer_macro::instrument(level = "trace", ret)]
     fn get_local_address_to_connect(address: SocketAddr) -> HookResult<SocketAddr> {
         // Aviram: I think this whole function and logic is weird but I really need to get

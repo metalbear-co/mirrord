@@ -1,9 +1,9 @@
 //! The layer uses features from this module to check if it should bypass one of its hooks, and call
 //! the original `libc` function.
 //!
-//! Here we also have the convenient `Detour`, that is used by the hooks to either return a
+//! Here we also have the convenient detour helpers that are used by the hooks to either return a
 //! [`Result`]-like value, or the special [`Bypass`] case, which makes the _detour_ function call
-//! the original [`libc`] equivalent, stored in a `HookFn`.
+//! the original [`libc`] equivalent, stored in a hook function pointer.
 
 use std::net::SocketAddr;
 #[cfg(unix)]
@@ -106,13 +106,12 @@ pub enum Bypass {
     /// Unix socket to address that was not configured to be connected remotely.
     UnixSocket(Option<String>),
 
-    /// We could not find this [`RawFd`] in neither [`OPEN_FILES`](mirrord_layer::file::OPEN_FILES),
-    /// nor [`SOCKETS`](crate::socket::SOCKETS).
+    /// We could not find this [`RawFd`] in the bookkeeping tables (`OPEN_FILES` and
+    /// [`SOCKETS`](crate::socket::SOCKETS)).
     #[cfg(unix)]
     LocalFdNotFound(RawFd),
 
-    /// Similar to `LocalFdNotFound`, but for
-    /// [`OPEN_DIRS`](mirrord_layer::file::open_dirs::OPEN_DIRS).
+    /// Similar to `LocalFdNotFound`, but for the layer's `OPEN_DIRS` table.
     LocalDirStreamNotFound(usize),
 
     /// A conversion from [`SockAddr`](socket2::SockAddr) to
@@ -157,7 +156,7 @@ pub enum Bypass {
     #[cfg(unix)]
     ReadOnly(PathBuf),
 
-    /// Called [`write`](crate::file::ops::write) with `write_bytes` set to [`None`].
+    /// Called `write` with `write_bytes` set to [`None`].
     EmptyBuffer,
 
     /// Operation received [`None`] for an [`Option`] that was required to be [`Some`].

@@ -85,7 +85,7 @@ impl Drop for ManagedRemoteFile {
     }
 }
 
-/// Retrieves the `hostname` from the agent's `/etc/hostname` to be used by [`gethostname`]
+/// Retrieves the `hostname` from the agent's `/etc/hostname` to be used by [`libc::gethostname`]
 /// Returns Ok(None) on Bypassed remote hostname retrieval due to setup::local_hostname
 /// configuration
 pub fn remote_hostname_string(check_is_enabled: bool) -> HookResult<Option<String>> {
