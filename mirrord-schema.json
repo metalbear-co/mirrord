@@ -886,6 +886,82 @@
       "description": "Configuration for a database branch.\n\nExample:\n\n```json { \"id\": \"my-branch-db\", \"name\": \"my-database-name\", \"ttl_secs\": 120, \"type\": \"mysql\", \"version\": \"8.0\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ```",
       "oneOf": [
         {
+          "description": "When configuring a branch for MongoDB, set `type` to `mongodb`.",
+          "type": "object",
+          "required": [
+            "connection",
+            "type"
+          ],
+          "properties": {
+            "connection": {
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
+              "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSource"
+                }
+              ]
+            },
+            "copy": {
+              "default": {
+                "collections": null,
+                "mode": "empty"
+              },
+              "allOf": [
+                {
+                  "$ref": "#/definitions/MongodbBranchCopyConfig"
+                }
+              ]
+            },
+            "creation_timeout_secs": {
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
+              "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
+              "default": 60,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "id": {
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
+              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
+              "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_secs": {
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
+              "default": 300,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "mongodb"
+              ]
+            },
+            "version": {
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
+              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        {
           "description": "When configuring a branch for MySQL, set `type` to `mysql`.",
           "type": "object",
           "required": [
@@ -894,7 +970,7 @@
           ],
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg) {#feature-db_branches-sql-connection}",
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
               "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
               "allOf": [
                 {
@@ -914,7 +990,7 @@
               ]
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg) {#feature-db_branches-sql-creation_timeout_secs}",
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
               "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
               "default": 60,
               "type": "integer",
@@ -922,7 +998,7 @@
               "minimum": 0.0
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg) {#feature-db_branches-sql-id}",
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
               "type": [
                 "string",
@@ -930,7 +1006,7 @@
               ]
             },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg) {#feature-db_branches-sql-name}",
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
               "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
               "type": [
                 "string",
@@ -938,7 +1014,7 @@
               ]
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg) {#feature-db_branches-sql-ttl_secs}",
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
               "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
               "default": 300,
               "type": "integer",
@@ -952,7 +1028,7 @@
               ]
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg) {#feature-db_branches-sql-version}",
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
               "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
               "type": [
                 "string",
@@ -970,7 +1046,7 @@
           ],
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg) {#feature-db_branches-sql-connection}",
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
               "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
               "allOf": [
                 {
@@ -990,7 +1066,7 @@
               ]
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg) {#feature-db_branches-sql-creation_timeout_secs}",
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
               "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
               "default": 60,
               "type": "integer",
@@ -1010,7 +1086,7 @@
               ]
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg) {#feature-db_branches-sql-id}",
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
               "type": [
                 "string",
@@ -1018,7 +1094,7 @@
               ]
             },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg) {#feature-db_branches-sql-name}",
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
               "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
               "type": [
                 "string",
@@ -1026,7 +1102,7 @@
               ]
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg) {#feature-db_branches-sql-ttl_secs}",
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
               "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
               "default": 300,
               "type": "integer",
@@ -1040,7 +1116,7 @@
               ]
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg) {#feature-db_branches-sql-version}",
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
               "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
               "type": [
                 "string",
@@ -2191,6 +2267,71 @@
           }
         }
       }
+    },
+    "MongodbBranchCollectionCopyConfig": {
+      "description": "Configuration for copying a specific collection.\n\nExample:\n\n```json { \"users\": { \"filter\": \"{\\\"name\\\": {\\\"$in\\\": [\\\"alice\\\", \\\"bob\\\"]}}\" }, \"orders\": { \"filter\": \"{\\\"created_at\\\": {\\\"$gt\\\": 1759948761}}\" } } ```\n\nWith the config above, only alice and bob from the `users` collection and orders created after the given timestamp will be copied.",
+      "type": "object",
+      "properties": {
+        "filter": {
+          "description": "A MongoDB query filter in JSON format. Documents matching this filter will be copied.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "MongodbBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their MongoDB branch database:\n\n- Empty\n\nCreates an empty database. If the source DB connection options are found from the chosen target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord operator looks for the `name` field from the branch DB config object. This option is useful for users that run DB migrations themselves before starting the application.\n\n- All\n\nCopies both schema and data of all collections. Supports optional collection filters to copy only specific collections or filter documents within collections.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "collections": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/MongodbBranchCollectionCopyConfig"
+              }
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "empty"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "collections": {
+              "description": "Optional collection filters. If not specified, all collections are copied. If specified, only the listed collections are copied with their optional filters.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/MongodbBranchCollectionCopyConfig"
+              }
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "all"
+              ]
+            }
+          }
+        }
+      ]
     },
     "MysqlBranchCopyConfig": {
       "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database:\n\n- Empty\n\nCreates an empty database. If the source DB connection options are found from the chosen target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord operator looks for the `name` field from the branch DB config object. This option is useful for users that run DB migrations themselves before starting the application.\n\n- Schema\n\nCreates an empty database and copies schema of all tables.\n\n- All\n\nCopies both schema and data of all tables. This option shall only be used when the data volume of the source database is minimal.",
