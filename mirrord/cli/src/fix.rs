@@ -14,7 +14,7 @@ use crate::{
 pub async fn fix_command(args: FixArgs) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord fix");
     match args.command {
-        FixCommand::Kubeconfig(args) => fix_kubeconfig(args, &mut progress).await?,
+        FixCommand::Kubeconfig(args) => fix_kubeconfig(&args, &mut progress)?,
     }
 
     Ok(())
@@ -62,11 +62,11 @@ pub enum FixKubeconfigError {
     },
 }
 
-async fn fix_kubeconfig<P: Progress>(
-    args: FixKubeconfig,
+fn fix_kubeconfig<P: Progress>(
+    args: &FixKubeconfig,
     progress: &mut P,
 ) -> Result<(), FixKubeconfigError> {
-    let kubeconfig_path = args.file_path.unwrap_or(
+    let kubeconfig_path = args.file_path.clone().unwrap_or(
         std::env::home_dir()
             .ok_or(FixKubeconfigError::Home)?
             .join(".kube/config"),
@@ -129,7 +129,7 @@ async fn fix_kubeconfig<P: Progress>(
         .into_string()
         .map_err(FixKubeconfigError::StringConversion)?;
 
-    let document = Document::new(tokio::fs::read_to_string(&kubeconfig_path).await?)?;
+    let document = Document::new(std::fs::read_to_string(&kubeconfig_path)?)?;
 
     let patch = Patch {
         route: route!("users", current_user_idx, "user", "exec", "command"),
@@ -144,7 +144,7 @@ async fn fix_kubeconfig<P: Progress>(
     if args.dry_run {
         msg.push_str(" (dry run, no actual changes made)");
     } else {
-        tokio::fs::write(&kubeconfig_path, patched.source()).await?;
+        std::fs::write(&kubeconfig_path, patched.source())?;
     }
 
     progress.success(Some(&msg));
