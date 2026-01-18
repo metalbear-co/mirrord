@@ -200,6 +200,9 @@ pub(super) enum Commands {
     /// configuration. Like `mirrord exec` it requires a connection to the cluster.
     #[cfg(feature = "wizard")]
     Wizard(Box<WizardArgs>),
+
+    /// Fix issues related to mirrord.
+    Fix(FixArgs),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -1202,6 +1205,33 @@ pub struct WizardArgs {
     /// [More information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md).
     #[arg(env = "MIRRORD_TELEMETRY", long, default_value = "true")]
     pub telemetry: bool,
+}
+
+/// `mirrord fix` args.
+#[derive(Args, Debug)]
+pub struct FixArgs {
+    /// Command to use with `mirrord fix`.
+    #[command(subcommand)]
+    pub command: FixCommand,
+}
+
+/// `mirrord fix` commands.
+#[derive(Subcommand, Debug)]
+pub enum FixCommand {
+    /// Look for non-absolute paths in kubeconfig and interactively make them absolute.
+    Kubeconfig(FixKubeconfig),
+}
+
+/// `mirrord fix kubeconfig` args
+#[derive(Args, Debug)]
+pub struct FixKubeconfig {
+    /// Explicitly set path of the kubeconfig file
+    #[arg(env = "MIRRORD_KUBECONFIG", long = "kubeconfig")]
+    pub file_path: Option<PathBuf>,
+
+    /// Do not make any actual changes, just print what would be changed
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
 }
 
 #[cfg(test)]
