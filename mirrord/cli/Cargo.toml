@@ -109,6 +109,7 @@ hyper-util = { workspace = true, "features" = ["server"] }
 http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
+tempfile.workspace = true
 
 [features]
 windows_build = []

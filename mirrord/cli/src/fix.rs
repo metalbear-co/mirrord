@@ -151,3 +151,99 @@ fn fix_kubeconfig<P: Progress>(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod test {
+    use std::{fs::read_to_string, io::Write};
+
+    use mirrord_progress::NullProgress;
+    use tempfile::NamedTempFile;
+
+    use super::fix_kubeconfig;
+    use crate::config::FixKubeconfig;
+
+    fn make_config(cfg: &str) -> (NamedTempFile, FixKubeconfig) {
+        let mut tmp = tempfile::NamedTempFile::new().expect("failed to create tempfile");
+        tmp.write_all(cfg.as_bytes()).unwrap();
+        let path = tmp.path().into();
+        (
+            tmp,
+            FixKubeconfig {
+                file_path: Some(path),
+                dry_run: false,
+            },
+        )
+    }
+
+    /// Make sure we don't touch anything if there's no match.
+    #[test]
+    fn no_match() {
+        let cfg = r#"
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority: /home/user/.minikube/ca.crt
+    extensions:
+    - extension:
+        last-update: Sat, 17 Jan 2026 10:55:44 +04
+        provider: minikube.sigs.k8s.io
+        version: v1.37.0
+      name: cluster_info
+    server: https://192.168.49.2:8443
+  name: minikube
+contexts:
+- context:
+    cluster: minikube
+    extensions:
+    - extension:
+        last-update: Sat, 17 Jan 2026 10:55:44 +04
+        provider: minikube.sigs.k8s.io
+        version: v1.37.0
+      name: context_info
+    namespace: default
+    user: minikube
+  name: minikube
+- context:
+    cluster: minikube2
+    extensions:
+    - extension:
+        last-update: Sat, 17 Jan 2026 10:55:44 +04
+        provider: minikube.sigs.k8s.io
+        version: v1.37.0
+      name: context_info
+    namespace: default
+    user: minikube2
+  name: minikube2
+current-context: minikube2
+kind: Config
+preferences: {}
+users:
+- name: minikube
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1
+      command: bash
+      interactiveMode: Never
+      args:
+        - -c
+        - |
+          cat <<EOF
+          {
+            "apiVersion": "client.authentication.k8s.io/v1",
+            "kind": "ExecCredential",
+            "status": {
+              "clientCertificateData": "$(cat /home/user/.minikube/profiles/minikube/client.crt | sed ':a;N;$!ba;s/\n/\\n/g')",
+              "clientKeyData": "$(cat /home/user/.minikube/profiles/minikube/client.key | sed ':a;N;$!ba;s/\n/\\n/g')"
+            }
+          }
+            EOF
+- name: minikube2
+  user:
+    client-certificate: /home/user/.minikube/profiles/minikube/client.crt
+    client-key: /home/user/.minikube/profiles/minikube/client.key
+"#;
+        let (file, kubeconfig) = make_config(cfg);
+        fix_kubeconfig(&kubeconfig, &mut NullProgress).unwrap();
+        assert_eq!(read_to_string(&file).unwrap(), cfg);
+    }
+}
