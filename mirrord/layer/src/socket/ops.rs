@@ -15,6 +15,8 @@ use std::{
 };
 
 use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
+#[cfg(target_os = "macos")]
+use libc::{SAE_ASSOCID_ANY, c_uint, iovec, sa_endpoints_t, sae_associd_t, sae_connid_t, size_t};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnMetadataRequest,
@@ -446,6 +448,55 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
         | SocketState::Listening(_)
         | SocketState::Connected(_) => Detour::Bypass(Bypass::InvalidState(sockfd)),
     }
+}
+
+/// Implementation of BSD `connectx(2)` detour:
+/// * If source address is present in `endpoints`, call [`bind`].
+/// * Call [`connect`] with the given destination address.
+/// * On success `connectx` is **supposed** to update `len` with the data length enqueued in the
+///   socket's send buffer copied from `iov`. For simplicity, we always set `len` to 0 on success to
+///   inform the caller that no data have been enqueued. `flags` is ignored for the same reason.
+/// * `sae_srcif`, source interface index, is an optional field of `endpoints`
+#[cfg(target_os = "macos")]
+#[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
+pub(super) fn connectx(
+    socket: RawFd,
+    endpoints: *const sa_endpoints_t,
+    associd: sae_associd_t,
+    flags: c_uint,
+    iov: *const iovec,
+    iovcnt: c_uint,
+    len: *mut size_t,
+    connid: *mut sae_connid_t,
+) -> Detour<ConnectResult> {
+    if endpoints.is_null() {
+        return Detour::Error(HookError::NullPointer);
+    }
+
+    // The parameter associd is reserved for future use, and must always be set to SAE_ASSOCID_ANY.
+    // The parameter connid is also reserved for future use and should be set to NULL.
+    if associd != SAE_ASSOCID_ANY || !connid.is_null() {
+        return Detour::Bypass(Bypass::InvalidArgValue);
+    }
+
+    let eps = unsafe {
+        let eps = *endpoints;
+
+        // Destination address must be specified.
+        if eps.sae_dstaddr.is_null() {
+            return Detour::Bypass(Bypass::InvalidArgValue);
+        }
+
+        eps
+    };
+
+    // Bind with source address if given.
+    if !eps.sae_srcaddr.is_null() {
+        bind(socket, eps.sae_srcaddr, eps.sae_srcaddrlen)?;
+    }
+
+    // Connect to the destination address.
+    connect(socket, eps.sae_dstaddr, eps.sae_dstaddrlen)
 }
 
 /// Common logic between Tcp/Udp `connect`, when used for the outgoing traffic feature.
