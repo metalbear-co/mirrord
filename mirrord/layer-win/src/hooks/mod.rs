@@ -8,11 +8,11 @@ pub(crate) mod socket;
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult},
-    setup::layer_setup,
+    setup::setup,
 };
 
 pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
-    let setup = layer_setup();
+    let setup = setup();
 
     // Always enable process hooks (required for Windows DLL injection)
     if setup.process_hooks_enabled() {

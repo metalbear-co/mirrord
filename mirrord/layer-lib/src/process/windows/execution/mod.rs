@@ -33,7 +33,7 @@ use super::sync::{LayerInitEvent, MIRRORD_LAYER_INIT_EVENT_NAME};
 use crate::{
     error::{LayerError, LayerResult, windows::WindowsError},
     proxy_connection::PROXY_CONNECTION,
-    setup::layer_setup,
+    setup::setup,
     socket::sockets::SHARED_SOCKETS_ENV_VAR,
 };
 
@@ -197,7 +197,7 @@ impl LayerManagedProcess {
             } else {
                 // Fallback: try to encode current config if layer setup is available
                 // Use a safe approach that doesn't panic if setup isn't initialized
-                match std::panic::catch_unwind(|| layer_setup().layer_config().encode()) {
+                match std::panic::catch_unwind(|| setup().layer_config().encode()) {
                     Ok(Ok(encoded_config)) => {
                         env_vars
                             .insert(LayerConfig::RESOLVED_CONFIG_ENV.to_string(), encoded_config);
@@ -221,24 +221,27 @@ impl LayerManagedProcess {
         }
 
         // Add Windows-specific child process inheritance variables if proxy connection exists
-        if let Some(proxy_conn) = PROXY_CONNECTION.get() {
-            // Pass current process ID as parent PID for child
-            env_vars.insert(
-                MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID.to_string(),
-                std::process::id().to_string(),
-            );
+        #[allow(static_mut_refs)]
+        unsafe {
+            if let Some(proxy_conn) = PROXY_CONNECTION.get() {
+                // Pass current process ID as parent PID for child
+                env_vars.insert(
+                    MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID.to_string(),
+                    std::process::id().to_string(),
+                );
 
-            // Pass current layer ID for child inheritance
-            env_vars.insert(
-                MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID.to_string(),
-                proxy_conn.layer_id().0.to_string(),
-            );
+                // Pass current layer ID for child inheritance
+                env_vars.insert(
+                    MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID.to_string(),
+                    proxy_conn.layer_id().0.to_string(),
+                );
 
-            // Pass proxy address for child connection
-            env_vars.insert(
-                MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR.to_string(),
-                proxy_conn.proxy_addr().to_string(),
-            );
+                // Pass proxy address for child connection
+                env_vars.insert(
+                    MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR.to_string(),
+                    proxy_conn.proxy_addr().to_string(),
+                );
+            }
         }
     }
 

@@ -8,20 +8,29 @@ pub(crate) mod hostname;
 pub(crate) mod ops;
 pub(crate) mod utils;
 
-use std::{net::SocketAddr, sync::OnceLock};
+use std::{net::SocketAddr, ops::Not, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_intproxy_protocol::{ConnMetadataRequest, ConnMetadataResponse, PortSubscribe};
+use mirrord_intproxy_protocol::{
+    ConnMetadataRequest, ConnMetadataResponse, OutgoingConnMetadataRequest, PortSubscribe,
+};
 use mirrord_layer_lib::{
     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
-    setup::{layer_setup, windows::NetworkHookConfig},
+    setup::{LayerSetup, NetworkHookConfig, setup},
     socket::{
-        Bound, ConnectResult, Connected, SocketDescriptor, SocketKind, SocketState,
+        Bound, Connected, SocketAddrExt, SocketKind, SocketState,
+        dns::{
+            remote_dns_resolve_via_proxy,
+            windows::{
+                MANAGED_ADDRINFO, free_managed_addrinfo, getaddrinfo, utils::ManagedAddrInfoAny,
+            },
+        },
         get_bound_address, get_connected_addresses, get_socket, get_socket_state,
-        hostname::{get_remote_hostname, remote_dns_resolve_via_proxy},
-        is_socket_in_state, is_socket_managed, register_socket, remove_socket, send_to,
-        set_socket_state,
+        hostname::remote_hostname_string,
+        is_socket_in_state, is_socket_managed,
+        ops::{ConnectResult, send_to},
+        register_socket, remove_socket, set_socket_state,
     },
 };
 use mirrord_protocol::outgoing::SocketAddress;
@@ -48,14 +57,11 @@ use winapi::{
 use windows_strings::{PCSTR, PCWSTR};
 
 use self::{
-    hostname::{
-        MANAGED_ADDRINFO, free_managed_addrinfo, handle_hostname_ansi, handle_hostname_unicode,
-        is_remote_hostname, windows_getaddrinfo,
-    },
+    hostname::{handle_hostname_ansi, handle_hostname_unicode, is_remote_hostname},
     ops::{WSABufferData, get_connectex_original, hook_connectex_extension, log_connection_result},
     utils::{
-        AutoCloseSocket, ERROR_SUCCESS_I32, ManagedAddrInfoAny, SocketAddrExtWin,
-        create_thread_local_hostent, determine_local_address, get_actual_bound_address,
+        AutoCloseSocket, ERROR_SUCCESS_I32, create_thread_local_hostent, determine_local_address,
+        get_actual_bound_address,
     },
 };
 use crate::{apply_hook, process::elevation::require_elevation};
@@ -367,15 +373,13 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
         res
     };
 
-    let raw_addr_opt = SocketAddr::try_from_raw(name, namelen);
-
     // Early return for non-managed sockets
     if !is_socket_managed(s) {
         return bind_fn(s, name, namelen, "non-managed socket");
     }
 
     // Parse the requested address
-    let requested_addr = match raw_addr_opt {
+    let requested_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
         None => {
             tracing::error!("bind_detour -> failed to convert address");
@@ -389,8 +393,7 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
     );
 
     // Check configuration-based early returns
-    let setup = layer_setup();
-    let incoming_config = setup.incoming_config();
+    let incoming_config = setup().incoming_config();
 
     if incoming_config.ignore_localhost && requested_addr.ip().is_loopback() {
         tracing::debug!("bind_detour -> ignoring localhost bind");
@@ -444,7 +447,14 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
         requested_address: requested_addr,
         address: actual_bound_addr,
     };
-    set_socket_state(s, SocketState::Bound(bound));
+    set_socket_state(
+        s,
+        SocketState::Bound {
+            bound,
+            // Note(Daniel): not yet migrated "will_not_trigger_subscription" from unix layer bind
+            is_only_bound: false,
+        },
+    );
 
     tracing::debug!(
         "bind_detour -> socket {} bound locally to {} for requested {}",
@@ -467,7 +477,10 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
 
     // Check if this socket is managed by mirrord and get bound state
     let bound_state = match get_socket_state(s) {
-        Some(SocketState::Bound(bound)) => bound,
+        Some(SocketState::Bound {
+            bound,
+            is_only_bound,
+        }) if is_only_bound.not() => bound,
         _ => {
             tracing::debug!(
                 "listen_detour -> socket {} is not in Bound state, using original listen",
@@ -485,16 +498,15 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
     );
 
     // Check if incoming traffic is enabled
-    let setup = layer_setup();
     if matches!(
-        setup.incoming_config().mode,
+        setup().incoming_config().mode,
         mirrord_config::feature::network::incoming::IncomingMode::Off
     ) {
         tracing::debug!("listen_detour -> incoming traffic is disabled");
         return listen_result;
     }
 
-    if setup.targetless() {
+    if setup().targetless() {
         tracing::warn!("listen_detour -> running targetless, binding locally instead");
         return listen_result;
     }
@@ -505,14 +517,14 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
     }
 
     // Register with the agent for incoming traffic (like Unix layer PortSubscribe)
-    let mapped_port = setup
+    let mapped_port = setup()
         .incoming_config()
         .port_mapping
         .get_by_left(&bound_state.requested_address.port())
         .copied()
         .unwrap_or_else(|| bound_state.requested_address.port());
 
-    let subscription = setup.incoming_mode().subscription(mapped_port);
+    let subscription = setup().incoming_mode().subscription(mapped_port);
 
     let port_subscribe = PortSubscribe {
         listening_on: bound_state.address,
@@ -569,7 +581,7 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
         tracing::debug!("connect_detour -> socket {} is not managed", s);
     }
 
-    let socket_addr = match SocketAddr::try_from_raw(name, namelen) {
+    let socket_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
         None => {
             tracing::error!(
@@ -581,14 +593,14 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
     };
     let raw_addr = SockAddr::from(socket_addr);
 
-    let connect_fn = |s: SocketDescriptor, addr: SockAddr| {
+    let connect_fn = |addr: SockAddr| {
         let original = CONNECT_ORIGINAL.get().unwrap();
         let result = unsafe { original(s, addr.as_ptr() as *const _, addr.len()) };
         log_connection_result(result, "connect_detour", addr);
         ConnectResult::from(result)
     };
 
-    match ops::attempt_proxy_connection(s, name, namelen, "connect_detour", connect_fn) {
+    match ops::connect(s, name, namelen, "connect_detour", connect_fn) {
         Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
             tracing::error!(
                 "connect_detour -> socket {} connect target {:?} is unreachable: {}",
@@ -701,8 +713,9 @@ unsafe extern "system" fn accept_detour(
 
         // Register the accepted socket with mirrord
         let connected = Connected {
-            remote_address: SocketAddress::Ip(remote_source),
-            local_address: SocketAddress::Ip(bound_addr),
+            connection_id: None,
+            remote_address: remote_source.into(),
+            local_address: Some(SocketAddress::Ip(bound_addr)),
             layer_address: None,
         };
 
@@ -724,7 +737,7 @@ unsafe extern "system" fn accept_detour(
 
     // Fill in the address structure with the real remote address (not intproxy's address)
     if !addr.is_null() && !addrlen.is_null() {
-        match remote_source.copy_to(addr, addrlen) {
+        match unsafe { remote_source.copy_to(addr, addrlen) } {
             Ok(()) => {
                 tracing::trace!(
                     "accept_detour -> filled address with real remote source: {}",
@@ -750,44 +763,61 @@ unsafe extern "system" fn getsockname_detour(
 ) -> INT {
     tracing::trace!("getsockname_detour -> socket: {}", s);
 
-    // Check if this socket is managed by mirrord and get its bound address
-    if let Some(bound_addr) = get_bound_address(s) {
-        match bound_addr.copy_to(name, namelen) {
-            Ok(()) => {
-                tracing::trace!(
-                    "getsockname_detour -> returned mirrord bound address: {}",
-                    bound_addr
-                );
-
-                return ERROR_SUCCESS_I32;
-            }
-
-            Err(err) => {
-                tracing::debug!(
-                    "getsockname_detour -> failed to convert bound address, error: {}",
-                    err
-                );
-
-                match err {
-                    WindowsError::WinSock(error_code) => unsafe {
-                        WSASetLastError(error_code);
-                    },
-
-                    WindowsError::Windows(error_code) => {
-                        tracing::warn!(
-                            "getsockname_detour -> unexpected windows error converting bound address: error {}",
-                            error_code
-                        );
+    let local_address: Option<SocketAddr> = match get_socket_state(s) {
+        Some(state) => match state {
+            SocketState::Connected(Connected {
+                local_address: Some(addr),
+                ..
+            }) => Some(addr.clone().try_into().unwrap()),
+            SocketState::Connected(Connected {
+                connection_id: Some(id),
+                ..
+            }) => {
+                match make_proxy_request_with_response(OutgoingConnMetadataRequest { conn_id: id })
+                {
+                    Ok(Some(res)) => Some(res.in_cluster_address),
+                    Ok(None) => {
+                        tracing::error!(id, "Protocol: could not locate outgoing metadata");
+                        None
                     }
-                };
-
-                return SOCKET_ERROR;
+                    Err(e) => {
+                        tracing::error!(?e, id, "Proxy: Error getting outgoing metadata");
+                        None
+                    }
+                }
             }
+            SocketState::Bound {
+                bound:
+                    Bound {
+                        requested_address,
+                        address,
+                    },
+                ..
+            }
+            | SocketState::Listening(Bound {
+                requested_address,
+                address,
+            }) => Some(if requested_address.port() == 0 {
+                SocketAddr::new(requested_address.ip(), address.port())
+            } else {
+                requested_address
+            }),
+
+            SocketState::Initialized | SocketState::Connected(_) => {
+                // For other managed socket states, fall back to original
+                tracing::trace!(
+                    "getsockname_detour -> managed socket not in bound/connected state, using original"
+                );
+                None
+            }
+        },
+        None => {
+            // Not a managed socket
+            None
         }
-    } else if let Some((_, local_addr, layer_addr)) = get_connected_addresses(s) {
-        // Return the layer address for connected sockets if available, otherwise local address
-        let addr_to_return = layer_addr.as_ref().unwrap_or(&local_addr);
-        match addr_to_return.copy_to(name, namelen) {
+    };
+    if let Some(local_address) = local_address {
+        match unsafe { local_address.copy_to(name, namelen) } {
             Ok(()) => {
                 tracing::trace!("getsockname_detour -> returned mirrord local address");
                 // Success
@@ -816,11 +846,6 @@ unsafe extern "system" fn getsockname_detour(
                 return SOCKET_ERROR;
             }
         }
-    } else if is_socket_managed(s) {
-        // For other managed socket states, fall back to original
-        tracing::trace!(
-            "getsockname_detour -> managed socket not in bound/connected state, using original"
-        );
     }
 
     // Fall back to original function for non-managed sockets or errors
@@ -842,7 +867,7 @@ unsafe extern "system" fn getpeername_detour(
     if let Some((remote_addr, _, _)) = get_connected_addresses(s) {
         // Return the remote address for connected sockets
 
-        match remote_addr.copy_to(name, namelen) {
+        match unsafe { remote_addr.copy_to(name, namelen) } {
             Ok(()) => {
                 tracing::trace!("getpeername_detour -> returned mirrord remote address");
                 // Success
@@ -1067,7 +1092,7 @@ unsafe extern "system" fn connectex_detour(
         }
     };
 
-    let socket_addr = match SocketAddr::try_from_raw(name, namelen) {
+    let socket_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
         None => {
             tracing::error!(
@@ -1084,7 +1109,7 @@ unsafe extern "system" fn connectex_detour(
     let is_managed = is_socket_managed(s);
 
     // Unified connect function for both managed and unmanaged sockets
-    let connect_fn = |socket_descriptor: SocketDescriptor, addr: SockAddr| {
+    let connect_fn = |addr: SockAddr| {
         let addr_description = if is_managed {
             format!("proxy at {:?}", addr)
         } else {
@@ -1093,7 +1118,7 @@ unsafe extern "system" fn connectex_detour(
 
         tracing::debug!(
             "connectex_detour connect_fn -> establishing connection for socket {} to {}",
-            socket_descriptor,
+            s,
             addr_description
         );
 
@@ -1127,10 +1152,10 @@ unsafe extern "system" fn connectex_detour(
         }
     };
 
-    // For managed sockets, use attempt_proxy_connection which will call connect_fn with proxy
+    // For managed sockets, use connect which will call connect_fn with proxy
     // address
     if is_managed {
-        match ops::attempt_proxy_connection(s, name, namelen, "connectex_detour", connect_fn) {
+        match ops::connect(s, name, namelen, "connectex_detour", connect_fn) {
             Ok(connect_result) => {
                 tracing::debug!(
                     "connectex_detour -> proxy connection result: {:?}",
@@ -1195,7 +1220,7 @@ unsafe extern "system" fn connectex_detour(
     }
 
     tracing::debug!("connectex_detour -> using original for socket {}", s);
-    let connect_result = connect_fn(s, raw_addr);
+    let connect_result = connect_fn(raw_addr);
     let error_opt = connect_result.error();
     let result_code: i32 = connect_result.into();
 
@@ -1226,7 +1251,7 @@ unsafe extern "system" fn wsa_connect_detour(
 ) -> INT {
     tracing::trace!("wsa_connect_detour -> socket: {}, namelen: {}", s, namelen);
 
-    let connect_fn = |s: SocketDescriptor, addr: SockAddr| {
+    let connect_fn = |addr: SockAddr| {
         // Call the original function with the prepared sockaddr
         let original = WSA_CONNECT_ORIGINAL.get().unwrap();
         let result = unsafe {
@@ -1244,7 +1269,7 @@ unsafe extern "system" fn wsa_connect_detour(
         ConnectResult::from(result)
     };
 
-    let socket_addr = match SocketAddr::try_from_raw(name, namelen) {
+    let socket_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
         None => {
             tracing::error!(
@@ -1256,7 +1281,7 @@ unsafe extern "system" fn wsa_connect_detour(
     };
     let raw_addr = SockAddr::from(socket_addr);
 
-    match ops::attempt_proxy_connection(s, name, namelen, "wsa_connect_detour", connect_fn) {
+    match ops::connect(s, name, namelen, "wsa_connect_detour", connect_fn) {
         Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
             tracing::error!(
                 "wsa_connect_detour -> socket {} connect target {:?} is unreachable: {}",
@@ -1278,7 +1303,7 @@ unsafe extern "system" fn wsa_connect_detour(
     }
 
     // Fallback to original function
-    let connect_res = connect_fn(s, raw_addr);
+    let connect_res = connect_fn(raw_addr);
     connect_res.result()
 }
 
@@ -1355,12 +1380,12 @@ unsafe extern "system" fn wsa_send_detour(
         // Check if outgoing traffic is enabled for this socket type
         let should_intercept = match user_socket.kind {
             SocketKind::Tcp(_) => {
-                let tcp_outgoing = layer_setup().outgoing_config().tcp;
+                let tcp_outgoing = setup().outgoing_config().tcp;
                 tracing::debug!("wsa_send_detour -> TCP outgoing enabled: {}", tcp_outgoing);
                 tcp_outgoing
             }
             SocketKind::Udp(_) => {
-                let udp_outgoing = layer_setup().outgoing_config().udp;
+                let udp_outgoing = setup().outgoing_config().udp;
                 tracing::debug!("wsa_send_detour -> UDP outgoing enabled: {}", udp_outgoing);
                 udp_outgoing
             }
@@ -1454,14 +1479,6 @@ unsafe extern "system" fn wsa_send_to_detour(
         iTolen
     );
 
-    let proxy_request_fn = |request| -> HookResult<_> {
-        match make_proxy_request_with_response(request) {
-            Ok(Ok(response)) => Ok(response),
-            Ok(Err(e)) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-            Err(e) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-        }
-    };
-
     // Helper function to consolidate all fallback calls to original WSASendTo
     let fallback_to_original = |reason: &str| {
         tracing::debug!("wsa_send_to_detour -> falling back to original: {}", reason);
@@ -1528,7 +1545,7 @@ unsafe extern "system" fn wsa_send_to_detour(
     }
 
     // Convert Windows destination address to cross-platform format
-    let raw_destination = match SocketAddr::try_from_raw(lpTo as *const _, iTolen as _) {
+    let raw_destination = match unsafe { SocketAddr::try_from_raw(lpTo as *const _, iTolen as _) } {
         Some(addr) => addr,
         None => unreachable!(),
     };
@@ -1585,7 +1602,6 @@ unsafe extern "system" fn wsa_send_to_detour(
             dwFlags as i32,
             raw_destination,
             wsa_sendto_fn,
-            proxy_request_fn,
         ) {
             Ok(sendto_result) => {
                 tracing::debug!(
@@ -1663,7 +1679,7 @@ unsafe extern "system" fn gethostname_detour(name: *mut i8, namelen: INT) -> INT
             name,
             namelen_ptr,
             || original(name, namelen),
-            || get_remote_hostname(true),
+            || remote_hostname_string(true),
             "gethostname",
             ERROR_BUFFER_OVERFLOW,
             // If no error occurs, gethostname returns zero. Otherwise, it returns SOCKET_ERROR
@@ -1683,7 +1699,7 @@ unsafe extern "system" fn get_computer_name_a_detour(lpBuffer: *mut i8, nSize: *
             lpBuffer,
             nSize,
             || original(lpBuffer, nSize),
-            || get_remote_hostname(true),
+            || remote_hostname_string(true),
             "GetComputerNameA",
             ERROR_BUFFER_OVERFLOW,
             // If the function succeeds, the return value is a nonzero value.
@@ -1702,7 +1718,7 @@ unsafe extern "system" fn get_computer_name_w_detour(lpBuffer: *mut u16, nSize: 
             lpBuffer,
             nSize,
             || original(lpBuffer, nSize),
-            || get_remote_hostname(true),
+            || remote_hostname_string(true),
             "GetComputerNameW",
             ERROR_BUFFER_OVERFLOW,
         )
@@ -1824,27 +1840,15 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
     }
 
     // Check if we should resolve this hostname remotely using the DNS selector
-    let should_resolve_remotely = {
-        let result = layer_setup()
-            .dns_selector()
-            .should_resolve_remotely(hostname_cstr, 0);
-        tracing::debug!(
-            "is_remote_hostname DNS selector check for '{}': {}",
-            hostname_cstr,
-            result
-        );
-        result
-    };
-
-    tracing::warn!(
-        "DNS selector decision for {}: resolve_remotely={}",
-        hostname_cstr,
-        should_resolve_remotely
-    );
-
-    if !should_resolve_remotely {
+    if setup()
+        .dns_selector()
+        .check_query(hostname_cstr.as_ref(), 0)
+        .is_err()
+    {
+        tracing::debug!("DNS selector check returned local for '{}'", hostname_cstr,);
         return fallback_to_original();
     }
+
     // Try to resolve the hostname using mirrord's remote DNS resolution
     match remote_dns_resolve_via_proxy(hostname_cstr) {
         Ok(results) => {
@@ -1922,7 +1926,7 @@ unsafe extern "system" fn getaddrinfo_detour(
     let hints_ref = unsafe { raw_hints.as_ref() };
 
     unsafe {
-        match windows_getaddrinfo::<ADDRINFOA>(node_opt, service_opt, hints_ref) {
+        match getaddrinfo::<ADDRINFOA>(node_opt, service_opt, hints_ref) {
             Ok(managed_addr_info) => {
                 // Store the managed result pointer and move the object to MANAGED_ADDRINFO
                 let addr_ptr = managed_addr_info.as_ptr();
@@ -1982,7 +1986,7 @@ unsafe extern "system" fn getaddrinfow_detour(
     let hints_ref = unsafe { hints.as_ref() };
 
     // Use full windows_getaddrinfo approach with DNS selector logic and service/hints support
-    match windows_getaddrinfo::<ADDRINFOW>(node_opt.clone(), service_opt, hints_ref) {
+    match getaddrinfo::<ADDRINFOW>(node_opt.clone(), service_opt, hints_ref) {
         Ok(managed_result) => {
             tracing::debug!("GetAddrInfoW: full resolution succeeded");
             // Store the managed result pointer and move the object to MANAGED_ADDRINFO
@@ -2064,12 +2068,12 @@ unsafe extern "system" fn send_detour(s: SOCKET, buf: *const i8, len: INT, flags
         // Check if outgoing traffic is enabled for this socket type
         let should_intercept = match user_socket.kind {
             SocketKind::Tcp(_) => {
-                let tcp_outgoing = layer_setup().outgoing_config().tcp;
+                let tcp_outgoing = setup().outgoing_config().tcp;
                 tracing::debug!("send_detour -> TCP outgoing enabled: {}", tcp_outgoing);
                 tcp_outgoing
             }
             SocketKind::Udp(_) => {
-                let udp_outgoing = layer_setup().outgoing_config().udp;
+                let udp_outgoing = setup().outgoing_config().udp;
                 tracing::debug!("send_detour -> UDP outgoing enabled: {}", udp_outgoing);
                 udp_outgoing
             }
@@ -2141,12 +2145,6 @@ unsafe extern "system" fn sendto_detour(
         tolen
     );
 
-    let proxy_request_fn = |request| match make_proxy_request_with_response(request) {
-        Ok(Ok(response)) => Ok(response),
-        Ok(Err(e)) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-        Err(e) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-    };
-
     // Helper function to consolidate all fallback calls to original sendto
     let fallback_to_original = |reason: &str| -> INT {
         tracing::debug!("sendto_detour -> falling back to original: {}", reason);
@@ -2155,7 +2153,7 @@ unsafe extern "system" fn sendto_detour(
     };
 
     // Convert Windows parameters to cross-platform format
-    let raw_destination = match SocketAddr::try_from_raw(to as *const _, tolen as _) {
+    let raw_destination = match unsafe { SocketAddr::try_from_raw(to as *const _, tolen as _) } {
         Some(addr) => addr,
         None => {
             return fallback_to_original("failed to parse destination address");
@@ -2191,7 +2189,6 @@ unsafe extern "system" fn sendto_detour(
         flags,
         raw_destination,
         sendto_fn,
-        proxy_request_fn,
     ) {
         Ok(result) => {
             tracing::debug!(
@@ -2207,9 +2204,6 @@ unsafe extern "system" fn sendto_detour(
 /// Socket management detour for closesocket() - closes a socket
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
-    // Get socket info BEFORE closing to send PortUnsubscribe if needed
-    let _socket_info = get_socket(s);
-
     let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();
     let res = unsafe { original(s) };
 
@@ -2266,10 +2260,7 @@ unsafe extern "system" fn getsockopt_detour(
 }
 
 /// Initialize socket hooks by setting up detours for Windows socket functions
-pub fn initialize_hooks(
-    guard: &mut DetourGuard<'static>,
-    setup: &mirrord_layer_lib::setup::windows::LayerSetup,
-) -> LayerResult<()> {
+pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) -> LayerResult<()> {
     // Ensure winsock libraries are loaded before attempting to hook them
     // This prevents issues with Python's _socket.pyd or other dynamic loaders
     // ensure_winsock_libraries_loaded()?;
