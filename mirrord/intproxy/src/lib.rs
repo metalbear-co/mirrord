@@ -1492,6 +1492,8 @@ mod test {
 
         let (mut conn, _) = server.accept().await.unwrap();
 
+        const EXPECTED_REQUEST: &[u8] = b"GET /test/ HTTP/1.0\r\ncontent-length: 5\r\n\r\nhello";
+
         if drop_during_response {
             to_proxy
                 .send(DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
@@ -1505,10 +1507,9 @@ mod test {
                 .await
                 .unwrap();
 
-            const EXPECTED: &[u8] = b"GET /test/ HTTP/1.0\r\ncontent-length: 5\r\n\r\nhello";
-            let mut buf = [0u8; EXPECTED.len()];
+            let mut buf = [0u8; EXPECTED_REQUEST.len()];
             conn.read_exact(&mut buf).await.unwrap();
-            assert_eq!(buf, EXPECTED);
+            assert_eq!(buf, EXPECTED_REQUEST);
 
             conn.write_all(b"HTTP/1.0 200 OK\r\ncontent-length: 5\r\n\r\nwo")
                 .await
@@ -1534,8 +1535,31 @@ mod test {
 
         drop(to_proxy);
 
-        // Assert intproxy closed the connection
-        assert!(conn.read(&mut [0]).await.is_ok_and(|s| s == 0));
+        // Assert intproxy closes the connection.
+        //
+        // `read_to_end` reads until EOF, which is the *graceful*
+        // termination of TCP connection by peer (a.k.a intproxy).
+        // Note that the connection may terminate before we're able to
+        // read the entire request (and often before we're able to
+        // read a single byte), so we're only checking whatever we
+        // *do* manage to receive. In any case all we care about here
+        // is whether the intproxy closes the connection gracefully or
+        // not.
+
+        let mut buf = vec![];
+        let read_bytes = conn.read_to_end(&mut buf).await.unwrap();
+        if drop_during_response {
+            // We've already responded, intproxy is (was) waiting for
+            // the rest of the response so we have nothing to receive.
+            // We should just wait for it to close the connection
+            // immediately.
+            assert_eq!(read_bytes, 0);
+        } else {
+            assert_eq!(
+                buf.get(..read_bytes).unwrap(),
+                EXPECTED_REQUEST.get(..read_bytes).unwrap()
+            );
+        }
 
         let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
         switch_protocol_version(&to_proxy, &from_proxy).await;

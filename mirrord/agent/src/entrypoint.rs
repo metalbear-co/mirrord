@@ -10,6 +10,7 @@ use std::{
     },
 };
 
+use async_pidfd::AsyncPidFd;
 use client_connection::AgentTlsConnector;
 use dns::{ClientGetAddrInfoRequest, DnsCommand};
 use futures::{TryFutureExt, future::OptionFuture};
@@ -640,6 +641,52 @@ pub async fn notify_client_about_dirty_iptables(
     Ok(())
 }
 
+/// Monitors the main container process and cancels `cancel` when it
+/// exits.
+///
+/// This not only makes for a better UX (no unused agent pods
+/// lingering), but is important for terminating redirected
+/// connections gracefully. If we don't exit as soon as the main
+/// container dies, the veth interface will be deleted while
+/// redirected connections are still open, and thus the other ends
+/// will stay open with no way to terminate them correctly.
+fn monitor_main_container(cancel: CancellationToken, pid: libc::pid_t) {
+    let fd = match AsyncPidFd::from_pid(pid) {
+        Ok(fd) => fd,
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "Failed to get the target container process descriptor",
+            );
+            return;
+        }
+    };
+
+    tokio::spawn(async move {
+        tracing::trace!("Starting watcher task for main target process");
+        match fd.wait().await {
+            Err(error) if error.raw_os_error() == Some(libc::ECHILD) => {
+                tracing::warn!(?error, "Target container process exited, shutting down");
+                cancel.cancel();
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "wait() on target container did not return expected value"
+                );
+            }
+            Ok(status) => {
+                // ExitInfo doesn't impl Debug >:(
+                tracing::warn!(
+                    siginifo = ?status.siginfo,
+                    rusage = ?status.rusage,
+                    "wait() on target container did not return expected value"
+                );
+            }
+        }
+    });
+}
+
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn get_rules(
     iptables: &IPTablesWrapper,
@@ -720,11 +767,13 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 
     let state = State::new(&args).await?;
 
+    let cancellation_token = CancellationToken::new();
+
     // Check that chain names won't conflict with another agent or failed cleanup.
     // This check is only relevant if we have a target.
     // If we don't have any target, the agent should be running in a fresh network namespace,
     // and you should **not** expect that it can access iptables.
-    if state.container_pid().is_some() {
+    if let Some(target_pid) = state.container_pid() {
         let leftover_rules = state
             .network_runtime
             .handle()
@@ -759,9 +808,11 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                 return Err(AgentError::IPTablesDirty);
             }
         }
-    }
 
-    let cancellation_token = CancellationToken::new();
+        // Casting u64 to i32 but linux pids shouldn't exceed 2^22
+        let pid = target_pid.try_into().unwrap();
+        monitor_main_container(cancellation_token.clone(), pid);
+    }
 
     // To make sure that background tasks are cancelled when we exit early from this function.
     let cancel_guard = cancellation_token.clone().drop_guard();

@@ -1,6 +1,8 @@
+#[cfg(target_family = "unix")]
 use std::ffi::{CStr, CString};
 
 /// Test the `readdir` and `readdir64` hooks.
+#[cfg(target_family = "unix")]
 fn main() {
     println!("test issue 2001: START");
 
@@ -29,4 +31,10 @@ fn main() {
     }
 
     println!("test issue 2001: SUCCESS");
+}
+
+#[cfg(not(target_family = "unix"))]
+fn main() {
+    eprintln!("ERROR: test issue 2001 is not supported on non-Unix platforms");
+    std::process::exit(1);
 }

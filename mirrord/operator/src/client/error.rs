@@ -19,6 +19,7 @@ pub enum OperatorOperation {
     GettingStatus,
     SessionManagement,
     ListingTargets,
+    MongodbBranching,
     MysqlBranching,
     PgBranching,
     MultiClusterSession,
@@ -34,6 +35,7 @@ impl fmt::Display for OperatorOperation {
             Self::GettingStatus => "getting status",
             Self::SessionManagement => "session management",
             Self::ListingTargets => "listing targets",
+            Self::MongodbBranching => "mongodb branching",
             Self::MysqlBranching => "mysql branching",
             Self::PgBranching => "postgresql branching",
             Self::MultiClusterSession => "multi-cluster session",
@@ -89,6 +91,12 @@ pub enum OperatorApiError {
 
     #[error("operation timed out: {}", operation)]
     OperationTimeout { operation: OperatorOperation },
+
+    #[error("{operation} failed: {message}")]
+    BranchCreationFailed {
+        operation: OperatorOperation,
+        message: String,
+    },
 
     #[error(transparent)]
     InvalidBackoff(#[from] InvalidBackoff),

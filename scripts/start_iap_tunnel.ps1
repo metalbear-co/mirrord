@@ -1,63 +1,93 @@
-# Helper script to start IAP tunnel to k3s-tests-1 on port 6443
-# Usage: . ./scripts/start_iap_tunnel.ps1
-# Returns $tunnelProc (Process object)
+param(
+    [string]$ServiceAccount = "174145836594-compute@developer.gserviceaccount.com",
+    [string]$Project = "mirrord",
+    [string]$Zone = "us-central1-a",
+    [string]$Instance = "k3s-tests-1",
+    [int]$Port = 6443,
+    [int]$LocalPort = 6443,
+    [int]$Retries = 5
+)
 
 $ErrorActionPreference = "Stop"
 
-# Resolve gcloud.cmd to avoid issues with .ps1 and cmd.exe
-$gcloudPath = (Get-Command gcloud).Source
-if ($gcloudPath.EndsWith(".ps1")) {
-    $parent = Split-Path $gcloudPath -Parent
-    $gcloudCmd = Join-Path $parent "gcloud.cmd"
-} else {
-    $gcloudCmd = $gcloudPath
+# 1. Ensure Dependencies
+if (-not (Get-Command kubectl -ErrorAction SilentlyContinue)) {
+    Write-Host "Installing kubectl..."
+    choco install kubernetes-cli -y
 }
-Write-Host "Using gcloud at: $gcloudCmd"
 
-# Clean up any existing process on port 6443 to avoid "Unable to open socket" errors
-Write-Host "Checking for existing tunnel on port 6443..."
-try {
-    $existing = Get-NetTCPConnection -LocalPort 6443 -ErrorAction Stop
-    if ($existing) {
-        Write-Host "Found existing process on 6443 (PID: $($existing.OwningProcess)). Killing..."
-        Stop-Process -Id $existing.OwningProcess -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 2
+# 2. Configure gcloud
+Write-Host "Configuring gcloud..."
+gcloud config set account $ServiceAccount
+gcloud config set project $Project
+gcloud config set core/disable_prompts true
+# Diagnostic info (optional, can be noisy)
+# gcloud info
+# gcloud auth list
+
+# 3. Check for Existing Tunnel
+$ExistingConn = Test-NetConnection -ComputerName "127.0.0.1" -Port $LocalPort -InformationLevel Quiet
+if ($ExistingConn) {
+    Write-Host "Port $LocalPort is already listening. Checking Kubernetes connectivity..."
+    $env:KUBECONFIG = "$env:USERPROFILE\.kube\config"
+    kubectl get pods -A
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Tunnel is active and healthy."
+        exit 0
     }
-} catch {
-    Write-Host "No existing process found on port 6443."
+    Write-Warning "Port is open but Kubectl failed. Killing stale processes..."
+    
+    Get-Process -Name "gcloud" -ErrorAction SilentlyContinue | Stop-Process -Force
+    $connections = Get-NetTCPConnection -LocalPort $LocalPort -ErrorAction SilentlyContinue
+    if ($connections) {
+        foreach ($conn in $connections) { Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue }
+    }
 }
 
-# Start IAP Tunnel in background
-# Use cmd.exe /c to execute the batch file.
-Write-Host "Starting IAP tunnel on port 6443..."
-$tunnelProc = Start-Process -FilePath "cmd.exe" `
-    -ArgumentList "/c ""$gcloudCmd"" compute start-iap-tunnel k3s-tests-1 6443 --local-host-port=127.0.0.1:6443 --zone=us-central1-a --quiet" `
-    -NoNewWindow -PassThru
+# 4. Start Tunnel
+Write-Host "Starting IAP Tunnel to $Instance ($Zone)..."
+$LogFile = "$env:TEMP\iap_tunnel.log"
+$ErrFile = "$env:TEMP\iap_tunnel.err"
 
-# Wait for tunnel to come up
-$retries = 30
-$tunnelUp = $false
-while ($retries -gt 0) {
-    try {
-        $conn = New-Object System.Net.Sockets.TcpClient("127.0.0.1", 6443)
-        $conn.Close()
-        $tunnelUp = $true
-        Write-Host "Tunnel is up!"
+$GcloudArgs = "compute start-iap-tunnel $Instance $Port --local-host-port=127.0.0.1:$LocalPort --zone=$Zone"
+$Process = Start-Process -FilePath "cmd.exe" -ArgumentList "/c gcloud $GcloudArgs" -NoNewWindow -PassThru -RedirectStandardOutput $LogFile -RedirectStandardError $ErrFile
+
+# 5. Wait for Connection
+for ($i=1; $i -le $Retries; $i++) {
+    Start-Sleep -Seconds 2
+    
+    if ($Process.HasExited) {
+        Write-Error "Tunnel process exited prematurely (Exit Code: $($Process.ExitCode))"
         break
-    } catch {
-        Write-Host "Waiting for tunnel... ($retries)"
-        Start-Sleep -Seconds 1
-        $retries--
     }
+
+    if (Test-NetConnection -ComputerName "127.0.0.1" -Port $LocalPort -InformationLevel Quiet) {
+        Write-Host "Tunnel Established."
+        break
+    }
+    Write-Host "Waiting for tunnel... ($i/$Retries)"
 }
 
-if (-not $tunnelUp) {
-    if ($tunnelProc.HasExited) {
-        Write-Error "Tunnel process exited unexpectedly. Exit code: $($tunnelProc.ExitCode)"
-    }
-    Stop-Process -InputObject $tunnelProc -ErrorAction SilentlyContinue
-    throw "Tunnel failed to start on port 6443"
+# 6. Verify Again
+if (-not (Test-NetConnection -ComputerName "127.0.0.1" -Port $LocalPort -InformationLevel Quiet)) {
+    Write-Error "Failed to establish IAP tunnel on port $LocalPort."
+    Write-Host "--- STDOUT ---"; if (Test-Path $LogFile) { Get-Content $LogFile }; Write-Host "--------------"
+    Write-Host "--- STDERR ---"; if (Test-Path $ErrFile) { Get-Content $ErrFile }; Write-Host "--------------"
+    
+    if (-not $Process.HasExited) { Stop-Process -Id $Process.Id -Force }
+    exit 1
 }
 
-# Return the process object for caller to manage if needed
-return $tunnelProc
+# 7. Final K8s Check
+$env:KUBECONFIG = "$env:USERPROFILE\.kube\config"
+if (-not (Test-Path $env:KUBECONFIG)) {
+    Write-Error "KUBECONFIG not found at $env:KUBECONFIG"
+    exit 1
+}
+kubectl get pods -A
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Tunnel open but kubectl failed."
+    exit 1
+}
+
+Write-Host "IAP Tunnel Ready."

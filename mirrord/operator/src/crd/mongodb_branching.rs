@@ -6,7 +6,7 @@ use std::{
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use mirrord_config::{
-    feature::database_branches::{MysqlBranchCopyConfig, MysqlBranchTableCopyConfig},
+    feature::database_branches::{MongodbBranchCollectionCopyConfig, MongodbBranchCopyConfig},
     target::Target,
 };
 use schemars::JsonSchema;
@@ -18,24 +18,24 @@ use crate::crd::session::SessionOwner;
 #[kube(
     group = "dbs.mirrord.metalbear.co",
     version = "v1alpha1",
-    kind = "MysqlBranchDatabase",
-    status = "MysqlBranchDatabaseStatus",
+    kind = "MongodbBranchDatabase",
+    status = "MongodbBranchDatabaseStatus",
     namespaced
 )]
 #[serde(rename_all = "camelCase")]
-pub struct MysqlBranchDatabaseSpec {
+pub struct MongodbBranchDatabaseSpec {
     /// ID derived by mirrord CLI.
     pub id: String,
     /// Database connection info from the workload.
     pub connection_source: ConnectionSource,
-    /// MySQL database name.
+    /// MongoDB database name.
     pub database_name: Option<String>,
     /// Target k8s resource to extract connection source info from.
     pub target: Target,
     /// The duration in seconds this branch database will live idling.
     pub ttl_secs: u64,
-    /// MySQL server image version, e.g. "8.0".
-    pub mysql_version: Option<String>,
+    /// MongoDB server image version, e.g. "7.0".
+    pub mongodb_version: Option<String>,
     /// Options for copying data from source database to the branch.
     #[serde(default)]
     pub copy: BranchCopyConfig,
@@ -66,34 +66,31 @@ pub enum ConnectionSourceKind {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct MysqlBranchDatabaseStatus {
+pub struct MongodbBranchDatabaseStatus {
     pub phase: BranchDatabasePhase,
     /// Time when the branch database should be deleted.
     pub expire_time: MicroTime,
     /// Information of sessions that are using this branch database.
     #[serde(default)]
     pub session_info: HashMap<String, SessionInfo>,
-    /// Error message when phase is Failed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
 pub enum BranchDatabasePhase {
-    /// The controller is creating the branch database.
+    /// Initial phase set by CLI. Controller will create the database pod.
+    Init,
+    /// The controller is creating the branch database pod.
     Pending,
     /// The branch database is ready to use.
     Ready,
-    /// The branch database creation failed.
-    Failed,
 }
 
 impl std::fmt::Display for BranchDatabasePhase {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            BranchDatabasePhase::Init => write!(f, "Init"),
             BranchDatabasePhase::Pending => write!(f, "Pending"),
             BranchDatabasePhase::Ready => write!(f, "Ready"),
-            BranchDatabasePhase::Failed => write!(f, "Failed"),
         }
     }
 }
@@ -110,13 +107,13 @@ pub struct SessionInfo {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BranchCopyConfig {
-    /// The default copy mode for the branch.
+    /// The copy mode for the branch.
     pub mode: BranchCopyMode,
 
-    /// An optional list of tables whose schema and data will be copied based on their
-    /// table level copy config. Only compatible with `Empty` and `Schema` copy mode.
+    /// An optional list of collections to copy with their filters.
+    /// If not specified, all collections are copied (for `All` mode) or none (for `Empty` mode).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tables: Option<BTreeMap<String, TableCopyConfig>>,
+    pub collections: Option<BTreeMap<String, CollectionCopyConfig>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -124,10 +121,8 @@ pub struct BranchCopyConfig {
 pub enum BranchCopyMode {
     /// Create an empty database only.
     Empty,
-    /// Create a database with all tables' schema copied from the source database.
-    Schema,
-    /// Create a database and copy all tables' schema and data from the source database.
-    /// With this copy mode, all table specific copy configs are ignored.
+    /// Create a database and copy collections' schema and data from the source database.
+    /// Supports optional collection filters to copy specific collections or filter documents.
     All,
 }
 
@@ -135,33 +130,29 @@ impl Default for BranchCopyConfig {
     fn default() -> Self {
         BranchCopyConfig {
             mode: BranchCopyMode::Empty,
-            tables: Default::default(),
+            collections: Default::default(),
         }
     }
 }
 
-impl From<MysqlBranchCopyConfig> for BranchCopyConfig {
-    fn from(config: MysqlBranchCopyConfig) -> Self {
+impl From<MongodbBranchCopyConfig> for BranchCopyConfig {
+    fn from(config: MongodbBranchCopyConfig) -> Self {
         match config {
-            MysqlBranchCopyConfig::Empty { tables } => BranchCopyConfig {
+            MongodbBranchCopyConfig::Empty { collections } => BranchCopyConfig {
                 mode: BranchCopyMode::Empty,
-                tables: tables.map(|t| {
-                    t.into_iter()
+                collections: collections.map(|c| {
+                    c.into_iter()
                         .map(|(name, config)| (name, config.into()))
                         .collect()
                 }),
             },
-            MysqlBranchCopyConfig::Schema { tables } => BranchCopyConfig {
-                mode: BranchCopyMode::Schema,
-                tables: tables.map(|t| {
-                    t.into_iter()
-                        .map(|(name, config)| (name, config.into()))
-                        .collect()
-                }),
-            },
-            MysqlBranchCopyConfig::All => BranchCopyConfig {
+            MongodbBranchCopyConfig::All { collections } => BranchCopyConfig {
                 mode: BranchCopyMode::All,
-                tables: None,
+                collections: collections.map(|c| {
+                    c.into_iter()
+                        .map(|(name, config)| (name, config.into()))
+                        .collect()
+                }),
             },
         }
     }
@@ -169,15 +160,15 @@ impl From<MysqlBranchCopyConfig> for BranchCopyConfig {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct TableCopyConfig {
+pub struct CollectionCopyConfig {
     /// Data that matches the filter will be copied.
-    /// For MySQL, this filter is a `where` clause that looks like `username = 'alice'`.
+    /// For MongoDB, this filter is a JSON query document like `{"username": "alice"}`.
     pub filter: Option<String>,
 }
 
-impl From<MysqlBranchTableCopyConfig> for TableCopyConfig {
-    fn from(config: MysqlBranchTableCopyConfig) -> Self {
-        TableCopyConfig {
+impl From<MongodbBranchCollectionCopyConfig> for CollectionCopyConfig {
+    fn from(config: MongodbBranchCollectionCopyConfig) -> Self {
+        CollectionCopyConfig {
             filter: config.filter,
         }
     }
