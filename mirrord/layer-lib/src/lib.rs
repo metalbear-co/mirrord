@@ -1,4 +1,7 @@
 //! Common layer functionality shared between Unix layer and Windows layer-win.
+#![feature(try_trait_v2)]
+#![feature(try_trait_v2_residual)]
+
 extern crate alloc;
 
 pub mod debugger_ports;

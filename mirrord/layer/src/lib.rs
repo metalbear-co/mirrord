@@ -104,6 +104,7 @@ use mirrord_intproxy_protocol::NewSessionRequest;
 #[cfg(doc)]
 use mirrord_layer_lib::setup::SETUP;
 use mirrord_layer_lib::{
+    detour::DetourGuard,
     setup::{LayerSetup, init_layer_setup, setup},
     trace_only::is_trace_only_mode,
 };
@@ -116,7 +117,6 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     common::make_proxy_request_with_response,
-    detour::DetourGuard,
     load::LoadType,
     socket::{hooks::MANAGED_ADDRINFO, ops::REMOTE_DNS_REVERSE_MAPPING},
 };

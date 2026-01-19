@@ -327,7 +327,7 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
 ) -> *const c_void {
     unsafe {
         // we hold the guard manually for tracing/internal code
-        let guard = crate::detour::DetourGuard::new();
+        let guard = mirrord_layer_lib::detour::DetourGuard::new();
         let detour: Detour<PathBuf> = raw_path.checked_into();
         let raw_path = if let Bypass(FileOperationInMirrordBinTempDir(ptr)) = detour {
             trace!("dlopen called with a path inside our patch dir, switching with fixed pointer.");

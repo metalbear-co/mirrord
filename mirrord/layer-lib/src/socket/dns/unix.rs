@@ -13,8 +13,8 @@ use socket2::SockAddr;
 use tracing::{trace, warn};
 
 use crate::{
-    detour::Bypass,
-    error::{HookError, HookResult},
+    detour::{Detour, Bypass, OptionExt},
+    error::HookError,
     setup::setup,
     socket::remote_getaddrinfo,
 };
@@ -41,9 +41,9 @@ pub fn getaddrinfo(
     rawish_node: Option<&CStr>,
     rawish_service: Option<&CStr>,
     raw_hints: Option<&libc::addrinfo>,
-) -> HookResult<*mut libc::addrinfo> {
+) -> Detour<*mut libc::addrinfo> {
     let node: String = rawish_node
-        .ok_or(HookError::Bypass(Bypass::NullNode))?
+        .bypass(Bypass::NullNode)?
         .to_str()
         .map_err(|fail| {
             warn!(
@@ -51,7 +51,7 @@ pub fn getaddrinfo(
                 fail
             );
 
-            HookError::Bypass(Bypass::CStrConversion)
+            Bypass::CStrConversion
         })?
         .into();
 
@@ -65,7 +65,7 @@ pub fn getaddrinfo(
                 fail
             );
 
-            HookError::Bypass(Bypass::CStrConversion)
+            Bypass::CStrConversion
         })?
         // TODO: according to the man page, service could also be a service name, it doesn't have to
         //   be a port number.
@@ -145,5 +145,5 @@ pub fn getaddrinfo(
 
     trace!("getaddrinfo -> result {:#?}", result);
 
-    Ok(result)
+    Detour::Success(result)
 }
