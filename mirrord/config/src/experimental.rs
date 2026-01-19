@@ -140,7 +140,7 @@ pub struct ExperimentalConfig {
 
     /// ### _experimental_ applev {#experimental-applev}
     ///
-    /// Configuraiton for inspecting and modifying apple variables. macOS only.
+    /// Configuration for inspecting and modifying apple variables. macOS only.
     pub applev: Option<AppleVariablesConfig>,
 }
 

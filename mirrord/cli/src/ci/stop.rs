@@ -1,3 +1,4 @@
+#[cfg_attr(windows, allow(unused))]
 use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
 

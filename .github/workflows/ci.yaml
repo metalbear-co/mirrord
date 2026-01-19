@@ -75,6 +75,7 @@ jobs:
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
+      config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
       wizard_frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
     steps:
@@ -153,6 +154,24 @@ jobs:
             echo "Error: Protocol has changed but Cargo.toml has not. Please update Cargo.toml."
             exit 1
           fi
+      - name: get config changes
+        id: changed-config-schema
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        with:
+          files: |
+            mirrord-schema.json
+      - name: get configuration.md changes
+        id: changed-configuration-md
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        with:
+          files: |
+            mirrord/config/configuration.md
+      - name: verify configuration.md is up-to-date
+        run: |
+          if [ "${{ steps.changed-config-schema.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-configuration-md.outputs.any_changed }}" != "true" ]; then
+            echo "Error: mirrord configuration has changed but `configuration.md` documentation has not."
+            exit 1
+          fi
       - name: output test
         run: |
           echo ${{ steps.changed-rs.outputs.any_changed }};
@@ -165,6 +184,8 @@ jobs:
           echo ${{ steps.changed-protocol-toml.outputs.any_changed }};
           echo ${{ steps.changed-windows.outputs.any_changed }};
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
+          echo ${{ steps.changed-config-schema.outputs.any_changed }};
+          echo ${{ steps.changed-configuration-md.outputs.any_changed }};
 
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
           
@@ -690,12 +711,33 @@ jobs:
           config: ".markdownlint.json"
           globs: "README.md"
 
-  # windows_build:
-  #   needs: changed_files
-  #   if: ${{ needs.changed_files.outputs.rs_changed == 'true' ||needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
-  #   uses: ./.github/workflows/windows-build.yaml
+  windows_tests:
+    needs: changed_files
+    if: ${{ needs.changed_files.outputs.rs_changed == 'true' ||needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4 # Checkout the mirrord repo.
+      # the setup rust toolchain action ignores the input if file exists.. so remove it
+      - run: Remove-Item rust-toolchain.toml
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          components: rustfmt, clippy
+          target: x86_64-pc-windows-msvc
+          toolchain: nightly-2025-08-01
+      - name: run lint/fmt
+        run: |
+          $ErrorActionPreference = "Stop"
 
-  #   secrets: inherit
+          # create dummy mirrord
+          New-Item -ItemType File -Force -Path "target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll" -Value "content"
+
+          cargo fmt --all -- --check
+          cargo clippy --target x86_64-pc-windows-msvc
+      - name: run UT
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
 
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
   # building concurrently can run faster the release ide tests
@@ -761,7 +803,7 @@ jobs:
         lint_markdown,
         check-rust-docs,
         cargo-deny,
-        # windows_build,
+        windows_tests,
       ]
     runs-on: ubuntu-24.04
     steps:
@@ -782,6 +824,6 @@ jobs:
             (needs.intellij_e2e_on_release_branch.result == 'success' || needs.intellij_e2e_on_release_branch.result == 'skipped') &&
             (needs.vscode_e2e_on_release_branch.result == 'success' || needs.vscode_e2e_on_release_branch.result == 'skipped') &&
             (needs.check-rust-docs.result == 'success' || needs.check-rust-docs.result == 'skipped') &&
-            (needs.cargo-deny.result == 'success' || needs.cargo-deny.result == 'skipped') }} # &&
-            # (needs.windows_build.result == 'success' || needs.windows_build.result == 'skipped') 
+            (needs.cargo-deny.result == 'success' || needs.cargo-deny.result == 'skipped') &&
+            (needs.windows_tests.result == 'success' || needs.windows_tests.result == 'skipped') }}
         run: echo $CI_SUCCESS && if [ "$CI_SUCCESS" == "true" ]; then echo "SUCCESS" && exit 0; else echo "Failure" && exit 1; fi

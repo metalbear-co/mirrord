@@ -240,13 +240,6 @@ impl KubernetesAPI {
             }
 
             if let Some(network_config) = network_config {
-                if let Some(modified_ports) = network_config
-                    .incoming
-                    .add_probe_ports_to_http_filter_ports(containers_probe_ports)
-                {
-                    progress.info(&format!("`network.incoming.http_filter.ports` has been set to use ports {modified_ports}."));
-                }
-
                 let stolen_probes = containers_probe_ports
                     .iter()
                     .copied()
