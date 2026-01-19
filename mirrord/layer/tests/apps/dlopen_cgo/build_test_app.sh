@@ -17,12 +17,12 @@ echo "Script directory: $SCRIPT_DIR"
 
 # Ensure files exist
 if [[ ! -f "$SERVER_GO_FILE" ]]; then
-    echo "ERROR: main.go not found in $SCRIPT_DIR"
+    echo "ERROR: server/main.go not found in $SCRIPT_DIR"
     exit 1
 fi
 
 if [[ ! -f "$FILEOPS_GO_FILE" ]]; then
-    echo "ERROR: main.go not found in $SCRIPT_DIR"
+    echo "ERROR: fileops/main.go not found in $SCRIPT_DIR"
     exit 1
 fi
 
