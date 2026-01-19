@@ -428,6 +428,7 @@ jobs:
       - run: | # Build Go test apps.
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 24
+      - run: ./mirrord/layer/tests/apps/dlopen_cgo/build_test_app.sh
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"

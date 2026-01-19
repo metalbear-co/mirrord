@@ -204,9 +204,9 @@ pub(crate) mod go_1_24 {
             "lea    r9, [rsp+0x8]",
             // Store r9 in g->sched->sp.
             "mov    QWORD PTR [r14+0x38],r9",
-            // Store r9 in g->sched->ret.
+            // Store 0 in g->sched->ret.
             "mov    QWORD PTR [r14+0x58],0x0",
-            // Store r9 in g->sched->bp.
+            // Store rbp in g->sched->bp.
             "mov    QWORD PTR [r14+0x68],rbp",
             // Store g->sched->ctxt in r9.
             "mov    r9, QWORD PTR [r14+0x50]",
