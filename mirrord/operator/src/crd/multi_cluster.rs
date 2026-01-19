@@ -55,6 +55,11 @@ pub struct MirrordMultiClusterSessionSpec {
     /// These are passed to the default cluster's child session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mysql_branch_names: Vec<String>,
+
+    /// MongoDB branch database names (created by primary before session init).
+    /// These are passed to the default cluster's child session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mongodb_branch_names: Vec<String>,
 }
 
 /// Target specification for a specific cluster in a multi-cluster session

@@ -358,7 +358,7 @@ pub async fn list_reusable_pg_branches<P: Progress>(
 ///
 /// Timeout after the duration specified by `timeout`.
 #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
-pub(crate) async fn create_mongodb_branches<P: Progress>(
+pub async fn create_mongodb_branches<P: Progress>(
     api: &Api<MongodbBranchDatabase>,
     params: HashMap<BranchDatabaseId, MongodbBranchParams>,
     timeout: Duration,
@@ -436,7 +436,7 @@ pub(crate) async fn create_mongodb_branches<P: Progress>(
 /// A MongoDB branch is considered reusable if
 /// 1. it has a user specified unique ID, and
 /// 2. it is in the "Ready" phase.
-pub(crate) async fn list_reusable_mongodb_branches<P: Progress>(
+pub async fn list_reusable_mongodb_branches<P: Progress>(
     api: &Api<MongodbBranchDatabase>,
     params: &HashMap<BranchDatabaseId, MongodbBranchParams>,
     progress: &P,
@@ -488,17 +488,17 @@ pub(crate) async fn list_reusable_mongodb_branches<P: Progress>(
     Ok(reusable_mongodb_branches)
 }
 
-pub(crate) struct DatabaseBranchParams {
-    pub(crate) mongodb: HashMap<BranchDatabaseId, MongodbBranchParams>,
-    pub(crate) mysql: HashMap<BranchDatabaseId, MysqlBranchParams>,
-    pub(crate) pg: HashMap<BranchDatabaseId, PgBranchParams>,
+pub struct DatabaseBranchParams {
+    pub mongodb: HashMap<BranchDatabaseId, MongodbBranchParams>,
+    pub mysql: HashMap<BranchDatabaseId, MysqlBranchParams>,
+    pub pg: HashMap<BranchDatabaseId, PgBranchParams>,
 }
 
 impl DatabaseBranchParams {
     /// Create branch database parameters.
     ///
     /// We generate unique database IDs unless the user explicitly specifies them.
-    pub(crate) fn new(config: &DatabaseBranchesConfig, target: &Target) -> Self {
+    pub fn new(config: &DatabaseBranchesConfig, target: &Target) -> Self {
         let mut mongodb = HashMap::new();
         let mut mysql = HashMap::new();
         let mut pg = HashMap::new();

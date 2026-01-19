@@ -85,6 +85,13 @@ pub struct MirrordClusterSessionSpec {
     /// The default cluster's operator then uses these branches for the session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mysql_branch_names: Vec<String>,
+
+    /// MongoDB branch database names created by the primary for this session.
+    ///
+    /// For multi-cluster: primary creates branches on default cluster and passes names here.
+    /// The default cluster's operator then uses these branches for the session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mongodb_branch_names: Vec<String>,
 }
 
 /// Describes an owner of a mirrord session.

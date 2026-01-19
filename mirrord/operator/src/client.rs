@@ -706,8 +706,8 @@ impl OperatorApi<PreparedClientCert> {
         );
         if let Some(multi_cluster_info) = self.multi_cluster_info() {
             tracing::info!(
-                is_primary = %multi_cluster_info.is_primary,
-                primary_cluster = %multi_cluster_info.primary_cluster,
+                multi_cluster = %multi_cluster_info.multi_cluster,
+                primary_cluster = %multi_cluster_info.cluster_name,
                 default_cluster = %multi_cluster_info.default_cluster,
                 "Multi-cluster mode enabled, Envoy will orchestrate sessions"
             );
@@ -2096,11 +2096,9 @@ mod test {
 #[derive(Debug, Clone)]
 pub struct MultiClusterInfo {
     /// Whether this operator is the primary cluster (where Envoy runs)
-    pub is_primary: bool,
+    pub multi_cluster: bool,
     /// Logical name of this cluster
     pub cluster_name: String,
-    /// Logical name of the primary cluster
-    pub primary_cluster: String,
     /// Logical name of the default cluster (for stateful operations)
     pub default_cluster: String,
 }
@@ -2119,9 +2117,8 @@ impl<C: ClientCertificateState> OperatorApi<C> {
         }
 
         Some(MultiClusterInfo {
-            is_primary: multi_cluster_config.is_primary,
+            multi_cluster: multi_cluster_config.enabled,
             cluster_name: multi_cluster_config.cluster_name.clone(),
-            primary_cluster: multi_cluster_config.primary_cluster.clone(),
             default_cluster: multi_cluster_config.default_cluster.clone(),
         })
     }
