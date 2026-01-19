@@ -2,19 +2,15 @@
 use std::{ffi::CStr, ops::Not, path::PathBuf};
 
 use libc::c_char;
-pub use mirrord_layer_lib::proxy_connection::{
-    make_proxy_request_no_response, make_proxy_request_with_response,
+pub use mirrord_layer_lib::{
+    detour::{Bypass, Detour},
+    proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
 };
 use mirrord_protocol::file::OpenOptionsInternal;
 use null_terminated::Nul;
 use tracing::warn;
 
-use crate::{
-    detour::{Bypass, Detour},
-    exec_hooks::Argv,
-    file::OpenOptionsInternalExt,
-    socket::SHARED_SOCKETS_ENV_VAR,
-};
+use crate::{exec_hooks::Argv, file::OpenOptionsInternalExt, socket::SHARED_SOCKETS_ENV_VAR};
 
 /// Converts raw pointer values `P` to some other type.
 ///

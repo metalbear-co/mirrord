@@ -139,7 +139,6 @@ mod integration_tests_deps {
 }
 
 mod common;
-mod detour;
 mod error;
 mod exec_hooks;
 #[cfg(target_os = "macos")]

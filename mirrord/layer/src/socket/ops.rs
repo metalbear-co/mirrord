@@ -23,6 +23,7 @@ use mirrord_intproxy_protocol::{
 #[cfg(target_os = "macos")]
 use mirrord_layer_lib::socket::apple_dnsinfo::*;
 use mirrord_layer_lib::{
+    detour::{Detour, OnceLockExt, OptionExt},
     graceful_exit,
     socket::{
         Bound, Connected, SocketAddrExt, SocketKind, SocketState,
@@ -43,7 +44,6 @@ use tracing::{error, trace};
 use super::{hooks::*, *};
 use crate::{
     common::make_proxy_request_with_response,
-    detour::{Detour, OnceLockExt, OptionExt},
     error::HookError,
     file::{self, OPEN_FILES},
 };

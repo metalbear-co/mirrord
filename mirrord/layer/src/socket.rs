@@ -9,14 +9,16 @@ use std::{
 
 use base64::prelude::*;
 use libc::{sockaddr, socklen_t};
-pub use mirrord_layer_lib::socket::UserSocket;
+pub use mirrord_layer_lib::{
+    detour::{Bypass, Detour},
+    socket::UserSocket,
+};
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
 use tracing::warn;
 
 use crate::{
     common,
-    detour::{Bypass, Detour},
     error::{HookError, HookResult},
 };
 
