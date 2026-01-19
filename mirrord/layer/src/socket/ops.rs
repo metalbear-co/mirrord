@@ -27,7 +27,7 @@ use mirrord_layer_lib::{
     graceful_exit,
     socket::{
         Bound, Connected, SocketAddrExt, SocketKind, SocketState,
-        dns::{remote_getaddrinfo, unix::getaddrinfo as getaddrinfo_common},
+        dns::{remote_getaddrinfo, unix::getaddrinfo as getaddrinfo_lib},
         ops::{ConnectResult, connect_common, connect_outgoing_common, nop_connect_fn},
     },
 };
@@ -739,7 +739,7 @@ pub(super) fn getaddrinfo(
     rawish_service: Option<&CStr>,
     raw_hints: Option<&libc::addrinfo>,
 ) -> Detour<*mut libc::addrinfo> {
-    getaddrinfo_common(rawish_node, rawish_service, raw_hints).into()
+    getaddrinfo_lib(rawish_node, rawish_service, raw_hints)
 }
 
 /// Retrieves the `hostname` from the agent's `/etc/hostname` to be used by [`gethostname`]
