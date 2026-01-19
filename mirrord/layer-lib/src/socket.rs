@@ -282,7 +282,6 @@ impl UserSocket {
 
 impl Drop for UserSocket {
     fn drop(&mut self) {
-        // Do not fail if error is returned, as other processes might have closed it already.
         let _ = self.close();
     }
 }
