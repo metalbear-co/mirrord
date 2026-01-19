@@ -407,10 +407,11 @@ pub(crate) enum CliError {
         mirrord failed to execute Kube authentication command.
         This can happen when the command is not specified using absolute path and cannot be found in $PATH in the context where mirrord is invoked.
         Possible fixes:
-        1. Change global $PATH to include the authentication command and relaunch the IDE/terminal.
-        2. In the kubeconfig, specify the command with an absolute path.{GENERAL_HELP}
+        1. Run `mirrord fix kubeconfig` from a terminal.
+        2. Change global $PATH to include the authentication command and relaunch the IDE/terminal.
+        3. In the kubeconfig, specify the command with an absolute path.{GENERAL_HELP}
     "))]
-    KubeAuthExecFailed(String),
+    KubeAuthExecFailed(io::Error),
 
     #[error("Failed while resolving target while using the mirrord-operator: {0}")]
     #[diagnostic(help(
@@ -508,8 +509,8 @@ impl CliError {
         use kube::{Error, client::AuthError};
 
         match error {
-            KubeApiError::KubeError(Error::Auth(AuthError::AuthExec(error))) => {
-                Self::KubeAuthExecFailed(error.to_owned())
+            KubeApiError::KubeError(Error::Auth(AuthError::AuthExecStart(error))) => {
+                Self::KubeAuthExecFailed(error)
             }
             // UGH(alex): Type-erased errors are messy, and this one is especially bad.
             // See `kube_service_error_dependency_is_in_sync` for a "what's going on here".
@@ -545,9 +546,12 @@ impl From<OperatorApiError> for CliError {
                 operation,
             } if code == StatusCode::FORBIDDEN => Self::OperatorApiForbidden(operation, message),
             OperatorApiError::KubeError {
-                error: Error::Auth(AuthError::AuthExec(error)),
+                error: Error::Auth(AuthError::AuthExecStart(error)),
                 ..
-            } => Self::KubeAuthExecFailed(error),
+            }
+            | OperatorApiError::KubeApi(KubeApiError::KubeError(Error::Auth(
+                AuthError::AuthExecStart(error),
+            ))) => Self::KubeAuthExecFailed(error),
             OperatorApiError::KubeError { error, operation } => {
                 Self::OperatorApiFailed(operation, error)
             }

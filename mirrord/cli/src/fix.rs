@@ -53,7 +53,8 @@ pub enum FixKubeconfigError {
     MissingUser { ctx: String, user: String },
 
     #[error(
-        "user {user}'s auth config uses {cmd_path:?}, which cannot be resolved using the current $PATH ({err})"
+        "user {user}'s auth config uses {cmd_path:?}, which cannot be resolved using the current $PATH ({err}).
+Ensure this command is run from a context where the parent directory of {cmd_path:?} is included in $PATH."
     )]
     CannotResolve {
         user: String,
