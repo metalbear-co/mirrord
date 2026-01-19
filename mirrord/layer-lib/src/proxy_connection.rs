@@ -20,8 +20,6 @@ use thiserror::Error;
 
 use crate::error::{HookError, HookResult};
 
-/// Global proxy connection instance, shared across the layer
-
 // TODO: We don't really need a lock, we just need a type that:
 //  1. Can be initialized as static (with a const constructor or whatever)
 //  2. Is `Sync` (because shared static vars have to be).
