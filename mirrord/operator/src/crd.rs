@@ -280,6 +280,56 @@ pub struct MirrordOperatorStatus {
 
     /// Option because added later.
     pub copy_targets: Option<Vec<CopyTargetEntryCompat>>,
+
+    /// Status of connected remote clusters (only on primary with multi-cluster enabled).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connected_clusters: Option<Vec<ConnectedClusterStatus>>,
+}
+
+/// Status of a connected remote cluster.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectedClusterStatus {
+    /// Logical name of the cluster.
+    pub name: String,
+    /// Timestamp of last health check (RFC3339 format).
+    pub last_check: String,
+    /// Result of the health check.
+    #[serde(flatten)]
+    pub result: ClusterCheckResult,
+}
+
+/// Result of a cluster health check.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ClusterCheckResult {
+    /// Cluster is connected and responding.
+    Connected {
+        /// Operator version running on the remote cluster.
+        operator_version: String,
+        /// License fingerprint from the remote cluster (for license validation).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        license_fingerprint: Option<String>,
+    },
+    /// Cluster check failed.
+    Error {
+        /// Error message describing the failure.
+        message: String,
+    },
+}
+
+/// Configuration for a remote cluster in multi-cluster mode.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ClusterConfig {
+    /// Logical name of the cluster.
+    pub name: String,
+    /// Kubernetes API server URL.
+    pub url: String,
+    /// Authentication method: "token" or "certificate".
+    pub authentication_method: String,
+    /// Name of the Secret containing cluster credentials.
+    pub secret: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -806,4 +856,8 @@ pub struct MultiClusterConfig {
 
     /// Logical name of the default cluster (for stateful operations)
     pub default_cluster: String,
+
+    /// Configured remote clusters
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clusters: Vec<ClusterConfig>,
 }
