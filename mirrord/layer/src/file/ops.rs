@@ -951,12 +951,12 @@ mod test {
         Success,
     }
 
-    impl<S> Detour<S> {
-        fn kind(&self) -> DetourKind {
-            match self {
-                Self::Bypass(..) => DetourKind::Bypass,
-                Self::Error(..) => DetourKind::Error,
-                Self::Success(..) => DetourKind::Success,
+    impl<S> From<&Detour<S>> for DetourKind {
+        fn from(detour: &Detour<S>) -> Self {
+            match detour {
+                Detour::Bypass(..) => DetourKind::Bypass,
+                Detour::Error(..) => DetourKind::Error,
+                Detour::Success(..) => DetourKind::Success,
             }
         }
     }
@@ -1183,7 +1183,7 @@ mod test {
 
         let res = ensure_remote(&file_filter, Path::new(path), write);
         println!("filter result: {res:?}");
-        assert_eq!(res.kind(), expected);
+        assert_eq!(DetourKind::from(&res), expected);
     }
 
     #[rstest]
@@ -1222,7 +1222,7 @@ mod test {
         let res = ensure_remote(&file_filter, Path::new(path), write);
         println!("filter result: {res:?}");
 
-        assert_eq!(res.kind(), expected);
+        assert_eq!(DetourKind::from(&res), expected);
     }
 
     /// Sanity test for empty [`RegexSet`] behaviour.
@@ -1246,6 +1246,6 @@ mod test {
         let res = ensure_remote(&filter, Path::new(path), false);
         println!("filter result: {res:?}");
 
-        assert_eq!(res.kind(), expected);
+        assert_eq!(DetourKind::from(&res), expected);
     }
 }

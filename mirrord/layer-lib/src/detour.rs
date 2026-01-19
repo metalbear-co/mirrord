@@ -15,7 +15,7 @@ use std::{cell::RefCell, ffi::CString, ops::Deref, os::fd::RawFd, path::PathBuf,
 
 #[cfg(target_os = "macos")]
 use libc::c_char;
-
+#[cfg(unix)]
 use crate::error::HookError;
 
 #[cfg(unix)]
