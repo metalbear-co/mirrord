@@ -13,7 +13,7 @@ use socket2::SockAddr;
 use tracing::{trace, warn};
 
 use crate::{
-    detour::{Detour, Bypass, OptionExt},
+    detour::{Bypass, Detour, OptionExt},
     error::HookError,
     setup::setup,
     socket::remote_getaddrinfo,
