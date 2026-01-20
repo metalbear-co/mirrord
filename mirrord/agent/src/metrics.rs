@@ -45,9 +45,13 @@ pub(crate) static TCP_OUTGOING_CONNECTION: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) static UDP_OUTGOING_CONNECTION: AtomicUsize = AtomicUsize::new(0);
 
+/// Metrics for tracking bypassed requests (a request that did not match an http filter or wasn't
+/// stolen by the stealer task).
+///
+/// - Also consumed by the operator.
 pub(crate) static BYPASSED_REQUESTS: LazyLock<prometheus::GaugeVec> = LazyLock::new(|| {
     prometheus::register_gauge_vec!(
-        "mirrord_bypassed_requests_count",
+        "mirrord_agent_bypassed_requests",
         "amount of incoming requests currently bypassed by mirrord-agent",
         &["port"]
     )
