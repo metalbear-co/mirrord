@@ -458,6 +458,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 ///   inform the caller that no data have been enqueued. `flags` is ignored for the same reason.
 /// * `sae_srcif`, source interface index, is an optional field of `endpoints`
 #[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
 #[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
 pub(super) fn connectx(
     socket: RawFd,
