@@ -940,11 +940,11 @@ Example:
 }
 ```
 
-When configuring a branch for MySQL, set `type` to `mysql`.
+When configuring a branch for MongoDB, set `type` to `mongodb`.
 
 MySQL and Postgres database branch config objects share the following fields.
 
-#### feature.db_branches[].connection (type: mysql, pg) {#feature-db_branches-sql-connection}
+#### feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}
 
 `connection` describes how to get the connection information to the source database.
 When the branch database is ready for use, Mirrord operator will replace the connection
@@ -966,24 +966,24 @@ the target pod template.
 }
 ```
 
-#### feature.db_branches[].creation_timeout_secs (type: mysql, pg) {#feature-db_branches-sql-creation_timeout_secs}
+#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
 
 The timeout in seconds to wait for a database branch to become ready after creation.
 Defaults to 60 seconds. Adjust this value based on your database size and cluster
 performance.
 
-#### feature.db_branches[].id (type: mysql, pg) {#feature-db_branches-sql-id}
+#### feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}
 
 Users can choose to specify a unique `id`. This is useful for reusing or sharing
 the same database branch among Kubernetes users.
 
-#### feature.db_branches[].name (type: mysql, pg) {#feature-db_branches-sql-name}
+#### feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}
 
 When source database connection detail is not accessible to mirrord operator, users
 can specify the database `name` so it is included in the connection options mirrord
 uses as the override.
 
-#### feature.db_branches[].ttl_secs (type: mysql, pg) {#feature-db_branches-sql-ttl_secs}
+#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}
 
 Mirrord operator starts counting the TTL when a branch is no longer used by any session.
 The time-to-live (TTL) for the branch database is set to 300 seconds by default.
@@ -991,7 +991,116 @@ Users can set `ttl_secs` to customize this value according to their need. Please
 that longer TTL paired with frequent mirrord session turnover can result in increased
 resource usage. For this reason, branch database TTL caps out at 15 min.
 
-#### feature.db_branches[].version (type: mysql, pg) {#feature-db_branches-sql-version}
+#### feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}
+
+Mirrord operator uses a default version of the database image unless `version` is given.
+
+Users can choose from the following copy mode to bootstrap their MongoDB branch database:
+
+- Empty
+
+  Creates an empty database. If the source DB connection options are found from the chosen
+  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord
+  operator looks for the `name` field from the branch DB config object. This option is useful
+  for users that run DB migrations themselves before starting the application.
+
+- All
+
+  Copies both schema and data of all collections. Supports optional collection filters
+  to copy only specific collections or filter documents within collections.
+
+Configuration for copying a specific collection.
+
+Example:
+
+```json
+{
+  "users": {
+    "filter": "{\"name\": {\"$in\": [\"alice\", \"bob\"]}}"
+  },
+  "orders": {
+    "filter": "{\"created_at\": {\"$gt\": 1759948761}}"
+  }
+}
+```
+
+With the config above, only alice and bob from the `users` collection and orders
+created after the given timestamp will be copied.
+
+A MongoDB query filter in JSON format. Documents matching this filter will be copied.
+
+Configuration for copying a specific collection.
+
+Example:
+
+```json
+{
+  "users": {
+    "filter": "{\"name\": {\"$in\": [\"alice\", \"bob\"]}}"
+  },
+  "orders": {
+    "filter": "{\"created_at\": {\"$gt\": 1759948761}}"
+  }
+}
+```
+
+With the config above, only alice and bob from the `users` collection and orders
+created after the given timestamp will be copied.
+
+A MongoDB query filter in JSON format. Documents matching this filter will be copied.
+
+When configuring a branch for MySQL, set `type` to `mysql`.
+
+MySQL and Postgres database branch config objects share the following fields.
+
+#### feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}
+
+`connection` describes how to get the connection information to the source database.
+When the branch database is ready for use, Mirrord operator will replace the connection
+information with the branch database's.
+
+Different ways of connecting to the source database.
+
+Example:
+
+A single complete connection URL stored in an environment variable accessible from
+the target pod template.
+
+```json
+{
+  "url": {
+    "type": "env",
+    "variable": "DB_CONNECTION_URL"
+  }
+}
+```
+
+#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
+
+The timeout in seconds to wait for a database branch to become ready after creation.
+Defaults to 60 seconds. Adjust this value based on your database size and cluster
+performance.
+
+#### feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}
+
+Users can choose to specify a unique `id`. This is useful for reusing or sharing
+the same database branch among Kubernetes users.
+
+#### feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}
+
+When source database connection detail is not accessible to mirrord operator, users
+can specify the database `name` so it is included in the connection options mirrord
+uses as the override.
+
+#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}
+
+Mirrord operator starts counting the TTL when a branch is no longer used by any session.
+The time-to-live (TTL) for the branch database is set to 300 seconds by default.
+Users can set `ttl_secs` to customize this value according to their need. Please note
+that longer TTL paired with frequent mirrord session turnover can result in increased
+resource usage. For this reason, branch database TTL caps out at 15 min.
+
+#### feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}
 
 Mirrord operator uses a default version of the database image unless `version` is given.
 
@@ -1055,7 +1164,7 @@ When configuring a branch for PostgreSQL, set `type` to `pg`.
 
 MySQL and Postgres database branch config objects share the following fields.
 
-#### feature.db_branches[].connection (type: mysql, pg) {#feature-db_branches-sql-connection}
+#### feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}
 
 `connection` describes how to get the connection information to the source database.
 When the branch database is ready for use, Mirrord operator will replace the connection
@@ -1077,24 +1186,24 @@ the target pod template.
 }
 ```
 
-#### feature.db_branches[].creation_timeout_secs (type: mysql, pg) {#feature-db_branches-sql-creation_timeout_secs}
+#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
 
 The timeout in seconds to wait for a database branch to become ready after creation.
 Defaults to 60 seconds. Adjust this value based on your database size and cluster
 performance.
 
-#### feature.db_branches[].id (type: mysql, pg) {#feature-db_branches-sql-id}
+#### feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}
 
 Users can choose to specify a unique `id`. This is useful for reusing or sharing
 the same database branch among Kubernetes users.
 
-#### feature.db_branches[].name (type: mysql, pg) {#feature-db_branches-sql-name}
+#### feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}
 
 When source database connection detail is not accessible to mirrord operator, users
 can specify the database `name` so it is included in the connection options mirrord
 uses as the override.
 
-#### feature.db_branches[].ttl_secs (type: mysql, pg) {#feature-db_branches-sql-ttl_secs}
+#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}
 
 Mirrord operator starts counting the TTL when a branch is no longer used by any session.
 The time-to-live (TTL) for the branch database is set to 300 seconds by default.
@@ -1102,7 +1211,7 @@ Users can set `ttl_secs` to customize this value according to their need. Please
 that longer TTL paired with frequent mirrord session turnover can result in increased
 resource usage. For this reason, branch database TTL caps out at 15 min.
 
-#### feature.db_branches[].version (type: mysql, pg) {#feature-db_branches-sql-version}
+#### feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}
 
 Mirrord operator uses a default version of the database image unless `version` is given.
 

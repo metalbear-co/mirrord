@@ -38,6 +38,7 @@ clap.workspace = true
 dotenvy.workspace = true
 tracing.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 serde.workspace = true
 tracing-subscriber.workspace = true
 futures.workspace = true
@@ -76,6 +77,8 @@ tower-http = { version = "0.6.6", features = ["fs", "set-header"], optional = tr
 tar = { version = "0.4.44", optional = true }
 flate2 = { version = "1.1.2", optional = true }
 itertools = { workspace = true, optional = true }
+yamlpatch.workspace = true
+yamlpath.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 rand.workspace = true
@@ -106,6 +109,7 @@ hyper-util = { workspace = true, "features" = ["server"] }
 http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
+tempfile.workspace = true
 
 [features]
 windows_build = []

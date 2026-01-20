@@ -8,6 +8,40 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.182.0](https://github.com/metalbear-co/mirrord/tree/3.182.0) - 2026-01-16
+
+
+### Added
+
+- Add support for db branches IAM.
+
+
+### Changed
+
+- `mirrord` now sets agent priority class for targeted agent pod as well.
+  [#3871.targeted-agent-priority-class](https://github.com/metalbear-co/mirrord/issues/3871.targeted-agent-priority-class)
+
+
+### Fixed
+
+- Agent will now terminate the intproxy side of HTTP connections that were
+  closed by the remote HTTP client.
+- Fixed a regression caused by panicing when closing a user socket that is
+  already dropped.
+
+
+### Internal
+
+- Made wizard IO error to `CliError` conversion more explicit
+- Refactor Windows CI workflows to use robust IAP tunneling with Service
+  Account authentication and VM-resident Kubeconfig. Added `windows-tests.yaml`
+  for on-demand E2E testing triggered by label or manual dispatch.
+- Tell claude how to run the mirrord CLI.
+- Updated `configuration.md` and added a CI step to verify the file is updated
+  if configuration has chagned.
+- Updated the flake lockfile.
+- fix release windows
+
 ## [3.181.1](https://github.com/metalbear-co/mirrord/tree/3.181.1) - 2026-01-14
 
 

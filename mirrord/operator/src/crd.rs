@@ -26,6 +26,7 @@ pub mod external;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
+pub mod mongodb_branching;
 pub mod mysql_branching;
 pub mod patch;
 pub mod pg_branching;
@@ -398,6 +399,7 @@ pub enum NewOperatorFeature {
     /// operator's license gets updated (on validity extension, for example).
     BypassCiCertificateVerification,
 
+    MongodbBranching,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -423,6 +425,7 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::MySqlBranching => "MySQL branching",
             NewOperatorFeature::PgBranching => "PostgreSQL branching",
+            NewOperatorFeature::MongodbBranching => "MongoDB branching",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
             NewOperatorFeature::BypassCiCertificateVerification => {
                 "BypassCiCertificateVerification"
