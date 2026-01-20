@@ -474,9 +474,12 @@ pub(super) fn connectx(
     }
 
     // The parameter associd is reserved for future use, and must always be set to SAE_ASSOCID_ANY.
+    if associd != SAE_ASSOCID_ANY {
+        warn!("associd is not SAE_ASSOCID_ANY.");
+    }
     // The parameter connid is also reserved for future use and should be set to NULL.
-    if associd != SAE_ASSOCID_ANY || !connid.is_null() {
-        return Detour::Bypass(Bypass::InvalidArgValue);
+    if !connid.is_null() {
+        warn!("connid is not null.");
     }
 
     let eps = unsafe {
@@ -484,6 +487,7 @@ pub(super) fn connectx(
 
         // Destination address must be specified.
         if eps.sae_dstaddr.is_null() {
+            warn!("destination address is null");
             return Detour::Bypass(Bypass::InvalidArgValue);
         }
 
@@ -493,6 +497,13 @@ pub(super) fn connectx(
     // Bind with source address if given.
     if !eps.sae_srcaddr.is_null() {
         bind(socket, eps.sae_srcaddr, eps.sae_srcaddrlen)?;
+    }
+
+    // Explicitly set `len` to 0.
+    if !len.is_null() {
+        unsafe {
+            *len = 0;
+        }
     }
 
     // Connect to the destination address.

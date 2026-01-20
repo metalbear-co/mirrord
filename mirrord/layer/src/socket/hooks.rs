@@ -544,7 +544,7 @@ pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifadd
 
 #[cfg(target_os = "macos")]
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn _connectx_detour(
+pub(crate) unsafe extern "C" fn connectx_detour(
     socket: RawFd,
     endpoints: *const sa_endpoints_t,
     associd: sae_associd_t,
@@ -558,7 +558,7 @@ pub(crate) unsafe extern "C" fn _connectx_detour(
         connectx(socket, endpoints, associd, flags, iov, iovcnt, len, connid)
             .map(From::from)
             .unwrap_or_bypass_with(|_| {
-                FN__CONNECTX(socket, endpoints, associd, flags, iov, iovcnt, len, connid)
+                FN_CONNECTX(socket, endpoints, associd, flags, iov, iovcnt, len, connid)
             })
     }
 }
@@ -760,10 +760,10 @@ pub(crate) unsafe fn enable_socket_hooks(
         {
             replace!(
                 hook_manager,
-                "_connectx",
-                _connectx_detour,
-                Fn_connectx,
-                FN__CONNECTX
+                "connectx",
+                connectx_detour,
+                FnConnectx,
+                FN_CONNECTX
             );
         }
     }
