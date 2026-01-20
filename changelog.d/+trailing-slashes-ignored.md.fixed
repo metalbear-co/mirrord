@@ -1,0 +1,1 @@
+Agent will no longer ignore trailing slashes when handling file open requests
