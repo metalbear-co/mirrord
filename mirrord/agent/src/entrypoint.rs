@@ -514,14 +514,7 @@ impl ClientConnectionHandler {
                     .await?;
             }
             ClientMessage::ReverseDnsLookup(request) => {
-                let hostname = dns_lookup::lookup_addr(&request.ip_address).inspect_err(|error| {
-                    error!(
-                        address = ?request.ip_address,
-                        error = ?error,
-                        "Reverse DNS lookup failed",
-                    )
-                });
-
+                let hostname = dns_lookup::lookup_addr(&request.ip_address);
                 self.respond(DaemonMessage::ReverseDnsLookup(Ok(
                     ReverseDnsLookupResponse {
                         hostname: hostname.map_err(ResponseError::from),
