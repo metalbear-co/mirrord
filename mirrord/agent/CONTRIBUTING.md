@@ -94,11 +94,15 @@ async fn handle_requests(
 
     loop {
         tokio::select! {
+            biased;
             // Wrapping up, start graceful shutdown on the connection.
             // We don't want to receive any more requests.
             _ = token.cancelled() => {
                 connection.start_graceful_shutdown();
             },
+            // Progress previously received requests.
+            Some(()) = requests.next() => {},
+            // Receive the next request.
             request = connection.next_request() => {
                 let Some(request) = request else {
                     // Connection is finished.
@@ -108,8 +112,6 @@ async fn handle_requests(
                 };
                 requests.push(handle_single_request(request));
             },
-            // Progress received requests.
-            Some(()) = requests.next() => {},
         }
     }
 }
@@ -119,3 +121,12 @@ However, from the moment the token is cancelled, the future returned from `token
 Also, since there is no `.await` point in this branch, the control will never go back to the runtime, and no other future will ever be progressed.
 The `tokio::select!` will always go into the first branch, and the whole agent will be stuck at calling `connection.start_graceful_shutdown()` in a loop,
 doing **no other work**.
+
+Even if there was an `.await` point in the first branch, and the `tokio::select!` was not `biased`,
+polling `token.cancelled()` in a loop would still result burn the CPU, and dramatically reduce agent's responsiveness.
+
+More examples of similar buggy loops:
+
+1. Reading from a connection that already returned EOF.
+2. Receiving from an `mpsc` channel that already returned `None`.
+3. Polling an empty `FuturesUnordered`/`FuturesOrdered`/`JoinSet`.
