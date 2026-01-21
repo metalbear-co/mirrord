@@ -8,13 +8,13 @@ Mind that in mfT:
 Be very careful when logging on or above the default log level, which is `INFO`.
 Such logs should be meaningful to the mirrord admin, not only to the user that runs the session.
 
-Examples of events that **are not** meaningful to the mirrord admin:
+Examples of mirrord-agent events that **are not** meaningful to the mirrord admin:
 
 1. Failed to make an outgoing connection requested by a session
 2. Failed to resolve DNS requested by a session
 3. Failed to deliver a stolen HTTP request, because the session has disconnected
 
-Examples of events that **are** meaningful to the mirrord admin:
+Examples of mirrord-agent events that **are** meaningful to the mirrord admin:
 
 1. Failed in an unexpected way, i.e. we have a bug in the agent.
 2. Encountered a fatal error, and most probably is not configured properly.
