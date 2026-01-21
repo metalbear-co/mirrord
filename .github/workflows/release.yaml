@@ -519,6 +519,7 @@ jobs:
           push: true
           tags: |
             ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }}
+            ghcr.io/metalbear-co/mirrord-cli:latest
 
   release_gh:
     needs:
