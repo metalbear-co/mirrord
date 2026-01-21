@@ -1,0 +1,1 @@
+Fixed bogus error logs printed by the agent on failed reverse DNS lookups.
