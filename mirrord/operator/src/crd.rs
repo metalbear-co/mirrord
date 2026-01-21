@@ -3,6 +3,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
+use chrono::{DateTime, Utc};
 use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
@@ -13,6 +14,7 @@ use mirrord_config::{
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[cfg(feature = "client")]
 use crate::client::error::OperatorApiError;
@@ -274,6 +276,7 @@ pub struct MirrordOperatorStatus {
 
     /// Option because added later.
     pub copy_targets: Option<Vec<CopyTargetEntryCompat>>,
+    pub ci_sessions: Option<Vec<CiSession>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -343,6 +346,45 @@ pub struct Session {
     pub user_id: Option<String>,
     pub sqs: Option<Vec<MirrordSqsSession>>,
     pub kafka: Option<Vec<MirrordKafkaEphemeralTopicSpec>>,
+}
+
+/// Nicer type for the `ci_sessions` database table.
+///
+/// You should use this type in the operator and the license-server, rather than the somewhat
+/// equivalent `CiSessionSql`, since here we have better types.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CiSession {
+    /// Id of this CI session.
+    ///
+    /// Must always be present in the [`MirrordClusterSession`] that we're dealing with.
+    pub uid: Uuid,
+
+    /// `LicenseKey` obtained from the `LicenseInfo::fingerprint` function.
+    pub license_hash: String,
+
+    pub target_namespace: Option<String>,
+
+    /// Deployment, pod, etc.
+    pub target_kind: Option<String>,
+    pub target_name: Option<String>,
+    pub target_container: Option<String>,
+
+    /// CI provider, e.g. github, gitlab, etc.
+    pub provider: Option<String>,
+    pub environment: Option<String>,
+    pub pipeline: Option<String>,
+    pub triggered_by: Option<String>,
+
+    /// When the session started, according to [`MirrordClusterSession`].
+    pub started_at: DateTime<Utc>,
+
+    /// `CiController` periodcally updates the backend to keep sessions as active, this is the time
+    /// of the last update it sent.
+    pub last_checked_at: DateTime<Utc>,
+
+    /// Session has been deleted ([`MirrordClusterSession`] has a `deletion_timestamp`), so we
+    /// count it as a dead session.
+    pub stopped_at: Option<DateTime<Utc>>,
 }
 
 /// Resource used to access the operator's session management routes.
