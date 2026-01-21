@@ -20,9 +20,7 @@ use mirrord_agent_iptables::{
     IPTablesWrapper, SafeIpTables,
     error::{IPTablesError, IPTablesResult},
 };
-use mirrord_protocol::{
-    ClientMessage, DaemonMessage, GetEnvVarsRequest, ResponseError, dns::ReverseDnsLookupResponse,
-};
+use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
     process::Command,
@@ -49,6 +47,7 @@ use crate::{
     mirror::TcpMirrorApi,
     namespace::NamespaceType,
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
+    reverse_dns::ReverseDnsApi,
     runtime::{self, get_container},
     steal::{StealerCommand, TcpStealerApi},
     task::{BgTaskRuntime, RuntimeNamespace, status::BgTaskStatus},
@@ -273,6 +272,7 @@ struct ClientConnectionHandler {
     tcp_outgoing_api: TcpOutgoingApi,
     udp_outgoing_api: UdpOutgoingApi,
     dns_api: DnsApi,
+    reverse_dns_api: ReverseDnsApi,
     state: State,
     /// Whether the client has sent us [`ClientMessage::ReadyForLogs`].
     ready_for_logs: bool,
@@ -312,7 +312,7 @@ impl ClientConnectionHandler {
         )
         .await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
-
+        let reverse_dns_api = ReverseDnsApi::new(&state.network_runtime);
         let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime);
         let udp_outgoing_api = UdpOutgoingApi::new(&state.network_runtime);
 
@@ -325,6 +325,7 @@ impl ClientConnectionHandler {
             tcp_outgoing_api,
             udp_outgoing_api,
             dns_api,
+            reverse_dns_api,
             state,
             ready_for_logs: false,
             protocol_version,
@@ -439,10 +440,10 @@ impl ClientConnectionHandler {
                     Ok(message) => self.respond(DaemonMessage::GetAddrInfoResponse(message)).await?,
                     Err(e) => break e,
                 },
-                // message = self.vpn_api.daemon_message() => match message{
-                //     Ok(message) => self.respond(DaemonMessage::Vpn(message)).await?,
-                //     Err(e) => break e,
-                // },
+                message = self.reverse_dns_api.recv() => match message {
+                    Ok(message) => self.respond(DaemonMessage::ReverseDnsLookup(Ok(message))).await?,
+                    Err(e) => break e,
+                },
                 _ = cancellation_token.cancelled() => return Ok(()),
             }
         };
@@ -514,13 +515,8 @@ impl ClientConnectionHandler {
                     .await?;
             }
             ClientMessage::ReverseDnsLookup(request) => {
-                let hostname = dns_lookup::lookup_addr(&request.ip_address);
-                self.respond(DaemonMessage::ReverseDnsLookup(Ok(
-                    ReverseDnsLookupResponse {
-                        hostname: hostname.map_err(ResponseError::from),
-                    },
-                )))
-                .await?
+                self.reverse_dns_api
+                    .request_reverse_lookup(request.ip_address);
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             // Message handled exclusively by the operator, see its docs for details.
