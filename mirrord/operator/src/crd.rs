@@ -269,6 +269,7 @@ impl CopyTargetEntryCompat {
     }
 }
 
+/// _CRD-ish_ that we get from `mirrord operator status`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
     pub sessions: Vec<Session>,
@@ -276,6 +277,11 @@ pub struct MirrordOperatorStatus {
 
     /// Option because added later.
     pub copy_targets: Option<Vec<CopyTargetEntryCompat>>,
+
+    /// Currently active mirrord for ci [`CiSession`]s.
+    ///
+    /// - These sessions have a slight delay before they're reported as dead (they have a ttl), so
+    ///   you may see some in here that are not currently being used.
     pub ci_sessions: Option<Vec<CiSession>>,
 }
 
@@ -348,15 +354,12 @@ pub struct Session {
     pub kafka: Option<Vec<MirrordKafkaEphemeralTopicSpec>>,
 }
 
-/// Nicer type for the `ci_sessions` database table.
-///
-/// You should use this type in the operator and the license-server, rather than the somewhat
-/// equivalent `CiSessionSql`, since here we have better types.
+/// _CRD-ish_ that represents a mirrord for ci session.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct CiSession {
     /// Id of this CI session.
     ///
-    /// Must always be present in the [`MirrordClusterSession`] that we're dealing with.
+    /// Must always be present in the `MirrordClusterSession` that we're dealing with.
     pub uid: Uuid,
 
     /// `LicenseKey` obtained from the `LicenseInfo::fingerprint` function.
@@ -375,14 +378,14 @@ pub struct CiSession {
     pub pipeline: Option<String>,
     pub triggered_by: Option<String>,
 
-    /// When the session started, according to [`MirrordClusterSession`].
+    /// When the session started, according to `MirrordClusterSession`.
     pub started_at: DateTime<Utc>,
 
     /// `CiController` periodcally updates the backend to keep sessions as active, this is the time
     /// of the last update it sent.
     pub last_checked_at: DateTime<Utc>,
 
-    /// Session has been deleted ([`MirrordClusterSession`] has a `deletion_timestamp`), so we
+    /// Session has been deleted (`MirrordClusterSession` has a `deletion_timestamp`), so we
     /// count it as a dead session.
     pub stopped_at: Option<DateTime<Utc>>,
 }
