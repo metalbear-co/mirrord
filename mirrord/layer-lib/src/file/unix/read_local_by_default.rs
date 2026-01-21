@@ -56,6 +56,8 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r"/node_modules",
         // asdf
         r".*/\.tool-versions$",
+        // WSL quirks
+        "^/Program.Files",
         // macOS
         #[cfg(target_os = "macos")]
         "^/Volumes(/|$)",
