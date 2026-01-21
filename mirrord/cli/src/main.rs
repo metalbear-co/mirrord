@@ -352,6 +352,13 @@ async fn exec_process<P>(
 where
     P: Progress,
 {
+    // IDE-orchestrated mode: only propagate DLL injection without full mirrord setup.
+    // The IDE manages the actual mirrord environment.
+    #[cfg(target_os = "windows")]
+    if args.ide_orchestrated {
+        return run_ide_orchestrated(args, progress, analytics).await;
+    }
+
     let mut sub_progress = progress.subtask("preparing to launch process");
 
     #[cfg(target_os = "linux")]
@@ -451,6 +458,7 @@ where
         _did_sip_patch,
         sub_progress,
         analytics,
+        #[cfg(not(target_os = "windows"))]
         &config,
         #[cfg(not(target_os = "windows"))]
         mirrord_for_ci,
@@ -538,13 +546,13 @@ async fn run_process_with_mirrord<P>(
     _did_sip_patch: bool,
     progress: P,
     analytics: &mut AnalyticsReporter,
-    _config: &LayerConfig,
 ) -> CliResult<()>
 where
     P: Progress,
 {
     // Let Windows handle executable resolution naturally
     // Don't force .exe extension - Windows will try .exe, .bat, .cmd, etc. automatically
+
     let binary_name = binary.clone();
 
     let binary_path = process_which(&binary_name).map_err(|e| {
@@ -576,6 +584,58 @@ where
 
     // Exit with the same code as the child process
     std::process::exit(exit_code as i32);
+}
+
+/// Run a process in IDE-orchestrated mode.
+///
+/// In this mode, mirrord only propagates DLL injection to child processes without
+/// establishing a full mirrord environment. The IDE manages the actual mirrord session.
+#[cfg(windows)]
+async fn run_ide_orchestrated<P>(
+    args: &ExecArgs,
+    progress: &mut P,
+    analytics: &mut AnalyticsReporter,
+) -> CliResult<()>
+where
+    P: Progress,
+{
+    use std::env;
+
+    use mirrord_layer_lib::ide::MIRRORD_IDE_ORCHESTRATED_ENV;
+    use mirrord_progress::MIRRORD_PROGRESS_ENV;
+
+    let mut sub_progress = progress.subtask("preparing IDE-orchestrated process");
+
+    let lib_path = extract_library(None, &mut sub_progress, true)?;
+    unsafe { env::set_var("MIRRORD_LAYER_FILE", &lib_path) };
+
+    // NOTE: add IDE orchestrated envvar including here, as it will be used later in execution
+    unsafe { env::set_var(MIRRORD_IDE_ORCHESTRATED_ENV, "true") };
+
+    let mut env_vars: HashMap<String, String> = vars().collect();
+    // Make it so that the user sees a console output as close to what they would see by
+    // running the application normally, by turning progress mode off
+    env_vars.insert(MIRRORD_PROGRESS_ENV.into(), "off".into());
+
+    let binary = args.binary.clone();
+
+    // Build command line arguments with executable in argv[0]
+    let binary_args = std::iter::once(&args.binary)
+        .chain(args.binary_args.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let sub_progress = progress.subtask("running process");
+
+    run_process_with_mirrord(
+        binary,
+        binary_args,
+        env_vars,
+        false,
+        sub_progress,
+        analytics,
+    )
+    .await
 }
 
 /// Prints config summary as multiple info messages, using the given [`Progress`].
@@ -1042,9 +1102,9 @@ fn main() -> miette::Result<()> {
             Commands::Operator(args) => {
                 operator_command(*args).await?;
             }
-            Commands::ExtensionExec(args) => windows_unsupported!(args, "ext", {
+            Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch, &user_data).await?;
-            }),
+            }
             Commands::InternalProxy {
                 port,
                 mirrord_for_ci,
@@ -1123,11 +1183,38 @@ fn main() -> miette::Result<()> {
     res.map_err(Into::into)
 }
 
-/// Make sure we're not running nested inside another mirrord exec
+/// Make sure we're not running nested inside another mirrord exec.
+///
+/// WINDOWS:
+/// Allows nesting when both `ext_injected` and `ide_orchestrated` are set,
+/// as this indicates the IDE is managing the mirrord environment and the
+/// nested exec is intentional (e.g., launching the actual user process).
 fn ensure_not_nested() -> CliResult<()> {
-    match std::env::var(mirrord_config::LayerConfig::RESOLVED_CONFIG_ENV) {
-        Ok(_) => Err(CliError::NestedExec),
-        Err(_) => Ok(()),
+    // Check if we're inside a mirrord session (resolved config exists)
+    let is_nested = std::env::var(mirrord_config::LayerConfig::RESOLVED_CONFIG_ENV).is_ok();
+
+    if !is_nested {
+        return Ok(());
+    }
+
+    #[cfg(not(windows))]
+    {
+        if is_nested {
+            return Err(CliError::NestedExec);
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        // Allow nesting when IDE-orchestrated mode with ext_injected
+        // This means the IDE is managing the session and this is the user process launch
+
+        use mirrord_layer_lib::ide::{is_ext_injected, is_ide_orchestrated};
+        if is_ext_injected() || is_ide_orchestrated() {
+            Ok(())
+        } else {
+            Err(CliError::NestedExec)
+        }
     }
 }
 

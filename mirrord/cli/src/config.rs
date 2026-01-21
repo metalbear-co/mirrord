@@ -414,6 +414,11 @@ pub(super) struct ExecArgs {
     #[clap(flatten)]
     pub params: Box<ExecParams>,
 
+    /// Is this an IDE-orchestrated execution?
+    /// This is an internal flag used by IDE extensions and should not be used directly.
+    #[clap(long, hide = true)]
+    pub ide_orchestrated: bool,
+
     /// Binary to execute and connect with the remote pod.
     pub binary: String,
 

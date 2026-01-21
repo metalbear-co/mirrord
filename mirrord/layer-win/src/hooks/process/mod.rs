@@ -261,10 +261,6 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
         CreateProcessInternalWType,
         CREATE_PROCESS_INTERNAL_W_ORIGINAL
     )?;
-
-    // API monitoring hooks for debugging injection scenarios
-    tracing::debug!("Installing API tracing hooks for LoadLibraryW and GetProcAddress");
-
     apply_hook!(
         guard,
         "kernel32",
@@ -282,6 +278,8 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
         GetProcAddressType,
         GET_PROC_ADDRESS_ORIGINAL
     )?;
+
+    tracing::info!("Process hooks initialization completed");
 
     Ok(())
 }
