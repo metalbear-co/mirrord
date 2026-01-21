@@ -450,13 +450,14 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     }
 }
 
-/// Implementation of BSD `connectx(2)` detour:
+/// Implementation of BSD `connectx(2)` detour.
 /// * If source address is present in `endpoints`, call [`bind`].
 /// * Call [`connect`] with the given destination address.
 /// * On success `connectx` is **supposed** to update `len` with the data length enqueued in the
 ///   socket's send buffer copied from `iov`. For simplicity, we always set `len` to 0 on success to
 ///   inform the caller that no data have been enqueued. `flags` is ignored for the same reason.
-/// * `sae_srcif`, source interface index, is an optional field of `endpoints`
+/// * `sae_srcif`, source interface index, is an optional field of `sa_endpoints_t`. When specified,
+///   `connectx` chooses a source address on the interface. This is not supported by this detour.
 #[cfg(target_os = "macos")]
 #[allow(clippy::too_many_arguments)]
 #[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
