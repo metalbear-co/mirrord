@@ -163,13 +163,9 @@ impl fmt::Debug for OperatorSession {
             )
             .field("operator_protocol_version", &self.operator_protocol_version)
             .field("operator_version", &self.operator_version)
-            .field("allow_reconnect", &self.allow_reconnect);
-        if let Some(traceparent) = &self.traceparent {
-            debug_struct.field("traceparent", traceparent);
-        }
-        if let Some(baggage) = &self.baggage {
-            debug_struct.field("baggage", baggage);
-        }
+            .field("allow_reconnect", &self.allow_reconnect)
+            .field("traceparent", &self.traceparent)
+            .field("baggage", &self.baggage);
         debug_struct.finish()
     }
 }
