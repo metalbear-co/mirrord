@@ -223,7 +223,7 @@
         "null"
       ]
     },
-    "traceparnet": {
+    "traceparent": {
       "title": "traceparent {#root-traceparent}",
       "description": "OpenTelemetry (OTel) / W3C trace context. See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)",
       "type": [
