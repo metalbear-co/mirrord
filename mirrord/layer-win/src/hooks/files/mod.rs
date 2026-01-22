@@ -23,10 +23,7 @@ use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest, SeekFromInternal,
 };
 use phnt::ffi::{
-    _IO_STATUS_BLOCK, _LARGE_INTEGER, FILE_ALL_INFORMATION, FILE_BASIC_INFORMATION,
-    FILE_FS_DEVICE_INFORMATION, FILE_INFORMATION_CLASS, FILE_POSITION_INFORMATION,
-    FILE_READ_ONLY_DEVICE, FILE_STANDARD_INFORMATION, FSINFOCLASS, PFILE_BASIC_INFORMATION,
-    PIO_APC_ROUTINE,
+    _IO_STATUS_BLOCK, _LARGE_INTEGER, FILE_ALL_INFORMATION, FILE_BASIC_INFORMATION, FILE_FS_DEVICE_INFORMATION, FILE_FS_VOLUME_INFORMATION, FILE_INFORMATION_CLASS, FILE_POSITION_INFORMATION, FILE_READ_ONLY_DEVICE, FILE_STANDARD_INFORMATION, FSINFOCLASS, PFILE_BASIC_INFORMATION, PIO_APC_ROUTINE
 };
 use str_win::path_to_unix_path;
 use winapi::{
@@ -1145,6 +1142,7 @@ unsafe extern "system" fn nt_query_attributes_file_hook(
 /// is distinguished by the [`FSINFOCLASS`] value. The current supported entries are:
 ///
 /// - [`FSINFOCLASS::FileFsDeviceInformation`]
+/// - [`FSINFOCLASS::FileFsVolumeInformation`]
 ///
 /// This is responsible to support functions such as `kernelbase!GetFileType`.
 unsafe extern "system" fn nt_query_volume_information_file_hook(
@@ -1191,6 +1189,41 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
 
                     (*io_status_block).Information =
                         std::mem::size_of::<FILE_FS_DEVICE_INFORMATION>() as _;
+                    (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
+
+                    return STATUS_SUCCESS;
+                },
+                FSINFOCLASS::FileFsVolumeInformation => {
+                    // Length must be the same size as [`FILE_FS_VOLUME_INFORMATION`] length!
+                    // NOTE: or must it? `VolumeLabelLength` is dynamic
+                    //
+                    // "The size of the buffer passed in the FileInformation parameter to FltQueryVolumeInformation or
+                    // ZwQueryVolumeInformationFile must be at least sizeof (FILE_FS_VOLUME_INFORMATION)."
+                    // - https://ntdoc.m417z.com/file_fs_volume_information
+                    // 
+                    // ... but for now, this is enough to support Node.
+                    if length as usize != std::mem::size_of::<FILE_FS_VOLUME_INFORMATION>() {
+                        return STATUS_ACCESS_VIOLATION;
+                    }
+
+                    let current_time = WindowsTime::current().as_file_time();
+
+                    let out_ptr = file_information as *mut FILE_FS_VOLUME_INFORMATION;
+                    (*out_ptr).VolumeCreationTime.u.LowPart = current_time.dwLowDateTime;
+                    (*out_ptr).VolumeCreationTime.u.HighPart = current_time.dwHighDateTime as _;
+
+                    (*out_ptr).VolumeSerialNumber = 0u32;
+
+                    // NOTE: this *can* be dynamic, and if you look at the struct definition, it's a classic case of
+                    // `_Field_size_bytes_(VolumeLabelLength)`
+                    (*out_ptr).VolumeLabelLength = 1;
+
+                    // Just tell the person doing the query that it's on C:/.
+                    // Everything's on C:/.
+                    (*out_ptr).VolumeLabel = ['C' as u16];
+
+                    (*io_status_block).Information =
+                        std::mem::size_of::<FILE_FS_VOLUME_INFORMATION>() as _;
                     (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
 
                     return STATUS_SUCCESS;
