@@ -1,1 +1,1 @@
-Experimental configuration to add artifical latency to outgoing connections
+Experimental configuration to add artificial latency to outgoing connections
