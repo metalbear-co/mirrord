@@ -18,13 +18,15 @@ use std::{
 #[cfg(unix)]
 use libc::{DIR, FILE, c_char, hostent};
 use mirrord_config::config::ConfigError;
-use mirrord_protocol::{ResponseError, SerializationError};
+use mirrord_protocol::{ResponseError, SerializationError, DnsLookupError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
 #[cfg(unix)]
 use nix::errno::Errno;
 use thiserror::Error;
 use tracing::{error, info};
+#[cfg(windows)]
+use winapi::shared::winerror::{WSAHOST_NOT_FOUND, WSANO_RECOVERY, WSATRY_AGAIN};
 
 use crate::{detour::Bypass, graceful_exit, proxy_connection::ProxyError, setup::setup};
 
@@ -425,18 +427,7 @@ fn get_platform_errno(fail: HookError) -> i32 {
                 mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
                 _ => libc::EINVAL,
             },
-            ResponseError::DnsLookup(dns_fail) => {
-                (match dns_fail.kind {
-                    mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
-                    // prevents an infinite loop that used to happen in some apps, don't know if
-                    // this is the correct mapping.
-                    mirrord_protocol::ResolveErrorKindInternal::NoRecordsFound(_) => {
-                        libc::EAI_NONAME
-                    }
-                    _ => libc::EAI_FAIL,
-                    // TODO: Add more error kinds, next time we break protocol compatibility.
-                } as _)
-            }
+            ResponseError::DnsLookup(dns_fail) => translate_dns_fail(dns_fail),
             // for listen, EINVAL means "socket is already connected."
             // Will not happen, because this ResponseError is not return from any hook, so it
             // never appears as HookError::ResponseError(PortAlreadyStolen(_)).
@@ -479,7 +470,7 @@ fn get_platform_errno(fail: HookError) -> i32 {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(windows)]
 fn get_platform_errno(fail: HookError) -> u32 {
     use winapi::shared::winerror::*;
     match fail {
@@ -511,16 +502,8 @@ fn get_platform_errno(fail: HookError) -> u32 {
                 _ => WSAEINVAL,
             },
             ResponseError::DnsLookup(dns_fail) => {
-                (match dns_fail.kind {
-                    mirrord_protocol::ResolveErrorKindInternal::Timeout => WSATRY_AGAIN,
-                    // prevents an infinite loop that used to happen in some apps, don't know if
-                    // this is the correct mapping.
-                    mirrord_protocol::ResolveErrorKindInternal::NoRecordsFound(_) => {
-                        WSAHOST_NOT_FOUND
-                    }
-                    _ => WSANO_RECOVERY,
-                    // TODO: Add more error kinds, next time we break protocol compatibility.
-                } as _)
+                // try_into must work as WSAE* errors returned are actually u32 
+                translate_dns_fail(dns_fail).try_into().unwrap()
             }
             // for listen, EINVAL means "socket is already connected."
             // Will not happen, because this ResponseError is not return from any hook, so it
@@ -564,6 +547,44 @@ fn get_platform_errno(fail: HookError) -> u32 {
     }
 }
 
+fn translate_dns_fail(dns_fail: DnsLookupError) -> i32 {
+    (match dns_fail.kind {
+        mirrord_protocol::ResolveErrorKindInternal::Timeout => {
+            #[cfg(unix)]
+            {
+                libc::EAI_AGAIN
+            }
+            #[cfg(windows)]
+            {
+                WSATRY_AGAIN
+            }
+        }
+        // prevents an infinite loop that used to happen in some apps, don't know if
+        // this is the correct mapping.
+        mirrord_protocol::ResolveErrorKindInternal::NoRecordsFound(_) => {
+            #[cfg(unix)]
+            {
+                libc::EAI_NONAME
+            }
+            #[cfg(windows)]
+            {
+                WSAHOST_NOT_FOUND
+            }
+        }
+        _ => {
+            #[cfg(unix)]
+            {
+                libc::EAI_FAIL
+            }
+            #[cfg(windows)]
+            {
+                WSANO_RECOVERY
+            }
+        }
+        // TODO: Add more error kinds, next time we break protocol compatibility.
+    } as _)
+}
+
 /// mapping based on - <https://man7.org/linux/man-pages/man3/errno.3.html>
 impl From<HookError> for i64 {
     fn from(fail: HookError) -> Self {
@@ -574,8 +595,7 @@ impl From<HookError> for i64 {
                 | ResponseError::NotFile(_)
                 | ResponseError::NotDirectory(_)
                 | ResponseError::Remote(_)
-                | ResponseError::RemoteIO(_)
-                | ResponseError::DnsLookup(_),
+                | ResponseError::RemoteIO(_),
             ) => {
                 info!("libc error (doesn't indicate a problem) >> {fail:#?}")
             }
@@ -591,6 +611,11 @@ impl From<HookError> for i64 {
             HookError::ResponseError(ResponseError::NotImplemented) => {
                 // this means we bypass, so we can just return to avoid setting libc.
                 return -1;
+            }
+            HookError::ResponseError(ResponseError::DnsLookup(dns_fail)) => {
+                // return native dns failure because their API expects the error code to be returned
+                // and not reported through Errno
+                return translate_dns_fail(dns_fail).into();
             }
             HookError::ProxyError(ref err) => {
                 let reason = match err {
