@@ -8,6 +8,108 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.182.0](https://github.com/metalbear-co/mirrord/tree/3.182.0) - 2026-01-16
+
+
+### Added
+
+- Add support for db branches IAM.
+
+
+### Changed
+
+- `mirrord` now sets agent priority class for targeted agent pod as well.
+  [#3871.targeted-agent-priority-class](https://github.com/metalbear-co/mirrord/issues/3871.targeted-agent-priority-class)
+
+
+### Fixed
+
+- Agent will now terminate the intproxy side of HTTP connections that were
+  closed by the remote HTTP client.
+- Fixed a regression caused by panicing when closing a user socket that is
+  already dropped.
+
+
+### Internal
+
+- Made wizard IO error to `CliError` conversion more explicit
+- Refactor Windows CI workflows to use robust IAP tunneling with Service
+  Account authentication and VM-resident Kubeconfig. Added `windows-tests.yaml`
+  for on-demand E2E testing triggered by label or manual dispatch.
+- Tell claude how to run the mirrord CLI.
+- Updated `configuration.md` and added a CI step to verify the file is updated
+  if configuration has chagned.
+- Updated the flake lockfile.
+- fix release windows
+
+## [3.181.1](https://github.com/metalbear-co/mirrord/tree/3.181.1) - 2026-01-14
+
+
+### Fixed
+
+- `mirrord` now unsets env from process even if the process is skipped on
+  macOS.
+- `getsockname`/`getpeername` will now correctly report IPv4-mapped-IPv6 addresses when necessary. 
+  When the client receives an IPv6 connection on an IPv4 server socket, `127.0.0.1` will be reported instead.
+
+
+### Internal
+
+- Added a `CLAUDE.md` file to contextualize AI agents in mirrord's codebase.
+- Small refactor to make a struct member name make sense.
+- Clean up windows ci - move windows CI into ci.yaml
+- Clean up windows ci - move windows release into release.yaml
+- Remove legacy windows_build.yaml
+- Fixed flaky intproxy reconnect flow test
+
+## [3.181.0](https://github.com/metalbear-co/mirrord/tree/3.181.0) - 2026-01-12
+
+
+### Removed
+
+- Removed traffic mirroring implementation based on packet sniffing, along with
+  related configuration options.
+
+
+### Added
+
+- Control agent repository/tag via env vars
+  [#3843](https://github.com/metalbear-co/mirrord/issues/3843)
+- Added new operator feature that allows bypassing user credential verification
+  when running mirrord ci start.
+
+
+### Changed
+
+- Allows `mirrord ci start` to be run multiple times (now you can start
+  multiple mirrord ci sessions), and `mirrord ci stop` will stop every session.
+- Unified `http_filter.ports` and `incoming.ports` behavior and made it more
+  intuitive. Now, ports will be stolen unfiltered/not stolen when
+  `http_filter.ports`/`incoming.ports` is set AND the port in question is not
+  in the list.
+
+
+### Fixed
+
+- Connections redirected by the agent will now correctly terminate when the
+  target pod is killed
+- Ports will now be unsubscribed only when `close.2` has been called on all
+  handles referring to the matching socket.
+
+
+### Internal
+
+- Don't force install existing software on Windows CI
+- Don't run Windows e2e on CI
+- Run UT/IT for Windows in CI
+- Temporarily ignore `RUSTSEC-2025-0141` advisory until we migrate to a
+  `bincode` alternative.
+- mirrord sessions can now be identified by a "key", which can be provided by
+  the user in the config/cli or auto-generated. It can be used in the config's
+  templating engine as `{{ key }}`.
+- Agent dockerfile will now use sccache for the host architecture instead of
+  the target architecture
+
 ## [3.180.0](https://github.com/metalbear-co/mirrord/tree/3.180.0) - 2026-01-06
 
 

@@ -73,6 +73,9 @@ pub struct MysqlBranchDatabaseStatus {
     /// Information of sessions that are using this branch database.
     #[serde(default)]
     pub session_info: HashMap<String, SessionInfo>,
+    /// Error message when phase is Failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
@@ -81,6 +84,8 @@ pub enum BranchDatabasePhase {
     Pending,
     /// The branch database is ready to use.
     Ready,
+    /// The branch database creation failed.
+    Failed,
 }
 
 impl std::fmt::Display for BranchDatabasePhase {
@@ -88,6 +93,7 @@ impl std::fmt::Display for BranchDatabasePhase {
         match self {
             BranchDatabasePhase::Pending => write!(f, "Pending"),
             BranchDatabasePhase::Ready => write!(f, "Ready"),
+            BranchDatabasePhase::Failed => write!(f, "Failed"),
         }
     }
 }

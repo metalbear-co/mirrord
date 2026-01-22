@@ -1,4 +1,4 @@
-use std::{collections::HashSet, net::SocketAddr, str::FromStr};
+use std::{collections::HashSet, net::SocketAddr, ops::Not, str::FromStr};
 
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
@@ -202,8 +202,8 @@ impl LayerSetup {
 pub struct HttpSettings {
     /// The HTTP filter to use.
     pub filter: HttpFilter,
-    /// Ports to filter HTTP on.
-    pub ports: HashSet<Port>,
+    /// Ports to filter HTTP on. `None` means we filter on all ports.
+    pub ports: Option<HashSet<Port>>,
 }
 
 #[derive(Debug)]
@@ -222,10 +222,9 @@ impl IncomingMode {
             let ports = config
                 .http_filter
                 .ports
-                .get_or_insert_default()
-                .iter()
-                .copied()
-                .collect();
+                .as_ref()
+                .cloned()
+                .map(HashSet::from);
 
             let filter = Self::parse_http_filter(&config.http_filter);
 
@@ -344,10 +343,14 @@ impl IncomingMode {
             let steal_type = match &self.http_settings {
                 None => StealType::All(port),
                 Some(settings) => {
-                    if settings.ports.contains(&port) {
-                        StealType::FilteredHttpEx(port, settings.filter.clone())
-                    } else {
+                    if settings
+                        .ports
+                        .as_ref()
+                        .is_some_and(|p| p.contains(&port).not())
+                    {
                         StealType::All(port)
+                    } else {
+                        StealType::FilteredHttpEx(port, settings.filter.clone())
                     }
                 }
             };
@@ -356,10 +359,14 @@ impl IncomingMode {
             let mirror_type = match &self.http_settings {
                 None => MirrorType::All(port),
                 Some(settings) => {
-                    if settings.ports.contains(&port) {
-                        MirrorType::FilteredHttp(port, settings.filter.clone())
-                    } else {
+                    if settings
+                        .ports
+                        .as_ref()
+                        .is_some_and(|p| p.contains(&port).not())
+                    {
                         MirrorType::All(port)
+                    } else {
+                        MirrorType::FilteredHttp(port, settings.filter.clone())
                     }
                 }
             };

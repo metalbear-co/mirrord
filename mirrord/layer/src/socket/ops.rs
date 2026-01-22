@@ -15,18 +15,21 @@ use std::{
 };
 
 use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
+#[cfg(target_os = "macos")]
+use libc::{SAE_ASSOCID_ANY, c_uint, iovec, sa_endpoints_t, sae_associd_t, sae_connid_t, size_t};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnMetadataRequest,
     OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe,
 };
+use mirrord_layer_lib::graceful_exit;
 use mirrord_protocol::{
     dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
 use nix::{
     errno::Errno,
-    sys::socket::{SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage, sockopt},
+    sys::socket::{SockaddrLike, SockaddrStorage, sockopt},
 };
 use socket2::SockAddr;
 #[cfg(debug_assertions)]
@@ -214,8 +217,7 @@ fn bind_similar_address(
     Detour::Error(io::Error::last_os_error().into())
 }
 
-/// Checks if given TCP port needs to be ignored
-/// based on http_filter/ports logic
+/// Checks if given TCP port needs to be ignored based on ports logic
 fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
     let mapped_port = crate::setup()
         .incoming_config()
@@ -223,31 +225,13 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
         .get_by_left(&addr.port())
         .copied()
         .unwrap_or_else(|| addr.port());
-    let http_filter_used = (config.mode == IncomingMode::Steal
-        || config.mode == IncomingMode::Mirror)
-        && config.http_filter.is_filter_set();
 
-    // This is a bit weird, but it makes more sense configured ports are the remote port
-    // and not the local, so the check is done on the mapped port
-    // see https://github.com/metalbear-co/mirrord/issues/2397
-    let not_a_filtered_port = config
-        .http_filter
+    let have_whitelist_and_port_is_not_whitelisted = config
         .ports
         .as_ref()
-        .is_some_and(|filter_ports| filter_ports.contains(&mapped_port))
-        .not();
+        .is_some_and(|ports| ports.contains(&mapped_port).not());
 
-    let not_stolen_with_filter = !http_filter_used || not_a_filtered_port;
-
-    // Unfiltered ports were specified and the requested port is not one of them, or an HTTP filter
-    // is set and no unfiltered ports were specified.
-    let not_whitelisted = config
-        .ports
-        .as_ref()
-        .map(|ports| !ports.contains(&mapped_port))
-        .unwrap_or(http_filter_used);
-
-    is_ignored_port(addr) || (not_stolen_with_filter && not_whitelisted)
+    is_ignored_port(addr) || have_whitelist_and_port_is_not_whitelisted
 }
 
 /// If the socket is not found in [`SOCKETS`], bypass.
@@ -395,63 +379,11 @@ pub(super) fn bind(
     Detour::Success(0)
 }
 
-/// Warn the user if they are filtering HTTP, and it looks like they might have intended to also
-/// steal another port unfiltered, but didn't know they had to set `feature.network.incoming.ports`
-/// for that.
-fn warn_on_suspected_unintentional_ignore(sockfd: RawFd) {
-    let incoming_config = crate::setup().incoming_config();
-    let http_filter_used =
-        incoming_config.mode == IncomingMode::Steal && incoming_config.http_filter.is_filter_set();
-
-    // User specified a filter that does not include this port, and did not specify any
-    // unfiltered ports?
-    // It's plausible that the user did not know the port has to be in either port list to be
-    // stolen when an HTTP filter is set, so show a warning.
-    if http_filter_used && incoming_config.ports.is_none() {
-        let port_text = if let Some(port) = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd)
-            .inspect_err(|err| {
-                tracing::debug!(
-                    "Calling getsockname failed. Ignoring as this is not critical. Error: {err:?}."
-                )
-            })
-            .ok()
-            .and_then(|addr_storage| {
-                addr_storage
-                    .as_sockaddr_in()
-                    .map(SockaddrIn::port)
-                    .or_else(|| addr_storage.as_sockaddr_in6().map(SockaddrIn6::port))
-            }) {
-            if let Some(mapped_port) = incoming_config.port_mapping.get_by_left(&port) {
-                format!("Remote port {mapped_port} (mapped from local port {port})",)
-            } else {
-                format!("Port {port}")
-            }
-        } else {
-            // `getsockname` returned an error, or a non-IP address. Not stopping execution on
-            // that, as it does not mean anything else went wrong in this run. Just emitting a
-            // warning without the port number.
-            tracing::debug!(
-                "Could not determine the bound port of a socket, for the purpose of displaying it in a warning."
-            );
-            "A port".to_string()
-        };
-        warn!(
-            "{port_text} was not included in the filtered ports, and also not in the non-filtered \
-            ports, and will therefore be bound locally. If this is intentional, ignore this \
-            warning. If you want the http filter to apply to this port, add it to \
-            `feature.network.incoming.http_filter.ports`. \
-            If you want to steal all the traffic of this port, add it to \
-            `feature.network.incoming.ports`."
-        );
-    }
-}
-
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
 #[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     let Some(mut socket) = SOCKETS.lock()?.remove(&sockfd) else {
-        warn_on_suspected_unintentional_ignore(sockfd);
         return Detour::Bypass(Bypass::LocalFdNotFound(sockfd));
     };
 
@@ -516,6 +448,68 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
         | SocketState::Listening(_)
         | SocketState::Connected(_) => Detour::Bypass(Bypass::InvalidState(sockfd)),
     }
+}
+
+/// Implementation of BSD `connectx(2)` detour.
+/// * If source address is present in `endpoints`, call [`bind`].
+/// * Call [`connect`] with the given destination address.
+/// * On success `connectx` is **supposed** to update `len` with the data length enqueued in the
+///   socket's send buffer copied from `iov`. For simplicity, we always set `len` to 0 on success to
+///   inform the caller that no data have been enqueued. `flags` is ignored for the same reason.
+/// * `sae_srcif`, source interface index, is an optional field of `sa_endpoints_t`. When specified,
+///   `connectx` chooses a source address on the interface. This is not supported by this detour.
+#[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
+#[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
+pub(super) fn connectx(
+    socket: RawFd,
+    endpoints: *const sa_endpoints_t,
+    associd: sae_associd_t,
+    flags: c_uint,
+    iov: *const iovec,
+    iovcnt: c_uint,
+    len: *mut size_t,
+    connid: *mut sae_connid_t,
+) -> Detour<ConnectResult> {
+    if endpoints.is_null() {
+        return Detour::Error(HookError::NullPointer);
+    }
+
+    // The parameter associd is reserved for future use, and must always be set to SAE_ASSOCID_ANY.
+    if associd != SAE_ASSOCID_ANY {
+        warn!("associd is not SAE_ASSOCID_ANY.");
+    }
+    // The parameter connid is also reserved for future use and should be set to NULL.
+    if !connid.is_null() {
+        warn!("connid is not null.");
+    }
+
+    let eps = unsafe {
+        let eps = *endpoints;
+
+        // Destination address must be specified.
+        if eps.sae_dstaddr.is_null() {
+            warn!("destination address is null");
+            return Detour::Bypass(Bypass::InvalidArgValue);
+        }
+
+        eps
+    };
+
+    // Bind with source address if given.
+    if !eps.sae_srcaddr.is_null() {
+        bind(socket, eps.sae_srcaddr, eps.sae_srcaddrlen)?;
+    }
+
+    // Explicitly set `len` to 0.
+    if !len.is_null() {
+        unsafe {
+            *len = 0;
+        }
+    }
+
+    // Connect to the destination address.
+    connect(socket, eps.sae_dstaddr, eps.sae_dstaddrlen)
 }
 
 /// Common logic between Tcp/Udp `connect`, when used for the outgoing traffic feature.
@@ -844,6 +838,41 @@ pub(super) fn connect(
     }
 }
 
+/// For IPv6 server / IPv4 client connections, translate IPv4
+/// addresses to IPv4-mapped-IPv6 addresses, inline with what happens
+/// without mirrord.
+///
+/// For IPv4 server / IPv6 client, we map the peer address to
+/// localhost, since we cannot map IPv6 to IPv4. Without mirrord, IPv4
+/// servers cannot accept IPv6 connections anyway, so this is fine.
+fn map_ipv64(domain: c_int, ip: SocketAddr) -> SocketAddr {
+    match (domain, ip) {
+        (libc::AF_INET, SocketAddr::V4(..)) | (libc::AF_INET6, SocketAddr::V6(..)) => ip,
+        (libc::AF_INET6, SocketAddr::V4(v4)) => {
+            SocketAddr::new(v4.ip().to_ipv6_mapped().into(), v4.port())
+        }
+
+        (libc::AF_INET, SocketAddr::V6(v6)) => {
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), v6.port())
+        }
+
+        (domain, _) => {
+            // Something has gone *very* wrong
+            graceful_exit!("IP socket domain was {domain}, which is neither AF_INET nor AF_INET6");
+        }
+    }
+}
+
+/// Thin wrapper around [`map_ipv64`] to bypass non-IP [`SocketAddr`]s
+/// and do return type mapping.
+fn map_socketaddress_ipv64(domain: c_int, addr: SocketAddress) -> SocketAddress {
+    // Bypass any non-IP stuff
+    let SocketAddress::Ip(ip) = addr else {
+        return addr;
+    };
+    map_ipv64(domain, ip).into()
+}
+
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
 /// cluster)
 #[mirrord_layer_macro::instrument(level = Level::TRACE, skip(address, address_len))]
@@ -858,9 +887,10 @@ pub(super) fn getpeername(
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => {
-                    Detour::Success(connected.remote_address.clone())
-                }
+                SocketState::Connected(connected) => Detour::Success(map_socketaddress_ipv64(
+                    socket.domain,
+                    connected.remote_address.clone(),
+                )),
                 SocketState::Bound { .. }
                 | SocketState::Initialized
                 | SocketState::Listening(_) => Detour::Bypass(Bypass::InvalidState(sockfd)),
@@ -893,14 +923,14 @@ pub(super) fn getsockname(
         SocketState::Connected(Connected {
             local_address: Some(addr),
             ..
-        }) => addr.clone().try_into()?,
+        }) => map_socketaddress_ipv64(socket.domain, addr.clone()).try_into()?,
         SocketState::Connected(Connected {
             connection_id: Some(id),
             ..
         }) => {
             let response =
                 make_proxy_request_with_response(OutgoingConnMetadataRequest { conn_id: *id })??;
-            response.in_cluster_address.into()
+            map_ipv64(socket.domain, response.in_cluster_address).into()
         }
         SocketState::Bound {
             bound: Bound {

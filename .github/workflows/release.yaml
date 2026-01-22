@@ -79,6 +79,196 @@ jobs:
             target/x86_64-unknown-linux-gnu/release/mirrord
             target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so
           if-no-files-found: error
+  build_binaries_windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          rustflags: ""
+
+      - name: Install WiX Toolset
+        run: |
+          choco install wixtoolset -y
+          $env:PATH = "C:\Program Files (x86)\WiX Toolset v3.14\bin;$env:PATH"
+          echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Get release version
+        id: version
+        run: |
+          $version = (Select-String -Path "Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build mirrord DLL and EXE
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # Build DLL in release mode
+          cargo build --release -p mirrord-layer-win --target x86_64-pc-windows-msvc
+          $dll = "target\x86_64-pc-windows-msvc\release\mirrord_layer_win.dll"
+          if (-not (Test-Path $dll)) {
+            throw "DLL not found at $dll"
+          }
+
+          # Build EXE in release mode
+          $env:MIRRORD_LAYER_FILE = (Resolve-Path $dll).Path
+          cargo build --release -p mirrord --bin mirrord --target x86_64-pc-windows-msvc
+          $exe = "target\x86_64-pc-windows-msvc\release\mirrord.exe"
+          if (-not (Test-Path $exe)) {
+            throw "EXE not found at $exe"
+          }
+
+          # Save paths for next steps
+          echo "MIRRORD_DLL=$dll" >> $env:GITHUB_ENV
+          echo "MIRRORD_EXE=$exe" >> $env:GITHUB_ENV
+      - name: Setup SM_CLIENT_CERT_FILE from base64 secret data
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "sm_client_cert.p12"
+          $certBytes = [System.Convert]::FromBase64String("${{ secrets.SM_CLIENT_CERT_FILE_B64 }}")
+          [System.IO.File]::WriteAllBytes($certPath, $certBytes)
+          echo "SM_CLIENT_CERT_FILE=$certPath" >> $env:GITHUB_ENV
+
+      - name: Setup Software Trust Manager
+        uses: digicert/code-signing-software-trust-action@v1.0.1
+        env:
+          SM_HOST: https://clientauth.one.digicert.com/
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+
+      - name: Sign DLL and EXE
+        env:
+          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.SM_KEYPAIR_ALIAS }}
+          SM_HOST: https://clientauth.one.digicert.com/
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Arch = ($env:RUNNER_ARCH).ToLower()
+          $SearchBase = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+
+          "Searching `"$SearchBase`" for signtool ($Arch)..."
+          $Tool = Get-ChildItem $SearchBase -Recurse -Force -ErrorAction SilentlyContinue |
+              Where-Object {$_.Name -eq 'signtool.exe' -and $_.Directory -like "*\$Arch"} |
+              Sort-Object -Descending |
+              Select-Object -First 1
+
+          if (!($Tool)) {throw [System.IO.FileNotFoundException]::new('File not found.', 'signtool.exe')}
+
+          'Adding signtool to PATH'
+          $Tool.Directory.FullName | Out-File $env:GITHUB_PATH -Append
+          "signtool-$Arch=$($Tool.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
+          $env:PATH = "$($Tool.Directory.FullName);$env:PATH"
+
+          echo "PATH=$PATH" >> $env:GITHUB_ENV
+
+          # Sign using DigiCert smctl
+          smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
+            --input="$env:MIRRORD_DLL" `
+            --verbose --exit-non-zero-on-fail
+
+          smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
+            --input="$env:MIRRORD_EXE" `
+            --verbose --exit-non-zero-on-fail
+
+      - name: Build MSI
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # Create working directory
+          $wixDir = "$env:RUNNER_TEMP\wix"
+          New-Item -ItemType Directory -Force -Path $wixDir | Out-Null
+
+          # Copy binary files
+          Copy-Item $env:MIRRORD_EXE "$wixDir\mirrord.exe" -Force
+          Copy-Item $env:MIRRORD_DLL "$wixDir\mirrord_layer_win.dll" -Force
+          Copy-Item "mirrord\cli\wix\mirrord.ico" "$wixDir\mirrord.ico" -Force
+          Copy-Item "mirrord\cli\wix\License.rtf" "$wixDir\License.rtf" -Force
+
+          # Get version from step output
+          $version = "${{ steps.version.outputs.version }}"
+
+
+          # Read WXS file directly and write with updated version (avoid Copy-Item encoding issues)
+          $wxsSource = "mirrord\cli\wix\main.wxs"
+          $wxsPath = "$wixDir\main.wxs"
+          $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+          $wxsContent = [System.IO.File]::ReadAllText($wxsSource, $utf8NoBom)
+          # Replace Product Version attribute (case-sensitive to avoid XML declaration)
+          $wxsContent = $wxsContent -creplace '(<Product[^>]+Version=)"[^"]*"', "`$1`"$version`""
+          [System.IO.File]::WriteAllText($wxsPath, $wxsContent, $utf8NoBom)
+
+          Write-Host "Updated WXS Product Version to: $version"
+
+          # Build MSI
+          $obj = "$wixDir\main.wixobj"
+          $msi = "$wixDir\mirrord.msi"
+
+          candle.exe -nologo "$wixDir\main.wxs" -out $obj
+          if ($LASTEXITCODE -ne 0) { throw "candle.exe failed" }
+
+          light.exe -nologo $obj -out $msi -ext WixUIExtension -sval
+          if ($LASTEXITCODE -ne 0) { throw "light.exe failed" }
+
+          if (-not (Test-Path $msi)) {
+            throw "MSI not produced"
+          }
+
+          echo "MIRRORD_MSI=$msi" >> $env:GITHUB_ENV
+
+      - name: Sign MSI
+        env:
+          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.SM_KEYPAIR_ALIAS }}
+          SM_HOST: https://clientauth.one.digicert.com/
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $Arch = ($env:RUNNER_ARCH).ToLower()
+          $SearchBase = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+
+          "Searching `"$SearchBase`" for signtool ($Arch)..."
+          $Tool = Get-ChildItem $SearchBase -Recurse -Force -ErrorAction SilentlyContinue |
+              Where-Object {$_.Name -eq 'signtool.exe' -and $_.Directory -like "*\$Arch"} |
+              Sort-Object -Descending |
+              Select-Object -First 1
+
+          if (!($Tool)) {throw [System.IO.FileNotFoundException]::new('File not found.', 'signtool.exe')}
+
+          'Adding signtool to PATH'
+          $Tool.Directory.FullName | Out-File $env:GITHUB_PATH -Append
+          "signtool-$Arch=$($Tool.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
+          $env:PATH = "$($Tool.Directory.FullName);$env:PATH"
+
+          smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
+            --input="$env:MIRRORD_MSI" `
+            --exit-non-zero-on-fail --verbose
+
+      - name: Generate checksums
+        run: |
+          $exe = $env:MIRRORD_EXE
+          $dll = $env:MIRRORD_DLL
+          $msi = $env:MIRRORD_MSI
+
+          (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower() | Out-File -FilePath "$exe.sha256" -NoNewline -Encoding ascii
+          (Get-FileHash $dll -Algorithm SHA256).Hash.ToLower() | Out-File -FilePath "$dll.sha256" -NoNewline -Encoding ascii
+          (Get-FileHash $msi -Algorithm SHA256).Hash.ToLower() | Out-File -FilePath "$msi.sha256" -NoNewline -Encoding ascii
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: x86_64-pc-windows-msvc
+          path: |
+            ${{ env.MIRRORD_EXE }}
+            ${{ env.MIRRORD_DLL }}
+            ${{ env.MIRRORD_MSI }}
+            ${{ env.MIRRORD_EXE }}.sha256
+            ${{ env.MIRRORD_DLL }}.sha256
+            ${{ env.MIRRORD_MSI }}.sha256
+          if-no-files-found: error
+
   build_binaries_macos:
     runs-on: macos-latest
     steps:
@@ -329,12 +519,14 @@ jobs:
           push: true
           tags: |
             ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }}
+            ghcr.io/metalbear-co/mirrord-cli:latest
 
   release_gh:
     needs:
       [
         build_binaries_aarch64-unknown-linux-gnu,
         build_binaries_x86_64-unknown-linux-gnu,
+        build_binaries_windows,
         build_binaries_macos,
         release_docker_image,
         release_cli_docker_image,
@@ -351,7 +543,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: /tmp/artifacts
-          pattern: +(*-unknown-linux-gnu|*-apple-darwin)
+          pattern: +(*-unknown-linux-gnu|*-apple-darwin|*-pc-windows-msvc)
       - uses: metalbear-co/action-zip@0852c26906e00f8a315c704958823928d8018b28
       - name: Create mirrord linux-x64 zip file
         run: |
@@ -394,6 +586,13 @@ jobs:
           mv /tmp/artifacts/universal-apple-darwin/mirrord /tmp/release/mirrord_mac_universal
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
+
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord.exe /tmp/release/mirrord.exe
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord_layer_win.dll /tmp/release/mirrord_layer_win.dll
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/_temp/wix/mirrord.msi /tmp/release/mirrord.msi
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord.exe.sha256 /tmp/release/mirrord.exe.sha256
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord_layer_win.dll.sha256 /tmp/release/mirrord_layer_win.dll.sha256
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/_temp/wix/mirrord.msi.sha256 /tmp/release/mirrord.msi.sha256
 
       # Consider to add changelog generation..
       - name: Release
@@ -440,6 +639,197 @@ jobs:
           git commit -m "Update to ${{ env.version }}"
           git push
 
+  release_chocolatey:
+    needs: release_gh
+    runs-on: windows-latest
+    if: github.event_name != 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: x86_64-pc-windows-msvc
+          path: artifacts/windows
+
+      - name: Get release version
+        id: version
+        run: |
+          $version = (Select-String -Path "Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build and publish Chocolatey package
+        env:
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # Get version from step output
+          $version = "${{ steps.version.outputs.version }}"
+
+          # Find the MSI file
+          $msi = Get-ChildItem "artifacts/windows" -Filter "mirrord.msi" -Recurse | Select-Object -First 1
+          if (-not $msi) {
+            throw "MSI file not found in artifacts"
+          }
+
+          # Create Chocolatey package structure
+          $pkgRoot = Join-Path $env:RUNNER_TEMP "choco"
+          $toolsDir = Join-Path $pkgRoot "tools"
+          New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+
+          # Copy MSI
+          Copy-Item $msi.FullName (Join-Path $toolsDir "mirrord.msi") -Force
+
+          # Copy LICENSE
+          Copy-Item "LICENSE" (Join-Path $toolsDir "LICENSE.txt") -Force
+
+          # Create VERIFICATION.txt
+          $hash = Get-FileHash $msi.FullName -Algorithm SHA256
+          @"
+          VERIFICATION
+          ------------
+
+          1. Download the mirrord MSI from the official source:
+             https://github.com/metalbear-co/mirrord/releases
+
+          2. Verify the SHA256 checksum of the downloaded file matches:
+             $($hash.Hash)
+
+          This installer is built from the source at:
+             https://github.com/metalbear-co/mirrord
+          "@ | Set-Content -Encoding UTF8 -Path (Join-Path $toolsDir "VERIFICATION.txt")
+
+          # Create nuspec file
+          @"
+          <?xml version="1.0"?>
+          <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+            <metadata>
+              <id>mirrord</id>
+              <version>$version</version>
+              <title>mirrord (Kubernetes dev tool)</title>
+              <summary>Run local code in the context of your Kubernetes environment.</summary>
+              <authors>MetalBear</authors>
+              <owners>MetalBear</owners>
+              <licenseUrl>https://github.com/metalbear-co/mirrord/blob/main/LICENSE</licenseUrl>
+              <projectUrl>https://github.com/metalbear-co/mirrord</projectUrl>
+              <packageSourceUrl>https://github.com/metalbear-co/mirrord</packageSourceUrl>
+              <projectSourceUrl>https://github.com/metalbear-co/mirrord</projectSourceUrl>
+              <docsUrl>https://mirrord.dev</docsUrl>
+              <bugTrackerUrl>https://github.com/metalbear-co/mirrord/issues</bugTrackerUrl>
+              <iconUrl>https://raw.githubusercontent.com/metalbear-co/mirrord/main/assets/icon.png</iconUrl>
+              <requireLicenseAcceptance>false</requireLicenseAcceptance>
+              <description>mirrord lets you run local code in the context of your cloud environment (Kubernetes).</description>
+              <releaseNotes>https://github.com/metalbear-co/mirrord/releases/tag/$version</releaseNotes>
+              <tags>mirrord kubernetes debugging cloud</tags>
+            </metadata>
+            <files>
+              <file src="tools\**" target="tools" />
+            </files>
+          </package>
+          "@ | Set-Content -Encoding UTF8 -Path (Join-Path $pkgRoot "mirrord.nuspec")
+
+          # Create chocolateyinstall.ps1
+          @'
+          $ErrorActionPreference = 'Stop'
+
+          $packageName = 'mirrord'
+          $toolsDir    = Split-Path -Parent $MyInvocation.MyCommand.Definition
+          $msiPath     = Join-Path $toolsDir 'mirrord.msi'
+
+          Install-ChocolateyInstallPackage -PackageName $packageName -FileType 'msi' -SilentArgs '/qn /norestart' -ValidExitCodes @(0, 3010) -File $msiPath
+          '@ | Set-Content -Encoding UTF8 -Path (Join-Path $toolsDir "chocolateyinstall.ps1")
+
+          # Build package
+          choco pack (Join-Path $pkgRoot "mirrord.nuspec") --outputdirectory $pkgRoot
+
+          # Find the generated nupkg
+          $nupkg = Get-ChildItem $pkgRoot -Filter "mirrord.$version.nupkg" -File | Select-Object -First 1
+          if (-not $nupkg) {
+            $nupkg = Get-ChildItem $pkgRoot -Filter "mirrord*.nupkg" -File | Select-Object -First 1
+          }
+          if (-not $nupkg) {
+            throw "Failed to find generated nupkg in $pkgRoot"
+          }
+
+          Write-Host "Built Chocolatey package: $($nupkg.FullName)"
+
+          # Publish to Chocolatey
+          if (-not $env:CHOCO_API_KEY) {
+            throw "CHOCO_API_KEY secret is not set. Cannot publish to Chocolatey."
+          }
+
+          Write-Host "Publishing to Chocolatey..."
+          choco push $nupkg.FullName --api-key $env:CHOCO_API_KEY --source "https://push.chocolatey.org/"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to publish to Chocolatey (exit code: $LASTEXITCODE)"
+          }
+          Write-Host "Successfully published to Chocolatey"
+
+  release_winget:
+    needs: release_gh
+    runs-on: windows-latest
+    if: github.event_name != 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install .NET runtime for wingetcreate
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Get release version
+        id: version
+        run: |
+          $version = (Select-String -Path "Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Update WinGet manifest
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # Get version from step output
+          $version = "${{ steps.version.outputs.version }}"
+
+          # Construct MSI download URL from GitHub release
+          $installerUrl = "https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord.msi"
+          $packageId = "MetalBear.mirrord"
+
+          Write-Host "Updating WinGet manifest for package '$packageId' version '$version'"
+          Write-Host "Installer URL: $installerUrl"
+
+          # Validate WINGET_TOKEN is set
+          if (-not $env:WINGET_TOKEN) {
+            throw "WINGET_TOKEN secret is not set. Cannot publish to WinGet."
+          }
+
+          # Download wingetcreate
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+
+          # Update manifest
+          $output = & .\wingetcreate.exe update $packageId `
+            --version $version `
+            --urls $installerUrl `
+            --submit `
+            --token $env:WINGET_TOKEN 2>&1
+
+          $exitCode = $LASTEXITCODE
+
+          # Display output
+          $output | ForEach-Object { Write-Host $_ }
+
+          # Check for errors
+          if ($exitCode -ne 0) {
+            if ($output -match "was not found") {
+              throw "WinGet package '$packageId' was not found in microsoft/winget-pkgs. Create the initial package manually first."
+            } else {
+              throw "wingetcreate update failed with exit code $exitCode"
+            }
+          }
+
+          Write-Host "Successfully updated WinGet manifest"
+
   update_latest:
     needs: release_homebrew
     runs-on: ubuntu-24.04
@@ -463,17 +853,3 @@ jobs:
           update-latest: true
           # Don't update the vX.Y tags
           update-minor: false
-
-  trigger_windows_build:
-    needs: update_latest
-    if: ${{ !cancelled() && !failure() }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/windows-build.yaml
-    with:
-
-      release_tag: ${{ github.event_name == 'push' && github.ref_name || '' }}
-      sign_artifacts: "true"
-      choco_publish: ${{ github.event_name == 'push' && 'true' || 'false' }}
-      winget_publish: ${{ github.event_name == 'push' && 'true' || 'false' }}
-    secrets: inherit

@@ -33,68 +33,103 @@ use crate::container::ContainerRuntime;
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub struct RedisBranchConfig {
+    /// #### feature.db_branches[].id (type: redis) {#feature-db_branches-redis-id}
+    ///
     /// Optional unique identifier for reusing branches across sessions.
     #[serde(default)]
     pub id: Option<String>,
 
+    /// #### feature.db_branches[].location (type: redis) {#feature-db_branches-redis-location}
+    ///
     /// Where the Redis instance should run.
-    /// - `local`: Spawns a local Redis instance.
-    /// - `remote`: Uses the remote Redis (default behavior).
+    /// - `local`: Spawns a local Redis instance managed by mirrord.
+    /// - `remote`: Uses the remote Redis (default behavior, no-op).
     #[serde(default)]
     pub location: RedisBranchLocation,
 
+    /// #### feature.db_branches[].connection (type: redis) {#feature-db_branches-redis-connection}
+    ///
     /// Connection configuration for the Redis instance.
     #[serde(default)]
     pub connection: RedisConnectionConfig,
 
+    /// #### feature.db_branches[].local (type: redis) {#feature-db_branches-redis-local}
+    ///
     /// Local Redis runtime configuration.
     /// Only used when `location` is `local`.
     #[serde(default)]
     pub local: RedisLocalConfig,
 }
 
-/// Location for the Redis branch instance.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RedisBranchLocation {
-    /// Use a local Redis instance that mirrord manages.
     Local,
-    /// Use the remote Redis (default behavior, no-op).
     #[default]
     Remote,
 }
 
-/// Redis connection configuration.
-///
 /// Supports either a complete URL or separated connection parameters.
 /// If both are provided, `url` takes precedence.
+///
+/// The following fields can be sourced via remote environment variable:
+/// - url
+/// - host
+/// - password
+/// - username
+///
+/// Example:
+/// ```json
+/// "connection": {
+///     "host": { "type": "env", "variable": "REDIS_HOST" },
+///     "port": 6379,
+///     "password": { "type": "env", "variable": "REDIS_PASSWORD" }
+/// }
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
 pub struct RedisConnectionConfig {
+    /// ##### feature.db_branches[].connection.url (type: redis)
+    ///
     /// Complete Redis URL (e.g., `redis://user:pass@host:6379/0`).
     /// Can be sourced from an environment variable.
     #[serde(default)]
     pub url: Option<RedisValueSource>,
 
+    /// ##### feature.db_branches[].connection.host (type: redis)
+    ///
     /// Redis host/hostname.
+    /// Can be sourced from an environment variable.
     #[serde(default)]
     pub host: Option<RedisValueSource>,
 
+    /// ##### feature.db_branches[].connection.port (type: redis)
+    ///
     /// Redis port (default: 6379).
     #[serde(default)]
     pub port: Option<u16>,
 
+    /// ##### feature.db_branches[].connection.password (type: redis)
+    ///
     /// Redis password for authentication.
+    /// Can be sourced from an environment variable.
     #[serde(default)]
     pub password: Option<RedisValueSource>,
 
+    /// ##### feature.db_branches[].connection.username (type: redis)
+    ///
     /// Redis username (Redis 6+ ACL).
+    /// Can be sourced from an environment variable.
     #[serde(default)]
     pub username: Option<RedisValueSource>,
 
+    /// ##### feature.db_branches[].connection.database (type: redis)
+    ///
     /// Redis database number (default: 0).
     #[serde(default)]
     pub database: Option<u16>,
 
+    /// ##### feature.db_branches[].connection.tls (type: redis)
+    ///
     /// Enable TLS/SSL connection.
     #[serde(default)]
     pub tls: Option<bool>,
@@ -121,15 +156,14 @@ impl RedisConnectionConfig {
     }
 }
 
+/// <!--${internal}-->
 /// Source for a Redis configuration value.
 ///
 /// Values can be specified directly or sourced from environment variables.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum RedisValueSource {
-    /// Direct value.
     Direct(String),
-    /// Value sourced from environment.
     Env(RedisEnvSource),
 }
 
@@ -143,21 +177,20 @@ impl RedisValueSource {
     }
 }
 
+/// <!--${internal}-->
 /// Environment variable source for Redis values.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub struct RedisEnvSource {
-    /// Must be "env" to indicate environment variable source.
     #[serde(rename = "type")]
     pub source_type: RedisEnvSourceType,
 
-    /// Name of the environment variable.
     pub variable: String,
 
-    /// Optional container name for multi-container pods.
     #[serde(default)]
     pub container: Option<String>,
 }
 
+/// <!--${internal}-->
 /// Type marker for environment variable sources.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -168,36 +201,50 @@ pub enum RedisEnvSourceType {
 /// Configuration for local Redis runtime.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub struct RedisLocalConfig {
+    /// ##### feature.db_branches[].local.port (type: redis)
+    ///
     /// Local port to bind Redis to (default: 6379).
     #[serde(default = "default_local_port")]
     pub port: u16,
 
+    /// ##### feature.db_branches[].local.version (type: redis)
+    ///
     /// Redis version/tag to use (default: "7-alpine").
     /// Used as the container image tag.
     #[serde(default = "default_redis_version")]
     pub version: String,
 
+    /// ##### feature.db_branches[].local.runtime (type: redis)
+    ///
     /// Runtime backend for local Redis: `container`, `redis_server`, or `auto`.
     #[serde(default)]
     pub runtime: RedisRuntime,
 
+    /// ##### feature.db_branches[].local.container_runtime (type: redis)
+    ///
     /// Which container runtime to use (Docker, Podman, or nerdctl).
     /// Only applies when `runtime` is `container` or `auto`.
     #[serde(default)]
     pub container_runtime: ContainerRuntime,
 
+    /// ##### feature.db_branches[].local.container_command (type: redis)
+    ///
     /// Custom path to the container command.
     /// If not provided, uses the runtime name from PATH (e.g., "docker").
     /// Example: `/usr/local/bin/docker` or `/home/user/.local/bin/podman`
     #[serde(default)]
     pub container_command: Option<String>,
 
+    /// ##### feature.db_branches[].local.server_command (type: redis)
+    ///
     /// Custom path to the redis-server binary.
     /// If not provided, uses "redis-server" from PATH.
     /// Example: `/opt/redis/bin/redis-server`
     #[serde(default)]
     pub server_command: Option<String>,
 
+    /// ##### feature.db_branches[].local.options (type: redis)
+    ///
     /// Additional Redis configuration options.
     #[serde(default)]
     pub options: RedisOptions,
@@ -217,29 +264,23 @@ impl Default for RedisLocalConfig {
     }
 }
 
-/// Runtime backend for running local Redis.
-///
 /// For container-based runtimes, mirrord spawns the Redis image in a container.
 /// For `redis_server`, it runs the native binary directly.
 ///
 /// Backends:
-/// - `container` (default) - Uses a container runtime (Docker/Podman/nerdctl)
+/// - `container` (default) - Uses a container runtime (Docker/Podman/nerdctl), configured via
+///   `container_runtime`.
 /// - `redis_server` - Uses native redis-server binary
 /// - `auto` - Tries container first, falls back to redis-server
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RedisRuntime {
-    /// Use a container runtime (configure which one via `container_runtime`). (default)
     #[default]
     Container,
-    /// Use native redis-server binary.
     RedisServer,
-    /// Auto-detect: try container first, fall back to redis-server.
     Auto,
 }
 
-/// Additional arguments passed to the Redis server.
-///
 /// Example:
 /// ```json
 /// {

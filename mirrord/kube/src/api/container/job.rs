@@ -108,24 +108,49 @@ where
                     Some(Ok(Event::Apply(pod) | Event::InitApply(pod))) => {
                         last_known_container_state = find_agent_container_state(&pod.status);
 
-                        let Some(ref status) = pod.status else {
+                        let Some(status) = &pod.status else {
                             continue;
                         };
-
-                        let Some(ref phase) = status.phase else {
+                        let Some(phase) = &status.phase else {
+                            continue;
+                        };
+                        let Some(agent_status) = status
+                            .container_statuses
+                            .as_deref()
+                            .unwrap_or_default()
+                            .iter()
+                            .find(|container| container.name == "mirrord-agent") else {
                             continue;
                         };
 
                         // Ref: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase
                         match phase.as_str() {
-                            "Pending" | "Unknown" => continue,
-                            "Running" => break,
+                            "Running" if agent_status.ready => break,
+                            "Pending" | "Running" | "Unknown" => continue,
                             "Failed" => {
-                                let message = format!(
-                                    "agent pod failed ({}): {}",
-                                    status.reason.as_deref().unwrap_or("<unknown reason>"),
-                                    status.message.as_deref().unwrap_or("<no message>"),
-                                );
+                                let message = if status.reason.is_some() || status.message.is_some() {
+                                    format!(
+                                        "agent pod failed ({}): {}",
+                                        status.reason.as_deref().unwrap_or("<unknown reason>"),
+                                        status.message.as_deref().unwrap_or("<no message>"),
+                                    )
+                                } else {
+                                    // Even if we don't have any reason/message on the pod level,
+                                    // there still might be something on the container level.
+                                    agent_status
+                                        .last_state
+                                        .as_ref()
+                                        .and_then(|state| state.terminated.as_ref())
+                                        .map(|terminated| {
+                                            format!(
+                                                "agent container failed with exit code {} ({}): {}",
+                                                terminated.exit_code,
+                                                terminated.reason.as_deref().unwrap_or("<unknown reason>"),
+                                                terminated.message.as_deref().unwrap_or("<unknown message>"),
+                                            )
+                                        })
+                                        .unwrap_or_else(|| "<reason not found>".to_string())
+                                };
                                 pod_progress.failure(Some(&message));
                                 return Err(KubeApiError::AgentPodStartError(message));
                             }

@@ -7,12 +7,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{self, source::MirrordConfigSource};
 
+pub mod mongodb;
 pub mod mysql;
 pub mod pg;
 pub mod redis;
 
+pub use mongodb::{
+    MongodbBranchCollectionCopyConfig, MongodbBranchConfig, MongodbBranchCopyConfig,
+};
 pub use mysql::{MysqlBranchConfig, MysqlBranchCopyConfig, MysqlBranchTableCopyConfig};
-pub use pg::{PgBranchConfig, PgBranchCopyConfig, PgBranchTableCopyConfig};
+pub use pg::{PgBranchConfig, PgBranchCopyConfig, PgBranchTableCopyConfig, PgIamAuthConfig};
 pub use redis::{
     RedisBranchConfig, RedisBranchLocation, RedisConnectionConfig, RedisLocalConfig, RedisOptions,
     RedisRuntime, RedisValueSource,
@@ -52,6 +56,13 @@ impl Deref for DatabaseBranchesConfig {
 }
 
 impl DatabaseBranchesConfig {
+    pub fn count_mongodb(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::Mongodb { .. }))
+            .count()
+    }
+
     pub fn count_mysql(&self) -> usize {
         self.0
             .iter()
@@ -96,29 +107,30 @@ impl DatabaseBranchesConfig {
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum DatabaseBranchConfig {
+    Mongodb(MongodbBranchConfig),
     Mysql(MysqlBranchConfig),
     Pg(PgBranchConfig),
     Redis(RedisBranchConfig),
 }
 
-/// Despite the database type, all database branch config objects share the following fields.
+/// MySQL and Postgres database branch config objects share the following fields.
 #[derive(MirrordConfig, Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[config(map_to = "DatabaseBranchBaseFileConfig")]
 pub struct DatabaseBranchBaseConfig {
-    /// #### feature.db_branches.base.id {#feature-db_branches-base-id}
+    /// #### feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}
     ///
     /// Users can choose to specify a unique `id`. This is useful for reusing or sharing
     /// the same database branch among Kubernetes users.
     pub id: Option<String>,
 
-    /// #### feature.db_branches.base.name {#feature-db_branches-base-name}
+    /// #### feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}
     ///
     /// When source database connection detail is not accessible to mirrord operator, users
     /// can specify the database `name` so it is included in the connection options mirrord
     /// uses as the override.
     pub name: Option<String>,
 
-    /// #### feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}
+    /// #### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}
     ///
     /// Mirrord operator starts counting the TTL when a branch is no longer used by any session.
     /// The time-to-live (TTL) for the branch database is set to 300 seconds by default.
@@ -128,7 +140,7 @@ pub struct DatabaseBranchBaseConfig {
     #[serde(default = "default_ttl_secs")]
     pub ttl_secs: u64,
 
-    /// #### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
+    /// #### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
     ///
     /// The timeout in seconds to wait for a database branch to become ready after creation.
     /// Defaults to 60 seconds. Adjust this value based on your database size and cluster
@@ -136,12 +148,12 @@ pub struct DatabaseBranchBaseConfig {
     #[serde(default = "default_creation_timeout_secs")]
     pub creation_timeout_secs: u64,
 
-    /// #### feature.db_branches.base.version {#feature-db_branches-base-version}
+    /// #### feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}
     ///
     /// Mirrord operator uses a default version of the database image unless `version` is given.
     pub version: Option<String>,
 
-    /// #### feature.db_branches.base.connection {#feature-db_branches-base-connection}
+    /// #### feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}
     ///
     /// `connection` describes how to get the connection information to the source database.
     /// When the branch database is ready for use, Mirrord operator will replace the connection
@@ -168,9 +180,10 @@ pub struct DatabaseBranchBaseConfig {
 #[schemars(rename = "DbBranchingConnectionSource")]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionSource {
-    Url(ConnectionSourceKind),
+    Url(TargetEnviromentVariableSource),
 }
 
+/// <!--${internal}-->
 /// Different ways to source the connection options.
 ///
 /// Support:
@@ -179,7 +192,7 @@ pub enum ConnectionSource {
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSourceKind")]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ConnectionSourceKind {
+pub enum TargetEnviromentVariableSource {
     Env {
         container: Option<String>,
         variable: String,
@@ -207,6 +220,7 @@ impl config::FromMirrordConfig for DatabaseBranchesConfig {
 
 impl CollectAnalytics for &DatabaseBranchesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
+        analytics.add("mongodb_branch_count", self.count_mongodb());
         analytics.add("mysql_branch_count", self.count_mysql());
         analytics.add("pg_branch_count", self.count_pg());
         analytics.add("redis_branch_count", self.count_redis());

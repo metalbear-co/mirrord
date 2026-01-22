@@ -114,13 +114,15 @@ where
     .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
 
     // unpack the frontend into `TempDir`
-    let tmp_dir = TempDir::new()?;
+    let tmp_dir = TempDir::new().map_err(CliError::WizardIoError)?;
     let temp_dir_path = tmp_dir.path();
 
     let tar_gz = Cursor::new(COMPRESSED_FRONTEND);
     let tar = GzDecoder::new(tar_gz);
     let mut archive = Archive::new(tar);
-    archive.unpack(temp_dir_path)?;
+    archive
+        .unpack(temp_dir_path)
+        .map_err(CliError::WizardIoError)?;
 
     let serve_client = {
         let index_service = ServiceBuilder::new()
@@ -162,8 +164,13 @@ where
         .route("/api/v1/namespace/{namespace}/targets", get(list_targets))
         .with_state(Arc::new(Mutex::new(BackendState { user_data, client })));
     let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 3000);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    tracing::debug!("listening on {}", listener.local_addr()?);
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .map_err(CliError::WizardIoError)?;
+    tracing::debug!(
+        "listening on {}",
+        listener.local_addr().map_err(CliError::WizardIoError)?
+    );
     progress.success(None);
 
     parent_progress

@@ -597,6 +597,15 @@ fn sip_only_layer_start(
     SETUP.set(layer_setup).expect("SETUP set failed");
 
     unsafe { file::hooks::enable_file_hooks(&mut hook_manager, setup()) };
+
+    if let Some(unset) = setup().env_config().unset.as_ref() {
+        let unset = unset.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>();
+        std::env::vars().for_each(|(key, _)| {
+            if unset.contains(&key.to_lowercase()) {
+                unsafe { std::env::remove_var(&key) };
+            }
+        });
+    }
 }
 
 /// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what
@@ -730,9 +739,14 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         Some(socket) => {
             // Closed file is a socket, so if it's already bound to a port - notify agent to stop
             // mirroring/stealing that port.
-            socket.close();
+
+            // [`UserSocket::close`] will be called in its `Drop` impl,
+            // when all handles (possibly created through `dup` and
+            // friends) have been closed.
+            drop(socket);
         }
         _ => {
+            // `close` called in [`RemoteFile::drop`]
             if setup().fs_config().is_active() {
                 OPEN_FILES
                     .lock()

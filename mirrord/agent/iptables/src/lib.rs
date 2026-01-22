@@ -1,5 +1,5 @@
 #![deny(unused_crate_dependencies)]
-
+#![cfg(target_os = "linux")]
 use std::{
     fmt::Debug,
     ops::Not,

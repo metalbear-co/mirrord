@@ -1,0 +1,133 @@
+name: E2E Tests
+
+
+on:
+  workflow_call:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RUST_BACKTRACE: "1"
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  MIRRORD_TELEMETRY: "false"
+  LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
+
+jobs:
+  windows_e2e:
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'windows-e2e') || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+    permissions:
+      contents: read
+    runs-on: [self-hosted, Windows]
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Verify Kubeconfig (Existing)
+        run: |
+           $KubePath = "$env:USERPROFILE\.kube\config"
+           Write-Host "Checking for existing Kubeconfig at: $KubePath"
+           
+           if (-not (Test-Path $KubePath)) {
+               Write-Error "KUBECONFIG NOT FOUND on runner! This workflow relies on a pre-configured ~/.kube/config."
+               exit 1
+           }
+           
+           $Size = (Get-Item $KubePath).Length
+           if ($Size -lt 10) {
+               Write-Error "Kubeconfig is empty ($Size bytes)."
+               exit 1
+           }
+           Write-Host "Kubeconfig found ($Size bytes). Using existing file."
+
+      - name: Close existing tunnels (Port 6443)
+        run: |
+          $port = 6443
+          # Kill gcloud IAP processes
+          Get-Process -Name "gcloud" -ErrorAction SilentlyContinue | Stop-Process -Force
+          # Kill anything else on 6443
+          $connections = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
+          if ($connections) {
+              Write-Host "Killing processes listening on port $port..."
+              foreach ($conn in $connections) {
+                  Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
+              }
+          }
+
+      - name: Start IAP Tunnel to K3s
+        run: |
+          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
+          & "$ScriptsDir\start_iap_tunnel.ps1"
+
+      - name: Toolchain info
+        run: |
+          $ErrorActionPreference = "Stop"
+          whoami
+          rustc -V
+          cargo -V
+          rustup show
+
+      - name: Prepare e2e tests dependencies
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
+          & "$ScriptsDir\win_build_test_apps.ps1"
+
+      - name: Ensure Python test deps (flask/uvicorn/fastapi)
+        run: |
+          $ErrorActionPreference = "Stop"
+          $py = Get-Command py -ErrorAction SilentlyContinue
+          if (-not $py) {
+            throw "py launcher not found; ensure Python is installed."
+          }
+          py -3 -m pip install --upgrade pip
+          py -3 -m pip install --upgrade flask uvicorn fastapi
+
+      - name: Build (Debug)
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Target = "x86_64-pc-windows-msvc"
+
+          Write-Host "Building mirrord-layer-win..."
+          cargo build -p mirrord-layer-win --target $Target
+
+          $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\debug"
+          $dll = Join-Path $RelDir "mirrord_layer_win.dll"
+          if (-not (Test-Path $dll)) { throw "mirrord_layer_win.dll not found" }
+
+          # Set for the next build command in this session
+          $env:MIRRORD_LAYER_FILE = $dll
+
+          Write-Host "Building mirrord binary..."
+          cargo build -p mirrord --bin mirrord --target $Target
+          
+          $exe = Join-Path $RelDir "mirrord.exe"
+          
+          if (-not (Test-Path $exe)) { throw "mirrord.exe not found" }
+          
+          "MIRRORD_EXE=$exe" | Out-File -Append -FilePath $env:GITHUB_ENV
+          "MIRRORD_LAYER_FILE=$dll" | Out-File -Append -FilePath $env:GITHUB_ENV
+
+      - name: Run Windows E2E Tests
+        run: |
+          $ErrorActionPreference = "Stop"
+          
+          # 1. Ensure/Restart Tunnel
+          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
+          & "$ScriptsDir\start_iap_tunnel.ps1"
+
+          Write-Host "Running E2E tests..."
+          # Note: skipping the specific test skipped in windows-build.yaml
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --nocapture --test-threads=1
+        env:
+          KUBECONFIG: ${{ env.USERPROFILE }}\.kube\config

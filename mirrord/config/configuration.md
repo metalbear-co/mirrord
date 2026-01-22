@@ -278,6 +278,10 @@ Complete setup:
 }
 ```
 
+Can also be controlled via `MIRRORD_AGENT_IMAGE`, `MIRRORD_AGENT_IMAGE_REGISTRY`, and
+`MIRRORD_AGENT_IMAGE_TAG`. `MIRRORD_AGENT_IMAGE` takes precedence, followed by config
+values for registry/tag, then environment variables for registry/tag.
+
 ### agent.image_pull_policy {#agent-image_pull_policy}
 
 Controls when a new agent image is downloaded.
@@ -419,8 +423,6 @@ as targeted agent always runs on the same node as its target container.
 
 Specifies the priority class to assign to the agent pod.
 
-This option is only applicable when running in the targetless mode.
-
 ```json
 {
   "agent": {
@@ -429,10 +431,9 @@ This option is only applicable when running in the targetless mode.
 }
 ```
 
-In some cases, the targetless agent pod may fail to schedule due to node resource
-constraints. Setting a priority class allows you to explicitly assign an existing
-priority class from your cluster to the agent pod, increasing its priority relative
-to other workloads.
+In some cases, the agent pod may fail to schedule due to node resource constraints.
+Setting a priority class allows you to explicitly assign an existing priority class
+from your cluster to the agent pod, increasing its priority relative to other workloads.
 
 ### agent.privileged {#agent-privileged}
 
@@ -532,7 +533,7 @@ Configuration for mirrord for CI.
 }
 ```
 
-### ci.output_dir{#ci-output_dir}
+### ci.output_dir {#ci-output_dir}
 
 Path to a directory where `mirrord ci` will flush application's stdout and stderr.
 
@@ -623,7 +624,7 @@ This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 
 ### _experimental_ applev {#experimental-applev}
 
-Configuraiton for inspecting and modifying apple variables. macOS only.
+Configuration for inspecting and modifying apple variables. macOS only.
 
 ### _experimental_ browser_extension_config {#experimental-browser_extension_config}
 
@@ -939,11 +940,11 @@ Example:
 }
 ```
 
-When configuring a branch for MySQL, set `type` to `mysql`.
+When configuring a branch for MongoDB, set `type` to `mongodb`.
 
-Despite the database type, all database branch config objects share the following fields.
+MySQL and Postgres database branch config objects share the following fields.
 
-#### feature.db_branches.base.connection {#feature-db_branches-base-connection}
+#### feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}
 
 `connection` describes how to get the connection information to the source database.
 When the branch database is ready for use, Mirrord operator will replace the connection
@@ -965,30 +966,24 @@ the target pod template.
 }
 ```
 
-Different ways to source the connection options.
-
-Support:
-- `env` in the target's pod spec.
-- `envFrom` in the target's pod spec.
-
-#### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
+#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
 
 The timeout in seconds to wait for a database branch to become ready after creation.
 Defaults to 60 seconds. Adjust this value based on your database size and cluster
 performance.
 
-#### feature.db_branches.base.id {#feature-db_branches-base-id}
+#### feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}
 
 Users can choose to specify a unique `id`. This is useful for reusing or sharing
 the same database branch among Kubernetes users.
 
-#### feature.db_branches.base.name {#feature-db_branches-base-name}
+#### feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}
 
 When source database connection detail is not accessible to mirrord operator, users
 can specify the database `name` so it is included in the connection options mirrord
 uses as the override.
 
-#### feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}
+#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}
 
 Mirrord operator starts counting the TTL when a branch is no longer used by any session.
 The time-to-live (TTL) for the branch database is set to 300 seconds by default.
@@ -996,7 +991,116 @@ Users can set `ttl_secs` to customize this value according to their need. Please
 that longer TTL paired with frequent mirrord session turnover can result in increased
 resource usage. For this reason, branch database TTL caps out at 15 min.
 
-#### feature.db_branches.base.version {#feature-db_branches-base-version}
+#### feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}
+
+Mirrord operator uses a default version of the database image unless `version` is given.
+
+Users can choose from the following copy mode to bootstrap their MongoDB branch database:
+
+- Empty
+
+  Creates an empty database. If the source DB connection options are found from the chosen
+  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord
+  operator looks for the `name` field from the branch DB config object. This option is useful
+  for users that run DB migrations themselves before starting the application.
+
+- All
+
+  Copies both schema and data of all collections. Supports optional collection filters
+  to copy only specific collections or filter documents within collections.
+
+Configuration for copying a specific collection.
+
+Example:
+
+```json
+{
+  "users": {
+    "filter": "{\"name\": {\"$in\": [\"alice\", \"bob\"]}}"
+  },
+  "orders": {
+    "filter": "{\"created_at\": {\"$gt\": 1759948761}}"
+  }
+}
+```
+
+With the config above, only alice and bob from the `users` collection and orders
+created after the given timestamp will be copied.
+
+A MongoDB query filter in JSON format. Documents matching this filter will be copied.
+
+Configuration for copying a specific collection.
+
+Example:
+
+```json
+{
+  "users": {
+    "filter": "{\"name\": {\"$in\": [\"alice\", \"bob\"]}}"
+  },
+  "orders": {
+    "filter": "{\"created_at\": {\"$gt\": 1759948761}}"
+  }
+}
+```
+
+With the config above, only alice and bob from the `users` collection and orders
+created after the given timestamp will be copied.
+
+A MongoDB query filter in JSON format. Documents matching this filter will be copied.
+
+When configuring a branch for MySQL, set `type` to `mysql`.
+
+MySQL and Postgres database branch config objects share the following fields.
+
+#### feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}
+
+`connection` describes how to get the connection information to the source database.
+When the branch database is ready for use, Mirrord operator will replace the connection
+information with the branch database's.
+
+Different ways of connecting to the source database.
+
+Example:
+
+A single complete connection URL stored in an environment variable accessible from
+the target pod template.
+
+```json
+{
+  "url": {
+    "type": "env",
+    "variable": "DB_CONNECTION_URL"
+  }
+}
+```
+
+#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
+
+The timeout in seconds to wait for a database branch to become ready after creation.
+Defaults to 60 seconds. Adjust this value based on your database size and cluster
+performance.
+
+#### feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}
+
+Users can choose to specify a unique `id`. This is useful for reusing or sharing
+the same database branch among Kubernetes users.
+
+#### feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}
+
+When source database connection detail is not accessible to mirrord operator, users
+can specify the database `name` so it is included in the connection options mirrord
+uses as the override.
+
+#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}
+
+Mirrord operator starts counting the TTL when a branch is no longer used by any session.
+The time-to-live (TTL) for the branch database is set to 300 seconds by default.
+Users can set `ttl_secs` to customize this value according to their need. Please note
+that longer TTL paired with frequent mirrord session turnover can result in increased
+resource usage. For this reason, branch database TTL caps out at 15 min.
+
+#### feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}
 
 Mirrord operator uses a default version of the database image unless `version` is given.
 
@@ -1058,9 +1162,9 @@ created after the given timestamp will be copied.
 
 When configuring a branch for PostgreSQL, set `type` to `pg`.
 
-Despite the database type, all database branch config objects share the following fields.
+MySQL and Postgres database branch config objects share the following fields.
 
-#### feature.db_branches.base.connection {#feature-db_branches-base-connection}
+#### feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}
 
 `connection` describes how to get the connection information to the source database.
 When the branch database is ready for use, Mirrord operator will replace the connection
@@ -1082,30 +1186,24 @@ the target pod template.
 }
 ```
 
-Different ways to source the connection options.
-
-Support:
-- `env` in the target's pod spec.
-- `envFrom` in the target's pod spec.
-
-#### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
+#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
 
 The timeout in seconds to wait for a database branch to become ready after creation.
 Defaults to 60 seconds. Adjust this value based on your database size and cluster
 performance.
 
-#### feature.db_branches.base.id {#feature-db_branches-base-id}
+#### feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}
 
 Users can choose to specify a unique `id`. This is useful for reusing or sharing
 the same database branch among Kubernetes users.
 
-#### feature.db_branches.base.name {#feature-db_branches-base-name}
+#### feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}
 
 When source database connection detail is not accessible to mirrord operator, users
 can specify the database `name` so it is included in the connection options mirrord
 uses as the override.
 
-#### feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}
+#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}
 
 Mirrord operator starts counting the TTL when a branch is no longer used by any session.
 The time-to-live (TTL) for the branch database is set to 300 seconds by default.
@@ -1113,7 +1211,7 @@ Users can set `ttl_secs` to customize this value according to their need. Please
 that longer TTL paired with frequent mirrord session turnover can result in increased
 resource usage. For this reason, branch database TTL caps out at 15 min.
 
-#### feature.db_branches.base.version {#feature-db_branches-base-version}
+#### feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}
 
 Mirrord operator uses a default version of the database image unless `version` is given.
 
@@ -1173,6 +1271,62 @@ Example:
 With the config above, only alice and bob from the `users` table and orders
 created after the given timestamp will be copied.
 
+#### feature.db_branches[].iam_auth (type: pg) {#feature-db_branches-pg-iam_auth}
+
+IAM authentication for the source database.
+Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication
+instead of password-based authentication.
+
+Environment variable sources follow the same pattern as `connection.url`:
+- `{ "type": "env", "variable": "VAR_NAME" }` - direct env var from pod spec
+- `{ "type": "env_from", "variable": "VAR_NAME" }` - from configMapRef/secretRef
+
+For AWS RDS/Aurora IAM authentication, set `type` to `"aws_rds"`.
+
+Example:
+```json
+{
+  "iam_auth": {
+    "type": "aws_rds",
+    "region": { "type": "env", "variable": "MY_AWS_REGION" },
+    "access_key_id": { "type": "env_from", "variable": "AWS_KEY" }
+  }
+}
+```
+
+The init container must have AWS credentials (via IRSA, instance profile, or env vars).
+
+Parameters:
+- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
+- `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
+- `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
+- `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses
+  AWS_SESSION_TOKEN.
+
+For GCP Cloud SQL IAM authentication, set `type` to `"gcp_cloud_sql"`.
+
+Example for GCP Cloud SQL with credentials from a secret:
+```json
+{
+  "iam_auth": {
+    "type": "gcp_cloud_sql",
+    "credentials_json": { "type": "env_from", "variable": "GOOGLE_APPLICATION_CREDENTIALS_JSON" }
+  }
+}
+```
+
+The init container must have GCP credentials (via Workload Identity or service account key).
+Use either `credentials_json` OR `credentials_path`, not both.
+
+Parameters:
+- `credentials_json`: Inline service account JSON key content. Specify the env var that
+  contains the raw JSON content of the service account key. Example: ` { "type": "env",
+  "variable": "GOOGLE_APPLICATION_CREDENTIALS_JSON" } `.
+- `credentials_path`: Path to service account JSON key file. Specify the env var that
+  contains the file path to the service account key. The file must be accessible from the
+  init container. Example: `{"type": "env", "variable": "GOOGLE_APPLICATION_CREDENTIALS"}`.
+- `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
+
 When configuring a branch for Redis, set `type` to `redis`.
 
 Example with URL-based connection:
@@ -1202,110 +1356,78 @@ Example with separated settings:
 }
 ```
 
-Connection configuration for the Redis instance.
+#### feature.db_branches[].connection (type: redis) {#feature-db_branches-redis-connection}
 
-Redis connection configuration.
+Connection configuration for the Redis instance.
 
 Supports either a complete URL or separated connection parameters.
 If both are provided, `url` takes precedence.
 
+The following fields can be sourced via remote environment variable:
+- url
+- host
+- password
+- username
+
+Example:
+```json
+"connection": {
+    "host": { "type": "env", "variable": "REDIS_HOST" },
+    "port": 6379,
+    "password": { "type": "env", "variable": "REDIS_PASSWORD" }
+}
+```
+
+##### feature.db_branches[].connection.database (type: redis)
+
 Redis database number (default: 0).
 
+##### feature.db_branches[].connection.host (type: redis)
+
 Redis host/hostname.
+Can be sourced from an environment variable.
 
-Source for a Redis configuration value.
-
-Values can be specified directly or sourced from environment variables.
-
-Direct value.
-
-Value sourced from environment.
-
-Environment variable source for Redis values.
-
-Optional container name for multi-container pods.
-
-Must be "env" to indicate environment variable source.
-
-Type marker for environment variable sources.
-
-Name of the environment variable.
+##### feature.db_branches[].connection.password (type: redis)
 
 Redis password for authentication.
+Can be sourced from an environment variable.
 
-Source for a Redis configuration value.
-
-Values can be specified directly or sourced from environment variables.
-
-Direct value.
-
-Value sourced from environment.
-
-Environment variable source for Redis values.
-
-Optional container name for multi-container pods.
-
-Must be "env" to indicate environment variable source.
-
-Type marker for environment variable sources.
-
-Name of the environment variable.
+##### feature.db_branches[].connection.port (type: redis)
 
 Redis port (default: 6379).
 
+##### feature.db_branches[].connection.tls (type: redis)
+
 Enable TLS/SSL connection.
+
+##### feature.db_branches[].connection.url (type: redis)
 
 Complete Redis URL (e.g., `redis://user:pass@host:6379/0`).
 Can be sourced from an environment variable.
 
-Source for a Redis configuration value.
-
-Values can be specified directly or sourced from environment variables.
-
-Direct value.
-
-Value sourced from environment.
-
-Environment variable source for Redis values.
-
-Optional container name for multi-container pods.
-
-Must be "env" to indicate environment variable source.
-
-Type marker for environment variable sources.
-
-Name of the environment variable.
+##### feature.db_branches[].connection.username (type: redis)
 
 Redis username (Redis 6+ ACL).
+Can be sourced from an environment variable.
 
-Source for a Redis configuration value.
-
-Values can be specified directly or sourced from environment variables.
-
-Direct value.
-
-Value sourced from environment.
-
-Environment variable source for Redis values.
-
-Optional container name for multi-container pods.
-
-Must be "env" to indicate environment variable source.
-
-Type marker for environment variable sources.
-
-Name of the environment variable.
+#### feature.db_branches[].id (type: redis) {#feature-db_branches-redis-id}
 
 Optional unique identifier for reusing branches across sessions.
+
+#### feature.db_branches[].local (type: redis) {#feature-db_branches-redis-local}
 
 Local Redis runtime configuration.
 Only used when `location` is `local`.
 
 Configuration for local Redis runtime.
 
+##### feature.db_branches[].local.container_command (type: redis)
+
 Custom path to the container command.
 If not provided, uses the runtime name from PATH (e.g., "docker").
 Example: `/usr/local/bin/docker` or `/home/user/.local/bin/podman`
+
+##### feature.db_branches[].local.container_runtime (type: redis)
 
 Which container runtime to use (Docker, Podman, or nerdctl).
 Only applies when `runtime` is `container` or `auto`.
@@ -1318,9 +1440,9 @@ nerdctl container runtime (containerd).
 
 Podman container runtime.
 
-Additional Redis configuration options.
+##### feature.db_branches[].local.options (type: redis)
 
-Additional arguments passed to the Redis server.
+Additional Redis configuration options.
 
 Example:
 ```json
@@ -1332,42 +1454,39 @@ Example:
 Raw arguments passed directly to redis-server or as Docker CMD args.
 Use standard Redis config syntax (e.g., "--maxmemory 256mb").
 
+##### feature.db_branches[].local.port (type: redis)
+
 Local port to bind Redis to (default: 6379).
 
-Runtime backend for local Redis: `container`, `redis_server`, or `auto`.
+##### feature.db_branches[].local.runtime (type: redis)
 
-Runtime backend for running local Redis.
+Runtime backend for local Redis: `container`, `redis_server`, or `auto`.
 
 For container-based runtimes, mirrord spawns the Redis image in a container.
 For `redis_server`, it runs the native binary directly.
 
 Backends:
-- `container` (default) - Uses a container runtime (Docker/Podman/nerdctl)
+- `container` (default) - Uses a container runtime (Docker/Podman/nerdctl), configured via
+  `container_runtime`.
 - `redis_server` - Uses native redis-server binary
 - `auto` - Tries container first, falls back to redis-server
 
-Auto-detect: try container first, fall back to redis-server.
-
-Use a container runtime (configure which one via `container_runtime`). (default)
-
-Use native redis-server binary.
+##### feature.db_branches[].local.server_command (type: redis)
 
 Custom path to the redis-server binary.
 If not provided, uses "redis-server" from PATH.
 Example: `/opt/redis/bin/redis-server`
 
+##### feature.db_branches[].local.version (type: redis)
+
 Redis version/tag to use (default: "7-alpine").
 Used as the container image tag.
 
+#### feature.db_branches[].location (type: redis) {#feature-db_branches-redis-location}
+
 Where the Redis instance should run.
-- `local`: Spawns a local Redis instance.
-- `remote`: Uses the remote Redis (default behavior).
-
-Location for the Redis branch instance.
-
-Use a local Redis instance that mirrord manages.
-
-Use the remote Redis (default behavior, no-op).
+- `local`: Spawns a local Redis instance managed by mirrord.
+- `remote`: Uses the remote Redis (default behavior, no-op).
 
 ### feature.env {#feature-env}
 
@@ -1578,6 +1697,8 @@ Will do the next replacements for any io operaton
 
 #### feature.fs.mode {#feature-fs-mode}
 
+### feature.fs.mode {#feature-fs-mode}
+
 Configuration for enabling read-only or read-write file operations.
 
 These options are overriden by user specified overrides and mirrord default overrides.
@@ -1588,19 +1709,19 @@ Default option for general file configuration.
 
 The accepted values are: `"local"`, `"localwithoverrides`, `"read"`, or `"write`.
 
-**feature.fs.mode.local** {#feature-fs-mode-local}
+#### feature.fs.mode.local {#feature-fs-mode-local}
 
 mirrord won't do anything fs-related, all operations will be local.
 
-**feature.fs.mode.localwithoverrides** {#feature-fs-mode-localwithoverrides}
+#### feature.fs.mode.localwithoverrides {#feature-fs-mode-localwithoverrides}
 
 mirrord will run overrides on some file operations, but most will be local.
 
-**feature.fs.mode.read** {#feature-fs-mode-read}
+#### feature.fs.mode.read {#feature-fs-mode-read}
 
 mirrord will read files from the remote, but won't write to them.
 
-**feature.fs.mode.write** {#feature-fs-mode-write}
+#### feature.fs.mode.write {#feature-fs-mode-write}
 
 mirrord will read/write from the remote.
 
@@ -1685,7 +1806,7 @@ Mind that:
 - DNS filter currently works only with frameworks that use `getaddrinfo`/`gethostbyname`
   functions.
 
-**feature.network.dns.filter** {#feature-network-dns-filter}
+##### feature.network.dns.filter {#feature-network-dns-filter}
 
 Unstable: the precise syntax of this config is subject to change.
 
@@ -1819,7 +1940,7 @@ Steal only traffic that matches the
 }
 ```
 
-**feature.network.incoming.http_filter** {#feature-network-incoming-http-filter}
+##### feature.network.incoming.http_filter {#feature-network-incoming-http-filter}
 
 Filter configuration for the HTTP traffic stealer feature.
 
@@ -1935,8 +2056,102 @@ Example:
 
 ##### feature.network.incoming.http_filter.body_filter {#feature-network-incoming-http-body-filter}
 
-Matches the request based on the contents of its body. Currently only JSON body filtering
-is supported.
+Matches the request based on the contents of its body.
+
+Currently only JSON body filtering is supported.
+
+##### feature.network.incoming.inner_filter.body_filter.json {#feature-network-incoming-inner-body-filter-json}
+
+Tries to parse the body as a JSON object and find (a) matching subobjects(s).
+
+`query` should be a valid JSONPath (RFC 9535) query string.
+`matches` should be a regex. Supports regexes validated by the
+[`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate
+
+Example:
+```json
+"http_filter": {
+  "body_filter": {
+    "body": "json",
+    "query": "$.library.books[*]",
+    "matches": "^\\d{3,5}$"
+  }
+}
+```
+will match
+```json
+{
+  "library": {
+    "books": [
+      34555,
+      1233,
+      234
+      23432
+    ]
+  }
+}
+```
+
+The filter will match if there is at least one query result.
+
+Non-string matches are stringified before being compared to
+the regex. To filter query results by type, the `typeof`
+[function extension](https://www.rfc-editor.org/rfc/rfc9535.html#name-function-extensions)
+is provided. It takes in a single `NodesType` parameter and
+returns `"null" | "bool" | "number" | "string" | "array" | "object"`,
+depending on the type of the argument. If not all nodes in the
+argument have the same type, it returns `nothing`.
+
+Example:
+
+```json
+"body_filter": {
+  "body": "json",
+  "query": "$.books[?(typeof(@) == 'number')]",
+  "matches": "4$"
+}
+```
+will match
+
+```json
+{
+  "books": [
+    1111,
+    2222,
+    4444
+  ]
+}
+```
+
+but not
+
+```json
+{
+  "books": [
+    "1111",
+    "2222",
+    "4444"
+  ]
+}
+```
+
+
+
+To use with with `all_of` or `any_of`, use the following syntax:
+```json
+"http_filter": {
+  "all_of": [
+    {
+      "path": "/buildings"
+    },
+    {
+      "body": "json",
+      "query": "$.library.books[*]",
+      "matches": "^\\d{3,5}$"
+    }
+  ]
+}
+```
 
 ##### feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}
 
@@ -1965,18 +2180,10 @@ If any of the two matches, the request is stolen.
 
 ##### feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}
 
-Activate the HTTP traffic filter only for these ports.
+Activate the HTTP traffic filter only for these ports. When
+absent, filtering will be done for all ports.
 
-Other ports will *not* be stolen, unless listed in
-[`feature.network.incoming.ports`](#feature-network-incoming-ports).
-
-We check the pod's health probe ports and automatically add them here, as they're
-usually the same ports your app might be listening on. If your app ports and the
-health probe ports don't match, then setting this option will override this behavior.
-
-Set to [80, 8080] by default.
-
-**feature.network.incoming.https_delivery** {#feature-network-incoming-https_delivery}
+##### feature.network.incoming.https_delivery {#feature-network-incoming-https_delivery}
 
 DEPRECATED: use `tls_delivery` instead.
 
@@ -2066,9 +2273,9 @@ Directories are not traversed recursively.
 Each certificate found in the files is treated as an allowed root.
 The files can contain entries of other types, e.g private keys, which are ignored.
 
-**feature.network.incoming.ignore_localhost** {#feature-network-incoming-ignore_localhost}
+##### feature.network.incoming.ignore_localhost {#feature-network-incoming-ignore_localhost}
 
-**feature.network.incoming.ignore_ports** {#feature-network-incoming-ignore_ports}
+##### feature.network.incoming.ignore_ports {#feature-network-incoming-ignore_ports}
 
 Ports to ignore when mirroring/stealing traffic, these ports will remain local.
 
@@ -2079,7 +2286,7 @@ a health probe, or other heartbeat-like traffic).
 
 Mutually exclusive with [`feature.network.incoming.ports`](#feature-network-ports).
 
-**feature.network.incoming.listen_ports** {#feature-network-incoming-listen_ports}
+##### feature.network.incoming.listen_ports {#feature-network-incoming-listen_ports}
 
 Mapping for local ports to actually used local ports.
 When application listens on a port while steal/mirror is active
@@ -2094,7 +2301,7 @@ you probably can't listen on `80` without sudo, so you can use `[[80, 4480]]`
 then access it on `4480` while getting traffic from remote `80`.
 The value of `port_mapping` doesn't affect this.
 
-**feature.network.incoming.mode** {#feature-network-incoming-mode}
+##### feature.network.incoming.mode {#feature-network-incoming-mode}
 
 Allows selecting between mirrorring or stealing traffic.
 
@@ -2112,8 +2319,7 @@ Can be set to either `"mirror"` (default), `"steal"` or `"off"`.
    on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the
    traffic on the port if it is HTTP;
 
-**feature.network.incoming.on_concurrent_steal**
-{#feature-network-incoming-on_concurrent_steal}
+##### feature.network.incoming.on_concurrent_steal {#feature-network-incoming-on_concurrent_steal}
 
 (Operator Only): Allows overriding port locks
 
@@ -2123,7 +2329,7 @@ Can be set to either `"continue"` or `"override"`.
 - `"override"`: If port lock detected then override it with new lock and force close the
   original locking connection.
 
-**feature.network.incoming.port_mapping** {#feature-network-incoming-port_mapping}
+##### feature.network.incoming.port_mapping {#feature-network-incoming-port_mapping}
 
 Mapping for local ports to remote ports.
 
@@ -2131,14 +2337,16 @@ This is useful when you want to mirror/steal a port to a different port on the r
 machine. For example, your local process listens on port `9333` and the container listens
 on port `80`. You'd use `[[9333, 80]]`
 
-**feature.network.incoming.ports {#feature-network-incoming-ports}
+##### feature.network.incoming.ports {#feature-network-incoming-ports}
 
-List of ports to mirror/steal traffic from. Other ports will remain local.
+When set, traffic will only be mirrored/stolen on these ports,
+and other ports will remain local. Otherwise, all ports are
+mirrored/stolen.
 
 Mutually exclusive with
 [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
 
-**feature.network.incoming.tls_delivery** {#feature-network-incoming-tls_delivery}
+##### feature.network.incoming.tls_delivery {#feature-network-incoming-tls_delivery}
 
 (Operator Only): configures how mirrord delivers stolen TLS traffic
 to the local application.
@@ -2274,7 +2482,7 @@ this feature are **mutually** exclusive.
 }
 ```
 
-**feature.network.outgoing.filter** {#feature.network.outgoing.filter}
+##### feature.network.outgoing.filter {#feature.network.outgoing.filter}
 
 Filters that are used to send specific traffic from either the remote pod or the local app
 
@@ -2327,19 +2535,19 @@ everything else will go through the remote pod.
 When filters are specified under `remote`, matching traffic will go through the remote pod,
 everything else will go through local.
 
-**feature.network.outgoing.ignore_localhost** {#feature.network.outgoing.ignore_localhost}
+##### feature.network.outgoing.ignore_localhost {#feature.network.outgoing.ignore_localhost}
 
 Defaults to `false`.
 
-**feature.network.outgoing.tcp** {#feature.network.outgoing.tcp}
+##### feature.network.outgoing.tcp {#feature.network.outgoing.tcp}
 
 Defaults to `true`.
 
-**feature.network.outgoing.udp** {#feature.network.outgoing.udp}
+##### feature.network.outgoing.udp {#feature.network.outgoing.udp}
 
 Defaults to `true`.
 
-**feature.network.outgoing.unix_streams** {#feature.network.outgoing.unix_streams}
+##### feature.network.outgoing.unix_streams {#feature.network.outgoing.unix_streams}
 
 Connect to these unix streams remotely (and to all other paths locally).
 
@@ -2492,6 +2700,42 @@ on process execution, delaying the layer startup and connection to proxy.
   }
 }
 ```
+
+## key {#root-key}
+
+An identifier for a mirrord session.
+
+This key can be referenced in your configuration using the `{{ key }}` template variable.
+For example, you can use it in HTTP filters: `"header_filter": "x-session: key-{{ key }}"`.
+
+Priority (highest to lowest):
+1. CLI argument: `mirrord exec --key my-key`
+2. Config file: `{ "key": "my-key" }`
+3. Fallback: A unique key is randomly generated if neither option is provided
+
+```json
+{
+  "key": "my-session-key",
+  "feature": {
+    "network": {
+      "incoming": {
+        "http_filter": {
+          "header_filter": "x-session: key-{{ key }}"
+        }
+      }
+    }
+  }
+}
+```
+
+Session key for traffic filtering.
+
+Distinguishes between user-provided keys (from CLI or config file)
+and auto-generated keys (UUID v4).
+
+Auto-generated UUID v4 when no key was provided.
+
+Key provided by user via CLI argument or config file.
 
 ## kube_context {#root-kube_context}
 

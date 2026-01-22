@@ -10,24 +10,45 @@ use std::process::ExitCode;
 #[cfg(target_os = "linux")]
 use crate::{entrypoint::IPTABLES_DIRTY_EXIT_CODE, error::AgentError};
 
+#[cfg(target_os = "linux")]
 mod cli;
+#[cfg(target_os = "linux")]
 mod client_connection;
+#[cfg(target_os = "linux")]
 mod container_handle;
+#[cfg(target_os = "linux")]
 mod dns;
+#[cfg(target_os = "linux")]
 mod entrypoint;
+#[cfg(target_os = "linux")]
 mod env;
+#[cfg(target_os = "linux")]
 mod error;
+#[cfg(target_os = "linux")]
 mod file;
+#[cfg(target_os = "linux")]
 mod http;
+#[cfg(target_os = "linux")]
 mod incoming;
+#[cfg(target_os = "linux")]
 mod metrics;
+#[cfg(target_os = "linux")]
 mod mirror;
+#[cfg(target_os = "linux")]
 mod namespace;
+#[cfg(target_os = "linux")]
 mod outgoing;
+#[cfg(target_os = "linux")]
+mod reverse_dns;
+#[cfg(target_os = "linux")]
 mod runtime;
+#[cfg(target_os = "linux")]
 mod steal;
+#[cfg(target_os = "linux")]
 mod task;
+#[cfg(target_os = "linux")]
 mod util;
+#[cfg(target_os = "linux")]
 mod vpn;
 
 #[cfg(target_os = "linux")]
