@@ -1,14 +1,14 @@
 use std::{
     net::SocketAddr,
     sync::{
-        Arc,
+        Arc, LazyLock,
         atomic::{AtomicUsize, Ordering},
     },
 };
 
 use axum::{Router, extract::State, routing::get};
 use http::StatusCode;
-use prometheus::{IntGauge, Registry, proto::MetricFamily};
+use prometheus::{GaugeVec, IntGauge, Registry, proto::MetricFamily};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
@@ -45,6 +45,19 @@ pub(crate) static TCP_OUTGOING_CONNECTION: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) static UDP_OUTGOING_CONNECTION: AtomicUsize = AtomicUsize::new(0);
 
+/// Metrics for tracking bypassed requests (a request that did not match an http filter or wasn't
+/// stolen by the stealer task).
+///
+/// - Also consumed by the operator.
+pub(crate) static BYPASSED_REQUESTS: LazyLock<prometheus::GaugeVec> = LazyLock::new(|| {
+    prometheus::register_gauge_vec!(
+        "mirrord_agent_bypassed_requests",
+        "amount of incoming requests currently bypassed by mirrord-agent",
+        &["port"]
+    )
+    .expect("BYPASSED_REQUESTS should be valid")
+});
+
 /// Convenience trait for static metrics variables.
 ///
 /// We store them as [`AtomicUsize`], which is the correct type (they're all counters).
@@ -68,7 +81,7 @@ impl AtomicUsizeExt for AtomicUsize {
 /// when it's time to send them via [`get_metrics`].
 #[derive(Debug)]
 struct Metrics {
-    registry: Registry,
+    registry: &'static Registry,
     client_count: IntGauge,
     dns_request_count: IntGauge,
     open_fd_count: IntGauge,
@@ -87,7 +100,7 @@ impl Metrics {
     fn new() -> Self {
         use prometheus::Opts;
 
-        let registry = Registry::new();
+        let registry = prometheus::default_registry();
 
         let client_count = {
             let opts = Opts::new(
@@ -315,6 +328,37 @@ pub(crate) async fn start_metrics(
         })?;
 
     Ok(())
+}
+
+/// A guard for a [`GaugeVec`] that decrements the metric value on `Drop`.
+pub(crate) struct GaugeVecMetricGuard {
+    /// The metric itself.
+    metric: &'static GaugeVec,
+
+    /// The **values** for the `labels` of this metric, i.e. `{port=80,id=1234}`.
+    ///
+    /// See the metric you're changing for the list of labels it expects, and pass them in the
+    /// correct **order**.
+    labels: Vec<String>,
+}
+
+impl GaugeVecMetricGuard {
+    /// Increments the [`GaugeVec`] while setting its labels.
+    ///
+    /// ## Returns
+    ///
+    /// The `Self` guard that you should keep alive until you want this metric to be decremented.
+    pub(crate) fn new(metric: &'static GaugeVec, labels: Vec<String>) -> Self {
+        metric.with_label_values(labels.as_slice()).inc();
+
+        Self { metric, labels }
+    }
+}
+
+impl Drop for GaugeVecMetricGuard {
+    fn drop(&mut self) {
+        self.metric.with_label_values(self.labels.as_slice()).dec();
+    }
 }
 
 /// Allows for managing metrics in a RAII fashion.
