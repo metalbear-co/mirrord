@@ -1155,11 +1155,6 @@ fn ensure_not_nested() -> CliResult<()> {
         return Ok(());
     }
 
-    #[cfg(not(windows))]
-    {
-        return Err(CliError::NestedExec);
-    }
-
     #[cfg(windows)]
     {
         // Allow nesting when IDE-orchestrated mode with ext_injected
@@ -1167,11 +1162,11 @@ fn ensure_not_nested() -> CliResult<()> {
 
         use mirrord_layer_lib::ide::is_ext_injected;
         if is_ext_injected() {
-            Ok(())
-        } else {
-            Err(CliError::NestedExec)
+            return Ok(());
         }
     }
+
+    Err(CliError::NestedExec)
 }
 
 /// Sends a request to the `analytics-server` at `/get-latest-version` to check if the mirrord
