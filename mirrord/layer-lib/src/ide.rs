@@ -7,9 +7,14 @@
 /// In this mode, the IDE manages the mirrord environment, so we only need to
 /// install process hooks for DLL propagation to child processes without full
 /// layer initialization.
+///
+/// This is set by `mirrord exec --ide-orchestrated` and propagated down the line
+/// by being inherited.
 pub const MIRRORD_IDE_ORCHESTRATED_ENV: &str = "__MIRRORD_IDE_ORCHESTRATED";
 
 /// Environment variable that will be present only in the user code processes.
+///
+/// This is set by the IDE extension to be passed to the user code processes.
 pub const MIRRORD_EXT_INJECTED_ENV: &str = "__MIRRORD_EXT_INJECTED";
 
 /// Check if running in IDE-orchestrated mode.

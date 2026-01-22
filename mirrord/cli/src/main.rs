@@ -354,7 +354,7 @@ where
 {
     // IDE-orchestrated mode: only propagate DLL injection without full mirrord setup.
     // The IDE manages the actual mirrord environment.
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     if args.ide_orchestrated {
         return run_ide_orchestrated(args, progress, analytics).await;
     }
@@ -604,9 +604,9 @@ where
     use mirrord_layer_lib::ide::MIRRORD_IDE_ORCHESTRATED_ENV;
     use mirrord_progress::MIRRORD_PROGRESS_ENV;
 
-    let mut sub_progress = progress.subtask("preparing IDE-orchestrated process");
+    let sub_progress = progress.subtask("preparing IDE-orchestrated process");
 
-    let lib_path = extract_library(None, &mut sub_progress, true)?;
+    let lib_path = extract_library(None, &sub_progress, true)?;
     unsafe { env::set_var("MIRRORD_LAYER_FILE", &lib_path) };
 
     // NOTE: add IDE orchestrated envvar including here, as it will be used later in execution
@@ -1209,8 +1209,8 @@ fn ensure_not_nested() -> CliResult<()> {
         // Allow nesting when IDE-orchestrated mode with ext_injected
         // This means the IDE is managing the session and this is the user process launch
 
-        use mirrord_layer_lib::ide::{is_ext_injected, is_ide_orchestrated};
-        if is_ext_injected() || is_ide_orchestrated() {
+        use mirrord_layer_lib::ide::is_ext_injected;
+        if is_ext_injected() {
             Ok(())
         } else {
             Err(CliError::NestedExec)
