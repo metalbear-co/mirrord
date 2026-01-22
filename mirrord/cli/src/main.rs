@@ -1199,9 +1199,7 @@ fn ensure_not_nested() -> CliResult<()> {
 
     #[cfg(not(windows))]
     {
-        if is_nested {
-            return Err(CliError::NestedExec);
-        }
+        return Err(CliError::NestedExec);
     }
 
     #[cfg(windows)]
