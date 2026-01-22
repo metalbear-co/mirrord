@@ -18,7 +18,7 @@ use std::{
 #[cfg(unix)]
 use libc::{DIR, FILE, c_char, hostent};
 use mirrord_config::config::ConfigError;
-use mirrord_protocol::{ResponseError, SerializationError, DnsLookupError};
+use mirrord_protocol::{DnsLookupError, ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
 #[cfg(unix)]
@@ -502,7 +502,7 @@ fn get_platform_errno(fail: HookError) -> u32 {
                 _ => WSAEINVAL,
             },
             ResponseError::DnsLookup(dns_fail) => {
-                // try_into must work as WSAE* errors returned are actually u32 
+                // try_into must work as WSAE* errors returned are actually u32
                 translate_dns_fail(dns_fail).try_into().unwrap()
             }
             // for listen, EINVAL means "socket is already connected."
@@ -571,6 +571,7 @@ fn translate_dns_fail(dns_fail: DnsLookupError) -> i32 {
                 WSAHOST_NOT_FOUND
             }
         }
+        // TODO: Add more error kinds, next time we break protocol compatibility.
         _ => {
             #[cfg(unix)]
             {
@@ -581,7 +582,6 @@ fn translate_dns_fail(dns_fail: DnsLookupError) -> i32 {
                 WSANO_RECOVERY
             }
         }
-        // TODO: Add more error kinds, next time we break protocol compatibility.
     } as _)
 }
 
