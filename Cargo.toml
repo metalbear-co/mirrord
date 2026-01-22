@@ -274,7 +274,7 @@ strip = "debuginfo"
 lto = false
 
 [patch.crates-io]
-tree-sitter = { git = "https://github.com/tree-sitter/tree-sitter.git", rev = "1f221c8500bf78c990690b49a0b62c7f11cdb87c" }
-tree-sitter-language = { git = "https://github.com/tree-sitter/tree-sitter.git", rev = "1f221c8500bf78c990690b49a0b62c7f11cdb87c" }
+tree-sitter = { git = "https://github.com/metalbear-co/tree-sitter.git", rev = "1f221c8500bf78c990690b49a0b62c7f11cdb87c" }
+tree-sitter-language = { git = "https://github.com/metalbear-co/tree-sitter.git", rev = "1f221c8500bf78c990690b49a0b62c7f11cdb87c" }
 
 

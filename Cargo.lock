@@ -8304,7 +8304,7 @@ dependencies = [
 [[package]]
 name = "tree-sitter"
 version = "0.26.3"
-source = "git+https://github.com/tree-sitter/tree-sitter.git?rev=1f221c8500bf78c990690b49a0b62c7f11cdb87c#1f221c8500bf78c990690b49a0b62c7f11cdb87c"
+source = "git+https://github.com/metalbear-co/tree-sitter.git?rev=1f221c8500bf78c990690b49a0b62c7f11cdb87c#1f221c8500bf78c990690b49a0b62c7f11cdb87c"
 dependencies = [
  "cc",
  "regex",
@@ -8326,7 +8326,7 @@ dependencies = [
 [[package]]
 name = "tree-sitter-language"
 version = "0.1.6"
-source = "git+https://github.com/tree-sitter/tree-sitter.git?rev=1f221c8500bf78c990690b49a0b62c7f11cdb87c#1f221c8500bf78c990690b49a0b62c7f11cdb87c"
+source = "git+https://github.com/metalbear-co/tree-sitter.git?rev=1f221c8500bf78c990690b49a0b62c7f11cdb87c#1f221c8500bf78c990690b49a0b62c7f11cdb87c"
 
 [[package]]
 name = "tree-sitter-yaml"
