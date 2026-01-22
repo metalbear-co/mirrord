@@ -8305,8 +8305,7 @@ dependencies = [
 [[package]]
 name = "tree-sitter"
 version = "0.26.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "974d205cc395652cfa8b37daa053fe56eebd429acf8dc055503fee648dae981e"
+source = "git+https://github.com/metalbear-co/tree-sitter.git?tag=hotfix#1f221c8500bf78c990690b49a0b62c7f11cdb87c"
 dependencies = [
  "cc",
  "regex",
@@ -8328,8 +8327,7 @@ dependencies = [
 [[package]]
 name = "tree-sitter-language"
 version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ae62f7eae5eb549c71b76658648b72cc6111f2d87d24a1e31fa907f4943e3ce"
+source = "git+https://github.com/metalbear-co/tree-sitter.git?tag=hotfix#1f221c8500bf78c990690b49a0b62c7f11cdb87c"
 
 [[package]]
 name = "tree-sitter-yaml"
