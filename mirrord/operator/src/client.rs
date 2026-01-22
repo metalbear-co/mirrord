@@ -915,6 +915,73 @@ impl OperatorApi<PreparedClientCert> {
         })
     }
 
+    /// Connect to operator using target config directly (no K8s resolution).
+    ///
+    /// Used when the target may not exist locally, e.g., in multi-cluster mode
+    /// where the primary cluster is management-only and targets exist only on
+    /// workload clusters. The operator handles target resolution on the appropriate cluster.
+    ///
+    /// This method skips:
+    /// - `assert_valid_mirrord_target` (operator validates on workload cluster)
+    /// - `runtime_data` warnings (operator handles on workload cluster)
+    /// - `copy_target` (not supported without local resolution)
+    pub async fn connect_in_new_session_from_config<P>(
+        &self,
+        target: &Target,
+        namespace: Option<&str>,
+        layer_config: &mut LayerConfig,
+        progress: &P,
+        branch_name: Option<String>,
+        session_ci_info: Option<SessionCiInfo>,
+    ) -> OperatorApiResult<OperatorSessionConnection>
+    where
+        P: Progress,
+    {
+        use mirrord_config::target::TargetDisplay;
+
+        tracing::info!(
+            target_type = %target.type_(),
+            target_name = %target.name(),
+            namespace = ?namespace,
+            "[MULTICLUSTER] Connecting without local target resolution - operator will resolve on workload cluster"
+        );
+
+        let use_proxy_api = self
+            .operator
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::ProxyApi);
+
+        // In multi-cluster mode, send feature_config for operator to handle
+        let feature_config = serde_json::to_string(&layer_config.feature)
+            .expect("FeatureConfig serialization should not fail");
+
+        let params = ConnectParams::new(
+            layer_config,
+            branch_name,
+            vec![], // No local branch creation
+            vec![],
+            vec![],
+            session_ci_info,
+            Some(feature_config),
+        );
+
+        let namespace = namespace.unwrap_or("default");
+        let connect_url =
+            Self::target_connect_url_from_config(use_proxy_api, target, namespace, &params);
+
+        let session = self.make_operator_session(None, connect_url)?;
+
+        let mut connection_subtask = progress.subtask("connecting to the target");
+        let conn = Self::connect_target(&self.client, &session).await?;
+        connection_subtask.success(Some("connected to the target"));
+
+        Ok(OperatorSessionConnection {
+            session: Box::new(session),
+            conn,
+        })
+    }
+
     /// Returns whether the `copy_target` feature should be used,
     /// with an optional reason (in case the feature is not explicitly enabled in the
     /// [`LayerConfig`]).
@@ -1104,6 +1171,40 @@ impl OperatorApi<PreparedClientCert> {
         };
 
         let namespace = target.namespace().unwrap_or("default");
+
+        if use_proxy {
+            let api_version = TargetCrd::api_version(&());
+            let plural = TargetCrd::plural(&());
+            format!(
+                "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?{connect_params}"
+            )
+        } else {
+            let url_path = TargetCrd::url_path(&(), Some(namespace));
+            format!("{url_path}/{name}?{connect_params}")
+        }
+    }
+
+    /// Produces the URL from Target config directly (no K8s resolution needed).
+    /// Used when the target may not exist locally (e.g., multi-cluster with management-only
+    /// primary).
+    fn target_connect_url_from_config(
+        use_proxy: bool,
+        target: &Target,
+        namespace: &str,
+        connect_params: &ConnectParams<'_>,
+    ) -> String {
+        use mirrord_config::target::TargetDisplay;
+
+        let name = {
+            let mut urlfied_name = target.type_().to_string();
+            urlfied_name.push('.');
+            urlfied_name.push_str(target.name());
+            if let Some(container) = target.container() {
+                urlfied_name.push_str(".container.");
+                urlfied_name.push_str(container);
+            }
+            urlfied_name
+        };
 
         if use_proxy {
             let api_version = TargetCrd::api_version(&());
