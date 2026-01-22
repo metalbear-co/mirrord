@@ -138,6 +138,12 @@ pub struct ExperimentalConfig {
     #[config(default = false)]
     pub dlopen_cgo: bool,
 
+    /// ### _experimental_ latency {#experimental-latency}
+    ///
+    /// Configuration for adding artificial latency to outgoing network operations.
+    #[config(nested)]
+    pub latency: LatencyConfig,
+
     /// ### _experimental_ applev {#experimental-applev}
     ///
     /// Configuration for inspecting and modifying apple variables. macOS only.
@@ -163,9 +169,33 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("force_hook_connect", self.force_hook_connect);
         analytics.add("non_blocking_tcp_connect", self.non_blocking_tcp_connect);
         analytics.add("dlopen_cgo", self.dlopen_cgo);
+        analytics.add("latency_transmit_delay", self.latency.transmit_delay);
+        analytics.add("latency_receive_delay", self.latency.receive_delay);
         analytics.add("applev", self.applev.is_some());
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, JsonSchema, Default)]
 pub struct AppleVariablesConfig {}
+
+/// Configuration for adding artificial latency to outgoing network operations.
+/// Useful for testing application behavior under network delay conditions.
+#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[config(map_to = "LatencyFileConfig", derive = "JsonSchema")]
+pub struct LatencyConfig {
+    /// ### _experimental_ latency.transmit_delay {#experimental-latency-transmit_delay}
+    ///
+    /// Delay in milliseconds for outgoing send operations (Layer → Agent).
+    ///
+    /// Defaults to `0` (no delay).
+    #[config(default = 0)]
+    pub transmit_delay: u64,
+
+    /// ### _experimental_ latency.receive_delay {#experimental-latency-receive_delay}
+    ///
+    /// Delay in milliseconds for outgoing receive operations (Agent → Layer).
+    ///
+    /// Defaults to `0` (no delay).
+    #[config(default = 0)]
+    pub receive_delay: u64,
+}
