@@ -1,0 +1,96 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Default light mode values - will be overridden by JS */
+:root {
+  --background: #FAFAFD;
+  --foreground: #000000;
+  --card: #FFFFFF;
+  --muted: #E4E3FD;
+  --muted-foreground: #6b6b80;
+  --border: #E5E5E5;
+  --primary: #756DF3;
+  --secondary: #FFCB7D;
+  --destructive: #F36869;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--foreground);
+  background-color: var(--background);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+@layer components {
+  .card {
+    @apply bg-[var(--card)] rounded-xl p-6 border border-[var(--border)] transition-colors duration-200;
+  }
+
+  .card-hover {
+    @apply hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] hover:border-primary/30 transition-shadow duration-200;
+  }
+
+  .btn-primary {
+    @apply bg-primary hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] text-white font-medium py-2 px-4 rounded-lg transition-all duration-200;
+  }
+
+  .btn-secondary {
+    @apply bg-[var(--card)] hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] text-[var(--foreground)] font-medium py-2 px-4 rounded-lg transition-all duration-200 border border-[var(--border)];
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply bg-green-500/20 text-green-600 dark:text-green-400;
+  }
+
+  .badge-warning {
+    @apply bg-secondary/20 text-yellow-600 dark:text-yellow-400;
+  }
+
+  .badge-error {
+    @apply bg-destructive/20 text-destructive;
+  }
+
+  .badge-info {
+    @apply bg-blue-500/20 text-blue-600 dark:text-blue-400;
+  }
+
+  .badge-primary {
+    @apply bg-primary/20 text-primary;
+  }
+
+  .text-muted {
+    @apply text-[var(--muted-foreground)];
+  }
+
+  .bg-muted {
+    @apply bg-[var(--muted)];
+  }
+
+  .border-default {
+    @apply border-[var(--border)];
+  }
+}
