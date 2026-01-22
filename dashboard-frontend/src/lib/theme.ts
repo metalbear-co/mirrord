@@ -51,9 +51,8 @@ export function applyTheme(isDark: boolean): void {
 
 export function getChartColors(isDark: boolean) {
   return {
-    primary: brandColors.purple,
-    secondary: brandColors.yellow,
-    destructive: brandColors.redBlush,
+    primary: brandColors.purple,           // #756DF3
+    secondary: isDark ? '#a8a0f7' : '#ACACAC',  // lighter purple in dark mode, grey in light mode
     grid: isDark ? DARK_BORDER : LIGHT_BORDER,
     axis: isDark ? '#a8a8c0' : '#6b6b80',
     tooltipBg: isDark ? DARK_CARD : '#FFFFFF',

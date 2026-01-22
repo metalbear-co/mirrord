@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Users, UserCheck, Clock, Activity } from 'lucide-react';
-import { Header } from '@/components/Header';
+import { AppBar } from '@/components/AppBar';
 import { MetricCard, LicenseCard, SessionsCard } from '@/components/MetricCard';
 import { UsageChart } from '@/components/UsageChart';
 import { SessionDistribution } from '@/components/SessionDistribution';
@@ -90,15 +90,16 @@ function App() {
   ];
 
   return (
-    <div className="min-h-screen bg-[var(--background)] p-4 sm:p-6 lg:p-8 transition-colors duration-200">
-      <div className="max-w-7xl mx-auto">
-        <Header
-          lastUpdated={lastUpdated}
-          onRefresh={refresh}
-          isLoading={isLoading}
-          isDarkMode={isDarkMode}
-          onToggleDarkMode={toggleDarkMode}
-        />
+    <div className="min-h-screen bg-[var(--background)] transition-colors duration-200">
+      <AppBar
+        isDarkMode={isDarkMode}
+        onToggleDarkMode={toggleDarkMode}
+        lastUpdated={lastUpdated}
+        onRefresh={refresh}
+        isLoading={isLoading}
+      />
+      <div className="p-4 sm:p-6 lg:p-8">
+        <div className="max-w-7xl mx-auto">
 
         {/* Key Metrics Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
@@ -133,7 +134,6 @@ function App() {
             value={`${timeSaved}h`}
             subtitle="Estimated developer hours"
             icon={<Clock className="w-5 h-5" />}
-            status="success"
           />
         </div>
 
@@ -185,7 +185,7 @@ function App() {
                 <div className="card flex items-center justify-center">
                   <div className="text-center">
                     <Activity className="w-12 h-12 text-primary mx-auto mb-4" />
-                    <p className="text-2xl font-bold text-[var(--foreground)]">
+                    <p className="text-h3 font-bold text-[var(--foreground)]">
                       {statistics.sessions_by_mode.steal + statistics.sessions_by_mode.mirror}
                     </p>
                     <p className="text-muted">Total Sessions</p>
@@ -203,7 +203,7 @@ function App() {
               <>
                 <TopTargetsChart sessionsByTarget={statistics.sessions_by_target} isDarkMode={isDarkMode} />
                 <div className="card">
-                  <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Target Details</h3>
+                  <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">Target Details</h3>
                   <div className="space-y-3 max-h-[280px] overflow-y-auto">
                     {Object.entries(statistics.sessions_by_target)
                       .sort(([, a], [, b]) => b - a)
@@ -224,7 +224,7 @@ function App() {
               <>
                 <UserActivityChart sessionsByUser={statistics.sessions_by_user} isDarkMode={isDarkMode} />
                 <div className="card">
-                  <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">User Details</h3>
+                  <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">User Details</h3>
                   <div className="space-y-3 max-h-[280px] overflow-y-auto">
                     {Object.entries(statistics.sessions_by_user)
                       .sort(([, a], [, b]) => b - a)
@@ -254,6 +254,7 @@ function App() {
           expandedSessionId={expandedSessionId}
           onToggleExpand={toggleExpanded}
         />
+        </div>
       </div>
     </div>
   );
@@ -261,11 +262,55 @@ function App() {
 
 function LoadingState() {
   return (
-    <div className="min-h-screen bg-[var(--background)] flex items-center justify-center">
-      <div className="text-center">
-        <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-        <p className="text-[var(--foreground)] text-lg">Loading dashboard...</p>
-        <p className="text-[var(--muted-foreground)] text-sm mt-2">Connecting to mirrord operator</p>
+    <div className="min-h-screen bg-[var(--background)] p-4 sm:p-6 lg:p-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header skeleton */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-[var(--muted)] rounded-lg animate-pulse"></div>
+            <div>
+              <div className="h-7 w-48 bg-[var(--muted)] rounded animate-pulse mb-2"></div>
+              <div className="h-4 w-64 bg-[var(--muted)] rounded animate-pulse"></div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 bg-[var(--muted)] rounded-lg animate-pulse"></div>
+            <div className="h-10 w-24 bg-[var(--muted)] rounded-lg animate-pulse"></div>
+          </div>
+        </div>
+
+        {/* Metrics skeleton */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="card">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-[var(--muted)] rounded-lg animate-pulse"></div>
+                <div className="h-4 w-24 bg-[var(--muted)] rounded animate-pulse"></div>
+              </div>
+              <div className="h-8 w-16 bg-[var(--muted)] rounded animate-pulse"></div>
+            </div>
+          ))}
+        </div>
+
+        {/* Charts skeleton */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {[...Array(2)].map((_, i) => (
+            <div key={i} className="card">
+              <div className="h-5 w-32 bg-[var(--muted)] rounded animate-pulse mb-4"></div>
+              <div className="h-[300px] bg-[var(--muted)]/50 rounded-lg animate-pulse"></div>
+            </div>
+          ))}
+        </div>
+
+        {/* Table skeleton */}
+        <div className="card">
+          <div className="h-5 w-32 bg-[var(--muted)] rounded animate-pulse mb-4"></div>
+          <div className="space-y-3">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="h-12 bg-[var(--muted)]/50 rounded animate-pulse"></div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -285,7 +330,7 @@ function ErrorState({ error, onRetry }: { error: unknown; onRetry: () => void })
             />
           </svg>
         </div>
-        <h2 className="text-xl font-bold text-[var(--foreground)] mb-2">Failed to Load Dashboard</h2>
+        <h2 className="text-h4 font-bold text-[var(--foreground)] mb-2">Failed to Load Dashboard</h2>
         <p className="text-[var(--muted-foreground)] mb-4">
           {error instanceof Error ? error.message : 'Unable to connect to the mirrord operator'}
         </p>
@@ -304,13 +349,27 @@ function EmptyState() {
   return (
     <div className="min-h-screen bg-[var(--background)] flex items-center justify-center p-4">
       <div className="text-center max-w-md">
-        <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4">
-          <Activity className="w-8 h-8 text-primary" />
+        {/* Empty state illustration */}
+        <div className="relative w-32 h-32 mx-auto mb-6">
+          <div className="absolute inset-0 bg-primary/10 rounded-full"></div>
+          <div className="absolute inset-4 bg-primary/20 rounded-full"></div>
+          <div className="absolute inset-0 flex items-center justify-center">
+            <svg className="w-16 h-16 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+          </div>
+          {/* Decorative dots */}
+          <div className="absolute -top-2 -right-2 w-4 h-4 bg-secondary rounded-full"></div>
+          <div className="absolute -bottom-1 -left-1 w-3 h-3 bg-primary/60 rounded-full"></div>
         </div>
-        <h2 className="text-xl font-bold text-[var(--foreground)] mb-2">No Data Available</h2>
-        <p className="text-[var(--muted-foreground)]">
+        <h2 className="text-h4 font-bold text-[var(--foreground)] mb-2">No Data Available</h2>
+        <p className="text-[var(--muted-foreground)] mb-6">
           No mirrord usage data found. Start using mirrord to see your team's activity here.
         </p>
+        <div className="flex items-center justify-center gap-2 text-sm text-[var(--muted-foreground)]">
+          <Activity className="w-4 h-4" />
+          <span>Waiting for first session...</span>
+        </div>
       </div>
     </div>
   );

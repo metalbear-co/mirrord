@@ -81,14 +81,14 @@ export function DateRangePicker({
             type="date"
             value={customStart}
             onChange={(e) => setCustomStart(e.target.value)}
-            className="px-3 py-1.5 bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--foreground)] text-sm focus:outline-none focus:border-primary-500"
+            className="px-3 py-1.5 bg-[var(--card)] border border-[var(--border)] rounded-lg text-[var(--foreground)] text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
           />
           <span className="text-[var(--muted-foreground)]">to</span>
           <input
             type="date"
             value={customEnd}
             onChange={(e) => setCustomEnd(e.target.value)}
-            className="px-3 py-1.5 bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--foreground)] text-sm focus:outline-none focus:border-primary-500"
+            className="px-3 py-1.5 bg-[var(--card)] border border-[var(--border)] rounded-lg text-[var(--foreground)] text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
           />
           <button onClick={handleApplyCustom} className="btn-primary text-sm py-1.5">
             Apply

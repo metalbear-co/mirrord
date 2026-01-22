@@ -27,7 +27,7 @@ export function UsageChart({ data, isDarkMode }: UsageChartProps) {
 
   return (
     <div className="card">
-      <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Usage Over Time</h3>
+      <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">Usage Over Time</h3>
       <div className="h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={formattedData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>

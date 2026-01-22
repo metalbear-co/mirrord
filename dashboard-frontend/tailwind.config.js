@@ -4,6 +4,25 @@ import {
   darkModeColors,
   LIGHT_BORDER,
   DARK_BORDER,
+  FONT_FAMILY_SANS,
+  FONT_FAMILY_HEADING,
+  FONT_FAMILY_BODY,
+  FONT_FAMILY_CODE,
+  FONT_SIZE_HEADING_1,
+  FONT_SIZE_HEADING_2,
+  FONT_SIZE_HEADING_3,
+  FONT_SIZE_HEADING_4,
+  FONT_SIZE_BODY_LG,
+  FONT_SIZE_BODY_MD,
+  FONT_SIZE_BODY_SM,
+  FONT_WEIGHT_REGULAR,
+  FONT_WEIGHT_MEDIUM,
+  FONT_WEIGHT_SEMIBOLD,
+  FONT_WEIGHT_BOLD,
+  LINE_HEIGHT_TIGHT,
+  LINE_HEIGHT_SNUG,
+  LINE_HEIGHT_NORMAL,
+  LINE_HEIGHT_RELAXED,
 } from '@metalbear/ui';
 
 /** @type {import('tailwindcss').Config} */
@@ -17,10 +36,31 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Poppins', 'system-ui', 'sans-serif'],
-        heading: ['Poppins', 'system-ui', 'sans-serif'],
-        body: ['Poppins', 'system-ui', 'sans-serif'],
-        code: ['Monaco', 'Consolas', 'monospace'],
+        sans: FONT_FAMILY_SANS.split(', '),
+        heading: FONT_FAMILY_HEADING.split(', '),
+        body: FONT_FAMILY_BODY.split(', '),
+        code: FONT_FAMILY_CODE.split(', '),
+      },
+      fontSize: {
+        'h1': [FONT_SIZE_HEADING_1, { lineHeight: LINE_HEIGHT_TIGHT }],
+        'h2': [FONT_SIZE_HEADING_2, { lineHeight: LINE_HEIGHT_TIGHT }],
+        'h3': [FONT_SIZE_HEADING_3, { lineHeight: LINE_HEIGHT_SNUG }],
+        'h4': [FONT_SIZE_HEADING_4, { lineHeight: LINE_HEIGHT_SNUG }],
+        'body-lg': [FONT_SIZE_BODY_LG, { lineHeight: LINE_HEIGHT_NORMAL }],
+        'body-md': [FONT_SIZE_BODY_MD, { lineHeight: LINE_HEIGHT_NORMAL }],
+        'body-sm': [FONT_SIZE_BODY_SM, { lineHeight: LINE_HEIGHT_NORMAL }],
+      },
+      fontWeight: {
+        regular: FONT_WEIGHT_REGULAR,
+        medium: FONT_WEIGHT_MEDIUM,
+        semibold: FONT_WEIGHT_SEMIBOLD,
+        bold: FONT_WEIGHT_BOLD,
+      },
+      lineHeight: {
+        tight: LINE_HEIGHT_TIGHT,
+        snug: LINE_HEIGHT_SNUG,
+        normal: LINE_HEIGHT_NORMAL,
+        relaxed: LINE_HEIGHT_RELAXED,
       },
       colors: {
         // Brand colors from @metalbear/ui

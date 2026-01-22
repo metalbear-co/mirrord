@@ -13,7 +13,7 @@ export function TopTargetsChart({ sessionsByTarget, isDarkMode }: TopTargetsChar
 
   return (
     <div className="card">
-      <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Top Targets</h3>
+      <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">Top Targets</h3>
       <div className="h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} layout="vertical" margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
@@ -67,7 +67,7 @@ export function UserActivityChart({ sessionsByUser, isDarkMode }: UserActivityCh
 
   return (
     <div className="card">
-      <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">User Activity</h3>
+      <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">User Activity</h3>
       <div className="h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>

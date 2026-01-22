@@ -35,7 +35,7 @@ export function SessionsTable({
   return (
     <div className="card">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
-        <h3 className="text-lg font-semibold text-[var(--foreground)]">Active Sessions</h3>
+        <h3 className="text-h4 font-semibold text-[var(--foreground)]">Active Sessions</h3>
         <div className="relative w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--muted-foreground)]" />
           <input
@@ -43,7 +43,7 @@ export function SessionsTable({
             placeholder="Search sessions..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 transition-colors"
+            className="w-full pl-10 pr-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-colors"
           />
         </div>
       </div>
@@ -117,7 +117,7 @@ function SessionRow({ session, isExpanded, onToggle }: SessionRowProps) {
   return (
     <>
       <tr
-        className="border-b border-[var(--border)]/50 hover:bg-[var(--surface-hover)] cursor-pointer transition-colors"
+        className="border-b border-[var(--border)]/50 hover:bg-[var(--muted)]/30 cursor-pointer transition-colors"
         onClick={onToggle}
       >
         <td className="px-2 py-3">

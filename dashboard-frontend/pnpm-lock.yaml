@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@metalbear/ui':
-        specifier: ^0.1.1
-        version: 0.1.1(@types/react-dom@18.3.7(@types/react@18.3.27))(@types/react@18.3.27)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+        specifier: ^0.1.2
+        version: 0.1.2(@types/react-dom@18.3.7(@types/react@18.3.27))(@types/react@18.3.27)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@tanstack/react-query':
         specifier: ^5.56.2
         version: 5.90.19(react@18.3.1)
@@ -237,8 +237,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@metalbear/ui@0.1.1':
-    resolution: {integrity: sha512-vjsqhio+RvBQHDJJRDMQodswKnNU6AR8wQcuPmGMo3gcyAt7NAN4Sd0opANbFkiTQA5frBw3B6tDqsopzAbbDQ==}
+  '@metalbear/ui@0.1.2':
+    resolution: {integrity: sha512-AuNG54P/AlxwiN78PJVzupSS51C6c4JqNwq12FDvWy4UotQF05XQa3STWz2zdwwc1Y+KrScdmrBunWkv4+NoMQ==}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
@@ -1333,7 +1333,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@metalbear/ui@0.1.1(@types/react-dom@18.3.7(@types/react@18.3.27))(@types/react@18.3.27)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+  '@metalbear/ui@0.1.2(@types/react-dom@18.3.7(@types/react@18.3.27))(@types/react@18.3.27)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
     dependencies:
       '@radix-ui/react-accordion': 1.2.12(@types/react-dom@18.3.7(@types/react@18.3.27))(@types/react@18.3.27)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@radix-ui/react-navigation-menu': 1.2.14(@types/react-dom@18.3.7(@types/react@18.3.27))(@types/react@18.3.27)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)

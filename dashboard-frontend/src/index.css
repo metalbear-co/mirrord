@@ -63,11 +63,11 @@ body {
   }
 
   .badge-success {
-    @apply bg-green-500/20 text-green-600 dark:text-green-400;
+    @apply bg-primary/20 text-primary;
   }
 
   .badge-warning {
-    @apply bg-secondary/20 text-yellow-600 dark:text-yellow-400;
+    @apply bg-secondary/20 text-secondary;
   }
 
   .badge-error {
@@ -75,7 +75,7 @@ body {
   }
 
   .badge-info {
-    @apply bg-blue-500/20 text-blue-600 dark:text-blue-400;
+    @apply bg-[#E4E3FD]/40 text-[#232141] dark:bg-[#232141]/40 dark:text-[#E4E3FD];
   }
 
   .badge-primary {
