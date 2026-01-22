@@ -272,3 +272,9 @@ private_intra_doc_links = "allow"
 strip = "debuginfo"
 # Enabling LTO causes this issue https://github.com/metalbear-co/mirrord/issues/906
 lto = false
+
+[patch.crates-io]
+tree-sitter = { git = "https://github.com/tree-sitter/tree-sitter.git", rev = "1f221c8500bf78c990690b49a0b62c7f11cdb87c" }
+tree-sitter-language = { git = "https://github.com/tree-sitter/tree-sitter.git", rev = "1f221c8500bf78c990690b49a0b62c7f11cdb87c" }
+
+
