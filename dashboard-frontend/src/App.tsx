@@ -102,8 +102,6 @@ function App() {
   const daysUntilExpiration = getDaysUntilExpiration(license.expire_at);
   const licenseStatus = getLicenseStatus(license.expire_at);
   const timeSaved = calculateTimeSaved(statistics);
-  const ciSessions = sessions.filter((s) => s.is_ci).length;
-  const userSessions = sessions.length - ciSessions;
 
   // Calculate trend (comparing last 7 days to previous 7 days)
   const recentUsage = statistics.usage_over_time.slice(-7);
@@ -161,8 +159,6 @@ function App() {
 
           <SessionsCard
             activeSessions={sessions.length}
-            userSessions={userSessions}
-            ciSessions={ciSessions}
             className="animate-card-enter animate-card-enter-4"
           />
 

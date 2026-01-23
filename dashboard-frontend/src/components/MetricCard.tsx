@@ -47,23 +47,25 @@ export function MetricCard({
   return (
     <DataCard className={classNames('card-hover', className)}>
       <DataCardHeader>
-        {icon && <DataCardIcon>{icon}</DataCardIcon>}
-        <div className="flex items-center gap-1.5">
-          <DataCardTitle>{title}</DataCardTitle>
-          {tooltip && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
-                    <HelpCircle className="w-3.5 h-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p className="max-w-xs text-body-sm">{tooltip}</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
+        <div className="flex items-center gap-3">
+          {icon && <DataCardIcon>{icon}</DataCardIcon>}
+          <div className="flex items-center gap-1.5">
+            <DataCardTitle>{title}</DataCardTitle>
+            {tooltip && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
+                      <HelpCircle className="w-3.5 h-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="max-w-xs text-body-sm">{tooltip}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+          </div>
         </div>
         {trend && trend.percentage > 0 && trendDirection && (
           <DataCardTrend className={trendVariants({ trend: trendDirection as 'up' | 'down' | 'neutral' })}>
@@ -115,20 +117,16 @@ export function LicenseCard({ organization, daysUntilExpiration, status, classNa
           />
         </svg>
       }
-    >
-      <p className="text-body-sm text-muted">{config.message}</p>
-    </MetricCard>
+    />
   );
 }
 
 interface SessionsCardProps {
   activeSessions: number;
-  userSessions: number;
-  ciSessions: number;
   className?: string;
 }
 
-export function SessionsCard({ activeSessions, userSessions, ciSessions, className }: SessionsCardProps) {
+export function SessionsCard({ activeSessions, className }: SessionsCardProps) {
   return (
     <MetricCard
       title="Active Sessions"
@@ -145,11 +143,6 @@ export function SessionsCard({ activeSessions, userSessions, ciSessions, classNa
           />
         </svg>
       }
-    >
-      <div className="flex items-center justify-between text-body-sm">
-        <span className="text-muted">Users: {userSessions}</span>
-        <span className="text-muted">CI: {ciSessions}</span>
-      </div>
-    </MetricCard>
+    />
   );
 }
