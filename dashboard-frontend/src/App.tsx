@@ -17,6 +17,7 @@ import {
   useSessionsTable,
 } from '@/hooks/useDashboardData';
 import {
+  getDaysUntilExpiration,
   calculateTimeSaved,
   getTrendIndicator,
 } from '@/lib/utils';
@@ -97,6 +98,7 @@ function App() {
   }
 
   const { license, statistics, sessions } = filteredData;
+  const daysUntilExpiration = getDaysUntilExpiration(license.expire_at);
   const timeSaved = calculateTimeSaved(statistics);
 
   // Calculate trend (comparing last 7 days to previous 7 days)
@@ -129,8 +131,8 @@ function App() {
         {/* Key Metrics Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
           <LicenseCard
-            organization={license.organization}
             tier={license.tier}
+            daysUntilExpiration={daysUntilExpiration}
             className="animate-card-enter animate-card-enter-1"
           />
 

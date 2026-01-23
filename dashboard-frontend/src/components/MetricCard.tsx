@@ -85,23 +85,27 @@ export function MetricCard({
 }
 
 interface LicenseCardProps {
-  organization: string;
   tier: 'free' | 'team' | 'enterprise';
+  daysUntilExpiration: number;
   className?: string;
 }
 
-export function LicenseCard({ organization, tier, className }: LicenseCardProps) {
+export function LicenseCard({ tier, daysUntilExpiration, className }: LicenseCardProps) {
   const tierLabels = {
     free: 'Free',
     team: 'Team',
     enterprise: 'Enterprise',
   };
 
+  const expirationText = daysUntilExpiration <= 0
+    ? 'expired'
+    : `expires in ${daysUntilExpiration}d`;
+
   return (
     <MetricCard
       title="License"
       value={tierLabels[tier]}
-      subtitle={organization}
+      subtitle={expirationText}
       className={className}
       tooltip="Your mirrord license tier"
       icon={
