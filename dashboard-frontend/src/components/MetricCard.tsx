@@ -1,5 +1,19 @@
-import { TrendingUp, TrendingDown, Minus, HelpCircle } from 'lucide-react';
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@metalbear/ui';
+import { HelpCircle } from 'lucide-react';
+import {
+  DataCard,
+  DataCardHeader,
+  DataCardTitle,
+  DataCardIcon,
+  DataCardContent,
+  DataCardValue,
+  DataCardDescription,
+  DataCardTrend,
+  trendVariants,
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from '@metalbear/ui';
 import { classNames } from '@/lib/utils';
 import type { ReactNode } from 'react';
 
@@ -27,60 +41,44 @@ export function MetricCard({
   className,
   tooltip,
 }: MetricCardProps) {
-  const trendColors = {
-    up: 'text-primary',
-    down: 'text-destructive',
-    flat: 'text-muted',
-  };
-
-  const TrendIcon = trend?.direction === 'up' ? TrendingUp : trend?.direction === 'down' ? TrendingDown : Minus;
+  // Map 'flat' to 'neutral' for UI kit compatibility
+  const trendDirection = trend?.direction === 'flat' ? 'neutral' : trend?.direction;
 
   return (
-    <div className={classNames('card card-hover', className)}>
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center gap-3">
-          {icon && (
-            <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-primary/10">
-              <span className="text-primary">{icon}</span>
-            </div>
+    <DataCard className={classNames('card-hover', className)}>
+      <DataCardHeader>
+        {icon && <DataCardIcon>{icon}</DataCardIcon>}
+        <div className="flex items-center gap-1.5">
+          <DataCardTitle>{title}</DataCardTitle>
+          {tooltip && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
+                    <HelpCircle className="w-3.5 h-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="max-w-xs text-body-sm">{tooltip}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
-          <div className="flex items-center gap-1.5">
-            <p className="text-muted text-body-sm font-medium">{title}</p>
-            {tooltip && (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
-                      <HelpCircle className="w-3.5 h-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p className="max-w-xs text-body-sm">{tooltip}</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
-          </div>
         </div>
-        {trend && trend.percentage > 0 && (
-          <div className={classNames('flex items-center gap-1 text-body-sm', trendColors[trend.direction])}>
-            <TrendIcon className="w-4 h-4" />
-            <span>{trend.percentage}%</span>
-          </div>
+        {trend && trend.percentage > 0 && trendDirection && (
+          <DataCardTrend className={trendVariants({ trend: trendDirection as 'up' | 'down' | 'neutral' })}>
+            {trend.percentage}%
+          </DataCardTrend>
         )}
-      </div>
+      </DataCardHeader>
 
-      <div className="flex items-end justify-between">
-        <div>
-          <p className="text-h4 font-bold text-[var(--foreground)]">
-            {value}
-          </p>
-          {subtitle && <p className="text-muted text-body-sm mt-1">{subtitle}</p>}
-        </div>
-      </div>
+      <DataCardContent>
+        <DataCardValue>{value}</DataCardValue>
+        {subtitle && <DataCardDescription>{subtitle}</DataCardDescription>}
+      </DataCardContent>
 
       {children && <div className="mt-4 pt-4 border-t border-[var(--border)]">{children}</div>}
-    </div>
+    </DataCard>
   );
 }
 
