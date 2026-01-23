@@ -38,7 +38,10 @@ export function calculateTimeSaved(statistics: Statistics): number {
   return Math.round((statistics.total_sessions * minutesSavedPerSession) / 60);
 }
 
-export function getTrendIndicator(current: number, previous: number): { direction: 'up' | 'down' | 'flat'; percentage: number } {
+export function getTrendIndicator(
+  current: number,
+  previous: number
+): { direction: 'up' | 'down' | 'flat'; percentage: number } {
   if (previous === 0) return { direction: 'flat', percentage: 0 };
   const change = ((current - previous) / previous) * 100;
   if (Math.abs(change) < 1) return { direction: 'flat', percentage: 0 };

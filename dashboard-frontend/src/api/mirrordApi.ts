@@ -184,8 +184,12 @@ function transformApiResponse(data: unknown): OperatorStatus {
           ...mock.statistics,
           total_sessions: Number(stats.total_sessions || mock.statistics.total_sessions),
           total_users: Number(stats.total_users || mock.statistics.total_users),
-          daily_active_users: Number(stats.daily_active_users || mock.statistics.daily_active_users),
-          monthly_active_users: Number(stats.monthly_active_users || mock.statistics.monthly_active_users),
+          daily_active_users: Number(
+            stats.daily_active_users || mock.statistics.daily_active_users
+          ),
+          monthly_active_users: Number(
+            stats.monthly_active_users || mock.statistics.monthly_active_users
+          ),
         };
       }
     }

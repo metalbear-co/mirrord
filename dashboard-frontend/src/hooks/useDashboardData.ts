@@ -12,14 +12,7 @@ import {
 export function useDashboardData() {
   const queryClient = useQueryClient();
 
-  const {
-    data,
-    isLoading,
-    isError,
-    error,
-    refetch,
-    dataUpdatedAt,
-  } = useQuery<OperatorStatus>({
+  const { data, isLoading, isError, error, refetch, dataUpdatedAt } = useQuery<OperatorStatus>({
     queryKey: ['operatorStatus'],
     queryFn: fetchOperatorStatus,
     refetchOnMount: true,

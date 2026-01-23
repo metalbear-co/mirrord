@@ -6,15 +6,15 @@
 
 /* Default light mode values - will be overridden by JS */
 :root {
-  --background: #FAFAFD;
+  --background: #fafafd;
   --foreground: #000000;
-  --card: #FFFFFF;
-  --muted: #E4E3FD;
+  --card: #ffffff;
+  --muted: #e4e3fd;
   --muted-foreground: #6b6b80;
-  --border: #E5E5E5;
-  --primary: #756DF3;
-  --secondary: #FFCB7D;
-  --destructive: #F36869;
+  --border: #e5e5e5;
+  --primary: #756df3;
+  --secondary: #ffcb7d;
+  --destructive: #f36869;
 }
 
 * {
@@ -22,7 +22,11 @@
 }
 
 body {
-  font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+  font-family:
+    'Poppins',
+    system-ui,
+    -apple-system,
+    sans-serif;
   line-height: 1.5;
   font-weight: 400;
   color: var(--foreground);
@@ -34,7 +38,9 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
 }
 
 #root {
@@ -127,8 +133,18 @@ body {
   animation: cardFadeIn 0.3s ease-out both;
 }
 
-.animate-card-enter-1 { animation-delay: 0s; }
-.animate-card-enter-2 { animation-delay: 0.05s; }
-.animate-card-enter-3 { animation-delay: 0.1s; }
-.animate-card-enter-4 { animation-delay: 0.15s; }
-.animate-card-enter-5 { animation-delay: 0.2s; }
+.animate-card-enter-1 {
+  animation-delay: 0s;
+}
+.animate-card-enter-2 {
+  animation-delay: 0.05s;
+}
+.animate-card-enter-3 {
+  animation-delay: 0.1s;
+}
+.animate-card-enter-4 {
+  animation-delay: 0.15s;
+}
+.animate-card-enter-5 {
+  animation-delay: 0.2s;
+}

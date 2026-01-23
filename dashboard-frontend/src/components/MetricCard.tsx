@@ -68,7 +68,9 @@ export function MetricCard({
           </div>
         </div>
         {trend && trend.percentage > 0 && trendDirection && (
-          <DataCardTrend className={trendVariants({ trend: trendDirection as 'up' | 'down' | 'neutral' })}>
+          <DataCardTrend
+            className={trendVariants({ trend: trendDirection as 'up' | 'down' | 'neutral' })}
+          >
             {trend.percentage}%
           </DataCardTrend>
         )}
@@ -97,9 +99,8 @@ export function LicenseCard({ tier, daysUntilExpiration, className }: LicenseCar
     enterprise: 'Enterprise',
   };
 
-  const expirationText = daysUntilExpiration <= 0
-    ? 'expired'
-    : `expires in ${daysUntilExpiration}d`;
+  const expirationText =
+    daysUntilExpiration <= 0 ? 'expired' : `expires in ${daysUntilExpiration}d`;
 
   return (
     <MetricCard

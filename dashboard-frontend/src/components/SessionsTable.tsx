@@ -1,4 +1,13 @@
-import { Search, ChevronDown, ChevronUp, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, X } from 'lucide-react';
+import {
+  Search,
+  ChevronDown,
+  ChevronUp,
+  ChevronRight,
+  ChevronLeft,
+  ChevronsLeft,
+  ChevronsRight,
+  X,
+} from 'lucide-react';
 import { formatDuration, formatRelativeTime, classNames } from '@/lib/utils';
 import type { Session, TableSort } from '@/types/mirrord';
 
@@ -72,9 +81,7 @@ export function SessionsTable({
       {/* Mobile Card View */}
       <div className="md:hidden space-y-3">
         {sessions.length === 0 ? (
-          <div className="py-8 text-center text-[var(--muted-foreground)]">
-            No active sessions
-          </div>
+          <div className="py-8 text-center text-[var(--muted-foreground)]">No active sessions</div>
         ) : (
           sessions.map((session) => (
             <SessionCard
@@ -93,12 +100,44 @@ export function SessionsTable({
           <thead>
             <tr className="border-b border-[var(--border)]">
               <th className="w-8"></th>
-              <SortableHeader column="user" label="User" sort={sort} onSort={onSort} SortIcon={SortIcon} />
-              <SortableHeader column="target" label="Target" sort={sort} onSort={onSort} SortIcon={SortIcon} />
-              <SortableHeader column="namespace" label="Namespace" sort={sort} onSort={onSort} SortIcon={SortIcon} />
-              <th className="px-4 py-3 text-left text-body-sm font-medium text-[var(--muted-foreground)]">Mode</th>
-              <SortableHeader column="duration_seconds" label="Duration" sort={sort} onSort={onSort} SortIcon={SortIcon} />
-              <SortableHeader column="started_at" label="Started" sort={sort} onSort={onSort} SortIcon={SortIcon} />
+              <SortableHeader
+                column="user"
+                label="User"
+                sort={sort}
+                onSort={onSort}
+                SortIcon={SortIcon}
+              />
+              <SortableHeader
+                column="target"
+                label="Target"
+                sort={sort}
+                onSort={onSort}
+                SortIcon={SortIcon}
+              />
+              <SortableHeader
+                column="namespace"
+                label="Namespace"
+                sort={sort}
+                onSort={onSort}
+                SortIcon={SortIcon}
+              />
+              <th className="px-4 py-3 text-left text-body-sm font-medium text-[var(--muted-foreground)]">
+                Mode
+              </th>
+              <SortableHeader
+                column="duration_seconds"
+                label="Duration"
+                sort={sort}
+                onSort={onSort}
+                SortIcon={SortIcon}
+              />
+              <SortableHeader
+                column="started_at"
+                label="Started"
+                sort={sort}
+                onSort={onSort}
+                SortIcon={SortIcon}
+              />
             </tr>
           </thead>
           <tbody>
@@ -137,7 +176,8 @@ export function SessionsTable({
               <option value={50}>50</option>
             </select>
             <span className="ml-4">
-              {((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, totalSessions)} of {totalSessions}
+              {(currentPage - 1) * pageSize + 1}-{Math.min(currentPage * pageSize, totalSessions)}{' '}
+              of {totalSessions}
             </span>
           </div>
 
@@ -245,8 +285,12 @@ function SessionRow({ session, isExpanded, onToggle }: SessionRowProps) {
             {session.mode}
           </span>
         </td>
-        <td className="px-4 py-3 text-[var(--foreground)]">{formatDuration(session.duration_seconds)}</td>
-        <td className="px-4 py-3 text-[var(--muted-foreground)] text-body-sm">{formatRelativeTime(session.started_at)}</td>
+        <td className="px-4 py-3 text-[var(--foreground)]">
+          {formatDuration(session.duration_seconds)}
+        </td>
+        <td className="px-4 py-3 text-[var(--muted-foreground)] text-body-sm">
+          {formatRelativeTime(session.started_at)}
+        </td>
       </tr>
       {isExpanded && (
         <tr className="bg-[var(--muted)]/30">
@@ -268,11 +312,15 @@ function SessionRow({ session, isExpanded, onToggle }: SessionRowProps) {
               </div>
               <div>
                 <p className="text-[var(--muted-foreground)] mb-1">Started At</p>
-                <p className="text-[var(--foreground)]">{new Date(session.started_at).toLocaleString()}</p>
+                <p className="text-[var(--foreground)]">
+                  {new Date(session.started_at).toLocaleString()}
+                </p>
               </div>
               <div>
                 <p className="text-[var(--muted-foreground)] mb-1">Type</p>
-                <p className="text-[var(--foreground)]">{session.is_ci ? 'CI Pipeline' : 'User Session'}</p>
+                <p className="text-[var(--foreground)]">
+                  {session.is_ci ? 'CI Pipeline' : 'User Session'}
+                </p>
               </div>
             </div>
           </td>
@@ -320,7 +368,9 @@ function SessionCard({ session, isExpanded, onToggle }: SessionRowProps) {
         </div>
         <div>
           <span className="text-[var(--muted-foreground)]">Duration: </span>
-          <span className="text-[var(--foreground)]">{formatDuration(session.duration_seconds)}</span>
+          <span className="text-[var(--foreground)]">
+            {formatDuration(session.duration_seconds)}
+          </span>
         </div>
         <div>
           <span className="text-[var(--muted-foreground)]">Started: </span>
@@ -336,7 +386,9 @@ function SessionCard({ session, isExpanded, onToggle }: SessionRowProps) {
           </div>
           <div>
             <p className="text-[var(--muted-foreground)] mb-1">Type</p>
-            <p className="text-[var(--foreground)]">{session.is_ci ? 'CI Pipeline' : 'User Session'}</p>
+            <p className="text-[var(--foreground)]">
+              {session.is_ci ? 'CI Pipeline' : 'User Session'}
+            </p>
           </div>
           <div className="col-span-2">
             <p className="text-[var(--muted-foreground)] mb-1">Ports</p>

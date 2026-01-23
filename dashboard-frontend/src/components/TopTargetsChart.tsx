@@ -17,8 +17,17 @@ export function TopTargetsChart({ sessionsByTarget, isDarkMode }: TopTargetsChar
       <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">Top Targets</h3>
       <div className="h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} layout="vertical" margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} horizontal={true} vertical={false} />
+          <BarChart
+            data={data}
+            layout="vertical"
+            margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
+          >
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke={colors.grid}
+              horizontal={true}
+              vertical={false}
+            />
             <XAxis
               type="number"
               stroke={colors.axis}
@@ -44,12 +53,7 @@ export function TopTargetsChart({ sessionsByTarget, isDarkMode }: TopTargetsChar
               }}
               formatter={(value: number) => [`${value} sessions`, 'Sessions']}
             />
-            <Bar
-              dataKey="value"
-              fill={colors.primary}
-              radius={[0, 4, 4, 0]}
-              barSize={24}
-            />
+            <Bar dataKey="value" fill={colors.primary} radius={[0, 4, 4, 0]} barSize={24} />
           </BarChart>
         </ResponsiveContainer>
       </div>

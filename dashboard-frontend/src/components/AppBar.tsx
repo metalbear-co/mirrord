@@ -10,11 +10,19 @@ interface AppBarProps {
   isLoading: boolean;
 }
 
-export function AppBar({ isDarkMode, onToggleDarkMode, lastUpdated, onRefresh, isLoading }: AppBarProps) {
+export function AppBar({
+  isDarkMode,
+  onToggleDarkMode,
+  lastUpdated,
+  onRefresh,
+  isLoading,
+}: AppBarProps) {
   return (
     <div className={isDarkMode ? 'bg-[#232141]' : 'bg-white border-b border-[#E5E5E5]'}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className={`flex items-center justify-between h-14 ${isDarkMode ? 'text-white' : 'text-[#232141]'}`}>
+        <div
+          className={`flex items-center justify-between h-14 ${isDarkMode ? 'text-white' : 'text-[#232141]'}`}
+        >
           {/* Logo and brand */}
           <div className="flex items-center gap-3">
             <img
@@ -25,7 +33,11 @@ export function AppBar({ isDarkMode, onToggleDarkMode, lastUpdated, onRefresh, i
             <div className="hidden sm:flex items-center gap-2">
               <span className="font-semibold text-h4">mirrord</span>
               <span className={isDarkMode ? 'text-white/30' : 'text-[#232141]/30'}>|</span>
-              <span className={`text-body-sm font-medium ${isDarkMode ? 'text-white/80' : 'text-[#232141]/70'}`}>Utilization</span>
+              <span
+                className={`text-body-sm font-medium ${isDarkMode ? 'text-white/80' : 'text-[#232141]/70'}`}
+              >
+                Utilization
+              </span>
             </div>
             <span className="font-semibold text-h4 sm:hidden">mirrord</span>
           </div>
@@ -33,7 +45,9 @@ export function AppBar({ isDarkMode, onToggleDarkMode, lastUpdated, onRefresh, i
           {/* Right side actions */}
           <div className="flex items-center gap-3">
             {lastUpdated && (
-              <span className={`text-body-sm hidden lg:inline ${isDarkMode ? 'text-white/50' : 'text-[#232141]/50'}`}>
+              <span
+                className={`text-body-sm hidden lg:inline ${isDarkMode ? 'text-white/50' : 'text-[#232141]/50'}`}
+              >
                 {formatDateTime(lastUpdated)}
               </span>
             )}

@@ -8,7 +8,11 @@ interface SessionDistributionProps {
   isDarkMode: boolean;
 }
 
-export function SessionDistribution({ mirrorCount, stealCount, isDarkMode }: SessionDistributionProps) {
+export function SessionDistribution({
+  mirrorCount,
+  stealCount,
+  isDarkMode,
+}: SessionDistributionProps) {
   const colors = getChartColors(isDarkMode);
 
   const data = [
@@ -20,7 +24,9 @@ export function SessionDistribution({ mirrorCount, stealCount, isDarkMode }: Ses
 
   return (
     <div className="card">
-      <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">Session Mode Distribution</h3>
+      <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">
+        Session Mode Distribution
+      </h3>
       <div className="h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
