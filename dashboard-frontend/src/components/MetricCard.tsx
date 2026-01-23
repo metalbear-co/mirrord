@@ -1,4 +1,5 @@
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, HelpCircle } from 'lucide-react';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@metalbear/ui';
 import { classNames } from '@/lib/utils';
 import type { ReactNode } from 'react';
 
@@ -12,6 +13,8 @@ interface MetricCardProps {
     percentage: number;
   };
   children?: ReactNode;
+  className?: string;
+  tooltip?: string;
 }
 
 export function MetricCard({
@@ -21,6 +24,8 @@ export function MetricCard({
   icon,
   trend,
   children,
+  className,
+  tooltip,
 }: MetricCardProps) {
   const trendColors = {
     up: 'text-primary',
@@ -31,7 +36,7 @@ export function MetricCard({
   const TrendIcon = trend?.direction === 'up' ? TrendingUp : trend?.direction === 'down' ? TrendingDown : Minus;
 
   return (
-    <div className="card card-hover">
+    <div className={classNames('card card-hover', className)}>
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
           {icon && (
@@ -39,8 +44,22 @@ export function MetricCard({
               <span className="text-primary">{icon}</span>
             </div>
           )}
-          <div>
+          <div className="flex items-center gap-1.5">
             <p className="text-muted text-body-sm font-medium">{title}</p>
+            {tooltip && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
+                      <HelpCircle className="w-3.5 h-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="max-w-xs text-body-sm">{tooltip}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
           </div>
         </div>
         {trend && trend.percentage > 0 && (
@@ -53,7 +72,7 @@ export function MetricCard({
 
       <div className="flex items-end justify-between">
         <div>
-          <p className="text-h3 font-bold text-[var(--foreground)]">
+          <p className="text-h4 font-bold text-[var(--foreground)]">
             {value}
           </p>
           {subtitle && <p className="text-muted text-body-sm mt-1">{subtitle}</p>}
@@ -69,9 +88,10 @@ interface LicenseCardProps {
   organization: string;
   daysUntilExpiration: number;
   status: 'valid' | 'warning' | 'expired';
+  className?: string;
 }
 
-export function LicenseCard({ organization, daysUntilExpiration, status }: LicenseCardProps) {
+export function LicenseCard({ organization, daysUntilExpiration, status, className }: LicenseCardProps) {
   const statusConfig = {
     valid: { label: 'Active', message: `${daysUntilExpiration} days remaining` },
     warning: { label: 'Expiring Soon', message: `${daysUntilExpiration} days remaining` },
@@ -85,6 +105,8 @@ export function LicenseCard({ organization, daysUntilExpiration, status }: Licen
       title="License Status"
       value={config.label}
       subtitle={organization}
+      className={className}
+      tooltip="Your mirrord operator license validity and expiration status"
       icon={
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path
@@ -105,13 +127,16 @@ interface SessionsCardProps {
   activeSessions: number;
   userSessions: number;
   ciSessions: number;
+  className?: string;
 }
 
-export function SessionsCard({ activeSessions, userSessions, ciSessions }: SessionsCardProps) {
+export function SessionsCard({ activeSessions, userSessions, ciSessions, className }: SessionsCardProps) {
   return (
     <MetricCard
       title="Active Sessions"
       value={activeSessions}
+      className={className}
+      tooltip="Currently running mirrord sessions across your cluster"
       icon={
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path

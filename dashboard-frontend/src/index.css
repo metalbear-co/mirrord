@@ -51,11 +51,11 @@ body {
   }
 
   .btn-primary {
-    @apply bg-primary hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] text-white font-medium py-2 px-4 rounded-lg transition-all duration-200;
+    @apply bg-primary hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] active:scale-[0.98] active:shadow-none text-white font-medium py-2 px-4 rounded-lg transition-all duration-200;
   }
 
   .btn-secondary {
-    @apply bg-[var(--card)] hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] text-[var(--foreground)] font-medium py-2 px-4 rounded-lg transition-all duration-200 border border-[var(--border)];
+    @apply bg-[var(--card)] hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] active:scale-[0.98] active:shadow-none text-[var(--foreground)] font-medium py-2 px-4 rounded-lg transition-all duration-200 border border-[var(--border)];
   }
 
   .badge {
@@ -94,3 +94,41 @@ body {
     @apply border-[var(--border)];
   }
 }
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
+/* Staggered card animations - uses both to apply 'from' state before animation starts */
+@keyframes cardFadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-card-enter {
+  animation: cardFadeIn 0.3s ease-out both;
+}
+
+.animate-card-enter-1 { animation-delay: 0s; }
+.animate-card-enter-2 { animation-delay: 0.05s; }
+.animate-card-enter-3 { animation-delay: 0.1s; }
+.animate-card-enter-4 { animation-delay: 0.15s; }
+.animate-card-enter-5 { animation-delay: 0.2s; }

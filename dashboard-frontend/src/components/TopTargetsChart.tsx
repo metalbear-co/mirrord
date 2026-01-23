@@ -1,4 +1,5 @@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { FONT_SIZE_BODY_SM } from '@metalbear/ui';
 import { getChartColors } from '@/lib/theme';
 import { getTopItems } from '@/lib/utils';
 
@@ -21,7 +22,7 @@ export function TopTargetsChart({ sessionsByTarget, isDarkMode }: TopTargetsChar
             <XAxis
               type="number"
               stroke={colors.axis}
-              fontSize={12}
+              fontSize={FONT_SIZE_BODY_SM}
               tickLine={false}
               axisLine={{ stroke: colors.grid }}
             />
@@ -29,7 +30,7 @@ export function TopTargetsChart({ sessionsByTarget, isDarkMode }: TopTargetsChar
               type="category"
               dataKey="name"
               stroke={colors.axis}
-              fontSize={12}
+              fontSize={FONT_SIZE_BODY_SM}
               tickLine={false}
               axisLine={{ stroke: colors.grid }}
               width={120}
@@ -75,13 +76,13 @@ export function UserActivityChart({ sessionsByUser, isDarkMode }: UserActivityCh
             <XAxis
               dataKey="name"
               stroke={colors.axis}
-              fontSize={12}
+              fontSize={FONT_SIZE_BODY_SM}
               tickLine={false}
               axisLine={{ stroke: colors.grid }}
             />
             <YAxis
               stroke={colors.axis}
-              fontSize={12}
+              fontSize={FONT_SIZE_BODY_SM}
               tickLine={false}
               axisLine={{ stroke: colors.grid }}
             />

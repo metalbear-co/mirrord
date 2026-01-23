@@ -41,7 +41,7 @@ export function AppBar({ isDarkMode, onToggleDarkMode, lastUpdated, onRefresh, i
             <button
               onClick={onRefresh}
               disabled={isLoading}
-              className="flex items-center gap-2 px-3 py-1.5 bg-[#756DF3] hover:bg-[#756DF3]/90 text-white rounded-lg text-body-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 px-3 py-1.5 bg-[#756DF3] hover:bg-[#756DF3]/90 active:scale-[0.98] text-white rounded-lg text-body-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">{isLoading ? 'Syncing...' : 'Sync'}</span>
@@ -70,7 +70,7 @@ export function AppBar({ isDarkMode, onToggleDarkMode, lastUpdated, onRefresh, i
 
             <button
               onClick={onToggleDarkMode}
-              className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-[#232141]/5'}`}
+              className={`p-2 rounded-lg transition-all active:scale-[0.95] ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-[#232141]/5'}`}
               aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
             >
               {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}

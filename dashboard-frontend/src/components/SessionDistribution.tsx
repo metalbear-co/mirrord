@@ -1,4 +1,5 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { FONT_SIZE_BODY_SM } from '@metalbear/ui';
 import { getChartColors } from '@/lib/theme';
 
 interface SessionDistributionProps {
@@ -44,7 +45,7 @@ export function SessionDistribution({ mirrorCount, stealCount, isDarkMode }: Ses
                     fill={colors.text}
                     textAnchor={x > cx ? 'start' : 'end'}
                     dominantBaseline="central"
-                    fontSize={12}
+                    fontSize={FONT_SIZE_BODY_SM}
                   >
                     {`${name} ${(percent * 100).toFixed(0)}%`}
                   </text>
@@ -78,11 +79,11 @@ export function SessionDistribution({ mirrorCount, stealCount, isDarkMode }: Ses
       </div>
       <div className="flex justify-around mt-4 pt-4 border-t border-[var(--border)]">
         <div className="text-center">
-          <p className="text-h3 font-bold text-primary">{stealCount}</p>
+          <p className="text-h4 font-bold text-primary">{stealCount}</p>
           <p className="text-body-sm text-muted">Steal Sessions</p>
         </div>
         <div className="text-center">
-          <p className="text-h3 font-bold text-[var(--foreground)]">{mirrorCount}</p>
+          <p className="text-h4 font-bold text-[var(--foreground)]">{mirrorCount}</p>
           <p className="text-body-sm text-muted">Mirror Sessions</p>
         </div>
       </div>

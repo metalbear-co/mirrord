@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useDeferredValue } from 'react';
 import { fetchOperatorStatus, resetMockData } from '@/api/mirrordApi';
 import type { DateRange, OperatorStatus, Session, TableSort } from '@/types/mirrord';
 import {
@@ -86,15 +86,22 @@ export function useFilteredData(data: OperatorStatus | undefined, dateRange: Dat
 
 export function useSessionsTable(sessions: Session[]) {
   const [searchQuery, setSearchQuery] = useState('');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [sort, setSort] = useState<TableSort>({ column: 'started_at', direction: 'desc' });
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(() => {
+    const saved = localStorage.getItem('sessionsPageSize');
+    return saved ? parseInt(saved, 10) : 10;
+  });
 
-  const filteredSessions = useMemo(() => {
+  // Filter and sort sessions
+  const filteredAndSortedSessions = useMemo(() => {
     let result = [...sessions];
 
-    // Apply search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
+    // Apply search filter (uses deferred value for smoother typing)
+    if (deferredSearchQuery) {
+      const query = deferredSearchQuery.toLowerCase();
       result = result.filter(
         (session) =>
           session.user.toLowerCase().includes(query) ||
@@ -121,7 +128,22 @@ export function useSessionsTable(sessions: Session[]) {
     }
 
     return result;
-  }, [sessions, searchQuery, sort]);
+  }, [sessions, deferredSearchQuery, sort]);
+
+  // Calculate pagination
+  const totalPages = Math.max(1, Math.ceil(filteredAndSortedSessions.length / pageSize));
+
+  // Reset to page 1 when search changes
+  const effectiveCurrentPage = useMemo(() => {
+    if (currentPage > totalPages) return 1;
+    return currentPage;
+  }, [currentPage, totalPages]);
+
+  // Get paginated sessions
+  const paginatedSessions = useMemo(() => {
+    const startIndex = (effectiveCurrentPage - 1) * pageSize;
+    return filteredAndSortedSessions.slice(startIndex, startIndex + pageSize);
+  }, [filteredAndSortedSessions, effectiveCurrentPage, pageSize]);
 
   const toggleSort = useCallback((column: keyof Session) => {
     setSort((prev) => ({
@@ -134,13 +156,30 @@ export function useSessionsTable(sessions: Session[]) {
     setExpandedSessionId((prev) => (prev === sessionId ? null : sessionId));
   }, []);
 
+  const handlePageChange = useCallback((page: number) => {
+    setCurrentPage(page);
+    setExpandedSessionId(null); // Collapse any expanded row when changing page
+  }, []);
+
+  const handlePageSizeChange = useCallback((size: number) => {
+    setPageSize(size);
+    setCurrentPage(1);
+    localStorage.setItem('sessionsPageSize', size.toString());
+  }, []);
+
   return {
-    filteredSessions,
+    filteredSessions: paginatedSessions,
+    totalSessions: filteredAndSortedSessions.length,
     searchQuery,
     setSearchQuery,
     sort,
     toggleSort,
     expandedSessionId,
     toggleExpanded,
+    currentPage: effectiveCurrentPage,
+    totalPages,
+    pageSize,
+    onPageChange: handlePageChange,
+    onPageSizeChange: handlePageSizeChange,
   };
 }

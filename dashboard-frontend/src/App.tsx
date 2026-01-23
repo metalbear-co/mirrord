@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Users, UserCheck, Clock, Activity } from 'lucide-react';
+import { Users, UserCheck, Clock, Activity, LayoutGrid, Maximize2 } from 'lucide-react';
 import { AppBar } from '@/components/AppBar';
+import { Toaster } from '@/components/Toaster';
 import { MetricCard, LicenseCard, SessionsCard } from '@/components/MetricCard';
+import { useToast } from '@/hooks/useToast';
 import { UsageChart } from '@/components/UsageChart';
 import { SessionDistribution } from '@/components/SessionDistribution';
 import { TopTargetsChart, UserActivityChart } from '@/components/TopTargetsChart';
@@ -45,15 +47,43 @@ function App() {
   const { dateRange, setPreset, setCustomRange } = useDateRange();
   const filteredData = useFilteredData(data, dateRange);
   const [activeTab, setActiveTab] = useState<ChartTab>('usage');
+  const [chartLayout, setChartLayout] = useState<'grid' | 'full'>(() => {
+    const saved = localStorage.getItem('chartLayout');
+    return (saved === 'full' || saved === 'grid') ? saved : 'grid';
+  });
+  const { toasts, success, error: toastError, dismiss } = useToast();
+
+  const toggleChartLayout = useCallback(() => {
+    setChartLayout((prev) => {
+      const newValue = prev === 'grid' ? 'full' : 'grid';
+      localStorage.setItem('chartLayout', newValue);
+      return newValue;
+    });
+  }, []);
+
+  const handleRefresh = useCallback(async () => {
+    try {
+      await refresh();
+      success('Dashboard synced');
+    } catch {
+      toastError('Failed to sync', 'Check your connection and try again');
+    }
+  }, [refresh, success, toastError]);
 
   const {
     filteredSessions,
+    totalSessions,
     searchQuery,
     setSearchQuery,
     sort,
     toggleSort,
     expandedSessionId,
     toggleExpanded,
+    currentPage,
+    totalPages,
+    pageSize,
+    onPageChange,
+    onPageSizeChange,
   } = useSessionsTable(filteredData?.sessions || []);
 
   if (isLoading && !data) {
@@ -95,9 +125,10 @@ function App() {
         isDarkMode={isDarkMode}
         onToggleDarkMode={toggleDarkMode}
         lastUpdated={lastUpdated}
-        onRefresh={refresh}
+        onRefresh={handleRefresh}
         isLoading={isLoading}
       />
+      <Toaster toasts={toasts} onDismiss={dismiss} />
       <div className="p-4 sm:p-6 lg:p-8">
         <div className="max-w-7xl mx-auto">
 
@@ -107,6 +138,7 @@ function App() {
             organization={license.organization}
             daysUntilExpiration={daysUntilExpiration}
             status={licenseStatus}
+            className="animate-card-enter animate-card-enter-1"
           />
 
           <MetricCard
@@ -114,6 +146,8 @@ function App() {
             value={statistics.daily_active_users}
             icon={<Users className="w-5 h-5" />}
             trend={sessionTrend}
+            className="animate-card-enter animate-card-enter-2"
+            tooltip="Unique users who ran mirrord today"
           />
 
           <MetricCard
@@ -121,12 +155,15 @@ function App() {
             value={statistics.monthly_active_users}
             subtitle={`${statistics.total_users} total users`}
             icon={<UserCheck className="w-5 h-5" />}
+            className="animate-card-enter animate-card-enter-3"
+            tooltip="Unique users who ran mirrord in the last 30 days"
           />
 
           <SessionsCard
             activeSessions={sessions.length}
             userSessions={userSessions}
             ciSessions={ciSessions}
+            className="animate-card-enter animate-card-enter-4"
           />
 
           <MetricCard
@@ -134,6 +171,8 @@ function App() {
             value={`${timeSaved}h`}
             subtitle="Estimated developer hours"
             icon={<Clock className="w-5 h-5" />}
+            className="animate-card-enter animate-card-enter-5"
+            tooltip="Estimated hours saved vs traditional remote debugging workflows"
           />
         </div>
 
@@ -148,23 +187,32 @@ function App() {
 
         {/* Charts Section with Tabs */}
         <div className="mb-8">
-          <div className="flex flex-wrap gap-2 mb-4">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === tab.id
-                    ? 'bg-primary text-white shadow-[-7px_6.5px_0px_rgba(0,0,0,1)]'
-                    : 'bg-[var(--card)] text-[var(--foreground)] hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] border border-[var(--border)]'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+            <div className="flex flex-wrap gap-2">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`px-4 py-2 rounded-lg text-body-sm font-medium transition-all active:scale-[0.98] ${
+                    activeTab === tab.id
+                      ? 'bg-primary text-white shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] active:shadow-none'
+                      : 'bg-[var(--card)] text-[var(--foreground)] hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] active:shadow-none border border-[var(--border)]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={toggleChartLayout}
+              className="p-2 rounded-lg bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] active:scale-[0.98] active:shadow-none transition-all"
+              title={chartLayout === 'grid' ? 'Switch to full-width view' : 'Switch to grid view'}
+            >
+              {chartLayout === 'grid' ? <Maximize2 className="w-4 h-4" /> : <LayoutGrid className="w-4 h-4" />}
+            </button>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div key={activeTab} className={`grid gap-6 animate-fade-in ${chartLayout === 'full' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2'}`}>
             {activeTab === 'usage' && (
               <>
                 <UsageChart data={statistics.usage_over_time} isDarkMode={isDarkMode} />
@@ -185,11 +233,11 @@ function App() {
                 <div className="card flex items-center justify-center">
                   <div className="text-center">
                     <Activity className="w-12 h-12 text-primary mx-auto mb-4" />
-                    <p className="text-h3 font-bold text-[var(--foreground)]">
+                    <p className="text-h4 font-bold text-[var(--foreground)]">
                       {statistics.sessions_by_mode.steal + statistics.sessions_by_mode.mirror}
                     </p>
                     <p className="text-muted">Total Sessions</p>
-                    <p className="text-sm text-[var(--muted-foreground)] mt-2">
+                    <p className="text-body-sm text-[var(--muted-foreground)] mt-2">
                       {((statistics.sessions_by_mode.steal /
                         (statistics.sessions_by_mode.steal + statistics.sessions_by_mode.mirror)) *
                         100).toFixed(0)}
@@ -210,7 +258,7 @@ function App() {
                       .map(([target, count]) => (
                         <div
                           key={target}
-                          className="flex items-center justify-between p-3 bg-[var(--muted)]/30 rounded-lg"
+                          className="flex items-center justify-between p-3 bg-[var(--muted)]/30 rounded-lg text-body-sm"
                         >
                           <span className="text-[var(--foreground)]">{target}</span>
                           <span className="text-primary font-medium">{count} sessions</span>
@@ -231,7 +279,7 @@ function App() {
                       .map(([user, count]) => (
                         <div
                           key={user}
-                          className="flex items-center justify-between p-3 bg-[var(--muted)]/30 rounded-lg"
+                          className="flex items-center justify-between p-3 bg-[var(--muted)]/30 rounded-lg text-body-sm"
                         >
                           <span className="text-[var(--foreground)]">{user}</span>
                           <span className="text-primary font-medium">{count} sessions</span>
@@ -247,12 +295,18 @@ function App() {
         {/* Active Sessions Table */}
         <SessionsTable
           sessions={filteredSessions}
+          totalSessions={totalSessions}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           sort={sort}
           onSort={toggleSort}
           expandedSessionId={expandedSessionId}
           onToggleExpand={toggleExpanded}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          onPageChange={onPageChange}
+          onPageSizeChange={onPageSizeChange}
         />
         </div>
       </div>
@@ -334,7 +388,7 @@ function ErrorState({ error, onRetry }: { error: unknown; onRetry: () => void })
         <p className="text-[var(--muted-foreground)] mb-4">
           {error instanceof Error ? error.message : 'Unable to connect to the mirrord operator'}
         </p>
-        <p className="text-[var(--muted-foreground)] text-sm mb-6">
+        <p className="text-[var(--muted-foreground)] text-body-sm mb-6">
           Make sure kubectl proxy is running: <code className="bg-[var(--muted)] px-2 py-1 rounded">kubectl proxy</code>
         </p>
         <button onClick={onRetry} className="btn-primary">
@@ -366,7 +420,7 @@ function EmptyState() {
         <p className="text-[var(--muted-foreground)] mb-6">
           No mirrord usage data found. Start using mirrord to see your team's activity here.
         </p>
-        <div className="flex items-center justify-center gap-2 text-sm text-[var(--muted-foreground)]">
+        <div className="flex items-center justify-center gap-2 text-body-sm text-[var(--muted-foreground)]">
           <Activity className="w-4 h-4" />
           <span>Waiting for first session...</span>
         </div>

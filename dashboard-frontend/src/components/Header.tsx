@@ -11,13 +11,13 @@ export function Header({ lastUpdated, onRefresh, isLoading }: HeaderProps) {
   return (
     <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
       <div>
-        <h1 className="text-2xl font-bold text-[var(--foreground)]">Utilization Dashboard</h1>
-        <p className="text-muted text-sm">Monitor your team's mirrord usage</p>
+        <h1 className="text-h3 font-bold text-[var(--foreground)]">Utilization Dashboard</h1>
+        <p className="text-muted text-body-sm">Monitor your team's mirrord usage</p>
       </div>
 
       <div className="flex items-center gap-3">
         {lastUpdated && (
-          <span className="text-muted text-sm hidden md:inline">
+          <span className="text-muted text-body-sm hidden md:inline">
             Last updated: {formatDateTime(lastUpdated)}
           </span>
         )}

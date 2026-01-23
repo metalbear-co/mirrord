@@ -43,7 +43,7 @@ export function DateRangePicker({
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
       <div className="flex items-center gap-2">
         <Calendar className="w-4 h-4 text-[var(--muted-foreground)]" />
-        <span className="text-[var(--muted-foreground)] text-sm">Date Range:</span>
+        <span className="text-[var(--muted-foreground)] text-body-sm">Date Range:</span>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -52,10 +52,10 @@ export function DateRangePicker({
             key={preset.value}
             onClick={() => handlePresetClick(preset.value)}
             className={classNames(
-              'px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
+              'px-3 py-1.5 rounded-lg text-body-sm font-medium transition-all active:scale-[0.98]',
               dateRange.preset === preset.value && !showCustom
-                ? 'bg-primary text-white shadow-[-7px_6.5px_0px_rgba(0,0,0,1)]'
-                : 'bg-[var(--card)] text-[var(--foreground)] hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] border border-[var(--border)]'
+                ? 'bg-primary text-white shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] active:shadow-none'
+                : 'bg-[var(--card)] text-[var(--foreground)] hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] active:shadow-none border border-[var(--border)]'
             )}
           >
             {preset.label}
@@ -65,10 +65,10 @@ export function DateRangePicker({
         <button
           onClick={() => setShowCustom(!showCustom)}
           className={classNames(
-            'px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
+            'px-3 py-1.5 rounded-lg text-body-sm font-medium transition-all active:scale-[0.98]',
             dateRange.preset === 'custom' || showCustom
-              ? 'bg-primary text-white shadow-[-7px_6.5px_0px_rgba(0,0,0,1)]'
-              : 'bg-[var(--card)] text-[var(--foreground)] hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] border border-[var(--border)]'
+              ? 'bg-primary text-white shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] active:shadow-none'
+              : 'bg-[var(--card)] text-[var(--foreground)] hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] active:shadow-none border border-[var(--border)]'
           )}
         >
           Custom
@@ -81,23 +81,23 @@ export function DateRangePicker({
             type="date"
             value={customStart}
             onChange={(e) => setCustomStart(e.target.value)}
-            className="px-3 py-1.5 bg-[var(--card)] border border-[var(--border)] rounded-lg text-[var(--foreground)] text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+            className="px-3 py-1.5 bg-[var(--card)] border border-[var(--border)] rounded-lg text-[var(--foreground)] text-body-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
           />
           <span className="text-[var(--muted-foreground)]">to</span>
           <input
             type="date"
             value={customEnd}
             onChange={(e) => setCustomEnd(e.target.value)}
-            className="px-3 py-1.5 bg-[var(--card)] border border-[var(--border)] rounded-lg text-[var(--foreground)] text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+            className="px-3 py-1.5 bg-[var(--card)] border border-[var(--border)] rounded-lg text-[var(--foreground)] text-body-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
           />
-          <button onClick={handleApplyCustom} className="btn-primary text-sm py-1.5">
+          <button onClick={handleApplyCustom} className="btn-primary text-body-sm py-1.5">
             Apply
           </button>
         </div>
       )}
 
       {dateRange.preset === 'custom' && !showCustom && (
-        <span className="text-[var(--foreground)] text-sm">
+        <span className="text-[var(--foreground)] text-body-sm">
           {format(dateRange.start, 'MMM d, yyyy')} - {format(dateRange.end, 'MMM d, yyyy')}
         </span>
       )}

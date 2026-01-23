@@ -9,6 +9,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
+import { FONT_SIZE_BODY_SM } from '@metalbear/ui';
 import { getChartColors } from '@/lib/theme';
 import type { UsageDataPoint } from '@/types/mirrord';
 
@@ -35,13 +36,13 @@ export function UsageChart({ data, isDarkMode }: UsageChartProps) {
             <XAxis
               dataKey="formattedDate"
               stroke={colors.axis}
-              fontSize={12}
+              fontSize={FONT_SIZE_BODY_SM}
               tickLine={false}
               axisLine={{ stroke: colors.grid }}
             />
             <YAxis
               stroke={colors.axis}
-              fontSize={12}
+              fontSize={FONT_SIZE_BODY_SM}
               tickLine={false}
               axisLine={{ stroke: colors.grid }}
             />
