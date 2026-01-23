@@ -61,7 +61,7 @@ jobs:
       - run: uv python install
       - run: uv venv
       - name: install towncrier
-        run: uv pip install towncrier==23.11.0
+        run: uv pip install towncrier==25.08.0
       - name: verify newsfragment exist
         run: uv run towncrier check
 
