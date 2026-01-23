@@ -6,6 +6,8 @@ underlines = ["", "", ""]
 template = "changelog.d/changelog_template.jinja"
 title_format = "## [{version}](https://github.com/metalbear-co/mirrord/tree/{version}) - {project_date}"
 issue_format = "[#{issue}](https://github.com/metalbear-co/mirrord/issues/{issue})"
+# We link to GitHub, and GitHub issues are made only out of digits.
+issue_pattern = "\\d+"
 wrap = true
 
 [[tool.towncrier.type]]
