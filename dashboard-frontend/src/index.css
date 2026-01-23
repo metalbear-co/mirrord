@@ -88,6 +88,11 @@ body {
     @apply bg-primary/20 text-primary;
   }
 
+  .badge-neutral {
+    @apply text-[var(--muted-foreground)];
+    background-color: color-mix(in srgb, var(--muted-foreground) 20%, transparent);
+  }
+
   .text-muted {
     @apply text-[var(--muted-foreground)];
   }

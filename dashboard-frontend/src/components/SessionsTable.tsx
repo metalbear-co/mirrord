@@ -282,7 +282,7 @@ function SessionRow({ session, isExpanded, onToggle }: SessionRowProps) {
           <span
             className={classNames(
               'badge',
-              session.mode === 'steal' ? 'badge-primary' : 'badge-warning'
+              session.mode === 'steal' ? 'badge-primary' : 'badge-neutral'
             )}
           >
             {session.mode}
@@ -350,7 +350,7 @@ function SessionCard({ session, isExpanded, onToggle }: SessionRowProps) {
           <span
             className={classNames(
               'badge',
-              session.mode === 'steal' ? 'badge-primary' : 'badge-warning'
+              session.mode === 'steal' ? 'badge-primary' : 'badge-neutral'
             )}
           >
             {session.mode}

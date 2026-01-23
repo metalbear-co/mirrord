@@ -15,8 +15,6 @@ function generateMockData(): OperatorStatus {
     'user-service',
     'notification-service',
   ];
-  const namespaces = ['default', 'staging', 'development', 'qa'];
-
   // Generate usage over time data
   const usageOverTime: UsageDataPoint[] = [];
   for (let i = 90; i >= 0; i--) {
@@ -33,23 +31,64 @@ function generateMockData(): OperatorStatus {
     });
   }
 
-  // Generate active sessions
-  const sessions: Session[] = [];
-  const numActiveSessions = 3 + Math.floor(Math.random() * 5);
-  for (let i = 0; i < numActiveSessions; i++) {
-    const startedMinutesAgo = Math.floor(Math.random() * 120);
-    sessions.push({
-      id: `session-${i + 1}`,
-      user: users[Math.floor(Math.random() * users.length)],
-      target: targets[Math.floor(Math.random() * targets.length)],
-      namespace: namespaces[Math.floor(Math.random() * namespaces.length)],
-      mode: Math.random() > 0.3 ? 'steal' : 'mirror',
-      started_at: new Date(now.getTime() - startedMinutesAgo * 60 * 1000).toISOString(),
-      duration_seconds: startedMinutesAgo * 60,
-      ports: [8080, 3000, 5432].slice(0, 1 + Math.floor(Math.random() * 3)),
-      is_ci: Math.random() > 0.8,
-    });
-  }
+  // Generate active sessions - fixed set for consistent display
+  const sessions: Session[] = [
+    {
+      id: 'session-1',
+      user: 'alice',
+      target: 'api-server',
+      namespace: 'staging',
+      mode: 'steal',
+      started_at: new Date(now.getTime() - 15 * 60 * 1000).toISOString(),
+      duration_seconds: 15 * 60,
+      ports: [8080, 3000],
+      is_ci: false,
+    },
+    {
+      id: 'session-2',
+      user: 'bob',
+      target: 'web-frontend',
+      namespace: 'development',
+      mode: 'mirror',
+      started_at: new Date(now.getTime() - 45 * 60 * 1000).toISOString(),
+      duration_seconds: 45 * 60,
+      ports: [3000],
+      is_ci: false,
+    },
+    {
+      id: 'session-3',
+      user: 'charlie',
+      target: 'auth-service',
+      namespace: 'default',
+      mode: 'steal',
+      started_at: new Date(now.getTime() - 5 * 60 * 1000).toISOString(),
+      duration_seconds: 5 * 60,
+      ports: [8080],
+      is_ci: true,
+    },
+    {
+      id: 'session-4',
+      user: 'david',
+      target: 'payment-service',
+      namespace: 'staging',
+      mode: 'steal',
+      started_at: new Date(now.getTime() - 90 * 60 * 1000).toISOString(),
+      duration_seconds: 90 * 60,
+      ports: [8080, 5432],
+      is_ci: false,
+    },
+    {
+      id: 'session-5',
+      user: 'eve',
+      target: 'notification-service',
+      namespace: 'qa',
+      mode: 'mirror',
+      started_at: new Date(now.getTime() - 30 * 60 * 1000).toISOString(),
+      duration_seconds: 30 * 60,
+      ports: [3000],
+      is_ci: false,
+    },
+  ];
 
   // Calculate statistics from mock data
   const totalSessions = usageOverTime.reduce((sum, d) => sum + d.sessions, 0);
@@ -161,7 +200,8 @@ function transformApiResponse(data: unknown): OperatorStatus {
     // Try to extract status info if available
     if (apiData.status && typeof apiData.status === 'object') {
       const status = apiData.status as Record<string, unknown>;
-      if (status.sessions && Array.isArray(status.sessions)) {
+      // Only override mock sessions if API has actual sessions
+      if (status.sessions && Array.isArray(status.sessions) && status.sessions.length > 0) {
         mock.sessions = status.sessions.map((s: unknown, i: number) => {
           const session = s as Record<string, unknown>;
           return {

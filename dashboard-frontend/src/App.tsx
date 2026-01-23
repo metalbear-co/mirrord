@@ -17,7 +17,7 @@ import {
   useFilteredData,
   useSessionsTable,
 } from '@/hooks/useDashboardData';
-import { getDaysUntilExpiration, calculateTimeSaved, getTrendIndicator } from '@/lib/utils';
+import { getDaysUntilExpiration, calculateTimeSaved } from '@/lib/utils';
 
 type ChartTab = 'usage' | 'distribution' | 'targets' | 'users';
 
@@ -98,13 +98,6 @@ function App() {
   const daysUntilExpiration = getDaysUntilExpiration(license.expire_at);
   const timeSaved = calculateTimeSaved(statistics);
 
-  // Calculate trend (comparing last 7 days to previous 7 days)
-  const recentUsage = statistics.usage_over_time.slice(-7);
-  const previousUsage = statistics.usage_over_time.slice(-14, -7);
-  const recentSessions = recentUsage.reduce((sum, d) => sum + d.sessions, 0);
-  const previousSessions = previousUsage.reduce((sum, d) => sum + d.sessions, 0);
-  const sessionTrend = getTrendIndicator(recentSessions, previousSessions);
-
   const tabs: Array<{ id: ChartTab; label: string }> = [
     { id: 'usage', label: strings.charts.tabs.usage },
     { id: 'distribution', label: strings.charts.tabs.distribution },
@@ -137,7 +130,6 @@ function App() {
               value={statistics.daily_active_users}
               subtitle={strings.metrics.dau.subtitle}
               icon={<Users className="w-5 h-5" />}
-              trend={sessionTrend}
               className="animate-card-enter animate-card-enter-2"
               tooltip={strings.metrics.dau.tooltip}
             />
