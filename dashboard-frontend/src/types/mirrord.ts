@@ -3,6 +3,7 @@ export interface License {
   organization: string;
   expire_at: string;
   fingerprint: string | null;
+  tier: 'free' | 'team' | 'enterprise';
 }
 
 export interface Session {

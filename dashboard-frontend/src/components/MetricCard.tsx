@@ -86,27 +86,24 @@ export function MetricCard({
 
 interface LicenseCardProps {
   organization: string;
-  daysUntilExpiration: number;
-  status: 'valid' | 'warning' | 'expired';
+  tier: 'free' | 'team' | 'enterprise';
   className?: string;
 }
 
-export function LicenseCard({ organization, daysUntilExpiration, status, className }: LicenseCardProps) {
-  const statusConfig = {
-    valid: { label: 'Active', message: `${daysUntilExpiration} days remaining` },
-    warning: { label: 'Expiring Soon', message: `${daysUntilExpiration} days remaining` },
-    expired: { label: 'Expired', message: 'License has expired' },
+export function LicenseCard({ organization, tier, className }: LicenseCardProps) {
+  const tierLabels = {
+    free: 'Free',
+    team: 'Team',
+    enterprise: 'Enterprise',
   };
-
-  const config = statusConfig[status];
 
   return (
     <MetricCard
-      title="License Status"
-      value={config.label}
+      title="License"
+      value={tierLabels[tier]}
       subtitle={organization}
       className={className}
-      tooltip="Your mirrord operator license validity and expiration status"
+      tooltip="Your mirrord license tier"
       icon={
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path
@@ -129,10 +126,11 @@ interface SessionsCardProps {
 export function SessionsCard({ activeSessions, className }: SessionsCardProps) {
   return (
     <MetricCard
-      title="Active Sessions"
+      title="Sessions"
       value={activeSessions}
+      subtitle="active now"
       className={className}
-      tooltip="Currently running mirrord sessions across your cluster"
+      tooltip="Currently running mirrord sessions"
       icon={
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path

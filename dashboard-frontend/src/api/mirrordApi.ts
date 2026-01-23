@@ -83,6 +83,7 @@ function generateMockData(): OperatorStatus {
     organization: 'Acme Corp',
     expire_at: new Date(now.getTime() + 45 * 24 * 60 * 60 * 1000).toISOString(), // 45 days from now
     fingerprint: 'abc123def456',
+    tier: 'enterprise',
   };
 
   return {
@@ -152,6 +153,7 @@ function transformApiResponse(data: unknown): OperatorStatus {
           organization: String(licenseData.organization || mock.license.organization),
           expire_at: String(licenseData.expire_at || mock.license.expire_at),
           fingerprint: licenseData.fingerprint ? String(licenseData.fingerprint) : null,
+          tier: (licenseData.tier as 'free' | 'team' | 'enterprise') || mock.license.tier,
         };
       }
     }

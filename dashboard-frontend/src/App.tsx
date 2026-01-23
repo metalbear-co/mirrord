@@ -17,8 +17,6 @@ import {
   useSessionsTable,
 } from '@/hooks/useDashboardData';
 import {
-  getDaysUntilExpiration,
-  getLicenseStatus,
   calculateTimeSaved,
   getTrendIndicator,
 } from '@/lib/utils';
@@ -99,8 +97,6 @@ function App() {
   }
 
   const { license, statistics, sessions } = filteredData;
-  const daysUntilExpiration = getDaysUntilExpiration(license.expire_at);
-  const licenseStatus = getLicenseStatus(license.expire_at);
   const timeSaved = calculateTimeSaved(statistics);
 
   // Calculate trend (comparing last 7 days to previous 7 days)
@@ -134,27 +130,27 @@ function App() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
           <LicenseCard
             organization={license.organization}
-            daysUntilExpiration={daysUntilExpiration}
-            status={licenseStatus}
+            tier={license.tier}
             className="animate-card-enter animate-card-enter-1"
           />
 
           <MetricCard
-            title="Daily Active Users"
+            title="DAU"
             value={statistics.daily_active_users}
+            subtitle="users today"
             icon={<Users className="w-5 h-5" />}
             trend={sessionTrend}
             className="animate-card-enter animate-card-enter-2"
-            tooltip="Unique users who ran mirrord today"
+            tooltip="Daily active users"
           />
 
           <MetricCard
-            title="Monthly Active Users"
+            title="MAU"
             value={statistics.monthly_active_users}
-            subtitle={`${statistics.total_users} total users`}
+            subtitle={`${statistics.total_users} total`}
             icon={<UserCheck className="w-5 h-5" />}
             className="animate-card-enter animate-card-enter-3"
-            tooltip="Unique users who ran mirrord in the last 30 days"
+            tooltip="Monthly active users"
           />
 
           <SessionsCard
@@ -165,10 +161,10 @@ function App() {
           <MetricCard
             title="Time Saved"
             value={`${timeSaved}h`}
-            subtitle="Estimated developer hours"
+            subtitle="dev hours saved"
             icon={<Clock className="w-5 h-5" />}
             className="animate-card-enter animate-card-enter-5"
-            tooltip="Estimated hours saved vs traditional remote debugging workflows"
+            tooltip="Estimated hours saved"
           />
         </div>
 
