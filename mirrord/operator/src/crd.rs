@@ -808,6 +808,13 @@ pub struct MirrordSqsSessionSpec {
     // The Kubernetes API can't deal with 64 bit numbers (with most significant bit set)
     // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
+
+    /// Multi-cluster coordination: seed for deterministic SQS queue naming.
+    ///
+    /// When set, SQS output queues will use this seed instead of random characters.
+    /// This ensures all clusters in a multi-cluster session create queues with the same names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_name_seed: Option<String>,
 }
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
