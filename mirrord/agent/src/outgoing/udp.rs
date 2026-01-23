@@ -186,6 +186,10 @@ impl UdpOutgoingTask {
     /// Note that these operations do not require any IO, as [`SocketAddress`] cannot be a hostname.
     /// Therefore, this function is async only due to [`UdpSocket`] interface's constraints.
     ///
+    /// If `hostname` is provided, the agent will resolve the hostname locally instead of using
+    /// the IP in `remote_address`. This is essential for multi-cluster scenarios where the same
+    /// hostname resolves to different IPs in different clusters.
+    ///
     /// Handles:
     /// 1. Normal `connect` called on an udp socket by the user, through the [`LayerConnect`]
     ///    message;
@@ -195,7 +199,19 @@ impl UdpOutgoingTask {
     /// 3. User is trying to use `sendto` and `recvfrom`, we use the same hack as in DNS to fake a
     ///    connection.
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::DEBUG))]
-    async fn connect(&mut self, remote_address: SocketAddress) -> RemoteResult<DaemonConnect> {
+    async fn connect(
+        &mut self,
+        remote_address: SocketAddress,
+        hostname: Option<String>,
+    ) -> RemoteResult<DaemonConnect> {
+        // For UDP, hostname resolution is not typically needed, but we log if provided.
+        // Multi-cluster SQS primarily uses TCP, but we accept hostname for consistency.
+        if hostname.is_some() {
+            tracing::debug!(
+                ?hostname,
+                "Hostname provided for UDP connection, but UDP doesn't use hostname resolution. Using IP directly."
+            );
+        }
         let peer_addr = remote_address.clone().try_into()?;
         let bind_addr = match peer_addr {
             std::net::SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
@@ -242,8 +258,11 @@ impl UdpOutgoingTask {
         match message {
             // [user] -> [layer] -> [agent] -> [layer]
             // `user` is asking us to connect to some remote host.
-            LayerUdpOutgoing::Connect(LayerConnect { remote_address }) => {
-                let daemon_connect = self.connect(remote_address).await;
+            LayerUdpOutgoing::Connect(LayerConnect {
+                remote_address,
+                hostname,
+            }) => {
+                let daemon_connect = self.connect(remote_address, hostname).await;
                 tracing::trace!(
                     result = ?daemon_connect,
                     "Connection attempt finished.",
@@ -258,8 +277,9 @@ impl UdpOutgoingTask {
             LayerUdpOutgoing::ConnectV2(LayerConnectV2 {
                 uid,
                 remote_address,
+                hostname,
             }) => {
-                let connect = self.connect(remote_address).await;
+                let connect = self.connect(remote_address, hostname).await;
                 let daemon_connect = DaemonConnectV2 { uid, connect };
                 tracing::trace!(
                     result = ?daemon_connect,

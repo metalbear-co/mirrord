@@ -1318,6 +1318,7 @@ mod test {
                     OutgoingConnectRequest {
                         remote_address: socket_addr.clone(),
                         protocol: NetProtocol::Stream,
+                        hostname: None,
                     },
                 )),
             })

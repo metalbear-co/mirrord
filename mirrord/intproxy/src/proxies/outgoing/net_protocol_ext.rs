@@ -46,7 +46,17 @@ pub trait NetProtocolExt: Sized {
 
     /// Creates a [`LayerConnect`] message and wraps it into the common [`ClientMessage`] type.
     /// The enum path used here depends on this protocol.
-    fn wrap_agent_connect(self, remote_address: SocketAddress, uid: Option<Uid>) -> ClientMessage;
+    ///
+    /// The `hostname` parameter is the original hostname before DNS resolution. When present,
+    /// the agent can re-resolve this hostname locally instead of using the IP in `remote_address`.
+    /// This is essential for multi-cluster scenarios where the same hostname resolves to
+    /// different IPs in different clusters.
+    fn wrap_agent_connect(
+        self,
+        remote_address: SocketAddress,
+        uid: Option<Uid>,
+        hostname: Option<String>,
+    ) -> ClientMessage;
 
     /// Opens a new socket for intercepting a connection to the given remote address.
     async fn prepare_socket(self, for_remote_address: SocketAddress) -> io::Result<PreparedSocket>;
@@ -77,28 +87,37 @@ impl NetProtocolExt for NetProtocol {
         }
     }
 
-    fn wrap_agent_connect(self, remote_address: SocketAddress, uid: Option<Uid>) -> ClientMessage {
+    fn wrap_agent_connect(
+        self,
+        remote_address: SocketAddress,
+        uid: Option<Uid>,
+        hostname: Option<String>,
+    ) -> ClientMessage {
         match (self, uid) {
             (Self::Datagrams, None) => {
                 ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
                     remote_address,
+                    hostname,
                 }))
             }
             (Self::Datagrams, Some(uid)) => {
                 ClientMessage::UdpOutgoing(LayerUdpOutgoing::ConnectV2(LayerConnectV2 {
                     uid,
                     remote_address,
+                    hostname,
                 }))
             }
             (Self::Stream, None) => {
                 ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
                     remote_address,
+                    hostname,
                 }))
             }
             (Self::Stream, Some(uid)) => {
                 ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
                     uid,
                     remote_address,
+                    hostname,
                 }))
             }
         }

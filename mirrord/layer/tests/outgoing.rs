@@ -272,6 +272,7 @@ async fn outgoing_tcp_high_port(dylib_path: &Path) {
             ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
                 remote_address: SocketAddress::Ip(addr),
                 uid,
+                ..
             })) => (addr, uid),
             ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(..)) => continue,
             ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(..)) => continue,

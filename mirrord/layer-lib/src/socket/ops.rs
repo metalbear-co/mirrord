@@ -206,6 +206,9 @@ where
         let request = OutgoingConnectRequest {
             remote_address: remote_address.clone(),
             protocol,
+            // TODO: For multi-cluster support, layer-lib should also track DNS lookups
+            // and populate hostname here. For now, this is None.
+            hostname: None,
         };
 
         let response = match proxy_request_fn(request) {
@@ -350,6 +353,7 @@ pub fn create_outgoing_request(
     OutgoingConnectRequest {
         remote_address: remote_address.into(),
         protocol,
+        hostname: None,
     }
 }
 
