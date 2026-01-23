@@ -60,7 +60,7 @@ export function MetricCard({
                       <HelpCircle className="w-3.5 h-3.5" />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent>
+                  <TooltipContent className="bg-[var(--card)] border border-[var(--border)] shadow-lg">
                     <p className="max-w-xs text-body-sm">{tooltip}</p>
                   </TooltipContent>
                 </Tooltip>
