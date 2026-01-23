@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { formatDuration, formatRelativeTime, classNames } from '@/lib/utils';
+import { strings } from '@/lib/strings';
 import type { Session, TableSort } from '@/types/mirrord';
 
 interface SessionsTableProps {
@@ -56,12 +57,12 @@ export function SessionsTable({
   return (
     <div className="card">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
-        <h3 className="text-h4 font-semibold text-[var(--foreground)]">Active Sessions</h3>
+        <h3 className="text-h4 font-semibold text-[var(--foreground)]">{strings.table.title}</h3>
         <div className="relative w-full sm:w-64 group">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--muted-foreground)] group-focus-within:text-primary transition-colors" />
           <input
             type="text"
-            placeholder="Search sessions..."
+            placeholder={strings.table.searchPlaceholder}
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             className="w-full pl-10 pr-10 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 focus:bg-[var(--background)] transition-all"
@@ -70,7 +71,7 @@ export function SessionsTable({
             <button
               onClick={() => onSearchChange('')}
               className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]/50 transition-colors"
-              aria-label="Clear search"
+              aria-label={strings.table.aria.clearSearch}
             >
               <X className="w-4 h-4" />
             </button>
@@ -81,7 +82,9 @@ export function SessionsTable({
       {/* Mobile Card View */}
       <div className="md:hidden space-y-3">
         {sessions.length === 0 ? (
-          <div className="py-8 text-center text-[var(--muted-foreground)]">No active sessions</div>
+          <div className="py-8 text-center text-[var(--muted-foreground)]">
+            {strings.table.empty}
+          </div>
         ) : (
           sessions.map((session) => (
             <SessionCard
@@ -102,38 +105,38 @@ export function SessionsTable({
               <th className="w-8"></th>
               <SortableHeader
                 column="user"
-                label="User"
+                label={strings.table.columns.user}
                 sort={sort}
                 onSort={onSort}
                 SortIcon={SortIcon}
               />
               <SortableHeader
                 column="target"
-                label="Target"
+                label={strings.table.columns.target}
                 sort={sort}
                 onSort={onSort}
                 SortIcon={SortIcon}
               />
               <SortableHeader
                 column="namespace"
-                label="Namespace"
+                label={strings.table.columns.namespace}
                 sort={sort}
                 onSort={onSort}
                 SortIcon={SortIcon}
               />
               <th className="px-4 py-3 text-left text-body-sm font-medium text-[var(--muted-foreground)]">
-                Mode
+                {strings.table.columns.mode}
               </th>
               <SortableHeader
                 column="duration_seconds"
-                label="Duration"
+                label={strings.table.columns.duration}
                 sort={sort}
                 onSort={onSort}
                 SortIcon={SortIcon}
               />
               <SortableHeader
                 column="started_at"
-                label="Started"
+                label={strings.table.columns.started}
                 sort={sort}
                 onSort={onSort}
                 SortIcon={SortIcon}
@@ -144,7 +147,7 @@ export function SessionsTable({
             {sessions.length === 0 ? (
               <tr>
                 <td colSpan={7} className="px-4 py-8 text-center text-[var(--muted-foreground)]">
-                  No active sessions
+                  {strings.table.empty}
                 </td>
               </tr>
             ) : (
@@ -165,7 +168,7 @@ export function SessionsTable({
       {totalSessions > 0 && (
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4 pt-4 border-t border-[var(--border)]">
           <div className="flex items-center gap-2 text-body-sm text-[var(--muted-foreground)]">
-            <span>Rows per page:</span>
+            <span>{strings.table.pagination.rowsPerPage}</span>
             <select
               value={pageSize}
               onChange={(e) => onPageSizeChange(Number(e.target.value))}
@@ -177,7 +180,7 @@ export function SessionsTable({
             </select>
             <span className="ml-4">
               {(currentPage - 1) * pageSize + 1}-{Math.min(currentPage * pageSize, totalSessions)}{' '}
-              of {totalSessions}
+              {strings.table.pagination.of} {totalSessions}
             </span>
           </div>
 
@@ -186,7 +189,7 @@ export function SessionsTable({
               onClick={() => onPageChange(1)}
               disabled={currentPage === 1}
               className="p-1.5 rounded hover:bg-[var(--muted)]/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              aria-label="First page"
+              aria-label={strings.table.aria.firstPage}
             >
               <ChevronsLeft className="w-4 h-4" />
             </button>
@@ -194,7 +197,7 @@ export function SessionsTable({
               onClick={() => onPageChange(currentPage - 1)}
               disabled={currentPage === 1}
               className="p-1.5 rounded hover:bg-[var(--muted)]/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              aria-label="Previous page"
+              aria-label={strings.table.aria.previousPage}
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -205,7 +208,7 @@ export function SessionsTable({
               onClick={() => onPageChange(currentPage + 1)}
               disabled={currentPage === totalPages}
               className="p-1.5 rounded hover:bg-[var(--muted)]/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              aria-label="Next page"
+              aria-label={strings.table.aria.nextPage}
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -213,7 +216,7 @@ export function SessionsTable({
               onClick={() => onPageChange(totalPages)}
               disabled={currentPage === totalPages}
               className="p-1.5 rounded hover:bg-[var(--muted)]/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              aria-label="Last page"
+              aria-label={strings.table.aria.lastPage}
             >
               <ChevronsRight className="w-4 h-4" />
             </button>
@@ -297,11 +300,13 @@ function SessionRow({ session, isExpanded, onToggle }: SessionRowProps) {
           <td colSpan={7} className="px-8 py-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-body-sm">
               <div>
-                <p className="text-[var(--muted-foreground)] mb-1">Session ID</p>
+                <p className="text-[var(--muted-foreground)] mb-1">
+                  {strings.table.details.sessionId}
+                </p>
                 <p className="text-[var(--foreground)] font-mono text-xs">{session.id}</p>
               </div>
               <div>
-                <p className="text-[var(--muted-foreground)] mb-1">Ports</p>
+                <p className="text-[var(--muted-foreground)] mb-1">{strings.table.details.ports}</p>
                 <div className="flex flex-wrap gap-1">
                   {session.ports.map((port) => (
                     <span key={port} className="badge badge-primary">
@@ -311,15 +316,17 @@ function SessionRow({ session, isExpanded, onToggle }: SessionRowProps) {
                 </div>
               </div>
               <div>
-                <p className="text-[var(--muted-foreground)] mb-1">Started At</p>
+                <p className="text-[var(--muted-foreground)] mb-1">
+                  {strings.table.details.startedAt}
+                </p>
                 <p className="text-[var(--foreground)]">
                   {new Date(session.started_at).toLocaleString()}
                 </p>
               </div>
               <div>
-                <p className="text-[var(--muted-foreground)] mb-1">Type</p>
+                <p className="text-[var(--muted-foreground)] mb-1">{strings.table.details.type}</p>
                 <p className="text-[var(--foreground)]">
-                  {session.is_ci ? 'CI Pipeline' : 'User Session'}
+                  {session.is_ci ? strings.table.sessionTypes.ci : strings.table.sessionTypes.user}
                 </p>
               </div>
             </div>
@@ -359,21 +366,23 @@ function SessionCard({ session, isExpanded, onToggle }: SessionRowProps) {
 
       <div className="grid grid-cols-2 gap-2 text-body-sm">
         <div>
-          <span className="text-[var(--muted-foreground)]">Target: </span>
+          <span className="text-[var(--muted-foreground)]">{strings.table.columns.target}: </span>
           <span className="text-[var(--foreground)]">{session.target}</span>
         </div>
         <div>
-          <span className="text-[var(--muted-foreground)]">Namespace: </span>
+          <span className="text-[var(--muted-foreground)]">
+            {strings.table.columns.namespace}:{' '}
+          </span>
           <span className="text-[var(--foreground)]">{session.namespace}</span>
         </div>
         <div>
-          <span className="text-[var(--muted-foreground)]">Duration: </span>
+          <span className="text-[var(--muted-foreground)]">{strings.table.columns.duration}: </span>
           <span className="text-[var(--foreground)]">
             {formatDuration(session.duration_seconds)}
           </span>
         </div>
         <div>
-          <span className="text-[var(--muted-foreground)]">Started: </span>
+          <span className="text-[var(--muted-foreground)]">{strings.table.columns.started}: </span>
           <span className="text-[var(--foreground)]">{formatRelativeTime(session.started_at)}</span>
         </div>
       </div>
@@ -381,17 +390,17 @@ function SessionCard({ session, isExpanded, onToggle }: SessionRowProps) {
       {isExpanded && (
         <div className="mt-4 pt-4 border-t border-[var(--border)] grid grid-cols-2 gap-3 text-body-sm">
           <div>
-            <p className="text-[var(--muted-foreground)] mb-1">Session ID</p>
+            <p className="text-[var(--muted-foreground)] mb-1">{strings.table.details.sessionId}</p>
             <p className="text-[var(--foreground)] font-mono text-xs break-all">{session.id}</p>
           </div>
           <div>
-            <p className="text-[var(--muted-foreground)] mb-1">Type</p>
+            <p className="text-[var(--muted-foreground)] mb-1">{strings.table.details.type}</p>
             <p className="text-[var(--foreground)]">
-              {session.is_ci ? 'CI Pipeline' : 'User Session'}
+              {session.is_ci ? strings.table.sessionTypes.ci : strings.table.sessionTypes.user}
             </p>
           </div>
           <div className="col-span-2">
-            <p className="text-[var(--muted-foreground)] mb-1">Ports</p>
+            <p className="text-[var(--muted-foreground)] mb-1">{strings.table.details.ports}</p>
             <div className="flex flex-wrap gap-1">
               {session.ports.map((port) => (
                 <span key={port} className="badge badge-primary">

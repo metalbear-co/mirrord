@@ -2,6 +2,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { FONT_SIZE_BODY_SM } from '@metalbear/ui';
 import { getChartColors } from '@/lib/theme';
 import { getTopItems } from '@/lib/utils';
+import { strings } from '@/lib/strings';
 
 interface TopTargetsChartProps {
   sessionsByTarget: Record<string, number>;
@@ -14,7 +15,9 @@ export function TopTargetsChart({ sessionsByTarget, isDarkMode }: TopTargetsChar
 
   return (
     <div className="card">
-      <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">Top Targets</h3>
+      <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">
+        {strings.charts.topTargets.title}
+      </h3>
       <div className="h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
@@ -51,7 +54,10 @@ export function TopTargetsChart({ sessionsByTarget, isDarkMode }: TopTargetsChar
                 borderRadius: '8px',
                 color: colors.text,
               }}
-              formatter={(value: number) => [`${value} sessions`, 'Sessions']}
+              formatter={(value: number) => [
+                `${value} ${strings.charts.topTargets.sessionsLabel}`,
+                strings.charts.usageChart.sessions,
+              ]}
             />
             <Bar dataKey="value" fill={colors.primary} radius={[0, 4, 4, 0]} barSize={24} />
           </BarChart>
@@ -72,7 +78,9 @@ export function UserActivityChart({ sessionsByUser, isDarkMode }: UserActivityCh
 
   return (
     <div className="card">
-      <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">User Activity</h3>
+      <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">
+        {strings.charts.userActivity.title}
+      </h3>
       <div className="h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
@@ -97,7 +105,10 @@ export function UserActivityChart({ sessionsByUser, isDarkMode }: UserActivityCh
                 borderRadius: '8px',
                 color: colors.text,
               }}
-              formatter={(value: number) => [`${value} sessions`, 'Sessions']}
+              formatter={(value: number) => [
+                `${value} ${strings.charts.userActivity.sessionsLabel}`,
+                strings.charts.usageChart.sessions,
+              ]}
             />
             <Bar dataKey="value" fill={colors.primary} radius={[4, 4, 0, 0]} barSize={32} />
           </BarChart>

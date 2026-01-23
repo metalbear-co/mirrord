@@ -10,6 +10,7 @@ import { TopTargetsChart, UserActivityChart } from '@/components/TopTargetsChart
 import { SessionsTable } from '@/components/SessionsTable';
 import { DateRangePicker } from '@/components/DateRangePicker';
 import { applyTheme } from '@/lib/theme';
+import { strings } from '@/lib/strings';
 import {
   useDashboardData,
   useDateRange,
@@ -59,9 +60,9 @@ function App() {
   const handleRefresh = useCallback(async () => {
     try {
       await refresh();
-      success('Dashboard synced');
+      success(strings.toast.syncSuccess);
     } catch {
-      toastError('Failed to sync', 'Check your connection and try again');
+      toastError(strings.toast.syncError, strings.toast.syncErrorDescription);
     }
   }, [refresh, success, toastError]);
 
@@ -105,10 +106,10 @@ function App() {
   const sessionTrend = getTrendIndicator(recentSessions, previousSessions);
 
   const tabs: Array<{ id: ChartTab; label: string }> = [
-    { id: 'usage', label: 'Usage Over Time' },
-    { id: 'distribution', label: 'Mode Distribution' },
-    { id: 'targets', label: 'Top Targets' },
-    { id: 'users', label: 'User Activity' },
+    { id: 'usage', label: strings.charts.tabs.usage },
+    { id: 'distribution', label: strings.charts.tabs.distribution },
+    { id: 'targets', label: strings.charts.tabs.targets },
+    { id: 'users', label: strings.charts.tabs.users },
   ];
 
   return (
@@ -132,22 +133,22 @@ function App() {
             />
 
             <MetricCard
-              title="DAU"
+              title={strings.metrics.dau.title}
               value={statistics.daily_active_users}
-              subtitle="users today"
+              subtitle={strings.metrics.dau.subtitle}
               icon={<Users className="w-5 h-5" />}
               trend={sessionTrend}
               className="animate-card-enter animate-card-enter-2"
-              tooltip="Daily active users"
+              tooltip={strings.metrics.dau.tooltip}
             />
 
             <MetricCard
-              title="MAU"
+              title={strings.metrics.mau.title}
               value={statistics.monthly_active_users}
-              subtitle={`${statistics.total_users} total`}
+              subtitle={`${statistics.total_users} ${strings.metrics.mau.subtitleSuffix}`}
               icon={<UserCheck className="w-5 h-5" />}
               className="animate-card-enter animate-card-enter-3"
-              tooltip="Monthly active users"
+              tooltip={strings.metrics.mau.tooltip}
             />
 
             <SessionsCard
@@ -156,12 +157,12 @@ function App() {
             />
 
             <MetricCard
-              title="Time Saved"
+              title={strings.metrics.timeSaved.title}
               value={`${timeSaved}h`}
-              subtitle="dev hours saved"
+              subtitle={strings.metrics.timeSaved.subtitle}
               icon={<Clock className="w-5 h-5" />}
               className="animate-card-enter animate-card-enter-5"
-              tooltip="Estimated hours saved"
+              tooltip={strings.metrics.timeSaved.tooltip}
             />
           </div>
 
@@ -195,7 +196,11 @@ function App() {
               <button
                 onClick={toggleChartLayout}
                 className="p-2 rounded-lg bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] active:scale-[0.98] active:shadow-none transition-all"
-                title={chartLayout === 'grid' ? 'Switch to full-width view' : 'Switch to grid view'}
+                title={
+                  chartLayout === 'grid'
+                    ? strings.charts.layout.switchToFullWidth
+                    : strings.charts.layout.switchToGrid
+                }
               >
                 {chartLayout === 'grid' ? (
                   <Maximize2 className="w-4 h-4" />
@@ -232,7 +237,7 @@ function App() {
                       <p className="text-h4 font-bold text-[var(--foreground)]">
                         {statistics.sessions_by_mode.steal + statistics.sessions_by_mode.mirror}
                       </p>
-                      <p className="text-muted">Total Sessions</p>
+                      <p className="text-muted">{strings.charts.distribution.totalSessions}</p>
                       <p className="text-body-sm text-[var(--muted-foreground)] mt-2">
                         {(
                           (statistics.sessions_by_mode.steal /
@@ -240,7 +245,7 @@ function App() {
                               statistics.sessions_by_mode.mirror)) *
                           100
                         ).toFixed(0)}
-                        % using steal mode
+                        {strings.charts.distribution.usingStealMode}
                       </p>
                     </div>
                   </div>
@@ -254,7 +259,7 @@ function App() {
                   />
                   <div className="card">
                     <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">
-                      Target Details
+                      {strings.charts.topTargets.detailsTitle}
                     </h3>
                     <div className="space-y-3 max-h-[280px] overflow-y-auto">
                       {Object.entries(statistics.sessions_by_target)
@@ -265,7 +270,9 @@ function App() {
                             className="flex items-center justify-between p-3 bg-[var(--muted)]/30 rounded-lg text-body-sm"
                           >
                             <span className="text-[var(--foreground)]">{target}</span>
-                            <span className="text-primary font-medium">{count} sessions</span>
+                            <span className="text-primary font-medium">
+                              {count} {strings.charts.topTargets.sessionsLabel}
+                            </span>
                           </div>
                         ))}
                     </div>
@@ -280,7 +287,7 @@ function App() {
                   />
                   <div className="card">
                     <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">
-                      User Details
+                      {strings.charts.userActivity.detailsTitle}
                     </h3>
                     <div className="space-y-3 max-h-[280px] overflow-y-auto">
                       {Object.entries(statistics.sessions_by_user)
@@ -291,7 +298,9 @@ function App() {
                             className="flex items-center justify-between p-3 bg-[var(--muted)]/30 rounded-lg text-body-sm"
                           >
                             <span className="text-[var(--foreground)]">{user}</span>
-                            <span className="text-primary font-medium">{count} sessions</span>
+                            <span className="text-primary font-medium">
+                              {count} {strings.charts.userActivity.sessionsLabel}
+                            </span>
                           </div>
                         ))}
                     </div>
@@ -398,18 +407,16 @@ function ErrorState({ error, onRetry }: { error: unknown; onRetry: () => void })
             />
           </svg>
         </div>
-        <h2 className="text-h4 font-bold text-[var(--foreground)] mb-2">
-          Failed to Load Dashboard
-        </h2>
+        <h2 className="text-h4 font-bold text-[var(--foreground)] mb-2">{strings.error.title}</h2>
         <p className="text-[var(--muted-foreground)] mb-4">
-          {error instanceof Error ? error.message : 'Unable to connect to the mirrord operator'}
+          {error instanceof Error ? error.message : strings.error.defaultMessage}
         </p>
         <p className="text-[var(--muted-foreground)] text-body-sm mb-6">
-          Make sure kubectl proxy is running:{' '}
-          <code className="bg-[var(--muted)] px-2 py-1 rounded">kubectl proxy</code>
+          {strings.error.proxyHint}{' '}
+          <code className="bg-[var(--muted)] px-2 py-1 rounded">{strings.error.proxyCommand}</code>
         </p>
         <button onClick={onRetry} className="btn-primary">
-          Try Again
+          {strings.error.retry}
         </button>
       </div>
     </div>
@@ -443,13 +450,11 @@ function EmptyState() {
           <div className="absolute -top-2 -right-2 w-4 h-4 bg-secondary rounded-full"></div>
           <div className="absolute -bottom-1 -left-1 w-3 h-3 bg-primary/60 rounded-full"></div>
         </div>
-        <h2 className="text-h4 font-bold text-[var(--foreground)] mb-2">No Data Available</h2>
-        <p className="text-[var(--muted-foreground)] mb-6">
-          No mirrord usage data found. Start using mirrord to see your team's activity here.
-        </p>
+        <h2 className="text-h4 font-bold text-[var(--foreground)] mb-2">{strings.empty.title}</h2>
+        <p className="text-[var(--muted-foreground)] mb-6">{strings.empty.message}</p>
         <div className="flex items-center justify-center gap-2 text-body-sm text-[var(--muted-foreground)]">
           <Activity className="w-4 h-4" />
-          <span>Waiting for first session...</span>
+          <span>{strings.empty.waiting}</span>
         </div>
       </div>
     </div>

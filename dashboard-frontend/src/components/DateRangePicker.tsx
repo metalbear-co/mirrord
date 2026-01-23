@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Calendar } from 'lucide-react';
 import { format } from 'date-fns';
 import { classNames } from '@/lib/utils';
+import { strings } from '@/lib/strings';
 import type { DateRange } from '@/types/mirrord';
 
 interface DateRangePickerProps {
@@ -20,9 +21,9 @@ export function DateRangePicker({
   const [customEnd, setCustomEnd] = useState(format(dateRange.end, 'yyyy-MM-dd'));
 
   const presets: Array<{ value: '7d' | '30d' | '90d'; label: string }> = [
-    { value: '7d', label: '7 Days' },
-    { value: '30d', label: '30 Days' },
-    { value: '90d', label: '90 Days' },
+    { value: '7d', label: strings.dateRange.presets['7d'] },
+    { value: '30d', label: strings.dateRange.presets['30d'] },
+    { value: '90d', label: strings.dateRange.presets['90d'] },
   ];
 
   const handlePresetClick = (preset: '7d' | '30d' | '90d') => {
@@ -43,7 +44,9 @@ export function DateRangePicker({
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
       <div className="flex items-center gap-2">
         <Calendar className="w-4 h-4 text-[var(--muted-foreground)]" />
-        <span className="text-[var(--muted-foreground)] text-body-sm">Date Range:</span>
+        <span className="text-[var(--muted-foreground)] text-body-sm">
+          {strings.dateRange.label}
+        </span>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -71,7 +74,7 @@ export function DateRangePicker({
               : 'bg-[var(--card)] text-[var(--foreground)] hover:shadow-[-7px_6.5px_0px_rgba(0,0,0,1)] active:shadow-none border border-[var(--border)]'
           )}
         >
-          Custom
+          {strings.dateRange.custom}
         </button>
       </div>
 
@@ -91,7 +94,7 @@ export function DateRangePicker({
             className="px-3 py-1.5 bg-[var(--card)] border border-[var(--border)] rounded-lg text-[var(--foreground)] text-body-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
           />
           <button onClick={handleApplyCustom} className="btn-primary text-body-sm py-1.5">
-            Apply
+            {strings.dateRange.apply}
           </button>
         </div>
       )}

@@ -11,6 +11,7 @@ import {
 import { format, parseISO } from 'date-fns';
 import { FONT_SIZE_BODY_SM } from '@metalbear/ui';
 import { getChartColors } from '@/lib/theme';
+import { strings } from '@/lib/strings';
 import type { UsageDataPoint } from '@/types/mirrord';
 
 interface UsageChartProps {
@@ -28,7 +29,9 @@ export function UsageChart({ data, isDarkMode }: UsageChartProps) {
 
   return (
     <div className="card">
-      <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">Usage Over Time</h3>
+      <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">
+        {strings.charts.usageChart.title}
+      </h3>
       <div className="h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={formattedData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
@@ -59,7 +62,7 @@ export function UsageChart({ data, isDarkMode }: UsageChartProps) {
             <Line
               type="monotone"
               dataKey="sessions"
-              name="Sessions"
+              name={strings.charts.usageChart.sessions}
               stroke={colors.primary}
               strokeWidth={2}
               dot={false}
@@ -68,7 +71,7 @@ export function UsageChart({ data, isDarkMode }: UsageChartProps) {
             <Line
               type="monotone"
               dataKey="users"
-              name="Active Users"
+              name={strings.charts.usageChart.activeUsers}
               stroke={colors.secondary}
               strokeWidth={2}
               dot={false}

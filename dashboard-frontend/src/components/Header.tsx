@@ -1,5 +1,6 @@
 import { RefreshCw } from 'lucide-react';
 import { formatDateTime } from '@/lib/utils';
+import { strings } from '@/lib/strings';
 
 interface HeaderProps {
   lastUpdated: Date | null;
@@ -18,7 +19,7 @@ export function Header({ lastUpdated, onRefresh, isLoading }: HeaderProps) {
       <div className="flex items-center gap-3">
         {lastUpdated && (
           <span className="text-muted text-body-sm hidden md:inline">
-            Last updated: {formatDateTime(lastUpdated)}
+            {strings.header.lastUpdated} {formatDateTime(lastUpdated)}
           </span>
         )}
 
@@ -28,7 +29,7 @@ export function Header({ lastUpdated, onRefresh, isLoading }: HeaderProps) {
           className="btn-primary flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed min-w-[120px] justify-center"
         >
           <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-          {isLoading ? 'Refreshing...' : 'Refresh'}
+          {isLoading ? strings.header.refreshing : strings.header.refresh}
         </button>
       </div>
     </header>

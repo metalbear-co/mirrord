@@ -1,6 +1,7 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { FONT_SIZE_BODY_SM } from '@metalbear/ui';
 import { getChartColors } from '@/lib/theme';
+import { strings } from '@/lib/strings';
 
 interface SessionDistributionProps {
   mirrorCount: number;
@@ -16,8 +17,8 @@ export function SessionDistribution({
   const colors = getChartColors(isDarkMode);
 
   const data = [
-    { name: 'Steal', value: stealCount, color: colors.primary },
-    { name: 'Mirror', value: mirrorCount, color: colors.secondary },
+    { name: strings.charts.distribution.steal, value: stealCount, color: colors.primary },
+    { name: strings.charts.distribution.mirror, value: mirrorCount, color: colors.secondary },
   ];
 
   const total = mirrorCount + stealCount;
@@ -25,7 +26,7 @@ export function SessionDistribution({
   return (
     <div className="card">
       <h3 className="text-h4 font-semibold text-[var(--foreground)] mb-4">
-        Session Mode Distribution
+        {strings.charts.distribution.title}
       </h3>
       <div className="h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
@@ -86,11 +87,11 @@ export function SessionDistribution({
       <div className="flex justify-around mt-4 pt-4 border-t border-[var(--border)]">
         <div className="text-center">
           <p className="text-h4 font-bold text-primary">{stealCount}</p>
-          <p className="text-body-sm text-muted">Steal Sessions</p>
+          <p className="text-body-sm text-muted">{strings.charts.distribution.stealSessions}</p>
         </div>
         <div className="text-center">
           <p className="text-h4 font-bold text-[var(--foreground)]">{mirrorCount}</p>
-          <p className="text-body-sm text-muted">Mirror Sessions</p>
+          <p className="text-body-sm text-muted">{strings.charts.distribution.mirrorSessions}</p>
         </div>
       </div>
     </div>

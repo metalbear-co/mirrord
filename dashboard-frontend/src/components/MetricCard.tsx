@@ -15,6 +15,7 @@ import {
   TooltipProvider,
 } from '@metalbear/ui';
 import { classNames } from '@/lib/utils';
+import { strings } from '@/lib/strings';
 import type { ReactNode } from 'react';
 
 interface MetricCardProps {
@@ -93,22 +94,18 @@ interface LicenseCardProps {
 }
 
 export function LicenseCard({ tier, daysUntilExpiration, className }: LicenseCardProps) {
-  const tierLabels = {
-    free: 'Free',
-    team: 'Team',
-    enterprise: 'Enterprise',
-  };
-
   const expirationText =
-    daysUntilExpiration <= 0 ? 'expired' : `expires in ${daysUntilExpiration}d`;
+    daysUntilExpiration <= 0
+      ? strings.metrics.license.expired
+      : strings.metrics.license.expiresIn(daysUntilExpiration);
 
   return (
     <MetricCard
-      title="License"
-      value={tierLabels[tier]}
+      title={strings.metrics.license.title}
+      value={strings.metrics.license.tiers[tier]}
       subtitle={expirationText}
       className={className}
-      tooltip="Your mirrord license tier"
+      tooltip={strings.metrics.license.tooltip}
       icon={
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path
@@ -131,11 +128,11 @@ interface SessionsCardProps {
 export function SessionsCard({ activeSessions, className }: SessionsCardProps) {
   return (
     <MetricCard
-      title="Sessions"
+      title={strings.metrics.sessions.title}
       value={activeSessions}
-      subtitle="active now"
+      subtitle={strings.metrics.sessions.subtitle}
       className={className}
-      tooltip="Currently running mirrord sessions"
+      tooltip={strings.metrics.sessions.tooltip}
       icon={
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path
