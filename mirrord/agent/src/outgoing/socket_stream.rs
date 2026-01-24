@@ -11,7 +11,9 @@ use std::{
     task::{Context, Poll},
 };
 
-use hickory_resolver::{TokioAsyncResolver, config::LookupIpStrategy, system_conf::parse_resolv_conf};
+use hickory_resolver::{
+    TokioAsyncResolver, config::LookupIpStrategy, system_conf::parse_resolv_conf,
+};
 use mirrord_protocol::{
     RemoteError, RemoteResult, ResponseError,
     outgoing::{SocketAddress, UnixAddr},
@@ -66,77 +68,9 @@ impl SocketStream {
         })
     }
 
-    /// Resolve a hostname using the target pod's DNS configuration.
-    ///
-    /// This is used in multi-cluster scenarios where the same hostname resolves to different IPs
-    /// in different clusters. Each agent resolves the hostname locally to connect to its own
-    /// cluster's service.
-    async fn resolve_hostname(hostname: &str, pid: Option<u64>, port: u16) -> RemoteResult<std::net::SocketAddr> {
-        let etc_path = pid
-            .map(|pid| PathBuf::from("/proc").join(pid.to_string()).join("root/etc"))
-            .unwrap_or_else(|| PathBuf::from("/etc"));
-
-        let resolv_conf_path = etc_path.join("resolv.conf");
-        let resolv_conf = fs::read(&resolv_conf_path).await.map_err(|e| {
-            ResponseError::Remote(RemoteError::DnsFailed(format!(
-                "Failed to read resolv.conf: {}",
-                e
-            )))
-        })?;
-
-        let (config, mut options) = parse_resolv_conf(resolv_conf).map_err(|e| {
-            ResponseError::Remote(RemoteError::DnsFailed(format!(
-                "Failed to parse resolv.conf: {}",
-                e
-            )))
-        })?;
-
-        options.ip_strategy = LookupIpStrategy::Ipv4thenIpv6;
-
-        let resolver = TokioAsyncResolver::tokio(config, options);
-
-        let lookup = resolver.lookup_ip(hostname).await.map_err(|e| {
-            ResponseError::Remote(RemoteError::DnsFailed(format!(
-                "DNS lookup failed for {}: {}",
-                hostname, e
-            )))
-        })?;
-
-        let ip = lookup.iter().next().ok_or_else(|| {
-            ResponseError::Remote(RemoteError::DnsFailed(format!(
-                "No IP addresses found for {}",
-                hostname
-            )))
-        })?;
-
-        Ok(std::net::SocketAddr::new(ip, port))
-    }
-
     /// Connect to a given [`SocketAddress`], whether IP or unix.
-    ///
-    /// If `hostname` is provided, the agent will resolve the hostname locally instead of using
-    /// the IP in `addr`. This is essential for multi-cluster scenarios where the same hostname
-    /// resolves to different IPs in different clusters.
-    pub async fn connect(
-        addr: SocketAddress,
-        pid: Option<u64>,
-        hostname: Option<&str>,
-    ) -> RemoteResult<Self> {
+    pub async fn connect(addr: SocketAddress, pid: Option<u64>) -> RemoteResult<Self> {
         match addr {
-            SocketAddress::Ip(original_addr) => {
-                // If hostname is provided, resolve it locally instead of using the original IP.
-                let addr = if let Some(hostname) = hostname {
-                    tracing::debug!(
-                        %hostname,
-                        original = %original_addr,
-                        "Re-resolving hostname locally for multi-cluster support"
-                    );
-                    Self::resolve_hostname(hostname, pid, original_addr.port()).await?
-                } else {
-                    original_addr
-                };
-                Ok(Self::from(TcpStream::connect(addr).await?))
-            }
             SocketAddress::Unix(UnixAddr::Pathname(path)) => {
                 // In order to connect to a unix socket on the target pod, instead of connecting to
                 // /the/target/path we connect to /proc/<PID>/root/the/target/path.

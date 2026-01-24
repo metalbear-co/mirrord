@@ -445,10 +445,7 @@ impl PortForwarder {
                 self.id_oneshots.push_back((port_mapping.pair, oneshot));
                 self.agent_connection
                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
-                        LayerConnect {
-                            remote_address,
-                            hostname: None,
-                        },
+                        LayerConnect { remote_address },
                     )))
                     .await;
             }
@@ -1263,7 +1260,6 @@ mod test {
         let remote_address = SocketAddress::Ip(SocketAddr::new(remote_ip.into(), 3038));
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
             remote_address: remote_address.clone(),
-            hostname: None,
         }));
         assert_eq!(test_connection.recv().await, expected,);
 
@@ -1362,7 +1358,6 @@ mod test {
             SocketAddress::Ip(SocketAddr::new(IpAddr::V4(ip), remote_destination_1.1));
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
             remote_address: remote_address_1.clone(),
-            hostname: None,
         }));
         assert_eq!(test_connection.recv().await, expected);
 
@@ -1377,7 +1372,6 @@ mod test {
 
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
             remote_address: remote_address_2.clone(),
-            hostname: None,
         }));
         assert_eq!(test_connection.recv().await, expected);
 

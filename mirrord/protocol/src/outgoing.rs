@@ -148,13 +148,6 @@ impl Display for SocketAddress {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct LayerConnect {
     pub remote_address: SocketAddress,
-    /// Original hostname before DNS resolution.
-    ///
-    /// When present, the agent can re-resolve this hostname locally instead of using
-    /// the IP in `remote_address`. This is essential for multi-cluster scenarios where
-    /// the same hostname resolves to different IPs in different clusters.
-    #[bincode(with_serde)]
-    pub hostname: Option<String>,
 }
 
 /// `user` wants to write `bytes` to remote host identified by `connection_id`.
@@ -207,13 +200,6 @@ pub struct LayerConnectV2 {
     pub uid: Uid,
     /// Remote address to connect to.
     pub remote_address: SocketAddress,
-    /// Original hostname before DNS resolution.
-    ///
-    /// When present, the agent can re-resolve this hostname locally instead of using
-    /// the IP in `remote_address`. This is essential for multi-cluster scenarios where
-    /// the same hostname resolves to different IPs in different clusters.
-    #[bincode(with_serde)]
-    pub hostname: Option<String>,
 }
 
 #[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]

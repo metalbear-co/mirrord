@@ -474,7 +474,7 @@ impl OutgoingProxy {
 
         let msg = request
             .protocol
-            .wrap_agent_connect(request.remote_address, uid, request.hostname);
+            .wrap_agent_connect(request.remote_address, uid);
         message_bus.send_agent(msg).await;
 
         Ok(())
@@ -726,7 +726,6 @@ mod test {
                     OutgoingRequest::Connect(OutgoingConnectRequest {
                         remote_address: SocketAddress::Ip(peer_addr),
                         protocol: NetProtocol::Stream,
-                        hostname: None,
                     }),
                     i,
                     LayerId(0),
@@ -737,7 +736,6 @@ mod test {
                 message,
                 ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
                     remote_address: SocketAddress::Ip(peer_addr),
-                    hostname: None,
                 })),
             );
 

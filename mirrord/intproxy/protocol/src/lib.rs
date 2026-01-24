@@ -143,13 +143,6 @@ pub struct OutgoingConnectRequest {
     pub remote_address: SocketAddress,
     /// The protocol stack the user application wants to use.
     pub protocol: NetProtocol,
-    /// Original hostname before DNS resolution.
-    ///
-    /// When present, the agent can re-resolve this hostname locally instead of using
-    /// the IP in `remote_address`. This is essential for multi-cluster scenarios where
-    /// the same hostname resolves to different IPs in different clusters.
-    #[bincode(with_serde)]
-    pub hostname: Option<String>,
 }
 
 /// A request for additional metadata for an outgoing connection.

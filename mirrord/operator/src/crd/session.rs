@@ -93,12 +93,13 @@ pub struct MirrordClusterSessionSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mongodb_branch_names: Vec<String>,
 
-    /// Multi-cluster coordination: seed for deterministic SQS queue naming.
+    /// Multi-cluster coordination: explicit SQS output queue names.
     ///
-    /// When set, SQS output queues will use this seed instead of random characters.
-    /// This ensures all clusters in a multi-cluster session create queues with the same names.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sqs_queue_seed: Option<String>,
+    /// Maps original queue names to their corresponding output queue names.
+    /// For multi-cluster: the default cluster creates temp queues and passes the exact names here.
+    /// Other clusters use these names directly instead of generating their own.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub sqs_output_queues: std::collections::HashMap<String, String>,
 }
 
 /// Describes an owner of a mirrord session.

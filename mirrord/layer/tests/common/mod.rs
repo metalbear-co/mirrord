@@ -178,7 +178,6 @@ impl TestIntProxy {
             ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
                 uid,
                 remote_address: SocketAddress::Ip(addr),
-                ..
             })) => {
                 println!("Received TCP connect request for address {addr} with uid {uid}");
                 (uid, addr)
@@ -212,7 +211,6 @@ impl TestIntProxy {
             ClientMessage::UdpOutgoing(LayerUdpOutgoing::ConnectV2(LayerConnectV2 {
                 uid,
                 remote_address: SocketAddress::Ip(addr),
-                ..
             })) => {
                 println!("Received UDP connect request for address {addr} with uid {uid}");
                 (uid, addr)

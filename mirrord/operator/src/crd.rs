@@ -809,12 +809,13 @@ pub struct MirrordSqsSessionSpec {
     // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
 
-    /// Multi-cluster coordination: seed for deterministic SQS queue naming.
+    /// Multi-cluster coordination: explicit output queue names.
     ///
-    /// When set, SQS output queues will use this seed instead of random characters.
-    /// This ensures all clusters in a multi-cluster session create queues with the same names.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub queue_name_seed: Option<String>,
+    /// Maps original queue names to their corresponding output queue names.
+    /// For multi-cluster: the default cluster creates temp queues and passes the exact names here.
+    /// Other clusters use these names directly instead of generating their own.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub output_queue_names: HashMap<String, String>,
 }
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]

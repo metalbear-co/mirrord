@@ -466,21 +466,9 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
         // Prepare this socket to be intercepted.
         let remote_address = SocketAddress::try_from(remote_address).unwrap();
 
-        // Look up the original hostname from DNS reverse mapping.
-        // This allows the agent to re-resolve the hostname locally in multi-cluster scenarios.
-        let hostname = if let SocketAddress::Ip(addr) = &remote_address {
-            REMOTE_DNS_REVERSE_MAPPING
-                .lock()
-                .ok()
-                .and_then(|map| map.get(&addr.ip()).cloned())
-        } else {
-            None
-        };
-
         let request = OutgoingConnectRequest {
             remote_address: remote_address.clone(),
             protocol,
-            hostname,
         };
         let response = common::make_proxy_request_with_response(request)??;
 
