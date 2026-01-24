@@ -86,6 +86,7 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 
 fn setup_layer_config(context: Option<&subprocess::ProcessContext>) -> LayerResult<()> {
     let propagating_layer = is_propagating_layer();
+    let trace_only = is_trace_only_mode();
 
     // Read and initialize configuration (default if we're just propagating layer!)
     let mut config = if propagating_layer {
@@ -98,9 +99,6 @@ fn setup_layer_config(context: Option<&subprocess::ProcessContext>) -> LayerResu
     } else {
         mirrord_config::util::read_resolved_config().map_err(LayerError::Config)?
     };
-
-    // Check if we're in trace only mode (no agent)
-    let trace_only = is_trace_only_mode();
 
     let proxy_address = if trace_only {
         modify_config_for_trace_only(&mut config);
