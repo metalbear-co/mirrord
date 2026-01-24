@@ -612,18 +612,19 @@ where
     let sub_progress = progress.subtask("preparing IDE-orchestrated process");
 
     let lib_path = extract_library(None, &sub_progress, true)?;
-    unsafe { 
+    unsafe {
         env::set_var("MIRRORD_LAYER_FILE", &lib_path);
 
         // Add IDE orchestrated envvar including here, as it will be used later in execution
         env::set_var(MIRRORD_IDE_ORCHESTRATED_ENV, "true");
-
-        // Make it so that the user sees a console output as close to what they would see by
-        // running the application normally, by turning progress mode off
-        env::set_var(MIRRORD_PROGRESS_ENV, "off");
     };
 
     let env_vars: HashMap<String, String> = vars().collect();
+
+    // Make it so that the user sees a console output as close to what they would see by
+    // running the application normally, by turning progress mode off
+    env_vars.insert(MIRRORD_PROGRESS_ENV.into(), "off".into());
+
     let binary = args.binary.clone();
 
     // Build command line arguments with executable in argv[0]

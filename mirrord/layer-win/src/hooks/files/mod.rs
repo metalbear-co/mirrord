@@ -23,7 +23,10 @@ use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest, SeekFromInternal,
 };
 use phnt::ffi::{
-    _IO_STATUS_BLOCK, _LARGE_INTEGER, FILE_ALL_INFORMATION, FILE_BASIC_INFORMATION, FILE_FS_DEVICE_INFORMATION, FILE_FS_VOLUME_INFORMATION, FILE_INFORMATION_CLASS, FILE_POSITION_INFORMATION, FILE_READ_ONLY_DEVICE, FILE_STANDARD_INFORMATION, FSINFOCLASS, PFILE_BASIC_INFORMATION, PIO_APC_ROUTINE
+    _IO_STATUS_BLOCK, _LARGE_INTEGER, FILE_ALL_INFORMATION, FILE_BASIC_INFORMATION,
+    FILE_FS_DEVICE_INFORMATION, FILE_FS_VOLUME_INFORMATION, FILE_INFORMATION_CLASS,
+    FILE_POSITION_INFORMATION, FILE_READ_ONLY_DEVICE, FILE_STANDARD_INFORMATION, FSINFOCLASS,
+    PFILE_BASIC_INFORMATION, PIO_APC_ROUTINE, PIO_STATUS_BLOCK,
 };
 use str_win::path_to_unix_path;
 use winapi::{
@@ -68,7 +71,7 @@ type NtCreateFileType = unsafe extern "system" fn(
     PHANDLE,
     ACCESS_MASK,
     POBJECT_ATTRIBUTES,
-    *mut _IO_STATUS_BLOCK,
+    PIO_STATUS_BLOCK,
     PLARGE_INTEGER,
     ULONG,
     ULONG,
@@ -85,7 +88,7 @@ type NtReadFileType = unsafe extern "system" fn(
     HANDLE,
     *mut c_void,
     PVOID,
-    *mut _IO_STATUS_BLOCK,
+    PIO_STATUS_BLOCK,
     PVOID,
     ULONG,
     PLARGE_INTEGER,
@@ -109,7 +112,7 @@ static NT_WRITE_FILE_ORIGINAL: OnceLock<&NtWriteFileType> = OnceLock::new();
 
 type NtSetInformationFileType = unsafe extern "system" fn(
     HANDLE,
-    *mut _IO_STATUS_BLOCK,
+    PIO_STATUS_BLOCK,
     PVOID,
     ULONG,
     FILE_INFORMATION_CLASS,
@@ -117,18 +120,18 @@ type NtSetInformationFileType = unsafe extern "system" fn(
 static NT_SET_INFORMATION_FILE_TYPE_ORIGINAL: OnceLock<&NtSetInformationFileType> = OnceLock::new();
 
 type NtSetVolumeInformationFileType =
-    unsafe extern "system" fn(HANDLE, *mut _IO_STATUS_BLOCK, PVOID, ULONG, FSINFOCLASS) -> NTSTATUS;
+    unsafe extern "system" fn(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, FSINFOCLASS) -> NTSTATUS;
 static NT_SET_VOLUME_INFORMATION_FILE_ORIGINAL: OnceLock<&NtSetVolumeInformationFileType> =
     OnceLock::new();
 
 type NtSetQuotaInformationFileType =
-    unsafe extern "system" fn(HANDLE, *mut _IO_STATUS_BLOCK, PVOID, ULONG) -> NTSTATUS;
+    unsafe extern "system" fn(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG) -> NTSTATUS;
 static NT_SET_QUOTA_INFORMATION_FILE_ORIGINAL: OnceLock<&NtSetQuotaInformationFileType> =
     OnceLock::new();
 
 type NtQueryInformationFileType = unsafe extern "system" fn(
     HANDLE,
-    *mut _IO_STATUS_BLOCK,
+    PIO_STATUS_BLOCK,
     PVOID,
     ULONG,
     FILE_INFORMATION_CLASS,
@@ -140,13 +143,13 @@ type NtQueryAttributesFileType =
 static NT_QUERY_ATTRIBUTES_FILE_ORIGINAL: OnceLock<&NtQueryAttributesFileType> = OnceLock::new();
 
 type NtQueryVolumeInformationFileType =
-    unsafe extern "system" fn(HANDLE, *mut _IO_STATUS_BLOCK, PVOID, ULONG, FSINFOCLASS) -> NTSTATUS;
+    unsafe extern "system" fn(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, FSINFOCLASS) -> NTSTATUS;
 static NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL: OnceLock<&NtQueryVolumeInformationFileType> =
     OnceLock::new();
 
 type NtQueryQuotaInformationFileType = unsafe extern "system" fn(
     HANDLE,
-    *mut _IO_STATUS_BLOCK,
+    PIO_STATUS_BLOCK,
     PVOID,
     ULONG,
     BOOLEAN,
@@ -166,7 +169,7 @@ type NtDeviceIoControlFileType = unsafe extern "system" fn(
     HANDLE,
     PIO_APC_ROUTINE,
     PVOID,
-    *mut _IO_STATUS_BLOCK,
+    PIO_STATUS_BLOCK,
     ULONG,
     PVOID,
     ULONG,
@@ -180,7 +183,7 @@ type NtLockFileType = unsafe extern "system" fn(
     HANDLE,
     PIO_APC_ROUTINE,
     PVOID,
-    *mut _IO_STATUS_BLOCK,
+    PIO_STATUS_BLOCK,
     PLARGE_INTEGER,
     PLARGE_INTEGER,
     ULONG,
@@ -191,7 +194,7 @@ static NT_LOCK_FILE_ORIGINAL: OnceLock<&NtLockFileType> = OnceLock::new();
 
 type NtUnlockFileType = unsafe extern "system" fn(
     HANDLE,
-    *mut _IO_STATUS_BLOCK,
+    PIO_STATUS_BLOCK,
     PLARGE_INTEGER,
     PLARGE_INTEGER,
     ULONG,
@@ -207,27 +210,23 @@ static NT_CLOSE_ORIGINAL: OnceLock<&NtCloseType> = OnceLock::new();
 ///
 /// The mechanism is:
 ///
-/// 1. We check if the layer is configured to have file-system hooks enbled or not.
-///     * If not, jump to ["Fallback"](#fallback).
-///     * This is the only point we have to check for this configuration. Without
-///       [`managed_handle::MirrordHandle`]s, there is no other logic.
-/// 2. We check if the path from `object_attributes` is an NT disk path.
+/// 1. We check if the path from `object_attributes` is an NT disk path.
 ///     * If we fail, jump to ["Fallback"](#fallback).
-/// 3. We try to convert the path from `object_attributes` to a Unix path.
+/// 2. We try to convert the path from `object_attributes` to a Unix path.
 ///     * If we fail, jump to ["Fallback"](#fallback).
-/// 4. We run the Unix path through
+/// 3. We run the Unix path through
 ///    [`mirrord_layer_lib::file::mapper::FileRemapper::change_path_str`] to account for file-system
 ///    configuration, This becomes the new "path".
 ///     * If the result of this operation is different from the original path, this is logged.
-/// 5. We account for filter logic after we run the Unix path through
+/// 4. We account for filter logic after we run the Unix path through
 ///    [`mirrord_layer_lib::file::filter::FileFilter::check`] to account for file-system
 ///    configuration.
-/// 6. We check if all input arguments are valid (verify pointer provenance, value, etc.)
+/// 5. We check if all input arguments are valid (verify pointer provenance, value, etc.)
 ///     * If any is not valid, log and jump to ["Fallback"](#fallback).
-/// 7. We make an [`mirrord_protocol::file::OpenFileRequest`] for the Unix path to obtain a file
+/// 6. We make an [`mirrord_protocol::file::OpenFileRequest`] for the Unix path to obtain a file
 ///    descriptor from agent.
 ///     * If this fails, log and jump to ["Fallback"](#fallback).
-/// 8. Use the file descriptor from the [`mirrord_protocol::file::OpenFileResponse`] to create a
+/// 7. Use the file descriptor from the [`mirrord_protocol::file::OpenFileResponse`] to create a
 ///    [`HandleContext`] and insert it into the managed handles map.
 ///     * The [`HandleContext`] may be modified by future operations over the
 ///       [`managed_handle::MirrordHandle`].
@@ -250,7 +249,7 @@ unsafe extern "system" fn nt_create_file_hook(
     file_handle: PHANDLE,
     desired_access: ACCESS_MASK,
     object_attributes: POBJECT_ATTRIBUTES,
-    io_status_block: *mut _IO_STATUS_BLOCK,
+    io_status_block: PIO_STATUS_BLOCK,
     allocation_size: PLARGE_INTEGER,
     file_attributes: ULONG,
     share_access: ULONG,
@@ -278,14 +277,10 @@ unsafe extern "system" fn nt_create_file_hook(
             )
         };
 
+        // Get layer config, for remapper and filters.
         let setup = layer_setup();
-        // NOTE(gabriela): this is the only place, realistically, where this logic handling
-        // is even needed in the first place, as the lack of [`MirrordHandle`]s will propagate
-        // to all functions which rely on expecting one!
-        if !setup.fs_hooks_enabled() {
-            return run_original();
-        }
 
+        // Read Windows path from C structure.
         let name = read_object_attributes_name(object_attributes);
 
         // WIN-56: check if path is a FS path.
@@ -350,6 +345,7 @@ unsafe extern "system" fn nt_create_file_hook(
                 {
                     tracing::warn!(
                         path = unix_path,
+                        matched_by_filter = matched_filter.is_some(),
                         "nt_create_file_hook: write mode not supported presently. falling back to original!"
                     );
                     return run_original();
@@ -467,7 +463,7 @@ unsafe extern "system" fn nt_read_file_hook(
     event: HANDLE,
     apc_routine: *mut c_void,
     apc_context: PVOID,
-    io_status_block: *mut _IO_STATUS_BLOCK,
+    io_status_block: PIO_STATUS_BLOCK,
     buffer: PVOID,
     length: ULONG,
     byte_offset: PLARGE_INTEGER,
@@ -634,7 +630,7 @@ unsafe extern "system" fn nt_write_file_hook(
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
 unsafe extern "system" fn nt_set_information_file_hook(
     file: HANDLE,
-    io_status_block: *mut _IO_STATUS_BLOCK,
+    io_status_block: PIO_STATUS_BLOCK,
     file_information: PVOID,
     length: ULONG,
     file_information_class: FILE_INFORMATION_CLASS,
@@ -750,7 +746,7 @@ unsafe extern "system" fn nt_set_information_file_hook(
 /// [`nt_set_volume_information_file_hook`] is not implemented!
 unsafe extern "system" fn nt_set_volume_information_file_hook(
     file: HANDLE,
-    io_status_block: *mut _IO_STATUS_BLOCK,
+    io_status_block: PIO_STATUS_BLOCK,
     file_information: PVOID,
     length: ULONG,
     fs_info_class: FSINFOCLASS,
@@ -781,7 +777,7 @@ unsafe extern "system" fn nt_set_volume_information_file_hook(
 /// [`nt_set_quota_information_file_hook`] is not implemented!
 unsafe extern "system" fn nt_set_quota_information_file_hook(
     file: HANDLE,
-    io_status_block: *mut _IO_STATUS_BLOCK,
+    io_status_block: PIO_STATUS_BLOCK,
     buffer: PVOID,
     length: ULONG,
 ) -> NTSTATUS {
@@ -830,7 +826,7 @@ unsafe extern "system" fn nt_set_quota_information_file_hook(
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
 unsafe extern "system" fn nt_query_information_file_hook(
     file: HANDLE,
-    io_status_block: *mut _IO_STATUS_BLOCK,
+    io_status_block: PIO_STATUS_BLOCK,
     file_information: PVOID,
     length: ULONG,
     file_information_class: FILE_INFORMATION_CLASS,
@@ -1147,7 +1143,7 @@ unsafe extern "system" fn nt_query_attributes_file_hook(
 /// This is responsible to support functions such as `kernelbase!GetFileType`.
 unsafe extern "system" fn nt_query_volume_information_file_hook(
     file: HANDLE,
-    io_status_block: *mut _IO_STATUS_BLOCK,
+    io_status_block: PIO_STATUS_BLOCK,
     file_information: PVOID,
     length: ULONG,
     fs_info_class: FSINFOCLASS,
@@ -1192,15 +1188,16 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
                     (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
 
                     return STATUS_SUCCESS;
-                },
+                }
                 FSINFOCLASS::FileFsVolumeInformation => {
                     // Length must be the same size as [`FILE_FS_VOLUME_INFORMATION`] length!
                     // NOTE: or must it? `VolumeLabelLength` is dynamic
                     //
-                    // "The size of the buffer passed in the FileInformation parameter to FltQueryVolumeInformation or
-                    // ZwQueryVolumeInformationFile must be at least sizeof (FILE_FS_VOLUME_INFORMATION)."
+                    // "The size of the buffer passed in the FileInformation parameter to
+                    // FltQueryVolumeInformation or ZwQueryVolumeInformationFile
+                    // must be at least sizeof (FILE_FS_VOLUME_INFORMATION)."
                     // - https://ntdoc.m417z.com/file_fs_volume_information
-                    // 
+                    //
                     // ... but for now, this is enough to support Node.
                     if length as usize != std::mem::size_of::<FILE_FS_VOLUME_INFORMATION>() {
                         return STATUS_ACCESS_VIOLATION;
@@ -1214,8 +1211,8 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
 
                     (*out_ptr).VolumeSerialNumber = 0u32;
 
-                    // NOTE: this *can* be dynamic, and if you look at the struct definition, it's a classic case of
-                    // `_Field_size_bytes_(VolumeLabelLength)`
+                    // NOTE: this *can* be dynamic, and if you look at the struct definition, it's a
+                    // classic case of `_Field_size_bytes_(VolumeLabelLength)`
                     (*out_ptr).VolumeLabelLength = 1;
 
                     // Just tell the person doing the query that it's on C:/.
@@ -1256,7 +1253,7 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
 /// [`nt_query_quota_information_file_hook`] is unimplemented!
 unsafe extern "system" fn nt_query_quota_information_file_hook(
     file: HANDLE,
-    io_status_block: *mut _IO_STATUS_BLOCK,
+    io_status_block: PIO_STATUS_BLOCK,
     buffer: PVOID,
     length: ULONG,
     return_single_entry: BOOLEAN,
@@ -1314,7 +1311,7 @@ unsafe extern "system" fn nt_device_io_control_file_hook(
     event: HANDLE,
     apc_routine: PIO_APC_ROUTINE,
     apc_context: PVOID,
-    io_status_block: *mut _IO_STATUS_BLOCK,
+    io_status_block: PIO_STATUS_BLOCK,
     io_control_code: ULONG,
     input_buffer: PVOID,
     input_buffer_length: ULONG,
@@ -1349,7 +1346,7 @@ unsafe extern "system" fn nt_lock_file_hook(
     event: HANDLE,
     apc_routine: PIO_APC_ROUTINE,
     apc_context: PVOID,
-    io_status_block: *mut _IO_STATUS_BLOCK,
+    io_status_block: PIO_STATUS_BLOCK,
     byte_offset: PLARGE_INTEGER,
     length: PLARGE_INTEGER,
     key: ULONG,
@@ -1386,7 +1383,7 @@ unsafe extern "system" fn nt_lock_file_hook(
 /// [`nt_unlock_file_hook`] is unimplemented!
 unsafe extern "system" fn nt_unlock_file_hook(
     file: HANDLE,
-    io_status_block: *mut _IO_STATUS_BLOCK,
+    io_status_block: PIO_STATUS_BLOCK,
     byte_offset: PLARGE_INTEGER,
     length: PLARGE_INTEGER,
     key: ULONG,

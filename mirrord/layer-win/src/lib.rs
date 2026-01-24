@@ -10,8 +10,10 @@
 mod tests;
 
 mod hooks;
+mod ide_only;
 mod logging;
 mod macros;
+mod mode;
 pub mod process;
 mod subprocess;
 mod trace_only;
@@ -27,7 +29,7 @@ use mirrord_config::{
 pub use mirrord_layer_lib::setup::layer_setup;
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult},
-    ide::{MIRRORD_IDE_ORCHESTRATED_ENV, is_ext_injected, is_ide_orchestrated, is_user_process},
+    ide::{MIRRORD_IDE_ORCHESTRATED_ENV, is_ide_orchestrated, is_user_process},
     process::windows::{execution::debug::should_wait_for_debugger, sync::LayerInitEvent},
     proxy_connection::PROXY_CONNECTION,
     setup::init_setup,
@@ -39,7 +41,9 @@ use winapi::{
 
 use crate::{
     hooks::initialize_hooks,
+    ide_only::is_propagating_layer,
     logging::init_tracing,
+    mode::ExecutionMode,
     subprocess::{create_proxy_connection, detect_process_context, get_setup_address},
     trace_only::{is_trace_only_mode, modify_config_for_trace_only},
 };
@@ -81,8 +85,7 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 }
 
 fn setup_layer_config(context: Option<&subprocess::ProcessContext>) -> LayerResult<()> {
-    // Check if we're just propagating layer (no environment)
-    let propagating_layer = is_ide_orchestrated() && !is_ext_injected();
+    let propagating_layer = is_propagating_layer();
 
     // Read and initialize configuration (default if we're just propagating layer!)
     let mut config = if propagating_layer {
@@ -127,60 +130,28 @@ fn setup_layer_config(context: Option<&subprocess::ProcessContext>) -> LayerResu
 }
 
 fn mirrord_start() -> LayerResult<()> {
-    // Create layer initialization event first
     let init_event = LayerInitEvent::for_child()?;
 
-    // Check for IDE-orchestrated mode first.
-    // In this mode, we only install process hooks for DLL propagation
-    // without full layer initialization - the IDE manages the mirrord environment.
-    // Skip this mode if we're in the user process (the actual target application).
-    if is_ide_orchestrated() && !is_user_process() {
-        tracing::info!("Running in IDE-orchestrated mode - initializing process hooks");
-
-        setup_layer_config(None)?;
-
-        initialize_detour_guard()?;
-        tracing::info!("DetourGuard initialized");
-
-        let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
-
-        // Initialize process hooks (CreateProcessInternalW) for DLL propagation
-        hooks::process::initialize_hooks(guard)?;
-
-        guard
-            .enable_all_hooks()
-            .map_err(|err| LayerError::DetourGuard(err.to_string()))?;
-
-        // Signal that initialization is complete
-        init_event.signal_complete()?;
-
-        tracing::info!(
-            "mirrord-layer-win initialized in IDE-orchestrated mode (process + output hooks)"
-        );
-        return Ok(());
-    }
-
-    // If we reach here and IDE-orchestrated was set, we're in the user process.
-    // Remove the IDE-orchestrated env var so child processes spawned by user code
-    // don't inherit this flag - they should go through normal mirrord initialization.
-    if is_ide_orchestrated() {
+    // If IDE-orchestrated mode but this IS the user process, remove the envvar
+    // so child processes spawned by user code don't inherit this flag
+    if is_ide_orchestrated() && is_user_process() {
         unsafe { std::env::remove_var(MIRRORD_IDE_ORCHESTRATED_ENV) };
     }
 
-    // Check for trace-only mode and initialize accordingly
-    if is_trace_only_mode() {
-        tracing::info!("Running in trace-only mode - skipping proxy connection");
-
-        // In trace-only mode, we still need to set up configuration but skip proxy connection
-        let process_context = detect_process_context()?;
-
-        setup_layer_config(Some(&process_context))?;
-
-        tracing::info!("Configuration setup completed in trace-only mode");
-    } else {
-        // Normal mode - initialize proxy connection
-        initialize_windows_proxy_connection()?;
-        tracing::info!("ProxyConnection initialized");
+    // Set up configuration and proxy connection based on mode
+    let mode = ExecutionMode::detect();
+    match mode {
+        ExecutionMode::Ide => {
+            setup_layer_config(None)?;
+        }
+        ExecutionMode::TraceOnly => {
+            let process_context = detect_process_context()?;
+            setup_layer_config(Some(&process_context))?;
+        }
+        ExecutionMode::Normal => {
+            initialize_windows_proxy_connection()?;
+            tracing::info!("ProxyConnection initialized");
+        }
     }
 
     initialize_detour_guard()?;
@@ -190,14 +161,9 @@ fn mirrord_start() -> LayerResult<()> {
     initialize_hooks(guard)?;
     tracing::info!("Hooks initialized");
 
-    // Signal that initialization is complete
     init_event.signal_complete()?;
 
-    if is_trace_only_mode() {
-        tracing::info!("mirrord-layer-win fully initialized in trace-only mode");
-    } else {
-        tracing::info!("mirrord-layer-win fully initialized");
-    }
+    tracing::info!("mirrord-layer-win initialized in {mode} mode");
 
     Ok(())
 }
