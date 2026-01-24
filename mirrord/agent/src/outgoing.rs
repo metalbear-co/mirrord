@@ -325,12 +325,11 @@ impl TcpOutgoingTask {
     async fn connect(
         remote_address: SocketAddress,
         target_pid: Option<u64>,
-        hostname: Option<String>,
     ) -> RemoteResult<Connected> {
         let started_at = Instant::now();
         let socket_stream = tokio::time::timeout(
             Self::CONNECT_TIMEOUT,
-            SocketStream::connect(remote_address.clone(), target_pid, hostname.as_deref()),
+            SocketStream::connect(remote_address.clone(), target_pid),
         )
         .await
         .map_err(|_| {
@@ -338,7 +337,6 @@ impl TcpOutgoingTask {
         })??;
         tracing::debug!(
             %remote_address,
-            ?hostname,
             elapsed = ?started_at.elapsed(),
             "Outgoing connection made",
         );
@@ -399,11 +397,8 @@ impl TcpOutgoingTask {
         match message {
             // We make connection to the requested address, split the stream into halves with
             // `io::split`, and put them into respective maps.
-            LayerTcpOutgoing::Connect(LayerConnect {
-                remote_address,
-                hostname,
-            }) => {
-                let fut = Self::connect(remote_address, self.pid, hostname).boxed();
+            LayerTcpOutgoing::Connect(LayerConnect { remote_address }) => {
+                let fut = Self::connect(remote_address, self.pid).boxed();
                 self.connects_v1.push(fut);
                 Ok(())
             }
@@ -411,9 +406,8 @@ impl TcpOutgoingTask {
             LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
                 uid,
                 remote_address,
-                hostname,
             }) => {
-                let fut = Self::connect(remote_address, self.pid, hostname)
+                let fut = Self::connect(remote_address, self.pid)
                     .map(move |result| (result, uid))
                     .boxed();
                 self.connects_v2.push(fut);

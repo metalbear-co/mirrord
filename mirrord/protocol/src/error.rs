@@ -158,13 +158,6 @@ pub enum RemoteError {
 
     #[error(r#"Got bad regex "{0:?}" for http filter subscriptions. Regex error: `{1}`."#)]
     BadHttpFilterExRegex(HttpFilter, String),
-
-    /// DNS resolution failed in the agent.
-    ///
-    /// This is used when the agent tries to re-resolve a hostname locally
-    /// (e.g., for multi-cluster support) and the resolution fails.
-    #[error("DNS resolution failed: {0}")]
-    DnsFailed(String),
 }
 
 impl From<AddrParseError> for RemoteError {
