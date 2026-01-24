@@ -242,6 +242,14 @@
 //!
 //! Opens a browser window for the wizard. The wizard is served on `localhost` and has various
 //! endpoints that are accessed by the frontend. This is all gated behind the `wizard` feature.
+//!
+//! ### `mirrord fix [COMMAND]`
+//!
+//! Detect and fix issues related to mirrord.
+//! - [`fix::fix_command`]
+//!
+//! > Contains fixes for commonly occuring issues that prevent mirrord from working optimally.
+
 #![feature(try_blocks)]
 #![feature(iterator_try_collect)]
 #![warn(clippy::indexing_slicing)]
@@ -324,6 +332,8 @@ mod wsl;
 
 #[cfg(feature = "wizard")]
 mod wizard;
+
+mod fix;
 
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
@@ -1051,6 +1061,7 @@ fn main() -> miette::Result<()> {
                 )
                 .await?
             }
+            Commands::Fix(args) => fix::fix_command(args).await?,
         };
 
         Ok(())

@@ -698,6 +698,23 @@ Defaults to 3000ms.
 
 Disables any system wide proxy configuration for affecting the running application.
 
+### _experimental_ latency {#experimental-latency}
+
+Configuration for adding artificial latency to outgoing network operations.
+Useful for testing application behavior under network delay conditions.
+
+#### _experimental_ latency.transmit_delay {#experimental-latency-transmit_delay}
+
+Delay in milliseconds for outgoing send operations (Layer → Agent).
+
+Defaults to `0` (no delay).
+
+#### _experimental_ latency.receive_delay {#experimental-latency-receive_delay}
+
+Delay in milliseconds for outgoing receive operations (Agent → Layer).
+
+Defaults to `0` (no delay).
+
 ### _experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
 
 Enables better support for outgoing connections using non-blocking TCP sockets.

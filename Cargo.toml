@@ -36,7 +36,7 @@ resolver = "2"
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.182.0"
+version = "3.183.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -261,6 +261,10 @@ winapi = { version = "0.3.9", features = [
 # Used by `analytics`, `cli`
 ci_info = "0.14"
 
+# Used by `cli`
+yamlpatch = "0.9.0"
+yamlpath = "0.32.0"
+
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 
@@ -268,3 +272,10 @@ private_intra_doc_links = "allow"
 strip = "debuginfo"
 # Enabling LTO causes this issue https://github.com/metalbear-co/mirrord/issues/906
 lto = false
+
+[patch.crates-io]
+tree-sitter = { git = "https://github.com/metalbear-co/tree-sitter.git", tag = "hotfix" }
+tree-sitter-language = { git = "https://github.com/metalbear-co/tree-sitter.git", tag = "hotfix" }
+
+
+
