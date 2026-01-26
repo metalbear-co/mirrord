@@ -275,6 +275,12 @@ pub struct MirrordOperatorStatus {
 
     /// Option because added later.
     pub copy_targets: Option<Vec<CopyTargetEntryCompat>>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct MirrordOperatorStatusStatistics {
+    pub dau: usize,
+    pub mau: usize,
 
     /// Count of active mirrord for ci sessions.
     ///
@@ -282,12 +288,6 @@ pub struct MirrordOperatorStatus {
     ///   you may see a number in here that's higher than how many are actually being used (the
     ///   count is correct though, they're still alive).
     pub active_ci_sessions_count: Option<u64>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct MirrordOperatorStatusStatistics {
-    pub dau: usize,
-    pub mau: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
