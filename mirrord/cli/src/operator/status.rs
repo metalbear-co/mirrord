@@ -279,8 +279,8 @@ Operator License
             println!("Operator Monthly Users: {}", statistics.mau);
         }
 
-        if let Some(ci_sessions) = &status.ci_sessions {
-            println!("Operator Concurrent CI Sessions: {}", ci_sessions.len());
+        if let Some(active_ci_sessions_count) = &status.active_ci_sessions_count {
+            println!("Operator Concurrent CI Sessions: {active_ci_sessions_count}");
         }
 
         let mut sessions = Table::new();
