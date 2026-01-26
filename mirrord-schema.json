@@ -1531,6 +1531,18 @@
             "null"
           ]
         },
+        "latency": {
+          "title": "_experimental_ latency {#experimental-latency}",
+          "description": "Configuration for adding artificial latency to outgoing network operations.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LatencyFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "non_blocking_tcp_connect": {
           "title": "_experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}",
           "description": "Enables better support for outgoing connections using non-blocking TCP sockets.\n\nDefaults to `false`.",
@@ -2220,6 +2232,33 @@
         },
         "job": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "LatencyFileConfig": {
+      "description": "Configuration for adding artificial latency to outgoing network operations. Useful for testing application behavior under network delay conditions.",
+      "type": "object",
+      "properties": {
+        "receive_delay": {
+          "title": "_experimental_ latency.receive_delay {#experimental-latency-receive_delay}",
+          "description": "Delay in milliseconds for outgoing receive operations (Agent → Layer).\n\nDefaults to `0` (no delay).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "transmit_delay": {
+          "title": "_experimental_ latency.transmit_delay {#experimental-latency-transmit_delay}",
+          "description": "Delay in milliseconds for outgoing send operations (Layer → Agent).\n\nDefaults to `0` (no delay).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
         }
       },
       "additionalProperties": false
