@@ -7,6 +7,8 @@ use std::{
 };
 
 use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t};
+#[cfg(target_os = "macos")]
+use libc::{c_uint, iovec, sa_endpoints_t, sae_associd_t, sae_connid_t};
 use mirrord_config::experimental::ExperimentalConfig;
 use mirrord_layer_lib::detour::DetourGuard;
 #[cfg(target_os = "macos")]
@@ -542,6 +544,27 @@ pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifadd
 }
 
 #[cfg(target_os = "macos")]
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn connectx_detour(
+    socket: RawFd,
+    endpoints: *const sa_endpoints_t,
+    associd: sae_associd_t,
+    flags: c_uint,
+    iov: *const iovec,
+    iovcnt: c_uint,
+    len: *mut size_t,
+    connid: *mut sae_connid_t,
+) -> c_int {
+    unsafe {
+        connectx(socket, endpoints, associd, flags, iov, iovcnt, len, connid)
+            .map(From::from)
+            .unwrap_or_bypass_with(|_| {
+                FN_CONNECTX(socket, endpoints, associd, flags, iov, iovcnt, len, connid)
+            })
+    }
+}
+
+#[cfg(target_os = "macos")]
 #[allow(non_snake_case)]
 #[hook_guard_fn]
 unsafe extern "C-unwind" fn CFNetworkCopySystemProxySettings_detour()
@@ -731,6 +754,17 @@ pub(crate) unsafe fn enable_socket_hooks(
                 getifaddrs_detour,
                 FnGetifaddrs,
                 FN_GETIFADDRS
+            );
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            replace!(
+                hook_manager,
+                "connectx",
+                connectx_detour,
+                FnConnectx,
+                FN_CONNECTX
             );
         }
     }

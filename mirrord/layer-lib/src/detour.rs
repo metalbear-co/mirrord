@@ -240,6 +240,10 @@ pub enum Bypass {
     /// File `open` (any `open`-ish operation) was forced to be local, instead of remote, most
     /// likely due to an operator fs policy.
     OpenLocal,
+
+    /// Invalid argument value
+    #[cfg(target_os = "macos")]
+    InvalidArgValue,
 }
 
 #[cfg(unix)]

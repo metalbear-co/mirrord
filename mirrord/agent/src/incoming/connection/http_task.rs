@@ -35,6 +35,7 @@ use crate::{
         },
         error::ConnError,
     },
+    metrics::{BYPASSED_REQUESTS, GaugeVecMetricGuard},
 };
 
 pub type UpgradeDataRx = mpsc::Receiver<Bytes>;
@@ -111,6 +112,11 @@ impl HttpTask<PassthroughConnection> {
         request: ExtractedRequest,
         redirector_config: RedirectorTaskConfig,
     ) -> Self {
+        let metric = GaugeVecMetricGuard::new(
+            &BYPASSED_REQUESTS,
+            vec![info.original_destination.port().to_string()],
+        );
+
         let (request_frame_tx, request_frame_rx) = request
             .body_tail
             .is_some()
@@ -166,6 +172,7 @@ impl HttpTask<PassthroughConnection> {
             request_frame_tx,
             upgrade,
             mirror_data_tx,
+            _metric: metric,
         };
 
         Self {
@@ -354,6 +361,7 @@ pub struct PassthroughConnection {
     request_frame_tx: Option<mpsc::Sender<Frame<Bytes>>>,
     upgrade: JoinHandle<Result<Option<Upgraded>, ConnError>>,
     mirror_data_tx: OptionalBroadcast,
+    _metric: GaugeVecMetricGuard,
 }
 
 impl RequestDestination for PassthroughConnection {

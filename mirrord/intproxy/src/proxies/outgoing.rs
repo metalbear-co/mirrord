@@ -187,6 +187,12 @@ pub struct OutgoingProxy {
     /// Established version of the [`mirrord_protocol`].
     protocol_version: Option<Version>,
 
+    /// Delay to apply to receive operations (Agent → Layer), in milliseconds.
+    receive_delay_ms: u64,
+
+    /// Delay to apply to transmit operations (Layer → Agent), in milliseconds.
+    transmit_delay_ms: u64,
+
     /// Outgoing connection local IDs, by layer instance.
     ///
     /// Local IDs are random and generated in this proxy.
@@ -206,7 +212,13 @@ impl OutgoingProxy {
     /// # Params
     ///
     /// * `non_blocking_tcp_connect` - see struct level docs
-    pub fn new(non_blocking_tcp_connect: bool) -> Self {
+    /// * `receive_delay_ms` - delay in milliseconds for receive operations (Agent → Layer)
+    /// * `transmit_delay_ms` - delay in milliseconds for transmit operations (Layer → Agent)
+    pub fn new(
+        non_blocking_tcp_connect: bool,
+        receive_delay_ms: u64,
+        transmit_delay_ms: u64,
+    ) -> Self {
         if non_blocking_tcp_connect {
             // First call to `get_working_method` might take a while.
             // Initialize the function's state so that we won't block the layer later.
@@ -221,6 +233,8 @@ impl OutgoingProxy {
             background_tasks: Default::default(),
             non_blocking_tcp_connect,
             protocol_version: Default::default(),
+            receive_delay_ms,
+            transmit_delay_ms,
             connections_in_layers: Default::default(),
             agent_local_addresses: Default::default(),
         }
@@ -259,6 +273,11 @@ impl OutgoingProxy {
             );
             return Ok(());
         };
+
+        // Apply receive delay if configured
+        if self.receive_delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(self.receive_delay_ms)).await;
+        }
 
         interceptor.send(bytes.0).await;
 
@@ -658,6 +677,11 @@ impl BackgroundTask for OutgoingProxy {
 
                 Some(task_update) = self.background_tasks.as_mut().unwrap().next() => match task_update {
                     (id, TaskUpdate::Message(bytes)) => {
+                        // Apply transmit delay if configured
+                        if self.transmit_delay_ms > 0 {
+                            tokio::time::sleep(std::time::Duration::from_millis(self.transmit_delay_ms)).await;
+                        }
+
                         let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
                         message_bus.send_agent(msg).await;
                     }
@@ -717,7 +741,7 @@ mod test {
 
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, OutgoingProxyError> =
             BackgroundTasks::new(connection.tx_handle());
-        let outgoing = background_tasks.register(OutgoingProxy::new(false), (), 8);
+        let outgoing = background_tasks.register(OutgoingProxy::new(false, 0, 0), (), 8);
 
         for i in 0..=1 {
             // Layer wants to make an outgoing connection.

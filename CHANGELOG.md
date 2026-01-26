@@ -8,6 +8,38 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.183.0](https://github.com/metalbear-co/mirrord/tree/3.183.0) - 2026-01-23
+
+
+### Added
+
+- Add bypassed requests metric.
+- Added BSD `connectx(2)` detour.
+- Added `mirrord kubeconfig fix`, which finds non-absolute paths in kubeconfig
+  `exec` fields and interactively replaces them with absolute paths to make
+  them `$PATH`-indepdendent.
+- Db Branching support for MongoDB.
+- Experimental configuration to add artificial latency to outgoing connections
+
+
+### Changed
+
+- Improved error messages produced in case of mirrord-agent pod failure.
+- make /Program Files always local, helps when debugging Python in WSL
+
+
+### Fixed
+
+- Agent will no longer ignore trailing slashes when handling file open requests
+- Fixed bogus error logs printed by the agent on failed reverse DNS lookups.
+- Link to tree-sitter version that doesn't break release build.
+
+
+### Internal
+
+- Added an initial `CONTRIBUTING.md` guide to the mirrord-agent crate.
+- update latest tag on mirrord-cli container image
+
 ## [3.182.0](https://github.com/metalbear-co/mirrord/tree/3.182.0) - 2026-01-16
 
 
