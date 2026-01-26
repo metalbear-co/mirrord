@@ -279,7 +279,7 @@ Operator License
             println!("Operator Monthly Users: {}", statistics.mau);
 
             println!(
-                "Operator Monthly Users: {}",
+                "Operator Concurrent CI Sessions: {}",
                 statistics.active_ci_sessions_count?
             );
 
