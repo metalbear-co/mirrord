@@ -619,7 +619,7 @@ where
         env::set_var(MIRRORD_IDE_ORCHESTRATED_ENV, "true");
     };
 
-    let env_vars: HashMap<String, String> = vars().collect();
+    let mut env_vars: HashMap<String, String> = vars().collect();
 
     // Make it so that the user sees a console output as close to what they would see by
     // running the application normally, by turning progress mode off
