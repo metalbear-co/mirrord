@@ -10,8 +10,8 @@
 #include <libgen.h>
 #include <cstdlib>
 
-#include "server/libgo_server.h"
-#include "fileops/libgo_fileops.h"
+#include "server/libgo_server_c_shared.h"
+#include "fileops/libgo_fileops_c_shared.h"
 
 using namespace std;
 
@@ -42,16 +42,16 @@ int main() {
     signal(SIGTERM, signal_handler);
 
     string exe_dir = get_exe_dir();
-    string server_so_path = exe_dir + "/server/libgo_server.so";
-    string fileops_so_path = exe_dir + "/fileops/libgo_fileops.so";
+    string server_so_path = exe_dir + "/server/libgo_server_c_shared.so";
+    string fileops_so_path = exe_dir + "/fileops/libgo_fileops_c_shared.so";
 
 	// These dlopen() flags are provided by the user.
-    void* server_so_handle = dlopen(server_so_path.c_str(), RTLD_LAZY | RTLD_NODELETE | RTLD_DEEPBIND);
+    void* server_so_handle = dlopen(server_so_path.c_str(), RTLD_LAZY | RTLD_NODELETE);
     if (!server_so_handle) {
         cerr << "dlopen error: " << dlerror() << "\n";
         return 1;
     }
-    void* fileops_so_handle = dlopen(fileops_so_path.c_str(), RTLD_LAZY | RTLD_NODELETE | RTLD_DEEPBIND);
+    void* fileops_so_handle = dlopen(fileops_so_path.c_str(), RTLD_LAZY | RTLD_NODELETE);
     if (!fileops_so_handle) {
         cerr << "dlopen error: " << dlerror() << "\n";
         return 1;
@@ -96,7 +96,7 @@ int main() {
 		if (!file_content) {
 			cerr << "ReadFileToString returned null\n";
 		} else {
-			cout << "\n--- test.txt (via Go) ---\n";
+			cout << "\n--- test.txt (via Go → dlopen) ---\n";
 			cout << file_content;
 			cout << "\n--- EOF ---\n";
 		}
