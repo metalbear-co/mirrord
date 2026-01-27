@@ -16,35 +16,33 @@ $env:KUBECONFIG = "$env:USERPROFILE\.kube\config"
 $SecretName = "k3s-tests-kubeconfig"
 $Project = "mirrord"
 
+# Always ensure parent dir exists
+$ParentDir = Split-Path -Parent $env:KUBECONFIG
+if (-not (Test-Path $ParentDir)) { New-Item -ItemType Directory -Force -Path $ParentDir | Out-Null }
+
+Write-Host "Fetching secret '$SecretName' from project '$Project'..."
 try {
-    # Ensure parent dir exists
-    $ParentDir = Split-Path -Parent $env:KUBECONFIG
-    if (-not (Test-Path $ParentDir)) { New-Item -ItemType Directory -Force -Path $ParentDir | Out-Null }
-    
-    Write-Host "Fetching secret '$SecretName' from project '$Project'..."
     $SecretContent = gcloud secrets versions access latest --secret=$SecretName --project=$Project
-    
-    if (-not $SecretContent) { throw "Empty secret content." }
+    if (-not $SecretContent) { throw "Empty secret content received." }
     
     $SecretContent | Set-Content -Path $env:KUBECONFIG -Encoding UTF8
-    Write-Host "Successfully retrieved and updated kubeconfig from Secrets Manager."
+    Write-Host "Successfully retreived kubeconfig from Secrets Manager."
 }
 catch {
-    Write-Warning "Failed to fetch kubeconfig from secrets manager: $_"
-    Write-Warning "Falling back to existing local file (if present)..."
+    Write-Error "Failed to fetch kubeconfig from secrets manager: $_"
+    Write-Error "Script will exit as local fallback is disabled."
+    exit 1
 }
 
 # 3. Check Kubernetes connectivity
 if (-not (Test-Path $env:KUBECONFIG)) {
-    Write-Error "KUBECONFIG not found at $env:KUBECONFIG and Secret Manager fetch failed."
+    Write-Error "KUBECONFIG file failed to be created at $env:KUBECONFIG"
     exit 1
 }
 
 Write-Host "--- DEBUG INFO ---"
 Write-Host "User: $(whoami)"
 Write-Host "KUBECONFIG path: $env:KUBECONFIG"
-Write-Host "Config Content:"
-Get-Content $env:KUBECONFIG
 Write-Host "Active Config View:"
 kubectl config view
 Write-Host "------------------"
