@@ -512,7 +512,9 @@ where
     // warn or fail with "unmanaged socket".
     {
         let mut sockets = SOCKETS.lock()?;
-        sockets.entry(sockfd).or_insert_with(|| user_socket_info.clone());
+        sockets
+            .entry(sockfd)
+            .or_insert_with(|| user_socket_info.clone());
     }
 
     let connect_result = if remote_address.is_unix() {

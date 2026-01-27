@@ -72,8 +72,9 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
                         #[cfg(unix)]
                         {
                             // Do not inherit sockets that are `FD_CLOEXEC`.
-                            // NOTE: The original `fcntl` is called instead of `FN_FCNTL` because the latter
-                            // may be null at this point, likely due to child-spawning functions that mess
+                            // NOTE: The original `fcntl` is called instead of `FN_FCNTL` because
+                            // the latter may be null at this point,
+                            // likely due to child-spawning functions that mess
                             // with memory such as fork/exec.
                             // See: https://github.com/metalbear-co/mirrord-intellij/issues/374
                             if unsafe { libc::fcntl(fd as i32, libc::F_GETFD, 0) } == -1 {

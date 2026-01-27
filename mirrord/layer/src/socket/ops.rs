@@ -45,7 +45,7 @@ use nix::{
 use socket2::SockAddr;
 #[cfg(debug_assertions)]
 use tracing::Level;
-use tracing::{warn, error, trace};
+use tracing::{error, trace, warn};
 
 use super::{hooks::*, *};
 use crate::{

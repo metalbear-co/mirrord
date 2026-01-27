@@ -105,8 +105,8 @@ use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_lib::setup::SETUP;
 use mirrord_layer_lib::{
     detour::DetourGuard,
-    socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING,
     setup::{LayerSetup, init_layer_setup, setup},
+    socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING,
     trace_only::is_trace_only_mode,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
@@ -117,9 +117,7 @@ use socket::SOCKETS;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
-    common::make_proxy_request_with_response,
-    load::LoadType,
-    socket::hooks::MANAGED_ADDRINFO,
+    common::make_proxy_request_with_response, load::LoadType, socket::hooks::MANAGED_ADDRINFO,
 };
 
 /// Silences `deny(unused_crate_dependencies)`.
