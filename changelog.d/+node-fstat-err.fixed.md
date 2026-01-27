@@ -1,0 +1,1 @@
+Fixed bug on Windows where `fstat` would fail on Node.js read file operation.
