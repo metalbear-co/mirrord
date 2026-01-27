@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    ops::Not,
     time::{Duration, Instant},
 };
 
@@ -276,13 +277,7 @@ where
             .map(BTreeMap::from_iter)
             .unwrap_or_default();
 
-        labels.extend(BTreeMap::from([
-            (
-                "kuma.io/sidecar-injection".to_string(),
-                "disabled".to_string(),
-            ),
-            ("app".to_string(), "mirrord".to_string()),
-        ]));
+        labels.insert("app".into(), "mirrord".into());
 
         let mut annotations = config
             .annotations
@@ -290,19 +285,22 @@ where
             .map(BTreeMap::from_iter)
             .unwrap_or_default();
 
-        annotations.extend(BTreeMap::from([
-            ("sidecar.istio.io/inject".to_string(), "false".to_string()),
-            ("linkerd.io/inject".to_string(), "disabled".to_string()),
-        ]));
+        if config.disable_mesh_sidecar_injection {
+            labels.insert("kuma.io/sidecar-injection".into(), "disabled".into());
+
+            annotations.insert("sidecar.istio.io/inject".into(), "false".into());
+            annotations.insert("linkerd.io/inject".into(), "disabled".into());
+
+            pod.annotations_mut().extend(annotations.clone());
+        }
 
         pod.labels_mut().extend(labels.clone());
-        pod.annotations_mut().extend(annotations.clone());
 
         Job {
             metadata: ObjectMeta {
                 name: Some(params.name.clone()),
                 labels: Some(labels),
-                annotations: Some(annotations),
+                annotations: annotations.is_empty().not().then_some(annotations),
                 ..Default::default()
             },
             spec: Some(JobSpec {

@@ -202,6 +202,13 @@ Controls how long the agent lives when there are no connections.
 Each connection has its own heartbeat mechanism, so even if the local application has no
 messages, the agent stays alive until there are no more heartbeat messages.
 
+### agent.disable_mesh_sidecar_injection {#agent-disable_mesh_sidecar_injection}
+
+Add relevant labels and annotations to agent pods/jobs to
+prevent service mesh sidecar injections. Defaults to true.
+
+Only affects istio, linkerd, kuma.
+
 ### agent.disabled_capabilities {#agent-disabled_capabilities}
 
 If nothing is disabled here, agent uses:
@@ -520,6 +527,11 @@ Controls how long the agent pod persists for after the agent exits (in seconds).
 Can be useful for collecting logs.
 
 Defaults to `1`.
+
+## baggage {#root-baggage}
+
+OpenTelemetry (OTel) / W3C baggage propagator.
+See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
 
 ## ci {#root-ci}
 
@@ -3028,6 +3040,11 @@ Controls whether or not mirrord sends telemetry data to MetalBear cloud.
 Telemetry sent doesn't contain personal identifiers or any data that
 should be considered sensitive. It is used to improve the product.
 [For more information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md)
+
+## traceparent {#root-traceparent}
+
+OpenTelemetry (OTel) / W3C trace context.
+See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
 
 ## use_proxy {#root-use_proxy}
 
