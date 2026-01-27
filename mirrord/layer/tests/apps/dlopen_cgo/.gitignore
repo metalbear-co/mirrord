@@ -1,3 +1,4 @@
 *.so
-*.h
-out.cpp_dlopen_cgo
+*.a
+libgo*.h
+out.*
