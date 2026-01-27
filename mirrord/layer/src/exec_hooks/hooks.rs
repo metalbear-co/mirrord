@@ -15,20 +15,8 @@ use crate::{
     detour::{Bypass, Detour},
     hooks::HookManager,
     replace,
-    socket::{SHARED_SOCKETS_ENV_VAR, UserSocket},
+    socket::SHARED_SOCKETS_ENV_VAR,
 };
-
-/// Converts the [`SOCKETS`] map into a vector of pairs `(Fd, UserSocket)`, so we can rebuild
-/// it as a map.
-fn shared_sockets() -> Detour<Vec<(i32, UserSocket)>> {
-    Detour::Success(
-        SOCKETS
-            .lock()?
-            .iter()
-            .map(|(key, value)| (*key, value.as_ref().clone()))
-            .collect::<Vec<_>>(),
-    )
-}
 
 /// Takes an [`Argv`] with the enviroment variables from an `exec` call, extending it with
 /// an encoded version of our [`SOCKETS`].
@@ -41,8 +29,16 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
         other => Detour::Bypass(other),
     })?;
 
-    let encoded = bincode::encode_to_vec(shared_sockets()?, bincode::config::standard())
+    let lock = SOCKETS.lock()?;
+    let shared_sockets = lock
+        .iter()
+        .map(|(key, value)| (*key, value))
+        .collect::<Vec<_>>();
+
+    let encoded = bincode::encode_to_vec(shared_sockets, bincode::config::standard())
         .map(|bytes| BASE64_URL_SAFE.encode(bytes))?;
+
+    drop(lock);
 
     env_vars.insert_env(SHARED_SOCKETS_ENV_VAR, &encoded)?;
 
