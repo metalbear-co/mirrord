@@ -1,0 +1,1 @@
+Fixed an issue where mirrord was not able to deliver incoming traffic due to firewall rules on the local machine.
