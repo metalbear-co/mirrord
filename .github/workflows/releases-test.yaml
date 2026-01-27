@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   # ============================================================
@@ -19,6 +20,13 @@ jobs:
       tag: ${{ steps.check.outputs.tag }}
       html_url: ${{ steps.check.outputs.html_url }}
     steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Check latest GitHub Release assets
         id: check
         uses: actions/github-script@v7
@@ -81,7 +89,27 @@ jobs:
             core.info(`Latest release tag: ${tag}`);
             core.info(`Assets on release: ${assetNames.join(", ") || "(none)"}`);
 
+            // === Check Docker Image ===
+            const imageName = "ghcr.io/metalbear-co/mirrord";
+            const fullImage = `${imageName}:${tag}`;
+            core.info(`Checking for Docker image: ${fullImage}`);
+            
+            let dockerImageFound = false;
+            try {
+              // Using exec to run shell command from script
+              // docker manifest inspect returns 0 if found, non-zero if not
+              await exec.exec("docker", ["manifest", "inspect", fullImage]);
+              dockerImageFound = true;
+              core.info(`✅ Docker image found: ${fullImage}`);
+            } catch (error) {
+              core.warning(`Failed to find Docker image ${fullImage}`);
+            }
+
             const missingRequired = requiredAssets.filter(name => !assetNames.includes(name));
+            if (!dockerImageFound) {
+                missingRequired.push(`Docker Image (${fullImage})`);
+            }
+            
             const missingOptional = optionalAssets.filter(name => !assetNames.includes(name));
 
             core.setOutput("tag", tag);
