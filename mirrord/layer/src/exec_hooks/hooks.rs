@@ -32,7 +32,7 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
     let lock = SOCKETS.lock()?;
     let shared_sockets = lock
         .iter()
-        .map(|(key, value)| (*key, value.as_ref()))
+        .map(|(key, value)| (*key, value))
         .collect::<Vec<_>>();
 
     let encoded = bincode::encode_to_vec(shared_sockets, bincode::config::standard())
