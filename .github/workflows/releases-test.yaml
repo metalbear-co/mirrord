@@ -224,6 +224,7 @@ jobs:
         id: check
         env:
           OPERATOR_REPO_TOKEN: ${{ secrets.OPERATOR_REPO_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         uses: actions/github-script@v7
         with:
           script: |
@@ -233,6 +234,10 @@ jobs:
             // Use PAT if available, otherwise fallback to GITHUB_TOKEN
             const token = process.env.OPERATOR_REPO_TOKEN || process.env.GITHUB_TOKEN;
             
+            if (!token) {
+                core.warning("No authentication token available (neither OPERATOR_REPO_TOKEN nor GITHUB_TOKEN)");
+            }
+
             core.info(`Fetching latest Operator version from GitHub API for ${operatorRepo}...`);
             let operatorTag;
             try {
@@ -246,9 +251,8 @@ jobs:
                 operatorTag = releaseData.tag_name;
                 
                 if (!operatorTag) {
-                    // Try to log some of the response to see if it's an error message
                     core.info(`API Response: ${stdout.substring(0, 1000)}`);
-                    throw new Error("No tag_name found in release data (possibly 404 or auth issue)");
+                    throw new Error(releaseData.message || "No tag_name found in release data");
                 }
                 core.info(`Latest Operator release tag from GitHub: ${operatorTag}`);
             } catch (error) {
