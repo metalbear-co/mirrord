@@ -17,6 +17,7 @@ use mirrord_config::{
     target::{Target, TargetConfig},
 };
 use mirrord_progress::Progress;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::{Level, debug, info};
@@ -320,7 +321,7 @@ impl<T> UnpinStream for T where
 }
 
 /// Provides information necessary to make a connection to a running mirrord agent.
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq, JsonSchema)]
 pub struct AgentKubernetesConnectInfo {
     /// Name of the pod that hosts the agent container.
     pub pod_name: String,
