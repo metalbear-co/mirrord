@@ -66,7 +66,8 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
                 .ok()
             })
             .map(|(fds_and_sockets, _)| {
-                // Note: filter_map is needed for unix filtering, on windows it's just a map, shush clippy.
+                // Note: filter_map is needed for unix filtering,
+                //  on windows it's just a map, shush clippy.
                 #[allow(clippy::unnecessary_filter_map)]
                 Mutex::new(HashMap::from_iter(fds_and_sockets.into_iter().filter_map(
                     |(fd, socket)| {
