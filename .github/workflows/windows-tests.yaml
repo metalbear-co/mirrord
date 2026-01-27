@@ -54,7 +54,7 @@ jobs:
 
       - name: Verify Cluster Connection
         run: |
-          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
+          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE ".github\workflows\scripts"
           & "$ScriptsDir\verify_k3s_connectivity.ps1"
 
       - name: Toolchain info
@@ -111,7 +111,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           
           # 1. Verify Connection
-          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
+          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE ".github\workflows\scripts"
           & "$ScriptsDir\verify_k3s_connectivity.ps1"
 
           Write-Host "Running E2E tests..."
