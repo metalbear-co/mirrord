@@ -272,5 +272,5 @@ where
     };
 
     // Try to connect through the mirrord proxy using layer-lib integration
-    connect_common(socket, user_socket, remote_addr, connect_fn)
+    connect_common(socket, user_socket, SockAddr::from(remote_addr), connect_fn)
 }

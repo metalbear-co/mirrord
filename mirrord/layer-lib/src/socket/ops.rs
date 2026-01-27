@@ -239,13 +239,12 @@ pub fn is_ignored_port(addr: &SocketAddr) -> bool {
 pub fn connect_common<F>(
     socket: SOCKET,
     user_socket_info: Arc<UserSocket>,
-    remote_addr: SocketAddr,
+    remote_address: SockAddr,
     connect_fn: F,
 ) -> HookResult<ConnectResult>
 where
     F: FnOnce(SockAddr) -> ConnectResult,
 {
-    let remote_address = SockAddr::from(remote_addr);
     let optional_ip_address = remote_address.as_socket();
     let unix_streams = setup().remote_unix_streams();
 
@@ -332,7 +331,7 @@ where
         )));
     }
 
-    tracing::info!("intercepting connection to {}", remote_addr);
+    tracing::info!("intercepting connection to {:?}", remote_address);
 
     let enabled_tcp_outgoing = setup().outgoing_config().tcp;
     let enabled_udp_outgoing = setup().outgoing_config().udp;

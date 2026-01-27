@@ -520,7 +520,7 @@ pub(super) fn connect(
     raw_address: *const sockaddr,
     address_length: socklen_t,
 ) -> Detour<ConnectResult> {
-    let remote_address = SocketAddr::try_from_raw(raw_address, address_length)?;
+    let remote_address = SockAddr::try_from_raw(raw_address, address_length)?;
     let connect_fn = |layer_address: SockAddr| -> ConnectResult {
         unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
     };
