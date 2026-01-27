@@ -104,12 +104,14 @@ jobs:
             }
 
             // === Check Operator Docker Image ===
-            // Operator has its own versioning, so we must fetch its latest release tag.
-            core.info(`Fetching latest release for ${owner}/operator...`);
+            // Operator has its own versioning. Fetch latest from version.mirrord.dev
+            core.info(`Fetching latest Operator version from https://version.mirrord.dev/v1/operator/version ...`);
             let operatorTag;
             try {
-                const opRes = await github.rest.repos.getLatestRelease({ owner, repo: "operator" });
-                operatorTag = opRes.data.tag_name;
+                // Use curl to fetch the JSON
+                const { stdout } = await exec.getExecOutput("curl", ["-s", "https://version.mirrord.dev/v1/operator/version"]);
+                const versionData = JSON.parse(stdout);
+                operatorTag = versionData.operator;
                 core.info(`Latest Operator release tag: ${operatorTag}`);
             } catch (error) {
                  const msg = `Failed to get latest operator release: ${error.message}`;
