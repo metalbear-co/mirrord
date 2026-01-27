@@ -99,25 +99,22 @@ impl ContainerVariant for PodVariant<'_> {
             .map(BTreeMap::from_iter)
             .unwrap_or_default();
 
+        let mut labels = BTreeMap::from([("app".to_string(), "mirrord".to_string())]);
+
+        if agent.disable_mesh_sidecar_injection {
+            labels.insert("kuma.io/sidecar-injection".into(), "disabled".into());
+        }
+
         Pod {
             metadata: ObjectMeta {
-                annotations: Some(
+                annotations: agent.disable_mesh_sidecar_injection.then(|| {
                     [
                         ("sidecar.istio.io/inject".to_string(), "false".to_string()),
                         ("linkerd.io/inject".to_string(), "disabled".to_string()),
                     ]
-                    .into(),
-                ),
-                labels: Some(
-                    [
-                        (
-                            "kuma.io/sidecar-injection".to_string(),
-                            "disabled".to_string(),
-                        ),
-                        ("app".to_string(), "mirrord".to_string()),
-                    ]
-                    .into(),
-                ),
+                    .into()
+                }),
+                labels: Some(labels),
                 ..Default::default()
             },
             spec: Some(PodSpec {

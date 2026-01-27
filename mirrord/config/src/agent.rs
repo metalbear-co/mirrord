@@ -468,6 +468,15 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_CLEAN_IPTABLES_ON_START")]
     pub clean_iptables_on_start: Option<bool>,
 
+    /// ### agent.disable_mesh_sidecar_injection {#agent-disable_mesh_sidecar_injection}
+    ///
+    /// Add relevant labels and annotations to agent pods/jobs to
+    /// prevent service mesh sidecar injections. Defaults to true.
+    ///
+    /// Only affects istio, linkerd, kuma.
+    #[config(default = true)]
+    pub disable_mesh_sidecar_injection: bool,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
