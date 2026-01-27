@@ -89,24 +89,43 @@ jobs:
             core.info(`Latest release tag: ${tag}`);
             core.info(`Assets on release: ${assetNames.join(", ") || "(none)"}`);
 
-            // === Check Docker Images ===
-            const dockerImages = [
-              "ghcr.io/metalbear-co/mirrord",
-              "ghcr.io/metalbear-co/operator"
-            ];
+            // === Check Mirrord Docker Image ===
+            const mirrordImage = `ghcr.io/metalbear-co/mirrord:${tag}`;
+            core.info(`Checking for Mirrord Docker image: ${mirrordImage}`);
             
             const missingRequired = requiredAssets.filter(name => !assetNames.includes(name));
 
-            for (const imageName of dockerImages) {
-                const fullImage = `${imageName}:${tag}`;
-                core.info(`Checking for Docker image: ${fullImage}`);
+            try {
+                await exec.exec("docker", ["manifest", "inspect", mirrordImage]);
+                core.info(`✅ Mirrord Docker image found: ${mirrordImage}`);
+            } catch (error) {
+                core.warning(`Failed to find Mirrord Docker image ${mirrordImage}`);
+                missingRequired.push(`Docker Image (${mirrordImage})`);
+            }
+
+            // === Check Operator Docker Image ===
+            // Operator has its own versioning, so we must fetch its latest release tag.
+            core.info(`Fetching latest release for ${owner}/operator...`);
+            let operatorTag;
+            try {
+                const opRes = await github.rest.repos.getLatestRelease({ owner, repo: "operator" });
+                operatorTag = opRes.data.tag_name;
+                core.info(`Latest Operator release tag: ${operatorTag}`);
+            } catch (error) {
+                 const msg = `Failed to get latest operator release: ${error.message}`;
+                 core.warning(msg);
+                 missingRequired.push(`Operator Release Check Failed (${msg})`);
+            }
+
+            if (operatorTag) {
+                const operatorImage = `ghcr.io/metalbear-co/operator:${operatorTag}`;
+                core.info(`Checking for Operator Docker image: ${operatorImage}`);
                 try {
-                  // Using exec to run shell command from script
-                  await exec.exec("docker", ["manifest", "inspect", fullImage]);
-                  core.info(`✅ Docker image found: ${fullImage}`);
+                    await exec.exec("docker", ["manifest", "inspect", operatorImage]);
+                    core.info(`✅ Operator Docker image found: ${operatorImage}`);
                 } catch (error) {
-                  core.warning(`Failed to find Docker image ${fullImage}`);
-                  missingRequired.push(`Docker Image (${fullImage})`);
+                    core.warning(`Failed to find Operator Docker image ${operatorImage}`);
+                    missingRequired.push(`Docker Image (${operatorImage})`);
                 }
             }
             
