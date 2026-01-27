@@ -103,33 +103,7 @@ jobs:
                 missingRequired.push(`Docker Image (${mirrordImage})`);
             }
 
-            // === Check Operator Docker Image ===
-            // Operator has its own versioning. Fetch latest from version.mirrord.dev
-            core.info(`Fetching latest Operator version from https://version.mirrord.dev/v1/operator/version ...`);
-            let operatorTag;
-            try {
-                // Use curl to fetch the JSON
-                const { stdout } = await exec.getExecOutput("curl", ["-s", "https://version.mirrord.dev/v1/operator/version"]);
-                const versionData = JSON.parse(stdout);
-                operatorTag = versionData.operator;
-                core.info(`Latest Operator release tag: ${operatorTag}`);
-            } catch (error) {
-                 const msg = `Failed to get latest operator release: ${error.message}`;
-                 core.warning(msg);
-                 missingRequired.push(`Operator Release Check Failed (${msg})`);
-            }
 
-            if (operatorTag) {
-                const operatorImage = `ghcr.io/metalbear-co/operator:${operatorTag}`;
-                core.info(`Checking for Operator Docker image: ${operatorImage}`);
-                try {
-                    await exec.exec("docker", ["manifest", "inspect", operatorImage]);
-                    core.info(`✅ Operator Docker image found: ${operatorImage}`);
-                } catch (error) {
-                    core.warning(`Failed to find Operator Docker image ${operatorImage}`);
-                    missingRequired.push(`Docker Image (${operatorImage})`);
-                }
-            }
             
             const missingOptional = optionalAssets.filter(name => !assetNames.includes(name));
 
@@ -229,6 +203,98 @@ jobs:
         shell: bash
         run: |
           echo "✅ Release monitor: all required and optional assets are present on latest release."
+
+
+  # ============================================================
+  # 2) Check latest Operator Release (Docker Image only)
+  # ============================================================
+  check_operator_release:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check latest Operator Release and Docker Image
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo; // we are in mirrord repo
+            
+            // Fetch Operator version from public endpoint
+            core.info(`Fetching latest Operator version from https://version.mirrord.dev/v1/operator/version ...`);
+            let operatorTag;
+            try {
+                // Use curl to fetch the JSON
+                const { stdout } = await exec.getExecOutput("curl", ["-s", "https://version.mirrord.dev/v1/operator/version"]);
+                const versionData = JSON.parse(stdout);
+                operatorTag = versionData.operator;
+                core.info(`Latest Operator release tag: ${operatorTag}`);
+            } catch (error) {
+                 const msg = `Failed to get latest operator version: ${error.message}`;
+                 core.warning(msg);
+                 core.setOutput("ok", "false");
+                 core.setOutput("error", msg);
+                 return;
+            }
+
+            core.setOutput("tag", operatorTag);
+
+            const operatorImage = `ghcr.io/metalbear-co/operator:${operatorTag}`;
+            core.info(`Checking for Operator Docker image: ${operatorImage}`);
+            
+            try {
+                await exec.exec("docker", ["manifest", "inspect", operatorImage]);
+                core.info(`✅ Operator Docker image found: ${operatorImage}`);
+                core.setOutput("ok", "true");
+                core.setOutput("error", "");
+            } catch (error) {
+                const msg = `Failed to find Operator Docker image ${operatorImage}`;
+                core.warning(msg);
+                core.setOutput("ok", "false");
+                core.setOutput("error", msg);
+            }
+
+      - name: Notify Slack on FAILURE
+        if: steps.check.outputs.ok != 'true'
+        env:
+          SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
+          TAG: ${{ steps.check.outputs.tag }}
+          ERROR: ${{ steps.check.outputs.error }}
+        shell: bash
+        run: |
+          if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
+            exit 0
+          fi
+
+          repo="${GITHUB_REPOSITORY} (Operator Check)"
+          tag="${TAG:-unknown}"
+          error="${ERROR:-Unknown error}"
+
+          text=":rotating_light: *Release monitor FAILURE for Operator*\n\
+          • *Tag:* \`$tag\`\n\
+          • *Problem:* $error"
+
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl -X POST -H 'Content-type: application/json' \
+               --data "$payload" \
+               "$SLACK_PROD_ALERTS_WEBHOOK_URL"
+
+          exit 1
+
+      - name: Log success
+        if: steps.check.outputs.ok == 'true'
+        shell: bash
+        run: |
+          echo "✅ Operator Release monitor: Docker image present for latest release."
 
 
   # ============================================================
