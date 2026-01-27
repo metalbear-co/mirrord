@@ -354,6 +354,14 @@
           "format": "uint16",
           "minimum": 0.0
         },
+        "disable_mesh_sidecar_injection": {
+          "title": "agent.disable_mesh_sidecar_injection {#agent-disable_mesh_sidecar_injection}",
+          "description": "Add relevant labels and annotations to agent pods/jobs to prevent service mesh sidecar injections. Defaults to true.\n\nOnly affects istio, linkerd, kuma.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "disabled_capabilities": {
           "title": "agent.disabled_capabilities {#agent-disabled_capabilities}",
           "description": "If nothing is disabled here, agent uses: 1. `NET_ADMIN`, 2. `SYS_PTRACE`, 3. `SYS_ADMIN`.\n\nHas no effect when using the targetless mode, as targetless agent containers have no capabilities.",
