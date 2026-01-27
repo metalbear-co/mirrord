@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
+use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
 #[cfg(unix)]
 use libc;
 #[cfg(windows)]
@@ -41,8 +42,6 @@ pub const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
 ///   are exclusive for their parents.
 pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> =
     LazyLock::new(|| {
-        use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
-
         std::env::var(SHARED_SOCKETS_ENV_VAR)
             .ok()
             .and_then(|encoded| {
@@ -77,7 +76,7 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
                             // likely due to child-spawning functions that mess
                             // with memory such as fork/exec.
                             // See: https://github.com/metalbear-co/mirrord-intellij/issues/374
-                            if unsafe { libc::fcntl(fd as i32, libc::F_GETFD, 0) } == -1 {
+                            if unsafe { libc::fcntl(fd, libc::F_GETFD, 0) } == -1 {
                                 return None;
                             }
                         }
