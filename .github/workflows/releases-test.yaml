@@ -222,26 +222,33 @@ jobs:
 
       - name: Check latest Operator Release and Docker Image
         id: check
+        env:
+          OPERATOR_REPO_TOKEN: ${{ secrets.OPERATOR_REPO_TOKEN }}
         uses: actions/github-script@v7
         with:
           script: |
-            const { owner, repo } = context.repo; // we are in mirrord repo
-            
-            // Fetch Operator version from GitHub API (authenticated)
+            const { owner, repo } = context.repo;
             const operatorRepo = "metalbear-co/operator";
+            
+            // Use PAT if available, otherwise fallback to GITHUB_TOKEN
+            const token = process.env.OPERATOR_REPO_TOKEN || process.env.GITHUB_TOKEN;
+            
             core.info(`Fetching latest Operator version from GitHub API for ${operatorRepo}...`);
             let operatorTag;
             try {
                 const { stdout } = await exec.getExecOutput("curl", [
                     "-s",
-                    "-H", `Authorization: token ${process.env.GITHUB_TOKEN}`,
+                    "-H", `Authorization: token ${token}`,
                     `https://api.github.com/repos/${operatorRepo}/releases/latest`
                 ]);
+                
                 const releaseData = JSON.parse(stdout);
-                core.info(`GitHub API Response: ${stdout}`);
                 operatorTag = releaseData.tag_name;
+                
                 if (!operatorTag) {
-                    throw new Error("No tag_name found in release data");
+                    // Try to log some of the response to see if it's an error message
+                    core.info(`API Response: ${stdout.substring(0, 1000)}`);
+                    throw new Error("No tag_name found in release data (possibly 404 or auth issue)");
                 }
                 core.info(`Latest Operator release tag from GitHub: ${operatorTag}`);
             } catch (error) {
@@ -267,40 +274,35 @@ jobs:
                 core.warning(msg);
                 core.setOutput("ok", "false");
                 core.setOutput("error", msg);
+                // Continue to check other assets even if image missing for full report
             }
 
             // === Check GitHub Release Page & Source Code Asset ===
-            // Note: For private repos, checking the UI page via curl might 404/redirect to login.
-            // But we can check the Source Code archive using the API token.
-            const releaseUrl = `https://github.com/metalbear-co/operator/releases/tag/${operatorTag}`;
+            const releaseUrl = `https://github.com/${operatorRepo}/releases/tag/${operatorTag}`;
             core.info(`Checking Operator Release Page: ${releaseUrl}`);
             try {
-                // simple reachability check
+                // simple reachability check. Private pages might redirect to login, returning 200 or 302.
                 await exec.exec("curl", ["-fsI", releaseUrl]);
                 core.info("✅ Operator Release Page is reachable.");
             } catch (error) {
-                 const msg = `Operator Release Page unreachable (or private): ${releaseUrl}`;
-                 core.warning(msg);
-                 // Don't fail the job for the UI page if it's just private, 
-                 // but we'll record it. If it's private, this failure is expected without a session.
-                 // We will rely more on the Asset check below.
+                 core.warning(`Operator Release Page unreachable (likely private): ${releaseUrl}`);
             }
 
-            const assetUrl = `https://github.com/metalbear-co/operator/archive/refs/tags/${operatorTag}.zip`;
+            const assetUrl = `https://github.com/${operatorRepo}/archive/refs/tags/${operatorTag}.zip`;
             core.info(`Checking Operator Source Code Zip: ${assetUrl}`);
              try {
                 // Must provide token for private repo archives
                 await exec.exec("curl", [
                     "-fsI", 
-                    "-H", `Authorization: token ${process.env.GITHUB_TOKEN}`,
+                    "-H", `Authorization: token ${token}`,
                     assetUrl
                 ]);
                 core.info("✅ Operator Source Code Zip found.");
             } catch (error) {
-                 const msg = `Operator Source Code Zip unreachable: ${assetUrl}`;
+                 const msg = `Operator Source Code Zip unreachable (Auth failure?): ${assetUrl}`;
                  core.warning(msg);
                  core.setOutput("ok", "false");
-                 core.setOutput("error", msg);
+                 core.setOutput("error", core.getInput("error") ? `${core.getInput("error")}; ${msg}` : msg);
             }
 
       - name: Notify Slack on FAILURE
