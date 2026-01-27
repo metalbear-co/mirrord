@@ -865,6 +865,9 @@ pub struct MultiClusterConfig {
     /// Logical name of the default cluster (for stateful operations)
     pub default_cluster: String,
 
+    /// Whether the primary cluster is management-only (no workloads)
+    pub primary_is_management_only: bool,
+
     /// Configured remote clusters
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub clusters: Vec<ClusterConfig>,
