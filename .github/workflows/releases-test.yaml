@@ -238,6 +238,7 @@ jobs:
                     `https://api.github.com/repos/${operatorRepo}/releases/latest`
                 ]);
                 const releaseData = JSON.parse(stdout);
+                core.info(`GitHub API Response: ${stdout}`);
                 operatorTag = releaseData.tag_name;
                 if (!operatorTag) {
                     throw new Error("No tag_name found in release data");
