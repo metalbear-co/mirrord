@@ -1,0 +1,113 @@
+name: Release Monitor
+
+on:
+  schedule:
+    # Every 5 minutes (for testing)
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  # ============================================================
+  # 1) Check latest GitHub Release and Docker Image
+  # ============================================================
+  check_release:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      html_url: ${{ steps.check.outputs.html_url }}
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check latest GitHub Release and Docker Image
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const imageName = "ghcr.io/metalbear-co/operator";
+
+            core.info(`Checking latest release for ${owner}/${repo}...`);
+
+            let release;
+            try {
+              const res = await github.rest.repos.getLatestRelease({ owner, repo });
+              release = res.data;
+            } catch (error) {
+              const msg = `Failed to get latest release: ${error.message}`;
+              core.warning(msg);
+              core.setOutput("ok", "false");
+              core.setOutput("error", msg);
+              return;
+            }
+
+            const tag = release.tag_name;
+            const htmlUrl = release.html_url;
+            core.info(`Latest release tag: ${tag}`);
+            
+            core.setOutput("tag", tag);
+            core.setOutput("html_url", htmlUrl);
+
+            // Check for Docker image existence using skopeo (pre-installed on Ubuntu runners) or docker manifest
+            // We'll use docker manifest inspect as it's straightforward.
+            const fullImage = `${imageName}:${tag}`;
+            core.info(`Checking for Docker image: ${fullImage}`);
+            
+            try {
+              // Using exec to run shell command from script
+              await exec.exec("docker", ["manifest", "inspect", fullImage]);
+              core.info(`✅ Docker image found: ${fullImage}`);
+              core.setOutput("ok", "true");
+              core.setOutput("error", "");
+            } catch (error) {
+              const msg = `Failed to find Docker image ${fullImage}. It might not be published yet.`;
+              core.warning(msg);
+              core.setOutput("ok", "false");
+              core.setOutput("error", msg);
+            }
+
+      - name: Notify Slack on FAILURE
+        if: steps.check.outputs.ok != 'true'
+        env:
+          SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
+          TAG: ${{ steps.check.outputs.tag }}
+          HTML_URL: ${{ steps.check.outputs.html_url }}
+          ERROR: ${{ steps.check.outputs.error }}
+        shell: bash
+        run: |
+          if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
+            exit 0
+          fi
+
+          repo="${GITHUB_REPOSITORY}"
+          tag="${TAG:-unknown}"
+          html_url="${HTML_URL:-https://github.com/$repo/releases}"
+          error="${ERROR:-Unknown error}"
+
+          text=":rotating_light: *Release monitor FAILURE for \`$repo\`*\n\
+          • *Tag:* \`$tag\`\n\
+          • *Problem:* $error\n\
+          • *Release page:* $html_url"
+
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl -X POST -H 'Content-type: application/json' \
+               --data "$payload" \
+               "$SLACK_PROD_ALERTS_WEBHOOK_URL"
+
+          exit 1
+
+      - name: Log success
+        if: steps.check.outputs.ok == 'true'
+        shell: bash
+        run: |
+          echo "✅ Release monitor: Docker image present for latest release."
