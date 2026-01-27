@@ -223,7 +223,7 @@ jobs:
       - name: Check latest Operator Release and Docker Image
         id: check
         env:
-          OPERATOR_REPO_TOKEN: ${{ secrets.OPERATOR-MONITOR-TOKEN }}
+          OPERATOR_REPO_TOKEN: ${{ secrets.OPERATOR_MONITOR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         uses: actions/github-script@v7
         with:
