@@ -227,17 +227,24 @@ jobs:
           script: |
             const { owner, repo } = context.repo; // we are in mirrord repo
             
-            // Fetch Operator version from public endpoint
-            core.info(`Fetching latest Operator version from https://version.mirrord.dev/v1/operator/version ...`);
+            // Fetch Operator version from GitHub API (authenticated)
+            const operatorRepo = "metalbear-co/operator";
+            core.info(`Fetching latest Operator version from GitHub API for ${operatorRepo}...`);
             let operatorTag;
             try {
-                // Use curl to fetch the JSON
-                const { stdout } = await exec.getExecOutput("curl", ["-s", "https://version.mirrord.dev/v1/operator/version"]);
-                const versionData = JSON.parse(stdout);
-                operatorTag = versionData.operator;
-                core.info(`Latest Operator release tag: ${operatorTag}`);
+                const { stdout } = await exec.getExecOutput("curl", [
+                    "-s",
+                    "-H", `Authorization: token ${process.env.GITHUB_TOKEN}`,
+                    `https://api.github.com/repos/${operatorRepo}/releases/latest`
+                ]);
+                const releaseData = JSON.parse(stdout);
+                operatorTag = releaseData.tag_name;
+                if (!operatorTag) {
+                    throw new Error("No tag_name found in release data");
+                }
+                core.info(`Latest Operator release tag from GitHub: ${operatorTag}`);
             } catch (error) {
-                 const msg = `Failed to get latest operator version: ${error.message}`;
+                 const msg = `Failed to get latest operator version from GitHub: ${error.message}`;
                  core.warning(msg);
                  core.setOutput("ok", "false");
                  core.setOutput("error", msg);
