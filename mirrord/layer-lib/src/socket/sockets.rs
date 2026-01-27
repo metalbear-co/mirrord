@@ -5,6 +5,8 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
+#[cfg(unix)]
+use libc;
 #[cfg(windows)]
 use winapi::um::winsock2::SOCKET;
 
@@ -21,10 +23,22 @@ pub type SocketDescriptor = SOCKET;
 /// Environment variable used to share sockets between parent and child processes
 pub const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
 
-/// Unified socket collection that can be used by both Unix and Windows layers
-/// This replaces the platform-specific SOCKETS collections
+/// Stores the [`UserSocket`]s created by the user.
 ///
-/// Initializes from SHARED_SOCKETS_ENV_VAR environment variable if present
+/// **Warning**: Do not put logs in here! If you try logging stuff inside this initialization
+/// you're gonna have a bad time. The process hanging is the min you should expect, if you
+/// choose to ignore this warning.
+///
+/// - [`SHARED_SOCKETS_ENV_VAR`]: Some sockets may have been initialized by a parent process through
+///   [`libc::execve`] (or any `exec*`), and the spawned children may want to use those sockets. As
+///   memory is not shared via `exec*` calls (unlike `fork`), we need a way to pass parent sockets
+///   to child processes. The way we achieve this is by setting the [`SHARED_SOCKETS_ENV_VAR`] with
+///   an [`BASE64_URL_SAFE`] encoded version of our [`SOCKETS`]. The env var is set as
+///   `MIRRORD_SHARED_SOCKETS=({fd}, {UserSocket}),*`.
+///
+/// - [`libc::FD_CLOEXEC`] behaviour: While rebuilding sockets from the env var, we also check if
+///   they're set with the cloexec flag, so that children processes don't end up using sockets that
+///   are exclusive for their parents.
 pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> =
     LazyLock::new(|| {
         use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
@@ -43,12 +57,7 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
                     .ok()
             })
             .and_then(|decoded| {
-                #[cfg(unix)]
-                type SocketHandle = i32;
-                #[cfg(windows)]
-                type SocketHandle = u64;
-
-                bincode::decode_from_slice::<Vec<(SocketHandle, UserSocket)>, _>(
+                bincode::decode_from_slice::<Vec<(SocketDescriptor, UserSocket)>, _>(
                     &decoded,
                     bincode::config::standard(),
                 )
@@ -58,16 +67,25 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
                 .ok()
             })
             .map(|(fds_and_sockets, _)| {
-                let filtered_sockets = fds_and_sockets.into_iter().map(|(fd, socket)| {
-                    // Do not inherit sockets that are FD_CLOEXEC on Unix
-                    // This requires access to FN_FCNTL which is not available in layer-lib
-                    // Unix layer will need to handle this filtering
-                    (fd as SocketDescriptor, Arc::new(socket))
-                });
+                Mutex::new(HashMap::from_iter(fds_and_sockets.into_iter().filter_map(
+                    |(fd, socket)| {
+                        #[cfg(unix)]
+                        {
+                            // Do not inherit sockets that are `FD_CLOEXEC`.
+                            // NOTE: The original `fcntl` is called instead of `FN_FCNTL` because the latter
+                            // may be null at this point, likely due to child-spawning functions that mess
+                            // with memory such as fork/exec.
+                            // See: https://github.com/metalbear-co/mirrord-intellij/issues/374
+                            if unsafe { libc::fcntl(fd as i32, libc::F_GETFD, 0) } == -1 {
+                                return None;
+                            }
+                        }
 
-                Mutex::new(HashMap::from_iter(filtered_sockets))
+                        Some((fd as SocketDescriptor, Arc::new(socket)))
+                    },
+                )))
             })
-            .unwrap_or_else(|| Mutex::new(HashMap::new()))
+            .unwrap_or_default()
     });
 
 /// Converts the SOCKETS map into a vector of pairs (SOCKET, UserSocket) for serialization.

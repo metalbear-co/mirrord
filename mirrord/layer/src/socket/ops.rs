@@ -1,7 +1,6 @@
 use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
 use std::{
-    collections::HashMap,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpStream},
     ops::Not,
@@ -11,7 +10,7 @@ use std::{
     },
     path::PathBuf,
     ptr::{self, copy_nonoverlapping},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, OnceLock},
 };
 
 use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
@@ -26,14 +25,19 @@ use mirrord_intproxy_protocol::{
 use mirrord_layer_lib::socket::apple_dnsinfo::*;
 use mirrord_layer_lib::{
     detour::{Detour, OnceLockExt, OptionExt},
+    error::HookResult,
     graceful_exit,
+    proxy_connection::make_proxy_request_with_response,
     socket::{
         Bound, Connected, SocketAddrExt, SocketKind, SocketState,
         dns::{remote_getaddrinfo, unix::getaddrinfo as getaddrinfo_lib},
         ops::{ConnectResult, connect_common, connect_outgoing_common, nop_connect_fn},
     },
 };
-use mirrord_protocol::file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse};
+use mirrord_protocol::{
+    file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
+    outgoing::SocketAddress,
+};
 use nix::{
     errno::Errno,
     sys::socket::{SockaddrLike, SockaddrStorage, sockopt},
@@ -41,22 +45,13 @@ use nix::{
 use socket2::SockAddr;
 #[cfg(debug_assertions)]
 use tracing::Level;
-use tracing::{error, trace};
+use tracing::{warn, error, trace};
 
 use super::{hooks::*, *};
 use crate::{
-    common::make_proxy_request_with_response,
     error::HookError,
     file::{self, OPEN_FILES},
 };
-
-/// Holds the pair of [`IpAddr`] with their hostnames, resolved remotely through
-/// [`remote_getaddrinfo`].
-///
-/// Used by [`connect_outgoing`] to retrieve the hostname from the address that the user called
-/// [`connect`] with, so we can resolve it locally when necessary.
-pub(crate) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<Mutex<HashMap<IpAddr, String>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Hostname initialized from the agent with [`gethostname`].
 pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
@@ -393,7 +388,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
                 .copied()
                 .unwrap_or_else(|| requested_address.port());
 
-            common::make_proxy_request_with_response(PortSubscribe {
+            make_proxy_request_with_response(PortSubscribe {
                 listening_on: address,
                 subscription: setup.incoming_mode().subscription(mapped_port),
             })??;
@@ -722,7 +717,7 @@ pub(super) fn accept(
     let ConnMetadataResponse {
         remote_source,
         local_address,
-    } = common::make_proxy_request_with_response(ConnMetadataRequest {
+    } = make_proxy_request_with_response(ConnMetadataRequest {
         listener_address,
         peer_address,
     })?;
