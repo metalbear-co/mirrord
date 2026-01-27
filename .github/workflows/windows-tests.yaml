@@ -50,24 +50,12 @@ jobs:
            }
            Write-Host "Kubeconfig found ($Size bytes). Using existing file."
 
-      - name: Close existing tunnels (Port 6443)
-        run: |
-          $port = 6443
-          # Kill gcloud IAP processes
-          Get-Process -Name "gcloud" -ErrorAction SilentlyContinue | Stop-Process -Force
-          # Kill anything else on 6443
-          $connections = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
-          if ($connections) {
-              Write-Host "Killing processes listening on port $port..."
-              foreach ($conn in $connections) {
-                  Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
-              }
-          }
 
-      - name: Start IAP Tunnel to K3s
+
+      - name: Verify Cluster Connection
         run: |
           $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
-          & "$ScriptsDir\start_iap_tunnel.ps1"
+          & "$ScriptsDir\verify_k3s_connectivity.ps1"
 
       - name: Toolchain info
         run: |
@@ -122,9 +110,9 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           
-          # 1. Ensure/Restart Tunnel
+          # 1. Verify Connection
           $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
-          & "$ScriptsDir\start_iap_tunnel.ps1"
+          & "$ScriptsDir\verify_k3s_connectivity.ps1"
 
           Write-Host "Running E2E tests..."
           # Note: skipping the specific test skipped in windows-build.yaml
