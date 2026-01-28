@@ -202,6 +202,13 @@ Controls how long the agent lives when there are no connections.
 Each connection has its own heartbeat mechanism, so even if the local application has no
 messages, the agent stays alive until there are no more heartbeat messages.
 
+### agent.disable_mesh_sidecar_injection {#agent-disable_mesh_sidecar_injection}
+
+Add relevant labels and annotations to agent pods/jobs to
+prevent service mesh sidecar injections. Defaults to true.
+
+Only affects istio, linkerd, kuma.
+
 ### agent.disabled_capabilities {#agent-disabled_capabilities}
 
 If nothing is disabled here, agent uses:
