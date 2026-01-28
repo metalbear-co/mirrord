@@ -1,5 +1,4 @@
 use futures::TryFutureExt;
-use serde::Deserialize;
 use status::StatusCommandHandler;
 
 use self::session::SessionCommandHandler;
