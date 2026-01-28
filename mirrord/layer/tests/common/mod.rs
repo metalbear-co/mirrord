@@ -978,6 +978,7 @@ pub enum Application {
     OpenFile,
     CIssue2055,
     CIssue2178,
+    CIssue3899,
     RustIssue2058,
     Realpath,
     NodeIssue2283,
@@ -1177,6 +1178,11 @@ impl Application {
                 env!("CARGO_MANIFEST_DIR"),
                 "tests/apps/issue2178/out.c_test_app",
             ),
+            Application::CIssue3899 => format!(
+                "{}/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                "tests/apps/issue3899/out.c_test_app",
+            ),
             Application::RustIssue2058 => String::from("tests/apps/issue2058/target/issue2058"),
             Application::RustIssue2204 => String::from("tests/apps/issue2204/target/issue2204"),
             Application::GoOpen { version, .. } => {
@@ -1302,6 +1308,7 @@ impl Application {
             | Application::OpenFile
             | Application::CIssue2055
             | Application::CIssue2178
+            | Application::CIssue3899
             | Application::RustIssue2204
             | Application::RustRebind0
             | Application::RustIssue2438
@@ -1392,6 +1399,7 @@ impl Application {
             | Application::OpenFile
             | Application::CIssue2055
             | Application::CIssue2178
+            | Application::CIssue3899
             | Application::NodeIssue2283
             | Application::RustIssue2204
             | Application::RustIssue2438
