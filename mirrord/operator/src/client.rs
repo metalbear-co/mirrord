@@ -64,7 +64,7 @@ use crate::{
 
 mod connect_params;
 mod credentials;
-mod database_branches;
+pub mod database_branches;
 mod discovery;
 pub mod error;
 mod upgrade;
@@ -704,6 +704,24 @@ impl OperatorApi<PreparedClientCert> {
     where
         P: Progress,
     {
+        // Multi-cluster is handled transparently by the operator's Envoy component.
+        // The CLI just connects normally - if multi-cluster is enabled, Envoy orchestrates.
+        // User doesn't need to know or care about multi-cluster configuration.
+        let is_multi_cluster = self.multi_cluster_info().is_some();
+        tracing::debug!(
+            is_multi_cluster = %is_multi_cluster,
+            has_multi_cluster_in_spec = %self.operator.spec.multi_cluster.is_some(),
+            "[MULTICLUSTER] CLI connect_in_new_session"
+        );
+        if let Some(multi_cluster_info) = self.multi_cluster_info() {
+            tracing::info!(
+                multi_cluster = %multi_cluster_info.multi_cluster,
+                primary_cluster = %multi_cluster_info.cluster_name,
+                default_cluster = %multi_cluster_info.default_cluster,
+                "Multi-cluster mode enabled, Envoy will orchestrate sessions"
+            );
+        }
+
         self.check_feature_support(layer_config)?;
         let (do_copy_target, reason) = self
             .should_copy_target(layer_config, &target, progress)
@@ -715,27 +733,57 @@ impl OperatorApi<PreparedClientCert> {
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
 
-        let mongodb_branch_names = if layer_config.feature.db_branches.is_empty().not() {
-            Some(
-                self.prepare_mongodb_branch_dbs(layer_config, progress)
-                    .await?,
-            )
-        } else {
-            None
-        };
-        let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
-            Some(
-                self.prepare_mysql_branch_dbs(layer_config, progress)
-                    .await?,
-            )
-        } else {
-            None
-        };
-        let pg_branch_names = if layer_config.feature.db_branches.is_empty().not() {
-            Some(self.prepare_pg_branch_dbs(layer_config, progress).await?)
-        } else {
-            None
-        };
+        // In multi-cluster mode, the primary operator creates database branches,
+        // so we send feature_config instead of creating branches locally.
+        // In single-cluster mode, CLI creates branches as before.
+        let (mysql_branch_names, pg_branch_names, mongodb_branch_names, feature_config) =
+            if is_multi_cluster {
+                // Serialize the feature config for the primary operator to create branches
+                let feature_config_json = serde_json::to_string(&layer_config.feature)
+                    .expect("FeatureConfig serialization should not fail");
+                let has_db_branches = !layer_config.feature.db_branches.is_empty();
+                tracing::info!(
+                    has_db_branches = %has_db_branches,
+                    feature_config_len = %feature_config_json.len(),
+                    "[MULTICLUSTER] Sending feature_config to operator (NOT creating branches locally)"
+                );
+                if has_db_branches {
+                    tracing::info!(
+                        "[MULTICLUSTER] db_branches configured - primary operator will create them on default cluster"
+                    );
+                }
+                (None, None, None, Some(feature_config_json))
+            } else {
+                // Single-cluster mode: create branches locally as before
+                let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
+                    Some(
+                        self.prepare_mysql_branch_dbs(layer_config, progress)
+                            .await?,
+                    )
+                } else {
+                    None
+                };
+                let pg_branch_names = if layer_config.feature.db_branches.is_empty().not() {
+                    Some(self.prepare_pg_branch_dbs(layer_config, progress).await?)
+                } else {
+                    None
+                };
+                let mongodb_branch_names = if layer_config.feature.db_branches.is_empty().not() {
+                    Some(
+                        self.prepare_mongodb_branch_dbs(layer_config, progress)
+                            .await?,
+                    )
+                } else {
+                    None
+                };
+
+                (
+                    mysql_branch_names,
+                    pg_branch_names,
+                    mongodb_branch_names,
+                    None,
+                )
+            };
 
         let (session, reused_copy) = if do_copy_target {
             let mut copy_subtask = progress.subtask("preparing target copy");
@@ -829,6 +877,7 @@ impl OperatorApi<PreparedClientCert> {
                 mysql_branch_names.clone().unwrap_or_default(),
                 pg_branch_names.clone().unwrap_or_default(),
                 session_ci_info.clone(),
+                feature_config.clone(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
 
@@ -883,6 +932,73 @@ impl OperatorApi<PreparedClientCert> {
             }
             Err(error) => return Err(error),
         };
+
+        Ok(OperatorSessionConnection {
+            session: Box::new(session),
+            conn,
+        })
+    }
+
+    /// Connect to operator using target config directly (no K8s resolution).
+    ///
+    /// Used when the target may not exist locally, e.g., in multi-cluster mode
+    /// where the primary cluster is management-only and targets exist only on
+    /// workload clusters. The operator handles target resolution on the appropriate cluster.
+    ///
+    /// This method skips:
+    /// - `assert_valid_mirrord_target` (operator validates on workload cluster)
+    /// - `runtime_data` warnings (operator handles on workload cluster)
+    /// - `copy_target` (not supported without local resolution)
+    pub async fn connect_in_new_session_from_config<P>(
+        &self,
+        target: &Target,
+        namespace: Option<&str>,
+        layer_config: &mut LayerConfig,
+        progress: &P,
+        branch_name: Option<String>,
+        session_ci_info: Option<SessionCiInfo>,
+    ) -> OperatorApiResult<OperatorSessionConnection>
+    where
+        P: Progress,
+    {
+        use mirrord_config::target::TargetDisplay;
+
+        tracing::info!(
+            target_type = %target.type_(),
+            target_name = %target.name(),
+            namespace = ?namespace,
+            "[MULTICLUSTER] Connecting without local target resolution - operator will resolve on workload cluster"
+        );
+
+        let use_proxy_api = self
+            .operator
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::ProxyApi);
+
+        // In multi-cluster mode, send feature_config for operator to handle
+        let feature_config = serde_json::to_string(&layer_config.feature)
+            .expect("FeatureConfig serialization should not fail");
+
+        let params = ConnectParams::new(
+            layer_config,
+            branch_name,
+            vec![], // No local branch creation
+            vec![],
+            vec![],
+            session_ci_info,
+            Some(feature_config),
+        );
+
+        let namespace = namespace.unwrap_or("default");
+        let connect_url =
+            Self::target_connect_url_from_config(use_proxy_api, target, namespace, &params);
+
+        let session = self.make_operator_session(None, connect_url)?;
+
+        let mut connection_subtask = progress.subtask("connecting to the target");
+        let conn = Self::connect_target(&self.client, &session).await?;
+        connection_subtask.success(Some("connected to the target"));
 
         Ok(OperatorSessionConnection {
             session: Box::new(session),
@@ -1096,6 +1212,40 @@ impl OperatorApi<PreparedClientCert> {
         }
     }
 
+    /// Produces the URL from Target config directly (no K8s resolution needed).
+    /// Used when the target may not exist locally (e.g., multi-cluster with management-only
+    /// primary).
+    fn target_connect_url_from_config(
+        use_proxy: bool,
+        target: &Target,
+        namespace: &str,
+        connect_params: &ConnectParams<'_>,
+    ) -> String {
+        use mirrord_config::target::TargetDisplay;
+
+        let name = {
+            let mut urlfied_name = target.type_().to_string();
+            urlfied_name.push('.');
+            urlfied_name.push_str(target.name());
+            if let Some(container) = target.container() {
+                urlfied_name.push_str(".container.");
+                urlfied_name.push_str(container);
+            }
+            urlfied_name
+        };
+
+        if use_proxy {
+            let api_version = TargetCrd::api_version(&());
+            let plural = TargetCrd::plural(&());
+            format!(
+                "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?{connect_params}"
+            )
+        } else {
+            let url_path = TargetCrd::url_path(&(), Some(namespace));
+            format!("{url_path}/{name}?{connect_params}")
+        }
+    }
+
     /// Produces the URL for making a copied target connection request to the operator.
     #[allow(clippy::too_many_arguments)]
     fn copy_target_connect_url(
@@ -1134,6 +1284,8 @@ impl OperatorApi<PreparedClientCert> {
             mysql_branch_names,
             pg_branch_names,
             session_ci_info,
+            // copy_target doesn't need feature_config - branches are handled separately
+            feature_config: None,
         };
 
         if use_proxy {
@@ -2071,6 +2223,7 @@ mod test {
             mysql_branch_names,
             pg_branch_names,
             session_ci_info,
+            feature_config: None,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);

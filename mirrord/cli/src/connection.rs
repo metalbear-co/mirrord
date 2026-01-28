@@ -91,28 +91,50 @@ where
 
     user_cert_subtask.success(Some("user credentials prepared"));
 
-    let target = ResolvedTarget::new(
-        api.client(),
-        &layer_config
+    let is_multi_cluster = api.multi_cluster_info().is_some();
+
+    let mut session_subtask = operator_subtask.subtask("starting session");
+    let connection = if is_multi_cluster {
+        // Multi-cluster: operator handles target resolution on workload clusters
+        let target_config = layer_config
             .target
             .path
             .clone()
-            .unwrap_or(Target::Targetless),
-        layer_config.target.namespace.as_deref(),
-    )
-    .await
-    .map_err(CliError::OperatorTargetResolution)?;
+            .unwrap_or(Target::Targetless);
+        let target_namespace = layer_config.target.namespace.clone();
 
-    let mut session_subtask = operator_subtask.subtask("starting session");
-    let connection = api
-        .connect_in_new_session(
-            target.clone(),
+        api.connect_in_new_session_from_config(
+            &target_config,
+            target_namespace.as_deref(),
             layer_config,
             &session_subtask,
             branch_name,
             mirrord_for_ci.map(MirrordCi::info),
         )
-        .await?;
+        .await?
+    } else {
+        // Single-cluster: resolve target locally
+        let target = ResolvedTarget::new(
+            api.client(),
+            &layer_config
+                .target
+                .path
+                .clone()
+                .unwrap_or(Target::Targetless),
+            layer_config.target.namespace.as_deref(),
+        )
+        .await
+        .map_err(CliError::OperatorTargetResolution)?;
+
+        api.connect_in_new_session(
+            target,
+            layer_config,
+            &session_subtask,
+            branch_name,
+            mirrord_for_ci.map(MirrordCi::info),
+        )
+        .await?
+    };
     session_subtask.success(Some("session started"));
 
     operator_subtask.success(Some("using operator"));

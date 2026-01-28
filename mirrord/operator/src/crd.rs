@@ -27,6 +27,7 @@ pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
 pub mod mongodb_branching;
+pub mod multi_cluster;
 pub mod mysql_branching;
 pub mod patch;
 pub mod pg_branching;
@@ -807,6 +808,14 @@ pub struct MirrordSqsSessionSpec {
     // The Kubernetes API can't deal with 64 bit numbers (with most significant bit set)
     // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
+
+    /// Multi-cluster coordination: explicit output queue names.
+    ///
+    /// Maps original queue names to their corresponding output queue names.
+    /// For multi-cluster: the default cluster creates temp queues and passes the exact names here.
+    /// Other clusters use these names directly instead of generating their own.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub output_queue_names: HashMap<String, String>,
 }
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
