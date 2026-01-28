@@ -11,12 +11,7 @@ use super::*;
 use crate::common::CheckedInto;
 #[cfg(target_os = "macos")]
 use crate::exec_utils::*;
-use crate::{
-    SOCKETS,
-    hooks::HookManager,
-    replace,
-    socket::SHARED_SOCKETS_ENV_VAR,
-};
+use crate::{SOCKETS, hooks::HookManager, replace, socket::SHARED_SOCKETS_ENV_VAR};
 
 /// Takes an [`Argv`] with the enviroment variables from an `exec` call, extending it with
 /// an encoded version of our [`SOCKETS`].
