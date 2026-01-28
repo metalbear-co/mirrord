@@ -4,8 +4,7 @@
  * 
  * Expectations:
  * - process.env.CHECK_TYPE: 'mirrord' or 'operator'
- * - process.env.OPERATOR_REPO_TOKEN (optional, for operator checks)
- * - process.env.GITHUB_TOKEN (required for API calls)
+ * - process.env.OPERATOR_MONITOR_TOKEN (required for operator checks)
  */
 
 module.exports = async ({ github, context, core, exec }) => {
@@ -111,10 +110,10 @@ async function checkMirrordRelease({ github, context, core, exec }) {
  */
 async function checkOperatorRelease({ github, context, core, exec }) {
     const operatorRepo = "metalbear-co/operator";
-    const token = process.env.OPERATOR_REPO_TOKEN || process.env.GITHUB_TOKEN;
+    const token = process.env.OPERATOR_MONITOR_TOKEN;
 
     if (!token) {
-        core.warning("No authentication token available (neither OPERATOR_MONITOR_TOKEN nor GITHUB_TOKEN)");
+        throw new Error("No OPERATOR_MONITOR_TOKEN available. This is required for checking private operator releases.");
     }
 
     core.info(`Fetching latest Operator version from GitHub API for ${operatorRepo}...`);

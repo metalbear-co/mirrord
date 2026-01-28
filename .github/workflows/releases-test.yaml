@@ -136,8 +136,7 @@ jobs:
         id: check
         uses: actions/github-script@v7
         env:
-          OPERATOR_REPO_TOKEN: ${{ secrets.OPERATOR_MONITOR_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPERATOR_MONITOR_TOKEN: ${{ secrets.OPERATOR_MONITOR_TOKEN }}
           CHECK_TYPE: operator
         with:
           script: |
