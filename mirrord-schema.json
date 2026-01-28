@@ -23,6 +23,14 @@
         }
       ]
     },
+    "baggage": {
+      "title": "baggage {#root-baggage}",
+      "description": "OpenTelemetry (OTel) / W3C baggage propagator. See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "ci": {
       "title": "ci {#root-ci}",
       "anyOf": [
@@ -215,6 +223,14 @@
         "null"
       ]
     },
+    "traceparent": {
+      "title": "traceparent {#root-traceparent}",
+      "description": "OpenTelemetry (OTel) / W3C trace context. See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "use_proxy": {
       "title": "use_proxy {#root-use_proxy}",
       "description": "When disabled, mirrord will remove `HTTP[S]_PROXY` env variables before doing any network requests. This is useful when the system sets a proxy but you don't want mirrord to use it. This also applies to the mirrord process (as it just removes the env). If the remote pod sets this env, the mirrord process will still use it.",
@@ -353,6 +369,14 @@
           ],
           "format": "uint16",
           "minimum": 0.0
+        },
+        "disable_mesh_sidecar_injection": {
+          "title": "agent.disable_mesh_sidecar_injection {#agent-disable_mesh_sidecar_injection}",
+          "description": "Add relevant labels and annotations to agent pods/jobs to prevent service mesh sidecar injections. Defaults to true.\n\nOnly affects istio, linkerd, kuma.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "disabled_capabilities": {
           "title": "agent.disabled_capabilities {#agent-disabled_capabilities}",
@@ -1531,6 +1555,18 @@
             "null"
           ]
         },
+        "latency": {
+          "title": "_experimental_ latency {#experimental-latency}",
+          "description": "Configuration for adding artificial latency to outgoing network operations.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LatencyFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "non_blocking_tcp_connect": {
           "title": "_experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}",
           "description": "Enables better support for outgoing connections using non-blocking TCP sockets.\n\nDefaults to `false`.",
@@ -2220,6 +2256,33 @@
         },
         "job": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "LatencyFileConfig": {
+      "description": "Configuration for adding artificial latency to outgoing network operations. Useful for testing application behavior under network delay conditions.",
+      "type": "object",
+      "properties": {
+        "receive_delay": {
+          "title": "_experimental_ latency.receive_delay {#experimental-latency-receive_delay}",
+          "description": "Delay in milliseconds for outgoing receive operations (Agent → Layer).\n\nDefaults to `0` (no delay).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "transmit_delay": {
+          "title": "_experimental_ latency.transmit_delay {#experimental-latency-transmit_delay}",
+          "description": "Delay in milliseconds for outgoing send operations (Layer → Agent).\n\nDefaults to `0` (no delay).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
         }
       },
       "additionalProperties": false

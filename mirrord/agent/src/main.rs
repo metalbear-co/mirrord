@@ -39,6 +39,8 @@ mod namespace;
 #[cfg(target_os = "linux")]
 mod outgoing;
 #[cfg(target_os = "linux")]
+mod reverse_dns;
+#[cfg(target_os = "linux")]
 mod runtime;
 #[cfg(target_os = "linux")]
 mod steal;

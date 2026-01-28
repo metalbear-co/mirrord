@@ -21,6 +21,7 @@ use mirrord_tls_util::MaybeTls;
 use rand::distr::{Alphanumeric, SampleString};
 use rstest::rstest;
 use rustls::pki_types::ServerName;
+use serde_json::json;
 use tokio::{net::TcpListener, sync::mpsc};
 use tokio_rustls::TlsStream;
 use tokio_stream::wrappers::ReceiverStream;
@@ -584,8 +585,6 @@ async fn body_filters_fail(
     #[values(SizeHintType::Missing, SizeHintType::Set, SizeHintType::Original)]
     size_hint: SizeHintType,
 ) {
-    use serde_json::json;
-
     let mut setup = TestSetup::new_http(http_kind, RedirectorTaskConfig::from_env()).await;
 
     let payload = Bytes::from(
@@ -720,8 +719,6 @@ async fn body_filters_pass(
     #[values(SizeHintType::Missing, SizeHintType::Set, SizeHintType::Original)]
     size_hint: SizeHintType,
 ) {
-    use serde_json::json;
-
     let mut setup = TestSetup::new_http(http_kind, RedirectorTaskConfig::from_env()).await;
 
     let payload = Bytes::from(

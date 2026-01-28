@@ -142,11 +142,18 @@ pub struct OperatorSession {
     pub operator_protocol_version: Option<Version>,
     /// Allow the layer to attempt reconnection
     pub allow_reconnect: bool,
+    /// OpenTelemetry (OTel) / W3C trace context.
+    /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
+    traceparent: Option<String>,
+    /// OpenTelemetry (OTel) / W3C baggage propagator.
+    /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
+    baggage: Option<String>,
 }
 
 impl fmt::Debug for OperatorSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OperatorSession")
+        let mut debug_struct = f.debug_struct("OperatorSession");
+        debug_struct
             .field("id", &format!("{:X}", self.id))
             .field("connect_url", &self.connect_url)
             .field("cert_public_key_data", &self.client_cert.public_key_data())
@@ -157,7 +164,9 @@ impl fmt::Debug for OperatorSession {
             .field("operator_protocol_version", &self.operator_protocol_version)
             .field("operator_version", &self.operator_version)
             .field("allow_reconnect", &self.allow_reconnect)
-            .finish()
+            .field("traceparent", &self.traceparent)
+            .field("baggage", &self.baggage);
+        debug_struct.finish()
     }
 }
 
@@ -760,7 +769,12 @@ impl OperatorApi<PreparedClientCert> {
                 pg_branch_names.clone().unwrap_or_default(),
                 session_ci_info.clone(),
             );
-            let session = self.make_operator_session(id, connect_url)?;
+            let session = self.make_operator_session(
+                id,
+                connect_url,
+                layer_config.traceparent.clone(),
+                layer_config.baggage.clone(),
+            )?;
 
             (session, reused)
         } else {
@@ -818,7 +832,12 @@ impl OperatorApi<PreparedClientCert> {
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
 
-            let session = self.make_operator_session(None, connect_url)?;
+            let session = self.make_operator_session(
+                None,
+                connect_url,
+                layer_config.traceparent.clone(),
+                layer_config.baggage.clone(),
+            )?;
 
             (session, false)
         };
@@ -850,7 +869,12 @@ impl OperatorApi<PreparedClientCert> {
                     .status
                     .as_ref()
                     .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
-                let session = self.make_operator_session(session_id, connect_url)?;
+                let session = self.make_operator_session(
+                    session_id,
+                    connect_url,
+                    layer_config.traceparent.clone(),
+                    layer_config.baggage.clone(),
+                )?;
 
                 let mut connection_subtask = progress.subtask("connecting to the target");
                 let conn = Self::connect_target(&self.client, &session).await?;
@@ -1006,6 +1030,8 @@ impl OperatorApi<PreparedClientCert> {
         &self,
         id: Option<&str>,
         connect_url: String,
+        traceparent: Option<String>,
+        baggage: Option<String>,
     ) -> OperatorApiResult<OperatorSession> {
         let id = id
             .map(|id| u64::from_str_radix(id, 16))
@@ -1032,6 +1058,8 @@ impl OperatorApi<PreparedClientCert> {
             operator_protocol_version,
             operator_version,
             allow_reconnect,
+            traceparent,
+            baggage,
         })
     }
 
@@ -1383,6 +1411,16 @@ impl OperatorApi<PreparedClientCert> {
         let request_builder = Request::builder()
             .uri(&session.connect_url)
             .header(SESSION_ID_HEADER, session.id.to_string());
+        let request_builder = if let Some(traceparent) = &session.traceparent {
+            request_builder.header("traceparent", traceparent.clone())
+        } else {
+            request_builder
+        };
+        let request_builder = if let Some(baggage) = &session.baggage {
+            request_builder.header("baggage", baggage.clone())
+        } else {
+            request_builder
+        };
 
         let request = request_builder
             .body(vec![])
@@ -2037,5 +2075,37 @@ mod test {
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
         assert_eq!(produced, expected)
+    }
+}
+
+/// Information about multi-cluster configuration
+#[derive(Debug, Clone)]
+pub struct MultiClusterInfo {
+    /// Whether this operator is the primary cluster
+    pub multi_cluster: bool,
+    /// Logical name of this cluster
+    pub cluster_name: String,
+    /// Logical name of the default cluster (for stateful operations)
+    pub default_cluster: String,
+}
+
+impl<C: ClientCertificateState> OperatorApi<C> {
+    /// Check if the operator has multi-cluster enabled and return configuration
+    ///
+    /// This is called by the CLI to determine if it should create a multi-cluster session
+    /// or a regular single-cluster session.
+    #[tracing::instrument(level = Level::DEBUG, skip(self), ret)]
+    pub fn multi_cluster_info(&self) -> Option<MultiClusterInfo> {
+        let multi_cluster_config = self.operator.spec.multi_cluster.as_ref()?;
+
+        if !multi_cluster_config.enabled {
+            return None;
+        }
+
+        Some(MultiClusterInfo {
+            multi_cluster: multi_cluster_config.enabled,
+            cluster_name: multi_cluster_config.cluster_name.clone(),
+            default_cluster: multi_cluster_config.default_cluster.clone(),
+        })
     }
 }
