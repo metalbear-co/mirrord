@@ -78,7 +78,6 @@ semver = { workspace = true, features = ["serde"], optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 serde_urlencoded = { version = "0.7", optional = true }
-serde_yaml = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tower = { workspace = true, features = ["retry"], optional = true }
