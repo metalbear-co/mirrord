@@ -503,7 +503,11 @@ impl TestRequest {
             protocol.run(TokioIo::new(upgraded), true).await;
         }
 
-        assert!(conn_task.await.unwrap().is_none());
+        let conn_task_ret = conn_task.await.unwrap();
+        assert!(
+            conn_task_ret.is_none(),
+            "Connection task returned {conn_task_ret:?}, exepcted None"
+        );
     }
 
     pub async fn make_connection(

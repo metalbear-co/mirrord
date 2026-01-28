@@ -22,7 +22,6 @@ use mirrord_config::{
     },
     target::TargetType,
 };
-use mirrord_operator::setup::OperatorNamespace;
 use thiserror::Error;
 /// Macro to automatically handle Windows unsupported commands.
 /// Usage: `windows_unsupported!(args, "command_name", { command_execution })`
@@ -791,7 +790,7 @@ pub(super) enum OperatorCommand {
     /// NOTE: You don't need to install the operator to use open source mirrord features.
     // DEPRECATED: use the helm chart instead: https://github.com/metalbear-co/charts/
     #[clap(hide(true))]
-    Setup(#[clap(flatten)] Box<OperatorSetupParams>),
+    Setup,
     /// Print operator status
     Status {
         /// Specify config file to use
@@ -809,74 +808,6 @@ pub(super) enum OperatorCommand {
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
         config_file: Option<PathBuf>,
     },
-}
-
-#[derive(Args, Debug)]
-pub(super) struct OperatorSetupParams {
-    /// ToS can be read here <https://metalbear.com/legal/terms>
-    #[arg(long)]
-    pub(super) accept_tos: bool,
-
-    /// A mirrord for Teams license key (online)
-    #[arg(long, allow_hyphen_values(true))]
-    pub(super) license_key: Option<String>,
-
-    /// Path to a file containing a mirrord for Teams license certificate
-    #[arg(long)]
-    pub(super) license_path: Option<PathBuf>,
-
-    /// Output Kubernetes specs to file instead of stdout
-    #[arg(short, long)]
-    pub(super) file: Option<PathBuf>,
-
-    /// Namespace to create the operator in (this doesn't limit the namespaces the operator
-    /// will be able to access)
-    #[arg(short, long, default_value = "mirrord")]
-    pub(super) namespace: OperatorNamespace,
-
-    /// AWS role ARN for the operator's service account.
-    /// Necessary for enabling SQS queue splitting.
-    /// For successfully running an SQS queue splitting operator the given IAM role must be
-    /// able to create, read from, write to, and delete SQS queues.
-    /// If the queue messages are encrypted using KMS, the operator also needs the
-    /// `kms:Encrypt`, `kms:Decrypt` and `kms:GenerateDataKey` permissions.
-    #[arg(long, visible_alias = "arn")]
-    pub(super) aws_role_arn: Option<String>,
-
-    /// Enable SQS queue splitting.
-    /// When set, some extra CRDs will be installed on the cluster, and the operator will run
-    /// an SQS splitting component.
-    #[arg(
-        long,
-        visible_alias = "sqs",
-        default_value_t = false,
-        requires = "aws_role_arn"
-    )]
-    pub(super) sqs_splitting: bool,
-
-    /// Enable Kafka queue splitting.
-    /// When set, some extra CRDs will be installed on the cluster, and the operator will run
-    /// a Kafka splitting component.
-    #[arg(long, visible_alias = "kafka", default_value_t = false)]
-    pub(super) kafka_splitting: bool,
-
-    /// Enable argocd Application auto-pause
-    /// When set the operator will temporary pause automated sync for applications whom resources
-    /// are targeted with `scale_down` feature enabled.
-    #[arg(long, default_value_t = false)]
-    pub(super) application_auto_pause: bool,
-
-    /// Enable MySQL database branching.
-    /// When set, some extra CRDs will be installed on the cluster, and the operator will run
-    /// a mysql branching component.
-    #[arg(long, visible_alias = "mysql", default_value_t = false)]
-    pub(super) mysql_branching: bool,
-
-    /// Enable PostgreSQL database branching.
-    /// When set, some extra CRDs will be installed on the cluster, and the operator will run
-    /// a PostgreSQL branching component.
-    #[arg(long, visible_alias = "pg", default_value_t = false)]
-    pub(super) pg_branching: bool,
 }
 
 /// `mirrord operator session` family of commands.

@@ -20,7 +20,7 @@ workspace = true
 
 [dependencies]
 mirrord-console = { path = "../console", features = ["async-logger"] }
-mirrord-operator = { path = "../operator", features = ["client", "setup"] }
+mirrord-operator = { path = "../operator", features = ["client"] }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
 mirrord-progress = { path = "../progress", features = ["implementations"] }
 mirrord-kube = { path = "../kube", features = ["portforward"] }

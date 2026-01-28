@@ -8,6 +8,34 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.184.0](https://github.com/metalbear-co/mirrord/tree/3.184.0) - 2026-01-27
+
+
+### Added
+
+- "traceparent" and "baggage" fields can now be added to the mirrord
+  configuration and propagated in requests to the
+  operator. Follows OTel/W3C context propagation conventions.
+- Added `agent.disable_mesh_sidecar_injection` config option that controls
+  relevant annotations are added to agent pods that disable service mesh
+  sidecar injection.
+
+
+### Fixed
+
+- Fix issue with subscriptions being removed when multiprocessing is used.
+- Fixed an issue where mirrord was not able to deliver incoming traffic due to
+  firewall rules on the local machine.
+- Fixed bug on Windows where `fstat` would fail on Node.js read file operation.
+
+
+### Internal
+
+- * Added GCP secret fetching for kubeconfig
+  * Rotated the kubeconfig secret
+- Add more logging to flaky `body_filters_fail` test to assist troubleshooting
+- Set pattern for towncrier issue pattern to reduce bogus links.
+
 ## [3.183.0](https://github.com/metalbear-co/mirrord/tree/3.183.0) - 2026-01-23
 
 
