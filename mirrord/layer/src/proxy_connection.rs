@@ -47,7 +47,7 @@ pub enum ProxyError {
     #[error("{FD_ENV_VAR} is set to an invalid value: {0:?}")]
     BadProxyConnFdEnv(OsString),
     #[error(
-        "fd passed in {FD_ENV_VAR} ({fd:?}) was not a valid connection. Errono: {errno} from {fn_name}"
+        "fd passed in {FD_ENV_VAR} ({fd:?}) was not a valid socket. Errno: \"{errno}\" from {fn_name}"
     )]
     BadProxyConnFd {
         fd: OwnedFd,
