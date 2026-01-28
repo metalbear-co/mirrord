@@ -1,7 +1,7 @@
 use std::fs::File;
 
 use futures::TryFutureExt;
-use mirrord_operator::setup::{LicenseType, Operator, OperatorSetup, SetupOptions};
+use mirrord_operator::setup::{LicenseType, Operator};
 use serde::Deserialize;
 use status::StatusCommandHandler;
 use tokio::fs;
@@ -50,73 +50,7 @@ async fn operator_setup(
         pg_branching,
     }: OperatorSetupParams,
 ) -> CliResult<(), OperatorSetupError> {
-    eprintln!(
-        "> WARNING: the operator setup command is deprecated, please use the Helm chart to set up the operator: https://github.com/metalbear-co/charts/"
-    );
-    if !accept_tos {
-        eprintln!(
-            "Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.com/legal/terms\nPass --accept-tos to accept the TOS"
-        );
-
-        return Ok(());
-    }
-
-    let license = match (license_key, license_path) {
-        (_, Some(license_path)) => fs::read_to_string(&license_path)
-            .await
-            .inspect_err(|err| {
-                tracing::warn!(
-                    "Unable to read license at path {}: {err}",
-                    license_path.display()
-                )
-            })
-            .ok()
-            .map(LicenseType::Offline),
-        (Some(license_key), _) => Some(LicenseType::Online(license_key)),
-        (None, None) => None,
-    };
-
-    // if env var std::env::var("MIRRORD_OPERATOR_IMAGE") exists, use it, otherwise call async
-    // function to get it
-    let image = match std::env::var("MIRRORD_OPERATOR_IMAGE") {
-        Ok(image) => image,
-        Err(_) => {
-            let version = get_last_version().await?;
-            format!("ghcr.io/metalbear-co/operator:{version}")
-        }
-    };
-
-    if let Some(license) = license {
-        eprintln!(
-            "Installing mirrord operator with namespace: {}",
-            namespace.name()
-        );
-
-        let operator = Operator::new(SetupOptions {
-            license,
-            namespace,
-            image,
-            aws_role_arn,
-            sqs_splitting,
-            kafka_splitting,
-            application_auto_pause,
-            mysql_branching,
-            pg_branching,
-        });
-
-        match file {
-            Some(path) => {
-                let writer =
-                    File::create(&path).map_err(|e| OperatorSetupError::OutputFileOpen(path, e))?;
-                operator.to_writer(writer)?;
-            }
-            None => operator.to_writer(std::io::stdout()).unwrap(), /* unwrap because failing to write to std out.. well.. */
-        }
-    } else {
-        eprintln!("--license-key or --license-path is required to install on cluster");
-    }
-
-    Ok(())
+    Err(OperatorSetupError::Deleted)
 }
 
 /// Handle commands related to the operator `mirrord operator ...`

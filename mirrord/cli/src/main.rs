@@ -159,18 +159,6 @@
 //!
 //! A family of commands that help managing the mirrord-operator.
 //!
-//! #### `mirrord operator setup [OPTIONS]`
-//!
-//! - `operator_setup`
-//!
-//! Creates a kubernetes spec `yaml` file that can be used to install the mirrord-operator in the
-//! cluster. No validations are done here! The user may pass an invalid license, operator version
-//! that doesn't exist, whatever. The command will work as long as we can parse the args and produce
-//! a file from it.
-//!
-//! - Tip: The [operator helm chart](https://github.com/metalbear-co/charts/tree/main/mirrord-operator)
-//!   is an alternative way of setting up the mirrord-operator.
-//!
 //! #### `mirrord operator status [OPTIONS]`
 //!
 //! - `StatusCommandHandler`
