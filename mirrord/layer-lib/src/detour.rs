@@ -11,13 +11,14 @@ use core::{
 };
 use std::net::SocketAddr;
 #[cfg(unix)]
-use std::{cell::RefCell, ffi::CString, ops::Deref, os::fd::RawFd, path::PathBuf, sync::OnceLock};
+use std::{cell::RefCell, ffi::CString, ops::Deref, path::PathBuf, sync::OnceLock};
 
 #[cfg(target_os = "macos")]
 use libc::c_char;
 
 #[cfg(unix)]
 use crate::error::HookError;
+use crate::socket::sockets::SocketDescriptor;
 
 #[cfg(unix)]
 thread_local!(
@@ -142,10 +143,9 @@ pub enum Bypass {
     /// Unix socket to address that was not configured to be connected remotely.
     UnixSocket(Option<String>),
 
-    /// We could not find this [`RawFd`] in the bookkeeping tables (`OPEN_FILES` and
+    /// We could not find this [`SocketDescriptor`] in the bookkeeping tables (`OPEN_FILES` and
     /// [`SOCKETS`](crate::socket::SOCKETS)).
-    #[cfg(unix)]
-    LocalFdNotFound(RawFd),
+    LocalFdNotFound(SocketDescriptor),
 
     /// Similar to `LocalFdNotFound`, but for the layer's `OPEN_DIRS` table.
     LocalDirStreamNotFound(usize),
@@ -154,9 +154,9 @@ pub enum Bypass {
     /// [`SocketAddr`] failed.
     AddressConversion,
 
-    /// The socket [`RawFd`] is in an invalid state for the operation.
+    /// The socket [`SocketDescriptor`] is in an invalid state for the operation.
     #[cfg(unix)]
-    InvalidState(RawFd),
+    InvalidState(SocketDescriptor),
 
     /// We got an `Utf8Error` while trying to convert a `CStr` into a safer string type.
     CStrConversion,

@@ -1,4 +1,6 @@
 // Unified socket collection for both Unix and Windows layers
+#[cfg(unix)]
+use std::os::fd::RawFd;
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -16,7 +18,7 @@ use super::{SocketKind, SocketState, UserSocket};
 // Platform-specific socket descriptors
 // RawFd
 #[cfg(unix)]
-pub type SocketDescriptor = i32;
+pub type SocketDescriptor = RawFd;
 
 #[cfg(windows)]
 pub type SocketDescriptor = SOCKET;
@@ -90,21 +92,6 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
             })
             .unwrap_or_default()
     });
-
-/// Converts the SOCKETS map into a vector of pairs (SOCKET, UserSocket) for serialization.
-/// Used primarily for sharing socket state between parent and child processes.
-///
-/// # Returns
-///
-/// A Result containing a vector of socket pairs, or an error if the lock fails
-pub fn shared_sockets() -> Result<Vec<(u64, UserSocket)>, Box<dyn std::error::Error>> {
-    Ok(SOCKETS
-        .lock()
-        .map_err(|e| format!("Failed to lock sockets: {}", e))?
-        .iter()
-        .map(|(socket, user_socket)| (*socket as u64, user_socket.as_ref().clone()))
-        .collect())
-}
 
 /// Helper function to safely convert socket descriptors to i64 for error handling and logging
 pub fn socket_descriptor_to_i64(socket: SocketDescriptor) -> i64 {
@@ -188,20 +175,10 @@ pub fn set_socket_state(socket: SocketDescriptor, new_state: SocketState) {
     };
 
     if let Some(socket_ref) = sockets.get_mut(&socket) {
-        if let Some(socket_mut) = Arc::get_mut(socket_ref) {
-            // Exclusive access - can modify in place
-            socket_mut.state = new_state;
-            tracing::debug!("SocketManager: Updated socket {} state in-place", socket);
-        } else {
-            // Arc is shared - must clone and replace
-            let mut new_socket = (**socket_ref).clone();
-            new_socket.state = new_state;
-            sockets.insert(socket, Arc::new(new_socket));
-            tracing::debug!(
-                "SocketManager: Arc for socket {} is shared, cloning for state update",
-                socket
-            );
-        }
+        let socket_mut = Arc::get_mut(socket_ref)
+            .expect("SocketManager: socket Arc unexpectedly shared during state update");
+        socket_mut.state = new_state;
+        tracing::debug!("SocketManager: Updated socket {} state", socket);
     } else {
         tracing::warn!(
             "SocketManager: Attempted to update state for unmanaged socket {}",
