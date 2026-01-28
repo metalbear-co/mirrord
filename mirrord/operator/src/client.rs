@@ -994,7 +994,12 @@ impl OperatorApi<PreparedClientCert> {
         let connect_url =
             Self::target_connect_url_from_config(use_proxy_api, target, namespace, &params);
 
-        let session = self.make_operator_session(None, connect_url)?;
+        let session = self.make_operator_session(
+            None,
+            connect_url,
+            layer_config.traceparent.clone(),
+            layer_config.baggage.clone(),
+        )?;
 
         let mut connection_subtask = progress.subtask("connecting to the target");
         let conn = Self::connect_target(&self.client, &session).await?;
