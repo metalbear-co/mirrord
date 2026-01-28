@@ -30,6 +30,7 @@ use thiserror::Error;
 use crate::crd::{
     MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
     MirrordWorkloadQueueRegistry, TargetCrd,
+    copy_target::MirrordClusterCopyTargetRequest,
     external::MirrordClusterExternalResource,
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     mysql_branching::MysqlBranchDatabase,
@@ -323,6 +324,10 @@ impl OperatorSetup for Operator {
             writer.write_all(b"---\n")?;
             PgBranchDatabase::crd().to_writer(&mut writer)?;
         }
+
+        writer.write_all(b"---\n")?;
+        MirrordClusterCopyTargetRequest::crd().to_writer(&mut writer)?;
+
         Ok(())
     }
 }
@@ -719,6 +724,7 @@ impl OperatorClusterRole {
                     format!("{}/status", MirrordClusterWorkloadPatchRequest::plural(&())),
                     MirrordClusterSession::plural(&()).into_owned(),
                     MirrordClusterExternalResource::plural(&()).into_owned(),
+                    MirrordClusterCopyTargetRequest::plural(&()).into_owned(),
                 ]),
                 verbs: vec!["*".to_owned()],
                 ..Default::default()
