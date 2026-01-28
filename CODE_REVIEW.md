@@ -108,6 +108,7 @@ If you see something beautiful, smart, helpful, nice or well-crafted, feel free 
 - [ ] The new code is readable and comprehensible
 - [ ] The code does what it says it does
 - [ ] The code meets non-functional requirements (performance, security, etc.)
+- [ ] The new code is tested sufficiently by existing or new tests
 
 ## Conflict Resolution
 
