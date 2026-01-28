@@ -3,6 +3,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
@@ -281,7 +282,7 @@ pub struct MirrordOperatorStatus {
     pub copy_targets: Option<Vec<CopyTargetEntryCompat>>,
 
     /// Status of connected remote clusters (only on primary with multi-cluster enabled).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connected_clusters: Option<Vec<ConnectedClusterStatus>>,
 }
 
@@ -291,8 +292,8 @@ pub struct MirrordOperatorStatus {
 pub struct ConnectedClusterStatus {
     /// Logical name of the cluster.
     pub name: String,
-    /// Timestamp of last health check (RFC3339 format).
-    pub last_check: String,
+    /// Timestamp of last health check.
+    pub last_check: MicroTime,
     /// Result of the health check.
     #[serde(flatten)]
     pub result: ClusterCheckResult,

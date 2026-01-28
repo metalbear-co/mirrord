@@ -22,7 +22,6 @@ pub enum OperatorOperation {
     MongodbBranching,
     MysqlBranching,
     PgBranching,
-    MultiClusterSession,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -38,7 +37,6 @@ impl fmt::Display for OperatorOperation {
             Self::MongodbBranching => "mongodb branching",
             Self::MysqlBranching => "mysql branching",
             Self::PgBranching => "postgresql branching",
-            Self::MultiClusterSession => "multi-cluster session",
         };
 
         f.write_str(as_str)
