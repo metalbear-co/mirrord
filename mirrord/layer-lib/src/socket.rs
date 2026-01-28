@@ -189,7 +189,7 @@ impl TryFrom<c_int> for SocketKind {
 // can't do that due to how `dup` interacts directly with our `Arc<UserSocket>`, because we just
 // `clone` the arc, we end up with exact duplicates, but `dup` generates a new fd that we have no
 // way of putting inside the duplicated `UserSocket`.
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Encode, Decode)]
 pub struct UserSocket {
     pub domain: c_int,
     pub type_: c_int,
