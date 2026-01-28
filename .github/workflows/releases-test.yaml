@@ -30,104 +30,12 @@ jobs:
       - name: Check latest GitHub Release assets
         id: check
         uses: actions/github-script@v7
+        env:
+          CHECK_TYPE: mirrord
         with:
           script: |
-            const { owner, repo } = context.repo;
-
-            // === REQUIRED ASSETS ===
-            // These must exist on every production release.
-            const requiredAssets = [
-              // Linux x86_64
-              "mirrord_linux_x86_64.zip",
-              "mirrord_linux_x86_64.shasum256",
-              "mirrord_linux_x86_64",
-              "libmirrord_layer_linux_x86_64.so",
-
-              // Linux aarch64
-              "mirrord_linux_aarch64.zip",
-              "mirrord_linux_aarch64.shasum256",
-              "mirrord_linux_aarch64",
-              "libmirrord_layer_linux_aarch64.so",
-
-              // macOS universal
-              "mirrord_mac_universal.zip",
-              "mirrord_mac_universal.shasum256",
-              "mirrord_mac_universal",
-              "libmirrord_layer_mac_universal.dylib"
-            ];
-
-            // === OPTIONAL ASSETS ===
-            // Windows artifacts: warn if missing, but don't fail the job.
-            const optionalAssets = [
-              "mirrord.exe",
-              "mirrord.exe.sha256",
-              "mirrord_layer_win.dll",
-              "mirrord_layer_win.dll.sha256"
-            ];
-
-            core.info(`Checking latest release for ${owner}/${repo}...`);
-
-            let release;
-            try {
-              const res = await github.rest.repos.getLatestRelease({ owner, repo });
-              release = res.data;
-            } catch (error) {
-              const msg = `Failed to get latest release: ${error.message}`;
-              core.warning(msg);
-              core.setOutput("ok", "false");
-              core.setOutput("error", msg);
-              core.setOutput("tag", "");
-              core.setOutput("html_url", "");
-              core.setOutput("missing_required", "");
-              core.setOutput("missing_optional", "");
-              return;
-            }
-
-            const tag = release.tag_name;
-            const htmlUrl = release.html_url;
-            const assetNames = release.assets.map(a => a.name);
-            core.info(`Latest release tag: ${tag}`);
-            core.info(`Assets on release: ${assetNames.join(", ") || "(none)"}`);
-
-            // === Check Mirrord Docker Image ===
-            const mirrordImage = `ghcr.io/metalbear-co/mirrord:${tag}`;
-            core.info(`Checking for Mirrord Docker image: ${mirrordImage}`);
-            
-            const missingRequired = requiredAssets.filter(name => !assetNames.includes(name));
-
-            try {
-                await exec.exec("docker", ["manifest", "inspect", mirrordImage]);
-                core.info(`✅ Mirrord Docker image found: ${mirrordImage}`);
-            } catch (error) {
-                core.warning(`Failed to find Mirrord Docker image ${mirrordImage}`);
-                missingRequired.push(`Docker Image (${mirrordImage})`);
-            }
-
-
-            
-            const missingOptional = optionalAssets.filter(name => !assetNames.includes(name));
-
-            core.setOutput("tag", tag);
-            core.setOutput("html_url", htmlUrl);
-            core.setOutput("missing_required", missingRequired.join(", "));
-            core.setOutput("missing_optional", missingOptional.join(", "));
-
-            if (missingRequired.length > 0) {
-              const msg = `Missing REQUIRED assets on latest release ${tag}: ${missingRequired.join(", ")}`;
-              core.warning(msg);
-              core.setOutput("ok", "false");
-              core.setOutput("error", msg);
-            } else {
-              // All required are present. Optional may still be missing.
-              core.info("All required assets are present on latest release.");
-              if (missingOptional.length > 0) {
-                core.warning(
-                  `Missing OPTIONAL (Windows) assets on latest release ${tag}: ${missingOptional.join(", ")}`
-                );
-              }
-              core.setOutput("ok", "true");
-              core.setOutput("error", "");
-            }
+            const script = require('./.github/workflows/scripts/check_release.js');
+            await script({ github, context, core, exec });
 
       # Hard failures: required assets missing or API failure
       - name: Notify Slack on REQUIRED asset failure
@@ -222,92 +130,15 @@ jobs:
 
       - name: Check latest Operator Release and Docker Image
         id: check
+        uses: actions/github-script@v7
         env:
           OPERATOR_REPO_TOKEN: ${{ secrets.OPERATOR_MONITOR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        uses: actions/github-script@v7
+          CHECK_TYPE: operator
         with:
           script: |
-            const { owner, repo } = context.repo;
-            const operatorRepo = "metalbear-co/operator";
-            
-            // Use PAT if available, otherwise fallback to GITHUB_TOKEN
-            const token = process.env.OPERATOR_REPO_TOKEN || process.env.GITHUB_TOKEN;
-            
-            if (!token) {
-                core.warning("No authentication token available (neither OPERATOR_REPO_TOKEN nor GITHUB_TOKEN)");
-            }
-
-            core.info(`Fetching latest Operator version from GitHub API for ${operatorRepo}...`);
-            let operatorTag;
-            try {
-                const { stdout } = await exec.getExecOutput("curl", [
-                    "-s",
-                    "-H", `Authorization: token ${token}`,
-                    `https://api.github.com/repos/${operatorRepo}/releases/latest`
-                ]);
-                
-                const releaseData = JSON.parse(stdout);
-                operatorTag = releaseData.tag_name;
-                
-                if (!operatorTag) {
-                    core.info(`API Response: ${stdout.substring(0, 1000)}`);
-                    throw new Error(releaseData.message || "No tag_name found in release data");
-                }
-                core.info(`Latest Operator release tag from GitHub: ${operatorTag}`);
-            } catch (error) {
-                 const msg = `Failed to get latest operator version from GitHub: ${error.message}`;
-                 core.warning(msg);
-                 core.setOutput("ok", "false");
-                 core.setOutput("error", msg);
-                 return;
-            }
-
-            core.setOutput("tag", operatorTag);
-
-            const operatorImage = `ghcr.io/metalbear-co/operator:${operatorTag}`;
-            core.info(`Checking for Operator Docker image: ${operatorImage}`);
-            
-            try {
-                await exec.exec("docker", ["manifest", "inspect", operatorImage]);
-                core.info(`✅ Operator Docker image found: ${operatorImage}`);
-                core.setOutput("ok", "true");
-                core.setOutput("error", "");
-            } catch (error) {
-                const msg = `Failed to find Operator Docker image ${operatorImage}`;
-                core.warning(msg);
-                core.setOutput("ok", "false");
-                core.setOutput("error", msg);
-                // Continue to check other assets even if image missing for full report
-            }
-
-            // === Check GitHub Release Page & Source Code Asset ===
-            const releaseUrl = `https://github.com/${operatorRepo}/releases/tag/${operatorTag}`;
-            core.info(`Checking Operator Release Page: ${releaseUrl}`);
-            try {
-                // simple reachability check. Private pages might redirect to login, returning 200 or 302.
-                await exec.exec("curl", ["-fsI", releaseUrl]);
-                core.info("✅ Operator Release Page is reachable.");
-            } catch (error) {
-                 core.warning(`Operator Release Page unreachable (likely private): ${releaseUrl}`);
-            }
-
-            const assetUrl = `https://github.com/${operatorRepo}/archive/refs/tags/${operatorTag}.zip`;
-            core.info(`Checking Operator Source Code Zip: ${assetUrl}`);
-             try {
-                // Must provide token for private repo archives
-                await exec.exec("curl", [
-                    "-fsI", 
-                    "-H", `Authorization: token ${token}`,
-                    assetUrl
-                ]);
-                core.info("✅ Operator Source Code Zip found.");
-            } catch (error) {
-                 const msg = `Operator Source Code Zip unreachable (Auth failure?): ${assetUrl}`;
-                 core.warning(msg);
-                 core.setOutput("ok", "false");
-                 core.setOutput("error", core.getInput("error") ? `${core.getInput("error")}; ${msg}` : msg);
-            }
+            const script = require('./.github/workflows/scripts/check_release.js');
+            await script({ github, context, core, exec });
 
       - name: Notify Slack on FAILURE
         if: steps.check.outputs.ok != 'true'
