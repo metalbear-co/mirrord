@@ -1,19 +1,25 @@
 use std::{
     ffi::OsStr,
     io::{self, Error},
+    net::IpAddr,
     os::{
         linux::net::SocketAddrExt,
         unix::{ffi::OsStrExt, net::SocketAddr},
     },
+    path::PathBuf,
     pin::Pin,
     task::{Context, Poll},
 };
 
+use hickory_resolver::{
+    TokioAsyncResolver, config::LookupIpStrategy, system_conf::parse_resolv_conf,
+};
 use mirrord_protocol::{
     RemoteError, RemoteResult, ResponseError,
     outgoing::{SocketAddress, UnixAddr},
 };
 use tokio::{
+    fs,
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::{TcpStream, UnixStream},
 };

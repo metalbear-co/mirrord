@@ -27,6 +27,7 @@ pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
 pub mod mongodb_branching;
+pub mod multi_cluster;
 pub mod mysql_branching;
 pub mod patch;
 pub mod pg_branching;
@@ -149,6 +150,10 @@ pub struct MirrordOperatorSpec {
     /// this field).
     #[deprecated(note = "use supported_features instead")]
     copy_target_enabled: Option<bool>,
+    /// Multi-cluster configuration (if enabled)
+    /// Contains information about whether this operator is part of a multi-cluster setup
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multi_cluster: Option<MultiClusterConfig>,
 }
 
 impl MirrordOperatorSpec {
@@ -173,6 +178,7 @@ impl MirrordOperatorSpec {
             protocol_version,
             features,
             copy_target_enabled,
+            multi_cluster: None, // Set by operator at runtime if multi-cluster is enabled
         }
     }
 
@@ -274,6 +280,56 @@ pub struct MirrordOperatorStatus {
 
     /// Option because added later.
     pub copy_targets: Option<Vec<CopyTargetEntryCompat>>,
+
+    /// Status of connected remote clusters (only on primary with multi-cluster enabled).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connected_clusters: Option<Vec<ConnectedClusterStatus>>,
+}
+
+/// Status of a connected remote cluster.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectedClusterStatus {
+    /// Logical name of the cluster.
+    pub name: String,
+    /// Timestamp of last health check (RFC3339 format).
+    pub last_check: String,
+    /// Result of the health check.
+    #[serde(flatten)]
+    pub result: ClusterCheckResult,
+}
+
+/// Result of a cluster health check.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ClusterCheckResult {
+    /// Cluster is connected and responding.
+    Connected {
+        /// Operator version running on the remote cluster.
+        operator_version: String,
+        /// License fingerprint from the remote cluster (for license validation).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        license_fingerprint: Option<String>,
+    },
+    /// Cluster check failed.
+    Error {
+        /// Error message describing the failure.
+        message: String,
+    },
+}
+
+/// Configuration for a remote cluster in multi-cluster mode.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ClusterConfig {
+    /// Logical name of the cluster.
+    pub name: String,
+    /// Kubernetes API server URL.
+    pub url: String,
+    /// Authentication method: "token" or "certificate".
+    pub authentication_method: String,
+    /// Name of the Secret containing cluster credentials.
+    pub secret: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -752,6 +808,14 @@ pub struct MirrordSqsSessionSpec {
     // The Kubernetes API can't deal with 64 bit numbers (with most significant bit set)
     // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
+
+    /// Multi-cluster coordination: explicit output queue names.
+    ///
+    /// Maps original queue names to their corresponding output queue names.
+    /// For multi-cluster: the default cluster creates temp queues and passes the exact names here.
+    /// Other clusters use these names directly instead of generating their own.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub output_queue_names: HashMap<String, String>,
 }
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -785,4 +849,26 @@ pub enum UserCredentialKind {
     #[schemars(skip)]
     #[serde(other)]
     Unknown,
+}
+
+/// Multi-cluster configuration for the operator
+/// This tells the CLI whether this operator is part of a multi-cluster setup
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MultiClusterConfig {
+    /// Whether multi-cluster is enabled on this operator
+    pub enabled: bool,
+
+    /// Logical name of this cluster (e.g., "us-east-1")
+    pub cluster_name: String,
+
+    /// Logical name of the default cluster (for stateful operations)
+    pub default_cluster: String,
+
+    /// Whether the primary cluster is management-only (no workloads)
+    pub primary_is_management_only: bool,
+
+    /// Configured remote clusters
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clusters: Vec<ClusterConfig>,
 }

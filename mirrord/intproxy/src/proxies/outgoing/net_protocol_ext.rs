@@ -46,6 +46,11 @@ pub trait NetProtocolExt: Sized {
 
     /// Creates a [`LayerConnect`] message and wraps it into the common [`ClientMessage`] type.
     /// The enum path used here depends on this protocol.
+    ///
+    /// The `hostname` parameter is the original hostname before DNS resolution. When present,
+    /// the agent can re-resolve this hostname locally instead of using the IP in `remote_address`.
+    /// This is essential for multi-cluster scenarios where the same hostname resolves to
+    /// different IPs in different clusters.
     fn wrap_agent_connect(self, remote_address: SocketAddress, uid: Option<Uid>) -> ClientMessage;
 
     /// Opens a new socket for intercepting a connection to the given remote address.
