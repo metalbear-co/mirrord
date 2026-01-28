@@ -274,10 +274,17 @@ Operator License
             println!();
         }
 
-        if let Some(statistics) = status.statistics.as_ref() {
+        status.statistics.as_ref().and_then(|statistics| {
             println!("Operator Daily Users: {}", statistics.dau);
             println!("Operator Monthly Users: {}", statistics.mau);
-        }
+
+            println!(
+                "Operator Concurrent CI Sessions: {}",
+                statistics.active_ci_sessions_count?
+            );
+
+            Some(())
+        });
 
         let mut sessions = Table::new();
 
