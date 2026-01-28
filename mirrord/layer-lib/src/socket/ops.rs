@@ -504,7 +504,7 @@ where
         SOCKETS.lock()?.insert(sockfd, user_socket_info);
         Ok(connect_result)
     };
-    
+
     let connect_result = if remote_address.is_unix() {
         remote_connection(remote_address)?
     } else {
