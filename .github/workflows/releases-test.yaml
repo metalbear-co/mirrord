@@ -31,10 +31,13 @@ jobs:
 
       - name: Check latest GitHub Release assets
         id: check
+        uses: actions/github-script@v7
         env:
           CHECK_TYPE: mirrord
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash .github/workflows/scripts/check_release.sh
+        with:
+          script: |
+            const script = require('./.github/workflows/scripts/check_release.js');
+            await script({ github, context, core, exec });
 
       # Hard failures: required assets missing or API failure
       - name: Notify Slack on REQUIRED asset failure
@@ -131,11 +134,15 @@ jobs:
 
       - name: Check latest Operator Release and Docker Image
         id: check
+        uses: actions/github-script@v7
         env:
           OPERATOR_REPO_TOKEN: ${{ secrets.OPERATOR_MONITOR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CHECK_TYPE: operator
-        run: bash .github/workflows/scripts/check_release.sh
+        with:
+          script: |
+            const script = require('./.github/workflows/scripts/check_release.js');
+            await script({ github, context, core, exec });
 
       - name: Notify Slack on FAILURE
         if: steps.check.outputs.ok != 'true'
@@ -414,71 +421,11 @@ jobs:
     steps:
       - name: Check version endpoint vs release download URLs
         id: version
-        shell: bash
-        run: |
-          set -euo pipefail
-          api_url="https://version.mirrord.dev/v1/version"
-          echo "Fetching version from: $api_url"
-
-          # The endpoint returns plain text like: 3.174.0%
-          if ! curl -fsSL "$api_url" -o /tmp/version.txt; then
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "error=Failed to fetch $api_url" >> "$GITHUB_OUTPUT"
-            echo "version=" >> "$GITHUB_OUTPUT"
-            echo "missing_urls=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Raw version.mirrord.dev response:"
-          cat /tmp/version.txt || true
-
-          # Strip whitespace and trailing '%' if present
-          ver="$(tr -d '\r' < /tmp/version.txt | sed 's/[[:space:]]*$//' | sed 's/%$//')"
-
-          if [ -z "$ver" ]; then
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "error=Empty version string from version.mirrord.dev" >> "$GITHUB_OUTPUT"
-            echo "version=" >> "$GITHUB_OUTPUT"
-            echo "missing_urls=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Normalized version from API: '$ver'"
-
-          base="https://github.com/metalbear-co/mirrord/releases/download"
-          urls=(
-            "$base/$ver/mirrord_linux_x86_64"
-            "$base/$ver/mirrord_linux_aarch64"
-            "$base/$ver/mirrord_mac_universal"
-          )
-
-          echo "Checking URLs:"
-          printf '  - %s\n' "${urls[@]}"
-
-          missing=()
-          for u in "${urls[@]}"; do
-            # HEAD to avoid downloading full binaries
-            if ! curl -fsSIL "$u" >/dev/null 2>&1; then
-              echo "URL appears unreachable (HEAD failed): $u"
-              missing+=("$u")
-            fi
-          done
-
-          if [ "${#missing[@]}" -gt 0 ]; then
-            echo "Some URLs are missing or unreachable for version $ver:"
-            printf '  - %s\n' "${missing[@]}"
-
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "error=Some download URLs are missing or not reachable for version $ver" >> "$GITHUB_OUTPUT"
-            printf 'missing_urls=%s\n' "$(IFS=','; echo "${missing[*]}")" >> "$GITHUB_OUTPUT"
-          else
-            echo "All download URLs for version $ver are reachable."
-            echo "ok=true" >> "$GITHUB_OUTPUT"
-            echo "error=" >> "$GITHUB_OUTPUT"
-            echo "missing_urls=" >> "$GITHUB_OUTPUT"
-          fi
-
-          printf 'version=%s\n' "$ver" >> "$GITHUB_OUTPUT"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const script = require('./.github/workflows/scripts/check_version_endpoint.js');
+            await script({ github, context, core, exec });
 
       - name: Notify Slack on version API / URL mismatch
         if: steps.version.outputs.ok != 'true'
