@@ -12,24 +12,6 @@ use crate::{
 mod session;
 pub(super) mod status;
 
-#[derive(Deserialize)]
-struct OperatorVersionResponse {
-    operator: String,
-}
-
-/// Fetches latest version of mirrord operator from our API
-async fn get_last_version() -> CliResult<String, reqwest::Error> {
-    let client = reqwest::Client::builder().build()?;
-    let response: OperatorVersionResponse = client
-        .get("https://version.mirrord.dev/v1/operator/version")
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    Ok(response.operator)
-}
-
 /// Set up the operator into a file or to stdout, with explanation.
 async fn operator_setup() -> CliResult<(), OperatorSetupError> {
     Err(OperatorSetupError::Deleted)
