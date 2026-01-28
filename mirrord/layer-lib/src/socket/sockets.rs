@@ -175,8 +175,8 @@ pub fn set_socket_state(socket: SocketDescriptor, new_state: SocketState) {
     };
 
     if let Some(socket_entry) = sockets.remove(&socket) {
-        let mut socket_inner =
-            Arc::try_unwrap(socket_entry).expect("SocketManager: socket Arc unexpectedly shared during state update");
+        let mut socket_inner = Arc::try_unwrap(socket_entry)
+            .expect("SocketManager: socket Arc unexpectedly shared during state update");
         socket_inner.state = new_state;
         sockets.insert(socket, Arc::new(socket_inner));
         tracing::debug!("SocketManager: Updated socket {} state", socket);
