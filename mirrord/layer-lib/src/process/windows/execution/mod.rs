@@ -34,7 +34,7 @@ use crate::{
     error::{LayerError, LayerResult, windows::WindowsError},
     proxy_connection::PROXY_CONNECTION,
     setup::setup,
-    socket::sockets::SHARED_SOCKETS_ENV_VAR,
+    socket::{SOCKETS, sockets::SHARED_SOCKETS_ENV_VAR},
 };
 
 pub mod debug;
@@ -141,47 +141,44 @@ impl LayerManagedProcess {
         }
 
         // Encode and forward current socket state to child process (like Unix prepare_execve_envp)
-        match crate::socket::sockets::shared_sockets() {
-            Ok(sockets) => {
-                let socket_count = sockets.len();
-                match bincode::encode_to_vec(&sockets, bincode::config::standard()) {
-                    Ok(encoded_bytes) => {
-                        let encoded_sockets = BASE64_URL_SAFE.encode(encoded_bytes);
-                        env_vars
-                            .insert(SHARED_SOCKETS_ENV_VAR.to_string(), encoded_sockets.clone());
-                        tracing::debug!(
-                            "Encoded and forwarding {} shared sockets to child process: {}",
-                            socket_count,
-                            encoded_sockets
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to encode shared sockets: {}", e);
-                        // Fallback: try to forward existing environment variable if it exists
-                        if let Ok(existing_sockets) = std::env::var(SHARED_SOCKETS_ENV_VAR) {
-                            env_vars.insert(
-                                SHARED_SOCKETS_ENV_VAR.to_string(),
-                                existing_sockets.clone(),
-                            );
-                            tracing::debug!(
-                                "Fallback: forwarding existing shared sockets: {}",
-                                existing_sockets
-                            );
-                        }
+        let encoded_sockets = match SOCKETS.lock() {
+            Ok(lock) => {
+                let shared_sockets = lock
+                    .iter()
+                    .map(|(key, value)| (*key, value))
+                    .collect::<Vec<_>>();
+                let socket_count = shared_sockets.len();
+                let encoded = bincode::encode_to_vec(shared_sockets, bincode::config::standard())
+                    .map(|bytes| BASE64_URL_SAFE.encode(bytes));
+                drop(lock);
+
+                match encoded {
+                    Ok(encoded_sockets) => Some((encoded_sockets, socket_count)),
+                    Err(error) => {
+                        tracing::warn!("Failed to encode shared sockets: {}", error);
+                        None
                     }
                 }
             }
-            Err(e) => {
-                tracing::warn!("Failed to get shared sockets: {}", e);
-                // Fallback: try to forward existing environment variable if it exists
-                if let Ok(existing_sockets) = std::env::var(SHARED_SOCKETS_ENV_VAR) {
-                    env_vars.insert(SHARED_SOCKETS_ENV_VAR.to_string(), existing_sockets.clone());
-                    tracing::debug!(
-                        "Fallback: forwarding existing shared sockets: {}",
-                        existing_sockets
-                    );
-                }
+            Err(error) => {
+                tracing::warn!("Failed to lock shared sockets: {}", error);
+                None
             }
+        };
+
+        if let Some((encoded_sockets, socket_count)) = encoded_sockets {
+            env_vars.insert(SHARED_SOCKETS_ENV_VAR.to_string(), encoded_sockets.clone());
+            tracing::debug!(
+                "Encoded and forwarding {} shared sockets to child process: {}",
+                socket_count,
+                encoded_sockets
+            );
+        } else if let Ok(existing_sockets) = std::env::var(SHARED_SOCKETS_ENV_VAR) {
+            env_vars.insert(SHARED_SOCKETS_ENV_VAR.to_string(), existing_sockets.clone());
+            tracing::debug!(
+                "Fallback: forwarding existing shared sockets: {}",
+                existing_sockets
+            );
         }
 
         // Add resolved config for child process inheritance
