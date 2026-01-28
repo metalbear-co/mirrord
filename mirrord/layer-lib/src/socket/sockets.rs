@@ -105,7 +105,7 @@ pub fn i64_to_socket_descriptor(value: i64) -> SocketDescriptor {
 
 // Helper function to convert socket types to SocketKind
 #[cfg(windows)]
-fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
+pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
     use winapi::um::winsock2::{SOCK_DGRAM, SOCK_STREAM};
 
     if socket_type == SOCK_STREAM {
@@ -118,7 +118,7 @@ fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
 }
 
 #[cfg(unix)]
-fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
+pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
     use libc::{SOCK_DGRAM, SOCK_STREAM};
 
     if socket_type == SOCK_STREAM {
@@ -160,32 +160,6 @@ pub fn register_socket(socket: SocketDescriptor, domain: i32, socket_type: i32, 
 
     sockets.insert(socket, Arc::new(user_socket));
     tracing::info!("SocketManager: Registered socket {} with mirrord", socket);
-}
-
-/// Update the state of a managed socket
-pub fn set_socket_state(socket: SocketDescriptor, new_state: SocketState) {
-    let mut sockets = match SOCKETS.lock() {
-        Ok(sockets) => sockets,
-        Err(poisoned) => {
-            tracing::warn!(
-                "SocketManager: sockets mutex was poisoned during state update, attempting recovery"
-            );
-            poisoned.into_inner()
-        }
-    };
-
-    if let Some(socket_entry) = sockets.remove(&socket) {
-        let mut socket_inner = Arc::try_unwrap(socket_entry)
-            .expect("SocketManager: socket Arc unexpectedly shared during state update");
-        socket_inner.state = new_state;
-        sockets.insert(socket, Arc::new(socket_inner));
-        tracing::debug!("SocketManager: Updated socket {} state", socket);
-    } else {
-        tracing::warn!(
-            "SocketManager: Attempted to update state for unmanaged socket {}",
-            socket
-        );
-    }
 }
 
 /// Remove a socket from the managed collection

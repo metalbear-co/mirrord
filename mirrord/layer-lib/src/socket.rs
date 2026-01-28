@@ -39,7 +39,7 @@ use socket2::SockAddr;
 pub use sockets::{
     SHARED_SOCKETS_ENV_VAR, SOCKETS, SocketDescriptor, get_bound_address, get_connected_addresses,
     get_socket, get_socket_state, is_socket_in_state, is_socket_managed, register_socket,
-    remove_socket, set_socket_state,
+    remove_socket,
 };
 use tracing::warn;
 #[cfg(windows)]

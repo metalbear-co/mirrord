@@ -27,7 +27,7 @@ use winapi::{
     um::winsock2::{SOCKET, WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR},
 };
 
-use super::sockets::{set_socket_state, socket_descriptor_to_i64};
+use super::sockets::socket_descriptor_to_i64;
 #[cfg(windows)]
 use crate::socket::dns::windows::check_address_reachability;
 use crate::{
@@ -384,7 +384,7 @@ where
 pub fn connect_outgoing_common<F>(
     sockfd: SocketDescriptor,
     remote_address: SockAddr,
-    user_socket_info: Arc<UserSocket>,
+    mut user_socket_info: Arc<UserSocket>,
     protocol: NetProtocol,
     connect_fn: F,
 ) -> HookResult<ConnectResult>
@@ -401,7 +401,7 @@ where
     };
 
     // Closure that performs the connection with mirrord messaging.
-    let mut remote_connection = |remote_addr: SockAddr| -> HookResult<ConnectResult> {
+    let remote_connection = |remote_addr: SockAddr| -> HookResult<ConnectResult> {
         // Prepare this socket to be intercepted.
         let remote_address = SocketAddress::try_from(remote_addr.clone()).unwrap();
 
@@ -500,8 +500,8 @@ where
 
         trace!("we are connected {connected:#?}");
 
-        set_socket_state(sockfd, SocketState::Connected(connected));
-
+        Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
+        SOCKETS.lock()?.insert(sockfd, user_socket_info);
         Ok(connect_result)
     };
 

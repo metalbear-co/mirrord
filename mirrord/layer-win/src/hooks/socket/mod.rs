@@ -8,7 +8,11 @@ pub(crate) mod hostname;
 pub(crate) mod ops;
 pub(crate) mod utils;
 
-use std::{net::SocketAddr, ops::Not, sync::OnceLock};
+use std::{
+    net::SocketAddr,
+    ops::Not,
+    sync::{Arc, OnceLock},
+};
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_intproxy_protocol::{
@@ -19,21 +23,21 @@ use mirrord_layer_lib::{
     proxy_connection::make_proxy_request_with_response,
     setup::{LayerSetup, NetworkHookConfig, setup},
     socket::{
-        Bound, Connected, SocketAddrExt, SocketKind, SocketState,
+        Bound, Connected, SOCKETS, SocketAddrExt, SocketKind, SocketState, UserSocket,
         dns::{
             remote_dns_resolve_via_proxy,
             windows::{
                 MANAGED_ADDRINFO, free_managed_addrinfo, getaddrinfo, utils::ManagedAddrInfoAny,
             },
         },
-        get_bound_address, get_connected_addresses, get_socket, get_socket_state,
+        get_connected_addresses, get_socket, get_socket_state,
         hostname::remote_hostname_string,
         is_socket_in_state, is_socket_managed,
         ops::{ConnectResult, send_to},
-        register_socket, remove_socket, set_socket_state,
+        register_socket, remove_socket,
+        sockets::socket_kind_from_type,
     },
 };
-use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
 use winapi::{
     ctypes::c_void,
@@ -361,8 +365,8 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
     let original = BIND_ORIGINAL.get().unwrap();
 
     // Define bind function before early returns so it can be reused
-    let bind_fn = |socket: SOCKET, addr: *const SOCKADDR, addr_len: INT, reason: &str| -> INT {
-        let res = unsafe { original(socket, addr, addr_len) };
+    let bind_fn = |addr: *const SOCKADDR, addr_len: INT, reason: &str| -> INT {
+        let res = unsafe { original(s, addr, addr_len) };
 
         if res != ERROR_SUCCESS_I32 {
             tracing::error!("bind_detour -> {} failed", reason);
@@ -372,18 +376,11 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
 
         res
     };
-
-    // Early return for non-managed sockets
-    if !is_socket_managed(s) {
-        return bind_fn(s, name, namelen, "non-managed socket");
-    }
-
-    // Parse the requested address
     let requested_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
         None => {
             tracing::error!("bind_detour -> failed to convert address");
-            return bind_fn(s, name, namelen, "address parse error");
+            return bind_fn(name, namelen, "address parse error");
         }
     };
 
@@ -392,12 +389,31 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
         requested_addr
     );
 
+    let mut socket = {
+        let mut sockets = SOCKETS
+            .lock()
+            .expect("bind_detour -> failed to lock sockets for socket retrieval");
+
+        let Some(entry) = sockets.remove(&s) else {
+            // fallback / early return when the socket isn’t tracked
+            return bind_fn(name, namelen, "non-managed socket");
+        };
+
+        entry
+    };
+    if !matches!(socket.state, SocketState::Initialized) {
+        tracing::warn!(
+            "bind_detour -> socket {} is not in Initialized state, using original bind",
+            s
+        );
+        return bind_fn(name, namelen, "invalid socket state");
+    }
+
     // Check configuration-based early returns
     let incoming_config = setup().incoming_config();
-
     if incoming_config.ignore_localhost && requested_addr.ip().is_loopback() {
         tracing::debug!("bind_detour -> ignoring localhost bind");
-        return bind_fn(s, name, namelen, "localhost ignored");
+        return bind_fn(name, namelen, "localhost ignored");
     }
 
     // Determine the appropriate local binding address
@@ -408,13 +424,12 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
         Ok((storage, len)) => (storage, len),
         Err(e) => {
             tracing::error!("bind_detour -> failed to convert local address: {}", e);
-            return unsafe { original(s, name, namelen) };
+            return bind_fn(name, namelen, "address conversion error");
         }
     };
 
     // Attempt primary bind
     let bind_result = bind_fn(
-        s,
         &local_addr_storage as *const _ as *const SOCKADDR,
         local_addr_len,
         "primary bind",
@@ -442,19 +457,18 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
 
     // Get the actual bound address and update socket state
     let actual_bound_addr = unsafe { get_actual_bound_address(s, requested_addr) };
-
-    let bound = Bound {
-        requested_address: requested_addr,
-        address: actual_bound_addr,
-    };
-    set_socket_state(
-        s,
-        SocketState::Bound {
-            bound,
-            // Note(Daniel): not yet migrated "will_not_trigger_subscription" from unix layer bind
-            is_only_bound: false,
+    Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound {
+        bound: Bound {
+            requested_address: requested_addr,
+            address: actual_bound_addr,
         },
-    );
+        // Note(Daniel): not yet migrated "will_not_trigger_subscription" from unix layer bind
+        is_only_bound: false,
+    };
+    SOCKETS
+        .lock()
+        .expect("bind_detour -> failed to lock sockets for state update")
+        .insert(s, socket);
 
     tracing::debug!(
         "bind_detour -> socket {} bound locally to {} for requested {}",
@@ -473,29 +487,50 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
 
     // Start listening on the local socket first (like Unix layer)
     let original = LISTEN_ORIGINAL.get().unwrap();
-    let listen_result = unsafe { original(s, backlog) };
+    let listen_fn = |reason: &str| -> INT {
+        let res = unsafe { original(s, backlog) };
+
+        if res != ERROR_SUCCESS_I32 {
+            tracing::error!("listen_detour -> {} failed", reason);
+        } else {
+            tracing::debug!("listen_detour -> {} succeeded", reason);
+        }
+
+        res
+    };
+    let mut socket = {
+        let mut sockets = SOCKETS
+            .lock()
+            .expect("listen_detour -> failed to lock sockets for socket retrieval");
+
+        let Some(entry) = sockets.remove(&s) else {
+            // fallback / early return when the socket isn’t tracked
+            return listen_fn("non-managed socket");
+        };
+
+        entry
+    };
 
     // Check if this socket is managed by mirrord and get bound state
-    let bound_state = match get_socket_state(s) {
-        Some(SocketState::Bound {
+    let bound_state = match socket.state {
+        SocketState::Bound {
             bound,
             is_only_bound,
-        }) if is_only_bound.not() => bound,
+        } if is_only_bound.not() => bound,
         _ => {
             tracing::debug!(
                 "listen_detour -> socket {} is not in Bound state, using original listen",
                 s
             );
-            return listen_result;
+            return listen_fn("invalid socket state");
         }
     };
 
-    tracing::info!(
-        "listen_detour -> mirrord socket {} transitioning to listening on {} (requested: {})",
-        s,
-        bound_state.address,
-        bound_state.requested_address
-    );
+    let listen_result = listen_fn("expected listen");
+    if listen_result != ERROR_SUCCESS_I32 {
+        tracing::error!("listen_detour -> listen() failed");
+        return listen_result;
+    }
 
     // Check if incoming traffic is enabled
     if matches!(
@@ -511,11 +546,6 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
         return listen_result;
     }
 
-    if listen_result != ERROR_SUCCESS_I32 {
-        tracing::error!("listen_detour -> listen() failed");
-        return listen_result;
-    }
-
     // Register with the agent for incoming traffic (like Unix layer PortSubscribe)
     let mapped_port = setup()
         .incoming_config()
@@ -524,28 +554,23 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
         .copied()
         .unwrap_or_else(|| bound_state.requested_address.port());
 
-    let subscription = setup().incoming_mode().subscription(mapped_port);
-
-    let port_subscribe = PortSubscribe {
-        listening_on: bound_state.address,
-        subscription,
-    };
-
     // Make the request to the agent
-    match make_proxy_request_with_response(port_subscribe) {
+    match make_proxy_request_with_response(PortSubscribe {
+        listening_on: bound_state.address,
+        subscription: setup().incoming_mode().subscription(mapped_port),
+    }) {
         Ok(Ok(_)) => {
-            // Success - update socket state to listening
-            set_socket_state(s, SocketState::Listening(bound_state));
-
             // this log message is expected by some E2E tests
-            tracing::debug!("daemon subscribed port {}", bound_state.address.port());
-
-            tracing::info!(
-                "listen_detour -> socket {} now listening through mirrord agent on port {}",
-                s,
-                mapped_port
+            tracing::debug!(
+                "daemon subscribed port {}",
+                bound_state.requested_address.port()
             );
 
+            Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(bound_state);
+            SOCKETS
+                .lock()
+                .expect("listen_detour -> failed to lock sockets for state update")
+                .insert(s, socket);
             listen_result
         }
         Ok(Err(e)) => {
@@ -639,33 +664,51 @@ unsafe extern "system" fn accept_detour(
     // Call original accept first
     let original = ACCEPT_ORIGINAL.get().unwrap();
     let accepted_socket = unsafe { original(s, addr, addrlen) };
-
     if accepted_socket == INVALID_SOCKET {
+        tracing::error!("accept_detour -> original accept failed");
         return accepted_socket;
     }
-
-    // Wrap the accepted socket in RAII wrapper for automatic cleanup on error
-    let auto_close_socket = AutoCloseSocket::new(accepted_socket);
-
-    // Check if the listening socket is managed by mirrord
-    let bound_addr = match get_bound_address(s) {
-        Some(addr) => addr,
-        None => {
-            tracing::trace!("accept_detour -> socket {} not managed by mirrord", s);
-            return auto_close_socket.release();
-        }
-    };
-
-    // Check if listening socket is in listening state
-    if !is_socket_in_state(s, |state| matches!(state, SocketState::Listening(_))) {
-        tracing::trace!("accept_detour -> socket {} not in listening state", s);
-        return auto_close_socket.release();
-    }
-
     tracing::info!(
         "accept_detour -> accepted socket {} from mirrord-managed listener",
         accepted_socket
     );
+
+    // Wrap the accepted socket in RAII wrapper for automatic cleanup on error
+    let auto_close_socket = AutoCloseSocket::new(accepted_socket);
+    let (domain, protocol, type_, port, listener_address) = {
+        let sockets = SOCKETS
+            .lock()
+            .expect("accept_detour -> failed to lock sockets for socket retrieval");
+
+        let Some(socket) = sockets.get(&s) else {
+            tracing::warn!(
+                "accept_detour -> socket {} is not tracked, using original accept",
+                s
+            );
+            // fallback / early return when the socket isn’t tracked
+            return auto_close_socket.release();
+        };
+
+        match &socket.state {
+            SocketState::Listening(Bound {
+                requested_address,
+                address,
+            }) => (
+                socket.domain,
+                socket.protocol,
+                socket.type_,
+                requested_address.port(),
+                *address,
+            ),
+            _ => {
+                tracing::debug!(
+                    "listen_detour -> socket {} is not in Bound state, using original listen",
+                    s
+                );
+                return auto_close_socket.release();
+            }
+        }
+    };
 
     // Get peer address from the accepted connection (this will be intproxy's address)
     let peer_address = match utils::get_peer_address_from_socket(auto_close_socket.get()) {
@@ -679,20 +722,20 @@ unsafe extern "system" fn accept_detour(
     };
 
     // Make ConnMetadataRequest to get the real remote source address
-    let metadata_response = match make_proxy_request_with_response(ConnMetadataRequest {
-        listener_address: bound_addr,
+    let ConnMetadataResponse {
+        remote_source,
+        local_address,
+    } = match make_proxy_request_with_response(ConnMetadataRequest {
+        listener_address,
         peer_address,
     }) {
-        Ok(ConnMetadataResponse {
-            remote_source,
-            local_address,
-        }) => {
+        Ok(res) => {
             tracing::info!(
                 "accept_detour -> got metadata: remote_source={}, local_address={}",
-                remote_source,
-                local_address
+                res.remote_source,
+                res.local_address
             );
-            (remote_source, local_address)
+            res
         }
         Err(e) => {
             tracing::error!("accept_detour -> failed to get connection metadata: {}", e);
@@ -702,40 +745,21 @@ unsafe extern "system" fn accept_detour(
         }
     };
 
-    let (remote_source, _local_address) = metadata_response;
+    // Register the accepted socket with mirrord
+    let Ok(socket_kind) = socket_kind_from_type(type_) else {
+        tracing::warn!("Failed to create socket kind");
+        return auto_close_socket.release();
+    };
+    let state = SocketState::Connected(Connected {
+        connection_id: None,
+        remote_address: remote_source.into(),
+        local_address: Some(SocketAddr::new(local_address, port).into()),
+        layer_address: None,
+    });
+    let new_socket = UserSocket::new(domain, type_, protocol, state, socket_kind);
 
-    // Get socket information from the listening socket
-    if let Some(listening_socket) = get_socket(s) {
-        let socket_type = match listening_socket.kind {
-            SocketKind::Tcp(t) => t,
-            SocketKind::Udp(t) => t,
-        };
-
-        // Register the accepted socket with mirrord
-        let connected = Connected {
-            connection_id: None,
-            remote_address: remote_source.into(),
-            local_address: Some(SocketAddress::Ip(bound_addr)),
-            layer_address: None,
-        };
-
-        register_socket(
-            auto_close_socket.get(),
-            listening_socket.domain,
-            socket_type,
-            0,
-        );
-        set_socket_state(auto_close_socket.get(), SocketState::Connected(connected));
-
-        tracing::info!(
-            "accept_detour -> registered accepted socket {} with mirrord (peer: {}, local: {})",
-            auto_close_socket.get(),
-            remote_source,
-            bound_addr
-        );
-    }
-
-    // Fill in the address structure with the real remote address (not intproxy's address)
+    // fill_address - Fill in the address structure with the real remote address (not intproxy's
+    // address)
     if !addr.is_null() && !addrlen.is_null() {
         match unsafe { remote_source.copy_to(addr, addrlen) } {
             Ok(()) => {
@@ -749,6 +773,11 @@ unsafe extern "system" fn accept_detour(
             }
         }
     }
+
+    SOCKETS
+        .lock()
+        .expect("accept_detour -> failed to lock sockets for state update")
+        .insert(accepted_socket, Arc::new(new_socket));
 
     // Success! Release the socket from automatic cleanup and return it
     auto_close_socket.release()
