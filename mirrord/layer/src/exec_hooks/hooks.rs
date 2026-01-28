@@ -1,3 +1,5 @@
+use std::os::fd::AsRawFd;
+
 use base64::prelude::*;
 use libc::{c_char, c_int};
 #[cfg(not(target_os = "macos"))]
@@ -11,15 +13,16 @@ use crate::common::CheckedInto;
 #[cfg(target_os = "macos")]
 use crate::exec_utils::*;
 use crate::{
-    SOCKETS,
+    PROXY_CONNECTION, SOCKETS,
     detour::{Bypass, Detour},
     hooks::HookManager,
+    proxy_connection::FD_ENV_VAR,
     replace,
     socket::SHARED_SOCKETS_ENV_VAR,
 };
 
 /// Takes an [`Argv`] with the enviroment variables from an `exec` call, extending it with
-/// an encoded version of our [`SOCKETS`].
+/// an encoded version of our [`SOCKETS`] and [`FD_ENV_VAR`].
 ///
 /// The check for [`libc::FD_CLOEXEC`] is performed during the [`SOCKETS`] initialization
 /// by the child process.
@@ -40,7 +43,15 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
 
     drop(lock);
 
+    // SAFETY: Mutation only happens during init
+    #[allow(static_mut_refs)]
+    let conn_fd = unsafe { PROXY_CONNECTION.get() }
+        .unwrap()
+        .as_raw_fd()
+        .to_string();
+
     env_vars.insert_env(SHARED_SOCKETS_ENV_VAR, &encoded)?;
+    env_vars.insert_env(FD_ENV_VAR, &conn_fd)?;
 
     Detour::Success(env_vars)
 }
