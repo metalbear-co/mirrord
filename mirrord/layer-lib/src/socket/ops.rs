@@ -504,18 +504,7 @@ where
         SOCKETS.lock()?.insert(sockfd, user_socket_info);
         Ok(connect_result)
     };
-
-    // make sure user_socket_info provided is tracked in SOCKETS
-    // The Unix UDP send_to path temporarily removes the socket from SOCKETS before
-    // calling connect_outgoing_common; reinsert it here so state updates don't
-    // warn or fail with "unmanaged socket".
-    {
-        let mut sockets = SOCKETS.lock()?;
-        sockets
-            .entry(sockfd)
-            .or_insert_with(|| user_socket_info.clone());
-    }
-
+    
     let connect_result = if remote_address.is_unix() {
         remote_connection(remote_address)?
     } else {
