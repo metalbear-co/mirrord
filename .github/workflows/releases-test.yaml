@@ -31,13 +31,10 @@ jobs:
 
       - name: Check latest GitHub Release assets
         id: check
-        uses: actions/github-script@v7
         env:
           CHECK_TYPE: mirrord
-        with:
-          script: |
-            const script = require('./.github/workflows/scripts/check_release.js');
-            await script({ github, context, core, exec });
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash .github/workflows/scripts/check_release.sh
 
       # Hard failures: required assets missing or API failure
       - name: Notify Slack on REQUIRED asset failure
@@ -134,15 +131,11 @@ jobs:
 
       - name: Check latest Operator Release and Docker Image
         id: check
-        uses: actions/github-script@v7
         env:
           OPERATOR_REPO_TOKEN: ${{ secrets.OPERATOR_MONITOR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CHECK_TYPE: operator
-        with:
-          script: |
-            const script = require('./.github/workflows/scripts/check_release.js');
-            await script({ github, context, core, exec });
+        run: bash .github/workflows/scripts/check_release.sh
 
       - name: Notify Slack on FAILURE
         if: steps.check.outputs.ok != 'true'
