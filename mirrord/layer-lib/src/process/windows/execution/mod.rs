@@ -32,6 +32,7 @@ use winapi::{
 use super::sync::{LayerInitEvent, MIRRORD_LAYER_INIT_EVENT_NAME};
 use crate::{
     error::{LayerError, LayerResult, windows::WindowsError},
+    ide::is_ide_orchestrated,
     proxy_connection::PROXY_CONNECTION,
     setup::layer_setup,
     socket::sockets::SHARED_SOCKETS_ENV_VAR,
@@ -194,7 +195,12 @@ impl LayerManagedProcess {
                     LayerConfig::RESOLVED_CONFIG_ENV.to_string(),
                     resolved_config,
                 );
-            } else {
+            } else if !is_ide_orchestrated() {
+                // NOTE: skipped in ide-orchestrated mode since
+                // 1. initial execution has none of the flags necessary
+                // 2. future execution uses default-initialized config, and setting up envvars to
+                //    propagate is weird at this step.
+
                 // Fallback: try to encode current config if layer setup is available
                 // Use a safe approach that doesn't panic if setup isn't initialized
                 match std::panic::catch_unwind(|| layer_setup().layer_config().encode()) {
@@ -360,14 +366,18 @@ impl LayerManagedProcess {
         let creation_flags = caller_creation_flags | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED;
 
         // Configure startup info for console handle inheritance - this ensures child processes
-        // can inherit console handles for proper stdout/stderr output visibility
-        caller_startup_info.dwFlags |= STARTF_USESTDHANDLES;
-        caller_startup_info.hStdInput =
-            Self::ensure_handle_inheritable(unsafe { GetStdHandle(STD_INPUT_HANDLE) })?;
-        caller_startup_info.hStdOutput =
-            Self::ensure_handle_inheritable(unsafe { GetStdHandle(STD_OUTPUT_HANDLE) })?;
-        caller_startup_info.hStdError =
-            Self::ensure_handle_inheritable(unsafe { GetStdHandle(STD_ERROR_HANDLE) })?;
+        // can inherit console handles for proper stdout/stderr output visibility.
+        // Skip this for IDE-orchestrated mode as the process tree, as later down the line, cmd.exe
+        // does not support operating with the parent process std handles.
+        if !is_ide_orchestrated() {
+            caller_startup_info.dwFlags |= STARTF_USESTDHANDLES;
+            caller_startup_info.hStdInput =
+                Self::ensure_handle_inheritable(unsafe { GetStdHandle(STD_INPUT_HANDLE) })?;
+            caller_startup_info.hStdOutput =
+                Self::ensure_handle_inheritable(unsafe { GetStdHandle(STD_OUTPUT_HANDLE) })?;
+            caller_startup_info.hStdError =
+                Self::ensure_handle_inheritable(unsafe { GetStdHandle(STD_ERROR_HANDLE) })?;
+        }
 
         // Call the original function with processed parameters
         let process_info = create_process_fn(creation_flags, environment_ptr, caller_startup_info)?;
@@ -403,19 +413,16 @@ impl LayerManagedProcess {
             .inject(payload_path)
             .map_err(|e| LayerError::DllInjection(format!("Failed to inject DLL: {}", e)))?;
 
-        match parent_event.wait_for_signal(Some(LAYER_INIT_TIMEOUT_MS))? {
-            true => {
-                // Layer initialization successful - report ready!
-                if let Some(mut progress) = progress {
-                    progress.success(Some("Ready!"));
-                }
+        if parent_event.wait_for_signal(Some(LAYER_INIT_TIMEOUT_MS))? {
+            // Layer initialization successful - report ready!
+            if let Some(mut progress) = progress {
+                progress.success(Some("Ready!"));
             }
-            false => {
-                return Err(LayerError::ProcessSynchronization(format!(
-                    "Layer initialization timed out after {}ms for process {}",
-                    LAYER_INIT_TIMEOUT_MS, self.process_info.dwProcessId
-                )));
-            }
+        } else {
+            return Err(LayerError::ProcessSynchronization(format!(
+                "Layer initialization timed out after {}ms for process {}",
+                LAYER_INIT_TIMEOUT_MS, self.process_info.dwProcessId
+            )));
         }
 
         // Resume the main thread - ResumeThread returns the previous suspend count

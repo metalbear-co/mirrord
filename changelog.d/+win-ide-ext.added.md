@@ -1,0 +1,1 @@
+Added CLI and layer-side support for IDE extensions on Windows.
