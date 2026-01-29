@@ -186,7 +186,15 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
             </>
           )}
 
-          {currentStep === "config" && <div className="w-full" />}
+          {currentStep === "config" && (
+            <>
+              <Button variant="outline" onClick={goBack} className="gap-2">
+                <ChevronLeft className="h-4 w-4" />
+                Back
+              </Button>
+              <div />
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -1,16 +1,11 @@
 import { useToast } from "../../hooks/use-toast";
 import { useState, useContext } from "react";
-import { Copy, Save, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { Copy, Save, Download } from "lucide-react";
 import {
   Button,
   Label,
   Separator,
   Textarea,
-} from "@metalbear/ui";
-import {
-  Card,
-  CardContent,
-  CardFooter,
 } from "@metalbear/ui";
 import {
   getConfigString,
@@ -60,61 +55,48 @@ const ConfigTabs = () => {
     });
   };
 
-  const nextTab = () => {
-    if (currentTab === "target") setCurrentTab("network");
-    else if (currentTab === "network") setCurrentTab("export");
-  };
-
-  const prevTab = () => {
-    if (currentTab === "export") setCurrentTab("network");
-    else if (currentTab === "network") setCurrentTab("target");
-  };
-
   const targetNotSelected = (): boolean => {
     return typeof readCurrentTargetDetails(config).name !== "string";
   };
 
   return (
-    <Card className="border-[var(--border)] shadow-sm">
+    <div className="space-y-6">
       {/* Tab Navigation */}
-      <div className="flex border-b border-[var(--border)] px-6 pt-4">
+      <div className="flex border-b border-[var(--border)]">
         <button
           onClick={() => setCurrentTab("target")}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
             currentTab === "target"
               ? "border-primary text-primary"
               : "border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
           }`}
-          disabled={portConflicts}
         >
           Target
         </button>
         <button
           onClick={() => !targetNotSelected() && setCurrentTab("network")}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
             currentTab === "network"
               ? "border-primary text-primary"
               : "border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
           } ${targetNotSelected() ? "opacity-50 cursor-not-allowed" : ""}`}
-          disabled={targetNotSelected()}
         >
           Network
         </button>
         <button
           onClick={() => !targetNotSelected() && !portConflicts && setCurrentTab("export")}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
             currentTab === "export"
               ? "border-primary text-primary"
               : "border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
           } ${targetNotSelected() || portConflicts ? "opacity-50 cursor-not-allowed" : ""}`}
-          disabled={targetNotSelected() || portConflicts}
         >
           Export
         </button>
       </div>
 
       {/* Tab Content */}
-      <CardContent className="pt-6">
+      <div>
         {currentTab === "target" && (
           <TargetTab setTargetPorts={setTargetPorts} />
         )}
@@ -201,32 +183,8 @@ const ConfigTabs = () => {
             </div>
           </div>
         )}
-      </CardContent>
-
-      {/* Navigation in CardFooter */}
-      <CardFooter className="flex items-center justify-between border-t border-[var(--border)] bg-[var(--muted)]/30">
-        <div>
-          {currentTab !== "target" && (
-            <Button variant="outline" onClick={prevTab} className="gap-2">
-              <ChevronLeft className="h-4 w-4" />
-              Back
-            </Button>
-          )}
-        </div>
-        <div>
-          {currentTab !== "export" && (
-            <Button
-              onClick={nextTab}
-              disabled={targetNotSelected() || portConflicts}
-              className="gap-2 shadow-brand hover:shadow-brand-hover"
-            >
-              Next
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-      </CardFooter>
-    </Card>
+      </div>
+    </div>
   );
 };
 
