@@ -93,9 +93,10 @@ const BoilerplateStep = () => {
               onClick={() => handleModeSelect(option.id)}
               className={`
                 w-full p-5 rounded-xl border text-left transition-all duration-200
-                ${isSelected
-                  ? "border-primary bg-primary/5 shadow-brand ring-1 ring-primary/20"
-                  : "border-[var(--border)] hover:border-primary/40 hover:bg-primary/5 hover:shadow-md active:scale-[0.99]"
+                ${
+                  isSelected
+                    ? "border-primary bg-primary/5 shadow-brand ring-1 ring-primary/20"
+                    : "border-[var(--border)] hover:border-primary/40 hover:bg-primary/5 hover:shadow-md active:scale-[0.99]"
                 }
               `}
             >
@@ -103,9 +104,10 @@ const BoilerplateStep = () => {
                 <div
                   className={`
                     w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors duration-200
-                    ${isSelected
-                      ? "bg-primary text-white shadow-brand"
-                      : "bg-[var(--muted)] text-[var(--muted-foreground)]"
+                    ${
+                      isSelected
+                        ? "bg-primary text-white shadow-brand"
+                        : "bg-[var(--muted)] text-[var(--muted-foreground)]"
                     }
                   `}
                 >
@@ -113,11 +115,16 @@ const BoilerplateStep = () => {
                 </div>
                 <div className="flex-grow min-w-0">
                   <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <span className={`font-semibold ${isSelected ? "text-primary" : "text-[var(--foreground)]"}`}>
+                    <span
+                      className={`font-semibold ${isSelected ? "text-primary" : "text-[var(--foreground)]"}`}
+                    >
                       {option.title}
                     </span>
                     {option.recommended && (
-                      <Badge variant="outline" className="text-xs bg-[var(--muted)] text-[var(--muted-foreground)] border-[var(--border)]">
+                      <Badge
+                        variant="outline"
+                        className="text-xs bg-[var(--muted)] text-[var(--muted-foreground)] border-[var(--border)]"
+                      >
                         Recommended
                       </Badge>
                     )}
@@ -137,7 +144,9 @@ const BoilerplateStep = () => {
                     ))}
                   </div>
                 </div>
-                <div className={`flex-shrink-0 transition-all duration-200 ${isSelected ? "opacity-100 scale-100" : "opacity-0 scale-75"}`}>
+                <div
+                  className={`flex-shrink-0 transition-all duration-200 ${isSelected ? "opacity-100 scale-100" : "opacity-0 scale-75"}`}
+                >
                   <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center">
                     <Check className="h-4 w-4 text-white" />
                   </div>

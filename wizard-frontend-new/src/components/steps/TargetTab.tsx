@@ -48,7 +48,10 @@ const TargetTab = ({
     if (!dropdownOpen) return;
 
     const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
         setDropdownOpen(false);
       }
     };
@@ -70,31 +73,37 @@ const TargetTab = ({
     queryFn: () =>
       fetch(window.location.origin + ALL_API_ROUTES.clusterDetails).then(
         async (res) =>
-          res.ok ? await res.json() : { namespaces: [], target_types: [] }
+          res.ok ? await res.json() : { namespaces: [], target_types: [] },
       ),
   });
 
   const availableNamespaces: string[] =
     clusterDetailsQuery.isLoading || clusterDetailsQuery.error
       ? []
-      : clusterDetailsQuery.data?.namespaces ?? [];
+      : (clusterDetailsQuery.data?.namespaces ?? []);
 
   const availableTargetTypes: string[] =
     clusterDetailsQuery.isLoading || clusterDetailsQuery.error
       ? []
-      : clusterDetailsQuery.data?.target_types ?? [];
+      : (clusterDetailsQuery.data?.target_types ?? []);
 
   const targetsQuery = useQuery<Target[]>({
     queryKey: ["targetDetails", namespace, targetType],
     queryFn: () =>
       fetch(
-        window.location.origin + ALL_API_ROUTES.targets(namespace, targetType === "all" ? undefined : targetType)
+        window.location.origin +
+          ALL_API_ROUTES.targets(
+            namespace,
+            targetType === "all" ? undefined : targetType,
+          ),
       ).then(async (res) => (res.ok ? await res.json() : [])),
     enabled: !!namespace,
   });
 
   const availableTargets: Target[] =
-    targetsQuery.isLoading || targetsQuery.error ? [] : targetsQuery.data ?? [];
+    targetsQuery.isLoading || targetsQuery.error
+      ? []
+      : (targetsQuery.data ?? []);
 
   const selectedTarget = readCurrentTargetDetails(config);
 
@@ -102,7 +111,7 @@ const TargetTab = ({
     const updated = updateConfigTarget(
       config,
       target.target_path,
-      target.target_namespace
+      target.target_namespace,
     );
     setTargetPorts(target.detected_ports);
     const updatedPorts = updateConfigPorts(target.detected_ports, updated);
@@ -111,7 +120,7 @@ const TargetTab = ({
   };
 
   const filteredTargets = availableTargets.filter((target) =>
-    target.target_path.toLowerCase().includes(targetSearchText.toLowerCase())
+    target.target_path.toLowerCase().includes(targetSearchText.toLowerCase()),
   );
 
   return (
@@ -187,7 +196,10 @@ const TargetTab = ({
               {selectedTarget.name ? (
                 <span className="flex items-center gap-2">
                   <span className="font-medium">{selectedTarget.name}</span>
-                  <Badge variant="outline" className="text-xs bg-primary/5 border-primary/20 text-primary">
+                  <Badge
+                    variant="outline"
+                    className="text-xs bg-primary/5 border-primary/20 text-primary"
+                  >
                     {selectedTarget.type}
                   </Badge>
                 </span>
@@ -196,7 +208,9 @@ const TargetTab = ({
                   Select a target...
                 </span>
               )}
-              <ChevronDown className={`h-4 w-4 text-[var(--muted-foreground)] transition-transform duration-200 ${dropdownOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown
+                className={`h-4 w-4 text-[var(--muted-foreground)] transition-transform duration-200 ${dropdownOpen ? "rotate-180" : ""}`}
+              />
             </Button>
 
             {dropdownOpen && (
@@ -217,31 +231,40 @@ const TargetTab = ({
                   {targetsQuery.isLoading ? (
                     <div className="p-6 text-center">
                       <div className="w-6 h-6 spinner mx-auto mb-2" />
-                      <p className="text-sm text-[var(--muted-foreground)]">Loading targets...</p>
+                      <p className="text-sm text-[var(--muted-foreground)]">
+                        Loading targets...
+                      </p>
                     </div>
                   ) : filteredTargets.length === 0 ? (
                     <div className="p-6 text-center bg-[var(--muted)]/20 m-2 rounded-lg">
                       <Server className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2 opacity-50" />
-                      <p className="text-sm text-[var(--muted-foreground)]">No targets found</p>
+                      <p className="text-sm text-[var(--muted-foreground)]">
+                        No targets found
+                      </p>
                     </div>
                   ) : (
                     <div className="p-2">
                       {filteredTargets.map((target) => {
-                        const isSelected = selectedTarget.name === target.target_path.split("/")[1];
+                        const isSelected =
+                          selectedTarget.name ===
+                          target.target_path.split("/")[1];
                         return (
                           <div
                             key={`${target.target_namespace}/${target.target_path}`}
                             className={`
                               w-full flex items-center justify-between p-3 rounded-lg transition-all duration-150 cursor-pointer
-                              ${isSelected
-                                ? "bg-primary/10 border border-primary/20"
-                                : "hover:bg-[var(--muted)]/50"
+                              ${
+                                isSelected
+                                  ? "bg-primary/10 border border-primary/20"
+                                  : "hover:bg-[var(--muted)]/50"
                               }
                             `}
                             onClick={() => handleTargetSelect(target)}
                           >
                             <div className="flex items-center gap-3">
-                              <span className={`font-medium ${isSelected ? "text-primary" : "text-[var(--foreground)]"}`}>
+                              <span
+                                className={`font-medium ${isSelected ? "text-primary" : "text-[var(--foreground)]"}`}
+                              >
                                 {target.target_path.split("/")[1]}
                               </span>
                               <Badge

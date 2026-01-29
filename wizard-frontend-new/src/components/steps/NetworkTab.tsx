@@ -197,16 +197,21 @@ const NetworkTab = ({
           />
         </div>
 
-        <div className={incomingDisabled ? "opacity-50 pointer-events-none" : ""}>
+        <div
+          className={incomingDisabled ? "opacity-50 pointer-events-none" : ""}
+        >
           <div className="space-y-6 pt-4">
             {/* Traffic Filtering */}
             {readBoilerplateType(config) !== "replace" && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="text-base font-semibold">Traffic Filtering</h4>
+                    <h4 className="text-base font-semibold">
+                      Traffic Filtering
+                    </h4>
                     <p className="text-sm text-[var(--muted-foreground)]">
-                      Steal a subset of traffic by specifying HTTP header or path filters
+                      Steal a subset of traffic by specifying HTTP header or
+                      path filters
                     </p>
                   </div>
                   <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--muted)]/30">
@@ -293,14 +298,20 @@ const NetworkTab = ({
                             >
                               <div className="flex items-center space-x-2">
                                 <RadioGroupItem value="all" id="and" />
-                                <Label htmlFor="and" className="text-sm font-normal cursor-pointer">
+                                <Label
+                                  htmlFor="and"
+                                  className="text-sm font-normal cursor-pointer"
+                                >
                                   <strong>All</strong> - Match all specified
                                   filters
                                 </Label>
                               </div>
                               <div className="flex items-center space-x-2">
                                 <RadioGroupItem value="any" id="or" />
-                                <Label htmlFor="or" className="text-sm font-normal cursor-pointer">
+                                <Label
+                                  htmlFor="or"
+                                  className="text-sm font-normal cursor-pointer"
+                                >
                                   <strong>Any</strong> - Match any specified
                                   filter
                                 </Label>
@@ -319,7 +330,9 @@ const NetworkTab = ({
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="text-base font-semibold">Port Configuration</h4>
+                  <h4 className="text-base font-semibold">
+                    Port Configuration
+                  </h4>
                   <p className="text-sm text-[var(--muted-foreground)]">
                     {readBoilerplateType(config) === "replace"
                       ? "Add port mappings for ports that differ locally and remotely"
@@ -341,7 +354,8 @@ const NetworkTab = ({
               {togglePortsEnabled && (
                 <div className="space-y-4 pl-4 border-l-2 border-primary/20">
                   <p className="text-xs text-[var(--muted-foreground)]">
-                    {targetPorts.length} ports were detected automatically in the target.
+                    {targetPorts.length} ports were detected automatically in
+                    the target.
                   </p>
                   <div className="space-y-3">
                     {readCurrentPorts(config).length > 0 && (
@@ -357,7 +371,8 @@ const NetworkTab = ({
                               Local Port
                             </Label>
                           </div>
-                          <div className="w-8" /> {/* Spacer for delete button */}
+                          <div className="w-8" />{" "}
+                          {/* Spacer for delete button */}
                         </div>
                       </div>
                     )}

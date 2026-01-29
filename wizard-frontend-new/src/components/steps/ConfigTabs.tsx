@@ -1,12 +1,7 @@
 import { useToast } from "../../hooks/use-toast";
 import { useState, useContext, useEffect } from "react";
 import { Copy, Save, Download } from "lucide-react";
-import {
-  Button,
-  Label,
-  Separator,
-  Textarea,
-} from "@metalbear/ui";
+import { Button, Label, Separator, Textarea } from "@metalbear/ui";
 import {
   getConfigString,
   readCurrentTargetDetails,
@@ -25,7 +20,11 @@ interface ConfigTabsProps {
   onCanAdvanceChange: (canAdvance: boolean) => void;
 }
 
-const ConfigTabs = ({ currentTab, onTabChange, onCanAdvanceChange }: ConfigTabsProps) => {
+const ConfigTabs = ({
+  currentTab,
+  onTabChange,
+  onCanAdvanceChange,
+}: ConfigTabsProps) => {
   const { config } = useContext(ConfigDataContext)!;
   const [savedIncoming, setSavedIncoming] =
     useState<ToggleableConfigFor_IncomingFileConfig>(readIncoming(config));
@@ -95,7 +94,9 @@ const ConfigTabs = ({ currentTab, onTabChange, onCanAdvanceChange }: ConfigTabsP
           Network
         </button>
         <button
-          onClick={() => !targetNotSelected() && !portConflicts && onTabChange("export")}
+          onClick={() =>
+            !targetNotSelected() && !portConflicts && onTabChange("export")
+          }
           className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
             currentTab === "export"
               ? "border-primary text-primary"

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -49,7 +49,11 @@
 }
 
 body {
-  font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+  font-family:
+    "Poppins",
+    system-ui,
+    -apple-system,
+    sans-serif;
   line-height: 1.5;
   font-weight: 400;
   color: var(--foreground);
@@ -61,7 +65,9 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
 }
 
 #root {
@@ -154,7 +160,8 @@ body {
 }
 
 @keyframes pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
@@ -228,7 +235,6 @@ body {
   background: var(--muted-foreground);
 }
 
-
 /* Brand shadows - using BRAND_PURPLE (#756DF3) from @metalbear/ui */
 .shadow-brand {
   box-shadow: 0 4px 14px -2px rgba(117, 109, 243, 0.25);
@@ -253,7 +259,6 @@ body {
 .animate-tab-in {
   animation: tabFadeIn 0.2s ease-out forwards;
 }
-
 
 /* Better spinner */
 .spinner {

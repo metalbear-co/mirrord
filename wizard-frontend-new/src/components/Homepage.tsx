@@ -29,11 +29,7 @@ const Homepage = () => {
           {/* Logo */}
           <div className="flex justify-center mb-8">
             <div className="p-4 rounded-2xl bg-primary/5 border border-primary/10">
-              <img
-                src={MirrordLogo}
-                alt="mirrord"
-                className="h-12"
-              />
+              <img src={MirrordLogo} alt="mirrord" className="h-12" />
             </div>
           </div>
 
@@ -43,7 +39,11 @@ const Homepage = () => {
               Configuration Wizard
             </h1>
             <p className="text-sm text-[var(--muted-foreground)] leading-relaxed max-w-xs mx-auto">
-              Generate a <code className="px-1.5 py-0.5 rounded bg-[var(--muted)] text-primary font-medium text-xs">mirrord.json</code> config file to connect your local environment to Kubernetes.
+              Generate a{" "}
+              <code className="px-1.5 py-0.5 rounded bg-[var(--muted)] text-primary font-medium text-xs">
+                mirrord.json
+              </code>{" "}
+              config file to connect your local environment to Kubernetes.
             </p>
           </div>
 

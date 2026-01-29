@@ -29,7 +29,9 @@ class ErrorBoundary extends React.Component<Props, State> {
       return (
         this.props.fallback || (
           <div className="p-4 bg-destructive/10 border border-destructive rounded-lg">
-            <h3 className="font-semibold text-destructive">Something went wrong</h3>
+            <h3 className="font-semibold text-destructive">
+              Something went wrong
+            </h3>
             <p className="text-sm text-[var(--muted-foreground)] mt-1">
               {this.state.error?.message}
             </p>

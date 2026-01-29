@@ -5,7 +5,7 @@ import {
   LIGHT_BORDER,
   DARK_BORDER,
   DARK_CARD,
-} from '@metalbear/ui';
+} from "@metalbear/ui";
 
 export { brandColors, lightModeColors, darkModeColors };
 
@@ -13,9 +13,9 @@ export const themeColors = {
   light: {
     background: lightModeColors.background,
     foreground: lightModeColors.foreground,
-    card: '#FFFFFF',
+    card: "#FFFFFF",
     muted: lightModeColors.muted,
-    'muted-foreground': '#6b6b80',
+    "muted-foreground": "#6b6b80",
     border: LIGHT_BORDER,
     primary: lightModeColors.primary,
     secondary: lightModeColors.secondary,
@@ -26,7 +26,7 @@ export const themeColors = {
     foreground: darkModeColors.foreground,
     card: DARK_CARD,
     muted: darkModeColors.muted,
-    'muted-foreground': '#a8a8c0',
+    "muted-foreground": "#a8a8c0",
     border: DARK_BORDER,
     primary: brandColors.purple,
     secondary: brandColors.yellow,
@@ -43,8 +43,8 @@ export function applyTheme(isDark: boolean): void {
   });
 
   if (isDark) {
-    root.classList.add('dark');
+    root.classList.add("dark");
   } else {
-    root.classList.remove('dark');
+    root.classList.remove("dark");
   }
 }

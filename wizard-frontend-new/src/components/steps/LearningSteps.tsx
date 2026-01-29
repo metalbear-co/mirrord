@@ -20,9 +20,10 @@ const steps: Step[] = [
     content: (
       <div className="space-y-4">
         <p className="text-sm text-[var(--foreground)] leading-relaxed">
-          <strong>mirrord</strong> lets you run your local process in the context of a
-          Kubernetes cluster. Instead of deploying your code to test it, you can
-          develop and debug locally while connected to your cloud environment.
+          <strong>mirrord</strong> lets you run your local process in the
+          context of a Kubernetes cluster. Instead of deploying your code to
+          test it, you can develop and debug locally while connected to your
+          cloud environment.
         </p>
         <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">
           This means faster development cycles, real environment testing, and no
@@ -36,8 +37,8 @@ const steps: Step[] = [
     content: (
       <div className="space-y-4">
         <p className="text-sm text-[var(--foreground)] leading-relaxed">
-          mirrord intercepts system calls from your local process and forwards them
-          to a remote pod in your Kubernetes cluster.
+          mirrord intercepts system calls from your local process and forwards
+          them to a remote pod in your Kubernetes cluster.
         </p>
         <img
           src={mirrordArchitecture}
@@ -64,16 +65,20 @@ const steps: Step[] = [
             <div>
               <strong className="text-[var(--foreground)]">Mirror</strong>
               <span className="text-[var(--muted-foreground)]">
-                {" "}— Copy traffic without affecting the remote service
+                {" "}
+                — Copy traffic without affecting the remote service
               </span>
             </div>
           </li>
           <li className="flex gap-3 text-sm">
             <span className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
             <div>
-              <strong className="text-[var(--foreground)]">Steal (Filter)</strong>
+              <strong className="text-[var(--foreground)]">
+                Steal (Filter)
+              </strong>
               <span className="text-[var(--muted-foreground)]">
-                {" "}— Redirect specific traffic based on headers or paths
+                {" "}
+                — Redirect specific traffic based on headers or paths
               </span>
             </div>
           </li>
@@ -82,7 +87,8 @@ const steps: Step[] = [
             <div>
               <strong className="text-[var(--foreground)]">Replace</strong>
               <span className="text-[var(--muted-foreground)]">
-                {" "}— Fully replace the remote service with your local process
+                {" "}
+                — Fully replace the remote service with your local process
               </span>
             </div>
           </li>
@@ -109,11 +115,15 @@ const steps: Step[] = [
           </li>
           <li className="flex gap-2">
             <span className="text-primary font-semibold">2.</span>
-            <span className="text-[var(--foreground)]">Run with mirrord to test in cluster context</span>
+            <span className="text-[var(--foreground)]">
+              Run with mirrord to test in cluster context
+            </span>
           </li>
           <li className="flex gap-2">
             <span className="text-primary font-semibold">3.</span>
-            <span className="text-[var(--foreground)]">Debug and iterate instantly</span>
+            <span className="text-[var(--foreground)]">
+              Debug and iterate instantly
+            </span>
           </li>
         </ol>
       </div>
@@ -124,8 +134,8 @@ const steps: Step[] = [
     content: (
       <div className="space-y-4">
         <p className="text-sm text-[var(--foreground)] leading-relaxed">
-          mirrord uses a JSON configuration file to define how it connects to your
-          cluster and handles traffic.
+          mirrord uses a JSON configuration file to define how it connects to
+          your cluster and handles traffic.
         </p>
         <div className="bg-[var(--muted)] rounded-lg p-4 font-mono text-xs">
           <pre className="text-[var(--foreground)] overflow-x-auto">{`{
@@ -222,11 +232,18 @@ const LearningSteps = ({ onComplete, onSkip }: LearningStepsProps) => {
         </div>
         <div className="flex items-center gap-3">
           {!isLastStep && (
-            <Button variant="ghost" onClick={onSkip} className="text-[var(--muted-foreground)]">
+            <Button
+              variant="ghost"
+              onClick={onSkip}
+              className="text-[var(--muted-foreground)]"
+            >
               Skip
             </Button>
           )}
-          <Button onClick={next} className="gap-2 shadow-brand hover:shadow-brand-hover">
+          <Button
+            onClick={next}
+            className="gap-2 shadow-brand hover:shadow-brand-hover"
+          >
             {isLastStep ? "Start Configuration" : "Next"}
             {!isLastStep && <ChevronRight className="h-4 w-4" />}
           </Button>

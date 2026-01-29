@@ -54,7 +54,10 @@ export const AddNewFilter = ({
   };
 
   return (
-    <div key="addfilter" className="border border-[var(--border)] rounded-lg p-3 space-y-3">
+    <div
+      key="addfilter"
+      className="border border-[var(--border)] rounded-lg p-3 space-y-3"
+    >
       <form onSubmit={handleOnSubmit} className="flex items-center gap-3">
         <Select
           value={inputMatching}

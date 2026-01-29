@@ -26,7 +26,8 @@ const modeColors: Record<string, string> = {
   steal: "bg-secondary/20 text-secondary-foreground border-secondary/30",
   mirror: "bg-primary/10 text-primary border-primary/20",
   replace: "bg-destructive/10 text-destructive border-destructive/20",
-  custom: "bg-[var(--muted)] text-[var(--muted-foreground)] border-[var(--border)]",
+  custom:
+    "bg-[var(--muted)] text-[var(--muted-foreground)] border-[var(--border)]",
 };
 
 import BoilerplateStep from "./steps/BoilerplateStep";
@@ -47,7 +48,7 @@ type ConfigTab = "target" | "network" | "export";
 const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
   const { config, setConfig } = useContext(ConfigDataContext)!;
   const [currentStep, setCurrentStep] = useState<WizardStep>(
-    startWithLearning ? "learning" : "boilerplate"
+    startWithLearning ? "learning" : "boilerplate",
   );
   const [learningComplete, setLearningComplete] = useState(false);
   const [currentTab, setCurrentTab] = useState<ConfigTab>("target");
@@ -115,9 +116,17 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
       case "learning":
         return { title: "Learn mirrord", step: 1, total: 3 };
       case "boilerplate":
-        return { title: "Choose Mode", step: learningComplete ? 2 : 1, total: learningComplete ? 3 : 2 };
+        return {
+          title: "Choose Mode",
+          step: learningComplete ? 2 : 1,
+          total: learningComplete ? 3 : 2,
+        };
       case "config":
-        return { title: "Configure", step: learningComplete ? 3 : 2, total: learningComplete ? 3 : 2 };
+        return {
+          title: "Configure",
+          step: learningComplete ? 3 : 2,
+          total: learningComplete ? 3 : 2,
+        };
       default:
         return { title: "", step: 0, total: 0 };
     }
@@ -126,7 +135,10 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
   const stepInfo = getStepInfo();
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen: boolean) => !isOpen && handleClose()}>
+    <Dialog
+      open={open}
+      onOpenChange={(isOpen: boolean) => !isOpen && handleClose()}
+    >
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-[var(--card)] border border-[var(--border)] shadow-xl [&>button]:hidden">
         <DialogHeader className="border-b border-[var(--border)] pb-4 -mx-6 px-6">
           <div className="flex items-center justify-between">
@@ -153,8 +165,8 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
                       index + 1 === stepInfo.step
                         ? "w-6 bg-primary"
                         : index + 1 < stepInfo.step
-                        ? "w-2 bg-primary/50"
-                        : "w-2 bg-[var(--muted)]"
+                          ? "w-2 bg-primary/50"
+                          : "w-2 bg-[var(--muted)]"
                     }`}
                   />
                 ))}
@@ -173,11 +185,12 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
 
         <div className="py-6">
           {currentStep === "learning" && (
-            <LearningSteps onComplete={handleLearningComplete} onSkip={goToConfig} />
+            <LearningSteps
+              onComplete={handleLearningComplete}
+              onSkip={goToConfig}
+            />
           )}
-          {currentStep === "boilerplate" && (
-            <BoilerplateStep />
-          )}
+          {currentStep === "boilerplate" && <BoilerplateStep />}
           {currentStep === "config" && (
             <ErrorBoundary>
               <ConfigTabs
@@ -192,45 +205,51 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
         {currentStep !== "learning" && (
           <DialogFooter className="flex justify-between sm:justify-between border-t border-[var(--border)] pt-4 -mx-6 px-6">
             {currentStep === "boilerplate" && (
-            <>
-              <div>
-                {(currentStep === "boilerplate" && learningComplete) && (
-                  <Button variant="outline" onClick={goBack} className="gap-2">
-                    <ChevronLeft className="h-4 w-4" />
-                    Back
-                  </Button>
-                )}
-              </div>
-              <div>
-                {currentStep === "boilerplate" && (
-                  <Button onClick={goFromBoilerplate} className="gap-2 shadow-brand hover:shadow-brand-hover">
-                    Continue
+              <>
+                <div>
+                  {currentStep === "boilerplate" && learningComplete && (
+                    <Button
+                      variant="outline"
+                      onClick={goBack}
+                      className="gap-2"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Back
+                    </Button>
+                  )}
+                </div>
+                <div>
+                  {currentStep === "boilerplate" && (
+                    <Button
+                      onClick={goFromBoilerplate}
+                      className="gap-2 shadow-brand hover:shadow-brand-hover"
+                    >
+                      Continue
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </>
+            )}
+
+            {currentStep === "config" && (
+              <>
+                <Button variant="outline" onClick={goBack} className="gap-2">
+                  <ChevronLeft className="h-4 w-4" />
+                  Back
+                </Button>
+                {currentTab !== "export" && canAdvanceTab && (
+                  <Button
+                    onClick={goNext}
+                    className="gap-2 shadow-brand hover:shadow-brand-hover"
+                  >
+                    Next
                     <ChevronRight className="h-4 w-4" />
                   </Button>
                 )}
-              </div>
-            </>
-          )}
-
-
-          {currentStep === "config" && (
-            <>
-              <Button variant="outline" onClick={goBack} className="gap-2">
-                <ChevronLeft className="h-4 w-4" />
-                Back
-              </Button>
-              {currentTab !== "export" && canAdvanceTab && (
-                <Button
-                  onClick={goNext}
-                  className="gap-2 shadow-brand hover:shadow-brand-hover"
-                >
-                  Next
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              )}
-              {(currentTab === "export" || !canAdvanceTab) && <div />}
-            </>
-          )}
+                {(currentTab === "export" || !canAdvanceTab) && <div />}
+              </>
+            )}
           </DialogFooter>
         )}
       </DialogContent>
