@@ -216,11 +216,11 @@ const TargetTab = ({
                 <div className="max-h-60 overflow-y-auto">
                   {targetsQuery.isLoading ? (
                     <div className="p-6 text-center">
-                      <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                      <div className="w-6 h-6 spinner mx-auto mb-2" />
                       <p className="text-sm text-[var(--muted-foreground)]">Loading targets...</p>
                     </div>
                   ) : filteredTargets.length === 0 ? (
-                    <div className="p-6 text-center">
+                    <div className="p-6 text-center bg-[var(--muted)]/20 m-2 rounded-lg">
                       <Server className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2 opacity-50" />
                       <p className="text-sm text-[var(--muted-foreground)]">No targets found</p>
                     </div>
@@ -265,8 +265,8 @@ const TargetTab = ({
           </div>
 
           {!config.target && (
-            <p className="text-sm text-destructive flex items-center gap-2 mt-3 p-3 rounded-lg bg-destructive/5 border border-destructive/10">
-              <AlertCircle className="h-4 w-4 flex-shrink-0" />
+            <p className="text-sm text-destructive flex items-center gap-2 mt-3 p-3 rounded-lg bg-gradient-to-r from-destructive/10 to-destructive/5 border-l-2 border-l-destructive border border-destructive/10">
+              <AlertCircle className="h-4 w-4 flex-shrink-0 animate-pulse" />
               Please select a target to continue
             </p>
           )}

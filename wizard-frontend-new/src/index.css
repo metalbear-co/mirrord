@@ -236,3 +236,63 @@ body {
 .gradient-subtle {
   background: linear-gradient(180deg, var(--background) 0%, var(--muted) 100%);
 }
+
+/* Brand shadows */
+.shadow-brand {
+  box-shadow: 0 4px 14px -2px rgba(117, 109, 243, 0.25);
+}
+
+.shadow-brand-hover {
+  box-shadow: 0 8px 20px -4px rgba(117, 109, 243, 0.35);
+}
+
+/* Tab content animation */
+@keyframes tabFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-tab-in {
+  animation: tabFadeIn 0.2s ease-out forwards;
+}
+
+/* Loading shimmer */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--muted) 25%,
+    var(--border) 50%,
+    var(--muted) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Better spinner */
+.spinner {
+  border: 2px solid var(--muted);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

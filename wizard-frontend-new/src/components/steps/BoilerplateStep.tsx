@@ -94,8 +94,8 @@ const BoilerplateStep = () => {
               className={`
                 w-full p-5 rounded-xl border text-left transition-all duration-200 animate-fade-in
                 ${isSelected
-                  ? "border-primary bg-primary/5 shadow-brand"
-                  : "border-[var(--border)] hover:border-primary/30 hover:bg-[var(--muted)]/30 hover:shadow-sm"
+                  ? "border-primary bg-primary/5 shadow-brand ring-1 ring-primary/20"
+                  : "border-[var(--border)] hover:border-primary/40 hover:bg-primary/5 hover:shadow-md active:scale-[0.99]"
                 }
               `}
               style={{ animationDelay: `${index * 50}ms` }}

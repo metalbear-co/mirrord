@@ -225,7 +225,8 @@ const NetworkTab = ({
               })}
             </div>
           ) : (
-            <div className="p-4 text-center text-sm text-[var(--muted-foreground)] bg-[var(--muted)]/30 rounded-lg">
+            <div className="p-5 text-center text-sm text-[var(--muted-foreground)] bg-gradient-to-br from-primary/5 to-transparent rounded-lg border border-dashed border-[var(--border)]">
+              <Network className="h-6 w-6 mx-auto mb-2 opacity-40" />
               {isReplaceMode
                 ? "All traffic will be intercepted in replace mode"
                 : "No ports configured. Add ports above or they will be auto-detected."}
@@ -343,7 +344,7 @@ const NetworkTab = ({
                   ))}
                 </div>
               ) : (
-                <div className="p-4 text-center text-sm text-[var(--muted-foreground)] bg-[var(--muted)]/30 rounded-lg">
+                <div className="p-5 text-center text-sm text-[var(--muted-foreground)] bg-gradient-to-br from-secondary/5 to-transparent rounded-lg border border-dashed border-[var(--border)]">
                   No filters configured. All matching traffic will be stolen.
                 </div>
               )}

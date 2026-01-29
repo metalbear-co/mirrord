@@ -107,7 +107,7 @@ const ConfigTabs = ({ currentTab, onTabChange, onCanAdvanceChange }: ConfigTabsP
       </div>
 
       {/* Tab Content */}
-      <div>
+      <div key={currentTab} className="animate-tab-in">
         {currentTab === "target" && (
           <TargetTab setTargetPorts={setTargetPorts} />
         )}
