@@ -32,9 +32,11 @@ use mirrord_layer_lib::{
                 MANAGED_ADDRINFO, free_managed_addrinfo, getaddrinfo, utils::ManagedAddrInfoAny,
             },
         },
-        get_connected_addresses, is_socket_managed, register_socket, remove_socket,
+        get_connected_addresses,
         hostname::remote_hostname_string,
+        is_socket_managed,
         ops::{ConnectResult, send_to},
+        register_socket, remove_socket,
         sockets::socket_kind_from_type,
     },
 };
@@ -45,8 +47,8 @@ use winapi::{
         minwindef::{BOOL, FALSE, INT, TRUE},
         winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA},
         ws2def::{
-            ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SIO_GET_EXTENSION_FUNCTION_POINTER, SOCKADDR,
-            LPWSABUF,
+            ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, LPWSABUF, SIO_GET_EXTENSION_FUNCTION_POINTER,
+            SOCKADDR,
         },
     },
     um::{
@@ -55,7 +57,7 @@ use winapi::{
         winsock2::{
             HOSTENT, INVALID_SOCKET, IPPORT_RESERVED, LPWSAOVERLAPPED_COMPLETION_ROUTINE, SOCKET,
             SOCKET_ERROR, WSA_IO_PENDING, WSAEACCES, WSAECONNABORTED, WSAECONNREFUSED, WSAEFAULT,
-            WSAGetLastError, WSAOVERLAPPED, WSASetLastError, fd_set, timeval, WSASend,
+            WSAGetLastError, WSAOVERLAPPED, WSASend, WSASetLastError,
         },
     },
 };
@@ -141,27 +143,6 @@ type GetComputerNameExWType =
     unsafe extern "system" fn(name_type: u32, lpBuffer: *mut u16, nSize: *mut u32) -> BOOL;
 static GET_COMPUTER_NAME_EX_W_ORIGINAL: OnceLock<&GetComputerNameExWType> = OnceLock::new();
 
-type WSAStartupType = unsafe extern "system" fn(wVersionRequested: u16, lpWSAData: *mut u8) -> i32;
-static WSA_STARTUP_ORIGINAL: OnceLock<&WSAStartupType> = OnceLock::new();
-
-// Add WSACleanup hook to complete Winsock lifecycle management
-type WSACleanupType = unsafe extern "system" fn() -> i32;
-static WSA_CLEANUP_ORIGINAL: OnceLock<&WSACleanupType> = OnceLock::new();
-
-// ioctlsocket for socket I/O control (used for non-blocking mode)
-type IoCtlSocketType = unsafe extern "system" fn(s: SOCKET, cmd: i32, argp: *mut u32) -> i32;
-static IOCTL_SOCKET_ORIGINAL: OnceLock<&IoCtlSocketType> = OnceLock::new();
-
-// select for socket readiness monitoring
-type SelectType = unsafe extern "system" fn(
-    nfds: i32,
-    readfds: *mut fd_set,
-    writefds: *mut fd_set,
-    exceptfds: *mut fd_set,
-    timeout: *const timeval,
-) -> i32;
-static SELECT_ORIGINAL: OnceLock<&SelectType> = OnceLock::new();
-
 type WSAIoctlType = unsafe extern "system" fn(
     s: SOCKET,
     dwIoControlCode: u32,
@@ -174,10 +155,6 @@ type WSAIoctlType = unsafe extern "system" fn(
     lpCompletionRoutine: LPWSAOVERLAPPED_COMPLETION_ROUTINE,
 ) -> INT;
 static WSA_IOCTL_ORIGINAL: OnceLock<&WSAIoctlType> = OnceLock::new();
-
-// WSAGetLastError for getting detailed error information
-type WSAGetLastErrorType = unsafe extern "system" fn() -> i32;
-static WSA_GET_LAST_ERROR_ORIGINAL: OnceLock<&WSAGetLastErrorType> = OnceLock::new();
 
 // WSASocket for advanced socket creation (used by Node.js internally)
 type WSASocketType = unsafe extern "system" fn(
@@ -222,28 +199,6 @@ type WSAAcceptType = unsafe extern "system" fn(
 ) -> SOCKET;
 static WSA_ACCEPT_ORIGINAL: OnceLock<&WSAAcceptType> = OnceLock::new();
 
-type WSASendType = unsafe extern "system" fn(
-    s: SOCKET,
-    lpBuffers: *mut u8,
-    dwBufferCount: u32,
-    lpNumberOfBytesSent: *mut u32,
-    dwFlags: u32,
-    lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8,
-) -> INT;
-static WSA_SEND_ORIGINAL: OnceLock<&WSASendType> = OnceLock::new();
-
-type WSARecvType = unsafe extern "system" fn(
-    s: SOCKET,
-    lpBuffers: *mut u8,
-    dwBufferCount: u32,
-    lpNumberOfBytesRecvd: *mut u32,
-    lpFlags: *mut u32,
-    lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8,
-) -> INT;
-static WSA_RECV_ORIGINAL: OnceLock<&WSARecvType> = OnceLock::new();
-
 type WSASendToType = unsafe extern "system" fn(
     s: SOCKET,
     lpBuffers: *mut u8,
@@ -256,36 +211,6 @@ type WSASendToType = unsafe extern "system" fn(
     lpCompletionRoutine: *mut u8,
 ) -> INT;
 static WSA_SEND_TO_ORIGINAL: OnceLock<&WSASendToType> = OnceLock::new();
-
-type WSARecvFromType = unsafe extern "system" fn(
-    s: SOCKET,
-    lpBuffers: *mut u8,
-    dwBufferCount: u32,
-    lpNumberOfBytesRecvd: *mut u32,
-    lpFlags: *mut u32,
-    lpFrom: *mut SOCKADDR,
-    lpFromlen: *mut INT,
-    lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8,
-) -> INT;
-static WSA_RECV_FROM_ORIGINAL: OnceLock<&WSARecvFromType> = OnceLock::new();
-
-// Data transfer function types
-type RecvType = unsafe extern "system" fn(s: SOCKET, buf: *mut i8, len: INT, flags: INT) -> INT;
-static RECV_ORIGINAL: OnceLock<&RecvType> = OnceLock::new();
-
-type SendType = unsafe extern "system" fn(s: SOCKET, buf: *const i8, len: INT, flags: INT) -> INT;
-static SEND_ORIGINAL: OnceLock<&SendType> = OnceLock::new();
-
-type RecvFromType = unsafe extern "system" fn(
-    s: SOCKET,
-    buf: *mut i8,
-    len: INT,
-    flags: INT,
-    from: *mut SOCKADDR,
-    fromlen: *mut INT,
-) -> INT;
-static RECV_FROM_ORIGINAL: OnceLock<&RecvFromType> = OnceLock::new();
 
 type SendToType = unsafe extern "system" fn(
     s: SOCKET,
@@ -300,28 +225,6 @@ static SEND_TO_ORIGINAL: OnceLock<&SendToType> = OnceLock::new();
 // Socket management function types
 type CloseSocketType = unsafe extern "system" fn(s: SOCKET) -> INT;
 static CLOSE_SOCKET_ORIGINAL: OnceLock<&CloseSocketType> = OnceLock::new();
-
-type ShutdownType = unsafe extern "system" fn(s: SOCKET, how: INT) -> INT;
-static SHUTDOWN_ORIGINAL: OnceLock<&ShutdownType> = OnceLock::new();
-
-// Socket option function types
-type SetSockOptType = unsafe extern "system" fn(
-    s: SOCKET,
-    level: INT,
-    optname: INT,
-    optval: *const i8,
-    optlen: INT,
-) -> INT;
-static SET_SOCK_OPT_ORIGINAL: OnceLock<&SetSockOptType> = OnceLock::new();
-
-type GetSockOptType = unsafe extern "system" fn(
-    s: SOCKET,
-    level: INT,
-    optname: INT,
-    optval: *mut i8,
-    optlen: *mut INT,
-) -> INT;
-static GET_SOCK_OPT_ORIGINAL: OnceLock<&GetSockOptType> = OnceLock::new();
 
 /// Windows socket hook for socket creation
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
@@ -355,6 +258,63 @@ unsafe extern "system" fn socket_detour(af: INT, r#type: INT, protocol: INT) -> 
         }
     }
 
+    socket
+}
+
+/// Windows socket hook for WSASocket (advanced socket creation)
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn wsa_socket_detour(
+    af: i32,
+    socket_type: i32,
+    protocol: i32,
+    lpProtocolInfo: *mut u8,
+    g: u32,
+    dwFlags: u32,
+) -> SOCKET {
+    tracing::info!(
+        "wsa_socket_detour -> af: {}, type: {}, protocol: {}, flags: {}",
+        af,
+        socket_type,
+        protocol,
+        dwFlags
+    );
+    let original = WSA_SOCKET_ORIGINAL.get().unwrap();
+    let socket = unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
+    if socket != INVALID_SOCKET {
+        if af == AF_INET || af == AF_INET6 {
+            register_socket(socket, af, socket_type, protocol);
+        }
+    } else {
+        tracing::warn!("wsa_socket_detour -> failed to create socket");
+    }
+    socket
+}
+
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn wsa_socket_w_detour(
+    af: i32,
+    socket_type: i32,
+    protocol: i32,
+    lpProtocolInfo: *mut u16,
+    g: u32,
+    dwFlags: u32,
+) -> SOCKET {
+    tracing::trace!(
+        "wsa_socket_w_detour -> af: {}, type: {}, protocol: {}, flags: {}",
+        af,
+        socket_type,
+        protocol,
+        dwFlags
+    );
+    let original = WSA_SOCKET_W_ORIGINAL.get().unwrap();
+    let socket = unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
+    if socket != INVALID_SOCKET {
+        if af == AF_INET || af == AF_INET6 {
+            register_socket(socket, af, socket_type, protocol);
+        }
+    } else {
+        tracing::warn!("wsa_socket_w_detour -> failed to create socket");
+    }
     socket
 }
 
@@ -755,6 +715,23 @@ unsafe extern "system" fn accept_detour(
     auto_close_socket.release()
 }
 
+/// Windows socket hook for WSAAccept (asynchronous accept)
+/// Node.js uses this for non-blocking accept operations
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn wsa_accept_detour(
+    s: SOCKET,
+    addr: *mut SOCKADDR,
+    addrlen: *mut INT,
+    lpfnCondition: *mut u8,
+    dwCallbackData: usize,
+) -> SOCKET {
+    //todo!("WSAAccept detour not yet implemented - implement like in accept_detour");
+    tracing::trace!("wsa_accept_detour -> socket: {}", s);
+    // Pass through to original - interceptor handles data for managed sockets
+    let original = WSA_ACCEPT_ORIGINAL.get().unwrap();
+    unsafe { original(s, addr, addrlen, lpfnCondition, dwCallbackData) }
+}
+
 /// Windows socket hook for getsockname
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn getsockname_detour(
@@ -772,13 +749,14 @@ unsafe extern "system" fn getsockname_detour(
         .lock()
         .expect("getsockname_detour -> failed to lock sockets for socket retrieval")
         .get(&s)
-        .bypass(Bypass::LocalFdNotFound(s)) {
-            Ok(sock) => sock.clone(),
-            Err(err) => {
-                tracing::warn!("getsockname_detour -> failed to get socket: {}", err);
-                return getsockname_fn();
-            }
-        };
+        .bypass(Bypass::LocalFdNotFound(s))
+    {
+        Ok(sock) => sock.clone(),
+        Err(err) => {
+            tracing::warn!("getsockname_detour -> failed to get socket: {}", err);
+            return getsockname_fn();
+        }
+    };
 
     let local_address: Option<SocketAddr> = match &socket.state {
         SocketState::Connected(Connected {
@@ -789,8 +767,7 @@ unsafe extern "system" fn getsockname_detour(
             connection_id: Some(id),
             ..
         }) => {
-            match make_proxy_request_with_response(OutgoingConnMetadataRequest { conn_id: *id })
-            {
+            match make_proxy_request_with_response(OutgoingConnMetadataRequest { conn_id: *id }) {
                 Ok(Some(res)) => Some(res.in_cluster_address),
                 Ok(None) => {
                     tracing::error!(id, "Protocol: could not locate outgoing metadata");
@@ -803,11 +780,10 @@ unsafe extern "system" fn getsockname_detour(
             }
         }
         SocketState::Bound {
-            bound:
-                Bound {
-                    requested_address,
-                    address,
-                },
+            bound: Bound {
+                requested_address,
+                address,
+            },
             ..
         }
         | SocketState::Listening(Bound {
@@ -816,7 +792,7 @@ unsafe extern "system" fn getsockname_detour(
         }) => Some(if requested_address.port() == 0 {
             SocketAddr::new(requested_address.ip(), address.port())
         } else {
-            (*requested_address).into()
+            *requested_address
         }),
 
         SocketState::Initialized | SocketState::Connected(_) => {
@@ -918,37 +894,6 @@ unsafe extern "system" fn getpeername_detour(
     unsafe { original(s, name, namelen) }
 }
 
-/// Pass-through hook for WSAStartup
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_startup_detour(wVersionRequested: u16, lpWSAData: *mut u8) -> i32 {
-    tracing::debug!("WSAStartup called with version: {}", wVersionRequested);
-
-    let original = WSA_STARTUP_ORIGINAL.get().unwrap();
-    let result = unsafe { original(wVersionRequested, lpWSAData) };
-
-    if result != ERROR_SUCCESS_I32 {
-        tracing::warn!("WSAStartup failed with error: {}", result);
-    }
-
-    result
-}
-
-/// Pass-through hook for WSACleanup
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_cleanup_detour() -> i32 {
-    // Pass through to original - let Windows Sockets handle cleanup
-    let original = WSA_CLEANUP_ORIGINAL.get().unwrap();
-    unsafe { original() }
-}
-
-/// Socket management detour for ioctlsocket() - controls I/O mode of socket
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn ioctlsocket_detour(s: SOCKET, cmd: i32, argp: *mut u32) -> i32 {
-    // Pass through to original - interceptor handles I/O control for managed sockets
-    let original = IOCTL_SOCKET_ORIGINAL.get().unwrap();
-    unsafe { original(s, cmd, argp) }
-}
-
 /// Socket management detour for WSAIoctl - intercepts extension lookups
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn wsa_ioctl_detour(
@@ -990,88 +935,6 @@ unsafe extern "system" fn wsa_ioctl_detour(
     }
 
     result
-}
-
-/// Socket management detour for select() - monitors socket readiness
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn select_detour(
-    nfds: i32,
-    readfds: *mut fd_set,
-    writefds: *mut fd_set,
-    exceptfds: *mut fd_set,
-    timeout: *const timeval,
-) -> i32 {
-    // Pass through to original - interceptor handles I/O readiness for managed sockets
-    let original = SELECT_ORIGINAL.get().unwrap();
-    unsafe { original(nfds, readfds, writefds, exceptfds, timeout) }
-}
-
-/// Windows socket hook for WSAGetLastError (error information)
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_get_last_error_detour() -> i32 {
-    let original = WSA_GET_LAST_ERROR_ORIGINAL.get().unwrap();
-    let result = unsafe { original() };
-
-    tracing::trace!("wsa_get_last_error_detour -> error: {}", result);
-
-    result
-}
-
-/// Windows socket hook for WSASocket (advanced socket creation)
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_socket_detour(
-    af: i32,
-    socket_type: i32,
-    protocol: i32,
-    lpProtocolInfo: *mut u8,
-    g: u32,
-    dwFlags: u32,
-) -> SOCKET {
-    tracing::info!(
-        "wsa_socket_detour -> af: {}, type: {}, protocol: {}, flags: {}",
-        af,
-        socket_type,
-        protocol,
-        dwFlags
-    );
-    let original = WSA_SOCKET_ORIGINAL.get().unwrap();
-    let socket = unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
-    if socket != INVALID_SOCKET {
-        if af == AF_INET || af == AF_INET6 {
-            register_socket(socket, af, socket_type, protocol);
-        }
-    } else {
-        tracing::warn!("wsa_socket_detour -> failed to create socket");
-    }
-    socket
-}
-
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_socket_w_detour(
-    af: i32,
-    socket_type: i32,
-    protocol: i32,
-    lpProtocolInfo: *mut u16,
-    g: u32,
-    dwFlags: u32,
-) -> SOCKET {
-    tracing::trace!(
-        "wsa_socket_w_detour -> af: {}, type: {}, protocol: {}, flags: {}",
-        af,
-        socket_type,
-        protocol,
-        dwFlags
-    );
-    let original = WSA_SOCKET_W_ORIGINAL.get().unwrap();
-    let socket = unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
-    if socket != INVALID_SOCKET {
-        if af == AF_INET || af == AF_INET6 {
-            register_socket(socket, af, socket_type, protocol);
-        }
-    } else {
-        tracing::warn!("wsa_socket_w_detour -> failed to create socket");
-    }
-    socket
 }
 
 /// Windows socket hook for ConnectEx (overlapped connect)
@@ -1318,155 +1181,6 @@ unsafe extern "system" fn wsa_connect_detour(
     connect_res.result()
 }
 
-/// Windows socket hook for WSAAccept (asynchronous accept)
-/// Node.js uses this for non-blocking accept operations
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_accept_detour(
-    s: SOCKET,
-    addr: *mut SOCKADDR,
-    addrlen: *mut INT,
-    lpfnCondition: *mut u8,
-    dwCallbackData: usize,
-) -> SOCKET {
-    tracing::trace!("wsa_accept_detour -> socket: {}", s);
-
-    // Pass through to original - interceptor handles data for managed sockets
-    let original = WSA_ACCEPT_ORIGINAL.get().unwrap();
-    unsafe { original(s, addr, addrlen, lpfnCondition, dwCallbackData) }
-}
-
-/// Windows socket hook for WSASend (asynchronous send)
-/// Node.js uses this extensively for overlapped I/O operations
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_send_detour(
-    s: SOCKET,
-    lpBuffers: *mut u8,
-    dwBufferCount: u32,
-    lpNumberOfBytesSent: *mut u32,
-    dwFlags: u32,
-    lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8,
-) -> INT {
-    tracing::trace!(
-        "wsa_send_detour -> socket: {}, buffer_count: {}",
-        s,
-        dwBufferCount,
-    );
-
-    // Helper function to consolidate all fallback calls to original WSASend
-    let fallback_to_original = |reason: &str| {
-        tracing::debug!("wsa_send_detour -> falling back to original: {}", reason);
-        let original = WSA_SEND_ORIGINAL.get().unwrap();
-        let res = unsafe {
-            original(
-                s,
-                lpBuffers,
-                dwBufferCount,
-                lpNumberOfBytesSent,
-                dwFlags,
-                lpOverlapped,
-                lpCompletionRoutine,
-            )
-        };
-        tracing::debug!(
-            "wsa_send_detour -> socket: {}, sentBytes: {}, result: {}, getlasterror: {}",
-            s,
-            unsafe { *lpNumberOfBytesSent },
-            res,
-            unsafe { WSAGetLastError() }
-        );
-        res
-    };
-
-    // Check if this socket is managed by mirrord
-    let managed_socket = get_socket(s);
-
-    if let Some(user_socket) = managed_socket {
-        tracing::debug!(
-            "wsa_send_detour -> socket {} is managed, kind: {:?}",
-            s,
-            user_socket.kind
-        );
-
-        // Check if outgoing traffic is enabled for this socket type
-        let should_intercept = match user_socket.kind {
-            SocketKind::Tcp(_) => {
-                let tcp_outgoing = setup().outgoing_config().tcp;
-                tracing::debug!("wsa_send_detour -> TCP outgoing enabled: {}", tcp_outgoing);
-                tcp_outgoing
-            }
-            SocketKind::Udp(_) => {
-                let udp_outgoing = setup().outgoing_config().udp;
-                tracing::debug!("wsa_send_detour -> UDP outgoing enabled: {}", udp_outgoing);
-                udp_outgoing
-            }
-        };
-
-        if should_intercept {
-            let socket_state =
-                get_socket_state(s).map_or("Unknown".to_string(), |state| format!("{:?}", state));
-            // Check if this socket is in connected state (proxy connection established)
-            if is_socket_in_state(s, |state| matches!(state, SocketState::Connected(_))) {
-                tracing::debug!(
-                    "wsa_send_detour -> socket {} is connected via proxy, data will be routed through proxy",
-                    s
-                );
-
-                // For proxy-connected sockets, the data routing happens automatically
-                // through the proxy connection established in connect_detour/wsa_connect_detour
-            } else {
-                tracing::debug!(
-                    "wsa_send_detour -> socket {} is managed but not connected ({}) via proxy, using original",
-                    s,
-                    socket_state
-                );
-            }
-        } else {
-            tracing::debug!(
-                "wsa_send_detour -> outgoing traffic disabled for {:?}, using original",
-                user_socket.kind
-            );
-        }
-    }
-
-    // Pass through to original - the proxy connection handles the routing if established
-    fallback_to_original("expected - passing through to original")
-}
-
-/// Windows socket hook for WSARecv (asynchronous receive)
-/// With the new architecture, incoming mirrored traffic flows through normal TCP connections
-/// created by intproxy, so we just pass through to the original function.
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_recv_detour(
-    s: SOCKET,
-    lpBuffers: *mut u8,
-    dwBufferCount: u32,
-    lpNumberOfBytesRecvd: *mut u32,
-    lpFlags: *mut u32,
-    lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8,
-) -> INT {
-    tracing::trace!(
-        "wsa_recv_detour -> socket: {}, buffer_count: {}",
-        s,
-        dwBufferCount
-    );
-
-    // Pass through to original - mirrored traffic flows through normal TCP connections
-    let original = WSA_RECV_ORIGINAL.get().unwrap();
-    unsafe {
-        original(
-            s,
-            lpBuffers,
-            dwBufferCount,
-            lpNumberOfBytesRecvd,
-            lpFlags,
-            lpOverlapped,
-            lpCompletionRoutine,
-        )
-    }
-}
-
 /// Windows socket hook for WSASendTo (asynchronous UDP send)
 /// Node.js uses this for overlapped UDP operations
 /// This implementation uses the shared layer-lib sendto functionality to handle DNS resolution
@@ -1480,8 +1194,8 @@ unsafe extern "system" fn wsa_send_to_detour(
     dwFlags: u32,
     lpTo: *const SOCKADDR,
     iTolen: INT,
-    lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8,
+    lpOverlapped: *mut OVERLAPPED,
+    lpCompletionRoutine: LPWSAOVERLAPPED_COMPLETION_ROUTINE,
 ) -> INT {
     tracing::debug!(
         "wsa_send_to_detour -> socket: {}, buffer_count: {}, to_len: {}",
@@ -1494,6 +1208,9 @@ unsafe extern "system" fn wsa_send_to_detour(
     let fallback_to_original = |reason: &str| {
         tracing::debug!("wsa_send_to_detour -> falling back to original: {}", reason);
         let original = WSA_SEND_TO_ORIGINAL.get().unwrap();
+        let completion_ptr = lpCompletionRoutine
+            .map(|routine| routine as *const () as *mut u8)
+            .unwrap_or(ptr::null_mut());
         unsafe {
             original(
                 s,
@@ -1503,14 +1220,14 @@ unsafe extern "system" fn wsa_send_to_detour(
                 dwFlags,
                 lpTo,
                 iTolen,
-                lpOverlapped,
-                lpCompletionRoutine,
+                lpOverlapped.cast::<u8>(),
+                completion_ptr,
             )
         }
     };
 
     // Handle overlapped I/O operations by falling back to original for async operations
-    if !lpOverlapped.is_null() || !lpCompletionRoutine.is_null() {
+    if !lpOverlapped.is_null() || lpCompletionRoutine.is_some() {
         return fallback_to_original("overlapped I/O detected");
     }
 
@@ -1543,9 +1260,9 @@ unsafe extern "system" fn wsa_send_to_detour(
         // For connection-oriented sockets or when no destination is specified,
         // WSASendTo is equivalent to WSASend
         return unsafe {
-            wsa_send_detour(
+            WSASend(
                 s,
-                lpBuffers,
+                lpBuffers as LPWSABUF,
                 dwBufferCount,
                 lpNumberOfBytesSent,
                 dwFlags,
@@ -1633,43 +1350,6 @@ unsafe extern "system" fn wsa_send_to_detour(
             "multi-buffer case (count: {})",
             buffer_data.buffer_count()
         ))
-    }
-}
-
-/// Windows socket hook for WSARecvFrom (asynchronous UDP receive)
-/// Node.js uses this for overlapped UDP operations
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_recv_from_detour(
-    s: SOCKET,
-    lpBuffers: *mut u8,
-    dwBufferCount: u32,
-    lpNumberOfBytesRecvd: *mut u32,
-    lpFlags: *mut u32,
-    lpFrom: *mut SOCKADDR,
-    lpFromlen: *mut INT,
-    lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8,
-) -> INT {
-    tracing::trace!(
-        "wsa_recv_from_detour -> socket: {}, buffer_count: {}",
-        s,
-        dwBufferCount
-    );
-
-    // Pass through to original - interceptor handles data routing for managed sockets
-    let original = WSA_RECV_FROM_ORIGINAL.get().unwrap();
-    unsafe {
-        original(
-            s,
-            lpBuffers,
-            dwBufferCount,
-            lpNumberOfBytesRecvd,
-            lpFlags,
-            lpFrom,
-            lpFromlen,
-            lpOverlapped,
-            lpCompletionRoutine,
-        )
     }
 }
 
@@ -2049,93 +1729,6 @@ unsafe extern "system" fn freeaddrinfo_t_detour(addrinfo: *mut ADDRINFOW) {
     }
 }
 
-/// Data transfer detour for recv() - receives data from a socket
-///
-/// With the new architecture, incoming mirrored traffic flows through normal TCP connections
-/// created by intproxy, so we just pass through to the original function.
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn recv_detour(s: SOCKET, buf: *mut i8, len: INT, flags: INT) -> INT {
-    // Pass through to original - interceptor handles data routing for managed sockets
-    let original = RECV_ORIGINAL.get().unwrap();
-    unsafe { original(s, buf, len, flags) }
-}
-
-/// Data transfer detour for send() - sends data to a socket
-///
-/// For mirrord-managed outgoing connections, this checks if the socket should be intercepted
-/// and routes data through the proxy if outgoing traffic is enabled.
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn send_detour(s: SOCKET, buf: *const i8, len: INT, flags: INT) -> INT {
-    tracing::trace!("send_detour -> socket: {}, len: {}", s, len);
-
-    // Check if this socket is managed by mirrord
-    if let Some(user_socket) = get_socket(s) {
-        tracing::debug!(
-            "send_detour -> socket {} is managed, kind: {:?}",
-            s,
-            user_socket.kind
-        );
-
-        // Check if outgoing traffic is enabled for this socket type
-        let should_intercept = match user_socket.kind {
-            SocketKind::Tcp(_) => {
-                let tcp_outgoing = setup().outgoing_config().tcp;
-                tracing::debug!("send_detour -> TCP outgoing enabled: {}", tcp_outgoing);
-                tcp_outgoing
-            }
-            SocketKind::Udp(_) => {
-                let udp_outgoing = setup().outgoing_config().udp;
-                tracing::debug!("send_detour -> UDP outgoing enabled: {}", udp_outgoing);
-                udp_outgoing
-            }
-        };
-
-        if should_intercept {
-            // Check if this socket is in connected state (proxy connection established)
-            if is_socket_in_state(s, |state| matches!(state, SocketState::Connected(_))) {
-                tracing::debug!(
-                    "send_detour -> socket {} is connected via proxy, data will be routed through proxy",
-                    s
-                );
-                // For proxy-connected sockets, the data routing happens automatically
-                // through the proxy connection established in connect_detour
-            } else {
-                tracing::debug!(
-                    "send_detour -> socket {} is managed but not connected via proxy, using original",
-                    s
-                );
-            }
-        } else {
-            tracing::debug!(
-                "send_detour -> outgoing traffic disabled for {:?}, using original",
-                user_socket.kind
-            );
-        }
-    }
-
-    // Pass through to original - the proxy connection handles the routing if established
-    let original = SEND_ORIGINAL.get().unwrap();
-    unsafe { original(s, buf, len, flags) }
-}
-
-/// Data transfer detour for recvfrom() - receives data from a socket with source address
-///
-/// Note: UDP/datagram sockets typically aren't managed by mirrord outgoing connections,
-/// so this is primarily a pass-through for compatibility.
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn recvfrom_detour(
-    s: SOCKET,
-    buf: *mut i8,
-    len: INT,
-    flags: INT,
-    from: *mut SOCKADDR,
-    fromlen: *mut INT,
-) -> INT {
-    // Pass through to original
-    let original = RECV_FROM_ORIGINAL.get().unwrap();
-    unsafe { original(s, buf, len, flags, from, fromlen) }
-}
-
 /// Data transfer detour for sendto() - sends data to a socket with destination address
 ///
 /// This implementation uses the shared layer-lib sendto functionality to handle DNS resolution
@@ -2234,42 +1827,6 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     res
 }
 
-/// Socket management detour for shutdown() - shuts down part or all of a socket connection
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn shutdown_detour(s: SOCKET, how: INT) -> INT {
-    // Pass through to original - interceptor handles connection shutdown for managed sockets
-    let original = SHUTDOWN_ORIGINAL.get().unwrap();
-    unsafe { original(s, how) }
-}
-
-/// Socket option detour for setsockopt() - sets socket options
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn setsockopt_detour(
-    s: SOCKET,
-    level: INT,
-    optname: INT,
-    optval: *const i8,
-    optlen: INT,
-) -> INT {
-    // Pass through to original - interceptor handles socket option management for managed sockets
-    let original = SET_SOCK_OPT_ORIGINAL.get().unwrap();
-    unsafe { original(s, level, optname, optval, optlen) }
-}
-
-/// Socket option detour for getsockopt() - gets socket options
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn getsockopt_detour(
-    s: SOCKET,
-    level: INT,
-    optname: INT,
-    optval: *mut i8,
-    optlen: *mut INT,
-) -> INT {
-    // Pass through to original - interceptor handles socket option queries for managed sockets
-    let original = GET_SOCK_OPT_ORIGINAL.get().unwrap();
-    unsafe { original(s, level, optname, optval, optlen) }
-}
-
 /// Initialize socket hooks by setting up detours for Windows socket functions
 pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) -> LayerResult<()> {
     // Ensure winsock libraries are loaded before attempting to hook them
@@ -2323,6 +1880,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
             GET_ADDR_INFO_W_ORIGINAL
         )?;
 
+        // Note: FreeAddrInfoW is used for both ADDRINFOA and ADDRINFOW deallocation
         apply_hook!(
             guard,
             "ws2_32",
@@ -2423,34 +1981,6 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
             CLOSE_SOCKET_ORIGINAL
         )?;
 
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "shutdown",
-            shutdown_detour,
-            ShutdownType,
-            SHUTDOWN_ORIGINAL
-        )?;
-
-        // Winsock startup/cleanup
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "WSAStartup",
-            wsa_startup_detour,
-            WSAStartupType,
-            WSA_STARTUP_ORIGINAL
-        )?;
-
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "WSACleanup",
-            wsa_cleanup_detour,
-            WSACleanupType,
-            WSA_CLEANUP_ORIGINAL
-        )?;
-
         // Socket information hooks
         apply_hook!(
             guard,
@@ -2470,25 +2000,6 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
             GET_PEER_NAME_ORIGINAL
         )?;
 
-        // Socket options
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "setsockopt",
-            setsockopt_detour,
-            SetSockOptType,
-            SET_SOCK_OPT_ORIGINAL
-        )?;
-
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "getsockopt",
-            getsockopt_detour,
-            GetSockOptType,
-            GET_SOCK_OPT_ORIGINAL
-        )?;
-
         // I/O control
         apply_hook!(
             guard,
@@ -2497,33 +2008,6 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
             wsa_ioctl_detour,
             WSAIoctlType,
             WSA_IOCTL_ORIGINAL
-        )?;
-
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "ioctlsocket",
-            ioctlsocket_detour,
-            IoCtlSocketType,
-            IOCTL_SOCKET_ORIGINAL
-        )?;
-
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "select",
-            select_detour,
-            SelectType,
-            SELECT_ORIGINAL
-        )?;
-
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "WSAGetLastError",
-            wsa_get_last_error_detour,
-            WSAGetLastErrorType,
-            WSA_GET_LAST_ERROR_ORIGINAL
         )?;
 
         // Incoming connection hooks (if incoming mode is not Off)
@@ -2598,49 +2082,6 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
             tracing::info!("Outgoing connection hooks disabled (no outgoing features enabled)");
         }
 
-        // Data transfer hooks (conditional based on TCP/UDP settings)
-        if network_config.requires_tcp_hooks() {
-            tracing::info!("Enabling TCP data transfer hooks");
-
-            apply_hook!(
-                guard,
-                "ws2_32",
-                "send",
-                send_detour,
-                SendType,
-                SEND_ORIGINAL
-            )?;
-
-            apply_hook!(
-                guard,
-                "ws2_32",
-                "recv",
-                recv_detour,
-                RecvType,
-                RECV_ORIGINAL
-            )?;
-
-            apply_hook!(
-                guard,
-                "ws2_32",
-                "WSASend",
-                wsa_send_detour,
-                WSASendType,
-                WSA_SEND_ORIGINAL
-            )?;
-
-            apply_hook!(
-                guard,
-                "ws2_32",
-                "WSARecv",
-                wsa_recv_detour,
-                WSARecvType,
-                WSA_RECV_ORIGINAL
-            )?;
-        } else {
-            tracing::info!("TCP data transfer hooks disabled (TCP outgoing disabled)");
-        }
-
         if network_config.requires_udp_hooks() {
             tracing::info!("Enabling UDP data transfer hooks");
 
@@ -2656,28 +2097,10 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
             apply_hook!(
                 guard,
                 "ws2_32",
-                "recvfrom",
-                recvfrom_detour,
-                RecvFromType,
-                RECV_FROM_ORIGINAL
-            )?;
-
-            apply_hook!(
-                guard,
-                "ws2_32",
                 "WSASendTo",
                 wsa_send_to_detour,
                 WSASendToType,
                 WSA_SEND_TO_ORIGINAL
-            )?;
-
-            apply_hook!(
-                guard,
-                "ws2_32",
-                "WSARecvFrom",
-                wsa_recv_from_detour,
-                WSARecvFromType,
-                WSA_RECV_FROM_ORIGINAL
             )?;
         } else {
             tracing::info!("UDP data transfer hooks disabled (UDP outgoing disabled)");
