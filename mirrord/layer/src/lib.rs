@@ -778,6 +778,11 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 /// Replaces [`libc::close`].
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+    // Block closing the intproxy connection
+    if proxy_conn_fd() == Some(fd) {
+        return 0;
+    };
+
     unsafe {
         let res = FN_CLOSE(fd);
         close_layer_fd(fd);
