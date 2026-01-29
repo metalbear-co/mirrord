@@ -16,11 +16,19 @@ import { readBoilerplateType } from "./JsonUtils";
 
 // Map internal mode names to display names
 const modeDisplayNames: Record<string, string> = {
-  steal: "filtering",
-  mirror: "mirror",
-  replace: "replace",
-  custom: "custom",
+  steal: "Filtering",
+  mirror: "Mirror",
+  replace: "Replace",
+  custom: "Custom",
 };
+
+const modeColors: Record<string, string> = {
+  steal: "bg-secondary/20 text-secondary-foreground border-secondary/30",
+  mirror: "bg-primary/10 text-primary border-primary/20",
+  replace: "bg-destructive/10 text-destructive border-destructive/20",
+  custom: "bg-[var(--muted)] text-[var(--muted-foreground)] border-[var(--border)]",
+};
+
 import BoilerplateStep from "./steps/BoilerplateStep";
 import ConfigTabs from "./steps/ConfigTabs";
 import LearningSteps from "./steps/LearningSteps";
@@ -88,36 +96,51 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
 
   return (
     <Dialog open={open} onOpenChange={(isOpen: boolean) => !isOpen && handleClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-[var(--card)] border border-[var(--border)] [&>button]:hidden">
-        <DialogHeader>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-[var(--card)] border border-[var(--border)] shadow-xl [&>button]:hidden">
+        <DialogHeader className="border-b border-[var(--border)] pb-4 -mx-6 px-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <DialogTitle className="text-lg font-semibold">
+              <DialogTitle className="text-xl font-semibold text-[var(--foreground)]">
                 {stepInfo.title}
               </DialogTitle>
               {currentStep !== "learning" && boilerplateType !== "custom" && (
-                <Badge variant="outline" className="capitalize">
-                  {modeDisplayNames[boilerplateType] || boilerplateType} mode
+                <Badge
+                  variant="outline"
+                  className={`capitalize text-xs font-medium ${modeColors[boilerplateType] || modeColors.custom}`}
+                >
+                  {modeDisplayNames[boilerplateType] || boilerplateType}
                 </Badge>
               )}
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-[var(--muted-foreground)]">
-                Step {stepInfo.step} of {stepInfo.total}
-              </span>
+            <div className="flex items-center gap-4">
+              {/* Step indicator */}
+              <div className="flex items-center gap-2">
+                {Array.from({ length: stepInfo.total }).map((_, index) => (
+                  <div
+                    key={index}
+                    className={`h-2 rounded-full transition-all duration-300 ${
+                      index + 1 === stepInfo.step
+                        ? "w-6 bg-primary"
+                        : index + 1 < stepInfo.step
+                        ? "w-2 bg-primary/50"
+                        : "w-2 bg-[var(--muted)]"
+                    }`}
+                  />
+                ))}
+              </div>
               <DialogClose asChild>
-                <button className="rounded-full p-1.5 hover:bg-[var(--muted)] transition-colors">
+                <button className="rounded-full p-2 hover:bg-[var(--muted)] transition-colors">
                   <X className="h-4 w-4 text-[var(--muted-foreground)]" />
                 </button>
               </DialogClose>
             </div>
           </div>
-          <DialogDescription className="sr-only">
-            mirrord configuration wizard
-          </DialogDescription>
         </DialogHeader>
+        <DialogDescription className="sr-only">
+          mirrord configuration wizard
+        </DialogDescription>
 
-        <div className="py-4">
+        <div className="py-6">
           {currentStep === "learning" && (
             <LearningSteps onComplete={handleLearningComplete} />
           )}
@@ -131,22 +154,22 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
           )}
         </div>
 
-        <DialogFooter className="flex justify-between sm:justify-between">
+        <DialogFooter className="flex justify-between sm:justify-between border-t border-[var(--border)] pt-4 -mx-6 px-6">
           {currentStep !== "learning" && currentStep !== "config" && (
             <>
               <div>
                 {(currentStep === "boilerplate" && learningComplete) && (
-                  <Button variant="outline" onClick={goBack}>
-                    <ChevronLeft className="h-4 w-4 mr-2" />
+                  <Button variant="outline" onClick={goBack} className="gap-2">
+                    <ChevronLeft className="h-4 w-4" />
                     Back
                   </Button>
                 )}
               </div>
               <div>
                 {currentStep === "boilerplate" && (
-                  <Button onClick={goFromBoilerplate}>
+                  <Button onClick={goFromBoilerplate} className="gap-2 shadow-brand hover:shadow-brand-hover">
                     Continue
-                    <ChevronRight className="h-4 w-4 ml-2" />
+                    <ChevronRight className="h-4 w-4" />
                   </Button>
                 )}
               </div>
@@ -156,9 +179,9 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
           {currentStep === "learning" && (
             <>
               <div />
-              <Button variant="outline" onClick={goToConfig}>
+              <Button variant="outline" onClick={goToConfig} className="gap-2">
                 Skip to Configuration
-                <ChevronRight className="h-4 w-4 ml-2" />
+                <ChevronRight className="h-4 w-4" />
               </Button>
             </>
           )}

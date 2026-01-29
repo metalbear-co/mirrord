@@ -4,17 +4,44 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Default light mode values - will be overridden by JS */
+/* Metal Bear UI Design Tokens */
 :root {
   --background: #fafafd;
   --foreground: #000000;
   --card: #ffffff;
+  --card-foreground: #000000;
   --muted: #e4e3fd;
   --muted-foreground: #6b6b80;
   --border: #e5e5e5;
   --primary: #756df3;
+  --primary-foreground: #ffffff;
   --secondary: #ffcb7d;
+  --secondary-foreground: #000000;
   --destructive: #f36869;
+  --destructive-foreground: #ffffff;
+  --accent: #e4e3fd;
+  --accent-foreground: #000000;
+  --ring: #756df3;
+  --radius: 0.75rem;
+}
+
+.dark {
+  --background: #232141;
+  --foreground: #fafafd;
+  --card: #1c1a38;
+  --card-foreground: #fafafd;
+  --muted: #2f2d4f;
+  --muted-foreground: #a0a0b0;
+  --border: #3e3c5e;
+  --primary: #756df3;
+  --primary-foreground: #ffffff;
+  --secondary: #ffcb7d;
+  --secondary-foreground: #000000;
+  --destructive: #f36869;
+  --destructive-foreground: #ffffff;
+  --accent: #2f2d4f;
+  --accent-foreground: #fafafd;
+  --ring: #756df3;
 }
 
 * {
@@ -22,11 +49,7 @@
 }
 
 body {
-  font-family:
-    'Poppins',
-    system-ui,
-    -apple-system,
-    sans-serif;
+  font-family: 'Poppins', system-ui, -apple-system, sans-serif;
   line-height: 1.5;
   font-weight: 400;
   color: var(--foreground);
@@ -38,32 +61,37 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  transition:
-    background-color 0.2s ease,
-    color 0.2s ease;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 #root {
   min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
 }
 
 @layer components {
+  /* Card styles */
   .card {
-    @apply bg-[var(--card)] rounded-xl p-6 border border-[var(--border)] transition-colors duration-200;
+    @apply bg-[var(--card)] rounded-xl p-6 border border-[var(--border)] transition-all duration-200;
   }
 
   .card-hover {
-    @apply hover:shadow-brutal hover:border-primary/30 transition-shadow duration-200;
+    @apply hover:shadow-brand hover:border-primary/30 hover:-translate-y-0.5 transition-all duration-200;
   }
 
+  /* Button styles */
   .btn-primary {
-    @apply bg-primary hover:shadow-brutal active:scale-[0.98] active:shadow-none text-white font-medium py-2 px-4 rounded-lg transition-all duration-200;
+    @apply bg-primary hover:bg-primary/90 hover:shadow-brand active:scale-[0.98] text-white font-medium py-2 px-4 rounded-lg transition-all duration-200;
   }
 
   .btn-secondary {
-    @apply bg-[var(--card)] hover:shadow-brutal active:scale-[0.98] active:shadow-none text-[var(--foreground)] font-medium py-2 px-4 rounded-lg transition-all duration-200 border border-[var(--border)];
+    @apply bg-[var(--card)] hover:bg-[var(--muted)] active:scale-[0.98] text-[var(--foreground)] font-medium py-2 px-4 rounded-lg transition-all duration-200 border border-[var(--border)];
   }
 
+  /* Text utilities */
   .text-muted {
     @apply text-[var(--muted-foreground)];
   }
@@ -74,6 +102,20 @@ body {
 
   .border-default {
     @apply border-[var(--border)];
+  }
+
+  /* Interactive elements */
+  .interactive {
+    @apply transition-all duration-200 cursor-pointer;
+  }
+
+  .interactive:hover {
+    @apply bg-[var(--muted)];
+  }
+
+  /* Focus ring */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-[var(--ring)] focus:ring-offset-2 focus:ring-offset-[var(--background)];
   }
 }
 
@@ -89,8 +131,51 @@ body {
   }
 }
 
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
 .animate-fade-in {
-  animation: fadeIn 0.2s ease-out forwards;
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out forwards;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.2s ease-out forwards;
+}
+
+.animate-pulse-subtle {
+  animation: pulse 2s ease-in-out infinite;
 }
 
 /* Dialog animation */
@@ -106,7 +191,7 @@ body {
 }
 
 .animate-dialog-in {
-  animation: dialogFadeIn 0.15s ease-out;
+  animation: dialogFadeIn 0.2s ease-out;
 }
 
 /* Fix transparent backgrounds for Radix UI components */
@@ -115,4 +200,39 @@ body {
 [role="dialog"] {
   background-color: var(--card) !important;
   border-color: var(--border) !important;
+}
+
+/* Selection styling */
+::selection {
+  background-color: var(--primary);
+  color: white;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--muted);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+/* Gradient backgrounds */
+.gradient-primary {
+  background: linear-gradient(135deg, var(--primary) 0%, #9b95f7 100%);
+}
+
+.gradient-subtle {
+  background: linear-gradient(180deg, var(--background) 0%, var(--muted) 100%);
 }
