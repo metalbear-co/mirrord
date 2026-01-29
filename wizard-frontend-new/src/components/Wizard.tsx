@@ -42,17 +42,22 @@ interface WizardProps {
 
 type WizardStep = "boilerplate" | "config" | "learning";
 
+type ConfigTab = "target" | "network" | "export";
+
 const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
   const { config, setConfig } = useContext(ConfigDataContext)!;
   const [currentStep, setCurrentStep] = useState<WizardStep>(
     startWithLearning ? "learning" : "boilerplate"
   );
   const [learningComplete, setLearningComplete] = useState(false);
+  const [currentTab, setCurrentTab] = useState<ConfigTab>("target");
+  const [canAdvanceTab, setCanAdvanceTab] = useState(false);
 
   const handleClose = () => {
     setConfig(DefaultConfig);
     setCurrentStep(startWithLearning ? "learning" : "boilerplate");
     setLearningComplete(false);
+    setCurrentTab("target");
     onClose();
   };
 
@@ -62,13 +67,30 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
 
   const goFromBoilerplate = () => {
     setCurrentStep("config");
+    setCurrentTab("target");
   };
 
   const goBack = () => {
     if (currentStep === "config") {
-      setCurrentStep("boilerplate");
+      if (currentTab === "target") {
+        setCurrentStep("boilerplate");
+      } else if (currentTab === "network") {
+        setCurrentTab("target");
+      } else if (currentTab === "export") {
+        setCurrentTab("network");
+      }
     } else if (currentStep === "boilerplate" && learningComplete) {
       setCurrentStep("learning");
+    }
+  };
+
+  const goNext = () => {
+    if (currentStep === "config") {
+      if (currentTab === "target") {
+        setCurrentTab("network");
+      } else if (currentTab === "network") {
+        setCurrentTab("export");
+      }
     }
   };
 
@@ -149,7 +171,11 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
           )}
           {currentStep === "config" && (
             <ErrorBoundary>
-              <ConfigTabs />
+              <ConfigTabs
+                currentTab={currentTab}
+                onTabChange={setCurrentTab}
+                onCanAdvanceChange={setCanAdvanceTab}
+              />
             </ErrorBoundary>
           )}
         </div>
@@ -192,7 +218,17 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
                 <ChevronLeft className="h-4 w-4" />
                 Back
               </Button>
-              <div />
+              {currentTab !== "export" && (
+                <Button
+                  onClick={goNext}
+                  disabled={!canAdvanceTab}
+                  className="gap-2 shadow-brand hover:shadow-brand-hover"
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              )}
+              {currentTab === "export" && <div />}
             </>
           )}
         </DialogFooter>

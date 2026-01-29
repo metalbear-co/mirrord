@@ -1,5 +1,5 @@
 import { useToast } from "../../hooks/use-toast";
-import { useState, useContext } from "react";
+import { useState, useContext, useEffect } from "react";
 import { Copy, Save, Download } from "lucide-react";
 import {
   Button,
@@ -19,15 +19,30 @@ import TargetTab from "./TargetTab";
 
 type CurrentTabId = "target" | "network" | "export";
 
-const ConfigTabs = () => {
+interface ConfigTabsProps {
+  currentTab: CurrentTabId;
+  onTabChange: (tab: CurrentTabId) => void;
+  onCanAdvanceChange: (canAdvance: boolean) => void;
+}
+
+const ConfigTabs = ({ currentTab, onTabChange, onCanAdvanceChange }: ConfigTabsProps) => {
   const { config } = useContext(ConfigDataContext)!;
-  const [currentTab, setCurrentTab] = useState<CurrentTabId>("target");
   const [savedIncoming, setSavedIncoming] =
     useState<ToggleableConfigFor_IncomingFileConfig>(readIncoming(config));
   const [portConflicts, setPortConflicts] = useState<boolean>(false);
   const [targetPorts, setTargetPorts] = useState<number[]>([]);
 
   const { toast } = useToast();
+
+  const targetNotSelected = (): boolean => {
+    return typeof readCurrentTargetDetails(config).name !== "string";
+  };
+
+  // Notify parent about whether we can advance
+  useEffect(() => {
+    const canAdvance = !targetNotSelected() && !portConflicts;
+    onCanAdvanceChange(canAdvance);
+  }, [config, portConflicts, onCanAdvanceChange]);
 
   const copyToClipboard = async () => {
     const jsonToCopy = getConfigString(config);
@@ -55,16 +70,12 @@ const ConfigTabs = () => {
     });
   };
 
-  const targetNotSelected = (): boolean => {
-    return typeof readCurrentTargetDetails(config).name !== "string";
-  };
-
   return (
     <div className="space-y-6">
       {/* Tab Navigation */}
       <div className="flex border-b border-[var(--border)]">
         <button
-          onClick={() => setCurrentTab("target")}
+          onClick={() => onTabChange("target")}
           className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
             currentTab === "target"
               ? "border-primary text-primary"
@@ -74,7 +85,7 @@ const ConfigTabs = () => {
           Target
         </button>
         <button
-          onClick={() => !targetNotSelected() && setCurrentTab("network")}
+          onClick={() => !targetNotSelected() && onTabChange("network")}
           className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
             currentTab === "network"
               ? "border-primary text-primary"
@@ -84,7 +95,7 @@ const ConfigTabs = () => {
           Network
         </button>
         <button
-          onClick={() => !targetNotSelected() && !portConflicts && setCurrentTab("export")}
+          onClick={() => !targetNotSelected() && !portConflicts && onTabChange("export")}
           className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
             currentTab === "export"
               ? "border-primary text-primary"
