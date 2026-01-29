@@ -1,0 +1,1 @@
+Fix wizard analytics by using `ExecutionKind::Wizard`.

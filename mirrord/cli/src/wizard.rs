@@ -95,7 +95,7 @@ where
 {
     let _analytics = AnalyticsReporter::new(
         args.telemetry,
-        ExecutionKind::PortForward,
+        ExecutionKind::Wizard,
         watch,
         user_data.machine_id(),
     );
