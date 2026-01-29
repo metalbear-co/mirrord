@@ -28,6 +28,8 @@ use nix::{
 };
 use thiserror::Error;
 
+use crate::detour::DetourGuard;
+
 pub static FD_ENV_VAR: &str = "MIRRORD_INTPROXY_CONNECTION_FD";
 
 #[derive(Debug, Error)]
@@ -82,7 +84,10 @@ impl ProxyConnection {
         session: NewSessionRequest,
         timeout: Duration,
     ) -> Result<Self> {
+
+        let guard = DetourGuard::new();
         let connection = Self::acquire_connection(session.parent_layer.is_some(), proxy_addr)?;
+        drop(guard);
 
         connection.set_read_timeout(Some(timeout))?;
         connection.set_write_timeout(Some(timeout))?;
