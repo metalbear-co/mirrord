@@ -148,7 +148,10 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
         #[cfg(unix)]
         {
             use std::os::fd::BorrowedFd;
-            use nix::sys::socket::{getsockname, getsockopt, sockopt, SockaddrStorage, SockaddrLike};
+
+            use nix::sys::socket::{
+                SockaddrLike, SockaddrStorage, getsockname, getsockopt, sockopt,
+            };
 
             let domain = getsockname::<SockaddrStorage>(sockfd)
                 .map_err(io::Error::from)?
@@ -160,13 +163,14 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
             }
             // I really hate it, but nix seems to really make this API bad :(
             let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
-            let type_ = getsockopt(&borrowed_fd, sockopt::SockType)
-                .map_err(io::Error::from)? as i32;
+            let type_ =
+                getsockopt(&borrowed_fd, sockopt::SockType).map_err(io::Error::from)? as i32;
             (domain, type_)
         }
         #[cfg(windows)]
         {
             use std::mem::MaybeUninit;
+
             use winapi::um::winsock2::{
                 SO_PROTOCOL_INFOA, SOCKET_ERROR, SOL_SOCKET, WSAPROTOCOL_INFOA, getsockopt,
             };
