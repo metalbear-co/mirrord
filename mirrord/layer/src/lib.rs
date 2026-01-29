@@ -868,11 +868,22 @@ pub(crate) unsafe extern "C" fn close_range_detour(
 ) -> c_int {
     let close_range = move |first: c_uint, last: c_uint| {
         let res = unsafe { FN_CLOSE_RANGE(first, last, flags) };
-        if flags.bitand(libc::CLOSE_RANGE_CLOEXEC as c_int) == 0 {
+
+        #[cfg(target_os = "linux")]
+        const CLOSE_RANGE_CLOEXEC: c_int = libc::CLOSE_RANGE_CLOEXEC as c_int;
+
+        #[cfg(not(target_os = "linux"))]
+        const CLOSE_RANGE_CLOEXEC: c_int = 0;
+
+        // CLOSE_RANGE_CLOEXEC (since Linux 5.11)
+        // Set the close-on-exec flag on the specified file
+        // descriptors, rather than immediately closing them.
+        if flags.bitand(CLOSE_RANGE_CLOEXEC) == 0 {
             for fd in first..=last {
                 close_layer_fd(fd as i32);
             }
         }
+
         res
     };
 
