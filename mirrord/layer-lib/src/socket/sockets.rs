@@ -171,8 +171,11 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
         {
             use std::mem::MaybeUninit;
 
-            use winapi::um::winsock2::{
-                SO_PROTOCOL_INFOA, SOCKET_ERROR, SOL_SOCKET, WSAPROTOCOL_INFOA, getsockopt,
+            use winapi::{
+                um::winsock2::{
+                    SO_PROTOCOL_INFOA, SOCKET_ERROR, SOL_SOCKET, WSAPROTOCOL_INFOA, getsockopt,
+                },
+                shared::ws2def::AF_INET,
             };
 
             // SO_PROTOCOL_INFOA works on all Winsock sockets
