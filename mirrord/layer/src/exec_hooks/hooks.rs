@@ -1,4 +1,3 @@
-use std::os::fd::AsRawFd;
 
 use base64::prelude::*;
 use libc::{c_char, c_int};
@@ -13,7 +12,7 @@ use crate::common::CheckedInto;
 #[cfg(target_os = "macos")]
 use crate::exec_utils::*;
 use crate::{
-    PROXY_CONNECTION, SOCKETS,
+    SOCKETS,
     common::proxy_conn_fd,
     detour::{Bypass, Detour},
     hooks::HookManager,

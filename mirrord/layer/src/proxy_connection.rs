@@ -16,7 +16,7 @@ use std::{
     time::Duration,
 };
 
-use libc::{F_GETFD, F_SETFD, FD_CLOEXEC, fcntl, sockaddr};
+use libc::{F_GETFD, F_SETFD, FD_CLOEXEC, fcntl};
 use mirrord_intproxy_protocol::{
     IsLayerRequest, IsLayerRequestWithResponse, LayerId, LayerToProxyMessage, LocalMessage,
     MessageId, NewSessionRequest, ProxyToLayerMessage,
@@ -84,7 +84,6 @@ impl ProxyConnection {
         session: NewSessionRequest,
         timeout: Duration,
     ) -> Result<Self> {
-
         let guard = DetourGuard::new();
         let connection = Self::acquire_connection(session.parent_layer.is_some(), proxy_addr)?;
         drop(guard);
