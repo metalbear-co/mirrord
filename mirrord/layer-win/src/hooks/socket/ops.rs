@@ -3,7 +3,7 @@ use std::{net::SocketAddr, sync::OnceLock};
 use mirrord_layer_lib::{
     error::ConnectError,
     socket::{
-        HookResult, SocketAddrExt, get_socket,
+        HookResult, SocketAddrExt,
         ops::{ConnectResult, connect_common},
     },
 };
@@ -246,19 +246,6 @@ pub fn connect<F>(
 where
     F: FnOnce(SockAddr) -> ConnectResult,
 {
-    // Get the socket state (we know it exists from validation)
-    let user_socket = match get_socket(socket) {
-        Some(socket) => socket,
-        None => {
-            tracing::error!(
-                "{} -> socket {} validated but not found in manager",
-                function_name,
-                socket
-            );
-            return Err(ConnectError::Fallback.into());
-        }
-    };
-
     // Convert Windows sockaddr to Rust SocketAddr
     let remote_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
@@ -272,5 +259,5 @@ where
     };
 
     // Try to connect through the mirrord proxy using layer-lib integration
-    connect_common(socket, user_socket, SockAddr::from(remote_addr), connect_fn)
+    connect_common(socket, SockAddr::from(remote_addr), connect_fn)
 }

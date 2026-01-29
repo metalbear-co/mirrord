@@ -3,6 +3,7 @@
 use std::os::fd::RawFd;
 use std::{
     collections::HashMap,
+    io,
     net::SocketAddr,
     sync::{Arc, LazyLock, Mutex},
 };
@@ -14,6 +15,11 @@ use libc;
 use winapi::um::winsock2::SOCKET;
 
 use super::{SocketKind, SocketState, UserSocket};
+use crate::{
+    detour::Bypass,
+    socket::{AF_INET, AF_INET6},
+    error::{HookError, HookResult},
+};
 
 // Platform-specific socket descriptors
 // RawFd
@@ -104,9 +110,11 @@ pub fn i64_to_socket_descriptor(value: i64) -> SocketDescriptor {
 }
 
 // Helper function to convert socket types to SocketKind
-#[cfg(windows)]
 pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
+    #[cfg(windows)]
     use winapi::um::winsock2::{SOCK_DGRAM, SOCK_STREAM};
+    #[cfg(unix)]
+    use libc::{SOCK_DGRAM, SOCK_STREAM};
 
     if socket_type == SOCK_STREAM {
         Ok(SocketKind::Tcp(socket_type))
@@ -117,17 +125,81 @@ pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
     }
 }
 
-#[cfg(unix)]
-pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
-    use libc::{SOCK_DGRAM, SOCK_STREAM};
+/// Attempt to rebuild [`UserSocket`] metadata for an existing socket descriptor.
+///
+/// This is used when a descriptor is no longer tracked in [`SOCKETS`] (for example,
+/// after the bind detour decided the socket was uninteresting and removed it), but we still
+/// need its domain/type/protocol to proceed. Callers typically fall back to this helper in a
+/// `match` similar to:
+///
+/// ```ignore
+/// let user_socket = match SOCKETS.lock()?.remove(&sockfd) {
+///     Some(socket) => socket,
+///     None => match reconstruct_user_socket(sockfd) {
+///         Ok(socket) => socket,
+///         Err(HookError::Bypass(bypass)) => return Detour::Bypass(bypass),
+///         Err(error) => return Detour::Error(error),
+///     },
+/// };
+/// ```
+pub fn reconstruct_user_socket(socket: SocketDescriptor) -> HookResult<Arc<UserSocket>> {
+    // Here we just recreate `UserSocket` using domain and type fetched from the descriptor
+    // we have.
+    let (domain, type_) = {
+        #[cfg(unix)]
+        {
+                let domain = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd)
+                    .map_err(io::Error::from)?
+                    .family()
+                    .map(|family| family as i32)
+                    .unwrap_or(-1);
+                if domain != libc::AF_INET && domain != libc::AF_UNIX {
+                    return HookError::Bypass(Bypass::Domain(domain));
+                }
+                // I really hate it, but nix seems to really make this API bad :(
+                let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
+                let type_ = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType)
+                    .map_err(io::Error::from)? as i32;
+                (domain, type_)
+        }
+        #[cfg(windows)]
+        {
+            use std::mem::MaybeUninit;
+        
+            use winapi::um::winsock2::{
+                getsockopt, SOL_SOCKET, SO_PROTOCOL_INFOA, SOCKET_ERROR, WSAPROTOCOL_INFOA,
+            };
+        
+            // SO_PROTOCOL_INFOA works on all Winsock sockets
+            let mut proto_info = MaybeUninit::<WSAPROTOCOL_INFOA>::zeroed();
+            let mut len = std::mem::size_of::<WSAPROTOCOL_INFOA>() as i32;
+            let result = unsafe {
+                getsockopt(
+                    socket,
+                    SOL_SOCKET,
+                    SO_PROTOCOL_INFOA,
+                    proto_info.as_mut_ptr() as *mut _,
+                    &mut len,
+                )
+            };
+            if result == SOCKET_ERROR {
+                return Err(HookError::from(io::Error::last_os_error()));
+            }
+        
+            let proto_info = unsafe { proto_info.assume_init() };
+            let domain = proto_info.iAddressFamily;
+            if domain != AF_INET && domain != AF_INET6 {
+                return Err(HookError::Bypass(Bypass::Domain(domain)));
+            }
+            
+            let socket_type = proto_info.iSocketType;
+            (domain, socket_type)
+        }
+    };
 
-    if socket_type == SOCK_STREAM {
-        Ok(SocketKind::Tcp(socket_type))
-    } else if socket_type == SOCK_DGRAM {
-        Ok(SocketKind::Udp(socket_type))
-    } else {
-        Err(format!("Unsupported socket type: {}", socket_type))
-    }
+    let kind = socket_kind_from_type(type_)
+        .map_err(|_| HookError::Bypass(Bypass::Type(type_)))?;
+    Ok(Arc::new(UserSocket::new(domain, type_, 0, Default::default(), kind)))
 }
 
 /// Register a new socket with the unified SOCKETS collection

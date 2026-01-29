@@ -11,6 +11,7 @@ pub(crate) mod utils;
 use std::{
     net::SocketAddr,
     ops::Not,
+    ptr,
     sync::{Arc, OnceLock},
 };
 
@@ -19,22 +20,21 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, OutgoingConnMetadataRequest, PortSubscribe,
 };
 use mirrord_layer_lib::{
+    detour::{Bypass, OptionExt},
     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
     setup::{LayerSetup, NetworkHookConfig, setup},
     socket::{
-        Bound, Connected, SOCKETS, SocketAddrExt, SocketKind, SocketState, UserSocket,
+        Bound, Connected, SOCKETS, SocketAddrExt, SocketState, UserSocket,
         dns::{
             remote_dns_resolve_via_proxy,
             windows::{
                 MANAGED_ADDRINFO, free_managed_addrinfo, getaddrinfo, utils::ManagedAddrInfoAny,
             },
         },
-        get_connected_addresses, get_socket, get_socket_state,
+        get_connected_addresses, is_socket_managed, register_socket, remove_socket,
         hostname::remote_hostname_string,
-        is_socket_in_state, is_socket_managed,
         ops::{ConnectResult, send_to},
-        register_socket, remove_socket,
         sockets::socket_kind_from_type,
     },
 };
@@ -46,6 +46,7 @@ use winapi::{
         winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA},
         ws2def::{
             ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SIO_GET_EXTENSION_FUNCTION_POINTER, SOCKADDR,
+            LPWSABUF,
         },
     },
     um::{
@@ -54,7 +55,7 @@ use winapi::{
         winsock2::{
             HOSTENT, INVALID_SOCKET, IPPORT_RESERVED, LPWSAOVERLAPPED_COMPLETION_ROUTINE, SOCKET,
             SOCKET_ERROR, WSA_IO_PENDING, WSAEACCES, WSAECONNABORTED, WSAECONNREFUSED, WSAEFAULT,
-            WSAGetLastError, WSAOVERLAPPED, WSASetLastError, fd_set, timeval,
+            WSAGetLastError, WSAOVERLAPPED, WSASetLastError, fd_set, timeval, WSASend,
         },
     },
 };
@@ -595,29 +596,6 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
 unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT {
     tracing::trace!("connect_detour -> socket: {}, namelen: {}", s, namelen);
 
-    // Log whether this socket is managed and what kind
-    if let Some(user_socket) = get_socket(s) {
-        tracing::debug!(
-            "connect_detour -> socket {} is managed, kind: {:?}",
-            s,
-            user_socket.kind
-        );
-    } else {
-        tracing::debug!("connect_detour -> socket {} is not managed", s);
-    }
-
-    let socket_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
-        Some(addr) => addr,
-        None => {
-            tracing::error!(
-                "connect_detour -> failed to convert raw sockaddr for socket {}",
-                s
-            );
-            return SOCKET_ERROR;
-        }
-    };
-    let raw_addr = SockAddr::from(socket_addr);
-
     let connect_fn = |addr: SockAddr| {
         let original = CONNECT_ORIGINAL.get().unwrap();
         let result = unsafe { original(s, addr.as_ptr() as *const _, addr.len()) };
@@ -626,13 +604,7 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
     };
 
     match ops::connect(s, name, namelen, "connect_detour", connect_fn) {
-        Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
-            tracing::error!(
-                "connect_detour -> socket {} connect target {:?} is unreachable: {}",
-                s,
-                raw_addr,
-                e
-            );
+        Err(HookError::ConnectError(ConnectError::AddressUnreachable(_))) => {
             return SOCKET_ERROR;
         }
         Err(e) => {
@@ -791,60 +763,72 @@ unsafe extern "system" fn getsockname_detour(
     namelen: *mut INT,
 ) -> INT {
     tracing::trace!("getsockname_detour -> socket: {}", s);
+    let getsockname_fn = || {
+        let original = GET_SOCK_NAME_ORIGINAL.get().unwrap();
+        unsafe { original(s, name, namelen) }
+    };
 
-    let local_address: Option<SocketAddr> = match get_socket_state(s) {
-        Some(state) => match state {
-            SocketState::Connected(Connected {
-                local_address: Some(addr),
-                ..
-            }) => Some(addr.clone().try_into().unwrap()),
-            SocketState::Connected(Connected {
-                connection_id: Some(id),
-                ..
-            }) => {
-                match make_proxy_request_with_response(OutgoingConnMetadataRequest { conn_id: id })
-                {
-                    Ok(Some(res)) => Some(res.in_cluster_address),
-                    Ok(None) => {
-                        tracing::error!(id, "Protocol: could not locate outgoing metadata");
-                        None
-                    }
-                    Err(e) => {
-                        tracing::error!(?e, id, "Proxy: Error getting outgoing metadata");
-                        None
-                    }
+    let socket = match SOCKETS
+        .lock()
+        .expect("getsockname_detour -> failed to lock sockets for socket retrieval")
+        .get(&s)
+        .bypass(Bypass::LocalFdNotFound(s)) {
+            Ok(sock) => sock.clone(),
+            Err(err) => {
+                tracing::warn!("getsockname_detour -> failed to get socket: {}", err);
+                return getsockname_fn();
+            }
+        };
+
+    let local_address: Option<SocketAddr> = match &socket.state {
+        SocketState::Connected(Connected {
+            local_address: Some(addr),
+            ..
+        }) => Some(addr.clone().try_into().unwrap()),
+        SocketState::Connected(Connected {
+            connection_id: Some(id),
+            ..
+        }) => {
+            match make_proxy_request_with_response(OutgoingConnMetadataRequest { conn_id: *id })
+            {
+                Ok(Some(res)) => Some(res.in_cluster_address),
+                Ok(None) => {
+                    tracing::error!(id, "Protocol: could not locate outgoing metadata");
+                    None
+                }
+                Err(e) => {
+                    tracing::error!(?e, id, "Proxy: Error getting outgoing metadata");
+                    None
                 }
             }
-            SocketState::Bound {
-                bound:
-                    Bound {
-                        requested_address,
-                        address,
-                    },
-                ..
-            }
-            | SocketState::Listening(Bound {
-                requested_address,
-                address,
-            }) => Some(if requested_address.port() == 0 {
-                SocketAddr::new(requested_address.ip(), address.port())
-            } else {
-                requested_address
-            }),
+        }
+        SocketState::Bound {
+            bound:
+                Bound {
+                    requested_address,
+                    address,
+                },
+            ..
+        }
+        | SocketState::Listening(Bound {
+            requested_address,
+            address,
+        }) => Some(if requested_address.port() == 0 {
+            SocketAddr::new(requested_address.ip(), address.port())
+        } else {
+            (*requested_address).into()
+        }),
 
-            SocketState::Initialized | SocketState::Connected(_) => {
-                // For other managed socket states, fall back to original
-                tracing::trace!(
-                    "getsockname_detour -> managed socket not in bound/connected state, using original"
-                );
-                None
-            }
-        },
-        None => {
-            // Not a managed socket
+        SocketState::Initialized | SocketState::Connected(_) => {
+            // For other managed socket states, fall back to original
+            tracing::trace!(
+                "getsockname_detour -> managed socket not in bound/connected state, using original"
+            );
             None
         }
     };
+
+    // fill_address - Fill in the address structure with the mirrord local address
     if let Some(local_address) = local_address {
         match unsafe { local_address.copy_to(name, namelen) } {
             Ok(()) => {
@@ -878,9 +862,7 @@ unsafe extern "system" fn getsockname_detour(
     }
 
     // Fall back to original function for non-managed sockets or errors
-    let original = GET_SOCK_NAME_ORIGINAL.get().unwrap();
-
-    unsafe { original(s, name, namelen) }
+    getsockname_fn()
 }
 
 /// Windows socket hook for getpeername

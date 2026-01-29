@@ -16,8 +16,9 @@ use std::{cell::RefCell, ffi::CString, ops::Deref, path::PathBuf, sync::OnceLock
 #[cfg(target_os = "macos")]
 use libc::c_char;
 
-#[cfg(unix)]
 use crate::error::HookError;
+#[cfg(windows)]
+use crate::error::HookResult;
 use crate::socket::sockets::SocketDescriptor;
 
 #[cfg(unix)]
@@ -453,6 +454,18 @@ pub trait OptionExt {
     fn bypass(self, value: Bypass) -> Detour<Self::Opt>;
 }
 
+#[cfg(windows)]
+pub trait OptionExt {
+    /// Inner `T` of the `Option<T>`.
+    type Opt;
+
+    /// Converts `Option<T>` into `Detour<T>`, mapping:
+    ///
+    /// - `Some` => `Detour::Success`;
+    /// - `None` => `Detour::Bypass`.
+    fn bypass(self, value: Bypass) -> HookResult<Self::Opt>;
+}
+
 /// Extends `Option<T>` with `Detour<T>` conversion methods.
 #[cfg(target_os = "linux")]
 pub trait OptionDetourExt<T>: OptionExt {
@@ -482,6 +495,18 @@ impl<T> OptionExt for Option<T> {
         match self {
             Some(v) => Detour::Success(v),
             None => Detour::Bypass(value),
+        }
+    }
+}
+
+#[cfg(windows)]
+impl<T> OptionExt for Option<T> {
+    type Opt = T;
+
+    fn bypass(self, value: Bypass) -> HookResult<T> {
+        match self {
+            Some(v) => Ok(v),
+            None => Err(HookError::Bypass(value)),
         }
     }
 }

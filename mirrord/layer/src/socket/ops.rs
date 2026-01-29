@@ -524,31 +524,6 @@ pub(super) fn connect(
     let connect_fn = |layer_address: SockAddr| -> ConnectResult {
         unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
     };
-
-    let user_socket_info = match SOCKETS.lock()?.remove(&sockfd) {
-        Some(socket) => socket,
-        None => {
-            // Socket was probably removed from `SOCKETS` in `bind` detour (as not interesting in
-            // terms of `incoming` feature).
-            // Here we just recreate `UserSocket` using domain and type fetched from the descriptor
-            // we have.
-            let domain = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd)
-                .map_err(io::Error::from)?
-                .family()
-                .map(|family| family as i32)
-                .unwrap_or(-1);
-            if domain != libc::AF_INET && domain != libc::AF_UNIX {
-                return Detour::Bypass(Bypass::Domain(domain));
-            }
-            // I really hate it, but nix seems to really make this API bad :(
-            let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
-            let type_ = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType)
-                .map_err(io::Error::from)? as i32;
-            let kind = SocketKind::try_from(type_)?;
-
-            Arc::new(UserSocket::new(domain, type_, 0, Default::default(), kind))
-        }
-    };
     trace!("in connect {:#?}", SOCKETS);
 
     connect_common(sockfd, user_socket_info, remote_address, connect_fn).into()

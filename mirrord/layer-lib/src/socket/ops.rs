@@ -36,7 +36,10 @@ use crate::{
     error::ConnectError,
     proxy_connection::make_proxy_request_with_response,
     setup::setup,
-    socket::{Bound, Connected, ConnectionThrough, SOCKETS, SocketState, UserSocket},
+    socket::{
+        Bound, Connected, ConnectionThrough, SOCKETS, SocketState, UserSocket,
+        sockets::reconstruct_user_socket,
+    },
 };
 #[cfg(windows)]
 use crate::{error::windows::WindowsError, socket::sockets::find_listener_address_by_port};
@@ -235,16 +238,19 @@ pub fn is_ignored_port(addr: &SocketAddr) -> bool {
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
 #[allow(clippy::result_large_err)]
-#[mirrord_layer_macro::instrument(level = "trace", skip(user_socket_info, connect_fn), ret)]
+#[mirrord_layer_macro::instrument(level = "trace", skip(connect_fn), ret)]
 pub fn connect_common<F>(
     socket: SOCKET,
-    user_socket_info: Arc<UserSocket>,
     remote_address: SockAddr,
     connect_fn: F,
 ) -> HookResult<ConnectResult>
 where
     F: FnOnce(SockAddr) -> ConnectResult,
 {
+    let user_socket_info = match SOCKETS.lock()?.remove(&socket) {
+        Some(socket) => socket,
+        None => reconstruct_user_socket(socket)?,
+    };
     let optional_ip_address = remote_address.as_socket();
     let unix_streams = setup().remote_unix_streams();
 
@@ -524,6 +530,8 @@ where
             ConnectionThrough::Local(addr) => {
                 #[cfg(windows)]
                 if check_address_reachability(sockfd, &addr) != 0 {
+                    tracing::error!(
+                        "socket {} connect target {:?} is unreachable", sockfd, addr);
                     return Err(ConnectError::AddressUnreachable(format!("{}", addr)).into());
                 }
 
