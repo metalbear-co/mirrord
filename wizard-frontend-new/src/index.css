@@ -4,7 +4,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Metal Bear UI Design Tokens */
+/* Metal Bear UI Design Tokens - from @metalbear/ui brandColors */
 :root {
   --background: #fafafd;
   --foreground: #000000;
@@ -230,14 +230,14 @@ body {
 
 /* Gradient backgrounds */
 .gradient-primary {
-  background: linear-gradient(135deg, var(--primary) 0%, #9b95f7 100%);
+  background: linear-gradient(135deg, var(--primary) 0%, var(--muted) 100%);
 }
 
 .gradient-subtle {
   background: linear-gradient(180deg, var(--background) 0%, var(--muted) 100%);
 }
 
-/* Brand shadows */
+/* Brand shadows - using BRAND_PURPLE (#756DF3) from @metalbear/ui */
 .shadow-brand {
   box-shadow: 0 4px 14px -2px rgba(117, 109, 243, 0.25);
 }
