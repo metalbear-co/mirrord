@@ -13,7 +13,7 @@ use tracing::{info, trace, warn};
 
 use crate::{
     EXECUTABLE_ARGS,
-    common::{CheckedInto, strip_mirrord_path},
+    common::{CheckedInto, proxy_conn_fd, strip_mirrord_path},
     detour::{
         Bypass::{
             ExecOnNonExistingFile, FileOperationInMirrordBinTempDir, NoSipDetected, TooManyArgs,
