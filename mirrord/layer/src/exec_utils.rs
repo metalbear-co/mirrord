@@ -61,7 +61,7 @@ pub(crate) unsafe fn enable_macos_hooks(
             "posix_spawn_file_actions_addclose",
             posix_spawn_file_actions_addclose_detour,
             FnPosix_spawn_file_actions_addclose,
-            FN_POSIX_SPAWN_FILE_ACTIONS_ADDCLOSE,
+            FN_POSIX_SPAWN_FILE_ACTIONS_ADDCLOSE
         );
         replace!(
             hook_manager,
