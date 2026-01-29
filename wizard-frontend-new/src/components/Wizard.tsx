@@ -210,17 +210,16 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
                 <ChevronLeft className="h-4 w-4" />
                 Back
               </Button>
-              {currentTab !== "export" && (
+              {currentTab !== "export" && canAdvanceTab && (
                 <Button
                   onClick={goNext}
-                  disabled={!canAdvanceTab}
                   className="gap-2 shadow-brand hover:shadow-brand-hover"
                 >
                   Next
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               )}
-              {currentTab === "export" && <div />}
+              {(currentTab === "export" || !canAdvanceTab) && <div />}
             </>
           )}
           </DialogFooter>
