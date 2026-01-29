@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Button, Card, CardContent, MirrordLogo } from "@metalbear/ui";
 import Wizard from "./Wizard";
 
@@ -72,7 +72,7 @@ const Homepage = () => {
               onClick={() => openWizard("learn")}
               className="w-full text-center text-sm text-[var(--muted-foreground)] hover:text-primary transition-colors flex items-center justify-center gap-2 py-3 rounded-lg hover:bg-primary/5 group"
             >
-              <Sparkles className="h-4 w-4 text-secondary group-hover:text-primary transition-colors" />
+              <span>📖</span>
               <span>New to mirrord? Learn the basics first</span>
             </button>
           </div>

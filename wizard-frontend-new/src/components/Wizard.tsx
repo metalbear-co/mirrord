@@ -1,4 +1,4 @@
-import { useState, useContext } from "react";
+import { useState, useContext, useEffect } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import {
   Dialog,
@@ -52,6 +52,15 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
   const [learningComplete, setLearningComplete] = useState(false);
   const [currentTab, setCurrentTab] = useState<ConfigTab>("target");
   const [canAdvanceTab, setCanAdvanceTab] = useState(false);
+
+  // Reset to correct step when wizard opens
+  useEffect(() => {
+    if (open) {
+      setCurrentStep(startWithLearning ? "learning" : "boilerplate");
+      setCurrentTab("target");
+      setLearningComplete(false);
+    }
+  }, [open, startWithLearning]);
 
   const handleClose = () => {
     setConfig(DefaultConfig);
