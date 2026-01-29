@@ -10,11 +10,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
 } from "@metalbear/ui";
 import {
   readCurrentTargetDetails,
@@ -120,21 +115,19 @@ const TargetTab = ({
   );
 
   return (
-    <Card className="border-[var(--border)] shadow-sm">
-      <CardHeader className="pb-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-            <Server className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <CardTitle className="text-lg font-semibold">Target Selection</CardTitle>
-            <CardDescription className="text-sm">
-              Choose the Kubernetes resource to connect to
-            </CardDescription>
-          </div>
+    <div className="space-y-6">
+      <div className="flex items-center gap-3 pb-4 border-b border-[var(--border)]">
+        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+          <Server className="h-5 w-5 text-primary" />
         </div>
-      </CardHeader>
-      <CardContent className="space-y-5">
+        <div>
+          <h3 className="text-lg font-semibold">Target Selection</h3>
+          <p className="text-sm text-[var(--muted-foreground)]">
+            Choose the Kubernetes resource to connect to
+          </p>
+        </div>
+      </div>
+      <div className="space-y-5">
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="namespace" className="text-sm font-medium">
@@ -278,8 +271,8 @@ const TargetTab = ({
             </p>
           )}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 };
 

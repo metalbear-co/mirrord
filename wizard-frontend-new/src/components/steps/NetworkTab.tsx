@@ -5,11 +5,6 @@ import {
   Input,
   Label,
   Switch,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
   Select,
   SelectContent,
   SelectItem,
@@ -147,17 +142,19 @@ const NetworkTab = ({
   return (
     <div className="space-y-6">
       {/* Ports Section */}
-      <Card>
-        <CardHeader className="pb-4">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Network className="h-5 w-5" />
-            Ports
-          </CardTitle>
-          <CardDescription>
-            Configure which ports to intercept from the remote target
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <div>
+        <div className="flex items-center gap-3 pb-4 border-b border-[var(--border)]">
+          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+            <Network className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold">Ports</h3>
+            <p className="text-sm text-[var(--muted-foreground)]">
+              Configure which ports to intercept from the remote target
+            </p>
+          </div>
+        </div>
+        <div className="space-y-4 pt-4">
           {/* Add new port */}
           {!isReplaceMode && (
             <div className="flex gap-2">
@@ -234,28 +231,31 @@ const NetworkTab = ({
                 : "No ports configured. Add ports above or they will be auto-detected."}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Filters Section - Only for Steal mode */}
       {isStealMode && (
-        <Card>
-          <CardHeader className="pb-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-lg">HTTP Filters</CardTitle>
-                <CardDescription>
-                  Selectively steal traffic based on headers or paths
-                </CardDescription>
+        <div className="pt-6 border-t border-[var(--border)]">
+          <div className="flex items-center justify-between pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-secondary/10 flex items-center justify-center">
+                <Network className="h-5 w-5 text-secondary" />
               </div>
-              <Switch
-                checked={filtersEnabled}
-                onCheckedChange={handleFiltersToggle}
-              />
+              <div>
+                <h3 className="text-lg font-semibold">HTTP Filters</h3>
+                <p className="text-sm text-[var(--muted-foreground)]">
+                  Selectively steal traffic based on headers or paths
+                </p>
+              </div>
             </div>
-          </CardHeader>
+            <Switch
+              checked={filtersEnabled}
+              onCheckedChange={handleFiltersToggle}
+            />
+          </div>
           {filtersEnabled && (
-            <CardContent className="space-y-4">
+            <div className="space-y-4">
               {/* Operator selection */}
               {filters.length > 1 && (
                 <div className="space-y-2">
@@ -347,9 +347,9 @@ const NetworkTab = ({
                   No filters configured. All matching traffic will be stolen.
                 </div>
               )}
-            </CardContent>
+            </div>
           )}
-        </Card>
+        </div>
       )}
     </div>
   );

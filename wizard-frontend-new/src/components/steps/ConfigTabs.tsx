@@ -10,9 +10,7 @@ import {
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
+  CardFooter,
 } from "@metalbear/ui";
 import {
   getConfigString,
@@ -77,9 +75,9 @@ const ConfigTabs = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <Card className="border-[var(--border)] shadow-sm">
       {/* Tab Navigation */}
-      <div className="flex border-b border-[var(--border)]">
+      <div className="flex border-b border-[var(--border)] px-6 pt-4">
         <button
           onClick={() => setCurrentTab("target")}
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -116,7 +114,7 @@ const ConfigTabs = () => {
       </div>
 
       {/* Tab Content */}
-      <div className="mt-6">
+      <CardContent className="pt-6">
         {currentTab === "target" && (
           <TargetTab setTargetPorts={setTargetPorts} />
         )}
@@ -131,85 +129,86 @@ const ConfigTabs = () => {
         )}
 
         {currentTab === "export" && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Save className="h-5 w-5" />
-                Export Configuration
-              </CardTitle>
-              <CardDescription>
-                Review and export your mirrord.json configuration
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="json-editor">Configuration JSON</Label>
-                <Textarea
-                  id="json-editor"
-                  className="font-code text-sm min-h-[200px] resize-none"
-                  value={getConfigString(config)}
-                  readOnly
-                  placeholder={getConfigString(DefaultConfig)}
-                />
+          <div className="space-y-6">
+            <div className="flex items-center gap-3 pb-4 border-b border-[var(--border)]">
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Save className="h-5 w-5 text-primary" />
               </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={copyToClipboard}>
-                  <Copy className="h-4 w-4 mr-2" />
-                  Copy to Clipboard
-                </Button>
-                <Button variant="outline" size="sm" onClick={downloadConfig}>
-                  <Download className="h-4 w-4 mr-2" />
-                  Download File
-                </Button>
+              <div>
+                <h3 className="text-lg font-semibold">Export Configuration</h3>
+                <p className="text-sm text-[var(--muted-foreground)]">
+                  Review and export your mirrord.json configuration
+                </p>
               </div>
+            </div>
 
-              <Separator />
+            <div className="space-y-2">
+              <Label htmlFor="json-editor">Configuration JSON</Label>
+              <Textarea
+                id="json-editor"
+                className="font-code text-sm min-h-[200px] resize-none"
+                value={getConfigString(config)}
+                readOnly
+                placeholder={getConfigString(DefaultConfig)}
+              />
+            </div>
 
-              <div className="space-y-3">
-                <h4 className="font-medium text-[var(--foreground)]">
-                  How to use your configuration:
-                </h4>
-                <div className="space-y-2 text-sm text-[var(--muted-foreground)]">
-                  <p>
-                    <strong>CLI:</strong> Use the{" "}
-                    <code className="px-1 py-0.5 bg-[var(--muted)] rounded text-xs">
-                      -f &lt;CONFIG_PATH&gt;
-                    </code>{" "}
-                    flag
-                  </p>
-                  <p>
-                    <strong>VSCode / JetBrains:</strong> Create a{" "}
-                    <code className="px-1 py-0.5 bg-[var(--muted)] rounded text-xs">
-                      .mirrord/mirrord.json
-                    </code>{" "}
-                    file
-                  </p>
-                  <p>
-                    See the{" "}
-                    <a
-                      href="https://mirrord.dev/docs/reference/configuration/"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:underline"
-                    >
-                      configuration documentation
-                    </a>{" "}
-                    for more details.
-                  </p>
-                </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={copyToClipboard}>
+                <Copy className="h-4 w-4 mr-2" />
+                Copy to Clipboard
+              </Button>
+              <Button variant="outline" size="sm" onClick={downloadConfig}>
+                <Download className="h-4 w-4 mr-2" />
+                Download File
+              </Button>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <h4 className="font-medium text-[var(--foreground)]">
+                How to use your configuration:
+              </h4>
+              <div className="space-y-2 text-sm text-[var(--muted-foreground)]">
+                <p>
+                  <strong>CLI:</strong> Use the{" "}
+                  <code className="px-1 py-0.5 bg-[var(--muted)] rounded text-xs">
+                    -f &lt;CONFIG_PATH&gt;
+                  </code>{" "}
+                  flag
+                </p>
+                <p>
+                  <strong>VSCode / JetBrains:</strong> Create a{" "}
+                  <code className="px-1 py-0.5 bg-[var(--muted)] rounded text-xs">
+                    .mirrord/mirrord.json
+                  </code>{" "}
+                  file
+                </p>
+                <p>
+                  See the{" "}
+                  <a
+                    href="https://mirrord.dev/docs/reference/configuration/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    configuration documentation
+                  </a>{" "}
+                  for more details.
+                </p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         )}
-      </div>
+      </CardContent>
 
-      {/* Navigation buttons */}
-      <div className="flex items-center justify-between pt-4 border-t border-[var(--border)]">
+      {/* Navigation in CardFooter */}
+      <CardFooter className="flex items-center justify-between border-t border-[var(--border)] bg-[var(--muted)]/30">
         <div>
           {currentTab !== "target" && (
-            <Button variant="outline" onClick={prevTab}>
-              <ChevronLeft className="h-4 w-4 mr-2" />
+            <Button variant="outline" onClick={prevTab} className="gap-2">
+              <ChevronLeft className="h-4 w-4" />
               Back
             </Button>
           )}
@@ -219,14 +218,15 @@ const ConfigTabs = () => {
             <Button
               onClick={nextTab}
               disabled={targetNotSelected() || portConflicts}
+              className="gap-2 shadow-brand hover:shadow-brand-hover"
             >
               Next
-              <ChevronRight className="h-4 w-4 ml-2" />
+              <ChevronRight className="h-4 w-4" />
             </Button>
           )}
         </div>
-      </div>
-    </div>
+      </CardFooter>
+    </Card>
   );
 };
 
