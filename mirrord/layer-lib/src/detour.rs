@@ -16,10 +16,9 @@ use std::{cell::RefCell, ffi::CString, ops::Deref, path::PathBuf, sync::OnceLock
 #[cfg(target_os = "macos")]
 use libc::c_char;
 
-use crate::error::HookError;
 #[cfg(windows)]
 use crate::error::HookResult;
-use crate::socket::sockets::SocketDescriptor;
+use crate::{error::HookError, socket::sockets::SocketDescriptor};
 
 #[cfg(unix)]
 thread_local!(

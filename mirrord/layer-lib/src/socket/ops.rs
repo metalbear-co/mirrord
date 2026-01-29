@@ -530,8 +530,7 @@ where
             ConnectionThrough::Local(addr) => {
                 #[cfg(windows)]
                 if check_address_reachability(sockfd, &addr) != 0 {
-                    tracing::error!(
-                        "socket {} connect target {:?} is unreachable", sockfd, addr);
+                    tracing::error!("socket {} connect target {:?} is unreachable", sockfd, addr);
                     return Err(ConnectError::AddressUnreachable(format!("{}", addr)).into());
                 }
 
