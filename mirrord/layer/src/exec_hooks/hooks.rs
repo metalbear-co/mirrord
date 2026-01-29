@@ -14,6 +14,7 @@ use crate::common::CheckedInto;
 use crate::exec_utils::*;
 use crate::{
     PROXY_CONNECTION, SOCKETS,
+    common::proxy_conn_fd,
     detour::{Bypass, Detour},
     hooks::HookManager,
     proxy_connection::FD_ENV_VAR,
@@ -43,15 +44,8 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
 
     drop(lock);
 
-    // SAFETY: Mutation only happens during init
-    #[allow(static_mut_refs)]
-    let conn_fd = unsafe { PROXY_CONNECTION.get() }
-        .unwrap()
-        .as_raw_fd()
-        .to_string();
-
     env_vars.insert_env(SHARED_SOCKETS_ENV_VAR, &encoded)?;
-    env_vars.insert_env(FD_ENV_VAR, &conn_fd)?;
+    env_vars.insert_env(FD_ENV_VAR, &proxy_conn_fd().unwrap().to_string())?;
 
     Detour::Success(env_vars)
 }

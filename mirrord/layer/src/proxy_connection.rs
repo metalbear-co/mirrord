@@ -16,13 +16,16 @@ use std::{
     time::Duration,
 };
 
-use libc::{F_GETFD, F_SETFD, FD_CLOEXEC, fcntl};
+use libc::{F_GETFD, F_SETFD, FD_CLOEXEC, fcntl, sockaddr};
 use mirrord_intproxy_protocol::{
     IsLayerRequest, IsLayerRequestWithResponse, LayerId, LayerToProxyMessage, LocalMessage,
     MessageId, NewSessionRequest, ProxyToLayerMessage,
     codec::{self, CodecError, SyncDecoder, SyncEncoder},
 };
-use nix::{errno::Errno, sys::socket::getsockopt};
+use nix::{
+    errno::Errno,
+    sys::socket::{SockaddrStorage, getpeername, getsockopt},
+};
 use thiserror::Error;
 
 pub static FD_ENV_VAR: &str = "MIRRORD_INTPROXY_CONNECTION_FD";
@@ -145,6 +148,14 @@ impl ProxyConnection {
                 fd: owned_fd,
                 errno,
                 fn_name: "getsockopt",
+            });
+        }
+
+        if let Err(errno) = getpeername::<SockaddrStorage>(fd) {
+            return Err(ProxyError::BadProxyConnFd {
+                fd: owned_fd,
+                errno,
+                fn_name: "getpeername",
             });
         }
 

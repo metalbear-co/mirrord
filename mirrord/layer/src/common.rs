@@ -1,5 +1,11 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{ffi::CStr, fmt::Debug, ops::Not, path::PathBuf};
+use std::{
+    ffi::CStr,
+    fmt::Debug,
+    ops::Not,
+    os::fd::{AsRawFd, RawFd},
+    path::PathBuf,
+};
 
 use libc::c_char;
 use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
@@ -149,4 +155,10 @@ impl CheckedInto<OpenOptionsInternal> for *const c_char {
     fn checked_into(self) -> Detour<OpenOptionsInternal> {
         CheckedInto::<String>::checked_into(self).map(OpenOptionsInternal::from_mode)
     }
+}
+
+pub fn proxy_conn_fd() -> Option<RawFd> {
+    // SAFETY: Mutation only happens during init
+    #[allow(static_mut_refs)]
+    unsafe { PROXY_CONNECTION.get() }.map(AsRawFd::as_raw_fd)
 }
