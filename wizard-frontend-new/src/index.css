@@ -228,14 +228,6 @@ body {
   background: var(--muted-foreground);
 }
 
-/* Gradient backgrounds */
-.gradient-primary {
-  background: linear-gradient(135deg, var(--primary) 0%, var(--muted) 100%);
-}
-
-.gradient-subtle {
-  background: linear-gradient(180deg, var(--background) 0%, var(--muted) 100%);
-}
 
 /* Brand shadows - using BRAND_PURPLE (#756DF3) from @metalbear/ui */
 .shadow-brand {
@@ -262,26 +254,6 @@ body {
   animation: tabFadeIn 0.2s ease-out forwards;
 }
 
-/* Loading shimmer */
-@keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
-
-.animate-shimmer {
-  background: linear-gradient(
-    90deg,
-    var(--muted) 25%,
-    var(--border) 50%,
-    var(--muted) 75%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-}
 
 /* Better spinner */
 .spinner {

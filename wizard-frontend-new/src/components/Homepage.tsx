@@ -22,8 +22,8 @@ const Homepage = () => {
   return (
     <div className="w-full max-w-md mx-auto animate-fade-in">
       <Card className="shadow-lg border-[var(--border)] overflow-hidden">
-        {/* Decorative gradient header */}
-        <div className="h-2 gradient-primary" />
+        {/* Decorative header */}
+        <div className="h-2 bg-primary" />
 
         <CardContent className="pt-10 pb-8 px-8">
           {/* Logo */}
