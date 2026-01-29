@@ -1,0 +1,118 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Default light mode values - will be overridden by JS */
+:root {
+  --background: #fafafd;
+  --foreground: #000000;
+  --card: #ffffff;
+  --muted: #e4e3fd;
+  --muted-foreground: #6b6b80;
+  --border: #e5e5e5;
+  --primary: #756df3;
+  --secondary: #ffcb7d;
+  --destructive: #f36869;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family:
+    'Poppins',
+    system-ui,
+    -apple-system,
+    sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--foreground);
+  background-color: var(--background);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+@layer components {
+  .card {
+    @apply bg-[var(--card)] rounded-xl p-6 border border-[var(--border)] transition-colors duration-200;
+  }
+
+  .card-hover {
+    @apply hover:shadow-brutal hover:border-primary/30 transition-shadow duration-200;
+  }
+
+  .btn-primary {
+    @apply bg-primary hover:shadow-brutal active:scale-[0.98] active:shadow-none text-white font-medium py-2 px-4 rounded-lg transition-all duration-200;
+  }
+
+  .btn-secondary {
+    @apply bg-[var(--card)] hover:shadow-brutal active:scale-[0.98] active:shadow-none text-[var(--foreground)] font-medium py-2 px-4 rounded-lg transition-all duration-200 border border-[var(--border)];
+  }
+
+  .text-muted {
+    @apply text-[var(--muted-foreground)];
+  }
+
+  .bg-muted {
+    @apply bg-[var(--muted)];
+  }
+
+  .border-default {
+    @apply border-[var(--border)];
+  }
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
+/* Dialog animation */
+@keyframes dialogFadeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.animate-dialog-in {
+  animation: dialogFadeIn 0.15s ease-out;
+}
+
+/* Fix transparent backgrounds for Radix UI components */
+[data-radix-popper-content-wrapper] > div,
+[role="listbox"],
+[role="dialog"] {
+  background-color: var(--card) !important;
+  border-color: var(--border) !important;
+}
