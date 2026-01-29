@@ -250,10 +250,16 @@ const NetworkTab = ({
                 </p>
               </div>
             </div>
-            <Switch
-              checked={filtersEnabled}
-              onCheckedChange={handleFiltersToggle}
-            />
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-[var(--muted-foreground)]">
+                {filtersEnabled ? "On" : "Off"}
+              </span>
+              <Switch
+                checked={filtersEnabled}
+                onCheckedChange={handleFiltersToggle}
+                className="data-[state=checked]:bg-primary"
+              />
+            </div>
           </div>
           {filtersEnabled && (
             <div className="space-y-4">
