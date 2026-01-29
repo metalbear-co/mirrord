@@ -291,7 +291,7 @@ pub(crate) unsafe extern "C" fn posix_spawn_file_actions_addclose_detour(
     if proxy_conn_fd() == Some(fd) {
         return 0;
     };
-    FN_POSIX_SPAWN_FILE_ACTIONS_ADDCLOSE(file_actions, fd)
+    unsafe { FN_POSIX_SPAWN_FILE_ACTIONS_ADDCLOSE(file_actions, fd) }
 }
 
 #[hook_guard_fn]
