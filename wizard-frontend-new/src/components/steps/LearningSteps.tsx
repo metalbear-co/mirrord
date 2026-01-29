@@ -6,6 +6,7 @@ import flowDiagram from "../../assets/flow-diagram.png";
 
 interface LearningStepsProps {
   onComplete: () => void;
+  onSkip: () => void;
 }
 
 interface Step {
@@ -164,7 +165,7 @@ const steps: Step[] = [
   },
 ];
 
-const LearningSteps = ({ onComplete }: LearningStepsProps) => {
+const LearningSteps = ({ onComplete, onSkip }: LearningStepsProps) => {
   const [currentStep, setCurrentStep] = useState(0);
   const isLastStep = currentStep === steps.length - 1;
   const isFirstStep = currentStep === 0;
@@ -184,15 +185,17 @@ const LearningSteps = ({ onComplete }: LearningStepsProps) => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Progress indicator */}
-      <div className="flex items-center justify-center gap-2">
+      <div className="flex items-center justify-center gap-1.5">
         {steps.map((_, index) => (
-          <div
+          <button
             key={index}
+            onClick={() => setCurrentStep(index)}
             className={`
-              h-2 rounded-full transition-all duration-300
-              ${index === currentStep ? "w-8 bg-primary" : "w-2 bg-[var(--muted)]"}
+              h-1.5 rounded-full transition-all duration-300 hover:opacity-80
+              ${index === currentStep ? "w-6 bg-primary" : "w-1.5 bg-[var(--muted)]"}
+              ${index < currentStep ? "bg-primary/50" : ""}
             `}
           />
         ))}
@@ -204,23 +207,29 @@ const LearningSteps = ({ onComplete }: LearningStepsProps) => {
       </h3>
 
       {/* Step content */}
-      <div className="min-h-[200px]">{steps[currentStep].content}</div>
+      <div>{steps[currentStep].content}</div>
 
       {/* Navigation */}
-      <div className="flex justify-between pt-4 border-t border-[var(--border)]">
-        <Button
-          variant="outline"
-          onClick={prev}
-          disabled={isFirstStep}
-          className={isFirstStep ? "invisible" : ""}
-        >
-          <ChevronLeft className="h-4 w-4 mr-2" />
-          Previous
-        </Button>
-        <Button onClick={next}>
-          {isLastStep ? "Start Configuration" : "Next"}
-          {!isLastStep && <ChevronRight className="h-4 w-4 ml-2" />}
-        </Button>
+      <div className="flex items-center justify-between pt-4 border-t border-[var(--border)]">
+        <div>
+          {!isFirstStep && (
+            <Button variant="outline" onClick={prev} className="gap-2">
+              <ChevronLeft className="h-4 w-4" />
+              Previous
+            </Button>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {!isLastStep && (
+            <Button variant="ghost" onClick={onSkip} className="text-[var(--muted-foreground)]">
+              Skip
+            </Button>
+          )}
+          <Button onClick={next} className="gap-2 shadow-brand hover:shadow-brand-hover">
+            {isLastStep ? "Start Configuration" : "Next"}
+            {!isLastStep && <ChevronRight className="h-4 w-4" />}
+          </Button>
+        </div>
       </div>
     </div>
   );

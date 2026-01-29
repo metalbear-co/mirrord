@@ -164,7 +164,7 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
 
         <div className="py-6">
           {currentStep === "learning" && (
-            <LearningSteps onComplete={handleLearningComplete} />
+            <LearningSteps onComplete={handleLearningComplete} onSkip={goToConfig} />
           )}
           {currentStep === "boilerplate" && (
             <BoilerplateStep />
@@ -180,8 +180,9 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
           )}
         </div>
 
-        <DialogFooter className="flex justify-between sm:justify-between border-t border-[var(--border)] pt-4 -mx-6 px-6">
-          {currentStep !== "learning" && currentStep !== "config" && (
+        {currentStep !== "learning" && (
+          <DialogFooter className="flex justify-between sm:justify-between border-t border-[var(--border)] pt-4 -mx-6 px-6">
+            {currentStep === "boilerplate" && (
             <>
               <div>
                 {(currentStep === "boilerplate" && learningComplete) && (
@@ -202,15 +203,6 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
             </>
           )}
 
-          {currentStep === "learning" && (
-            <>
-              <div />
-              <Button variant="outline" onClick={goToConfig} className="gap-2">
-                Skip to Configuration
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </>
-          )}
 
           {currentStep === "config" && (
             <>
@@ -231,7 +223,8 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
               {currentTab === "export" && <div />}
             </>
           )}
-        </DialogFooter>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   );
