@@ -18,7 +18,6 @@ use super::{SocketKind, SocketState, UserSocket};
 use crate::{
     detour::Bypass,
     error::{HookError, HookResult},
-    socket::{AF_INET, AF_INET6},
 };
 
 // Platform-specific socket descriptors
@@ -142,30 +141,32 @@ pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
 ///     },
 /// };
 /// ```
-pub fn reconstruct_user_socket(socket: SocketDescriptor) -> HookResult<Arc<UserSocket>> {
+pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserSocket>> {
     // Here we just recreate `UserSocket` using domain and type fetched from the descriptor
     // we have.
     let (domain, type_) = {
         #[cfg(unix)]
         {
-            let domain = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd)
+            use std::os::fd::BorrowedFd;
+            use nix::sys::socket::{getsockname, getsockopt, sockopt, SockaddrStorage, SockaddrLike};
+
+            let domain = getsockname::<SockaddrStorage>(sockfd)
                 .map_err(io::Error::from)?
                 .family()
                 .map(|family| family as i32)
                 .unwrap_or(-1);
             if domain != libc::AF_INET && domain != libc::AF_UNIX {
-                return HookError::Bypass(Bypass::Domain(domain));
+                return Err(HookError::Bypass(Bypass::Domain(domain)));
             }
             // I really hate it, but nix seems to really make this API bad :(
             let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
-            let type_ = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType)
+            let type_ = getsockopt(&borrowed_fd, sockopt::SockType)
                 .map_err(io::Error::from)? as i32;
             (domain, type_)
         }
         #[cfg(windows)]
         {
             use std::mem::MaybeUninit;
-
             use winapi::um::winsock2::{
                 SO_PROTOCOL_INFOA, SOCKET_ERROR, SOL_SOCKET, WSAPROTOCOL_INFOA, getsockopt,
             };
@@ -175,7 +176,7 @@ pub fn reconstruct_user_socket(socket: SocketDescriptor) -> HookResult<Arc<UserS
             let mut len = std::mem::size_of::<WSAPROTOCOL_INFOA>() as i32;
             let result = unsafe {
                 getsockopt(
-                    socket,
+                    sockfd,
                     SOL_SOCKET,
                     SO_PROTOCOL_INFOA,
                     proto_info.as_mut_ptr() as *mut _,
@@ -188,7 +189,7 @@ pub fn reconstruct_user_socket(socket: SocketDescriptor) -> HookResult<Arc<UserS
 
             let proto_info = unsafe { proto_info.assume_init() };
             let domain = proto_info.iAddressFamily;
-            if domain != AF_INET && domain != AF_INET6 {
+            if domain != AF_INET {
                 return Err(HookError::Bypass(Bypass::Domain(domain)));
             }
 

@@ -5,7 +5,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpStream},
     ops::Not,
     os::{
-        fd::{BorrowedFd, FromRawFd, IntoRawFd},
+        fd::{FromRawFd, IntoRawFd},
         unix::io::RawFd,
     },
     path::PathBuf,
@@ -40,7 +40,7 @@ use mirrord_protocol::{
 };
 use nix::{
     errno::Errno,
-    sys::socket::{SockaddrLike, SockaddrStorage, sockopt},
+    sys::socket::{SockaddrLike, SockaddrStorage},
 };
 use socket2::SockAddr;
 #[cfg(debug_assertions)]
@@ -526,7 +526,7 @@ pub(super) fn connect(
     };
     trace!("in connect {:#?}", SOCKETS);
 
-    connect_common(sockfd, user_socket_info, remote_address, connect_fn).into()
+    connect_common(sockfd, remote_address, connect_fn).into()
 }
 
 /// For IPv6 server / IPv4 client connections, translate IPv4
