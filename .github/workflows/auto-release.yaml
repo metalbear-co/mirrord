@@ -1,0 +1,98 @@
+name: Auto Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_version:
+        description: 'Force specific version (optional)'
+        required: false
+      dry_run:
+        description: 'Dry run'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: 'auth'
+        uses: 'google-github-actions/auth@v1'
+        with:
+          credentials_json: '${{ secrets.GCP_CREDENTIALS }}'
+
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v1'
+
+      - name: 'Docker auth'
+        run: |-
+          gcloud auth configure-docker us-central1-docker.pkg.dev
+
+      - name: Calculate Version
+        id: version
+        run: |
+          echo "Using Dockerized tools..."
+          if [[ -n "${{ github.event.inputs.force_version }}" ]]; then
+             next_version="${{ github.event.inputs.force_version }}"
+          else
+             # Run calculation using Docker image
+             next_version=$(docker run --rm -v $PWD:/workspace -w /workspace --entrypoint python3 us-central1-docker.pkg.dev/mirrord/release-tools/calculate-version-script \
+               /usr/local/bin/calculate_version.py --file Cargo.toml --changelog-dir changelog.d)
+          fi
+          echo "next_version=$next_version" >> $GITHUB_OUTPUT
+
+      - name: Update Files
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          v="${{ steps.version.outputs.next_version }}"
+          # Using ^ to match start of line to avoid matching dependencies
+          sed -i "s/^version = \".*\"/version = \"$v\"/" Cargo.toml
+
+      - name: Generate Changelog
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          v="${{ steps.version.outputs.next_version }}"
+          if grep -q "\[$v\]" CHANGELOG.md; then
+            echo "Changelog entry for $v already exists, skipping creation."
+          else
+            docker run --rm -v $PWD:/workspace -w /workspace --entrypoint towncrier us-central1-docker.pkg.dev/mirrord/release-tools/calculate-version-script \
+              build --yes --version "$v"
+          fi
+          
+          # Extract the new entry for release body (from first header to next header)
+          awk '/^## / { if (p) { exit }; p=1; print; next } p { print }' CHANGELOG.md > RELEASE_NOTES.md
+
+      - name: Commit and Push
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          sudo chown -R $(id -u):$(id -g) .
+          v="${{ steps.version.outputs.next_version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml CHANGELOG.md changelog.d
+          if ! git diff --staged --quiet; then
+            git commit -m "Release $v"
+            git pull --rebase origin main
+            git push origin main
+          else
+            echo "No changes to commit, checking if tag exists..."
+          fi
+          if git rev-parse "$v" >/dev/null 2>&1; then
+            echo "Tag $v already exists, skipping creation."
+          else
+            git tag "$v"
+            git push origin "$v"
+          fi
+          
+      - name: Create Release
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: metalbear-co/action-gh-release-1@v1
+        with:
+          tag_name: ${{ steps.version.outputs.next_version }}
+          body_path: RELEASE_NOTES.md
