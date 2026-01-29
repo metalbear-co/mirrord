@@ -78,12 +78,14 @@ use std::{
     fs::File,
     io::Read,
     net::SocketAddr,
+    ops::{BitAnd, Not},
     os::unix::process::parent_id,
     panic,
     sync::OnceLock,
     time::Duration,
 };
 
+use common::proxy_conn_fd;
 use ctor::ctor;
 use error::{LayerError, Result};
 use file::OPEN_FILES;
@@ -93,7 +95,7 @@ use hooks::HookManager;
     target_os = "linux"
 ))]
 use libc::c_char;
-use libc::{c_int, pid_t};
+use libc::{c_int, c_uint, pid_t};
 use load::ExecuteArgs;
 #[cfg(target_os = "macos")]
 use mirrord_config::feature::fs::FsConfig;
@@ -630,6 +632,13 @@ fn enable_hooks(state: &LayerSetup) {
         replace!(&mut hook_manager, "close", close_detour, FnClose, FN_CLOSE);
         replace!(
             &mut hook_manager,
+            "close_range",
+            close_range_detour,
+            FnClose_range,
+            FN_CLOSE_RANGE
+        );
+        replace!(
+            &mut hook_manager,
             "close$NOCANCEL",
             close_nocancel_detour,
             FnClose_nocancel,
@@ -842,6 +851,51 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
         drop(addr_info);
         drop(dns_mapping);
         res
+    }
+}
+
+/// Guard against closing the intproxy connection.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn close_range_detour(
+    first: c_uint,
+    last: c_uint,
+    flags: c_int,
+) -> c_int {
+    let close_range = move |first: c_uint, last: c_uint| {
+        let res = unsafe { FN_CLOSE_RANGE(first, last, flags) };
+        if flags.bitand(libc::CLOSE_RANGE_CLOEXEC as c_int) == 0 {
+            for fd in first..=last {
+                close_layer_fd(fd as i32);
+            }
+        }
+        res
+    };
+
+    let Some(intproxy_conn_fd) = proxy_conn_fd() else {
+        return close_range(first, last);
+    };
+
+    // the fd is a i32 but fds are never negative, so this is ok.
+    let intproxy_conn_fd = intproxy_conn_fd as c_uint;
+
+    if (first..=last).contains(&intproxy_conn_fd).not() {
+        close_range(first, last)
+    } else {
+        if intproxy_conn_fd != first
+            && let result = close_range(first, intproxy_conn_fd - 1)
+            && result != 0
+        {
+            return result;
+        };
+
+        if intproxy_conn_fd != last
+            && let result = close_range(intproxy_conn_fd + 1, last)
+            && result != 0
+        {
+            return result;
+        };
+
+        0
     }
 }
 
