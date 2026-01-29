@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight, CheckCircle } from "lucide-react";
-import { Button } from "@metalbear/ui";
+import { Button, Card, CardContent, CardFooter } from "@metalbear/ui";
 import mirrordArchitecture from "../../assets/mirrord-architecture.svg";
 import flowDiagram from "../../assets/flow-diagram.png";
 
@@ -185,32 +185,33 @@ const LearningSteps = ({ onComplete, onSkip }: LearningStepsProps) => {
   };
 
   return (
-    <div className="space-y-5">
-      {/* Progress indicator */}
-      <div className="flex items-center justify-center gap-1.5">
-        {steps.map((_, index) => (
-          <button
-            key={index}
-            onClick={() => setCurrentStep(index)}
-            className={`
-              h-1.5 rounded-full transition-all duration-300 hover:opacity-80
-              ${index === currentStep ? "w-6 bg-primary" : "w-1.5 bg-[var(--muted)]"}
-              ${index < currentStep ? "bg-primary/50" : ""}
-            `}
-          />
-        ))}
-      </div>
+    <Card className="border-[var(--border)]">
+      <CardContent className="pt-6 space-y-5">
+        {/* Progress indicator */}
+        <div className="flex items-center justify-center gap-1.5">
+          {steps.map((_, index) => (
+            <button
+              key={index}
+              onClick={() => setCurrentStep(index)}
+              className={`
+                h-1.5 rounded-full transition-all duration-300 hover:opacity-80
+                ${index === currentStep ? "w-6 bg-primary" : "w-1.5 bg-[var(--muted)]"}
+                ${index < currentStep ? "bg-primary/50" : ""}
+              `}
+            />
+          ))}
+        </div>
 
-      {/* Step title */}
-      <h3 className="text-lg font-semibold text-[var(--foreground)] text-center">
-        {steps[currentStep].title}
-      </h3>
+        {/* Step title */}
+        <h3 className="text-lg font-semibold text-[var(--foreground)] text-center">
+          {steps[currentStep].title}
+        </h3>
 
-      {/* Step content */}
-      <div>{steps[currentStep].content}</div>
+        {/* Step content */}
+        <div>{steps[currentStep].content}</div>
+      </CardContent>
 
-      {/* Navigation */}
-      <div className="flex items-center justify-between pt-4 border-t border-[var(--border)]">
+      <CardFooter className="flex items-center justify-between">
         <div>
           {!isFirstStep && (
             <Button variant="outline" onClick={prev} className="gap-2">
@@ -230,8 +231,8 @@ const LearningSteps = ({ onComplete, onSkip }: LearningStepsProps) => {
             {!isLastStep && <ChevronRight className="h-4 w-4" />}
           </Button>
         </div>
-      </div>
-    </div>
+      </CardFooter>
+    </Card>
   );
 };
 
