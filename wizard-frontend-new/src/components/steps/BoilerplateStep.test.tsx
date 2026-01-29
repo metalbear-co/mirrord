@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '../../test/test-utils';
 import BoilerplateStep from './BoilerplateStep';
 import { ConfigDataContext } from '../UserDataContext';

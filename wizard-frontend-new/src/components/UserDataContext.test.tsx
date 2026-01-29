@@ -14,7 +14,16 @@ describe('UserDataContext', () => {
     });
 
     it('has mirror mode as default', () => {
-      expect(DefaultConfig.feature?.network?.incoming?.mode).toBe('mirror');
+      const network = DefaultConfig.feature?.network;
+      // network can be boolean or object
+      const incoming = typeof network === 'object' && network !== null && 'incoming' in network
+        ? network.incoming
+        : undefined;
+      // incoming can also be boolean or object with mode
+      const mode = typeof incoming === 'object' && incoming !== null && 'mode' in incoming
+        ? incoming.mode
+        : undefined;
+      expect(mode).toBe('mirror');
     });
   });
 
@@ -49,7 +58,11 @@ describe('UserDataContext', () => {
         result.current?.setConfig(newConfig);
       });
 
-      expect(result.current?.config.target?.path).toBe('deployment/test');
+      const target = result.current?.config.target;
+      const path = typeof target === 'object' && target !== null && 'path' in target
+        ? target.path
+        : undefined;
+      expect(path).toBe('deployment/test');
     });
 
     it('preserves config across re-renders', () => {
@@ -72,8 +85,15 @@ describe('UserDataContext', () => {
 
       rerender();
 
-      expect(result.current?.config.target?.path).toBe('deployment/api');
-      expect(result.current?.config.target?.namespace).toBe('staging');
+      const target = result.current?.config.target;
+      const path = typeof target === 'object' && target !== null && 'path' in target
+        ? target.path
+        : undefined;
+      const namespace = typeof target === 'object' && target !== null && 'namespace' in target
+        ? target.namespace
+        : undefined;
+      expect(path).toBe('deployment/api');
+      expect(namespace).toBe('staging');
     });
   });
 });

@@ -91,7 +91,10 @@ describe('JsonUtils', () => {
         target: { path: 'deployment/test' },
       };
       const result = updateConfigMode('mirror', config);
-      expect(result.target?.path).toBe('deployment/test');
+      // Use type guard to check target has path property
+      const target = result.target;
+      expect(target).toBeDefined();
+      expect(typeof target === 'object' && target !== null && 'path' in target ? target.path : undefined).toBe('deployment/test');
     });
   });
 
@@ -194,47 +197,47 @@ describe('JsonUtils', () => {
 
   describe('readCurrentFilters', () => {
     it('reads single header filter', () => {
-      const config: LayerFileConfig = {
+      const config = {
         feature: {
           network: {
             incoming: {
-              mode: 'steal',
+              mode: 'steal' as const,
               http_filter: {
                 header: 'x-user-id: 123',
               },
             },
           },
         },
-      };
+      } as LayerFileConfig;
       const result = readCurrentFilters(config);
       expect(result.filters).toHaveLength(1);
       expect(result.filters).toContainEqual({ type: 'header', value: 'x-user-id: 123' });
     });
 
     it('reads single path filter', () => {
-      const config: LayerFileConfig = {
+      const config = {
         feature: {
           network: {
             incoming: {
-              mode: 'steal',
+              mode: 'steal' as const,
               http_filter: {
                 path: '/api/users',
               },
             },
           },
         },
-      };
+      } as LayerFileConfig;
       const result = readCurrentFilters(config);
       expect(result.filters).toHaveLength(1);
       expect(result.filters).toContainEqual({ type: 'path', value: '/api/users' });
     });
 
     it('reads any_of filters', () => {
-      const config: LayerFileConfig = {
+      const config = {
         feature: {
           network: {
             incoming: {
-              mode: 'steal',
+              mode: 'steal' as const,
               http_filter: {
                 any_of: [
                   { header: 'x-user-id: 123' },
@@ -244,7 +247,7 @@ describe('JsonUtils', () => {
             },
           },
         },
-      };
+      } as LayerFileConfig;
       const result = readCurrentFilters(config);
       expect(result.filters).toHaveLength(2);
       expect(result.operator).toBe('any');
@@ -270,7 +273,8 @@ describe('JsonUtils', () => {
       };
       const filters = [{ type: 'header' as const, value: 'x-test: value' }];
       const result = updateConfigFilter(filters, 'any', config);
-      expect(result.feature?.network?.incoming).toHaveProperty('http_filter');
+      const incoming = result.feature?.network?.incoming;
+      expect(typeof incoming === 'object' && incoming !== null && 'http_filter' in incoming).toBe(true);
     });
 
     it('adds path filter', () => {
@@ -283,26 +287,31 @@ describe('JsonUtils', () => {
       };
       const filters = [{ type: 'path' as const, value: '/api/test' }];
       const result = updateConfigFilter(filters, 'any', config);
-      expect(result.feature?.network?.incoming).toHaveProperty('http_filter');
+      const incoming = result.feature?.network?.incoming;
+      expect(typeof incoming === 'object' && incoming !== null && 'http_filter' in incoming).toBe(true);
     });
   });
 
   describe('disableConfigFilter', () => {
     it('removes http_filter from config', () => {
-      const config: LayerFileConfig = {
+      const config = {
         feature: {
           network: {
             incoming: {
-              mode: 'steal',
+              mode: 'steal' as const,
               http_filter: {
                 header: 'x-test: value',
               },
             },
           },
         },
-      };
+      } as LayerFileConfig;
       const result = disableConfigFilter(config);
-      expect(result.feature?.network?.incoming).not.toHaveProperty('http_filter');
+      const network = result.feature?.network;
+      const incoming = typeof network === 'object' && network !== null && 'incoming' in network
+        ? network.incoming
+        : undefined;
+      expect(typeof incoming === 'object' && incoming !== null && 'http_filter' in incoming).toBe(false);
     });
   });
 
@@ -340,8 +349,11 @@ describe('JsonUtils', () => {
           },
         };
         const result = updateConfigPorts([8080, 3000], config);
-        expect(result.feature?.network?.incoming).toHaveProperty('ports');
-        expect((result.feature?.network?.incoming as { ports?: number[] })?.ports).toEqual([8080, 3000]);
+        const incoming = result.feature?.network?.incoming;
+        expect(typeof incoming === 'object' && incoming !== null && 'ports' in incoming).toBe(true);
+        if (typeof incoming === 'object' && incoming !== null && 'ports' in incoming) {
+          expect(incoming.ports).toEqual([8080, 3000]);
+        }
       });
     });
 
