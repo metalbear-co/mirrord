@@ -118,7 +118,7 @@ const BoilerplateStep = () => {
                       {option.title}
                     </span>
                     {option.recommended && (
-                      <Badge variant="secondary" className="text-xs bg-secondary/20 text-secondary-foreground border-secondary/30">
+                      <Badge variant="outline" className="text-xs bg-[var(--muted)] text-[var(--muted-foreground)] border-[var(--border)]">
                         Recommended
                       </Badge>
                     )}
