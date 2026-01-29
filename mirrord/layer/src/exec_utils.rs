@@ -58,6 +58,13 @@ pub(crate) unsafe fn enable_macos_hooks(
         );
         replace!(
             hook_manager,
+            "posix_spawn_file_actions_addclose",
+            posix_spawn_file_actions_addclose_detour,
+            FnPosix_spawn_file_actions_addclose,
+            FN_POSIX_SPAWN_FILE_ACTIONS_ADDCLOSE,
+        );
+        replace!(
+            hook_manager,
             "_NSGetExecutablePath",
             _nsget_executable_path_detour,
             Fn_nsget_executable_path,
@@ -273,6 +280,18 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
             _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
         }
     }
+}
+
+/// Guard against closing intproxy connection
+#[hook_fn]
+pub(crate) unsafe extern "C" fn posix_spawn_file_actions_addclose_detour(
+    file_actions: *mut libc::posix_spawn_file_actions_t,
+    fd: c_int,
+) -> c_int {
+    if proxy_conn_fd() == Some(fd) {
+        return 0;
+    };
+    FN_POSIX_SPAWN_FILE_ACTIONS_ADDCLOSE(file_actions, fd)
 }
 
 #[hook_guard_fn]
