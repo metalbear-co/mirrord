@@ -1,5 +1,7 @@
 use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
+#[cfg(target_os = "macos")]
+use std::os::fd::BorrowedFd;
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpStream},
@@ -12,8 +14,6 @@ use std::{
     ptr::{self, copy_nonoverlapping},
     sync::{Arc, OnceLock},
 };
-#[cfg(target_os = "macos")]
-use std::os::fs::BorrowedFd;
 
 use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
 #[cfg(target_os = "macos")]
