@@ -896,7 +896,11 @@ pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
         }
     };
 
+    // Drop the `DetourGuard` so we actually fork_detour.
+    drop(__bypass);
     let fork_result = unsafe { fork_detour() };
+    let _guard = DetourGuard::new();
+
     match fork_result.cmp(&0) {
         // We're the child.
         // Write end of the pipe will be dropped when we exit or exec,
