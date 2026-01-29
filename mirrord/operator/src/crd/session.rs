@@ -2,6 +2,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[kube(
@@ -43,6 +44,62 @@ pub struct MirrordClusterSessionSpec {
     /// Set when the session uses a copied pod.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub copy_target: Option<SessionCopyTarget>,
+
+    /// Multi-cluster coordination: ID of the parent MirrordMultiClusterSession.
+    ///
+    /// If set, this session is part of a multi-cluster session and was created by Envoy.
+    /// The value is the name of the MirrordMultiClusterSession CRD in the primary cluster.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multi_cluster_parent_id: Option<String>,
+
+    /// Multi-cluster coordination: logical name of the primary cluster.
+    ///
+    /// If set, indicates which cluster is coordinating this multi-cluster session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multi_cluster_primary: Option<String>,
+
+    /// Multi-cluster coordination: whether this is the default cluster for stateful ops.
+    ///
+    /// If true, this cluster should handle db_branches and other stateful operations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_default_cluster: Option<bool>,
+
+    /// Feature configuration as JSON (FeatureConfig from mirrord-config).
+    ///
+    /// The full config is passed to all clusters. Each cluster uses the relevant parts:
+    /// - Default cluster: handles db_branches (stateful operations)
+    /// - Workload clusters: handle traffic operations
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feature_config: Option<JsonValue>,
+
+    /// PostgreSQL branch database names created by the primary for this session.
+    ///
+    /// For multi-cluster: primary creates branches on default cluster and passes names here.
+    /// The default cluster's operator then uses these branches for the session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pg_branch_names: Vec<String>,
+
+    /// MySQL branch database names created by the primary for this session.
+    ///
+    /// For multi-cluster: primary creates branches on default cluster and passes names here.
+    /// The default cluster's operator then uses these branches for the session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mysql_branch_names: Vec<String>,
+
+    /// MongoDB branch database names created by the primary for this session.
+    ///
+    /// For multi-cluster: primary creates branches on default cluster and passes names here.
+    /// The default cluster's operator then uses these branches for the session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mongodb_branch_names: Vec<String>,
+
+    /// Multi-cluster coordination: explicit SQS output queue names.
+    ///
+    /// Maps original queue names to their corresponding output queue names.
+    /// For multi-cluster: the default cluster creates temp queues and passes the exact names here.
+    /// Other clusters use these names directly instead of generating their own.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub sqs_output_queues: std::collections::HashMap<String, String>,
 }
 
 /// Describes an owner of a mirrord session.
