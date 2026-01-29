@@ -84,7 +84,7 @@ const BoilerplateStep = () => {
       </div>
 
       <div className="space-y-3">
-        {modeOptions.map((option, index) => {
+        {modeOptions.map((option) => {
           const isSelected = selectedMode === option.id;
 
           return (
@@ -92,13 +92,12 @@ const BoilerplateStep = () => {
               key={option.id}
               onClick={() => handleModeSelect(option.id)}
               className={`
-                w-full p-5 rounded-xl border text-left transition-all duration-200 animate-fade-in
+                w-full p-5 rounded-xl border text-left transition-all duration-200
                 ${isSelected
                   ? "border-primary bg-primary/5 shadow-brand ring-1 ring-primary/20"
                   : "border-[var(--border)] hover:border-primary/40 hover:bg-primary/5 hover:shadow-md active:scale-[0.99]"
                 }
               `}
-              style={{ animationDelay: `${index * 50}ms` }}
             >
               <div className="flex items-start gap-4">
                 <div
