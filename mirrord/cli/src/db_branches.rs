@@ -3,18 +3,16 @@ use std::collections::HashSet;
 use kube::{
     Api,
     api::{DeleteParams, ListParams},
-    client::ClientBuilder,
 };
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_kube::{api::kubernetes::create_kube_config, retry::RetryKube};
 use mirrord_operator::crd::{mysql_branching::MysqlBranchDatabase, pg_branching::PgBranchDatabase};
 use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{Table, row};
-use tower::{buffer::BufferLayer, retry::RetryLayer};
 
 use crate::{
-    CliError, CliResult,
+    CliResult,
     config::{DbBranchesArgs, DbBranchesCommand},
+    kube::kube_client_from_layer_config,
 };
 
 #[derive(Debug)]
@@ -99,21 +97,7 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
 
     let layer_config = LayerConfig::resolve(&mut cfg_context)?;
 
-    let client = create_kube_config(
-        layer_config.accept_invalid_certificates,
-        layer_config.kubeconfig.clone(),
-        layer_config.kube_context.clone(),
-    )
-    .await
-    .and_then(|config| {
-        Ok(ClientBuilder::try_from(config.clone())?
-            .with_layer(&BufferLayer::new(1024))
-            .with_layer(&RetryLayer::new(RetryKube::try_from(
-                &layer_config.startup_retry,
-            )?))
-            .build())
-    })
-    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
+    let client = kube_client_from_layer_config(&layer_config).await?;
 
     // Fetch MySQL branches
     let mysql_api: Api<MysqlBranchDatabase> = if args.all_namespaces {
@@ -215,21 +199,7 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &Vec<String>) 
 
     let layer_config = LayerConfig::resolve(&mut cfg_context)?;
 
-    let client = create_kube_config(
-        layer_config.accept_invalid_certificates,
-        layer_config.kubeconfig.clone(),
-        layer_config.kube_context.clone(),
-    )
-    .await
-    .and_then(|config| {
-        Ok(ClientBuilder::try_from(config.clone())?
-            .with_layer(&BufferLayer::new(1024))
-            .with_layer(&RetryLayer::new(RetryKube::try_from(
-                &layer_config.startup_retry,
-            )?))
-            .build())
-    })
-    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
+    let client = kube_client_from_layer_config(&layer_config).await?;
 
     let mysql_api: Api<MysqlBranchDatabase> = if args.all_namespaces {
         Api::all(client.clone())
