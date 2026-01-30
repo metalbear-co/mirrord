@@ -7,12 +7,15 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
-use mirrord_layer_lib::detour::{Bypass, Detour};
+use mirrord_layer_lib::{
+    detour::{Bypass, Detour},
+    error::HookError,
+};
 use mirrord_protocol::file::{CloseDirRequest, DirEntryInternal, ReadDirRequest, ReadDirResponse};
 use tracing::Level;
 
 use super::{DirStreamFd, LocalFd, OPEN_FILES, RemoteFd};
-use crate::{common, error::HookError};
+use crate::common;
 
 /// Global instance of [`OpenDirs`]. Used in hooks.
 pub static OPEN_DIRS: LazyLock<OpenDirs> = LazyLock::new(OpenDirs::new);

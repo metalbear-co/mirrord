@@ -6,10 +6,15 @@ use std::{
 };
 
 use libc::{c_char, c_int, pid_t};
-use mirrord_layer_lib::detour::{
-    Bypass::{ExecOnNonExistingFile, FileOperationInMirrordBinTempDir, NoSipDetected, TooManyArgs},
-    Detour,
-    Detour::{Bypass, Error, Success},
+use mirrord_layer_lib::{
+    detour::{
+        Bypass::{
+            ExecOnNonExistingFile, FileOperationInMirrordBinTempDir, NoSipDetected, TooManyArgs,
+        },
+        Detour,
+        Detour::{Bypass, Error, Success},
+    },
+    error::HookError,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_sip::{MIRRORD_PATCH_DIR, SipError, SipPatchOptions, sip_patch};
@@ -19,7 +24,6 @@ use tracing::{info, trace, warn};
 use crate::{
     EXECUTABLE_ARGS,
     common::{CheckedInto, strip_mirrord_path},
-    error::HookError,
     exec_hooks::{hooks, *},
     graceful_exit,
     hooks::HookManager,

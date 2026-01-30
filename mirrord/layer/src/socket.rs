@@ -5,11 +5,10 @@ use std::net::SocketAddr;
 use libc::{sockaddr, socklen_t};
 pub use mirrord_layer_lib::{
     detour::{Bypass, Detour},
+    error::HookError,
     socket::{SHARED_SOCKETS_ENV_VAR, SOCKETS, UserSocket},
 };
 use socket2::SockAddr;
-
-use crate::error::HookError;
 
 pub(super) mod hooks;
 pub(crate) mod ops;

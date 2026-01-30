@@ -27,7 +27,7 @@ use mirrord_intproxy_protocol::{
 use mirrord_layer_lib::socket::apple_dnsinfo::*;
 use mirrord_layer_lib::{
     detour::{Detour, OnceLockExt, OptionExt},
-    error::HookResult,
+    error::{HookError, HookResult},
     graceful_exit,
     proxy_connection::make_proxy_request_with_response,
     socket::{
@@ -50,10 +50,7 @@ use tracing::Level;
 use tracing::{error, trace, warn};
 
 use super::{hooks::*, *};
-use crate::{
-    error::HookError,
-    file::{self, OPEN_FILES},
-};
+use crate::file::{self, OPEN_FILES};
 
 /// Hostname initialized from the agent with [`gethostname`].
 pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();

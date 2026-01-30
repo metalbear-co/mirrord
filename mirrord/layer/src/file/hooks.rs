@@ -19,8 +19,11 @@ use libc::{
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, statx};
+#[cfg(target_os = "linux")]
+use mirrord_layer_lib::error::HookError::ResponseError;
 use mirrord_layer_lib::{
     detour::{Bypass, Detour, DetourGuard},
+    error::HookError,
     setup::LayerSetup,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
@@ -37,12 +40,9 @@ use tracing::trace;
 use tracing::{error, info, warn};
 
 use super::{OpenOptionsInternalExt, open_dirs, ops::*};
-#[cfg(target_os = "linux")]
-use crate::error::HookError::ResponseError;
 use crate::{
     close_layer_fd,
     common::CheckedInto,
-    error::HookError,
     file::{
         open_dirs::OPEN_DIRS,
         ops::{access, lseek, open, read, write},

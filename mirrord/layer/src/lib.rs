@@ -85,7 +85,6 @@ use std::{
 };
 
 use ctor::ctor;
-use error::{LayerError, Result};
 use file::OPEN_FILES;
 use hooks::HookManager;
 #[cfg(all(
@@ -105,6 +104,7 @@ use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_lib::setup::SETUP;
 use mirrord_layer_lib::{
     detour::DetourGuard,
+    error::{LayerError, Result},
     proxy_connection::{PROXY_CONNECTION, ProxyConnection},
     setup::{LayerSetup, init_layer_setup, setup},
     socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING,
@@ -138,7 +138,6 @@ mod integration_tests_deps {
 }
 
 mod common;
-mod error;
 mod exec_hooks;
 #[cfg(target_os = "macos")]
 mod exec_utils;

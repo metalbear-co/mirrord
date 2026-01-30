@@ -19,6 +19,7 @@ use libc::{c_char, statx, statx_timestamp};
 use mirrord_config::feature::fs::FsModeConfig;
 use mirrord_layer_lib::{
     detour::{Bypass, Detour},
+    error::{HookError, HookResult as Result},
     file::filter::FileFilter,
 };
 use mirrord_protocol::{
@@ -38,12 +39,9 @@ use tracing::Level;
 use tracing::{error, trace};
 
 use super::{hooks::FN_OPEN, open_dirs::OPEN_DIRS, *};
+use crate::common;
 #[cfg(target_os = "linux")]
 use crate::common::CheckedInto;
-use crate::{
-    common,
-    error::{HookError, HookResult as Result},
-};
 
 /// 1 Megabyte. Large read requests can lead to timeouts.
 const MAX_READ_SIZE: u64 = 1024 * 1024;

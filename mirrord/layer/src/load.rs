@@ -7,9 +7,8 @@ use std::{
 
 use mirrord_config::LayerConfig;
 use mirrord_intproxy_protocol::ProcessInfo;
+use mirrord_layer_lib::error::LayerError;
 use tracing::trace;
-
-use crate::error::LayerError;
 
 static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     HashSet::from([
