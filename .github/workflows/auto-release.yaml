@@ -27,13 +27,6 @@ jobs:
         id: set-tags
         with:
           base-name: ci/calculate-version-script
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Calculate Version
         id: version
         run: |
