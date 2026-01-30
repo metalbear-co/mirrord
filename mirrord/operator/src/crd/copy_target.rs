@@ -73,6 +73,7 @@ impl CopyTargetStatus {
     kind = "MirrordClusterCopyTargetRequest",
     status = "MirrordClusterCopyTargetRequestStatus"
 )]
+#[serde(rename_all = "camelCase")]
 pub struct MirrordClusterCopyTargetRequestSpec {
     /// Target to copy.
     pub target: PatchedWorkloadRef,
@@ -103,13 +104,14 @@ pub struct MirrordClusterCopyTargetRequestSpec {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct MirrordClusterCopyTargetRequestStatus {
     /// Marks the time when the request has finished spawning its first pod.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ready_at: Option<MicroTime>,
     /// Marks the time when the request was last used by any mirrord session.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub used_timestamp: Option<MicroTime>,
+    pub used_at: Option<MicroTime>,
     /// If the request is closed, this field contains the reason.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closed: Option<MirrordClusterCopyTargetRequestClosed>,
@@ -117,6 +119,7 @@ pub struct MirrordClusterCopyTargetRequestStatus {
 
 /// Details of why a copy target request is closed.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct MirrordClusterCopyTargetRequestClosed {
     /// Short reason name in PascalCase.
     pub reason: String,
