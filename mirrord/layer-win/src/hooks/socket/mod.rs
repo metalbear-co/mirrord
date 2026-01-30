@@ -190,15 +190,6 @@ type WSAConnectType = unsafe extern "system" fn(
 ) -> INT;
 static WSA_CONNECT_ORIGINAL: OnceLock<&WSAConnectType> = OnceLock::new();
 
-type WSAAcceptType = unsafe extern "system" fn(
-    s: SOCKET,
-    addr: *mut SOCKADDR,
-    addrlen: *mut INT,
-    lpfnCondition: *mut u8,
-    dwCallbackData: usize,
-) -> SOCKET;
-static WSA_ACCEPT_ORIGINAL: OnceLock<&WSAAcceptType> = OnceLock::new();
-
 type WSASendToType = unsafe extern "system" fn(
     s: SOCKET,
     lpBuffers: *mut u8,
@@ -650,7 +641,7 @@ unsafe extern "system" fn accept_detour(
             ),
             _ => {
                 tracing::debug!(
-                    "listen_detour -> socket {} is not in Bound state, using original listen",
+                    "accept_detour -> socket {} is not in Bound state, using original accept",
                     s
                 );
                 return auto_close_socket.release();
@@ -729,23 +720,6 @@ unsafe extern "system" fn accept_detour(
 
     // Success! Release the socket from automatic cleanup and return it
     auto_close_socket.release()
-}
-
-/// Windows socket hook for WSAAccept (asynchronous accept)
-/// Node.js uses this for non-blocking accept operations
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_accept_detour(
-    s: SOCKET,
-    addr: *mut SOCKADDR,
-    addrlen: *mut INT,
-    lpfnCondition: *mut u8,
-    dwCallbackData: usize,
-) -> SOCKET {
-    //todo!("WSAAccept detour not yet implemented - implement like in accept_detour");
-    tracing::trace!("wsa_accept_detour -> socket: {}", s);
-    // Pass through to original - interceptor handles data for managed sockets
-    let original = WSA_ACCEPT_ORIGINAL.get().unwrap();
-    unsafe { original(s, addr, addrlen, lpfnCondition, dwCallbackData) }
 }
 
 /// Windows socket hook for getsockname
@@ -2055,15 +2029,6 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
                 accept_detour,
                 AcceptType,
                 ACCEPT_ORIGINAL
-            )?;
-
-            apply_hook!(
-                guard,
-                "ws2_32",
-                "WSAAccept",
-                wsa_accept_detour,
-                WSAAcceptType,
-                WSA_ACCEPT_ORIGINAL
             )?;
         } else {
             tracing::info!("Incoming connection hooks disabled (incoming mode = Off)");
