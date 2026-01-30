@@ -105,6 +105,7 @@ use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_lib::setup::SETUP;
 use mirrord_layer_lib::{
     detour::DetourGuard,
+    proxy_connection::{PROXY_CONNECTION, ProxyConnection},
     setup::{LayerSetup, init_layer_setup, setup},
     socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING,
     trace_only::is_trace_only_mode,
@@ -112,7 +113,6 @@ use mirrord_layer_lib::{
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use nix::errno::Errno;
-use proxy_connection::{PROXY_CONNECTION, ProxyConnection};
 use socket::SOCKETS;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
