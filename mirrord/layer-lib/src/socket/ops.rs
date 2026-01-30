@@ -278,7 +278,7 @@ where
             // it.
             #[cfg(unix)]
             if let Some(result) = connect_to_local_address(
-                socket,
+                sockfd,
                 &user_socket_info,
                 ip_address,
                 &mut call_connect_fn,
