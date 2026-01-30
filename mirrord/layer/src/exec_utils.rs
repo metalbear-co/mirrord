@@ -2,7 +2,7 @@ use std::{
     env,
     ffi::{CStr, CString, c_void},
     mem::zeroed,
-    ops::BitAnd,
+    ops::{BitAnd, Not},
     path::PathBuf,
     sync::OnceLock,
 };
@@ -261,6 +261,8 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
+    // rebind because hook_guard_fn panics if I make the arg mut
+    let mut file_actions = file_actions;
     unsafe {
         let mut file_actions_buf: posix_spawn_file_actions_t = zeroed();
         let mut file_actions_buf_used = false;
@@ -269,16 +271,23 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
             // Check if POSIX_SPAWN_CLOEXEC_DEFAULT flag is set,
             // and if so, add the intproxy connection fd to inherit list
             // so it won't get closed.
-
             let mut flags: c_short = 0;
-            if attrp.is_null().not()
+            if attrp.is_null.not()
                 && posix_spawnattr_getflags(attrp, &mut flags) == 0
-                && flags.bitand(POSIX_SPAWN_CLOEXEC_DEFAULT) != 0
+                && flags.bitand(POSIX_SPAWN_CLOEXEC_DEFAULT as c_short) != 0
             {
                 if file_actions.is_null() {
                     posix_spawn_file_actions_init(&mut file_actions_buf);
                     file_actions_buf_used = true;
                     file_actions = &mut file_actions_buf as *mut _;
+                }
+
+                extern "C" {
+                    // not exposed by libc crate :(
+                    fn posix_spawn_file_actions_addinherit_np(
+                        file_actions: *mut libc::posix_spawn_file_actions_t,
+                        fd: c_int,
+                    ) -> c_int;
                 }
                 posix_spawn_file_actions_addinherit_np(file_actions, proxy_conn_fd);
             };
