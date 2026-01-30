@@ -6,7 +6,10 @@ use mirrord_config::{feature::split_queues::SplitQueuesConfig, target::Target};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::crd::{Session, patch::PatchedWorkloadRef, session::SessionOwner};
+use crate::crd::{
+    Session,
+    session::{SessionOwner, SessionTarget},
+};
 
 /// This resource represents a copy pod created from an existing [`Target`]
 /// (operator's copy pod feature).
@@ -76,9 +79,9 @@ impl CopyTargetStatus {
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterCopyTargetRequestSpec {
     /// Target to copy.
-    pub target: PatchedWorkloadRef,
-    /// Name of the container within the target, that will be used as session target.
-    pub target_container: String,
+    pub target: SessionTarget,
+    /// Namespace of the target.
+    pub namespace: String,
     /// Whether the target workload should be scaled down for the duration of the copy.
     pub scaledown: bool,
     /// ID of the session that created this request.
