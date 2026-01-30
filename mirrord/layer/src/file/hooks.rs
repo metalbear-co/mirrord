@@ -528,7 +528,7 @@ pub(crate) unsafe extern "C" fn openat64_detour(
 }
 
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn _openat_nocancel_detour(
+pub(crate) unsafe extern "C" fn openat_nocancel_detour(
     fd: RawFd,
     raw_path: *const c_char,
     open_flags: c_int,
@@ -538,7 +538,7 @@ pub(crate) unsafe extern "C" fn _openat_nocancel_detour(
 
         openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|bypass| {
             let raw_path = update_ptr_from_bypass(raw_path, &bypass);
-            FN__OPENAT_NOCANCEL(fd, raw_path, open_flags)
+            FN_OPENAT_NOCANCEL(fd, raw_path, open_flags)
         })
     }
 }
@@ -649,33 +649,6 @@ pub(crate) unsafe extern "C" fn read_detour(
 }
 
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn _read_nocancel_detour(
-    fd: RawFd,
-    out_buffer: *mut c_void,
-    count: size_t,
-) -> ssize_t {
-    unsafe {
-        read(fd, count as u64)
-            .map(|read_file| {
-                let ReadFileResponse { bytes, read_amount } = read_file;
-
-                // There is no distinction between reading 0 bytes or if we hit EOF, but we only
-                // copy to buffer if we have something to copy.
-                if read_amount > 0 {
-                    let read_ptr = bytes.as_ptr();
-                    let out_buffer = out_buffer.cast();
-                    ptr::copy(read_ptr, out_buffer, read_amount as usize);
-                }
-
-                // WARN: Must be careful when it comes to `EOF`, incorrect handling may appear as
-                // the `read` call being repeated.
-                ssize_t::try_from(read_amount).unwrap()
-            })
-            .unwrap_or_bypass_with(|_| FN__READ_NOCANCEL(fd, out_buffer, count))
-    }
-}
-
-#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn read_nocancel_detour(
     fd: RawFd,
     out_buffer: *mut c_void,
@@ -733,7 +706,7 @@ pub(crate) unsafe extern "C" fn pread_detour(
 }
 
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn _pread_nocancel_detour(
+pub(crate) unsafe extern "C" fn pread_nocancel_detour(
     fd: RawFd,
     out_buffer: *mut c_void,
     amount_to_read: size_t,
@@ -758,7 +731,7 @@ pub(crate) unsafe extern "C" fn _pread_nocancel_detour(
                 }
                 fixed_read as ssize_t
             })
-            .unwrap_or_bypass_with(|_| FN__PREAD_NOCANCEL(fd, out_buffer, amount_to_read, offset))
+            .unwrap_or_bypass_with(|_| FN_PREAD_NOCANCEL(fd, out_buffer, amount_to_read, offset))
     }
 }
 
@@ -801,7 +774,7 @@ pub(crate) unsafe extern "C" fn pwrite_detour(
 }
 
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn _pwrite_nocancel_detour(
+pub(crate) unsafe extern "C" fn pwrite_nocancel_detour(
     fd: RawFd,
     in_buffer: *const c_void,
     amount_to_write: size_t,
@@ -809,7 +782,7 @@ pub(crate) unsafe extern "C" fn _pwrite_nocancel_detour(
 ) -> ssize_t {
     unsafe {
         pwrite_logic(fd, in_buffer, amount_to_write, offset)
-            .unwrap_or_bypass_with(|_| FN__PWRITE_NOCANCEL(fd, in_buffer, amount_to_write, offset))
+            .unwrap_or_bypass_with(|_| FN_PWRITE_NOCANCEL(fd, in_buffer, amount_to_write, offset))
     }
 }
 
@@ -854,7 +827,7 @@ pub(crate) unsafe extern "C" fn write_detour(
 }
 
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn _write_nocancel_detour(
+pub(crate) unsafe extern "C" fn write_nocancel_detour(
     fd: RawFd,
     buffer: *const c_void,
     count: size_t,
@@ -865,7 +838,7 @@ pub(crate) unsafe extern "C" fn _write_nocancel_detour(
         let write_bytes =
             (!buffer.is_null()).then(|| slice::from_raw_parts(buffer as *const u8, count).to_vec());
 
-        write(fd, write_bytes).unwrap_or_bypass_with(|_| FN__WRITE_NOCANCEL(fd, buffer, count))
+        write(fd, write_bytes).unwrap_or_bypass_with(|_| FN_WRITE_NOCANCEL(fd, buffer, count))
     }
 }
 
@@ -906,6 +879,12 @@ pub(crate) unsafe extern "C" fn faccessat_detour(
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fsync_detour(fd: RawFd) -> c_int {
     unsafe { fsync(fd).unwrap_or_bypass_with(|_| FN_FSYNC(fd)) }
+}
+
+/// Hook for `fsync$NOCANCEL`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn fsync_nocancel_detour(fd: RawFd) -> c_int {
+    unsafe { fsync(fd).unwrap_or_bypass_with(|_| FN_FSYNC_NOCANCEL(fd)) }
 }
 
 /// Hook for `libc::fdatasync`.
@@ -1392,7 +1371,35 @@ pub(crate) unsafe extern "C" fn readv_detour(
     }
 }
 
-/// Hook for `libc::readv`.
+/// Hook for `readv$NOCANCEL`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn readv_nocancel_detour(
+    fd: RawFd,
+    iovecs: *const iovec,
+    iovec_count: c_int,
+) -> ssize_t {
+    unsafe {
+        if iovec_count < 0 {
+            return FN_READV_NOCANCEL(fd, iovecs, iovec_count);
+        }
+
+        let iovs = (!iovecs.is_null()).then(|| slice::from_raw_parts(iovecs, iovec_count as usize));
+
+        readv(iovs)
+            .and_then(|(iovs, read_size)| Detour::Success((read(fd, read_size)?, iovs)))
+            .map(|(read_file, iovs)| {
+                let ReadFileResponse { bytes, .. } = read_file;
+
+                vec_to_iovec(bytes.borrow(), iovs);
+                // WARN: Must be careful when it comes to `EOF`, incorrect handling may appear as
+                // the `read` call being repeated.
+                ssize_t::try_from(bytes.len()).unwrap()
+            })
+            .unwrap_or_bypass_with(|_| FN_READV_NOCANCEL(fd, iovecs, iovec_count))
+    }
+}
+
+/// Hook for `libc::preadv`.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn preadv_detour(
     fd: RawFd,
@@ -1421,6 +1428,38 @@ pub(crate) unsafe extern "C" fn preadv_detour(
                 ssize_t::try_from(bytes.len()).unwrap()
             })
             .unwrap_or_bypass_with(|_| FN_PREADV(fd, iovecs, iovec_count, offset))
+    }
+}
+
+/// Hook for `preadv$NOCANCEL`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn preadv_nocancel_detour(
+    fd: RawFd,
+    iovecs: *const iovec,
+    iovec_count: c_int,
+    offset: off_t,
+) -> ssize_t {
+    unsafe {
+        if iovec_count < 0 {
+            return FN_PREADV_NOCANCEL(fd, iovecs, iovec_count, offset);
+        }
+
+        let iovs = (!iovecs.is_null()).then(|| slice::from_raw_parts(iovecs, iovec_count as usize));
+
+        readv(iovs)
+            .and_then(|(iovs, read_size)| {
+                Detour::Success((pread(fd, read_size, offset as u64)?, iovs))
+            })
+            .map(|(read_file, iovs)| {
+                let ReadFileResponse { bytes, .. } = read_file;
+
+                vec_to_iovec(bytes.borrow(), iovs);
+
+                // WARN: Must be careful when it comes to `EOF`, incorrect handling may appear as
+                // the `read` call being repeated.
+                ssize_t::try_from(bytes.len()).unwrap()
+            })
+            .unwrap_or_bypass_with(|_| FN_PREADV_NOCANCEL(fd, iovecs, iovec_count, offset))
     }
 }
 
@@ -1546,20 +1585,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &L
         );
         replace!(
             hook_manager,
-            "_openat$NOCANCEL",
-            _openat_nocancel_detour,
-            Fn_openat_nocancel,
-            FN__OPENAT_NOCANCEL
+            "openat$NOCANCEL",
+            openat_nocancel_detour,
+            FnOpenat_nocancel,
+            FN_OPENAT_NOCANCEL
         );
 
         replace!(hook_manager, "read", read_detour, FnRead, FN_READ);
-        replace!(
-            hook_manager,
-            "_read$NOCANCEL",
-            _read_nocancel_detour,
-            Fn_read_nocancel,
-            FN__READ_NOCANCEL
-        );
 
         replace!(
             hook_manager,
@@ -1581,13 +1613,27 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &L
 
         replace!(hook_manager, "pread", pread_detour, FnPread, FN_PREAD);
         replace!(hook_manager, "readv", readv_detour, FnReadv, FN_READV);
+        replace!(
+            hook_manager,
+            "readv$NOCANCEL",
+            readv_nocancel_detour,
+            FnReadv_nocancel,
+            FN_READV_NOCANCEL
+        );
         replace!(hook_manager, "preadv", preadv_detour, FnPreadv, FN_PREADV);
         replace!(
             hook_manager,
-            "_pread$NOCANCEL",
-            _pread_nocancel_detour,
-            Fn_pread_nocancel,
-            FN__PREAD_NOCANCEL
+            "preadv$NOCANCEL",
+            preadv_nocancel_detour,
+            FnPreadv_nocancel,
+            FN_PREADV_NOCANCEL
+        );
+        replace!(
+            hook_manager,
+            "pread$NOCANCEL",
+            pread_nocancel_detour,
+            FnPread_nocancel,
+            FN_PREAD_NOCANCEL
         );
 
         replace!(
@@ -1623,19 +1669,19 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &L
         replace!(hook_manager, "write", write_detour, FnWrite, FN_WRITE);
         replace!(
             hook_manager,
-            "_write$NOCANCEL",
-            _write_nocancel_detour,
-            Fn_write_nocancel,
-            FN__WRITE_NOCANCEL
+            "write$NOCANCEL",
+            write_nocancel_detour,
+            FnWrite_nocancel,
+            FN_WRITE_NOCANCEL
         );
 
         replace!(hook_manager, "pwrite", pwrite_detour, FnPwrite, FN_PWRITE);
         replace!(
             hook_manager,
-            "_pwrite$NOCANCEL",
-            _pwrite_nocancel_detour,
-            Fn_pwrite_nocancel,
-            FN__PWRITE_NOCANCEL
+            "pwrite$NOCANCEL",
+            pwrite_nocancel_detour,
+            FnPwrite_nocancel,
+            FN_PWRITE_NOCANCEL
         );
 
         replace!(hook_manager, "access", access_detour, FnAccess, FN_ACCESS);
@@ -1648,6 +1694,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &L
         );
 
         replace!(hook_manager, "fsync", fsync_detour, FnFsync, FN_FSYNC);
+        replace!(
+            hook_manager,
+            "fsync$NOCANCEL",
+            fsync_nocancel_detour,
+            FnFsync_nocancel,
+            FN_FSYNC_NOCANCEL
+        );
         replace!(
             hook_manager,
             "fdatasync",

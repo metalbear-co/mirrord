@@ -69,7 +69,7 @@ pub(crate) unsafe extern "C" fn connect_detour(
 /// Hook for `_connect$NOCANCEL` (for macos, see
 /// [this](https://opensource.apple.com/source/xnu/xnu-4570.41.2/libsyscall/Platforms/MacOSX/x86_64/syscall.map.auto.html)).
 #[hook_guard_fn]
-pub(super) unsafe extern "C" fn _connect_nocancel_detour(
+pub(super) unsafe extern "C" fn connect_nocancel_detour(
     sockfd: RawFd,
     raw_address: *const sockaddr,
     address_length: socklen_t,
@@ -77,7 +77,7 @@ pub(super) unsafe extern "C" fn _connect_nocancel_detour(
     unsafe {
         connect(sockfd, raw_address, address_length)
             .map(From::from)
-            .unwrap_or_bypass_with(|_| FN__CONNECT_NOCANCEL(sockfd, raw_address, address_length))
+            .unwrap_or_bypass_with(|_| FN_CONNECT_NOCANCEL(sockfd, raw_address, address_length))
     }
 }
 
@@ -201,13 +201,13 @@ pub(super) unsafe extern "C" fn uv__accept4_detour(
 /// Hook for `_accept$NOCANCEL` (for macos, see
 /// [this](https://opensource.apple.com/source/xnu/xnu-4570.41.2/libsyscall/Platforms/MacOSX/x86_64/syscall.map.auto.html)).
 #[hook_guard_fn]
-pub(super) unsafe extern "C" fn _accept_nocancel_detour(
+pub(super) unsafe extern "C" fn accept_nocancel_detour(
     sockfd: c_int,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
 ) -> c_int {
     unsafe {
-        let accept_result = FN__ACCEPT_NOCANCEL(sockfd, address, address_len);
+        let accept_result = FN_ACCEPT_NOCANCEL(sockfd, address, address_len);
 
         if accept_result == -1 {
             accept_result
@@ -223,6 +223,31 @@ pub(crate) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
     unsafe {
         let arg = arg.arg::<usize>();
         let fcntl_result = FN_FCNTL(fd, cmd, arg);
+        let guard = DetourGuard::new();
+        if guard.is_none() {
+            return fcntl_result;
+        }
+
+        if fcntl_result == -1 {
+            fcntl_result
+        } else {
+            match fcntl(fd, cmd, fcntl_result) {
+                Ok(()) => fcntl_result,
+                Err(e) => e.into(),
+            }
+        }
+    }
+}
+
+#[hook_fn]
+pub(crate) unsafe extern "C" fn fcntl_nocancel_detour(
+    fd: c_int,
+    cmd: c_int,
+    mut arg: ...
+) -> c_int {
+    unsafe {
+        let arg = arg.arg::<usize>();
+        let fcntl_result = FN_FCNTL_NOCANCEL(fd, cmd, arg);
         let guard = DetourGuard::new();
         if guard.is_none() {
             return fcntl_result;
@@ -468,6 +493,33 @@ pub(super) unsafe extern "C" fn recvmsg_detour(
     }
 }
 
+/// Not a faithful reproduction of what [`libc::recvmsg`] is supposed to do, see [`recv_from`].
+///
+/// TODO(alex): We are ignoring the control message header [`libc::cmsghdr`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn recvmsg_nocancel_detour(
+    sockfd: i32,
+    message_header: *mut libc::msghdr,
+    flags: c_int,
+) -> ssize_t {
+    unsafe {
+        let recvmsg_result = FN_RECVMSG_NOCANCEL(sockfd, message_header, flags);
+
+        if recvmsg_result == -1 {
+            recvmsg_result
+        } else {
+            // Fills the address, similar to how `recv_from` works.
+            recv_from(
+                sockfd,
+                recvmsg_result,
+                (*message_header).msg_name as *mut _,
+                &mut (*message_header).msg_namelen,
+            )
+            .unwrap_or_bypass(recvmsg_result)
+        }
+    }
+}
+
 /// Not a faithful reproduction of what [`libc::sendmsg`] is supposed to do, see [`sendmsg`].
 //
 // TODO(alex): We are ignoring the control message header `libc::cmsghdr`.
@@ -489,6 +541,31 @@ pub(super) unsafe extern "C" fn sendmsg_detour(
         } else {
             sendmsg(sockfd, message_header, flags)
                 .unwrap_or_bypass_with(|_| FN_SENDMSG(sockfd, message_header, flags))
+        }
+    }
+}
+
+/// Not a faithful reproduction of what [`libc::sendmsg`] is supposed to do, see [`sendmsg`].
+//
+// TODO(alex): We are ignoring the control message header `libc::cmsghdr`.
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn sendmsg_nocancel_detour(
+    sockfd: RawFd,
+    message_header: *const libc::msghdr,
+    flags: c_int,
+) -> ssize_t {
+    unsafe {
+        // When the whole header is null, the operation happens, but does basically nothing (afaik).
+        //
+        // If you ever hit an issue with this, maybe null here is meant to `libc::send` a 0-sized
+        // message?
+        //
+        // When `msg_name` is null, this is equivalent to `send`.
+        if message_header.is_null() || (*message_header).msg_name.is_null() {
+            FN_SENDMSG_NOCANCEL(sockfd, message_header, flags)
+        } else {
+            sendmsg(sockfd, message_header, flags)
+                .unwrap_or_bypass_with(|_| FN_SENDMSG_NOCANCEL(sockfd, message_header, flags))
         }
     }
 }
@@ -603,10 +680,24 @@ pub(crate) unsafe fn enable_socket_hooks(
         );
         replace!(
             hook_manager,
+            "recvmsg$NOCANCEL",
+            recvmsg_nocancel_detour,
+            FnRecvmsg_nocancel,
+            FN_RECVMSG_NOCANCEL
+        );
+        replace!(
+            hook_manager,
             "sendmsg",
             sendmsg_detour,
             FnSendmsg,
             FN_SENDMSG
+        );
+        replace!(
+            hook_manager,
+            "sendmsg$NOCANCEL",
+            sendmsg_nocancel_detour,
+            FnSendmsg_nocancel,
+            FN_SENDMSG_NOCANCEL
         );
 
         replace!(hook_manager, "bind", bind_detour, FnBind, FN_BIND);
@@ -630,13 +721,20 @@ pub(crate) unsafe fn enable_socket_hooks(
 
         replace!(
             hook_manager,
-            "_connect$NOCANCEL",
-            _connect_nocancel_detour,
-            Fn_connect_nocancel,
-            FN__CONNECT_NOCANCEL
+            "connect$NOCANCEL",
+            connect_nocancel_detour,
+            FnConnect_nocancel,
+            FN_CONNECT_NOCANCEL
         );
 
         replace!(hook_manager, "fcntl", fcntl_detour, FnFcntl, FN_FCNTL);
+        replace!(
+            hook_manager,
+            "fcntl$NOCANCEL",
+            fcntl_nocancel_detour,
+            FnFcntl_nocancel,
+            FN_FCNTL_NOCANCEL
+        );
         replace!(hook_manager, "dup", dup_detour, FnDup, FN_DUP);
         replace!(hook_manager, "dup2", dup2_detour, FnDup2, FN_DUP2);
 
@@ -689,10 +787,10 @@ pub(crate) unsafe fn enable_socket_hooks(
         replace!(hook_manager, "accept", accept_detour, FnAccept, FN_ACCEPT);
         replace!(
             hook_manager,
-            "_accept$NOCANCEL",
-            _accept_nocancel_detour,
-            Fn_accept_nocancel,
-            FN__ACCEPT_NOCANCEL
+            "accept$NOCANCEL",
+            accept_nocancel_detour,
+            FnAccept_nocancel,
+            FN_ACCEPT_NOCANCEL
         );
 
         if enabled_remote_dns {
