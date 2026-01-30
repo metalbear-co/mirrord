@@ -1,18 +1,13 @@
 use k8s_openapi::api::core::v1::ConfigMap;
-use kube::client::ClientBuilder;
 use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_kube::{api::kubernetes::create_kube_config, retry::RetryKube};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_vpn::{agent::VpnAgent, config::VpnConfig, tunnel::VpnTunnel};
 use tokio::signal;
-use tower::{buffer::BufferLayer, retry::RetryLayer};
 
 use crate::{
-    config::VpnArgs,
-    connection::create_and_connect,
-    error::{CliError, CliResult},
-    util::get_user_git_branch,
+    config::VpnArgs, connection::create_and_connect, error::CliResult,
+    kube::kube_client_from_layer_config, util::get_user_git_branch,
 };
 
 pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
@@ -26,21 +21,7 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
     let mut layer_config = LayerConfig::resolve(&mut cfg_context)?;
     layer_config.agent.privileged = true;
 
-    let client = create_kube_config(
-        layer_config.accept_invalid_certificates,
-        layer_config.kubeconfig.clone(),
-        layer_config.kube_context.clone(),
-    )
-    .await
-    .and_then(|config| {
-        Ok(ClientBuilder::try_from(config.clone())?
-            .with_layer(&BufferLayer::new(1024))
-            .with_layer(&RetryLayer::new(RetryKube::try_from(
-                &layer_config.startup_retry,
-            )?))
-            .build())
-    })
-    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
+    let client = kube_client_from_layer_config(&layer_config).await?;
 
     let mut sub_progress = progress.subtask("fetching vpn info");
 
