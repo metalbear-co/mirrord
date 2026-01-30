@@ -85,6 +85,18 @@ pub async fn db_branches_command(args: DbBranchesArgs) -> CliResult<()> {
     }
 }
 
+fn get_api<T>(args: &DbBranchesArgs, client: &kube::Client, layer_config: &LayerConfig) -> Api<T> {
+    if args.all_namespaces {
+        Api::all(client.clone())
+    } else if let Some(namespace) = &args.namespace {
+        Api::namespaced(client.clone(), namespace)
+    } else if let Some(namespace) = &layer_config.target.namespace {
+        Api::namespaced(client.clone(), namespace)
+    } else {
+        Api::default_namespaced(client.clone())
+    }
+}
+
 async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()> {
     let names: HashSet<_> = names.iter().collect();
 
@@ -99,27 +111,9 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
 
     let client = kube_client_from_layer_config(&layer_config).await?;
 
-    // Fetch MySQL branches
-    let mysql_api: Api<MysqlBranchDatabase> = if args.all_namespaces {
-        Api::all(client.clone())
-    } else if let Some(namespace) = &args.namespace {
-        Api::namespaced(client.clone(), namespace)
-    } else if let Some(namespace) = &layer_config.target.namespace {
-        Api::namespaced(client.clone(), namespace)
-    } else {
-        Api::default_namespaced(client.clone())
-    };
+    let mysql_api: Api<MysqlBranchDatabase> = get_api(args, &client, &layer_config);
 
-    // Fetch PostgreSQL branches
-    let pg_api: Api<PgBranchDatabase> = if args.all_namespaces {
-        Api::all(client.clone())
-    } else if let Some(namespace) = &args.namespace {
-        Api::namespaced(client.clone(), namespace)
-    } else if let Some(namespace) = &layer_config.target.namespace {
-        Api::namespaced(client, namespace)
-    } else {
-        Api::default_namespaced(client)
-    };
+    let pg_api: Api<PgBranchDatabase> = get_api(args, &client, &layer_config);
 
     let list_params = ListParams::default();
 
@@ -201,25 +195,9 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &Vec<String>) 
 
     let client = kube_client_from_layer_config(&layer_config).await?;
 
-    let mysql_api: Api<MysqlBranchDatabase> = if args.all_namespaces {
-        Api::all(client.clone())
-    } else if let Some(namespace) = &args.namespace {
-        Api::namespaced(client.clone(), namespace)
-    } else if let Some(namespace) = &layer_config.target.namespace {
-        Api::namespaced(client.clone(), namespace)
-    } else {
-        Api::default_namespaced(client.clone())
-    };
+    let mysql_api: Api<MysqlBranchDatabase> = get_api(args, &client, &layer_config);
 
-    let pg_api: Api<PgBranchDatabase> = if args.all_namespaces {
-        Api::all(client.clone())
-    } else if let Some(namespace) = &args.namespace {
-        Api::namespaced(client.clone(), namespace)
-    } else if let Some(namespace) = &layer_config.target.namespace {
-        Api::namespaced(client, namespace)
-    } else {
-        Api::default_namespaced(client)
-    };
+    let pg_api: Api<PgBranchDatabase> = get_api(args, &client, &layer_config);
 
     if all {
         // List all branches first to check if any exist
