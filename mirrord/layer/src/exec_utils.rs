@@ -272,7 +272,7 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
             // and if so, add the intproxy connection fd to inherit list
             // so it won't get closed.
             let mut flags: c_short = 0;
-            if attrp.is_null.not()
+            if attrp.is_null().not()
                 && posix_spawnattr_getflags(attrp, &mut flags) == 0
                 && flags.bitand(POSIX_SPAWN_CLOEXEC_DEFAULT as c_short) != 0
             {
@@ -282,7 +282,7 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
                     file_actions = &mut file_actions_buf as *mut _;
                 }
 
-                extern "C" {
+                unsafe extern "C" {
                     // not exposed by libc crate :(
                     fn posix_spawn_file_actions_addinherit_np(
                         file_actions: *mut libc::posix_spawn_file_actions_t,
