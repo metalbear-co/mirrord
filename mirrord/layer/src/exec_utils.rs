@@ -256,7 +256,7 @@ pub(crate) unsafe fn patch_sip_for_new_process(
 pub(crate) unsafe extern "C" fn posix_spawn_detour(
     pid: *const pid_t,
     path: *const c_char,
-    mut file_actions: *mut posix_spawn_file_actions_t,
+    file_actions: *mut posix_spawn_file_actions_t,
     attrp: *const posix_spawnattr_t,
     argv: *const *const c_char,
     envp: *const *const c_char,
@@ -278,7 +278,7 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
                 if file_actions.is_null() {
                     posix_spawn_file_actions_init(&mut file_actions_buf);
                     file_actions_buf_used = true;
-                    file_actions = &mut file_actions_buf;
+                    file_actions = &mut file_actions_buf as *mut _;
                 }
                 posix_spawn_file_actions_addinherit_np(file_actions, proxy_conn_fd);
             };
