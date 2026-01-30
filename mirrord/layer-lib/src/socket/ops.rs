@@ -240,17 +240,18 @@ pub fn is_ignored_port(addr: &SocketAddr) -> bool {
 #[allow(clippy::result_large_err)]
 #[mirrord_layer_macro::instrument(level = "trace", skip(connect_fn), ret)]
 pub fn connect_common<F>(
-    socket: SOCKET,
+    sockfd: SOCKET,
     remote_address: SockAddr,
     connect_fn: F,
 ) -> HookResult<ConnectResult>
 where
     F: FnOnce(SockAddr) -> ConnectResult,
 {
-    let user_socket_info = match SOCKETS.lock()?.remove(&socket) {
+    let user_socket_info = match SOCKETS.lock()?.remove(&sockfd) {
         Some(socket) => socket,
-        None => reconstruct_user_socket(socket)?,
+        None => reconstruct_user_socket(sockfd)?,
     };
+
     let optional_ip_address = remote_address.as_socket();
     let unix_streams = setup().remote_unix_streams();
 
@@ -344,7 +345,7 @@ where
 
     match NetProtocol::from(user_socket_info.kind) {
         NetProtocol::Datagrams if enabled_udp_outgoing => connect_outgoing_common(
-            socket,
+            sockfd,
             remote_address,
             user_socket_info,
             NetProtocol::Datagrams,
@@ -357,7 +358,7 @@ where
                     || (remote_address.is_unix() && !unix_streams.is_empty()) =>
             {
                 connect_outgoing_common(
-                    socket,
+                    sockfd,
                     remote_address,
                     user_socket_info,
                     NetProtocol::Stream,

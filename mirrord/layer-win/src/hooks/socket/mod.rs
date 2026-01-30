@@ -507,6 +507,22 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
         return listen_result;
     }
 
+    // For Windows socketpair emulation (loopback-bound listener paired with loopback connects),
+    // mirrord should leave the socket untouched so the runtime, e.g. python, can manage it locally.
+    // Use the requested address to identify synthetic socketpair listeners:
+    // they bind to loopback with port 0. Allow normal loopback services on
+    // explicit ports to remain managed.
+    // On Unix it doesn't matter since socketpair uses AF_UNIX sockets.
+    if bound_state.requested_address.ip().is_loopback() && bound_state.requested_address.port() == 0
+    {
+        tracing::debug!(
+            "listen_detour -> skipping subscription for local listener {} -> {}",
+            bound_state.requested_address,
+            bound_state.address
+        );
+        return listen_result;
+    }
+
     // Register with the agent for incoming traffic (like Unix layer PortSubscribe)
     let mapped_port = setup()
         .incoming_config()
