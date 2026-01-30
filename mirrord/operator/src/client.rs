@@ -2078,34 +2078,3 @@ mod test {
     }
 }
 
-/// Information about multi-cluster configuration
-#[derive(Debug, Clone)]
-pub struct MultiClusterInfo {
-    /// Whether this operator is the primary cluster
-    pub multi_cluster: bool,
-    /// Logical name of this cluster
-    pub cluster_name: String,
-    /// Logical name of the default cluster (for stateful operations)
-    pub default_cluster: String,
-}
-
-impl<C: ClientCertificateState> OperatorApi<C> {
-    /// Check if the operator has multi-cluster enabled and return configuration
-    ///
-    /// This is called by the CLI to determine if it should create a multi-cluster session
-    /// or a regular single-cluster session.
-    #[tracing::instrument(level = Level::DEBUG, skip(self), ret)]
-    pub fn multi_cluster_info(&self) -> Option<MultiClusterInfo> {
-        let multi_cluster_config = self.operator.spec.multi_cluster.as_ref()?;
-
-        if !multi_cluster_config.enabled {
-            return None;
-        }
-
-        Some(MultiClusterInfo {
-            multi_cluster: multi_cluster_config.enabled,
-            cluster_name: multi_cluster_config.cluster_name.clone(),
-            default_cluster: multi_cluster_config.default_cluster.clone(),
-        })
-    }
-}
