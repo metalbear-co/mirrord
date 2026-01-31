@@ -191,6 +191,10 @@ pub(super) enum Commands {
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Ci(Box<CiArgs>),
 
+    /// Manage preview environments (requires operator).
+    #[cfg_attr(target_os = "windows", command(hide = true))]
+    Preview(Box<PreviewArgs>),
+
     /// Launch the config wizard.
     ///
     /// The config wizard is a web app that allows the user to create a mirrord config file by
@@ -1163,6 +1167,89 @@ pub struct FixKubeconfig {
     /// Do not make any actual changes, just print what would be changed
     #[arg(long = "dry-run")]
     pub dry_run: bool,
+}
+
+/// Arguments for `mirrord preview` command.
+#[derive(Args, Debug)]
+pub(super) struct PreviewArgs {
+    /// Subcommand to use with `mirrord preview`.
+    #[command(subcommand)]
+    pub command: PreviewCommand,
+}
+
+/// `mirrord preview` subcommands.
+#[derive(Subcommand, Debug)]
+pub(super) enum PreviewCommand {
+    /// Start a new preview environment or update an existing one.
+    Start(PreviewStartArgs),
+}
+
+/// Arguments for `mirrord preview start` command.
+#[derive(Args, Debug)]
+pub(super) struct PreviewStartArgs {
+    /// Container image to run in the preview pod.
+    ///
+    /// The image must be pre-built and pushed to a registry accessible by the cluster.
+    #[arg(short = 'i', long, required = true)]
+    pub image: String,
+
+    /// Environment key to identify the preview environment.
+    ///
+    /// Multiple preview pods can share the same key to form a preview environment.
+    /// If not provided, a new key will be generated.
+    #[arg(short = 'k', long)]
+    pub key: Option<String>,
+
+    /// Target to copy configuration from.
+    ///
+    /// Valid formats:
+    /// - `pod/{pod-name}[/container/{container-name}]`
+    /// - `deployment/{deployment-name}[/container/{container-name}]`
+    /// - `rollout/{rollout-name}[/container/{container-name}]`
+    /// - `statefulset/{statefulset-name}[/container/{container-name}]`
+    ///
+    /// The preview pod will be a copy of the target's pod spec with your image.
+    #[arg(short = 't', long)]
+    pub target: Option<String>,
+
+    /// Namespace of the target.
+    #[arg(short = 'n', long)]
+    pub target_namespace: Option<String>,
+
+    /// Load config from config file.
+    ///
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    pub config_file: Option<PathBuf>,
+
+    /// Kube context to use from Kubeconfig.
+    #[arg(long)]
+    pub context: Option<String>,
+}
+
+impl PreviewStartArgs {
+    /// Convert CLI arguments to environment variable overrides for config resolution.
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, &OsStr> {
+        let mut envs = HashMap::default();
+
+        if let Some(key) = &self.key {
+            envs.insert(env_key::MIRRORD_ENV_KEY.as_ref(), key.as_ref());
+        }
+        if let Some(target) = &self.target {
+            envs.insert("MIRRORD_IMPERSONATED_TARGET".as_ref(), target.as_ref());
+        }
+        if let Some(namespace) = &self.target_namespace {
+            envs.insert("MIRRORD_TARGET_NAMESPACE".as_ref(), namespace.as_ref());
+        }
+        if let Some(config_file) = &self.config_file {
+            envs.insert("MIRRORD_CONFIG_FILE".as_ref(), config_file.as_ref());
+        }
+        if let Some(context) = &self.context {
+            envs.insert("MIRRORD_KUBE_CONTEXT".as_ref(), context.as_ref());
+        }
+
+        envs
+    }
 }
 
 #[cfg(test)]
