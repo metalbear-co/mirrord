@@ -214,7 +214,6 @@ impl MirrordCi {
     pub(super) async fn prepare_command<P: Progress>(
         self,
         progress: &mut P,
-        binary: &str,
         binary_path: &Path,
         binary_args: &[String],
         env_vars: &HashMap<String, String>,
@@ -222,6 +221,10 @@ impl MirrordCi {
     ) -> CiResult<()> {
         use nix::libc::{SIGINT, SIGKILL, SIGTERM};
 
+        let binary = binary_path
+            .file_name()
+            .expect("failed to get file name of binary path")
+            .to_string_lossy();
         let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
 
         // Create a dir like `/tmp/mirrord/node-1234-cool` where we dump ci related files.
@@ -235,7 +238,6 @@ impl MirrordCi {
                 .elapsed()
                 .expect("system time should not be earlier than UNIX EPOCH")
                 .as_secs();
-
             let ci_run_output_dir = parent_dir.join(format!("{binary}-{timestamp}-{random_name}"));
 
             create_dir_all(&ci_run_output_dir).await?;
@@ -311,7 +313,6 @@ impl MirrordCi {
     pub(super) async fn prepare_command<P: Progress>(
         self,
         progress: &mut P,
-        binary: &str,
         binary_path: &Path,
         binary_args: &[String],
         env_vars: &HashMap<String, String>,
