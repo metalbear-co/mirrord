@@ -12,14 +12,16 @@ use crate::common::CheckedInto;
 use crate::exec_utils::*;
 use crate::{
     SOCKETS,
+    common::proxy_conn_fd,
     detour::{Bypass, Detour},
     hooks::HookManager,
+    proxy_connection::FD_ENV_VAR,
     replace,
     socket::SHARED_SOCKETS_ENV_VAR,
 };
 
 /// Takes an [`Argv`] with the enviroment variables from an `exec` call, extending it with
-/// an encoded version of our [`SOCKETS`].
+/// an encoded version of our [`SOCKETS`] and [`FD_ENV_VAR`].
 ///
 /// The check for [`libc::FD_CLOEXEC`] is performed during the [`SOCKETS`] initialization
 /// by the child process.
@@ -41,6 +43,7 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
     drop(lock);
 
     env_vars.insert_env(SHARED_SOCKETS_ENV_VAR, &encoded)?;
+    env_vars.insert_env(FD_ENV_VAR, &proxy_conn_fd().unwrap().to_string())?;
 
     Detour::Success(env_vars)
 }

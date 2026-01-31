@@ -1,11 +1,17 @@
 use std::{
     env,
     ffi::{CStr, CString, c_void},
+    mem::zeroed,
+    ops::{BitAnd, Not},
     path::PathBuf,
     sync::OnceLock,
 };
 
-use libc::{c_char, c_int, pid_t};
+use libc::{
+    POSIX_SPAWN_CLOEXEC_DEFAULT, c_char, c_int, c_short, pid_t, posix_spawn_file_actions_destroy,
+    posix_spawn_file_actions_init, posix_spawn_file_actions_t, posix_spawnattr_getflags,
+    posix_spawnattr_t,
+};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_sip::{MIRRORD_PATCH_DIR, SipError, SipPatchOptions, sip_patch};
 use null_terminated::Nul;
@@ -13,7 +19,7 @@ use tracing::{info, trace, warn};
 
 use crate::{
     EXECUTABLE_ARGS,
-    common::{CheckedInto, strip_mirrord_path},
+    common::{CheckedInto, proxy_conn_fd, strip_mirrord_path},
     detour::{
         Bypass::{
             ExecOnNonExistingFile, FileOperationInMirrordBinTempDir, NoSipDetected, TooManyArgs,
@@ -55,6 +61,13 @@ pub(crate) unsafe fn enable_macos_hooks(
             posix_spawn_detour,
             FnPosix_spawn,
             FN_POSIX_SPAWN
+        );
+        replace!(
+            hook_manager,
+            "posix_spawn_file_actions_addclose",
+            posix_spawn_file_actions_addclose_detour,
+            FnPosix_spawn_file_actions_addclose,
+            FN_POSIX_SPAWN_FILE_ACTIONS_ADDCLOSE
         );
         replace!(
             hook_manager,
@@ -243,13 +256,44 @@ pub(crate) unsafe fn patch_sip_for_new_process(
 pub(crate) unsafe extern "C" fn posix_spawn_detour(
     pid: *const pid_t,
     path: *const c_char,
-    file_actions: *const c_void,
-    attrp: *const c_void,
+    file_actions: *mut posix_spawn_file_actions_t,
+    attrp: *const posix_spawnattr_t,
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
+    // rebind because hook_guard_fn panics if I make the arg mut
+    let mut file_actions = file_actions;
     unsafe {
-        match patch_sip_for_new_process(path, argv, envp) {
+        let mut file_actions_buf: posix_spawn_file_actions_t = zeroed();
+        let mut file_actions_buf_used = false;
+
+        if let Some(proxy_conn_fd) = proxy_conn_fd() {
+            // Check if POSIX_SPAWN_CLOEXEC_DEFAULT flag is set,
+            // and if so, add the intproxy connection fd to inherit list
+            // so it won't get closed.
+            let mut flags: c_short = 0;
+            if attrp.is_null().not()
+                && posix_spawnattr_getflags(attrp, &mut flags) == 0
+                && flags.bitand(POSIX_SPAWN_CLOEXEC_DEFAULT as c_short) != 0
+            {
+                if file_actions.is_null() {
+                    posix_spawn_file_actions_init(&mut file_actions_buf);
+                    file_actions_buf_used = true;
+                    file_actions = &mut file_actions_buf as *mut _;
+                }
+
+                unsafe extern "C" {
+                    // not exposed by libc crate :(
+                    fn posix_spawn_file_actions_addinherit_np(
+                        file_actions: *mut libc::posix_spawn_file_actions_t,
+                        fd: c_int,
+                    ) -> c_int;
+                }
+                posix_spawn_file_actions_addinherit_np(file_actions, proxy_conn_fd);
+            };
+        }
+
+        let result = match patch_sip_for_new_process(path, argv, envp) {
             Detour::Success((path, argv, envp)) => {
                 match hooks::prepare_execve_envp(Detour::Success(envp.clone())) {
                     Detour::Success(envp) => FN_POSIX_SPAWN(
@@ -271,8 +315,26 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
                 }
             }
             _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
+        };
+
+        if file_actions_buf_used {
+            posix_spawn_file_actions_destroy(&mut file_actions_buf);
         }
+
+        result
     }
+}
+
+/// Guard against closing intproxy connection
+#[hook_fn]
+pub(crate) unsafe extern "C" fn posix_spawn_file_actions_addclose_detour(
+    file_actions: *mut libc::posix_spawn_file_actions_t,
+    fd: c_int,
+) -> c_int {
+    if proxy_conn_fd() == Some(fd) {
+        return 0;
+    };
+    unsafe { FN_POSIX_SPAWN_FILE_ACTIONS_ADDCLOSE(file_actions, fd) }
 }
 
 #[hook_guard_fn]
