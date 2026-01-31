@@ -223,6 +223,8 @@ impl MirrordCi {
 
         let binary = binary_path
             .file_name()
+            // Safety: binary path is a resolved path, and  `file_name()` only fails
+            // when the last part is `..`
             .expect("failed to get file name of binary path")
             .to_string_lossy();
         let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
