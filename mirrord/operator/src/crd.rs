@@ -151,10 +151,6 @@ pub struct MirrordOperatorSpec {
     /// this field).
     #[deprecated(note = "use supported_features instead")]
     copy_target_enabled: Option<bool>,
-    /// Multi-cluster configuration (if enabled)
-    /// Contains information about whether this operator is part of a multi-cluster setup
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub multi_cluster: Option<MultiClusterConfig>,
 }
 
 impl MirrordOperatorSpec {
@@ -179,7 +175,6 @@ impl MirrordOperatorSpec {
             protocol_version,
             features,
             copy_target_enabled,
-            multi_cluster: None, // Set by operator at runtime if multi-cluster is enabled
         }
     }
 
@@ -274,6 +269,7 @@ impl CopyTargetEntryCompat {
     }
 }
 
+/// _CRD-ish_ that we get from `mirrord operator status`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
     pub sessions: Vec<Session>,
@@ -319,24 +315,17 @@ pub enum ClusterCheckResult {
     },
 }
 
-/// Configuration for a remote cluster in multi-cluster mode.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ClusterConfig {
-    /// Logical name of the cluster.
-    pub name: String,
-    /// Kubernetes API server URL.
-    pub url: String,
-    /// Authentication method: "token" or "certificate".
-    pub authentication_method: String,
-    /// Name of the Secret containing cluster credentials.
-    pub secret: String,
-}
-
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatusStatistics {
     pub dau: usize,
     pub mau: usize,
+
+    /// Count of active mirrord for ci sessions.
+    ///
+    /// - These sessions have a slight delay before they're reported as dead (they have a ttl), so
+    ///   you may see a number in here that's higher than how many are actually being used (the
+    ///   count is correct though, they're still alive).
+    pub active_ci_sessions_count: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -457,6 +446,10 @@ pub enum NewOperatorFeature {
     BypassCiCertificateVerification,
 
     MongodbBranching,
+    /// This operator can act as a primary and use envoy to connect to remote clusters.
+    MultiClusterPrimary,
+    /// This operator can be connected to by a primary.
+    MultiClusterRemote,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -487,6 +480,8 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::BypassCiCertificateVerification => {
                 "BypassCiCertificateVerification"
             }
+            NewOperatorFeature::MultiClusterPrimary => "multi-cluster primary",
+            NewOperatorFeature::MultiClusterRemote => "multi-cluster remote",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -850,26 +845,4 @@ pub enum UserCredentialKind {
     #[schemars(skip)]
     #[serde(other)]
     Unknown,
-}
-
-/// Multi-cluster configuration for the operator
-/// This tells the CLI whether this operator is part of a multi-cluster setup
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct MultiClusterConfig {
-    /// Whether multi-cluster is enabled on this operator
-    pub enabled: bool,
-
-    /// Logical name of this cluster (e.g., "us-east-1")
-    pub cluster_name: String,
-
-    /// Logical name of the default cluster (for stateful operations)
-    pub default_cluster: String,
-
-    /// Whether this cluster is management-only (no workloads)
-    pub management_only: bool,
-
-    /// Configured remote clusters
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub clusters: Vec<ClusterConfig>,
 }

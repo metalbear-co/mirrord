@@ -530,8 +530,12 @@ Defaults to `1`.
 
 ## baggage {#root-baggage}
 
-OpenTelemetry (OTel) / W3C baggage propagator.
+OpenTelemetry (OTel) / W3C baggage propagator. This is used in HTTP requests sent to the
+operator to manually set values in the trace span, which can help when processing traces.
 See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
+
+Only relevant for use with the operator. For more details, read
+the [docs on monitoring](https://metalbear.com/mirrord/docs/managing-mirrord/monitoring).
 
 ## ci {#root-ci}
 
@@ -3043,8 +3047,13 @@ should be considered sensitive. It is used to improve the product.
 
 ## traceparent {#root-traceparent}
 
-OpenTelemetry (OTel) / W3C trace context.
+OpenTelemetry (OTel) / W3C trace context. This is used in HTTP requests sent to the
+operator to manually set the parent trace of the entry point, which can help when
+processing traces.
 See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
+
+Only relevant for use with the operator. For more details, read
+the [docs on monitoring](https://metalbear.com/mirrord/docs/managing-mirrord/monitoring).
 
 ## use_proxy {#root-use_proxy}
 
