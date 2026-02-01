@@ -3,6 +3,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
@@ -275,6 +276,42 @@ pub struct MirrordOperatorStatus {
 
     /// Option because added later.
     pub copy_targets: Option<Vec<CopyTargetEntryCompat>>,
+
+    /// Status of connected remote clusters (only on primary with multi-cluster enabled).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connected_clusters: Option<Vec<ConnectedClusterStatus>>,
+}
+
+/// Status of a connected remote cluster.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectedClusterStatus {
+    /// Logical name of the cluster.
+    pub name: String,
+    /// Timestamp of last health check.
+    pub last_check: MicroTime,
+    /// Result of the health check.
+    #[serde(flatten)]
+    pub result: ClusterCheckResult,
+}
+
+/// Result of a cluster health check.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum ClusterCheckResult {
+    /// Cluster is connected and responding.
+    Connected {
+        /// Operator version running on the remote cluster.
+        operator_version: String,
+        /// License fingerprint from the remote cluster (for license validation).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        license_fingerprint: Option<String>,
+    },
+    /// Cluster check failed.
+    Error {
+        /// Error message describing the failure.
+        message: String,
+    },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -408,6 +445,10 @@ pub enum NewOperatorFeature {
     BypassCiCertificateVerification,
 
     MongodbBranching,
+    /// This operator can act as a primary and use envoy to connect to remote clusters.
+    MultiClusterPrimary,
+    /// This operator can be connected to by a primary.
+    MultiClusterRemote,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -438,6 +479,8 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::BypassCiCertificateVerification => {
                 "BypassCiCertificateVerification"
             }
+            NewOperatorFeature::MultiClusterPrimary => "multi-cluster primary",
+            NewOperatorFeature::MultiClusterRemote => "multi-cluster remote",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
