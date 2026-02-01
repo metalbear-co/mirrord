@@ -158,17 +158,11 @@ pub(crate) enum InternalProxyError {
 /// Errors that can occur when executing the `mirrord operator setup` command.
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum OperatorSetupError {
-    #[error("Failed to get latest mirrord operator version: {0}")]
-    #[diagnostic(help("Please check internet connection.{GENERAL_HELP}"))]
-    OperatorVersionCheck(#[from] reqwest::Error),
-
-    #[error("Failed to open output file at `{0}`: {1}")]
-    #[diagnostic(help("{GENERAL_HELP}"))]
-    OutputFileOpen(PathBuf, std::io::Error),
-
-    #[error("Failed to write mirrord operator setup: {0}")]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    SetupWrite(#[from] mirrord_operator::setup::SetupWriteError),
+    #[error("mirrord operator setup was deleted")]
+    #[diagnostic(help(
+        "Please use the helm chart instead https://github.com/metalbear-co/charts/"
+    ))]
+    Deleted,
 }
 
 #[derive(Debug, Error, Diagnostic)]

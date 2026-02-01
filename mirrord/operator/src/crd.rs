@@ -268,6 +268,7 @@ impl CopyTargetEntryCompat {
     }
 }
 
+/// _CRD-ish_ that we get from `mirrord operator status`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
     pub sessions: Vec<Session>,
@@ -317,6 +318,13 @@ pub enum ClusterCheckResult {
 pub struct MirrordOperatorStatusStatistics {
     pub dau: usize,
     pub mau: usize,
+
+    /// Count of active mirrord for ci sessions.
+    ///
+    /// - These sessions have a slight delay before they're reported as dead (they have a ttl), so
+    ///   you may see a number in here that's higher than how many are actually being used (the
+    ///   count is correct though, they're still alive).
+    pub active_ci_sessions_count: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
