@@ -298,7 +298,7 @@ pub struct ConnectedClusterStatus {
 
 /// Result of a cluster health check.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ClusterCheckResult {
     /// Cluster is connected and responding.
     Connected {
