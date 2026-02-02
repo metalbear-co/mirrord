@@ -491,7 +491,6 @@ async fn run_process_with_mirrord<P: Progress>(
         Some(mirrord_ci) => mirrord_ci
             .prepare_command(
                 &mut progress,
-                &binary,
                 &binary_path,
                 &binary_args,
                 &env_vars,
