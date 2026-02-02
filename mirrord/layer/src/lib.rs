@@ -639,6 +639,13 @@ fn enable_hooks(state: &LayerSetup) {
         );
         replace!(
             &mut hook_manager,
+            "closefrom",
+            closefrom_detour,
+            FnClosefrom,
+            FN_CLOSEFROM,
+        );
+        replace!(
+            &mut hook_manager,
             "close$NOCANCEL",
             close_nocancel_detour,
             FnClose_nocancel,
@@ -763,6 +770,13 @@ pub(crate) fn close_layer_fd(fd: c_int) {
                     .remove(&fd);
             }
         }
+    }
+}
+
+#[hook_fn]
+pub(crate) unsafe extern "C" fn closefrom_detour(fd: c_int) {
+    unsafe {
+        close_range_detour(fd as u32, i32::MAX as u32, 0);
     }
 }
 
