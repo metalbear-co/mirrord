@@ -50,11 +50,10 @@ pub struct ConnectParams<'a> {
     )]
     pub session_ci_info: Option<SessionCiInfo>,
 
-    /// Full feature configuration as JSON for multi-cluster mode.
-    /// When set, the primary operator creates database branches on the default cluster
-    /// instead of the CLI creating them locally.
-    #[serde(skip_serializing_if = "Option::is_none", with = "feature_config_serde")]
-    pub feature_config: Option<String>,
+    /// SQS output queue name mappings for multi-cluster mode.
+    /// Maps original queue names to their corresponding output queue names.
+    #[serde(with = "sqs_output_queues_serde")]
+    pub sqs_output_queues: HashMap<&'a str, &'a str>,
 }
 
 impl<'a> ConnectParams<'a> {
@@ -65,7 +64,6 @@ impl<'a> ConnectParams<'a> {
         mysql_branch_names: Vec<String>,
         pg_branch_names: Vec<String>,
         session_ci_info: Option<SessionCiInfo>,
-        feature_config: Option<String>,
     ) -> Self {
         Self {
             connect: true,
@@ -78,7 +76,7 @@ impl<'a> ConnectParams<'a> {
             mysql_branch_names,
             pg_branch_names,
             session_ci_info,
-            feature_config,
+            sqs_output_queues: HashMap::new(),
         }
     }
 }
@@ -174,17 +172,25 @@ mod session_ci_info_serde {
     }
 }
 
-mod feature_config_serde {
+mod sqs_output_queues_serde {
+    use std::collections::HashMap;
+
     use serde::Serializer;
 
-    /// Serialize feature_config - it's already a JSON string, so we just pass it through.
-    pub fn serialize<S>(feature_config: &Option<String>, serializer: S) -> Result<S::Ok, S::Error>
+    /// Serialize sqs_output_queues as a JSON string.
+    pub fn serialize<S>(
+        sqs_output_queues: &HashMap<&str, &str>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        match feature_config {
-            Some(config) => serializer.serialize_str(config),
-            None => serializer.serialize_none(),
+        if sqs_output_queues.is_empty() {
+            serializer.serialize_none()
+        } else {
+            let as_json = serde_json::to_string(sqs_output_queues)
+                .expect("serialization to memory should not fail");
+            serializer.serialize_str(&as_json)
         }
     }
 }

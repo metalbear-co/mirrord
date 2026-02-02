@@ -2,7 +2,6 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[kube(
@@ -63,14 +62,6 @@ pub struct MirrordClusterSessionSpec {
     /// If true, this cluster should handle db_branches and other stateful operations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_default_cluster: Option<bool>,
-
-    /// Feature configuration as JSON (FeatureConfig from mirrord-config).
-    ///
-    /// The full config is passed to all clusters. Each cluster uses the relevant parts:
-    /// - Default cluster: handles db_branches (stateful operations)
-    /// - Workload clusters: handle traffic operations
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub feature_config: Option<JsonValue>,
 
     /// PostgreSQL branch database names created by the primary for this session.
     ///
