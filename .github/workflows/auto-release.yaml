@@ -22,11 +22,24 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
+          token: ${{ secrets.MIRRORD_RELEASE_PAT }}
       - name: Set Docker tags
-        uses: metalbear-co/ci/.github/actions/set-image-tags@main
+        uses: ./.github/actions/set-image-tags
         id: set-tags
         with:
           base-name: ci/calculate-version-script
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-get,cargo-edit
       - name: Calculate Version
         id: version
         run: |
@@ -47,8 +60,8 @@ jobs:
         if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           v="${{ steps.version.outputs.next_version }}"
-          # Using ^ to match start of line to avoid matching dependencies
-          sed -i "s/^version = \".*\"/version = \"$v\"/" Cargo.toml
+          cargo set workspace.package.version "$v"
+          cargo update -w -q
 
       - name: Generate Changelog
         if: ${{ github.event.inputs.dry_run != 'true' }}
@@ -64,8 +77,8 @@ jobs:
               build --yes --version "$v"
           fi
           
-          # Extract the new entry for release body (from first header to next header)
-          awk '/^## / { if (p) { exit }; p=1; print; next } p { print }' CHANGELOG.md > RELEASE_NOTES.md
+          # Extract the new entry for release body (excluding Internal sections)
+          awk '/^## / { if (p) exit; p=1; print; next } p { if (/^### Internal/) { skip=1; next } if (/^### /) { skip=0 } if (!skip) print }' CHANGELOG.md > RELEASE_NOTES.md
 
       - name: Commit and Push
         if: ${{ github.event.inputs.dry_run != 'true' }}
@@ -74,7 +87,7 @@ jobs:
           v="${{ steps.version.outputs.next_version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml CHANGELOG.md changelog.d
+          git add Cargo.toml Cargo.lock CHANGELOG.md changelog.d
           if ! git diff --staged --quiet; then
             git commit -m "Release $v"
             git pull --rebase origin main

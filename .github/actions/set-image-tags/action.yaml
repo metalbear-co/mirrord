@@ -1,0 +1,25 @@
+name: Set Docker Tags
+description: Determines Docker tags based on the GitHub event and image name. Handles tool images by defaulting to latest.
+inputs:
+  base-name:
+    description: Base name of the Docker image
+    required: true
+outputs:
+  tags:
+    description: The Docker tags to use
+    value: ${{ steps.set-tags.outputs.tags }}
+runs:
+  using: composite
+  steps:
+    - name: Determine Docker tags
+      id: set-tags
+      shell: bash
+      run: |
+        # If it's a tool image (base-name starts with ci/), we always want stable versions
+        if [[ "${{ inputs.base-name }}" == ci/* ]]; then
+          echo "tags=ghcr.io/metalbear-co/${{ inputs.base-name }}:latest" >> $GITHUB_OUTPUT
+        elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "tags=ghcr.io/metalbear-co/${{ inputs.base-name }}-staging:${{ github.sha }}" >> $GITHUB_OUTPUT
+        else
+          echo "tags=ghcr.io/metalbear-co/${{ inputs.base-name }}:latest,ghcr.io/metalbear-co/${{ inputs.base-name }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+        fi

@@ -1,1 +1,1 @@
-Added automated release workflow. Check the PR for details.
+Added automated release workflow
