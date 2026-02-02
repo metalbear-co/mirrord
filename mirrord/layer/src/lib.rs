@@ -889,13 +889,16 @@ pub(crate) unsafe extern "C" fn close_range_detour(
         #[cfg(not(target_os = "linux"))]
         const CLOSE_RANGE_CLOEXEC: c_int = 0;
 
+        let mut sockets = SOCKETS.lock().unwrap();
+        let mut files = OPEN_FILES.lock().unwrap();
+        let range = first as i32..=last as i32;
+
         // CLOSE_RANGE_CLOEXEC (since Linux 5.11)
         // Set the close-on-exec flag on the specified file
         // descriptors, rather than immediately closing them.
         if flags.bitand(CLOSE_RANGE_CLOEXEC) == 0 {
-            for fd in first..=last {
-                close_layer_fd(fd as i32);
-            }
+            sockets.retain(|k, _| range.contains(k));
+            files.retain(|k, _| range.contains(k));
         }
 
         res
