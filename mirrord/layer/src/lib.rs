@@ -948,7 +948,9 @@ pub(crate) unsafe extern "C" fn close_range_detour(
 #[hook_fn]
 pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
     let Some(guard) = DetourGuard::new() else {
-        return FN_VFORK();
+        unsafe {
+            return FN_VFORK();
+        }
     };
 
     #[cfg(target_os = "macos")]
@@ -990,7 +992,7 @@ pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
 
     // Unwrap here because it was fine in the beginning of the
     // function and nothing else should be using it at this point.
-    let guard = DetourGuard::new().expect("Acquiring DetourGuard failed.");
+    let _guard = DetourGuard::new().expect("Acquiring DetourGuard failed.");
 
     match fork_result.cmp(&0) {
         // We're the child.
