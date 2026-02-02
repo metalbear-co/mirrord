@@ -11,7 +11,10 @@ use mirrord_kube::{
     error::KubeApiError,
     resolved::ResolvedTarget,
 };
-use mirrord_operator::client::{OperatorApi, OperatorSessionConnection};
+use mirrord_operator::{
+    client::{OperatorApi, OperatorSessionConnection},
+    crd::NewOperatorFeature,
+};
 use mirrord_progress::{
     IdeAction, IdeMessage, NotificationLevel, Progress,
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
@@ -91,7 +94,11 @@ where
 
     user_cert_subtask.success(Some("user credentials prepared"));
 
-    let is_multi_cluster = api.multi_cluster_info().is_some();
+    let is_multi_cluster = api
+        .operator()
+        .spec
+        .supported_features()
+        .contains(&NewOperatorFeature::MultiClusterPrimary);
 
     let mut session_subtask = operator_subtask.subtask("starting session");
     let connection = if is_multi_cluster {

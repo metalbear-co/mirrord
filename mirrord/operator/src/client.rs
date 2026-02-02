@@ -707,20 +707,11 @@ impl OperatorApi<PreparedClientCert> {
         // Multi-cluster is handled transparently by the operator's Envoy component.
         // The CLI just connects normally - if multi-cluster is enabled, Envoy orchestrates.
         // User doesn't need to know or care about multi-cluster configuration.
-        let is_multi_cluster = self.multi_cluster_info().is_some();
-        tracing::debug!(
-            is_multi_cluster = %is_multi_cluster,
-            has_multi_cluster_in_spec = %self.operator.spec.multi_cluster.is_some(),
-            "[MULTICLUSTER] CLI connect_in_new_session"
-        );
-        if let Some(multi_cluster_info) = self.multi_cluster_info() {
-            tracing::info!(
-                multi_cluster = %multi_cluster_info.multi_cluster,
-                primary_cluster = %multi_cluster_info.cluster_name,
-                default_cluster = %multi_cluster_info.default_cluster,
-                "Multi-cluster mode enabled, Envoy will orchestrate sessions"
-            );
-        }
+        let is_multi_cluster = self
+            .operator
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::MultiClusterPrimary);
 
         self.check_feature_support(layer_config)?;
         let (do_copy_target, reason) = self
