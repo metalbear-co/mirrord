@@ -642,7 +642,7 @@ fn enable_hooks(state: &LayerSetup) {
             "closefrom",
             closefrom_detour,
             FnClosefrom,
-            FN_CLOSEFROM,
+            FN_CLOSEFROM
         );
         replace!(
             &mut hook_manager,
