@@ -167,6 +167,7 @@ pub fn proxy_conn_fd() -> Option<RawFd> {
     unsafe { PROXY_CONNECTION.get() }.map(AsRawFd::as_raw_fd)
 }
 
+#[cfg(target_os = "macos")]
 pub fn proxy_conn_layer_id() -> Option<LayerId> {
     // SAFETY: Mutation only happens during init
     #[allow(static_mut_refs)]
