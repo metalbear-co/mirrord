@@ -4,8 +4,6 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
-
 use super::session::{SessionOwner, SessionTarget};
 
 /// Multi-cluster session coordinated by Envoy
@@ -41,11 +39,6 @@ pub struct MirrordMultiClusterSessionSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_cluster: Option<String>,
 
-    /// Full feature configuration as JSON (FeatureConfig from mirrord-config).
-    /// Each cluster deserializes and uses the parts relevant to its role.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub feature_config: Option<JsonValue>,
-
     /// PostgreSQL branch database names (created by primary before session init).
     /// These are passed to the default cluster's child session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -60,6 +53,12 @@ pub struct MirrordMultiClusterSessionSpec {
     /// These are passed to the default cluster's child session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mongodb_branch_names: Vec<String>,
+
+    /// SQS output queue names for multi-cluster coordination.
+    /// Maps original queue names to their output queue names.
+    /// All clusters use the same temp queue names.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub sqs_output_queues: std::collections::HashMap<String, String>,
 }
 
 /// Target specification for a specific cluster in a multi-cluster session

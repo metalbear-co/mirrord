@@ -704,15 +704,6 @@ impl OperatorApi<PreparedClientCert> {
     where
         P: Progress,
     {
-        // Multi-cluster is handled transparently by the operator's Envoy component.
-        // The CLI just connects normally - if multi-cluster is enabled, Envoy orchestrates.
-        // User doesn't need to know or care about multi-cluster configuration.
-        let is_multi_cluster = self
-            .operator
-            .spec
-            .supported_features()
-            .contains(&NewOperatorFeature::MultiClusterPrimary);
-
         self.check_feature_support(layer_config)?;
         let (do_copy_target, reason) = self
             .should_copy_target(layer_config, &target, progress)
@@ -724,57 +715,30 @@ impl OperatorApi<PreparedClientCert> {
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
 
-        // In multi-cluster mode, the primary operator creates database branches,
-        // so we send feature_config instead of creating branches locally.
-        // In single-cluster mode, CLI creates branches as before.
-        let (mysql_branch_names, pg_branch_names, mongodb_branch_names, feature_config) =
-            if is_multi_cluster {
-                // Serialize the feature config for the primary operator to create branches
-                let feature_config_json = serde_json::to_string(&layer_config.feature)
-                    .expect("FeatureConfig serialization should not fail");
-                let has_db_branches = !layer_config.feature.db_branches.is_empty();
-                tracing::info!(
-                    has_db_branches = %has_db_branches,
-                    feature_config_len = %feature_config_json.len(),
-                    "[MULTICLUSTER] Sending feature_config to operator (NOT creating branches locally)"
-                );
-                if has_db_branches {
-                    tracing::info!(
-                        "[MULTICLUSTER] db_branches configured - primary operator will create them on default cluster"
-                    );
-                }
-                (None, None, None, Some(feature_config_json))
-            } else {
-                // Single-cluster mode: create branches locally as before
-                let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
-                    Some(
-                        self.prepare_mysql_branch_dbs(layer_config, progress)
-                            .await?,
-                    )
-                } else {
-                    None
-                };
-                let pg_branch_names = if layer_config.feature.db_branches.is_empty().not() {
-                    Some(self.prepare_pg_branch_dbs(layer_config, progress).await?)
-                } else {
-                    None
-                };
-                let mongodb_branch_names = if layer_config.feature.db_branches.is_empty().not() {
-                    Some(
-                        self.prepare_mongodb_branch_dbs(layer_config, progress)
-                            .await?,
-                    )
-                } else {
-                    None
-                };
-
-                (
-                    mysql_branch_names,
-                    pg_branch_names,
-                    mongodb_branch_names,
-                    None,
-                )
-            };
+        // Create branches locally (both single-cluster and multi-cluster modes)
+        // Note: In multi-cluster, branches are created on the default cluster which the CLI
+        // may not have direct access to. Branch names are passed via ConnectParams.
+        let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
+            Some(
+                self.prepare_mysql_branch_dbs(layer_config, progress)
+                    .await?,
+            )
+        } else {
+            None
+        };
+        let pg_branch_names = if layer_config.feature.db_branches.is_empty().not() {
+            Some(self.prepare_pg_branch_dbs(layer_config, progress).await?)
+        } else {
+            None
+        };
+        let mongodb_branch_names = if layer_config.feature.db_branches.is_empty().not() {
+            Some(
+                self.prepare_mongodb_branch_dbs(layer_config, progress)
+                    .await?,
+            )
+        } else {
+            None
+        };
 
         let (session, reused_copy) = if do_copy_target {
             let mut copy_subtask = progress.subtask("preparing target copy");
@@ -868,7 +832,6 @@ impl OperatorApi<PreparedClientCert> {
                 mysql_branch_names.clone().unwrap_or_default(),
                 pg_branch_names.clone().unwrap_or_default(),
                 session_ci_info.clone(),
-                feature_config.clone(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
 
@@ -958,7 +921,7 @@ impl OperatorApi<PreparedClientCert> {
             target_type = %target.type_(),
             target_name = %target.name(),
             namespace = ?namespace,
-            "[MULTICLUSTER] Connecting without local target resolution - operator will resolve on workload cluster"
+            "Connecting without local target resolution - operator will resolve on workload cluster"
         );
 
         let use_proxy_api = self
@@ -967,18 +930,15 @@ impl OperatorApi<PreparedClientCert> {
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
 
-        // In multi-cluster mode, send feature_config for operator to handle
-        let feature_config = serde_json::to_string(&layer_config.feature)
-            .expect("FeatureConfig serialization should not fail");
-
+        // Multi-cluster mode: queue splits are passed via ConnectParams
+        // Branch creation will be handled by DbBranchSyncController
         let params = ConnectParams::new(
             layer_config,
             branch_name,
-            vec![], // No local branch creation
+            vec![], // Branches are created on default cluster
             vec![],
             vec![],
             session_ci_info,
-            Some(feature_config),
         );
 
         let namespace = namespace.unwrap_or("default");
@@ -1280,8 +1240,6 @@ impl OperatorApi<PreparedClientCert> {
             mysql_branch_names,
             pg_branch_names,
             session_ci_info,
-            // copy_target doesn't need feature_config - branches are handled separately
-            feature_config: None,
         };
 
         if use_proxy {
@@ -2219,7 +2177,6 @@ mod test {
             mysql_branch_names,
             pg_branch_names,
             session_ci_info,
-            feature_config: None,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
