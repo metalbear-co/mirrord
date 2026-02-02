@@ -10,7 +10,6 @@
 mod tests;
 
 mod hooks;
-mod logging;
 mod macros;
 pub mod process;
 mod subprocess;
@@ -23,6 +22,7 @@ use minhook_detours_rs::guard::DetourGuard;
 pub use mirrord_layer_lib::setup::layer_setup;
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult},
+    logging::init_tracing,
     process::windows::{execution::debug::should_wait_for_debugger, sync::LayerInitEvent},
     proxy_connection::PROXY_CONNECTION,
     setup::init_setup,
@@ -34,7 +34,6 @@ use winapi::{
 
 use crate::{
     hooks::initialize_hooks,
-    logging::init_tracing,
     subprocess::{create_proxy_connection, detect_process_context, get_setup_address},
     trace_only::{is_trace_only_mode, modify_config_for_trace_only},
 };

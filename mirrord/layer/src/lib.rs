@@ -108,7 +108,7 @@ use nix::errno::Errno;
 use proxy_connection::ProxyConnection;
 use setup::LayerSetup;
 use socket::SOCKETS;
-use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
+use mirrord_layer_lib::logging;
 
 use crate::{
     common::make_proxy_request_with_response,
@@ -345,25 +345,6 @@ fn mirrord_layer_entry_point() {
     }
 }
 
-/// Initialize logger. Set the logs to go according to the layer's config either to a trace file, to
-/// mirrord-console or to stderr.
-fn init_tracing() {
-    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-        mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
-    } else {
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_thread_ids(true)
-                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-                    .compact()
-                    .with_writer(std::io::stderr),
-            )
-            .with(tracing_subscriber::EnvFilter::from_default_env())
-            .init();
-    };
-}
-
 /// Occurs after [`layer_pre_initialization`] has succeeded.
 ///
 /// Initialized the main parts of mirrord-layer.
@@ -404,7 +385,7 @@ fn layer_start(mut config: LayerConfig) {
         config.feature.network.outgoing.udp = false;
     }
 
-    init_tracing();
+    logging::init_tracing();
 
     let proxy_connection_timeout = *PROXY_CONNECTION_TIMEOUT
         .get_or_init(|| Duration::from_secs(config.internal_proxy.socket_timeout));
