@@ -930,14 +930,34 @@ impl OperatorApi<PreparedClientCert> {
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
 
-        // Multi-cluster mode: queue splits are passed via ConnectParams
-        // Branch creation will be handled by DbBranchSyncController
+        // Create branch CRDs on the cluster CLI has access to:
+        // - Single-cluster: CRDs created directly on target cluster, branching happens locally.
+        // - Multi-cluster: CRDs created on primary cluster, DbBranchSyncController syncs them to
+        //   the default cluster where actual branching happens, status syncs back to primary.
+        let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
+            self.prepare_mysql_branch_dbs(layer_config, progress)
+                .await?
+        } else {
+            vec![]
+        };
+        let pg_branch_names = if layer_config.feature.db_branches.is_empty().not() {
+            self.prepare_pg_branch_dbs(layer_config, progress).await?
+        } else {
+            vec![]
+        };
+        let mongodb_branch_names = if layer_config.feature.db_branches.is_empty().not() {
+            self.prepare_mongodb_branch_dbs(layer_config, progress)
+                .await?
+        } else {
+            vec![]
+        };
+
         let params = ConnectParams::new(
             layer_config,
             branch_name,
-            vec![], // Branches are created on default cluster
-            vec![],
-            vec![],
+            mongodb_branch_names,
+            mysql_branch_names,
+            pg_branch_names,
             session_ci_info,
         );
 
