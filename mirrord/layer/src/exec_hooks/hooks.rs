@@ -21,11 +21,11 @@ use crate::{
 };
 
 /// Takes an [`Argv`] with the enviroment variables from an `exec` call, extending it with
-/// an encoded version of our [`SOCKETS`] and [`FD_ENV_VAR`].
+/// an encoded version of our [`SOCKETS`] and [`INTPROXY_CONN_FD_ENV_VAR`].
 ///
 /// # Params
 ///
-/// `intproxy_conn_fd` dictates the value of [`FD_ENV_VAR`].
+/// `intproxy_conn_fd` dictates the value of [`INTPROXY_CONN_FD_ENV_VAR`].
 /// When it is `None`, the current connection fd will be used.
 ///
 /// The check for [`libc::FD_CLOEXEC`] is performed during the [`SOCKETS`] initialization
