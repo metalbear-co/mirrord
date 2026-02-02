@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
+use k8s_openapi::NamespaceResourceScope;
 use kube::{
-    Api,
+    Api, Resource,
     api::{DeleteParams, ListParams},
 };
 use mirrord_config::{LayerConfig, config::ConfigContext};
@@ -12,7 +13,7 @@ use prettytable::{Table, row};
 use crate::{
     CliResult,
     config::{DbBranchesArgs, DbBranchesCommand},
-    kube::kube_client_from_layer_config,
+    kube::{kube_client_from_layer_config, list_resource_if_defined},
 };
 
 #[derive(Debug)]
@@ -52,6 +53,37 @@ impl From<&MysqlBranchDatabase> for BranchInfo {
     }
 }
 
+impl From<MysqlBranchDatabase> for BranchInfo {
+    fn from(
+        MysqlBranchDatabase {
+            metadata,
+            spec,
+            mut status,
+        }: MysqlBranchDatabase,
+    ) -> Self {
+        Self {
+            name: metadata.name.unwrap_or_default(),
+            db_type: "MySQL",
+            phase: status.as_ref().map(|s| s.phase.to_string()),
+            ttl: spec.ttl_secs,
+            database: spec.database_name,
+            users: status.as_mut().and_then(|s| {
+                if s.session_info.is_empty() {
+                    None
+                } else {
+                    let mut user_list: Vec<_> = std::mem::take(&mut s.session_info)
+                        .into_values()
+                        .map(|session| session.owner.k8s_username)
+                        .collect();
+                    user_list.sort();
+                    Some(user_list.join("\n"))
+                }
+            }),
+            expire_time: status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
+        }
+    }
+}
+
 impl From<&PgBranchDatabase> for BranchInfo {
     fn from(branch: &PgBranchDatabase) -> Self {
         Self {
@@ -78,6 +110,37 @@ impl From<&PgBranchDatabase> for BranchInfo {
     }
 }
 
+impl From<PgBranchDatabase> for BranchInfo {
+    fn from(
+        PgBranchDatabase {
+            metadata,
+            spec,
+            mut status,
+        }: PgBranchDatabase,
+    ) -> Self {
+        Self {
+            name: metadata.name.unwrap_or_default(),
+            db_type: "PostgreSQL",
+            phase: status.as_ref().map(|s| s.phase.to_string()),
+            ttl: spec.ttl_secs,
+            database: spec.database_name,
+            users: status.as_mut().and_then(|s| {
+                if s.session_info.is_empty() {
+                    None
+                } else {
+                    let mut user_list: Vec<_> = std::mem::take(&mut s.session_info)
+                        .into_values()
+                        .map(|session| session.owner.k8s_username)
+                        .collect();
+                    user_list.sort();
+                    Some(user_list.join("\n"))
+                }
+            }),
+            expire_time: status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
+        }
+    }
+}
+
 pub async fn db_branches_command(args: DbBranchesArgs) -> CliResult<()> {
     match &args.command {
         DbBranchesCommand::Status { names } => status_command(&args, names.as_slice()).await,
@@ -85,7 +148,11 @@ pub async fn db_branches_command(args: DbBranchesArgs) -> CliResult<()> {
     }
 }
 
-fn get_api<T>(args: &DbBranchesArgs, client: &kube::Client, layer_config: &LayerConfig) -> Api<T> {
+fn get_api<T: Resource<DynamicType = (), Scope = NamespaceResourceScope>>(
+    args: &DbBranchesArgs,
+    client: &kube::Client,
+    layer_config: &LayerConfig,
+) -> Api<T> {
     if args.all_namespaces {
         Api::all(client.clone())
     } else if let Some(namespace) = &args.namespace {
@@ -115,39 +182,15 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
 
     let pg_api: Api<PgBranchDatabase> = get_api(args, &client, &layer_config);
 
-    let list_params = ListParams::default();
+    let mysql_branches = list_resource_if_defined(&mysql_api, &mut status_progress)
+        .await?
+        .unwrap_or_default();
 
-    let mysql_branches = mysql_api.list(&list_params).await.map_err(|e| {
-        status_progress.failure(Some("failed to list MySQL branches"));
-        crate::CliError::ListTargetsFailed(mirrord_kube::error::KubeApiError::KubeError(e))
-    })?;
+    let pg_branches = list_resource_if_defined(&pg_api, &mut status_progress)
+        .await?
+        .unwrap_or_default();
 
-    let pg_branches = pg_api.list(&list_params).await.map_err(|e| {
-        status_progress.failure(Some("failed to list PostgreSQL branches"));
-        crate::CliError::ListTargetsFailed(mirrord_kube::error::KubeApiError::KubeError(e))
-    })?;
-
-    let mut all_branches = Vec::with_capacity(mysql_branches.items.len() + pg_branches.items.len());
-
-    // Process MySQL branches
-    for branch in &mysql_branches.items {
-        if let Some(name) = &branch.metadata.name
-            && (names.is_empty() || names.contains(name))
-        {
-            all_branches.push(BranchInfo::from(branch));
-        }
-    }
-
-    // Process PostgreSQL branches
-    for branch in &pg_branches.items {
-        if let Some(name) = &branch.metadata.name
-            && (names.is_empty() || names.contains(name))
-        {
-            all_branches.push(BranchInfo::from(branch));
-        }
-    }
-
-    if all_branches.is_empty() {
+    if mysql_branches.is_empty() && pg_branches.is_empty() {
         progress.success(Some("No active DB branch found"));
         return Ok(());
     }
@@ -166,7 +209,29 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
         "Expires At"
     ]);
 
-    for branch in all_branches {
+    // filtering before constructing BranchInfo, that way only constructing BranchInfos for filtered
+    // branches, not all branches.
+    fn get_iter<T: Resource + Into<BranchInfo>>(
+        vec: Vec<T>,
+        names: &HashSet<&String>,
+    ) -> impl Iterator<Item = BranchInfo> {
+        vec.into_iter()
+            .filter(|branch| {
+                branch
+                    .meta()
+                    .name
+                    .as_ref()
+                    .map(|name| names.contains(name))
+                    .unwrap_or_default()
+            })
+            .map(Into::into)
+    }
+
+    let mysql_iter = get_iter(mysql_branches, &names);
+    let pg_iter = get_iter(pg_branches, &names);
+    let branch_iter = mysql_iter.chain(pg_iter);
+
+    for branch in branch_iter {
         table.add_row(row![
             branch.name,
             branch.db_type,
