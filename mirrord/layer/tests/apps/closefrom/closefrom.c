@@ -1,73 +1,83 @@
-#include <arpa/inet.h>
-#include <fcntl.h>
-#include <netinet/in.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <unistd.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/wait.h>
+#include <stdio.h>
 
-int is_fd_open(int fd) {
-	return fcntl(fd, F_GETFD) != -1;
+int create_socket(int port) {
+    int sock_fd;
+    struct sockaddr_in addr;
+
+    sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock_fd < 0) {
+        return -1;
+    }
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(port);
+
+    if (bind(sock_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        close(sock_fd);
+        return -1;
+    }
+
+    if (listen(sock_fd, 5) < 0) {
+        close(sock_fd);
+        return -1;
+    }
+
+    return sock_fd;
 }
 
 int main() {
-	int fd1, fd2, fd3, fd4, fd5, sock_fd;
-	struct sockaddr_in addr;
-	int opt = 1;
+    int sock1, sock2;
+    pid_t pid;
 
-	/* Open several file descriptors */
-	fd1 = open("/a/file", O_RDONLY);
-	fd2 = open("/some/other/file", O_RDONLY);
-	fd3 = open("/yet/another_file", O_RDONLY);
-	fd4 = open("/take/a/wild/guess", O_RDONLY);
-	fd5 = open("/oh/wow", O_RDONLY);
+	int port = 40000;
 
-	if (fd1 < 0 || fd2 < 0 || fd3 < 0 || fd4 < 0 || fd5 < 0) {
-		return 1;
-	}
+    /* Create 2 sockets in parent */
+    sock1 = create_socket(port++);
+    sock2 = create_socket(port++);
 
-	/* Create a TCP server socket */
-	sock_fd = socket(AF_INET, SOCK_STREAM, 0);
-	if (sock_fd < 0) {
-		return 1;
-	}
+    if (sock1 < 0 || sock2 < 0) {
+        return 1;
+    }
 
-	/* Set socket options */
-	setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    /* Fork */
+    pid = fork();
 
-	/* Bind to a random port */
-	memset(&addr, 0, sizeof(addr));
-	addr.sin_family = AF_INET;
-	addr.sin_addr.s_addr = INADDR_ANY;
-	addr.sin_port = htons(0);
+    if (pid < 0) {
+        return 1;
+    }
 
-	if (bind(sock_fd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
-		return 1;
-	}
+    if (pid == 0) {
+        /* Child process */
+        int sock3, sock4;
 
-	/* Start listening */
-	if (listen(sock_fd, 5) < 0) {
-		return 1;
-	}
+        /* Create 2 more sockets in child */
+        sock3 = create_socket(port++);
+        sock4 = create_socket(port++);
 
-	/* Verify all are open before closefrom */
-	int all_open_before = is_fd_open(fd1) && is_fd_open(fd2) &&
-						  is_fd_open(fd3) && is_fd_open(fd4) &&
-						  is_fd_open(fd5) && is_fd_open(sock_fd);
+        if (sock3 < 0 || sock4 < 0) {
+            exit(1);
+        }
 
-	/* Call closefrom to close all file descriptors */
-	closefrom(0);
+        closefrom(3);
+        exit(0);
+    } else {
+        /* Parent process */
+        int status;
 
-	/* Check which file descriptors are still open */
-	int success = is_fd_open(fd1) && is_fd_open(fd2) && !is_fd_open(fd3) &&
-				  !is_fd_open(fd4) && !is_fd_open(fd5) &&
-				  !is_fd_open(sock_fd) && all_open_before;
+        /* Wait for child */
+        waitpid(pid, &status, 0);
+        closefrom(3);
 
-	/* Clean up remaining file descriptors */
-	if (is_fd_open(fd1))
-		close(fd1);
-	if (is_fd_open(fd2))
-		close(fd2);
-
-	return success ? 0 : 1;
+        return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+    }
 }

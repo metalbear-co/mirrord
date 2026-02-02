@@ -1,13 +1,15 @@
 #![feature(assert_matches)]
 use std::{
     assert_matches::{self, assert_matches},
+    ops::Not,
     path::Path,
     time::Duration,
 };
 
 use mirrord_intproxy_protocol::PortSubscribe;
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage,
+    ClientMessage, DaemonMessage, FileRequest,
+    file::CloseFileRequest,
     tcp::{DaemonTcp, LayerTcp},
 };
 use rstest::rstest;
@@ -25,36 +27,35 @@ async fn closefrom(dylib_path: &Path) {
         .start_process_with_layer(dylib_path, Default::default(), None)
         .await;
 
-    intproxy
-        .expect_file_open_with_whatever_options("/a/file", 4)
-        .await;
-    intproxy
-        .expect_file_open_with_whatever_options("/some/other/file", 5)
-        .await;
-    intproxy
-        .expect_file_open_with_whatever_options("/yet/another_file", 6)
-        .await;
-    intproxy
-        .expect_file_open_with_whatever_options("/take/a/wild/guess", 7)
-        .await;
-    intproxy
-        .expect_file_open_with_whatever_options("/oh/wow", 8)
-        .await;
+    for port in 40000..=40003 {
+        assert_matches!(
+            intproxy.try_recv().await.unwrap(),
+            ClientMessage::Tcp(LayerTcp::PortSubscribe(p)) if p == port
+        );
+        intproxy
+            .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(port))))
+            .await;
+    }
 
-    assert_matches!(
-        intproxy.try_recv().await.unwrap(),
-        ClientMessage::Tcp(LayerTcp::PortSubscribe(12345))
-    );
-
-    intproxy
-        .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(12345))))
-        .await;
+    // Expect the last 2 to be closed first, as the parent process
+    // still has a reference to the first two.
+    let mut closed = [false; 4];
+    for _ in 0..2 {
+        assert_matches!(
+            intproxy.try_recv().await.unwrap(),
+            ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)) if
+            (40002..=40003).includes(port) && {
+                closed[port - 40000] = true;
+            }
+        );
+        intproxy
+            .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(port))))
+            .await;
+    }
 
     while let Some(msg) = intproxy.try_recv().await {
         dbg!(msg);
     }
-
-    intproxy.expect_file_close(1).await;
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
