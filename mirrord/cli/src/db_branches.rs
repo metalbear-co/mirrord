@@ -1,14 +1,12 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt::Debug};
 
 use k8s_openapi::NamespaceResourceScope;
-use kube::{
-    Api, Resource,
-    api::{DeleteParams, ListParams},
-};
+use kube::{Api, Resource, api::DeleteParams};
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::crd::{mysql_branching::MysqlBranchDatabase, pg_branching::PgBranchDatabase};
 use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{Table, row};
+use serde::de::DeserializeOwned;
 
 use crate::{
     CliResult,
@@ -248,7 +246,27 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
     Ok(())
 }
 
-async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &Vec<String>) -> CliResult<()> {
+async fn delete_branches<I, R, P>(
+    branch_names: I,
+    api: &kube::Api<R>,
+    progress: &P,
+    delete_params: &DeleteParams,
+) where
+    I: Iterator<Item = String>,
+    R: Resource<DynamicType = ()> + Clone + DeserializeOwned + Debug,
+    P: Progress,
+{
+    for branch in branch_names {
+        let mut branch_progress =
+            progress.subtask(&format!("destroying {} {branch}", R::kind(&())));
+        match api.delete(&branch, delete_params).await {
+            Ok(_) => branch_progress.success(Some(&format!("destroyed {branch}"))),
+            Err(e) => branch_progress.failure(Some(&format!("failed: {e}"))),
+        }
+    }
+}
+
+async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &[String]) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("DB Branches Destroy");
     let mut destroy_progress = progress.subtask("deleting branches");
 
@@ -277,29 +295,20 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &Vec<String>) 
             destroy_progress.success(Some("No active DB branch found."));
         } else {
             // Delete all MySQL branches
-            let delete_params = DeleteParams::default();
-            for branch in mysql_branches.into_iter().flatten() {
-                if let Some(name) = branch.metadata.name {
-                    let mut branch_progress =
-                        destroy_progress.subtask(&format!("destroying MySQL branch {name}"));
-                    match mysql_api.delete(&name, &delete_params).await {
-                        Ok(_) => branch_progress.success(Some(&format!("destroyed {name}"))),
-                        Err(e) => branch_progress.failure(Some(&format!("failed: {e}"))),
-                    }
-                }
-            }
+            let d_params = DeleteParams::default();
+            let my_branch_names = mysql_branches
+                .into_iter()
+                .flatten()
+                .filter_map(|b| b.metadata.name);
+            delete_branches(my_branch_names, &mysql_api, &destroy_progress, &d_params).await;
 
-            // Delete all PostgreSQL branches
-            for branch in pg_branches.into_iter().flatten() {
-                if let Some(name) = branch.metadata.name {
-                    let mut branch_progress =
-                        destroy_progress.subtask(&format!("destroying PostgreSQL branch {name}"));
-                    match pg_api.delete(&name, &delete_params).await {
-                        Ok(_) => branch_progress.success(Some(&format!("destroyed {name}"))),
-                        Err(e) => branch_progress.failure(Some(&format!("failed: {e}"))),
-                    }
-                }
-            }
+            // Delete all Postgres branches
+            let pg_branch_names = pg_branches
+                .into_iter()
+                .flatten()
+                .filter_map(|b| b.metadata.name);
+            delete_branches(pg_branch_names, &pg_api, &destroy_progress, &d_params).await;
+
             destroy_progress.success(None);
         }
     } else {
@@ -311,49 +320,24 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &Vec<String>) 
         let mut names: HashSet<_> = names.iter().collect();
         let d_params = DeleteParams::default();
 
-        let mysql_names: HashSet<String> = mysql_branches
+        let mysql_names = mysql_branches
             .into_iter()
+            .flatten()
             .filter_map(|b| b.metadata.name)
-            .collect();
+            .filter(|name| names.remove(name));
+        delete_branches(mysql_names, &mysql_api, &destroy_progress, &d_params).await;
 
-        let pg_names: HashSet<String> = pg_branches
+        let pg_names = pg_branches
             .into_iter()
+            .flatten()
             .filter_map(|b| b.metadata.name)
-            .collect();
-
-        let delete_params = DeleteParams::default();
+            .filter(|name| names.remove(name));
+        delete_branches(pg_names, &pg_api, &destroy_progress, &d_params).await;
 
         for name in names {
-            let mut branch_progress = destroy_progress.subtask(&format!("destroying {name}"));
-
-            let mut found = false;
-
-            if mysql_names.contains(name) {
-                found = true;
-                match mysql_api.delete(name, &delete_params).await {
-                    Ok(_) => {
-                        branch_progress.success(Some(&format!("destroyed MySQL branch: {name}")))
-                    }
-                    Err(e) => branch_progress
-                        .failure(Some(&format!("failed to destroy MySQL branch {name}: {e}"))),
-                }
-            }
-
-            if pg_names.contains(name) {
-                found = true;
-                match pg_api.delete(name, &delete_params).await {
-                    Ok(_) => branch_progress
-                        .success(Some(&format!("destroyed PostgreSQL branch: {name}"))),
-                    Err(e) => branch_progress.failure(Some(&format!(
-                        "failed to destroy PostgreSQL branch {name}: {e}"
-                    ))),
-                }
-            }
-
-            if !found {
-                branch_progress.failure(Some(&format!("branch not found: {name}")));
-            }
+            destroy_progress.failure(Some(&format!("branch not found: {name}")));
         }
+
         destroy_progress.success(None);
     }
 
