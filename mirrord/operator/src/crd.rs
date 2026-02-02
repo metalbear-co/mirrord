@@ -40,6 +40,16 @@ pub mod steal_tls;
 pub use kafka::MirrordKafkaEphemeralTopic;
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
+/// Label added to branch CRDs in multi-cluster mode.
+///
+/// In multi-cluster mode:
+/// 1. CLI creates branch CRD on PRIMARY cluster (only cluster CLI can access)
+/// 2. This label tells PRIMARY's branching controller to SKIP processing
+/// 3. DbBranchSyncController syncs CRD to DEFAULT cluster (removes this label)
+/// 4. DEFAULT's branching controller processes it (creates actual database branch)
+/// 5. Status syncs back to PRIMARY, CLI sees Ready status
+pub const MULTI_CLUSTER_SYNC_LABEL: &str = "mirrord.metalbear.co/multi-cluster-sync";
+
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",

@@ -715,25 +715,27 @@ impl OperatorApi<PreparedClientCert> {
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
 
-        // Create branches locally (both single-cluster and multi-cluster modes)
-        // Note: In multi-cluster, branches are created on the default cluster which the CLI
-        // may not have direct access to. Branch names are passed via ConnectParams.
+        // Create branches locally (single-cluster mode).
+        // multi_cluster=false means branches are processed locally, not synced.
         let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
             Some(
-                self.prepare_mysql_branch_dbs(layer_config, progress)
+                self.prepare_mysql_branch_dbs(layer_config, progress, false)
                     .await?,
             )
         } else {
             None
         };
         let pg_branch_names = if layer_config.feature.db_branches.is_empty().not() {
-            Some(self.prepare_pg_branch_dbs(layer_config, progress).await?)
+            Some(
+                self.prepare_pg_branch_dbs(layer_config, progress, false)
+                    .await?,
+            )
         } else {
             None
         };
         let mongodb_branch_names = if layer_config.feature.db_branches.is_empty().not() {
             Some(
-                self.prepare_mongodb_branch_dbs(layer_config, progress)
+                self.prepare_mongodb_branch_dbs(layer_config, progress, false)
                     .await?,
             )
         } else {
@@ -903,7 +905,7 @@ impl OperatorApi<PreparedClientCert> {
     /// - `assert_valid_mirrord_target` (operator validates on workload cluster)
     /// - `runtime_data` warnings (operator handles on workload cluster)
     /// - `copy_target` (not supported without local resolution)
-    pub async fn connect_in_new_session_from_config<P>(
+    pub async fn connect_in_multi_cluster_session<P>(
         &self,
         target: &Target,
         namespace: Option<&str>,
@@ -932,21 +934,23 @@ impl OperatorApi<PreparedClientCert> {
 
         // Create branch CRDs on the cluster CLI has access to:
         // - Single-cluster: CRDs created directly on target cluster, branching happens locally.
-        // - Multi-cluster: CRDs created on primary cluster, DbBranchSyncController syncs them to
-        //   the default cluster where actual branching happens, status syncs back to primary.
+        // - Multi-cluster: CRDs created on primary cluster with sync label. DbBranchSyncController
+        //   syncs them to the default cluster where actual branching happens, status syncs back.
+        // multi_cluster=true adds label so primary's branching controller skips these CRDs.
         let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
-            self.prepare_mysql_branch_dbs(layer_config, progress)
+            self.prepare_mysql_branch_dbs(layer_config, progress, true)
                 .await?
         } else {
             vec![]
         };
         let pg_branch_names = if layer_config.feature.db_branches.is_empty().not() {
-            self.prepare_pg_branch_dbs(layer_config, progress).await?
+            self.prepare_pg_branch_dbs(layer_config, progress, true)
+                .await?
         } else {
             vec![]
         };
         let mongodb_branch_names = if layer_config.feature.db_branches.is_empty().not() {
-            self.prepare_mongodb_branch_dbs(layer_config, progress)
+            self.prepare_mongodb_branch_dbs(layer_config, progress, true)
                 .await?
         } else {
             vec![]
@@ -1605,11 +1609,14 @@ impl OperatorApi<PreparedClientCert> {
     /// 1. List reusable branch databases.
     /// 2. Create new ones if any missing.
     /// 3. Wait for all new databases to be ready.
+    ///
+    /// If `multi_cluster` is true, branches are marked for sync to the default cluster.
     #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
     async fn prepare_mysql_branch_dbs<P: Progress>(
         &self,
         layer_config: &LayerConfig,
         progress: &P,
+        multi_cluster: bool,
     ) -> OperatorApiResult<Vec<String>> {
         let mut subtask = progress.subtask("preparing branch databases");
         let target = layer_config
@@ -1629,6 +1636,14 @@ impl OperatorApi<PreparedClientCert> {
             mysql: mut create_mysql_params,
             pg: _create_pg_params,
         } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+
+        // Add multi-cluster sync label if in multi-cluster mode
+        if multi_cluster {
+            create_mysql_params = create_mysql_params
+                .into_iter()
+                .map(|(id, params)| (id, params.with_multi_cluster_sync()))
+                .collect();
+        }
 
         let reusable_mysql_branches =
             list_reusable_mysql_branches(&mysql_branch_api, &create_mysql_params, &subtask).await?;
@@ -1681,11 +1696,14 @@ impl OperatorApi<PreparedClientCert> {
     /// 1. List reusable branch databases.
     /// 2. Create new ones if any missing.
     /// 3. Wait for all new databases to be ready.
+    ///
+    /// If `multi_cluster` is true, branches are marked for sync to the default cluster.
     #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
     async fn prepare_pg_branch_dbs<P: Progress>(
         &self,
         layer_config: &LayerConfig,
         progress: &P,
+        multi_cluster: bool,
     ) -> OperatorApiResult<Vec<String>> {
         let mut subtask = progress.subtask("preparing branch databases");
         let target = layer_config
@@ -1704,6 +1722,14 @@ impl OperatorApi<PreparedClientCert> {
             mysql: _create_mysql_params,
             pg: mut create_pg_params,
         } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+
+        // Add multi-cluster sync label if in multi-cluster mode
+        if multi_cluster {
+            create_pg_params = create_pg_params
+                .into_iter()
+                .map(|(id, params)| (id, params.with_multi_cluster_sync()))
+                .collect();
+        }
 
         let reusable_pg_branches =
             list_reusable_pg_branches(&pg_branch_api, &create_pg_params, &subtask).await?;
@@ -1756,11 +1782,14 @@ impl OperatorApi<PreparedClientCert> {
     /// 1. List reusable branch databases.
     /// 2. Create new ones if any missing.
     /// 3. Wait for all new databases to be ready.
+    ///
+    /// If `multi_cluster` is true, branches are marked for sync to the default cluster.
     #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
     async fn prepare_mongodb_branch_dbs<P: Progress>(
         &self,
         layer_config: &LayerConfig,
         progress: &P,
+        multi_cluster: bool,
     ) -> OperatorApiResult<Vec<String>> {
         let mut subtask = progress.subtask("preparing MongoDB branch databases");
         let target = layer_config
@@ -1780,6 +1809,14 @@ impl OperatorApi<PreparedClientCert> {
             mysql: _create_mysql_params,
             pg: _create_pg_params,
         } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+
+        // Add multi-cluster sync label if in multi-cluster mode
+        if multi_cluster {
+            create_mongodb_params = create_mongodb_params
+                .into_iter()
+                .map(|(id, params)| (id, params.with_multi_cluster_sync()))
+                .collect();
+        }
 
         let reusable_mongodb_branches =
             list_reusable_mongodb_branches(&mongodb_branch_api, &create_mongodb_params, &subtask)

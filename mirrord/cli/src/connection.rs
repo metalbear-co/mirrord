@@ -110,7 +110,7 @@ where
             .unwrap_or(Target::Targetless);
         let target_namespace = layer_config.target.namespace.clone();
 
-        api.connect_in_new_session_from_config(
+        api.connect_in_multi_cluster_session(
             &target_config,
             target_namespace.as_deref(),
             layer_config,

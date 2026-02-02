@@ -631,6 +631,16 @@ impl MysqlBranchParams {
             spec,
         }
     }
+
+    /// Mark this branch for multi-cluster sync.
+    /// See [`crate::crd::MULTI_CLUSTER_SYNC_LABEL`] for details.
+    pub fn with_multi_cluster_sync(mut self) -> Self {
+        self.labels.insert(
+            labels::MULTI_CLUSTER_SYNC_LABEL.to_string(),
+            "true".to_string(),
+        );
+        self
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -669,6 +679,16 @@ impl PgBranchParams {
             labels,
             spec,
         }
+    }
+
+    /// Mark this branch for multi-cluster sync.
+    /// See [`crate::crd::MULTI_CLUSTER_SYNC_LABEL`] for details on the multi-cluster flow.
+    pub fn with_multi_cluster_sync(mut self) -> Self {
+        self.labels.insert(
+            labels::MULTI_CLUSTER_SYNC_LABEL.to_string(),
+            "true".to_string(),
+        );
+        self
     }
 }
 
@@ -719,10 +739,23 @@ impl MongodbBranchParams {
             spec,
         }
     }
+
+    /// Mark this branch for multi-cluster sync.
+    /// See [`crate::crd::MULTI_CLUSTER_SYNC_LABEL`] for details.
+    pub fn with_multi_cluster_sync(mut self) -> Self {
+        self.labels.insert(
+            labels::MULTI_CLUSTER_SYNC_LABEL.to_string(),
+            "true".to_string(),
+        );
+        self
+    }
 }
 
 pub mod labels {
     pub(crate) const MIRRORD_MONGODB_BRANCH_ID_LABEL: &str = "mirrord-mongodb-branch-id";
     pub(crate) const MIRRORD_MYSQL_BRANCH_ID_LABEL: &str = "mirrord-mysql-branch-id";
     pub(crate) const MIRRORD_PG_BRANCH_ID_LABEL: &str = "mirrord-pg-branch-id";
+
+    // Re-export the multi-cluster sync label from crd module
+    pub use crate::crd::MULTI_CLUSTER_SYNC_LABEL;
 }
