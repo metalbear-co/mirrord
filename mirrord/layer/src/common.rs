@@ -19,7 +19,7 @@ use crate::{
     error::{HookError, HookResult},
     exec_hooks::Argv,
     file::OpenOptionsInternalExt,
-    proxy_connection::FD_ENV_VAR,
+    proxy_connection::INTPROXY_CONN_FD_ENV_VAR,
     socket::SHARED_SOCKETS_ENV_VAR,
 };
 
@@ -144,7 +144,7 @@ impl CheckedInto<Argv> for *const *const c_char {
             .filter(|value| !value.is_null())
             .map(|value| unsafe { CStr::from_ptr(*value) }.to_owned())
             .filter(|value| !value.to_string_lossy().starts_with(SHARED_SOCKETS_ENV_VAR))
-            .filter(|value| !value.to_string_lossy().starts_with(FD_ENV_VAR))
+            .filter(|value| !value.to_string_lossy().starts_with(INTPROXY_CONN_FD_ENV_VAR))
             .collect::<Argv>();
 
         Detour::Success(list)

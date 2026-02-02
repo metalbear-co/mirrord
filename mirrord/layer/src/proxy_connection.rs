@@ -30,7 +30,7 @@ use thiserror::Error;
 
 use crate::detour::DetourGuard;
 
-pub static FD_ENV_VAR: &str = "MIRRORD_INTPROXY_CONNECTION_FD";
+pub static INTPROXY_CONN_FD_ENV_VAR: &str = "MIRRORD_INTPROXY_CONNECTION_FD";
 
 #[derive(Debug, Error)]
 pub enum ProxyError {
@@ -49,10 +49,10 @@ pub enum ProxyError {
     LockPoisoned,
     #[error("{0}")]
     IoFailed(#[from] io::Error),
-    #[error("{FD_ENV_VAR} is set to an invalid value: {0:?}")]
+    #[error("{INTPROXY_CONN_FD_ENV_VAR} is set to an invalid value: {0:?}")]
     BadProxyConnFdEnv(OsString),
     #[error(
-        "fd passed in {FD_ENV_VAR} ({fd:?}) was not a valid socket. Errno: \"{errno}\" from {fn_name}"
+        "fd passed in {INTPROXY_CONN_FD_ENV_VAR} ({fd:?}) was not a valid socket. Errno: \"{errno}\" from {fn_name}"
     )]
     BadProxyConnFd {
         fd: OwnedFd,
@@ -136,7 +136,7 @@ impl ProxyConnection {
             return Self::make_new_connection(proxy_addr);
         }
 
-        let fd: i32 = match std::env::var(FD_ENV_VAR) {
+        let fd: i32 = match std::env::var(INTPROXY_CONN_FD_ENV_VAR) {
             Ok(var) => var
                 .parse()
                 .map_err(|_| ProxyError::BadProxyConnFdEnv(var.into()))?,
