@@ -278,7 +278,7 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
         let conn = ProxyConnection::new(
             crate::setup().proxy_address(),
             NewSessionRequest {
-                proxy_conn_layer_id(),
+                parent_layer: proxy_conn_layer_id(),
                 process_info: EXECUTABLE_ARGS
                     .get()
                     .expect("should always be set in layer constructor")
