@@ -43,7 +43,10 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
     drop(lock);
 
     env_vars.insert_env(SHARED_SOCKETS_ENV_VAR, &encoded)?;
-    env_vars.insert_env(INTPROXY_CONN_FD_ENV_VAR, &proxy_conn_fd().unwrap().to_string())?;
+    env_vars.insert_env(
+        INTPROXY_CONN_FD_ENV_VAR,
+        &proxy_conn_fd().unwrap().to_string(),
+    )?;
 
     Detour::Success(env_vars)
 }

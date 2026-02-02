@@ -144,7 +144,11 @@ impl CheckedInto<Argv> for *const *const c_char {
             .filter(|value| !value.is_null())
             .map(|value| unsafe { CStr::from_ptr(*value) }.to_owned())
             .filter(|value| !value.to_string_lossy().starts_with(SHARED_SOCKETS_ENV_VAR))
-            .filter(|value| !value.to_string_lossy().starts_with(INTPROXY_CONN_FD_ENV_VAR))
+            .filter(|value| {
+                !value
+                    .to_string_lossy()
+                    .starts_with(INTPROXY_CONN_FD_ENV_VAR)
+            })
             .collect::<Argv>();
 
         Detour::Success(list)
