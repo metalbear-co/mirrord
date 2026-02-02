@@ -29,7 +29,6 @@ client = [
   "dep:futures",
   "dep:mirrord-analytics",
   "dep:mirrord-auth",
-  "dep:mirrord-kube",
   "dep:mirrord-progress",
   "dep:mirrord-protocol",
   "dep:mirrord-protocol-io",
@@ -46,9 +45,11 @@ crd = [
   "dep:kube",
   "dep:mirrord-agent-env",
   "dep:mirrord-config",
+  "dep:mirrord-kube",
   "dep:semver",
   "dep:serde_json",
   "dep:thiserror",
+  "dep:uuid",
 ]
 
 [dependencies]
