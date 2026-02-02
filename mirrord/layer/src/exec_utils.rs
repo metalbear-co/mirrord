@@ -18,7 +18,7 @@ use null_terminated::Nul;
 use tracing::{info, trace, warn};
 
 use crate::{
-    EXECUTABLE_ARGS, PROXY_CONNECTION, PROXY_CONNECTION_TIMEOUT,
+    EXECUTABLE_ARGS, PROXY_CONNECTION_TIMEOUT,
     common::{CheckedInto, proxy_conn_fd, proxy_conn_layer_id, strip_mirrord_path},
     detour::{
         Bypass::{
