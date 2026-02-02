@@ -266,52 +266,50 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &Vec<String>) 
 
     if all {
         // List all branches first to check if any exist
-        let mysql_branches = mysql_api.list(&ListParams::default()).await.map_err(|e| {
-            crate::CliError::ListTargetsFailed(mirrord_kube::error::KubeApiError::KubeError(e))
-        })?;
 
-        let pg_branches = pg_api.list(&ListParams::default()).await.map_err(|e| {
-            crate::CliError::ListTargetsFailed(mirrord_kube::error::KubeApiError::KubeError(e))
-        })?;
+        let mysql_branches = list_resource_if_defined(&mysql_api, &mut destroy_progress).await?;
 
-        if mysql_branches.items.is_empty() && pg_branches.items.is_empty() {
+        let pg_branches = list_resource_if_defined(&pg_api, &mut destroy_progress).await?;
+
+        if mysql_branches.as_ref().is_none_or(|vec| vec.is_empty())
+            && pg_branches.as_ref().is_none_or(|vec| vec.is_empty())
+        {
             destroy_progress.success(Some("No active DB branch found."));
-        }
-
-        // Delete all MySQL branches
-        let delete_params = DeleteParams::default();
-        for branch in mysql_branches {
-            if let Some(name) = branch.metadata.name {
-                let mut branch_progress =
-                    destroy_progress.subtask(&format!("destroying MySQL branch {name}"));
-                match mysql_api.delete(&name, &delete_params).await {
-                    Ok(_) => branch_progress.success(Some(&format!("destroyed {name}"))),
-                    Err(e) => branch_progress.failure(Some(&format!("failed: {e}"))),
+        } else {
+            // Delete all MySQL branches
+            let delete_params = DeleteParams::default();
+            for branch in mysql_branches.into_iter().flatten() {
+                if let Some(name) = branch.metadata.name {
+                    let mut branch_progress =
+                        destroy_progress.subtask(&format!("destroying MySQL branch {name}"));
+                    match mysql_api.delete(&name, &delete_params).await {
+                        Ok(_) => branch_progress.success(Some(&format!("destroyed {name}"))),
+                        Err(e) => branch_progress.failure(Some(&format!("failed: {e}"))),
+                    }
                 }
             }
-        }
 
-        // Delete all PostgreSQL branches
-        for branch in pg_branches {
-            if let Some(name) = branch.metadata.name {
-                let mut branch_progress =
-                    destroy_progress.subtask(&format!("destroying PostgreSQL branch {name}"));
-                match pg_api.delete(&name, &delete_params).await {
-                    Ok(_) => branch_progress.success(Some(&format!("destroyed {name}"))),
-                    Err(e) => branch_progress.failure(Some(&format!("failed: {e}"))),
+            // Delete all PostgreSQL branches
+            for branch in pg_branches.into_iter().flatten() {
+                if let Some(name) = branch.metadata.name {
+                    let mut branch_progress =
+                        destroy_progress.subtask(&format!("destroying PostgreSQL branch {name}"));
+                    match pg_api.delete(&name, &delete_params).await {
+                        Ok(_) => branch_progress.success(Some(&format!("destroyed {name}"))),
+                        Err(e) => branch_progress.failure(Some(&format!("failed: {e}"))),
+                    }
                 }
             }
+            destroy_progress.success(None);
         }
-        destroy_progress.success(None);
     } else {
         // First, list all branches to determine their types
-        let mysql_branches = mysql_api.list(&ListParams::default()).await.map_err(|e| {
-            crate::CliError::ListTargetsFailed(mirrord_kube::error::KubeApiError::KubeError(e))
-        })?;
+        let mysql_branches = list_resource_if_defined(&mysql_api, &mut destroy_progress).await?;
 
-        let pg_branches = pg_api.list(&ListParams::default()).await.map_err(|e| {
-            crate::CliError::ListTargetsFailed(mirrord_kube::error::KubeApiError::KubeError(e))
-        })?;
+        let pg_branches = list_resource_if_defined(&pg_api, &mut destroy_progress).await?;
+
+        let mut names: HashSet<_> = names.iter().collect();
+        let d_params = DeleteParams::default();
 
         let mysql_names: HashSet<String> = mysql_branches
             .into_iter()
