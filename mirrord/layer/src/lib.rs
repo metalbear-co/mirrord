@@ -945,8 +945,12 @@ pub(crate) unsafe extern "C" fn close_range_detour(
 /// These are often used in tandem with `vfork`. However, `vfork` requires the child process
 /// not to write to memory (it's shared with the parent). Doing it in the child process results with
 /// an undefined behavior. Since our hooks always write to memory, `vfork` is not our ally.
-#[hook_guard_fn]
+#[hook_fn]
 pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
+    let Some(guard) = DetourGuard::new() else {
+        return FN_VFORK();
+    };
+
     #[cfg(target_os = "macos")]
     let pipe_result = {
         use std::os::fd::AsRawFd;
@@ -981,9 +985,12 @@ pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
     };
 
     // Drop the `DetourGuard` so we actually fork_detour.
-    drop(__bypass);
+    drop(guard);
     let fork_result = unsafe { fork_detour() };
-    let _guard = DetourGuard::new();
+
+    // Unwrap here because it was fine in the beginning of the
+    // function and nothing else should be using it at this point.
+    let guard = DetourGuard::new().expect("Acquiring DetourGuard failed.");
 
     match fork_result.cmp(&0) {
         // We're the child.
