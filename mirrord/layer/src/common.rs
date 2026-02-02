@@ -8,7 +8,7 @@ use std::{
 };
 
 use libc::c_char;
-use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
+use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, LayerId, MessageId};
 use mirrord_protocol::file::OpenOptionsInternal;
 use null_terminated::Nul;
 use tracing::warn;
@@ -165,4 +165,10 @@ pub fn proxy_conn_fd() -> Option<RawFd> {
     // SAFETY: Mutation only happens during init
     #[allow(static_mut_refs)]
     unsafe { PROXY_CONNECTION.get() }.map(AsRawFd::as_raw_fd)
+}
+
+pub fn proxy_conn_layer_id() -> Option<LayerId> {
+    // SAFETY: Mutation only happens during init
+    #[allow(static_mut_refs)]
+    unsafe { PROXY_CONNECTION.get() }.map(|t| t.layer_id())
 }

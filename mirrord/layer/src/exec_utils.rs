@@ -2,16 +2,14 @@ use std::{
     env,
     ffi::{CStr, CString, c_void},
     mem::zeroed,
-    ops::{BitAnd, Not},
     os::fd::AsRawFd,
     path::PathBuf,
     sync::OnceLock,
 };
 
 use libc::{
-    POSIX_SPAWN_CLOEXEC_DEFAULT, c_char, c_int, c_short, pid_t, posix_spawn_file_actions_destroy,
-    posix_spawn_file_actions_init, posix_spawn_file_actions_t, posix_spawnattr_getflags,
-    posix_spawnattr_t,
+    c_char, c_int, pid_t, posix_spawn_file_actions_destroy, posix_spawn_file_actions_init,
+    posix_spawn_file_actions_t, posix_spawnattr_t,
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
@@ -21,7 +19,7 @@ use tracing::{info, trace, warn};
 
 use crate::{
     EXECUTABLE_ARGS, PROXY_CONNECTION, PROXY_CONNECTION_TIMEOUT,
-    common::{CheckedInto, proxy_conn_fd, strip_mirrord_path},
+    common::{CheckedInto, proxy_conn_fd, proxy_conn_layer_id, strip_mirrord_path},
     detour::{
         Bypass::{
             ExecOnNonExistingFile, FileOperationInMirrordBinTempDir, NoSipDetected, TooManyArgs,
@@ -277,11 +275,10 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
         let mut file_actions_buf: posix_spawn_file_actions_t = zeroed();
         let mut file_actions_buf_used = false;
 
-        let parent_layer = PROXY_CONNECTION.get().map(|t| t.layer_id());
         let conn = ProxyConnection::new(
             crate::setup().proxy_address(),
             NewSessionRequest {
-                parent_layer,
+                proxy_conn_layer_id(),
                 process_info: EXECUTABLE_ARGS
                     .get()
                     .expect("should always be set in layer constructor")
