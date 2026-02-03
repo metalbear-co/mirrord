@@ -1637,7 +1637,7 @@ impl OperatorApi<PreparedClientCert> {
             pg: _create_pg_params,
         } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
 
-        // Add multi-cluster sync label if in multi-cluster mode
+        // Add multi-cluster sync label if it is multi-cluster
         if multi_cluster {
             create_mysql_params = create_mysql_params
                 .into_iter()
@@ -1723,7 +1723,7 @@ impl OperatorApi<PreparedClientCert> {
             pg: mut create_pg_params,
         } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
 
-        // Add multi-cluster sync label if in multi-cluster mode
+        // Add multi-cluster sync label if it is multi-cluster
         if multi_cluster {
             create_pg_params = create_pg_params
                 .into_iter()
@@ -1810,7 +1810,7 @@ impl OperatorApi<PreparedClientCert> {
             pg: _create_pg_params,
         } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
 
-        // Add multi-cluster sync label if in multi-cluster mode
+        // Add multi-cluster sync label if it is multi-cluster
         if multi_cluster {
             create_mongodb_params = create_mongodb_params
                 .into_iter()
