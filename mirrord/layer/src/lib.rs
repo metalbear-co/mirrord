@@ -81,7 +81,7 @@ use std::{
     ops::{BitAnd, Not},
     os::unix::process::parent_id,
     panic,
-    sync::OnceLock,
+    sync::{Arc, LazyLock, OnceLock},
     time::Duration,
 };
 
@@ -460,6 +460,10 @@ fn layer_start(mut config: LayerConfig) {
             .set(new_connection)
             .expect("setting PROXY_CONNECTION singleton")
     }
+
+    // Recover and close inherited fds
+    LazyLock::force(&SOCKETS);
+    LazyLock::force(&OPEN_FILES);
 
     let fetch_env = setup().env_config().load_from_process.unwrap_or(false)
         && !std::env::var(REMOTE_ENV_FETCHED)
