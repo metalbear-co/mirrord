@@ -80,7 +80,7 @@ impl BackgroundTask for Interceptor {
                     Err(e) => break Err(e),
                     Ok(bytes) => {
                         if bytes.is_empty() {
-                            tracing::trace!("Layer shutdown, sending a 0-sized read to inform the agent");
+                            tracing::trace!("Layer shutdown or closed socket, sending a 0-sized read to inform the agent");
                             reading_closed = true;
                         } else {
                             tracing::trace!(bytes = bytes.len(), "Received data from the layer");
