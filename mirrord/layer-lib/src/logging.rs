@@ -139,3 +139,54 @@ fn sanitized_process_name() -> String {
 
     sanitized
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, time::Duration};
+
+    use tempfile::tempdir;
+
+    use super::*;
+
+    #[test]
+    fn init_tracing_creates_log_file() {
+        let temp_dir = tempdir().expect("temp dir");
+
+        let prev_log_path = std::env::var(MIRRORD_LAYER_LOG_PATH).ok();
+        let prev_console_addr = std::env::var("MIRRORD_CONSOLE_ADDR").ok();
+
+        std::env::remove_var("MIRRORD_CONSOLE_ADDR");
+        std::env::set_var(MIRRORD_LAYER_LOG_PATH, temp_dir.path());
+
+        init_tracing();
+        tracing::info!("logging smoke test");
+
+        std::thread::sleep(Duration::from_millis(20));
+
+        let mut entries = fs::read_dir(temp_dir.path())
+            .expect("read temp log dir")
+            .filter_map(|entry| entry.ok())
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.path());
+
+        let log_path = entries
+            .first()
+            .map(|entry| entry.path())
+            .expect("log file not created");
+        let metadata = fs::metadata(&log_path).expect("log file metadata");
+        assert!(
+            metadata.len() > 0,
+            "expected log file to be non-empty: {}",
+            log_path.display()
+        );
+
+        match prev_log_path {
+            Some(value) => std::env::set_var(MIRRORD_LAYER_LOG_PATH, value),
+            None => std::env::remove_var(MIRRORD_LAYER_LOG_PATH),
+        }
+        match prev_console_addr {
+            Some(value) => std::env::set_var("MIRRORD_CONSOLE_ADDR", value),
+            None => std::env::remove_var("MIRRORD_CONSOLE_ADDR"),
+        }
+    }
+}
