@@ -798,6 +798,7 @@ pub(crate) unsafe extern "C" fn closefrom_detour(fd: c_int) {
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     // Block closing the intproxy connection
     if proxy_conn_fd() == Some(fd) {
+        tracing::debug!("app tried to close intproxy connection fd");
         return 0;
     };
 
