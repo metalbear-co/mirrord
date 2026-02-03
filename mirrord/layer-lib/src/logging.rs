@@ -64,7 +64,7 @@ fn init_subscriber(log_file: Option<File>) {
         .compact()
         .with_writer(std::io::stderr);
 
-    // Note (Daniel): to disable ansi ansi code properly in file, stderr must be last
+    // Note (Daniel): to disable ansi code properly in file, stderr must be last
     // according to this Stackoverflow comment:
     // https://stackoverflow.com/questions/79118770/strange-symbols-ansi-in-a-log-file-when-using-tracing-subscriber#comment139523806_79119452
     registry.with(file_layer).with(stderr_layer).init();
