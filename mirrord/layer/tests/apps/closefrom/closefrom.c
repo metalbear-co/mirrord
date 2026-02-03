@@ -1,3 +1,4 @@
+#ifndef __APPLE__
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -80,3 +81,9 @@ int main() {
         return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
     }
 }
+#else
+// mac doesn't support this
+int main(){
+	return 0;
+}
+#endif

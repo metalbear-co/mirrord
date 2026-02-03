@@ -1,5 +1,6 @@
 #![feature(assert_matches)]
 #![allow(clippy::indexing_slicing)]
+#![cfg(not(target_os = "macos"))]
 use std::{assert_matches::assert_matches, mem::replace, ops::Not, path::Path, time::Duration};
 
 use mirrord_protocol::{
