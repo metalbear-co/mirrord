@@ -902,8 +902,8 @@ pub(crate) unsafe extern "C" fn close_range_detour(
         // Set the close-on-exec flag on the specified file
         // descriptors, rather than immediately closing them.
         if flags.bitand(CLOSE_RANGE_CLOEXEC) == 0 {
-            sockets.retain(|k, _| range.contains(k));
-            files.retain(|k, _| range.contains(k));
+            sockets.retain(|k, _| range.contains(k).not());
+            files.retain(|k, _| range.contains(k).not());
         }
 
         res
