@@ -8,6 +8,7 @@ use tracing::Level;
 
 /// For tracking remote resources allocated in the agent: open files and directories, port
 /// subscriptions. Remote resources can be shared by multiple layer instances because of forks.
+#[derive(Debug)]
 pub struct RemoteResources<T> {
     by_layer: HashMap<LayerId, HashSet<T>>,
     counts: HashMap<T, usize>,
