@@ -2,9 +2,7 @@
 #![allow(clippy::await_holding_refcell_ref)]
 
 mod common;
-use std::{
-    assert_matches::assert_matches, cell::RefCell, path::Path, time::Duration,
-};
+use std::{assert_matches::assert_matches, cell::RefCell, path::Path, time::Duration};
 
 pub use common::*;
 use mirrord_protocol::{
@@ -86,8 +84,9 @@ async fn socket_inheritance(dylib_path: &Path) {
             ))))
             .await;
 
-        // TODO(areg): Expect a close from the agent here once that
-        // change is merged merged
+        intproxy
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(id)))
+            .await;
     };
 
     accept_conn(0).await;
