@@ -353,7 +353,7 @@ fn mirrord_layer_entry_point() {
 ///
 /// Sets up a few things based on the [`LayerConfig`] given by the user:
 ///
-/// 1. [`tracing_subscriber`] or [`mirrord_console`];
+/// 1. [`logging::init_tracing`] for `tracing_subscriber` or `mirrord_console`
 ///
 /// 2. Global [`SETUP`];
 ///
