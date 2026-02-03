@@ -1,24 +1,21 @@
 #![feature(assert_matches)]
+#![allow(clippy::await_holding_refcell_ref)]
 
 mod common;
 use std::{
-    assert_matches::assert_matches, cell::RefCell, mem::replace, path::Path, time::Duration,
+    assert_matches::assert_matches, cell::RefCell, path::Path, time::Duration,
 };
 
 pub use common::*;
-use mirrord_config::internal_proxy::InternalProxyFileConfig;
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonMessage,
     outgoing::{
-        DaemonRead, LayerConnectV2, LayerWrite,
+        DaemonRead, LayerWrite,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
 };
 use rstest::rstest;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-};
+use tokio::net::TcpListener;
 
 /// Test that file descriptors are correctly inherited and tracked
 /// across fork and exec calls, and are dropped gracefully at the

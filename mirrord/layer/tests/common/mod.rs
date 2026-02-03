@@ -1194,7 +1194,9 @@ impl Application {
             Application::DlopenCgo => String::from("tests/apps/dlopen_cgo/out.cpp_dlopen_cgo"),
             Application::Connectx => String::from("tests/apps/connectx/out.c_test_app"),
             Application::Closefrom => String::from("tests/apps/closefrom/out.c_test_app"),
-            Application::SocketInheritance => String::from("tests/apps/socket_inheritance/out.c_test_app"),
+            Application::SocketInheritance => {
+                String::from("tests/apps/socket_inheritance/out.c_test_app")
+            }
         }
     }
 

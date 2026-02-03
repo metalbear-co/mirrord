@@ -1,17 +1,15 @@
 #![feature(assert_matches)]
+#![allow(clippy::indexing_slicing)]
 use std::{
-    assert_matches::{self, assert_matches},
-    convert::identity,
+    assert_matches::assert_matches,
     mem::replace,
     ops::Not,
     path::Path,
     time::Duration,
 };
 
-use mirrord_intproxy_protocol::PortSubscribe;
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage, FileRequest,
-    file::CloseFileRequest,
+    ClientMessage, DaemonMessage,
     tcp::{DaemonTcp, LayerTcp},
 };
 use rstest::rstest;

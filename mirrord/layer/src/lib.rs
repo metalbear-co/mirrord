@@ -81,7 +81,7 @@ use std::{
     ops::{BitAnd, Not},
     os::unix::process::parent_id,
     panic,
-    sync::{Arc, LazyLock, OnceLock},
+    sync::{LazyLock, OnceLock},
     time::Duration,
 };
 
