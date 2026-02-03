@@ -38,13 +38,8 @@ pub fn init_tracing() {
 
 /// Initialize tracing subscriber with optional file + stderr layers.
 fn init_subscriber(log_file: Option<File>) {
-    let env_filter = if std::env::var_os("RUST_LOG").is_none() {
-        tracing_subscriber::EnvFilter::new("info")
-    } else {
-        tracing_subscriber::EnvFilter::from_default_env()
-    };
-
-    let registry = tracing_subscriber::registry().with(env_filter);
+    let registry =
+        tracing_subscriber::registry().with(tracing_subscriber::EnvFilter::from_default_env());
 
     let mut layers = vec![
         // Always log to stderr
