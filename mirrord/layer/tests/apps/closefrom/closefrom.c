@@ -6,7 +6,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/wait.h>
-#include <stdio.h>
 
 int create_socket(int port) {
     int sock_fd;

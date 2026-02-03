@@ -1,9 +1,6 @@
 #![feature(assert_matches)]
 use std::{
-    assert_matches::{self, assert_matches},
-    ops::Not,
-    path::Path,
-    time::Duration,
+    assert_matches::{self, assert_matches}, convert::identity, mem::replace, ops::Not, path::Path, time::Duration
 };
 
 use mirrord_intproxy_protocol::PortSubscribe;
@@ -44,18 +41,22 @@ async fn closefrom(dylib_path: &Path) {
         assert_matches!(
             intproxy.try_recv().await.unwrap(),
             ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)) if
-            (40002..=40003).includes(port) && {
-                closed[port - 40000] = true;
-            }
+            (40002u16..=40003).contains(&port) &&
+                replace(&mut closed[(port - 40000) as usize], true).not()
         );
-        intproxy
-            .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(port))))
-            .await;
     }
 
-    while let Some(msg) = intproxy.try_recv().await {
-        dbg!(msg);
+    // Once the child closes, the first two should close as well.
+    for _ in 0..2 {
+        assert_matches!(
+            intproxy.try_recv().await.unwrap(),
+            ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)) if
+            (40000u16..=40001).contains(&port) &&
+                replace(&mut closed[(port - 40000) as usize], true).not()
+        );
     }
+
+    assert!(closed.iter().all(|f| *f));
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
