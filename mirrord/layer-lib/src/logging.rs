@@ -76,11 +76,7 @@ fn init_subscriber(log_file: Option<File>) {
 
 fn open_log_file_from_env(log_dir: &str) -> io::Result<File> {
     let path = build_log_file_path(log_dir)?;
-    open_log_file(&path)
-}
-
-/// Open a log file for writing, truncating existing content.
-fn open_log_file(path: &str) -> io::Result<File> {
+    /// Open a log file for writing, truncating existing content.
     OpenOptions::new()
         .create(true)
         .write(true)
@@ -107,7 +103,7 @@ fn build_log_file_path(log_dir: &str) -> io::Result<String> {
     let full_path = dir_path.join(file_name);
 
     tracing::info!(
-        "mirrord-layer initializing logger for process '{}' (pid={}), logging to file: {:?}",
+        "mirrord-layer initializing file logger for process '{}' (pid={}), logging to file: {:?}",
         process_name,
         pid,
         full_path

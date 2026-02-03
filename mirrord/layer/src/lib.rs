@@ -133,6 +133,7 @@ mod integration_tests_deps {
     use tempfile as _;
     use test_cdylib as _;
     use tokio as _;
+    use tracing_subscriber as _;
 }
 
 mod common;
