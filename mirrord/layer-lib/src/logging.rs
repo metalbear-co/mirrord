@@ -41,21 +41,17 @@ fn init_subscriber(log_file: Option<File>) {
     let registry =
         tracing_subscriber::registry().with(tracing_subscriber::EnvFilter::from_default_env());
 
-    let file_layer = if let Some(file) = log_file {
-        Some(
-            tracing_subscriber::fmt::layer()
-                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-                .with_thread_ids(true)
-                .with_ansi(false) // File logs should avoid ANSI escape codes
-                .with_writer(file)
-                .with_file(true)
-                .with_line_number(true)
-                .with_target(true)
-                .compact(),
-        )
-    } else {
-        None
-    };
+    let file_layer = log_file.map(|file| {
+        tracing_subscriber::fmt::layer()
+            .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+            .with_thread_ids(true)
+            .with_ansi(false) // File logs should avoid ANSI escape codes
+            .with_writer(file)
+            .with_file(true)
+            .with_line_number(true)
+            .with_target(true)
+            .compact()
+    });
 
     // Always add stderr layer
     let stderr_layer = tracing_subscriber::fmt::layer()
