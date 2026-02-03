@@ -71,7 +71,7 @@ fn init_subscriber(log_file: Option<File>) {
 
 fn open_log_file_from_env(log_dir: &str) -> io::Result<File> {
     let path = build_log_file_path(log_dir)?;
-    /// Open a log file for writing, truncating existing content.
+    // Open a log file for writing, truncating existing content.
     OpenOptions::new()
         .create(true)
         .write(true)
