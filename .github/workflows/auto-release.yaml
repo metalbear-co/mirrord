@@ -36,15 +36,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Rust tools
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-get,cargo-edit
+      - name: Set Environment Variables
+        run: |
+          TAGS="${{ steps.set-tags.outputs.tags }}"
+          echo "TOOLS_IMAGE=${TAGS%%,*}" >> $GITHUB_ENV
+
       - name: Calculate Version
         id: version
         run: |
           echo "Using Dockerized tools..."
-          TOOLS_IMAGE=$(echo "${{ steps.set-tags.outputs.tags }}" | cut -d',' -f1)
           if [[ -n "${{ github.event.inputs.force_version }}" ]]; then
              next_version="${{ github.event.inputs.force_version }}"
           else
@@ -55,6 +55,12 @@ jobs:
                /usr/local/bin/calculate_version.py --file Cargo.toml --changelog-dir changelog.d)
           fi
           echo "next_version=$next_version" >> $GITHUB_OUTPUT
+
+      - name: Install Rust tools
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-edit
 
       - name: Update Files
         if: ${{ github.event.inputs.dry_run != 'true' }}
@@ -67,7 +73,6 @@ jobs:
         if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           v="${{ steps.version.outputs.next_version }}"
-          TOOLS_IMAGE=$(echo "${{ steps.set-tags.outputs.tags }}" | cut -d',' -f1)
           if grep -q "\[$v\]" CHANGELOG.md; then
             echo "Changelog entry for $v already exists, skipping creation."
           else
