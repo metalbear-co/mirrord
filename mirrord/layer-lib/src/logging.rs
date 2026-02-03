@@ -41,18 +41,8 @@ fn init_subscriber(log_file: Option<File>) {
     let registry =
         tracing_subscriber::registry().with(tracing_subscriber::EnvFilter::from_default_env());
 
-    let mut layers = vec![
-        // Always log to stderr
-        tracing_subscriber::fmt::layer()
-            .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-            .with_thread_ids(true)
-            .compact()
-            .with_writer(std::io::stderr)
-            .boxed(),
-    ];
-    // Add file layer if logging to file
-    if let Some(file) = log_file {
-        layers.push(
+    let file_layer = if let Some(file) = log_file {
+        Some(
             tracing_subscriber::fmt::layer()
                 .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
                 .with_thread_ids(true)
@@ -61,12 +51,23 @@ fn init_subscriber(log_file: Option<File>) {
                 .with_file(true)
                 .with_line_number(true)
                 .with_target(true)
-                .compact()
-                .boxed(),
-        );
+                .compact(),
+        )
+    } else {
+        None
     };
 
-    registry.with(layers).init();
+    // Always add stderr layer
+    let stderr_layer = tracing_subscriber::fmt::layer()
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .with_thread_ids(true)
+        .compact()
+        .with_writer(std::io::stderr);
+
+    // Note (Daniel): to disable ansi ansi code properly in file, stderr must be last
+    // according to this Stackoverflow comment:
+    // https://stackoverflow.com/questions/79118770/strange-symbols-ansi-in-a-log-file-when-using-tracing-subscriber#comment139523806_79119452
+    registry.with(file_layer).with(stderr_layer).init();
 }
 
 fn open_log_file_from_env(log_dir: &str) -> io::Result<File> {
