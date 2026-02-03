@@ -146,8 +146,10 @@ mod tests {
         let prev_log_path = std::env::var(MIRRORD_LAYER_LOG_PATH).ok();
         let prev_console_addr = std::env::var("MIRRORD_CONSOLE_ADDR").ok();
 
-        std::env::remove_var("MIRRORD_CONSOLE_ADDR");
-        std::env::set_var(MIRRORD_LAYER_LOG_PATH, temp_dir.path());
+        unsafe {
+            std::env::remove_var("MIRRORD_CONSOLE_ADDR");
+            std::env::set_var(MIRRORD_LAYER_LOG_PATH, temp_dir.path());
+        }
 
         init_tracing();
         tracing::info!("logging smoke test");
@@ -171,13 +173,15 @@ mod tests {
             log_path.display()
         );
 
-        match prev_log_path {
-            Some(value) => std::env::set_var(MIRRORD_LAYER_LOG_PATH, value),
-            None => std::env::remove_var(MIRRORD_LAYER_LOG_PATH),
-        }
-        match prev_console_addr {
-            Some(value) => std::env::set_var("MIRRORD_CONSOLE_ADDR", value),
-            None => std::env::remove_var("MIRRORD_CONSOLE_ADDR"),
+        unsafe {
+            match prev_log_path {
+                Some(value) => std::env::set_var(MIRRORD_LAYER_LOG_PATH, value),
+                None => std::env::remove_var(MIRRORD_LAYER_LOG_PATH),
+            }
+            match prev_console_addr {
+                Some(value) => std::env::set_var("MIRRORD_CONSOLE_ADDR", value),
+                None => std::env::remove_var("MIRRORD_CONSOLE_ADDR"),
+            }
         }
     }
 }
