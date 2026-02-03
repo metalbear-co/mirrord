@@ -14,7 +14,8 @@ use rstest::rstest;
 mod common;
 pub use common::*;
 
-/// Test that hooks work in a child process after a program calls `fork` without `execve`.
+/// Test that checks the functionality of the closefrom hook, ensuring
+/// it doesn't close intproxy connection.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
