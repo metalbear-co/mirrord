@@ -1,6 +1,11 @@
 #![feature(assert_matches)]
 use std::{
-    assert_matches::{self, assert_matches}, convert::identity, mem::replace, ops::Not, path::Path, time::Duration
+    assert_matches::{self, assert_matches},
+    convert::identity,
+    mem::replace,
+    ops::Not,
+    path::Path,
+    time::Duration,
 };
 
 use mirrord_intproxy_protocol::PortSubscribe;
@@ -27,7 +32,7 @@ async fn closefrom(dylib_path: &Path) {
 
     for port in 40000..=40003 {
         assert_matches!(
-            intproxy.try_recv().await.unwrap(),
+            intproxy.recv().await,
             ClientMessage::Tcp(LayerTcp::PortSubscribe(p)) if p == port
         );
         intproxy
@@ -40,7 +45,7 @@ async fn closefrom(dylib_path: &Path) {
     let mut closed = [false; 4];
     for _ in 0..2 {
         assert_matches!(
-            intproxy.try_recv().await.unwrap(),
+            intproxy.recv().await,
             ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)) if
             (40002u16..=40003).contains(&port) &&
                 replace(&mut closed[(port - 40000) as usize], true).not()
@@ -50,7 +55,7 @@ async fn closefrom(dylib_path: &Path) {
     // Once the child closes, the first two should close as well.
     for _ in 0..2 {
         assert_matches!(
-            intproxy.try_recv().await.unwrap(),
+            intproxy.recv().await,
             ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)) if
             (40000u16..=40001).contains(&port) &&
                 replace(&mut closed[(port - 40000) as usize], true).not()
