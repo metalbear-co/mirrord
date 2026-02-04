@@ -446,14 +446,15 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
         SocketState::Listening(_) => {
             tracing::debug!("second listen called");
             let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
+
             if listen_result != 0 {
                 let error = io::Error::last_os_error();
                 error!("listen -> Failed `listen` sockfd {:#?}", sockfd);
+                SOCKETS.lock()?.insert(sockfd, socket);
                 Err(error)?
             }
 
             SOCKETS.lock()?.insert(sockfd, socket);
-
             Detour::Success(listen_result)
         }
         SocketState::Bound { .. } | SocketState::Initialized | SocketState::Connected(_) => {
