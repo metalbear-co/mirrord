@@ -31,10 +31,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set Environment Variables
-        run: |
-          echo "TOOLS_IMAGE=ghcr.io/metalbear-co/ci/calculate-version-script:latest" >> $GITHUB_ENV
-
       - name: Calculate Version
         id: version
         run: |
@@ -44,8 +40,7 @@ jobs:
           else
              # Run calculation using Docker image
              next_version=$(docker run --rm -v $PWD:/workspace -w /workspace \
-               --entrypoint python3 \
-               $TOOLS_IMAGE \
+               --entrypoint python3 ghcr.io/metalbear-co/ci/calculate-version-script:latest \
                /usr/local/bin/calculate_version.py --file Cargo.toml --changelog-dir changelog.d)
           fi
           echo "next_version=$next_version" >> $GITHUB_OUTPUT
@@ -72,7 +67,7 @@ jobs:
           else
             docker run --rm -v $PWD:/workspace -w /workspace \
               --entrypoint towncrier \
-              $TOOLS_IMAGE \
+              ghcr.io/metalbear-co/ci/calculate-version-script:latest \
               build --yes --version "$v"
           fi
           
