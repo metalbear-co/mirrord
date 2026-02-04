@@ -8,6 +8,40 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.185.0](https://github.com/metalbear-co/mirrord/tree/3.185.0) - 2026-02-03
+
+
+### Removed
+
+- Removed operator setup command, use helm chart instead.
+
+
+### Added
+
+- .NET 10 switched to using $NOCANCEL variants of the libc functions.
+  A full list of functions affected can be found under
+  [this issue](https://github.com/dotnet/runtime/issues/117299).
+  For each function in the list that `mirrord` already hooks a detour,
+  `mirrord` now hooks the $NOCANCEL variant as well.
+
+
+### Changed
+
+- Add concurrent ci sessions count to `mirrord operator status`.
+
+
+### Fixed
+
+- Fixed CI start command output directory on macOS.
+- Layer will now reuse intproxy connections across `exec` calls. This fixes
+  remote resource tracking in the intproxy.
+
+
+### Internal
+
+- Added some more detail to config baggage and traceparent fields.
+- Fix wizard analytics by using `ExecutionKind::Wizard`.
+
 ## [3.184.0](https://github.com/metalbear-co/mirrord/tree/3.184.0) - 2026-01-27
 
 

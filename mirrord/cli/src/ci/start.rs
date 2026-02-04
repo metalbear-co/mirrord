@@ -1,5 +1,5 @@
 use drain::Watch;
-use mirrord_progress::ProgressTracker;
+use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
 
 use super::{CiResult, MirrordCi};
@@ -70,5 +70,7 @@ impl<'a> CiStartCommandHandler<'a> {
             Some(mirrord_for_ci),
         )
         .await
+        .inspect(|_| progress.success(None))
+        .inspect_err(|_| progress.failure(None))
     }
 }

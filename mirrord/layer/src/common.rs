@@ -1,10 +1,18 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{ffi::CStr, ops::Not, path::PathBuf};
+use std::{
+    ffi::CStr,
+    ops::Not,
+    os::fd::{AsRawFd, RawFd},
+    path::PathBuf,
+};
 
 use libc::c_char;
 pub use mirrord_layer_lib::{
     detour::{Bypass, Detour},
-    proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
+    proxy_connection::{
+        INTPROXY_CONN_FD_ENV_VAR, PROXY_CONNECTION, make_proxy_request_no_response,
+        make_proxy_request_with_response,
+    },
 };
 use mirrord_protocol::file::OpenOptionsInternal;
 use null_terminated::Nul;
@@ -99,6 +107,11 @@ impl CheckedInto<Argv> for *const *const c_char {
             .filter(|value| !value.is_null())
             .map(|value| unsafe { CStr::from_ptr(*value) }.to_owned())
             .filter(|value| !value.to_string_lossy().starts_with(SHARED_SOCKETS_ENV_VAR))
+            .filter(|value| {
+                !value
+                    .to_string_lossy()
+                    .starts_with(INTPROXY_CONN_FD_ENV_VAR)
+            })
             .collect::<Argv>();
 
         Detour::Success(list)
@@ -109,4 +122,17 @@ impl CheckedInto<OpenOptionsInternal> for *const c_char {
     fn checked_into(self) -> Detour<OpenOptionsInternal> {
         CheckedInto::<String>::checked_into(self).map(OpenOptionsInternal::from_mode)
     }
+}
+
+pub fn proxy_conn_fd() -> Option<RawFd> {
+    // SAFETY: Mutation only happens during init
+    #[allow(static_mut_refs)]
+    unsafe { PROXY_CONNECTION.get() }.map(AsRawFd::as_raw_fd)
+}
+
+#[cfg(target_os = "macos")]
+pub fn proxy_conn_layer_id() -> Option<mirrord_intproxy_protocol::LayerId> {
+    // SAFETY: Mutation only happens during init
+    #[allow(static_mut_refs)]
+    unsafe { PROXY_CONNECTION.get() }.map(|t| t.layer_id())
 }
