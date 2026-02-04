@@ -442,7 +442,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
             SOCKETS.lock()?.insert(sockfd, socket);
 
             Detour::Success(listen_result)
-        },
+        }
         SocketState::Listening(_) => {
             tracing::debug!("second listen called");
             let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
@@ -456,9 +456,9 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 
             Detour::Success(listen_result)
         }
-        SocketState::Bound { .. }
-        | SocketState::Initialized
-        | SocketState::Connected(_) => Detour::Bypass(Bypass::InvalidState(sockfd)),
+        SocketState::Bound { .. } | SocketState::Initialized | SocketState::Connected(_) => {
+            Detour::Bypass(Bypass::InvalidState(sockfd))
+        }
     }
 }
 
