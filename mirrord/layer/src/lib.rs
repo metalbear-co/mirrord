@@ -78,12 +78,14 @@ use std::{
     fs::File,
     io::Read,
     net::SocketAddr,
+    ops::{BitAnd, Not},
     os::unix::process::parent_id,
     panic,
-    sync::OnceLock,
+    sync::{LazyLock, OnceLock},
     time::Duration,
 };
 
+use common::proxy_conn_fd;
 use ctor::ctor;
 use error::{LayerError, Result};
 use file::OPEN_FILES;
@@ -93,7 +95,7 @@ use hooks::HookManager;
     target_os = "linux"
 ))]
 use libc::c_char;
-use libc::{c_int, pid_t};
+use libc::{c_int, c_uint, pid_t};
 use load::ExecuteArgs;
 #[cfg(target_os = "macos")]
 use mirrord_config::feature::fs::FsConfig;
@@ -453,11 +455,15 @@ fn layer_start(mut config: LayerConfig) {
             },
             proxy_connection_timeout,
         )
-        .unwrap_or_else(|_| panic!("failed to initialize proxy connection at {address}"));
+        .unwrap_or_else(|err| panic!("failed to initialize proxy connection at {address}: {err}"));
         PROXY_CONNECTION
             .set(new_connection)
             .expect("setting PROXY_CONNECTION singleton")
     }
+
+    // Recover and close inherited fds
+    LazyLock::force(&SOCKETS);
+    LazyLock::force(&OPEN_FILES);
 
     let fetch_env = setup().env_config().load_from_process.unwrap_or(false)
         && !std::env::var(REMOTE_ENV_FETCHED)
@@ -630,6 +636,20 @@ fn enable_hooks(state: &LayerSetup) {
         replace!(&mut hook_manager, "close", close_detour, FnClose, FN_CLOSE);
         replace!(
             &mut hook_manager,
+            "close_range",
+            close_range_detour,
+            FnClose_range,
+            FN_CLOSE_RANGE
+        );
+        replace!(
+            &mut hook_manager,
+            "closefrom",
+            closefrom_detour,
+            FnClosefrom,
+            FN_CLOSEFROM
+        );
+        replace!(
+            &mut hook_manager,
             "close$NOCANCEL",
             close_nocancel_detour,
             FnClose_nocancel,
@@ -757,6 +777,13 @@ pub(crate) fn close_layer_fd(fd: c_int) {
     }
 }
 
+#[hook_fn]
+pub(crate) unsafe extern "C" fn closefrom_detour(fd: c_int) {
+    unsafe {
+        close_range_detour(fd as u32, i32::MAX as u32, 0);
+    }
+}
+
 // TODO: When this is annotated with `hook_guard_fn`, then the outgoing sockets never call it (we
 // just bypass). Everything works, so, should we intervene?
 //
@@ -769,6 +796,12 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 /// Replaces [`libc::close`].
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+    // Block closing the intproxy connection
+    if proxy_conn_fd() == Some(fd) {
+        tracing::debug!("app tried to close intproxy connection fd");
+        return 0;
+    };
+
     unsafe {
         let res = FN_CLOSE(fd);
         close_layer_fd(fd);
@@ -845,6 +878,65 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     }
 }
 
+/// Guard against closing the intproxy connection.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn close_range_detour(
+    first: c_uint,
+    last: c_uint,
+    flags: c_int,
+) -> c_int {
+    let close_range = move |first: c_uint, last: c_uint| {
+        let res = unsafe { FN_CLOSE_RANGE(first, last, flags) };
+
+        #[cfg(target_os = "linux")]
+        const CLOSE_RANGE_CLOEXEC: c_int = libc::CLOSE_RANGE_CLOEXEC as c_int;
+
+        #[cfg(not(target_os = "linux"))]
+        const CLOSE_RANGE_CLOEXEC: c_int = 0;
+
+        let mut sockets = SOCKETS.lock().unwrap();
+        let mut files = OPEN_FILES.lock().unwrap();
+        let range = first as i32..=last as i32;
+
+        // CLOSE_RANGE_CLOEXEC (since Linux 5.11)
+        // Set the close-on-exec flag on the specified file
+        // descriptors, rather than immediately closing them.
+        if flags.bitand(CLOSE_RANGE_CLOEXEC) == 0 {
+            sockets.retain(|k, _| range.contains(k).not());
+            files.retain(|k, _| range.contains(k).not());
+        }
+
+        res
+    };
+
+    let Some(intproxy_conn_fd) = proxy_conn_fd() else {
+        return close_range(first, last);
+    };
+
+    // the fd is a i32 but fds are never negative, so this is ok.
+    let intproxy_conn_fd = intproxy_conn_fd as c_uint;
+
+    if (first..=last).contains(&intproxy_conn_fd).not() {
+        close_range(first, last)
+    } else {
+        if intproxy_conn_fd != first
+            && let result = close_range(first, intproxy_conn_fd - 1)
+            && result != 0
+        {
+            return result;
+        };
+
+        if intproxy_conn_fd != last
+            && let result = close_range(intproxy_conn_fd + 1, last)
+            && result != 0
+        {
+            return result;
+        };
+
+        0
+    }
+}
+
 /// Transparently replaces `vfork` call with a safer `fork`.
 ///
 /// `vfork` and `fork` calls are very similar (except performance),
@@ -861,8 +953,14 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
 /// These are often used in tandem with `vfork`. However, `vfork` requires the child process
 /// not to write to memory (it's shared with the parent). Doing it in the child process results with
 /// an undefined behavior. Since our hooks always write to memory, `vfork` is not our ally.
-#[hook_guard_fn]
+#[hook_fn]
 pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
+    let Some(guard) = DetourGuard::new() else {
+        unsafe {
+            return FN_VFORK();
+        }
+    };
+
     #[cfg(target_os = "macos")]
     let pipe_result = {
         use std::os::fd::AsRawFd;
@@ -896,7 +994,14 @@ pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
         }
     };
 
+    // Drop the `DetourGuard` so we actually fork_detour.
+    drop(guard);
     let fork_result = unsafe { fork_detour() };
+
+    // Unwrap here because it was fine in the beginning of the
+    // function and nothing else should be using it at this point.
+    let _guard = DetourGuard::new().expect("Acquiring DetourGuard failed.");
+
     match fork_result.cmp(&0) {
         // We're the child.
         // Write end of the pipe will be dropped when we exit or exec,

@@ -1,1 +1,0 @@
-Added some more detail to config baggage and traceparent fields.
