@@ -6,10 +6,6 @@ on:
       force_version:
         description: 'Force specific version (optional)'
         required: false
-      dry_run:
-        description: 'Dry run'
-        required: false
-        default: 'false'
 
 permissions:
   contents: write
@@ -19,7 +15,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.MIRRORD_RELEASE_PAT }}
@@ -29,7 +25,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.MIRRORD_RELEASE_PAT }}
 
       - name: Calculate Version
         id: version
@@ -44,22 +40,22 @@ jobs:
                /usr/local/bin/calculate_version.py --file Cargo.toml --changelog-dir changelog.d)
           fi
           echo "next_version=$next_version" >> $GITHUB_OUTPUT
+          echo "Next version: $next_version"
+
+
 
       - name: Install Rust tools
-        if: ${{ github.event.inputs.dry_run != 'true' }}
         uses: metalbear-co/install-action@main
         with:
-          tool: cargo-set
+          tool: cargo-edit
 
       - name: Update Files
-        if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           v="${{ steps.version.outputs.next_version }}"
-          cargo set workspace.package.version "$v"
+          cargo set-version "$v"
           cargo update -w -q
 
       - name: Generate Changelog
-        if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           v="${{ steps.version.outputs.next_version }}"
           if grep -q "\[$v\]" CHANGELOG.md; then
@@ -75,7 +71,6 @@ jobs:
           awk '/^## / { if (p) exit; p=1; print; next } p { if (/^### Internal/) { skip=1; next } if (/^### /) { skip=0 } if (!skip) print }' CHANGELOG.md > RELEASE_NOTES.md
 
       - name: Commit and Push
-        if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           sudo chown -R $(id -u):$(id -g) .
           v="${{ steps.version.outputs.next_version }}"
@@ -97,8 +92,12 @@ jobs:
           fi
           
       - name: Create Release
-        if: ${{ github.event.inputs.dry_run != 'true' }}
         uses: metalbear-co/action-gh-release-1@v1
         with:
           tag_name: ${{ steps.version.outputs.next_version }}
           body_path: RELEASE_NOTES.md
+      
+      - name: Summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: ${{ steps.version.outputs.next_version }}" >> $GITHUB_STEP_SUMMARY
