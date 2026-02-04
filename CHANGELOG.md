@@ -8,6 +8,13 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.185.1](https://github.com/metalbear-co/mirrord/tree/3.185.1) - 2026-02-04
+
+
+### Fixed
+
+- Fix double listen making port unsubscribed. Happens in Rails.
+
 ## [3.185.0](https://github.com/metalbear-co/mirrord/tree/3.185.0) - 2026-02-03
 
 
