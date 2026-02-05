@@ -18,7 +18,6 @@ use mirrord_config::{
 };
 use mirrord_intproxy_protocol::{
     IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProcessInfo,
-    ProxyToLayerMessage,
 };
 use mirrord_protocol::{
     CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
@@ -635,26 +634,7 @@ impl IntProxy {
                     .send(SimpleProxyMessage::GetEnvReq(message_id, layer_id, req))
                     .await
             }
-            LayerToProxyMessage::NewSession(req) => {
-                let layer_info = self
-                    .connected_layers
-                    .get_mut(&layer_id)
-                    .expect("Received NewSession from layer with an unknown layer id");
-
-                *layer_info = req.process_info;
-
-                self.task_txs
-                    .layers
-                    .get(&layer_id)
-                    .unwrap()
-                    .send(LocalMessage {
-                        message_id,
-                        inner: ProxyToLayerMessage::NewSession(layer_id),
-                    })
-                    .await;
-
-                tracing::debug!("Layer reinitialized");
-            }
+            other => Err(ProxyRuntimeError::UnexpectedLayerMessage(other))?,
         }
 
         Ok(())

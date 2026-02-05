@@ -75,12 +75,6 @@ impl<T, W> SyncEncoder<T, W> {
     }
 }
 
-impl<T, W> AsRef<W> for SyncEncoder<T, W> {
-    fn as_ref(&self) -> &W {
-        &self.writer
-    }
-}
-
 impl<T, W> SyncEncoder<T, W>
 where
     T: Encode,
