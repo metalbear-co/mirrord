@@ -1006,6 +1006,7 @@ pub enum Application {
     DlopenCgo,
     /// C app that calls BSD connectx(2).
     Connectx,
+    Dup,
 }
 
 impl Application {
@@ -1188,6 +1189,7 @@ impl Application {
             }
             Application::DlopenCgo => String::from("tests/apps/dlopen_cgo/out.cpp_dlopen_cgo"),
             Application::Connectx => String::from("tests/apps/connectx/out.c_test_app"),
+            Application::Dup => String::from("tests/apps/dup/out.c_test_app"),
         }
     }
 
@@ -1308,7 +1310,8 @@ impl Application {
             | Application::RustIssue3248
             | Application::GoIssue2988(..)
             | Application::DlopenCgo
-            | Application::Connectx => vec![],
+            | Application::Connectx
+            | Application::Dup => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
@@ -1406,6 +1409,7 @@ impl Application {
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
             Application::DlopenCgo => 23333,
+            Application::Dup => 42069,
         }
     }
 
