@@ -941,24 +941,6 @@ mod test {
         )
     }
 
-    /// Helper type for testing [`FileFilter`] results.
-    #[derive(PartialEq, Eq, Debug)]
-    enum DetourKind {
-        Bypass,
-        Error,
-        Success,
-    }
-
-    impl<S> Detour<S> {
-        fn kind(&self) -> DetourKind {
-            match self {
-                Self::Bypass(..) => DetourKind::Bypass,
-                Self::Error(..) => DetourKind::Error,
-                Self::Success(..) => DetourKind::Success,
-            }
-        }
-    }
-
     #[rstest]
     #[trace]
     #[case(FsModeConfig::Write, "/a/test.a", false, DetourKind::Success)]

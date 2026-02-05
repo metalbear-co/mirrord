@@ -279,6 +279,15 @@ pub enum Detour<S = ()> {
     Error(HookError),
 }
 
+/// Helper type for testing [`FileFilter`] results.
+#[cfg(test)]
+#[derive(PartialEq, Eq, Debug)]
+enum DetourKind {
+    Bypass,
+    Error,
+    Success,
+}
+
 #[cfg(unix)]
 impl<S> Try for Detour<S> {
     type Output = S;
@@ -404,6 +413,15 @@ impl<S> Detour<S> {
             Detour::Success(s) => Detour::Success(s),
             Detour::Bypass(b) => op(b),
             Detour::Error(e) => Detour::Error(e),
+        }
+    }
+
+    #[cfg(test)]
+    fn kind(&self) -> DetourKind {
+        match self {
+            Self::Bypass(..) => DetourKind::Bypass,
+            Self::Error(..) => DetourKind::Error,
+            Self::Success(..) => DetourKind::Success,
         }
     }
 }
