@@ -1,18 +1,27 @@
 // Unified socket collection for both Unix and Windows layers
 #[cfg(unix)]
-use std::os::fd::RawFd;
+use std::os::fd::{BorrowedFd, RawFd};
+#[cfg(windows)]
+use std::mem::MaybeUninit;
 use std::{
     collections::HashMap,
     io,
     net::SocketAddr,
     sync::{Arc, LazyLock, Mutex},
 };
+#[cfg(unix)]
+use nix::sys::socket::{
+    SockaddrLike, SockaddrStorage, getsockname, getsockopt, sockopt,
+};
 
 use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
 #[cfg(unix)]
 use libc::{self, SOCK_DGRAM, SOCK_STREAM};
 #[cfg(windows)]
-use winapi::um::winsock2::{SOCKET, SOCK_DGRAM, SOCK_STREAM};
+use winapi::{
+    shared::ws2def::AF_INET,
+    um::winsock2::{SOCKET, SOCK_DGRAM, SOCK_STREAM, SO_PROTOCOL_INFOA, SOCKET_ERROR, SOL_SOCKET, WSAPROTOCOL_INFOA, getsockopt,},
+};
 
 use super::{SocketKind, SocketState, UserSocket};
 use crate::{
@@ -142,12 +151,6 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
     let (domain, type_) = {
         #[cfg(unix)]
         {
-            use std::os::fd::BorrowedFd;
-
-            use nix::sys::socket::{
-                SockaddrLike, SockaddrStorage, getsockname, getsockopt, sockopt,
-            };
-
             let domain = getsockname::<SockaddrStorage>(sockfd)
                 .map_err(io::Error::from)?
                 .family()
@@ -164,15 +167,6 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
         }
         #[cfg(windows)]
         {
-            use std::mem::MaybeUninit;
-
-            use winapi::{
-                shared::ws2def::AF_INET,
-                um::winsock2::{
-                    SO_PROTOCOL_INFOA, SOCKET_ERROR, SOL_SOCKET, WSAPROTOCOL_INFOA, getsockopt,
-                },
-            };
-
             // SO_PROTOCOL_INFOA works on all Winsock sockets
             let mut proto_info = MaybeUninit::<WSAPROTOCOL_INFOA>::zeroed();
             let mut len = std::mem::size_of::<WSAPROTOCOL_INFOA>() as i32;
