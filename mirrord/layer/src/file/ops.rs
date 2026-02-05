@@ -925,6 +925,29 @@ mod test {
     use rstest::*;
 
     use super::{absolute_path, *};
+
+    /// Helper type for testing [`FileFilter`] results.
+    #[derive(PartialEq, Eq, Debug)]
+    enum DetourKind {
+        Bypass,
+        Error,
+        Success,
+    }
+
+    trait DetourKindExt {
+        fn kind(&self) -> DetourKind;
+    }
+
+    impl<S> DetourKindExt for Detour<S> {
+        fn kind(&self) -> DetourKind {
+            match self {
+                Detour::Bypass(..) => DetourKind::Bypass,
+                Detour::Error(..) => DetourKind::Error,
+                Detour::Success(..) => DetourKind::Success,
+            }
+        }
+    }
+    
     #[test]
     fn test_absolute_normal() {
         assert_eq!(
