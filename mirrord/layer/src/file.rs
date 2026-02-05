@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     os::unix::io::RawFd,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{Arc, LazyLock},
 };
 
 use libc::{O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY, c_int};
@@ -10,6 +10,7 @@ use mirrord_protocol::file::{
     OpenRelativeFileRequest, ReadFileRequest, ReadLimitedFileRequest, SeekFileRequest,
     WriteFileRequest, WriteLimitedFileRequest, XstatRequest,
 };
+use crate::mutex::Mutex;
 /// File operations on remote pod.
 ///
 /// Read-only file operations are enabled by default, you can turn it off by setting

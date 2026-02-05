@@ -10,7 +10,7 @@ use std::{
         unix::prelude::RawFd,
     },
     sync::{
-        Mutex, PoisonError,
+        PoisonError,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
@@ -28,7 +28,7 @@ use nix::{
 };
 use thiserror::Error;
 
-use crate::detour::DetourGuard;
+use crate::{detour::DetourGuard, mutex::Mutex};
 
 pub static INTPROXY_CONN_FD_ENV_VAR: &str = "MIRRORD_INTPROXY_CONNECTION_FD";
 

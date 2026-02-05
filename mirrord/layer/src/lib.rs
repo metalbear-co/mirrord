@@ -148,6 +148,7 @@ mod file;
 mod hooks;
 mod load;
 mod macros;
+mod mutex;
 mod proxy_connection;
 mod setup;
 mod socket;
