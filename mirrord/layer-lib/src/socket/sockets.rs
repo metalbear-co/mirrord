@@ -10,9 +10,9 @@ use std::{
 
 use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
 #[cfg(unix)]
-use libc;
+use libc::{self, SOCK_DGRAM, SOCK_STREAM};
 #[cfg(windows)]
-use winapi::um::winsock2::SOCKET;
+use winapi::um::winsock2::{SOCKET, SOCK_DGRAM, SOCK_STREAM};
 
 use super::{SocketKind, SocketState, UserSocket};
 use crate::{
@@ -110,14 +110,9 @@ pub fn i64_to_socket_descriptor(value: i64) -> SocketDescriptor {
 
 // Helper function to convert socket types to SocketKind
 pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
-    #[cfg(unix)]
-    use libc::{SOCK_DGRAM, SOCK_STREAM};
-    #[cfg(windows)]
-    use winapi::um::winsock2::{SOCK_DGRAM, SOCK_STREAM};
-
-    if socket_type == SOCK_STREAM {
+    if (socket_type & SOCK_STREAM) == SOCK_STREAM {
         Ok(SocketKind::Tcp(socket_type))
-    } else if socket_type == SOCK_DGRAM {
+    } else if (socket_type & SOCK_DGRAM) == SOCK_DGRAM {
         Ok(SocketKind::Udp(socket_type))
     } else {
         Err(format!("Unsupported socket type: {}", socket_type))
