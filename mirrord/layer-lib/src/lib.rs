@@ -2,6 +2,7 @@
 
 pub mod error;
 pub mod file;
+pub mod ide;
 pub mod macros;
 pub mod process;
 pub mod proxy_connection;
