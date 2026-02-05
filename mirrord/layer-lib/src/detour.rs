@@ -1,24 +1,26 @@
 //! The layer uses features from this module to check if it should bypass one of its hooks, and call
-//! the original [`libc`] function.
+//! the original `libc` function.
 //!
-//! Here we also have the convenient [`Detour`], that is used by the hooks to either return a
+//! Here we also have the convenient detour helpers that are used by the hooks to either return a
 //! [`Result`]-like value, or the special [`Bypass`] case, which makes the _detour_ function call
-//! the original [`libc`] equivalent, stored in a [`HookFn`].
-
+//! the original [`libc`] equivalent, stored in a hook function pointer.
+#[cfg(unix)]
 use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::{
-    cell::RefCell, ffi::CString, net::SocketAddr, ops::Deref, os::unix::prelude::*, path::PathBuf,
-    sync::OnceLock,
-};
+use std::net::SocketAddr;
+#[cfg(unix)]
+use std::{cell::RefCell, ffi::CString, ops::Deref, path::PathBuf, sync::OnceLock};
 
 #[cfg(target_os = "macos")]
 use libc::c_char;
 
-use crate::error::HookError;
+#[cfg(windows)]
+use crate::error::HookResult;
+use crate::{error::HookError, socket::sockets::SocketDescriptor};
 
+#[cfg(unix)]
 thread_local!(
     /// Holds the thread-local state for bypassing the layer's detour functions.
     ///
@@ -46,6 +48,7 @@ thread_local!(
 /// Sets [`DETOUR_BYPASS`] to `false`.
 ///
 /// Prefer relying on the [`Drop`] implementation of [`DetourGuard`] instead.
+#[cfg(unix)]
 pub(super) fn detour_bypass_off() {
     DETOUR_BYPASS.with(|enabled| {
         if let Ok(mut bypass) = enabled.try_borrow_mut() {
@@ -62,11 +65,13 @@ pub(super) fn detour_bypass_off() {
 ///
 /// You should always use `DetourGuard::new`, if you construct this in any other way, it's
 /// not going to guard anything.
-pub(crate) struct DetourGuard;
+#[cfg(unix)]
+pub struct DetourGuard;
 
+#[cfg(unix)]
 impl DetourGuard {
     /// Create a new DetourGuard if it's not already enabled.
-    pub(crate) fn new() -> Option<Self> {
+    pub fn new() -> Option<Self> {
         DETOUR_BYPASS.with(|enabled| {
             if let Ok(bypass) = enabled.try_borrow()
                 && *bypass
@@ -85,6 +90,7 @@ impl DetourGuard {
     }
 }
 
+#[cfg(unix)]
 impl Drop for DetourGuard {
     fn drop(&mut self) {
         detour_bypass_off();
@@ -94,9 +100,11 @@ impl Drop for DetourGuard {
 /// Wrapper around [`OnceLock`], mainly used for the [`Deref`] implementation
 /// to simplify calls to the original functions as `FN_ORIGINAL()`, instead of
 /// `FN_ORIGINAL.get().unwrap()`.
+#[cfg(unix)]
 #[derive(Debug)]
-pub(crate) struct HookFn<T>(OnceLock<T>);
+pub struct HookFn<T>(OnceLock<T>);
 
+#[cfg(unix)]
 impl<T> Deref for HookFn<T> {
     type Target = T;
 
@@ -105,21 +113,22 @@ impl<T> Deref for HookFn<T> {
     }
 }
 
+#[cfg(unix)]
 impl<T> HookFn<T> {
     /// Helper function to set the inner [`OnceLock`] `T` of `self`.
-    pub(crate) fn set(&self, value: T) -> Result<(), T> {
+    pub fn set(&self, value: T) -> Result<(), T> {
         self.0.set(value)
     }
 
     /// Until we can impl Default as const.
-    pub(crate) const fn default_const() -> Self {
+    pub const fn default_const() -> Self {
         Self(OnceLock::new())
     }
 }
 
 /// Soft-errors that can be recovered from by calling the raw FFI function.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) enum Bypass {
+pub enum Bypass {
     /// We're dealing with a socket port value that should be ignored, according to the incoming
     /// config.
     IgnoredInIncoming(SocketAddr),
@@ -134,19 +143,20 @@ pub(crate) enum Bypass {
     /// Unix socket to address that was not configured to be connected remotely.
     UnixSocket(Option<String>),
 
-    /// We could not find this [`RawFd`] in neither [`OPEN_FILES`](crate::file::OPEN_FILES), nor
-    /// [`SOCKETS`](crate::socket::SOCKETS).
-    LocalFdNotFound(RawFd),
+    /// We could not find this [`SocketDescriptor`] in the bookkeeping tables (`OPEN_FILES` and
+    /// [`SOCKETS`](crate::socket::SOCKETS)).
+    LocalFdNotFound(SocketDescriptor),
 
-    /// Similar to `LocalFdNotFound`, but for [`OPEN_DIRS`](crate::file::open_dirs::OPEN_DIRS).
+    /// Similar to `LocalFdNotFound`, but for the layer's `OPEN_DIRS` table.
     LocalDirStreamNotFound(usize),
 
     /// A conversion from [`SockAddr`](socket2::SockAddr) to
     /// [`SocketAddr`] failed.
     AddressConversion,
 
-    /// The socket [`RawFd`] is in an invalid state for the operation.
-    InvalidState(RawFd),
+    /// The socket [`SocketDescriptor`] is in an invalid state for the operation.
+    #[cfg(unix)]
+    InvalidState(SocketDescriptor),
 
     /// We got an `Utf8Error` while trying to convert a `CStr` into a safer string type.
     CStrConversion,
@@ -157,14 +167,17 @@ pub(crate) enum Bypass {
     FileOperationInMirrordBinTempDir(*const c_char),
 
     /// File [`PathBuf`] should be ignored (used for tests).
+    #[cfg(unix)]
     IgnoredFile(CString),
 
     /// Multiple file [`PathBuf`] that should be ignored.
     ///
     /// Used for functions that must apply `fs.mapping` to multiple files on bypass.
+    #[cfg(unix)]
     IgnoredFiles(Option<CString>, Option<CString>),
 
     /// Some operations only handle absolute [`PathBuf`]s.
+    #[cfg(unix)]
     RelativePath(CString),
 
     /// Started mirrord with [`FsModeConfig`](mirrord_config::feature::fs::mode::FsModeConfig) set
@@ -176,9 +189,10 @@ pub(crate) enum Bypass {
     ///
     /// When this happens, the file operation will be bypassed (will be handled locally, instead of
     /// through the agent).
+    #[cfg(unix)]
     ReadOnly(PathBuf),
 
-    /// Called [`write`](crate::file::ops::write) with `write_bytes` set to [`None`].
+    /// Called `write` with `write_bytes` set to [`None`].
     EmptyBuffer,
 
     /// Operation received [`None`] for an [`Option`] that was required to be [`Some`].
@@ -232,6 +246,7 @@ pub(crate) enum Bypass {
     InvalidArgValue,
 }
 
+#[cfg(unix)]
 impl Bypass {
     pub fn relative_path(path: impl Into<Vec<u8>>) -> Self {
         Bypass::RelativePath(CString::new(path).expect("should be a valid C string"))
@@ -251,9 +266,10 @@ impl Bypass {
 /// Conversion from `Option`:
 /// - `Option::Some` -> `Detour::Success`
 /// - `Option::None` -> `Detour::Bypass`
+#[cfg(unix)]
 #[must_use = "this `Detour` may be an `Error` or a `Bypass` variant, which should be handled"]
 #[derive(Debug)]
-pub(crate) enum Detour<S = ()> {
+pub enum Detour<S = ()> {
     /// Equivalent to `Result::Ok`
     Success(S),
     /// Useful for operations with parameters that are ignored by `mirrord`, or for soft-failures
@@ -263,6 +279,7 @@ pub(crate) enum Detour<S = ()> {
     Error(HookError),
 }
 
+#[cfg(unix)]
 impl<S> Try for Detour<S> {
     type Output = S;
 
@@ -281,6 +298,7 @@ impl<S> Try for Detour<S> {
     }
 }
 
+#[cfg(unix)]
 impl<S> FromResidual<Detour<convert::Infallible>> for Detour<S> {
     fn from_residual(residual: Detour<convert::Infallible>) -> Self {
         match residual {
@@ -290,37 +308,54 @@ impl<S> FromResidual<Detour<convert::Infallible>> for Detour<S> {
     }
 }
 
+#[cfg(unix)]
 impl<S, E> FromResidual<Result<convert::Infallible, E>> for Detour<S>
 where
     E: Into<HookError>,
 {
     fn from_residual(Err(e): Result<convert::Infallible, E>) -> Self {
-        Detour::Error(e.into())
+        match e.into() {
+            HookError::Bypass(bypass) => Detour::Bypass(bypass),
+            error => Detour::Error(error),
+        }
     }
 }
 
-impl<S> FromResidual<Result<convert::Infallible, Bypass>> for Detour<S> {
-    fn from_residual(Err(e): Result<convert::Infallible, Bypass>) -> Self {
-        Detour::Bypass(e)
+#[cfg(unix)]
+impl<S, E> From<Result<S, E>> for Detour<S>
+where
+    E: Into<HookError>,
+{
+    fn from(res: Result<S, E>) -> Self {
+        match res {
+            Ok(s) => Detour::Success(s),
+            Err(e) => match e.into() {
+                HookError::Bypass(b) => Detour::Bypass(b),
+                err => Detour::Error(err),
+            },
+        }
     }
 }
 
+#[cfg(unix)]
 impl<S> FromResidual<Option<convert::Infallible>> for Detour<S> {
     fn from_residual(_none_residual: Option<convert::Infallible>) -> Self {
         Detour::Bypass(Bypass::EmptyOption)
     }
 }
 
+#[cfg(unix)]
 impl<S> Residual<S> for Detour<convert::Infallible> {
     type TryType = Detour<S>;
 }
 
+#[cfg(unix)]
 impl<S> Detour<S> {
     /// Calls `op` if the result is `Success`, otherwise returns the `Bypass` or `Error` value of
     /// self.
     ///
     /// This function can be used for control flow based on `Detour` values.
-    pub(crate) fn and_then<U, F: FnOnce(S) -> Detour<U>>(self, op: F) -> Detour<U> {
+    pub fn and_then<U, F: FnOnce(S) -> Detour<U>>(self, op: F) -> Detour<U> {
         match self {
             Detour::Success(s) => op(s),
             Detour::Bypass(b) => Detour::Bypass(b),
@@ -332,7 +367,7 @@ impl<S> Detour<S> {
     /// leaving a `Bypass` or `Error` value untouched.
     ///
     /// This function can be used to compose the results of two functions.
-    pub(crate) fn map<U, F: FnOnce(S) -> U>(self, op: F) -> Detour<U> {
+    pub fn map<U, F: FnOnce(S) -> U>(self, op: F) -> Detour<U> {
         match self {
             Detour::Success(s) => Detour::Success(op(s)),
             Detour::Bypass(b) => Detour::Bypass(b),
@@ -347,7 +382,7 @@ impl<S> Detour<S> {
     /// Currently defined only on macos because it is only used in macos-only code.
     /// Remove the cfg attribute to enable using in other code.
     #[cfg(target_os = "macos")]
-    pub(crate) fn unwrap_or(self, default: S) -> S {
+    pub fn unwrap_or(self, default: S) -> S {
         match self {
             Detour::Success(s) => s,
             _ => default,
@@ -373,6 +408,7 @@ impl<S> Detour<S> {
     }
 }
 
+#[cfg(unix)]
 impl<S> Detour<S>
 where
     S: From<HookError>,
@@ -382,7 +418,7 @@ where
     /// - `Success` -> Return the contained value.
     /// - `Bypass` -> Call the bypass and return its value.
     /// - `Error` -> Convert to libc value and return it.
-    pub(crate) fn unwrap_or_bypass_with<F: FnOnce(Bypass) -> S>(self, op: F) -> S {
+    pub fn unwrap_or_bypass_with<F: FnOnce(Bypass) -> S>(self, op: F) -> S {
         match self {
             Detour::Success(s) => s,
             Detour::Bypass(b) => op(b),
@@ -395,7 +431,7 @@ where
     /// `Success` -> Return the contained value.
     /// `Bypass` -> Return provided value.
     /// `Error` -> Convert to libc value and return it.
-    pub(crate) fn unwrap_or_bypass(self, value: S) -> S {
+    pub fn unwrap_or_bypass(self, value: S) -> S {
         match self {
             Detour::Success(s) => s,
             Detour::Bypass(_) => value,
@@ -405,7 +441,8 @@ where
 }
 
 /// Extends `Option<T>` with the `Option::bypass` function.
-pub(crate) trait OptionExt {
+#[cfg(unix)]
+pub trait OptionExt {
     /// Inner `T` of the `Option<T>`.
     type Opt;
 
@@ -416,8 +453,21 @@ pub(crate) trait OptionExt {
     fn bypass(self, value: Bypass) -> Detour<Self::Opt>;
 }
 
+#[cfg(windows)]
+pub trait OptionExt {
+    /// Inner `T` of the `Option<T>`.
+    type Opt;
+
+    /// Converts `Option<T>` into `Detour<T>`, mapping:
+    ///
+    /// - `Some` => `Detour::Success`;
+    /// - `None` => `Detour::Bypass`.
+    fn bypass(self, value: Bypass) -> HookResult<Self::Opt>;
+}
+
 /// Extends `Option<T>` with `Detour<T>` conversion methods.
-pub(crate) trait OptionDetourExt<T>: OptionExt {
+#[cfg(target_os = "linux")]
+pub trait OptionDetourExt<T>: OptionExt {
     /// Transposes an `Option` of a [`Detour`] into a [`Detour`] of an `Option`.
     ///
     /// - [`None`] will be mapped to `Success(None)`;
@@ -428,13 +478,15 @@ pub(crate) trait OptionDetourExt<T>: OptionExt {
     /// # Examples
     ///
     /// ```no_run
-    /// let x: Detour<Option<i32>> = Detour::Sucess(Some(5));
+    /// use mirrord_layer_lib::detour::{Detour, OptionDetourExt};
+    /// let x: Detour<Option<i32>> = Detour::Success(Some(5));
     /// let y: Option<Detour<i32>> = Some(Detour::Success(5));
     /// assert_eq!(x, y.transpose());
     /// ```
     fn transpose(self) -> Detour<Option<T>>;
 }
 
+#[cfg(unix)]
 impl<T> OptionExt for Option<T> {
     type Opt = T;
 
@@ -446,6 +498,19 @@ impl<T> OptionExt for Option<T> {
     }
 }
 
+#[cfg(windows)]
+impl<T> OptionExt for Option<T> {
+    type Opt = T;
+
+    fn bypass(self, value: Bypass) -> HookResult<T> {
+        match self {
+            Some(v) => Ok(v),
+            None => Err(HookError::Bypass(value)),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
 impl<T> OptionDetourExt<T> for Option<Detour<T>> {
     #[inline]
     fn transpose(self) -> Detour<Option<T>> {
@@ -459,13 +524,15 @@ impl<T> OptionDetourExt<T> for Option<Detour<T>> {
 }
 
 /// Extends [`OnceLock`] with a helper function to initialize it with a [`Detour`].
-pub(crate) trait OnceLockExt<T> {
+#[cfg(unix)]
+pub trait OnceLockExt<T> {
     /// Initializes a [`OnceLock`] with a [`Detour`] (similar to [`OnceLock::get_or_try_init`]).
     fn get_or_detour_init<F>(&self, f: F) -> Detour<&T>
     where
         F: FnOnce() -> Detour<T>;
 }
 
+#[cfg(unix)]
 impl<T> OnceLockExt<T> for OnceLock<T> {
     fn get_or_detour_init<F>(&self, f: F) -> Detour<&T>
     where

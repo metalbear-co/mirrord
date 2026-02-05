@@ -102,6 +102,7 @@ use mirrord_config::{
     feature::{env::mapper::EnvVarsRemapper, fs::FsModeConfig, network::incoming::IncomingMode},
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
+use mirrord_layer_lib::detour::DetourGuard;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use nix::errno::Errno;
@@ -113,7 +114,6 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use crate::{
     common::make_proxy_request_with_response,
     debugger_ports::DebuggerPorts,
-    detour::DetourGuard,
     load::LoadType,
     socket::{hooks::MANAGED_ADDRINFO, ops::REMOTE_DNS_REVERSE_MAPPING},
 };
@@ -137,7 +137,6 @@ mod integration_tests_deps {
 
 mod common;
 mod debugger_ports;
-mod detour;
 mod error;
 mod exec_hooks;
 #[cfg(target_os = "macos")]

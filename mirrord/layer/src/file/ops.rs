@@ -17,7 +17,10 @@ use libc::{AT_FDCWD, c_int, iovec};
 #[cfg(target_os = "linux")]
 use libc::{c_char, statx, statx_timestamp};
 use mirrord_config::feature::fs::FsModeConfig;
-use mirrord_layer_lib::file::filter::FileFilter;
+use mirrord_layer_lib::{
+    detour::{Bypass, Detour},
+    file::filter::FileFilter,
+};
 use mirrord_protocol::{
     Payload, ResponseError,
     file::{
@@ -39,7 +42,6 @@ use super::{hooks::FN_OPEN, open_dirs::OPEN_DIRS, *};
 use crate::common::CheckedInto;
 use crate::{
     common,
-    detour::{Bypass, Detour},
     error::{HookError, HookResult as Result},
 };
 
@@ -665,7 +667,7 @@ pub(crate) fn statx_logic(
 
     use std::{mem, ops::Not};
 
-    use crate::detour::OptionDetourExt;
+    use mirrord_layer_lib::detour::OptionDetourExt;
 
     let statx_buf = unsafe { statx_buf.as_mut().ok_or(HookError::BadPointer)? };
 
@@ -921,10 +923,10 @@ mod test {
     use std::path::PathBuf;
 
     use mirrord_config::{feature::fs::FsConfig, util::VecOrSingle};
+    use mirrord_layer_lib::detour::Detour;
     use rstest::*;
 
     use super::{absolute_path, *};
-    use crate::detour::Detour;
     #[test]
     fn test_absolute_normal() {
         assert_eq!(

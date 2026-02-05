@@ -22,7 +22,10 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnMetadataRequest,
     OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe,
 };
-use mirrord_layer_lib::graceful_exit;
+use mirrord_layer_lib::{
+    detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
+    graceful_exit,
+};
 use mirrord_protocol::{
     dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
@@ -41,7 +44,6 @@ use super::apple_dnsinfo::*;
 use super::{hooks::*, *};
 use crate::{
     common::make_proxy_request_with_response,
-    detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
     file::{self, OPEN_FILES},
 };

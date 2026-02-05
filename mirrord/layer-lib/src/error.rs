@@ -28,7 +28,7 @@ use nix::errno::Errno;
 use thiserror::Error;
 use tracing::{error, info};
 
-use crate::graceful_exit;
+use crate::{detour::Bypass, graceful_exit};
 
 mod ignore_codes {
     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
@@ -278,6 +278,15 @@ pub enum HookError {
 
     #[error("mirrord-layer: Hostname resolution failed with `{0}`!")]
     HostnameResolveError(#[from] HostnameResolveError),
+
+    #[error("mirrord-layer: Hook bypassed")]
+    Bypass(Bypass),
+}
+
+impl From<Bypass> for HookError {
+    fn from(bypass: Bypass) -> Self {
+        HookError::Bypass(bypass)
+    }
 }
 
 /// Errors internal to mirrord-layer.
@@ -497,6 +506,7 @@ fn get_platform_errno(fail: HookError) -> i32 {
         HookError::AddrInfoError(_) => libc::EFAULT,
         HookError::SendToError(_) => libc::EFAULT,
         HookError::HostnameResolveError(_) => libc::EFAULT,
+        HookError::Bypass(_) => libc::ENOTSUP,
     }
 }
 
@@ -580,6 +590,7 @@ fn get_platform_errno(fail: HookError) -> u32 {
         HookError::AddrInfoError(_) => WSAEFAULT,
         HookError::SendToError(_) => WSAEFAULT,
         HookError::HostnameResolveError(_) => WSAEFAULT,
+        HookError::Bypass(_) => WSAEPROTONOSUPPORT,
     }
 }
 
