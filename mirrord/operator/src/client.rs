@@ -726,10 +726,7 @@ impl OperatorApi<PreparedClientCert> {
             None
         };
         let pg_branch_names = if layer_config.feature.db_branches.is_empty().not() {
-            Some(
-                self.prepare_pg_branch_dbs(layer_config, progress)
-                    .await?,
-            )
+            Some(self.prepare_pg_branch_dbs(layer_config, progress).await?)
         } else {
             None
         };
@@ -908,7 +905,6 @@ impl OperatorApi<PreparedClientCert> {
     pub async fn connect_in_multi_cluster_session<P>(
         &self,
         target: &Target,
-        namespace: Option<&str>,
         layer_config: &mut LayerConfig,
         progress: &P,
         branch_name: Option<String>,
@@ -919,11 +915,13 @@ impl OperatorApi<PreparedClientCert> {
     {
         use mirrord_config::target::TargetDisplay;
 
+        let namespace = layer_config.target.namespace.as_deref();
+
         tracing::info!(
             target_type = %target.type_(),
             target_name = %target.name(),
             namespace = ?namespace,
-            "Connecting without local target resolution - operator will resolve on workload cluster"
+            "Connecting to multi-cluster primary - workload cluster will resolve target"
         );
 
         let use_proxy_api = self
@@ -935,8 +933,8 @@ impl OperatorApi<PreparedClientCert> {
         // Create branch CRDs on the cluster CLI has access to:
         // - Single-cluster: CRDs created directly on target cluster, branching happens locally.
         // - Multi-cluster: CRDs created on primary cluster. If Primary == Default, branching
-        //   happens locally. If Primary != Default, a sync controller copies CRDs to Default
-        //   where actual branching happens, then syncs status back.
+        //   happens locally. If Primary != Default, a sync controller copies CRDs to Default where
+        //   actual branching happens, then syncs status back.
         let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
             self.prepare_mysql_branch_dbs(layer_config, progress)
                 .await?
@@ -944,8 +942,7 @@ impl OperatorApi<PreparedClientCert> {
             vec![]
         };
         let pg_branch_names = if layer_config.feature.db_branches.is_empty().not() {
-            self.prepare_pg_branch_dbs(layer_config, progress)
-                .await?
+            self.prepare_pg_branch_dbs(layer_config, progress).await?
         } else {
             vec![]
         };

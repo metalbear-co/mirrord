@@ -4,9 +4,10 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
 use super::session::{SessionOwner, SessionTarget};
 
-/// Multi-cluster session coordinated by Envoy
+/// Multi-cluster session coordinated by Envoy on Primary cluster.
 #[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
@@ -20,11 +21,11 @@ pub struct MirrordMultiClusterSessionSpec {
     /// Owner of this session
     pub owner: SessionOwner,
 
-    /// Kubernetes namespace for the session (in primary cluster)
+    /// Kubernetes namespace for the session (in workload clusters)
     pub namespace: String,
 
-    /// Logical target alias provided by admin (e.g., "x-crm")
-    /// This resolves to multiple targets across clusters
+    /// Target identifier from user's mirrord config (e.g., "deployment.my-app")
+    /// Format: "{kind}.{name}" where kind (deployment, pod, etc.)
     pub target_alias: String,
 
     /// Clusters to create sessions in
@@ -32,10 +33,12 @@ pub struct MirrordMultiClusterSessionSpec {
     /// Value: target details for that cluster
     pub cluster_targets: HashMap<String, ClusterTarget>,
 
-    /// Primary cluster where ephemeral resources will be created
+    /// Primary cluster
     pub primary_cluster: String,
 
     /// Default cluster for stateful operations (db_branches, etc.)
+    /// The primary cluster will be used as the default cluster when a default cluster is not
+    /// specified.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_cluster: Option<String>,
 
