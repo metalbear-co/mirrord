@@ -1006,11 +1006,6 @@ pub enum Application {
     DlopenCgo,
     /// C app that calls BSD connectx(2).
     Connectx,
-    /// C app that calls closefrom
-    Closefrom,
-    /// C app that ensures FDs are inherited correctly across fork and
-    /// exec
-    SocketInheritance,
 }
 
 impl Application {
@@ -1193,10 +1188,6 @@ impl Application {
             }
             Application::DlopenCgo => String::from("tests/apps/dlopen_cgo/out.cpp_dlopen_cgo"),
             Application::Connectx => String::from("tests/apps/connectx/out.c_test_app"),
-            Application::Closefrom => String::from("tests/apps/closefrom/out.c_test_app"),
-            Application::SocketInheritance => {
-                String::from("tests/apps/socket_inheritance/out.c_test_app")
-            }
         }
     }
 
@@ -1317,8 +1308,6 @@ impl Application {
             | Application::RustIssue3248
             | Application::GoIssue2988(..)
             | Application::DlopenCgo
-            | Application::Closefrom
-            | Application::SocketInheritance
             | Application::Connectx => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
@@ -1413,8 +1402,6 @@ impl Application {
             | Application::DynamicApp(..)
             | Application::GoIssue2988(..)
             | Application::NodeMakeConnections
-            | Application::Closefrom
-            | Application::SocketInheritance
             | Application::Connectx => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
