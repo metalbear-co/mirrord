@@ -418,7 +418,7 @@ impl TestIntProxy {
         new_connection_id
     }
 
-    async fn send_tcp_data(&mut self, message_data: &str, connection_id: u64) {
+    pub async fn send_tcp_data(&mut self, message_data: &str, connection_id: u64) {
         self.codec
             .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
                 connection_id,
@@ -1007,6 +1007,7 @@ pub enum Application {
     /// C app that calls BSD connectx(2).
     Connectx,
     Dup,
+    DoubleListen,
 }
 
 impl Application {
@@ -1190,6 +1191,7 @@ impl Application {
             Application::DlopenCgo => String::from("tests/apps/dlopen_cgo/out.cpp_dlopen_cgo"),
             Application::Connectx => String::from("tests/apps/connectx/out.c_test_app"),
             Application::Dup => String::from("tests/apps/dup/out.c_test_app"),
+            Application::DoubleListen => String::from("tests/apps/double_listen/out.c_test_app"),
         }
     }
 
@@ -1311,7 +1313,8 @@ impl Application {
             | Application::GoIssue2988(..)
             | Application::DlopenCgo
             | Application::Connectx
-            | Application::Dup => vec![],
+            | Application::Dup
+            | Application::DoubleListen => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
@@ -1409,7 +1412,7 @@ impl Application {
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
             Application::DlopenCgo => 23333,
-            Application::Dup => 42069,
+            Application::Dup | Application::DoubleListen => 42069,
         }
     }
 

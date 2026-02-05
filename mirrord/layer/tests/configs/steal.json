@@ -1,0 +1,9 @@
+{
+    "feature": {
+        "network": {
+            "incoming": {
+                "mode": "steal"
+            }
+        }
+    }
+}
