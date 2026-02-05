@@ -106,12 +106,12 @@ impl SocketMap {
         self.inner
             .lock()
             .unwrap()
-            .get(&fd)
+            .get(fd)
             .map(|t| t.lock().unwrap().clone_inner())
     }
 
     pub fn remove(&self, fd: &RawFd) -> bool {
-        self.inner.lock().unwrap().remove(&fd).is_some()
+        self.inner.lock().unwrap().remove(fd).is_some()
     }
 
     // /// Calls `fun` on the entry corresponding to `fd`, returns the
@@ -185,7 +185,7 @@ impl SocketMap {
         let Some(e) = lock.get(from) else {
             return false;
         };
-        let cloned = Arc::clone(&e);
+        let cloned = Arc::clone(e);
         lock.insert(to, cloned);
 
         true

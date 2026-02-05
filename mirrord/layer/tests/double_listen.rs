@@ -1,18 +1,9 @@
 #![feature(assert_matches)]
-use std::{
-    assert_matches::assert_matches,
-    net::{IpAddr, Ipv4Addr},
-    path::Path,
-    time::Duration,
-};
+use std::{assert_matches::assert_matches, net::Ipv4Addr, path::Path, time::Duration};
 
-use mirrord_intproxy_protocol::PortSubscribe;
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
-    tcp::{
-        DaemonTcp, LayerTcp, LayerTcpSteal, NewTcpConnectionV1, NewTcpConnectionV2, StealType,
-        TcpClose, TcpData,
-    },
+    tcp::{DaemonTcp, LayerTcpSteal, NewTcpConnectionV1, StealType, TcpClose, TcpData},
 };
 use rstest::rstest;
 

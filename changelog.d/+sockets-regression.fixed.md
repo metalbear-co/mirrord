@@ -1,1 +1,1 @@
-Revert changes related to socket regressions 
+Revert #3911, correctly implement reference counting for sockets.
