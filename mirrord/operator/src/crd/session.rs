@@ -43,41 +43,6 @@ pub struct MirrordClusterSessionSpec {
     /// Set when the session uses a copied pod.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub copy_target: Option<SessionCopyTarget>,
-
-    /// Multi-cluster coordination: whether this is the default cluster for stateful ops.
-    ///
-    /// If true, this cluster should handle db_branches and other stateful operations.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_default_cluster: Option<bool>,
-
-    /// PostgreSQL branch database names created by the primary for this session.
-    ///
-    /// For multi-cluster: primary creates branches on default cluster and passes names here.
-    /// The default cluster's operator then uses these branches for the session.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pg_branch_names: Vec<String>,
-
-    /// MySQL branch database names created by the primary for this session.
-    ///
-    /// For multi-cluster: primary creates branches on default cluster and passes names here.
-    /// The default cluster's operator then uses these branches for the session.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mysql_branch_names: Vec<String>,
-
-    /// MongoDB branch database names created by the primary for this session.
-    ///
-    /// For multi-cluster: primary creates branches on default cluster and passes names here.
-    /// The default cluster's operator then uses these branches for the session.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mongodb_branch_names: Vec<String>,
-
-    /// Multi-cluster coordination: explicit SQS output queue names.
-    ///
-    /// Maps original queue names to their corresponding output queue names.
-    /// For multi-cluster: the default cluster creates temp queues and passes the exact names here.
-    /// Other clusters use these names directly instead of generating their own.
-    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
-    pub sqs_output_queues: std::collections::HashMap<String, String>,
 }
 
 /// Describes an owner of a mirrord session.
