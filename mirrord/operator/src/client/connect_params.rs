@@ -50,12 +50,11 @@ pub struct ConnectParams<'a> {
     )]
     pub session_ci_info: Option<SessionCiInfo>,
 
-    /// Multi-cluster coordination: whether this is the default cluster for stateful operations.
-    /// Only used in multi-cluster mode, None for single-cluster.
+    /// Multi-cluster: whether this is the default cluster for stateful operations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_default_cluster: Option<bool>,
 
-    /// Multi-cluster coordination: SQS output queue names.
+    /// Multi-cluster: SQS output queue names.
     /// Maps original queue names to their output queue names.
     /// All clusters use the same temp queue names for consistency.
     #[serde(
@@ -86,7 +85,7 @@ impl<'a> ConnectParams<'a> {
             mysql_branch_names,
             pg_branch_names,
             session_ci_info,
-            is_default_cluster: None, // Only used in multi-cluster
+            is_default_cluster: None,          // Only used in multi-cluster
             sqs_output_queues: HashMap::new(), // Only used in multi-cluster
         }
     }
