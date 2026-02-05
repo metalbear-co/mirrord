@@ -29,18 +29,7 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
         other => Detour::Bypass(other),
     })?;
 
-    let lock = SOCKETS.lock()?;
-    let shared_sockets = lock
-        .iter()
-        .map(|(key, value)| (*key, value))
-        .collect::<Vec<_>>();
-
-    let encoded = bincode::encode_to_vec(shared_sockets, bincode::config::standard())
-        .map(|bytes| BASE64_URL_SAFE.encode(bytes))?;
-
-    drop(lock);
-
-    env_vars.insert_env(SHARED_SOCKETS_ENV_VAR, &encoded)?;
+    env_vars.insert_env(SHARED_SOCKETS_ENV_VAR, &SOCKETS.serialize()?)?;
 
     Detour::Success(env_vars)
 }

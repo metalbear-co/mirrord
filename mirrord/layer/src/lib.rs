@@ -78,6 +78,7 @@ use std::{
     fs::File,
     io::Read,
     net::SocketAddr,
+    ops::Not,
     os::unix::process::parent_id,
     panic,
     sync::OnceLock,
@@ -735,24 +736,13 @@ fn enable_hooks(state: &LayerSetup) {
 #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()))]
 pub(crate) fn close_layer_fd(fd: c_int) {
     // Remove from sockets.
-    match SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd) {
-        Some(socket) => {
-            // Closed file is a socket, so if it's already bound to a port - notify agent to stop
-            // mirroring/stealing that port.
-
-            // [`UserSocket::close`] will be called in its `Drop` impl,
-            // when all handles (possibly created through `dup` and
-            // friends) have been closed.
-            drop(socket);
-        }
-        _ => {
-            // `close` called in [`RemoteFile::drop`]
-            if setup().fs_config().is_active() {
-                OPEN_FILES
-                    .lock()
-                    .expect("OPEN_FILES lock failed")
-                    .remove(&fd);
-            }
+    if SOCKETS.remove(&fd).not() {
+        // Wasn't a socket, remove from files
+        if setup().fs_config().is_active() {
+            OPEN_FILES
+                .lock()
+                .expect("OPEN_FILES lock failed")
+                .remove(&fd);
         }
     }
 }

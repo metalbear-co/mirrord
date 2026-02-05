@@ -3,14 +3,16 @@
 use std::{
     collections::{HashMap, HashSet},
     net::{SocketAddr, ToSocketAddrs},
+    ops::Deref,
     os::unix::io::RawFd,
     str::FromStr,
     sync::{Arc, LazyLock, Mutex},
 };
 
 use base64::prelude::*;
-use bincode::{Decode, Encode};
+use bincode::{Decode, Encode, error::EncodeError};
 use libc::{c_int, sockaddr, socklen_t};
+use map::SocketMap;
 use mirrord_config::feature::network::{
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
     outgoing::{OutgoingConfig, OutgoingFilterConfig},
@@ -36,6 +38,7 @@ pub(super) mod hooks;
 pub(crate) mod ops;
 
 pub(crate) const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
+mod map;
 
 /// Stores the [`UserSocket`]s created by the user.
 ///
@@ -53,46 +56,7 @@ pub(crate) const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
 /// - [`libc::FD_CLOEXEC`] behaviour: While rebuilding sockets from the env var, we also check if
 ///   they're set with the cloexec flag, so that children processes don't end up using sockets that
 ///   are exclusive for their parents.
-pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> = LazyLock::new(|| {
-    std::env::var(SHARED_SOCKETS_ENV_VAR)
-        .ok()
-        .and_then(|encoded| {
-            BASE64_URL_SAFE
-                .decode(encoded.into_bytes())
-                .inspect_err(|error| {
-                    tracing::warn!(
-                        ?error,
-                        "failed decoding base64 value from {SHARED_SOCKETS_ENV_VAR}"
-                    )
-                })
-                .ok()
-        })
-        .and_then(|decoded| {
-            bincode::decode_from_slice::<Vec<(i32, UserSocket)>, _>(
-                &decoded,
-                bincode::config::standard(),
-            )
-            .inspect_err(|error| tracing::warn!(?error, "failed parsing shared sockets env value"))
-            .ok()
-        })
-        .map(|(fds_and_sockets, _)| {
-            Mutex::new(HashMap::from_iter(fds_and_sockets.into_iter().filter_map(
-                |(fd, socket)| {
-                    // Do not inherit sockets that are `FD_CLOEXEC`.
-                    // NOTE: The original `fcntl` is called instead of `FN_FCNTL` because the latter
-                    // may be null at this point, likely due to child-spawning functions that mess
-                    // with memory such as fork/exec.
-                    // See: https://github.com/metalbear-co/mirrord-intellij/issues/374
-                    if unsafe { libc::fcntl(fd, libc::F_GETFD, 0) != -1 } {
-                        Some((fd, Arc::new(socket)))
-                    } else {
-                        None
-                    }
-                },
-            )))
-        })
-        .unwrap_or_default()
-});
+pub(crate) static SOCKETS: LazyLock<SocketMap> = LazyLock::new(SocketMap::read_from_env);
 
 /// Contains the addresses of a mirrord connected socket.
 ///
@@ -210,7 +174,7 @@ impl TryFrom<c_int> for SocketKind {
 // can't do that due to how `dup` interacts directly with our `Arc<UserSocket>`, because we just
 // `clone` the arc, we end up with exact duplicates, but `dup` generates a new fd that we have no
 // way of putting inside the duplicated `UserSocket`.
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, Encode, Decode, Clone)]
 #[allow(dead_code)]
 pub(crate) struct UserSocket {
     domain: c_int,
@@ -263,12 +227,6 @@ impl UserSocket {
         };
 
         result.inspect_err(|error| warn!(?error, "mirrord failed to send close socket message."))
-    }
-}
-
-impl Drop for UserSocket {
-    fn drop(&mut self) {
-        let _ = self.close();
     }
 }
 

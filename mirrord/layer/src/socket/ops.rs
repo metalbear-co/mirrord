@@ -11,7 +11,7 @@ use std::{
     },
     path::PathBuf,
     ptr::{self, copy_nonoverlapping},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Mutex, OnceLock},
 };
 
 use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
@@ -144,7 +144,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
 
     let new_socket = UserSocket::new(domain, type_, protocol, Default::default(), socket_kind);
 
-    SOCKETS.lock()?.insert(socket_fd, Arc::new(new_socket));
+    SOCKETS.insert(socket_fd, new_socket);
 
     Detour::Success(socket_fd)
 }
@@ -247,19 +247,16 @@ pub(super) fn bind(
     let requested_address = SocketAddr::try_from_raw(raw_address, address_length)?;
     let requested_port = requested_address.port();
     let incoming_config = crate::setup().incoming_config();
-    let mut socket = {
-        SOCKETS
-            .lock()?
-            .remove(&sockfd)
-            .ok_or(Bypass::LocalFdNotFound(sockfd))
-            .and_then(|socket| {
-                if !matches!(socket.state, SocketState::Initialized) {
-                    Err(Bypass::InvalidState(sockfd))
-                } else {
-                    Ok(socket)
-                }
-            })?
-    };
+    let socket = SOCKETS
+        .get(&sockfd)
+        .ok_or(Bypass::LocalFdNotFound(sockfd))
+        .and_then(|socket| {
+            if !matches!(socket.state, SocketState::Initialized) {
+                Err(Bypass::InvalidState(sockfd))
+            } else {
+                Ok(socket)
+            }
+        })?;
 
     // Check that the domain matches the requested address.
     let domain_valid = match socket.domain {
@@ -267,6 +264,7 @@ pub(super) fn bind(
         libc::AF_INET6 => requested_address.is_ipv6(),
         _ => false,
     };
+
     if !domain_valid {
         Err(HookError::InvalidBindAddressForDomain)?;
     }
@@ -276,15 +274,12 @@ pub(super) fn bind(
     // changing normal socket behavior (see issue #1123).
     // We check that port isn't 0 because if it's port 0 it can't really conflict.
     if requested_address.port() != 0
-        && SOCKETS
-            .lock()?
-            .iter()
-            .any(|(_, socket)| match &socket.state {
-                SocketState::Initialized | SocketState::Connected(_) => false,
-                SocketState::Bound { bound, .. } | SocketState::Listening(bound) => {
-                    bound.requested_address == requested_address
-                }
-            })
+        && SOCKETS.any(|(_, socket)| match &socket.state {
+            SocketState::Initialized | SocketState::Connected(_) => false,
+            SocketState::Bound { bound, .. } | SocketState::Listening(bound) => {
+                bound.requested_address == requested_address
+            }
+        })
     {
         Err(HookError::AddressAlreadyBound(requested_address))?;
     }
@@ -363,16 +358,15 @@ pub(super) fn bind(
         return Detour::Bypass(Bypass::AddressConversion);
     };
 
-    Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound {
-        bound: Bound {
-            requested_address,
-            address,
-        },
-        is_only_bound: will_not_trigger_subscription,
-    };
-
-    SOCKETS.lock()?.insert(sockfd, socket);
-
+    SOCKETS.modify(&sockfd, |s| {
+        s.state = SocketState::Bound {
+            bound: Bound {
+                requested_address,
+                address,
+            },
+            is_only_bound: will_not_trigger_subscription,
+        };
+    });
     // node reads errno to check if bind was successful and doesn't care about the return value
     // (???)
     Errno::set_raw(0);
@@ -383,7 +377,7 @@ pub(super) fn bind(
 /// later be routed to the fake local port.
 #[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
-    let Some(mut socket) = SOCKETS.lock()?.remove(&sockfd) else {
+    let Some(socket) = SOCKETS.get(&sockfd) else {
         return Detour::Bypass(Bypass::LocalFdNotFound(sockfd));
     };
 
@@ -434,20 +428,18 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
             // this log message is expected by some E2E tests
             tracing::debug!("daemon subscribed port {}", requested_address.port());
 
-            Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(Bound {
-                requested_address,
-                address,
+            SOCKETS.modify(&sockfd, |s| {
+                s.state = SocketState::Listening(Bound {
+                    requested_address,
+                    address,
+                });
             });
-
-            SOCKETS.lock()?.insert(sockfd, socket);
 
             Detour::Success(listen_result)
         }
         SocketState::Listening(_) => {
             tracing::debug!("second listen called");
             let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
-
-            SOCKETS.lock()?.insert(sockfd, socket);
 
             if listen_result != 0 {
                 let error = io::Error::last_os_error();
@@ -535,7 +527,7 @@ pub(super) fn connectx(
 fn connect_outgoing<const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
-    mut user_socket_info: Arc<UserSocket>,
+    user_socket_info: &UserSocket,
     protocol: NetProtocol,
 ) -> Detour<ConnectResult> {
     // Closure that performs the connection with mirrord messaging.
@@ -641,8 +633,9 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
 
         trace!("we are connected {connected:#?}");
 
-        Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
-        SOCKETS.lock()?.insert(sockfd, user_socket_info);
+        SOCKETS.modify(&sockfd, |s| {
+            s.state = SocketState::Connected(connected);
+        });
 
         Detour::Success(connect_result)
     };
@@ -690,8 +683,6 @@ fn connect_to_local_address(
     } else {
         Detour::Success(
             SOCKETS
-                .lock()?
-                .iter()
                 .find_map(|(_, socket)| match socket.state {
                     SocketState::Listening(Bound {
                         requested_address,
@@ -744,30 +735,9 @@ pub(super) fn connect(
 
     trace!("in connect {:#?}", SOCKETS);
 
-    let user_socket_info = match SOCKETS.lock()?.remove(&sockfd) {
-        Some(socket) => socket,
-        None => {
-            // Socket was probably removed from `SOCKETS` in `bind` detour (as not interesting in
-            // terms of `incoming` feature).
-            // Here we just recreate `UserSocket` using domain and type fetched from the descriptor
-            // we have.
-            let domain = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd)
-                .map_err(io::Error::from)?
-                .family()
-                .map(|family| family as i32)
-                .unwrap_or(-1);
-            if domain != libc::AF_INET && domain != libc::AF_UNIX {
-                return Detour::Bypass(Bypass::Domain(domain));
-            }
-            // I really hate it, but nix seems to really make this API bad :(
-            let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
-            let type_ = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType)
-                .map_err(io::Error::from)? as i32;
-            let kind = SocketKind::try_from(type_)?;
-
-            Arc::new(UserSocket::new(domain, type_, 0, Default::default(), kind))
-        }
-    };
+    let user_socket_info = SOCKETS
+        .get(&sockfd)
+        .bypass(Bypass::LocalFdNotFound(sockfd))?;
 
     if let Some(ip_address) = optional_ip_address {
         if crate::setup().experimental().tcp_ping4_mock && ip_address.port() == 7 {
@@ -824,7 +794,7 @@ pub(super) fn connect(
         NetProtocol::Datagrams if enabled_udp_outgoing => connect_outgoing::<true>(
             sockfd,
             remote_address,
-            user_socket_info,
+            &user_socket_info,
             NetProtocol::Datagrams,
         ),
 
@@ -836,7 +806,7 @@ pub(super) fn connect(
                 connect_outgoing::<true>(
                     sockfd,
                     remote_address,
-                    user_socket_info,
+                    &user_socket_info,
                     NetProtocol::Stream,
                 )
             }
@@ -896,7 +866,6 @@ pub(super) fn getpeername(
 ) -> Detour<i32> {
     let remote_address = {
         SOCKETS
-            .lock()?
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
@@ -928,7 +897,6 @@ pub(super) fn getsockname(
     address_len: *mut socklen_t,
 ) -> Detour<i32> {
     let socket = SOCKETS
-        .lock()?
         .get(&sockfd)
         .bypass(Bypass::LocalFdNotFound(sockfd))?
         .clone();
@@ -984,7 +952,6 @@ pub(super) fn accept(
 ) -> Detour<RawFd> {
     let (domain, protocol, type_, port, listener_address) = {
         SOCKETS
-            .lock()?
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
@@ -1030,7 +997,7 @@ pub(super) fn accept(
 
     fill_address(address, address_len, remote_source.into())?;
 
-    SOCKETS.lock()?.insert(new_fd, Arc::new(new_socket));
+    SOCKETS.insert(new_fd, new_socket);
 
     Detour::Success(new_fd)
 }
@@ -1054,10 +1021,7 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), Hoo
 /// Extra relevant for node on macos.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
-    let mut sockets = SOCKETS.lock()?;
-    if let Some(socket) = sockets.get(&fd).cloned() {
-        sockets.insert(dup_fd as RawFd, socket);
-
+    if SOCKETS.clone_entry(&fd, dup_fd) {
         if SWITCH_MAP {
             OPEN_FILES.lock()?.remove(&dup_fd);
         }
@@ -1071,7 +1035,7 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
         open_files.insert(dup_fd as RawFd, cloned_file);
 
         if SWITCH_MAP {
-            sockets.remove(&dup_fd);
+            SOCKETS.remove(&dup_fd);
         }
     }
 
@@ -1433,7 +1397,6 @@ pub(super) fn recv_from(
     source_length: *mut socklen_t,
 ) -> Detour<isize> {
     SOCKETS
-        .lock()?
         .get(&sockfd)
         .and_then(|socket| match &socket.state {
             SocketState::Connected(Connected { remote_address, .. }) => {
@@ -1454,51 +1417,51 @@ pub(super) fn recv_from(
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 fn send_dns_patch(
     sockfd: RawFd,
-    user_socket_info: Arc<UserSocket>,
+    user_socket_info: &UserSocket,
     destination: SocketAddr,
 ) -> Detour<SockAddr> {
-    let mut sockets = SOCKETS.lock()?;
-    // We want to keep holding this socket.
-    sockets.insert(sockfd, user_socket_info);
-
     // Sending a packet on port NOT 53.
-    let destination = sockets
-        .iter()
-        .filter(|(_, socket)| socket.kind.is_udp())
+    let destination = SOCKETS
         // Is the `destination` one of our sockets? If so, then we grab the actual address,
         // instead of the possibly fake address from mirrord.
-        .find_map(|(_, receiver_socket)| match &receiver_socket.state {
-            SocketState::Bound {
-                bound:
-                    Bound {
-                        requested_address,
-                        address,
-                    },
-                ..
-            } => {
-                // Special case for port `0`, see `getsockname`.
-                if requested_address.port() == 0 {
-                    (SocketAddr::new(requested_address.ip(), address.port()) == destination)
-                        .then_some(*address)
-                } else {
-                    (*requested_address == destination).then_some(*address)
-                }
+        .find_map(|(_, receiver_socket)| {
+            if receiver_socket.kind.is_udp().not() {
+                return None;
             }
-            SocketState::Connected(Connected {
-                remote_address,
-                layer_address,
-                ..
-            }) => {
-                let remote_address: SocketAddr = remote_address.clone().try_into().ok()?;
-                let layer_address: SocketAddr = layer_address.clone()?.try_into().ok()?;
 
-                if remote_address == destination {
-                    Some(layer_address)
-                } else {
-                    None
+            match &receiver_socket.state {
+                SocketState::Bound {
+                    bound:
+                        Bound {
+                            requested_address,
+                            address,
+                        },
+                    ..
+                } => {
+                    // Special case for port `0`, see `getsockname`.
+                    if requested_address.port() == 0 {
+                        (SocketAddr::new(requested_address.ip(), address.port()) == destination)
+                            .then_some(*address)
+                    } else {
+                        (*requested_address == destination).then_some(*address)
+                    }
                 }
+                SocketState::Connected(Connected {
+                    remote_address,
+                    layer_address,
+                    ..
+                }) => {
+                    let remote_address: SocketAddr = remote_address.clone().try_into().ok()?;
+                    let layer_address: SocketAddr = layer_address.clone()?.try_into().ok()?;
+
+                    if remote_address == destination {
+                        Some(layer_address)
+                    } else {
+                        None
+                    }
+                }
+                SocketState::Listening(_) | SocketState::Initialized => None,
             }
-            SocketState::Listening(_) | SocketState::Initialized => None,
         })?;
 
     Detour::Success(SockAddr::from(destination))
@@ -1543,8 +1506,7 @@ pub(super) fn send_to(
     trace!("destination {:?}", destination.as_socket());
 
     let user_socket_info = SOCKETS
-        .lock()?
-        .remove(&sockfd)
+        .get(&sockfd)
         .ok_or(Bypass::LocalFdNotFound(sockfd))?;
 
     // we don't support unix sockets which don't use `connect`
@@ -1566,7 +1528,7 @@ pub(super) fn send_to(
         .as_socket()
         .filter(|destination| destination.port() != 53)
     {
-        let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
+        let rawish_true_destination = send_dns_patch(sockfd, &user_socket_info, destination)?;
 
         unsafe {
             FN_SEND_TO(
@@ -1582,12 +1544,11 @@ pub(super) fn send_to(
         connect_outgoing::<false>(
             sockfd,
             destination,
-            user_socket_info,
+            &user_socket_info,
             NetProtocol::Datagrams,
         )?;
 
         let layer_address: SockAddr = SOCKETS
-            .lock()?
             .get(&sockfd)
             .and_then(|socket| match &socket.state {
                 SocketState::Connected(connected) => connected.layer_address.clone(),
@@ -1636,8 +1597,7 @@ pub(super) fn sendmsg(
 
     // send_dns_patch acquires lock, so don't hold it
     let user_socket_info = SOCKETS
-        .lock()?
-        .remove(&sockfd)
+        .get(&sockfd)
         .ok_or(Bypass::LocalFdNotFound(sockfd))?;
 
     // we don't support unix sockets which don't use `connect`
@@ -1659,7 +1619,7 @@ pub(super) fn sendmsg(
         .as_socket()
         .filter(|destination| destination.port() != 53)
     {
-        let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
+        let rawish_true_destination = send_dns_patch(sockfd, &user_socket_info, destination)?;
 
         let mut true_message_header = Box::new(unsafe { *raw_message_header });
 
@@ -1679,12 +1639,11 @@ pub(super) fn sendmsg(
         connect_outgoing::<false>(
             sockfd,
             destination,
-            user_socket_info,
+            &user_socket_info,
             NetProtocol::Datagrams,
         )?;
 
         let layer_address: SockAddr = SOCKETS
-            .lock()?
             .get(&sockfd)
             .and_then(|socket| match &socket.state {
                 SocketState::Connected(connected) => connected.layer_address.clone(),
