@@ -715,8 +715,6 @@ impl OperatorApi<PreparedClientCert> {
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
 
-        // Create branches locally (single-cluster mode).
-        // Branches are created and processed on the same cluster.
         let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
             Some(
                 self.prepare_mysql_branch_dbs(layer_config, progress)
@@ -931,7 +929,8 @@ impl OperatorApi<PreparedClientCert> {
             .contains(&NewOperatorFeature::ProxyApi);
 
         // Create branch CRDs on the cluster CLI has access to:
-        // - Single-cluster: CRDs created directly on target cluster, branching happens locally.
+        // - Single-cluster: CRDs created directly on target cluster, branching happens on the entry
+        //   cluster.
         // - Multi-cluster: CRDs created on primary cluster. If Primary == Default, branching
         //   happens locally. If Primary != Default, a sync controller copies CRDs to Default where
         //   actual branching happens, then syncs status back.
