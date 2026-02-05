@@ -1,6 +1,9 @@
 use base64::prelude::*;
 use libc::{c_char, c_int};
-use mirrord_layer_lib::detour::{Bypass, Detour};
+use mirrord_layer_lib::{
+    detour::{Bypass, Detour},
+    proxy_connection::INTPROXY_CONN_FD_ENV_VAR,
+};
 #[cfg(not(target_os = "macos"))]
 use mirrord_layer_macro::hook_fn;
 #[cfg(target_os = "macos")]

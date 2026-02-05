@@ -85,7 +85,6 @@ use std::{
 };
 
 use ctor::ctor;
-use error::{LayerError, Result};
 use file::OPEN_FILES;
 use hooks::HookManager;
 #[cfg(all(
@@ -102,7 +101,10 @@ use mirrord_config::{
     feature::{env::mapper::EnvVarsRemapper, fs::FsModeConfig, network::incoming::IncomingMode},
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
-use mirrord_layer_lib::detour::DetourGuard;
+use mirrord_layer_lib::{
+    detour::DetourGuard,
+    error::{LayerError, Result},
+};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use nix::errno::Errno;
@@ -137,7 +139,6 @@ mod integration_tests_deps {
 
 mod common;
 mod debugger_ports;
-mod error;
 mod exec_hooks;
 #[cfg(target_os = "macos")]
 mod exec_utils;

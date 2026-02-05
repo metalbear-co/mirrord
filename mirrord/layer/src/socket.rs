@@ -16,7 +16,10 @@ use mirrord_config::feature::network::{
     outgoing::{OutgoingConfig, OutgoingFilterConfig},
 };
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnCloseRequest, PortUnsubscribe};
-use mirrord_layer_lib::detour::{Bypass, Detour, DetourGuard, OptionExt};
+use mirrord_layer_lib::{
+    detour::{Bypass, Detour, DetourGuard, OptionExt},
+    error::{HookError, HookResult},
+};
 use mirrord_protocol::{
     DnsLookupError, ResolveErrorKindInternal, ResponseError, outgoing::SocketAddress,
 };
@@ -25,7 +28,6 @@ use tracing::warn;
 
 use crate::{
     common,
-    error::{HookError, HookResult},
     socket::ops::{REMOTE_DNS_REVERSE_MAPPING, remote_getaddrinfo},
 };
 

@@ -3,14 +3,13 @@
 //! This module provides error types that can be shared between the Unix layer and Windows
 //! layer-win, along with platform-specific conversions to native error codes.
 
-#[cfg(target_os = "windows")]
+#[cfg(windows)]
 pub mod windows;
 
 #[cfg(unix)]
 use std::ptr;
 use std::{
     env::VarError,
-    io,
     net::{AddrParseError, SocketAddr},
     str::ParseBoolError,
     sync::{MutexGuard, PoisonError},
@@ -19,16 +18,17 @@ use std::{
 #[cfg(unix)]
 use libc::{DIR, FILE, c_char, hostent};
 use mirrord_config::config::ConfigError;
-use mirrord_intproxy_protocol::{ProxyToLayerMessage, codec::CodecError};
-use mirrord_protocol::{ResponseError, SerializationError};
+use mirrord_protocol::{DnsLookupError, ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
 #[cfg(unix)]
 use nix::errno::Errno;
 use thiserror::Error;
 use tracing::{error, info};
+#[cfg(windows)]
+use winapi::shared::winerror::{WSAHOST_NOT_FOUND, WSANO_RECOVERY, WSATRY_AGAIN};
 
-use crate::{detour::Bypass, graceful_exit};
+use crate::{detour::Bypass, graceful_exit, proxy_connection::ProxyError};
 
 mod ignore_codes {
     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
@@ -60,28 +60,6 @@ mod ignore_codes {
         } else {
             false
         }
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum ProxyError {
-    #[error("{0}")]
-    CodecError(#[from] CodecError),
-    #[error("connection closed")]
-    ConnectionClosed,
-    #[error("unexpected response: {0:?}")]
-    UnexpectedResponse(Box<ProxyToLayerMessage>),
-    #[error("critical error: {0}")]
-    ProxyFailure(String),
-    #[error("connection lock poisoned")]
-    LockPoisoned,
-    #[error("{0}")]
-    IoFailed(#[from] io::Error),
-}
-
-impl<T> From<PoisonError<T>> for ProxyError {
-    fn from(_value: PoisonError<T>) -> Self {
-        Self::LockPoisoned
     }
 }
 
@@ -217,7 +195,7 @@ pub enum HookError {
     #[error("mirrord-layer: SIP patch failed with error `{0}`!")]
     FailedSipPatch(#[from] SipError),
 
-    #[error("mirrord-layer: IPv6 can't be used with mirrord")]
+    #[error("mirrord-layer: IPv6 support disabled")]
     SocketUnsuportedIpv6,
 
     // `From` implemented below, not with `#[from]` so that when new variants of
@@ -292,7 +270,7 @@ impl From<Bypass> for HookError {
 /// Errors internal to mirrord-layer.
 ///
 /// You'll encounter these when the layer is performing some of its internal operations, mostly when
-/// handling [`ProxyToLayerMessage`].
+/// handling [`ProxyToLayerMessage`](mirrord_intproxy_protocol::ProxyToLayerMessage).
 #[derive(Error, Debug)]
 pub enum LayerError {
     #[error("mirrord-layer: `{0}`")]
@@ -308,6 +286,10 @@ pub enum LayerError {
     #[cfg(target_os = "linux")]
     #[error("mirrord-layer: Failed to find symbol for name `{0}`!")]
     NoSymbolName(String),
+
+    #[cfg(target_os = "linux")]
+    #[error("mirrord-layer: Failed to find module for name `{0}`!")]
+    NoModuleName(String),
 
     #[error("mirrord-layer: Environment variable interaction failed with `{0}`!")]
     VarError(#[from] VarError),
@@ -424,16 +406,9 @@ impl<T> From<PoisonError<MutexGuard<'_, T>>> for HookError {
     }
 }
 
-#[cfg(unix)]
-impl From<frida_gum::Error> for LayerError {
-    fn from(err: frida_gum::Error) -> Self {
-        LayerError::Frida(err)
-    }
-}
-
+pub type Result<T, E = LayerError> = std::result::Result<T, E>;
 pub type LayerResult<T, E = LayerError> = std::result::Result<T, E>;
 pub type HookResult<T, E = HookError> = std::result::Result<T, E>;
-pub type ProxyResult<T, E = ProxyError> = std::result::Result<T, E>;
 
 #[cfg(unix)]
 fn get_platform_errno(fail: HookError) -> i32 {
@@ -457,18 +432,7 @@ fn get_platform_errno(fail: HookError) -> i32 {
                 mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
                 _ => libc::EINVAL,
             },
-            ResponseError::DnsLookup(dns_fail) => {
-                (match dns_fail.kind {
-                    mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
-                    // prevents an infinite loop that used to happen in some apps, don't know if
-                    // this is the correct mapping.
-                    mirrord_protocol::ResolveErrorKindInternal::NoRecordsFound(_) => {
-                        libc::EAI_NONAME
-                    }
-                    _ => libc::EAI_FAIL,
-                    // TODO: Add more error kinds, next time we break protocol compatibility.
-                } as _)
-            }
+            ResponseError::DnsLookup(dns_fail) => translate_dns_fail(dns_fail),
             // for listen, EINVAL means "socket is already connected."
             // Will not happen, because this ResponseError is not return from any hook, so it
             // never appears as HookError::ResponseError(PortAlreadyStolen(_)).
@@ -506,11 +470,12 @@ fn get_platform_errno(fail: HookError) -> i32 {
         HookError::AddrInfoError(_) => libc::EFAULT,
         HookError::SendToError(_) => libc::EFAULT,
         HookError::HostnameResolveError(_) => libc::EFAULT,
+        // Note: temporary mapping, will be removed once Detour is migrated to windows
         HookError::Bypass(_) => libc::ENOTSUP,
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(windows)]
 fn get_platform_errno(fail: HookError) -> u32 {
     use winapi::shared::winerror::*;
     match fail {
@@ -542,16 +507,8 @@ fn get_platform_errno(fail: HookError) -> u32 {
                 _ => WSAEINVAL,
             },
             ResponseError::DnsLookup(dns_fail) => {
-                (match dns_fail.kind {
-                    mirrord_protocol::ResolveErrorKindInternal::Timeout => WSATRY_AGAIN,
-                    // prevents an infinite loop that used to happen in some apps, don't know if
-                    // this is the correct mapping.
-                    mirrord_protocol::ResolveErrorKindInternal::NoRecordsFound(_) => {
-                        WSAHOST_NOT_FOUND
-                    }
-                    _ => WSANO_RECOVERY,
-                    // TODO: Add more error kinds, next time we break protocol compatibility.
-                } as _)
+                // try_into must work as WSAE* errors returned are actually u32
+                translate_dns_fail(dns_fail).try_into().unwrap()
             }
             // for listen, EINVAL means "socket is already connected."
             // Will not happen, because this ResponseError is not return from any hook, so it
@@ -590,8 +547,47 @@ fn get_platform_errno(fail: HookError) -> u32 {
         HookError::AddrInfoError(_) => WSAEFAULT,
         HookError::SendToError(_) => WSAEFAULT,
         HookError::HostnameResolveError(_) => WSAEFAULT,
+        // Note: temporary mapping, will be removed once Detour is migrated to windows
         HookError::Bypass(_) => WSAEPROTONOSUPPORT,
     }
+}
+
+fn translate_dns_fail(dns_fail: DnsLookupError) -> i32 {
+    (match dns_fail.kind {
+        mirrord_protocol::ResolveErrorKindInternal::Timeout => {
+            #[cfg(unix)]
+            {
+                libc::EAI_AGAIN
+            }
+            #[cfg(windows)]
+            {
+                WSATRY_AGAIN
+            }
+        }
+        // prevents an infinite loop that used to happen in some apps, don't know if
+        // this is the correct mapping.
+        mirrord_protocol::ResolveErrorKindInternal::NoRecordsFound(_) => {
+            #[cfg(unix)]
+            {
+                libc::EAI_NONAME
+            }
+            #[cfg(windows)]
+            {
+                WSAHOST_NOT_FOUND
+            }
+        }
+        // TODO: Add more error kinds, next time we break protocol compatibility.
+        _ => {
+            #[cfg(unix)]
+            {
+                libc::EAI_FAIL
+            }
+            #[cfg(windows)]
+            {
+                WSANO_RECOVERY
+            }
+        }
+    } as _)
 }
 
 /// mapping based on - <https://man7.org/linux/man-pages/man3/errno.3.html>
@@ -604,8 +600,7 @@ impl From<HookError> for i64 {
                 | ResponseError::NotFile(_)
                 | ResponseError::NotDirectory(_)
                 | ResponseError::Remote(_)
-                | ResponseError::RemoteIO(_)
-                | ResponseError::DnsLookup(_),
+                | ResponseError::RemoteIO(_),
             ) => {
                 info!("libc error (doesn't indicate a problem) >> {fail:#?}")
             }
@@ -621,6 +616,11 @@ impl From<HookError> for i64 {
             HookError::ResponseError(ResponseError::NotImplemented) => {
                 // this means we bypass, so we can just return to avoid setting libc.
                 return -1;
+            }
+            HookError::ResponseError(ResponseError::DnsLookup(dns_fail)) => {
+                // return native dns failure because their API expects the error code to be returned
+                // and not reported through Errno
+                return translate_dns_fail(dns_fail).into();
             }
             HookError::ProxyError(ref err) => {
                 let reason = match err {
@@ -698,6 +698,13 @@ impl From<HookError> for *mut DIR {
         let _ = i64::from(fail);
 
         ptr::null_mut()
+    }
+}
+
+#[cfg(unix)]
+impl From<frida_gum::Error> for LayerError {
+    fn from(err: frida_gum::Error) -> Self {
+        LayerError::Frida(err)
     }
 }
 

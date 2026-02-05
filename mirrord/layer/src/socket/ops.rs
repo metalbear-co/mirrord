@@ -24,6 +24,7 @@ use mirrord_intproxy_protocol::{
 };
 use mirrord_layer_lib::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
+    error::HookError,
     graceful_exit,
 };
 use mirrord_protocol::{
@@ -44,7 +45,6 @@ use super::apple_dnsinfo::*;
 use super::{hooks::*, *};
 use crate::{
     common::make_proxy_request_with_response,
-    error::HookError,
     file::{self, OPEN_FILES},
 };
 

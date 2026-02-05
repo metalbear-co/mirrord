@@ -1,10 +1,9 @@
 use std::{
     collections::HashMap,
     fmt::Debug,
-    io,
     net::{SocketAddr, TcpStream},
     sync::{
-        Mutex, PoisonError,
+        Mutex,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
@@ -13,36 +12,12 @@ use std::{
 use mirrord_intproxy_protocol::{
     IsLayerRequest, IsLayerRequestWithResponse, LayerId, LayerToProxyMessage, LocalMessage,
     MessageId, NewSessionRequest, ProxyToLayerMessage,
-    codec::{self, CodecError, SyncDecoder, SyncEncoder},
+    codec::{self, SyncDecoder, SyncEncoder},
 };
-use thiserror::Error;
-
-#[derive(Debug, Error)]
-pub enum ProxyError {
-    #[error("{0}")]
-    CodecError(#[from] CodecError),
-    #[error("connection closed")]
-    ConnectionClosed,
-    #[error("unexpected response: {0:?}")]
-    UnexpectedResponse(
-        /// Boxed due to large size difference.
-        Box<ProxyToLayerMessage>,
-    ),
-    #[error("critical error: {0}")]
-    ProxyFailure(String),
-    #[error("connection lock poisoned")]
-    LockPoisoned,
-    #[error("{0}")]
-    IoFailed(#[from] io::Error),
-}
-
-impl<T> From<PoisonError<T>> for ProxyError {
-    fn from(_value: PoisonError<T>) -> Self {
-        Self::LockPoisoned
-    }
-}
-
-pub type Result<T> = core::result::Result<T, ProxyError>;
+use mirrord_layer_lib::{
+    detour::DetourGuard,
+    proxy_connection::{ProxyError, Result},
+};
 
 #[derive(Debug)]
 pub struct ProxyConnection {
