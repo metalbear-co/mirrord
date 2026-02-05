@@ -94,7 +94,7 @@ fn build_log_file_path(log_dir: &str) -> io::Result<String> {
     let file_name = format!("mirrord-layer_{}_{}_pid{}", timestamp, process_name, pid);
     let full_path = dir_path.join(file_name);
 
-    tracing::info!(
+    eprintln!(
         "mirrord-layer initializing file logger for process '{}' (pid={}), logging to file: {:?}",
         process_name,
         pid,
