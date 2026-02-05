@@ -44,53 +44,13 @@ pub struct MirrordClusterSessionSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub copy_target: Option<SessionCopyTarget>,
 
-    /// Multi-cluster coordination: ID of the parent MirrordMultiClusterSession.
+    /// Multi-cluster: name of the parent MirrordMultiClusterSession.
     ///
-    /// If set, this session is part of a multi-cluster session and was created by Envoy.
-    /// The value is the name of the MirrordMultiClusterSession CRD in the primary cluster.
+    /// When set, this is a child session created by the Primary operator
+    /// as part of a multi-cluster session. The parent session coordinates
+    /// all child sessions across clusters.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub multi_cluster_parent_id: Option<String>,
-
-    /// Multi-cluster coordination: logical name of the primary cluster.
-    ///
-    /// If set, indicates which cluster is coordinating this multi-cluster session.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub multi_cluster_primary: Option<String>,
-
-    /// Multi-cluster coordination: whether this is the default cluster for stateful ops.
-    ///
-    /// If true, this cluster should handle db_branches and other stateful operations.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_default_cluster: Option<bool>,
-
-    /// PostgreSQL branch database names created by the primary for this session.
-    ///
-    /// For multi-cluster: primary creates branches on default cluster and passes names here.
-    /// The default cluster's operator then uses these branches for the session.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pg_branch_names: Vec<String>,
-
-    /// MySQL branch database names created by the primary for this session.
-    ///
-    /// For multi-cluster: primary creates branches on default cluster and passes names here.
-    /// The default cluster's operator then uses these branches for the session.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mysql_branch_names: Vec<String>,
-
-    /// MongoDB branch database names created by the primary for this session.
-    ///
-    /// For multi-cluster: primary creates branches on default cluster and passes names here.
-    /// The default cluster's operator then uses these branches for the session.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mongodb_branch_names: Vec<String>,
-
-    /// Multi-cluster coordination: explicit SQS output queue names.
-    ///
-    /// Maps original queue names to their corresponding output queue names.
-    /// For multi-cluster: the default cluster creates temp queues and passes the exact names here.
-    /// Other clusters use these names directly instead of generating their own.
-    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
-    pub sqs_output_queues: std::collections::HashMap<String, String>,
+    pub multi_cluster_parent_name: Option<String>,
 }
 
 /// Describes an owner of a mirrord session.

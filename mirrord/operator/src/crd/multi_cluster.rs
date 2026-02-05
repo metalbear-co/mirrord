@@ -4,9 +4,10 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
 use super::session::{SessionOwner, SessionTarget};
 
-/// Multi-cluster session coordinated by Envoy
+/// Multi-cluster session coordinated by Envoy on Primary cluster.
 #[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
@@ -20,56 +21,27 @@ pub struct MirrordMultiClusterSessionSpec {
     /// Owner of this session
     pub owner: SessionOwner,
 
-    /// Kubernetes namespace for the session (in primary cluster)
+    /// Kubernetes namespace for the session (in workload clusters)
     pub namespace: String,
 
-    /// Logical target alias provided by admin (e.g., "x-crm")
-    /// This resolves to multiple targets across clusters
+    /// Target same for all workload clusters
+    pub target: SessionTarget,
+
+    /// Target identifier from user's mirrord config (e.g., "deployment.my-app")
+    /// Format: "{kind}.{name}" where kind (deployment, pod, etc.)
     pub target_alias: String,
 
-    /// Clusters to create sessions in
-    /// Key: cluster name (e.g., "us-east-1")
-    /// Value: target details for that cluster
-    pub cluster_targets: HashMap<String, ClusterTarget>,
+    /// List of cluster names to create sessions in
+    pub clusters: Vec<String>,
 
-    /// Primary cluster where ephemeral resources will be created
+    /// Primary cluster
     pub primary_cluster: String,
 
     /// Default cluster for stateful operations (db_branches, etc.)
+    /// The primary cluster will be used as the default cluster when a default cluster is not
+    /// specified.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_cluster: Option<String>,
-
-    /// PostgreSQL branch database names (created by primary before session init).
-    /// These are passed to the default cluster's child session.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pg_branch_names: Vec<String>,
-
-    /// MySQL branch database names (created by primary before session init).
-    /// These are passed to the default cluster's child session.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mysql_branch_names: Vec<String>,
-
-    /// MongoDB branch database names (created by primary before session init).
-    /// These are passed to the default cluster's child session.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mongodb_branch_names: Vec<String>,
-
-    /// SQS output queue names for multi-cluster coordination.
-    /// Maps original queue names to their output queue names.
-    /// All clusters use the same temp queue names.
-    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
-    pub sqs_output_queues: std::collections::HashMap<String, String>,
-}
-
-/// Target specification for a specific cluster in a multi-cluster session
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ClusterTarget {
-    /// Target in this cluster
-    pub target: SessionTarget,
-
-    /// Namespace in this cluster (might differ from primary)
-    pub namespace: String,
 }
 
 /// Status of a multi-cluster session

@@ -102,17 +102,16 @@ where
 
     let mut session_subtask = operator_subtask.subtask("starting session");
     let connection = if is_multi_cluster {
-        // Multi-cluster: operator handles target resolution on workload clusters
+        // Multi-cluster: CLI connects to Primary, which routes to the workload cluster
+        // where the target is resolved and the session is created
         let target_config = layer_config
             .target
             .path
             .clone()
             .unwrap_or(Target::Targetless);
-        let target_namespace = layer_config.target.namespace.clone();
 
         api.connect_in_multi_cluster_session(
             &target_config,
-            target_namespace.as_deref(),
             layer_config,
             &session_subtask,
             branch_name,
@@ -120,7 +119,7 @@ where
         )
         .await?
     } else {
-        // Single-cluster: resolve target locally
+        // Single-cluster: CLI resolves target of the connected cluster
         let target = ResolvedTarget::new(
             api.client(),
             &layer_config
