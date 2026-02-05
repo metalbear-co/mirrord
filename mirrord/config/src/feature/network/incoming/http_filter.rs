@@ -1,13 +1,15 @@
-use std::{ops::Not, sync::LazyLock};
+use std::{ops::Not, str::FromStr, sync::LazyLock};
 
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use mirrord_protocol::tcp::{
-    HTTP_BODY_JSON_FILTER_VERSION, HTTP_COMPOSITE_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION,
+    Filter, HTTP_BODY_JSON_FILTER_VERSION, HTTP_COMPOSITE_FILTER_VERSION,
+    HTTP_METHOD_FILTER_VERSION, HttpBodyFilter, HttpFilter, HttpMethodFilter, JsonPathQuery,
 };
 use schemars::JsonSchema;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::{
     config::{ConfigContext, ConfigError, from_env::FromEnv, source::MirrordConfigSource},
@@ -85,7 +87,9 @@ use crate::{
 ///  ]
 /// }
 /// ```
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(
+    MirrordConfig, Default, PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize,
+)]
 #[config(map_to = "HttpFilterFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct HttpFilterConfig {
@@ -185,6 +189,11 @@ impl HttpFilterConfig {
             || self.body_filter.is_some()
     }
 
+    pub fn is_filter_not_set(&self) -> bool {
+        // :not:
+        self.is_filter_set().not()
+    }
+
     pub fn ensure_usable_with(
         &self,
         agent_protocol_version: Option<Version>,
@@ -270,6 +279,99 @@ impl HttpFilterConfig {
                 None => u16::MAX,
             }
         }
+    }
+
+    /// Converts this config into the protocol-level [`HttpFilter`].
+    ///
+    /// Returns an error if a filter expression is invalid. Panics if no filter is set
+    /// (call [`is_filter_set`](Self::is_filter_set) first).
+    pub fn as_protocol_http_filter(&self) -> Result<HttpFilter, HttpFilterParseError> {
+        match self {
+            HttpFilterConfig {
+                path_filter: Some(path),
+                header_filter: None,
+                method_filter: None,
+                body_filter: None,
+                all_of: None,
+                any_of: None,
+                ports: _,
+            } => Ok(HttpFilter::Path(Filter::new(path.into())?)),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: Some(header),
+                method_filter: None,
+                body_filter: None,
+                all_of: None,
+                any_of: None,
+                ports: _,
+            } => Ok(HttpFilter::Header(Filter::new(header.into())?)),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: Some(method),
+                body_filter: None,
+                all_of: None,
+                any_of: None,
+                ports: _,
+            } => Ok(HttpFilter::Method(HttpMethodFilter::from_str(method)?)),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                body_filter: Some(filter),
+                all_of: None,
+                any_of: None,
+                ports: _,
+            } => Ok(HttpFilter::Body(filter.as_protocol_http_body_filter()?)),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                body_filter: None,
+                all_of: Some(filters),
+                any_of: None,
+                ports: _,
+            } => Self::make_composite_filter(true, filters),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                body_filter: None,
+                all_of: None,
+                any_of: Some(filters),
+                ports: _,
+            } => Self::make_composite_filter(false, filters),
+
+            _ => panic!("No HTTP filters specified, this should have been caught earlier"),
+        }
+    }
+
+    fn make_composite_filter(
+        all: bool,
+        filters: &[InnerFilter],
+    ) -> Result<HttpFilter, HttpFilterParseError> {
+        let filters = filters
+            .iter()
+            .map(|filter| match filter {
+                InnerFilter::Path { path } => Ok(HttpFilter::Path(Filter::new(path.clone())?)),
+                InnerFilter::Header { header } => {
+                    Ok(HttpFilter::Header(Filter::new(header.clone())?))
+                }
+                InnerFilter::Method { method } => {
+                    Ok(HttpFilter::Method(HttpMethodFilter::from_str(method)?))
+                }
+                InnerFilter::Body(body_filter) => Ok(HttpFilter::Body(
+                    body_filter.as_protocol_http_body_filter()?,
+                )),
+            })
+            .collect::<Result<Vec<_>, HttpFilterParseError>>()?;
+
+        Ok(HttpFilter::Composite { all, filters })
     }
 }
 
@@ -411,6 +513,18 @@ pub enum BodyFilter {
     Json { query: String, matches: String },
 }
 
+impl BodyFilter {
+    /// Converts this config into the protocol-level [`HttpBodyFilter`].
+    pub fn as_protocol_http_body_filter(&self) -> Result<HttpBodyFilter, Box<fancy_regex::Error>> {
+        match self {
+            BodyFilter::Json { query, matches } => Ok(HttpBodyFilter::Json {
+                query: JsonPathQuery::new_unchecked(query.clone()),
+                matches: Filter::new(matches.clone())?,
+            }),
+        }
+    }
+}
+
 impl MirrordToggleableConfig for HttpFilterFileConfig {
     fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
         let header_filter = FromEnv::new("MIRRORD_HTTP_HEADER_FILTER")
@@ -452,4 +566,14 @@ impl CollectAnalytics for &HttpFilterConfig {
         analytics.add("path_filter", self.path_filter.is_some());
         analytics.add("ports", self.count_filtered_ports());
     }
+}
+
+/// Error returned when converting an [`HttpFilterConfig`] into an [`HttpFilter`].
+#[derive(Error, Debug)]
+pub enum HttpFilterParseError {
+    #[error(transparent)]
+    Regex(#[from] Box<fancy_regex::Error>),
+
+    #[error(transparent)]
+    Method(#[from] strum::ParseError),
 }
