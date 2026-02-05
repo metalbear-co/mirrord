@@ -1,9 +1,11 @@
+#[cfg(target_family = "unix")]
 use std::{
     io::Read,
     net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener},
     os::fd::AsRawFd,
 };
 
+#[cfg(target_family = "unix")]
 fn main() {
     let listener = TcpListener::bind(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 80)).unwrap();
 
@@ -22,4 +24,10 @@ fn main() {
     let mut buf = String::new();
     stream.read_to_string(&mut buf).unwrap();
     assert_eq!(buf, "hello there");
+}
+
+#[cfg(not(target_family = "unix"))]
+fn main() {
+    eprintln!("ERROR: test dup-listen is not supported on non-Unix platforms");
+    std::process::exit(1);
 }
