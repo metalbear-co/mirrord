@@ -96,9 +96,7 @@ fn build_log_file_path(log_dir: &str) -> io::Result<String> {
 
     eprintln!(
         "mirrord-layer initializing file logger for process '{}' (pid={}), logging to file: {:?}",
-        process_name,
-        pid,
-        full_path
+        process_name, pid, full_path
     );
 
     Ok(full_path.to_string_lossy().into_owned())
