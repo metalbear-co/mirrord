@@ -213,7 +213,7 @@ impl UserSocket {
     /// Closes the socket and performs necessary cleanup.
     /// If this socket was listening and bound to a port, notifies agent to stop
     /// mirroring/stealing that port by sending PortUnsubscribe.
-    pub fn close(&self) -> HookResult<()> {
+    pub fn close(&self) {
         if self.is_listening()
             && let Some(bound) = self.bound_address()
         {
@@ -223,7 +223,7 @@ impl UserSocket {
             };
 
             // Send unsubscribe request to stop port operations
-            let result = make_proxy_request_no_response(port_unsubscribe);
+            let _ = make_proxy_request_no_response(port_unsubscribe);
 
             // For steal mode on Windows, add a small delay to allow agent processing
             // This prevents race conditions where subsequent requests arrive before
@@ -237,21 +237,7 @@ impl UserSocket {
                     std::thread::sleep(std::time::Duration::from_millis(50));
                 }
             }
-
-            result.map(|_| ())
-        } else {
-            Ok(())
         }
-    }
-}
-
-impl Drop for UserSocket {
-    fn drop(&mut self) {
-        let result = self.close();
-        assert!(
-            result.is_ok(),
-            "mirrord failed to send close socket message. Error: {result:?}",
-        )
     }
 }
 
