@@ -7,12 +7,12 @@ int main() {
 	int s = socket(AF_INET, SOCK_STREAM, 0);
 	if (s < 0) { perror("socket"); exit(1); }
 
-	int opt = 1;
-	if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-		perror("setsockopt"); exit(1);
-	}
+	struct sockaddr_in a = {
+		.sin_family = AF_INET,
+		.sin_port = htons(42069),
+		.sin_addr = { .s_addr = htonl(INADDR_ANY) },
+	};
 
-	struct sockaddr_in a = {AF_INET, htons(42069), {INADDR_ANY}};
 	if (bind(s, (struct sockaddr*)&a, sizeof(a)) < 0) {
 		perror("bind"); exit(1);
 	}
