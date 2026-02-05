@@ -961,7 +961,8 @@ impl OperatorApi<PreparedClientCert> {
             session_ci_info,
         );
 
-        let namespace = namespace.unwrap_or("default");
+        // If no namespace in config, use the kubeconfig's default namespace
+        let namespace = namespace.unwrap_or_else(|| self.client.default_namespace());
         let connect_url =
             Self::target_connect_url_from_config(use_proxy_api, target, namespace, &params);
 
@@ -1201,11 +1202,15 @@ impl OperatorApi<PreparedClientCert> {
 
         let name = {
             let mut urlfied_name = target.type_().to_string();
-            urlfied_name.push('.');
-            urlfied_name.push_str(target.name());
-            if let Some(container) = target.container() {
-                urlfied_name.push_str(".container.");
-                urlfied_name.push_str(container);
+            // For targetless, name() returns "targetless" which would result in
+            // "targetless.targetless" - so we skip this
+            if !matches!(target, Target::Targetless) {
+                urlfied_name.push('.');
+                urlfied_name.push_str(target.name());
+                if let Some(container) = target.container() {
+                    urlfied_name.push_str(".container.");
+                    urlfied_name.push_str(container);
+                }
             }
             urlfied_name
         };
@@ -2204,6 +2209,85 @@ mod test {
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
+        assert_eq!(produced, expected)
+    }
+
+    /// Verifies that [`OperatorApi::target_connect_url_from_config`] produces expected URLs.
+    ///
+    /// These URLs should not change for backward compatibility.
+    #[rstest]
+    #[case::deployment_no_container_no_proxy(
+        false,
+        mirrord_config::target::Target::Deployment(mirrord_config::target::deployment::DeploymentTarget {
+            deployment: "my-deployment".into(),
+            container: None,
+        }),
+        "my-namespace",
+        "/apis/operator.metalbear.co/v1/namespaces/my-namespace/targets/deployment.my-deployment?connect=true&on_concurrent_steal=abort"
+    )]
+    #[case::deployment_with_container_no_proxy(
+        false,
+        mirrord_config::target::Target::Deployment(mirrord_config::target::deployment::DeploymentTarget {
+            deployment: "my-deployment".into(),
+            container: Some("my-container".into()),
+        }),
+        "my-namespace",
+        "/apis/operator.metalbear.co/v1/namespaces/my-namespace/targets/deployment.my-deployment.container.my-container?connect=true&on_concurrent_steal=abort"
+    )]
+    #[case::deployment_with_container_proxy(
+        true,
+        mirrord_config::target::Target::Deployment(mirrord_config::target::deployment::DeploymentTarget {
+            deployment: "my-deployment".into(),
+            container: Some("my-container".into()),
+        }),
+        "my-namespace",
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/my-namespace/targets/deployment.my-deployment.container.my-container?connect=true&on_concurrent_steal=abort"
+    )]
+    #[case::targetless_no_proxy(
+        false,
+        mirrord_config::target::Target::Targetless,
+        "default",
+        "/apis/operator.metalbear.co/v1/namespaces/default/targets/targetless?connect=true&on_concurrent_steal=abort"
+    )]
+    #[case::targetless_proxy(
+        true,
+        mirrord_config::target::Target::Targetless,
+        "default",
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/targetless?connect=true&on_concurrent_steal=abort"
+    )]
+    #[case::pod_no_proxy(
+        false,
+        mirrord_config::target::Target::Pod(mirrord_config::target::pod::PodTarget {
+            pod: "my-pod".into(),
+            container: None,
+        }),
+        "test-ns",
+        "/apis/operator.metalbear.co/v1/namespaces/test-ns/targets/pod.my-pod?connect=true&on_concurrent_steal=abort"
+    )]
+    #[test]
+    fn target_connect_url_from_config(
+        #[case] use_proxy: bool,
+        #[case] target: mirrord_config::target::Target,
+        #[case] namespace: &str,
+        #[case] expected: &str,
+    ) {
+        let params = ConnectParams {
+            connect: true,
+            on_concurrent_steal: Some(ConcurrentSteal::Abort),
+            profile: None,
+            kafka_splits: Default::default(),
+            sqs_splits: Default::default(),
+            branch_name: None,
+            mongodb_branch_names: Default::default(),
+            mysql_branch_names: Default::default(),
+            pg_branch_names: Default::default(),
+            session_ci_info: None,
+            is_default_cluster: None,
+            sqs_output_queues: Default::default(),
+        };
+
+        let produced =
+            OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);
         assert_eq!(produced, expected)
     }
 }

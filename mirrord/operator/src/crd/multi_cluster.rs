@@ -24,14 +24,15 @@ pub struct MirrordMultiClusterSessionSpec {
     /// Kubernetes namespace for the session (in workload clusters)
     pub namespace: String,
 
+    /// Target same for all workload clusters
+    pub target: SessionTarget,
+
     /// Target identifier from user's mirrord config (e.g., "deployment.my-app")
     /// Format: "{kind}.{name}" where kind (deployment, pod, etc.)
     pub target_alias: String,
 
-    /// Clusters to create sessions in
-    /// Key: cluster name (e.g., "us-east-1")
-    /// Value: target details for that cluster
-    pub cluster_targets: HashMap<String, ClusterTarget>,
+    /// List of cluster names to create sessions in
+    pub clusters: Vec<String>,
 
     /// Primary cluster
     pub primary_cluster: String,
@@ -41,17 +42,6 @@ pub struct MirrordMultiClusterSessionSpec {
     /// specified.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_cluster: Option<String>,
-}
-
-/// Target specification for a specific cluster in a multi-cluster session
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ClusterTarget {
-    /// Target in this cluster
-    pub target: SessionTarget,
-
-    /// Namespace in this cluster (might differ from primary)
-    pub namespace: String,
 }
 
 /// Status of a multi-cluster session
