@@ -238,6 +238,11 @@ impl UserSocket {
     }
 
     /// Inform internal proxy about closing a listening port.
+    ///
+    /// **Important**
+    ///
+    /// Before calling this method, make sure that this socket does not have any living clones
+    /// (dup*) in the current process.
     #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()), ret)]
     pub(crate) fn close(&self) {
         match self {
