@@ -466,7 +466,7 @@ pub trait OptionExt {
 }
 
 /// Extends `Option<T>` with `Detour<T>` conversion methods.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 pub trait OptionDetourExt<T>: OptionExt {
     /// Transposes an `Option` of a [`Detour`] into a [`Detour`] of an `Option`.
     ///
