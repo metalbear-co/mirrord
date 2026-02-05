@@ -13,7 +13,12 @@ int main() {
 		perror("setsockopt"); exit(1);
 	}
 
-	struct sockaddr_in a = {AF_INET, htons(42069), {INADDR_ANY}};
+	struct sockaddr_in a = {
+		.sin_family = AF_INET,
+		.sin_port = htons(42069),
+		.sin_addr = { .s_addr = htonl(INADDR_ANY) },
+	};
+
 	if (bind(s, (struct sockaddr*)&a, sizeof(a)) < 0) {
 		perror("bind"); exit(1);
 	}
