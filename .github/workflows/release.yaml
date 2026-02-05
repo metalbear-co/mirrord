@@ -358,6 +358,7 @@ jobs:
       - name: Check disk space
         run: df . -h
       - name: Free disk space
+        continue-on-error: true
         run: |
           sudo rm -rf /usr/share/dotnet
           sudo docker rmi $(docker image ls -aq) >/dev/null 2>&1 || true
@@ -445,6 +446,7 @@ jobs:
       - name: Check disk space
         run: df . -h
       - name: Free disk space
+        continue-on-error: true
         run: |
           sudo rm -rf /usr/share/dotnet
           sudo docker rmi $(docker image ls -aq) >/dev/null 2>&1 || true
