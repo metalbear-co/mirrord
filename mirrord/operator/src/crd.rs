@@ -160,7 +160,6 @@ pub struct MirrordOperatorSpec {
     /// The namespace where the operator is deployed.
     /// Used by CLI in multi-cluster management-only mode to create CRDs
     /// in the operator's namespace with a target-namespace annotation.
-    /// Optional for backwards compatibility with older operators.
     pub operator_namespace: Option<String>,
 }
 
