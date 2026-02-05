@@ -2219,6 +2219,14 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
             "closesocket_detour -> successfully closed socket {}, removing from mirrord tracking",
             s
         );
+
+        // Call close() method to send PortUnsubscribe if socket was listening
+        if let Some(socket) = &socket_info
+            && socket.is_listening()
+        {
+            socket.close();
+        }
+
         remove_socket(s);
     } else {
         tracing::warn!(

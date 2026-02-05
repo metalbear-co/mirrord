@@ -739,14 +739,9 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         Some(socket) => {
             // Closed file is a socket, so if it's already bound to a port - notify agent to stop
             // mirroring/stealing that port.
-
-            // [`UserSocket::close`] will be called in its `Drop` impl,
-            // when all handles (possibly created through `dup` and
-            // friends) have been closed.
-            drop(socket);
+            socket.close();
         }
         _ => {
-            // `close` called in [`RemoteFile::drop`]
             if setup().fs_config().is_active() {
                 OPEN_FILES
                     .lock()
