@@ -947,7 +947,7 @@ mod test {
             }
         }
     }
-    
+
     #[test]
     fn test_absolute_normal() {
         assert_eq!(
