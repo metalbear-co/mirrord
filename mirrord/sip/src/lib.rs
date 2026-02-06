@@ -1150,8 +1150,7 @@ mod main {
                     signed_temp_file_path,
                     SipPatchOptions {
                         patch: &[],
-                        skip: &[signed_temp_file_path.to_string()],
-                        ..SipPatchOptions::default()
+                        skip: &[signed_temp_file_path.to_string()]
                     }
                 )
                 .unwrap(),
