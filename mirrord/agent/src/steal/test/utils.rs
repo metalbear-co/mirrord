@@ -473,7 +473,19 @@ impl TestRequest {
         };
         let mut requests = ExtractedRequests::new(TokioIo::new(conn), self.kind.version());
         let request = requests.next().await.unwrap().unwrap();
-        let conn_task = tokio::spawn(async move { requests.next().await });
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let conn_task = tokio::spawn(async move {
+            let mut shutdown = false;
+            loop {
+                tokio::select! {
+                    res = requests.next() => return res,
+                    _ = &mut shutdown_rx, if !shutdown => {
+                        requests.graceful_shutdown();
+                        shutdown = true;
+                    }
+                }
+            }
+        });
 
         println!(
             "[{}:{}] Got request: {request:?}, expected {self:?}",
@@ -503,6 +515,7 @@ impl TestRequest {
             protocol.run(TokioIo::new(upgraded), true).await;
         }
 
+        let _ = shutdown_tx.send(());
         let conn_task_ret = conn_task.await.unwrap();
         assert!(
             conn_task_ret.is_none(),
