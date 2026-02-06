@@ -7,6 +7,11 @@ use crate::error::{Result, SipError};
 
 const EMPTY_ENTITLEMENTS_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict></dict></plist>"#;
 
+/// mirrord auto detects santa (or user can set it) and changes codesign behavior
+/// see sip logic for more info.
+#[cfg(target_os = "macos")]
+pub const MIRRORD_SANTA_MODE_ENV: &str = "MIRRORD_SANTA_MODE";
+
 /// Hex string from random 20 bytes (results in 40 hexadecimal digits).
 fn generate_hex_string() -> String {
     let mut rng = rand::rng();
@@ -105,7 +110,7 @@ fn sign_with_codesign_binary<PI: AsRef<Path>, PO: AsRef<Path>>(
 /// and has transistive allowance - meaning any binary it creates is also allowed to run
 /// so if we use the systems' codesign, we can bypass Santa's block.
 fn use_codesign_binary() -> bool {
-    std::env::var("MIRRORD_SANTA_MODE")
+    std::env::var(MIRRORD_SANTA_MODE_ENV)
         .ok()
         .and_then(|value| value.trim().to_ascii_lowercase().parse::<bool>().ok())
         .unwrap_or(false)

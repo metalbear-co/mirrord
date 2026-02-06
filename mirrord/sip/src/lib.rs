@@ -54,6 +54,7 @@ mod main {
     };
 
     use apple_codesign::{CodeSignatureFlags, MachFile};
+    pub use codesign::MIRRORD_SANTA_MODE_ENV;
     use fs4::fs_std::FileExt;
     use object::{
         Architecture, Endianness, FileKind,
