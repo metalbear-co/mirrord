@@ -1,4 +1,4 @@
-use std::boxed::Box;
+use std::{boxed::Box, process::ExitStatus};
 
 use thiserror::Error;
 
