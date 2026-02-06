@@ -1,4 +1,4 @@
-use mirrord_intproxy_protocol::codec::CodecError;
+use mirrord_intproxy_protocol::{LayerToProxyMessage, codec::CodecError};
 use mirrord_protocol::{DaemonMessage, ErrorKindInternal, RemoteIOError, ResponseError};
 use thiserror::Error;
 
@@ -25,6 +25,9 @@ pub struct UnexpectedAgentMessage(
 /// according to [`crate::FailoverStrategy`]
 #[derive(Error, Debug)]
 pub(crate) enum ProxyRuntimeError {
+    #[error("layer sent unexpected message: {0:?}")]
+    UnexpectedLayerMessage(LayerToProxyMessage),
+
     #[error("connection with agent failed: {0}")]
     AgentConnection(#[from] AgentConnectionError),
     #[error("agent closed connection with error: {0}")]

@@ -12,51 +12,39 @@ use crate::common::CheckedInto;
 use crate::exec_utils::*;
 use crate::{
     SOCKETS,
-    common::proxy_conn_fd,
     detour::{Bypass, Detour},
     hooks::HookManager,
-    proxy_connection::INTPROXY_CONN_FD_ENV_VAR,
     replace,
-    socket::SHARED_SOCKETS_ENV_VAR,
+    socket::{SHARED_SOCKETS_ENV_VAR, UserSocket},
 };
 
+/// Converts the [`SOCKETS`] map into a vector of pairs `(Fd, UserSocket)`, so we can rebuild
+/// it as a map.
+fn shared_sockets() -> Detour<Vec<(i32, UserSocket)>> {
+    Detour::Success(
+        SOCKETS
+            .lock()?
+            .iter()
+            .map(|(key, value)| (*key, value.as_ref().clone()))
+            .collect::<Vec<_>>(),
+    )
+}
+
 /// Takes an [`Argv`] with the enviroment variables from an `exec` call, extending it with
-/// an encoded version of our [`SOCKETS`] and [`INTPROXY_CONN_FD_ENV_VAR`].
-///
-/// # Params
-///
-/// `intproxy_conn_fd` dictates the value of [`INTPROXY_CONN_FD_ENV_VAR`].
-/// When it is `None`, the current connection fd will be used.
+/// an encoded version of our [`SOCKETS`].
 ///
 /// The check for [`libc::FD_CLOEXEC`] is performed during the [`SOCKETS`] initialization
 /// by the child process.
-pub(crate) fn prepare_execve_envp(
-    env_vars: Detour<Argv>,
-    intproxy_conn_fd: Option<i32>,
-) -> Detour<Argv> {
+pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
     let mut env_vars = env_vars.or_bypass(|reason| match reason {
         Bypass::EmptyOption => Detour::Success(Argv(Vec::new())),
         other => Detour::Bypass(other),
     })?;
 
-    let lock = SOCKETS.lock()?;
-    let shared_sockets = lock
-        .iter()
-        .map(|(key, value)| (*key, value))
-        .collect::<Vec<_>>();
-
-    let encoded = bincode::encode_to_vec(shared_sockets, bincode::config::standard())
+    let encoded = bincode::encode_to_vec(shared_sockets()?, bincode::config::standard())
         .map(|bytes| BASE64_URL_SAFE.encode(bytes))?;
 
-    drop(lock);
-
     env_vars.insert_env(SHARED_SOCKETS_ENV_VAR, &encoded)?;
-    env_vars.insert_env(
-        INTPROXY_CONN_FD_ENV_VAR,
-        &intproxy_conn_fd
-            .unwrap_or(proxy_conn_fd().unwrap())
-            .to_string(),
-    )?;
 
     Detour::Success(env_vars)
 }
@@ -81,7 +69,7 @@ unsafe fn environ() -> *const *const c_char {
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
     unsafe {
         let envp = environ();
-        match prepare_execve_envp(envp.checked_into(), None) {
+        match prepare_execve_envp(envp.checked_into()) {
             Detour::Success(envp) => FN_EXECVE(path, argv, envp.leak()),
             _ => FN_EXECVE(path, argv, envp),
         }
@@ -99,7 +87,7 @@ pub(crate) unsafe extern "C" fn execve_detour(
     envp: *const *const c_char,
 ) -> c_int {
     unsafe {
-        match prepare_execve_envp(envp.checked_into(), None) {
+        match prepare_execve_envp(envp.checked_into()) {
             Detour::Success(envp) => FN_EXECVE(path, argv, envp.leak()),
             _ => FN_EXECVE(path, argv, envp),
         }
@@ -139,7 +127,7 @@ pub(crate) unsafe extern "C" fn execve_detour(
     unsafe {
         match patch_sip_for_new_process(path, argv, envp) {
             Detour::Success((path, argv, envp)) => {
-                match prepare_execve_envp(Detour::Success(envp.clone()), None) {
+                match prepare_execve_envp(Detour::Success(envp.clone())) {
                     Detour::Success(envp) => {
                         FN_EXECVE(path.into_raw().cast_const(), argv.leak(), envp.leak())
                     }

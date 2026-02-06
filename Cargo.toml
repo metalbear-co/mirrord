@@ -21,6 +21,7 @@ members = [
     "mirrord/layer/tests/apps/issue2438",
     "mirrord/layer/tests/apps/issue3248",
     "mirrord/layer/tests/apps/rebind0",
+    "mirrord/layer/tests/apps/dup_listen",
     "sample/rust",
     "medschool",
     "tests",
