@@ -14,10 +14,7 @@ use mirrord_intproxy_protocol::{
     MessageId, NewSessionRequest, ProxyToLayerMessage,
     codec::{self, SyncDecoder, SyncEncoder},
 };
-use mirrord_layer_lib::{
-    detour::DetourGuard,
-    proxy_connection::{ProxyError, Result},
-};
+use mirrord_layer_lib::proxy_connection::{ProxyError, Result};
 
 #[derive(Debug)]
 pub struct ProxyConnection {

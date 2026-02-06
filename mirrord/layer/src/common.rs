@@ -6,7 +6,6 @@ use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, Mess
 use mirrord_layer_lib::{
     detour::{Bypass, Detour},
     error::{HookError, HookResult},
-    proxy_connection::INTPROXY_CONN_FD_ENV_VAR,
 };
 use mirrord_protocol::file::OpenOptionsInternal;
 use null_terminated::Nul;
