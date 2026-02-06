@@ -2208,7 +2208,7 @@ unsafe extern "system" fn sendto_detour(
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     // Get socket info BEFORE closing to send PortUnsubscribe if needed
-    let _socket_info = get_socket(s);
+    let socket_info = get_socket(s);
 
     let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();
     let res = unsafe { original(s) };
@@ -2219,6 +2219,14 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
             "closesocket_detour -> successfully closed socket {}, removing from mirrord tracking",
             s
         );
+
+        // Call close() method to send PortUnsubscribe if socket was listening
+        if let Some(socket) = &socket_info
+            && socket.is_listening()
+        {
+            socket.close();
+        }
+
         remove_socket(s);
     } else {
         tracing::warn!(

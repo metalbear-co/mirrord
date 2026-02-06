@@ -1,14 +1,8 @@
 use std::{
     collections::HashMap,
-    env::VarError,
-    ffi::OsString,
     fmt::Debug,
     io,
     net::{SocketAddr, TcpStream},
-    os::{
-        fd::{AsRawFd, FromRawFd, OwnedFd},
-        unix::prelude::RawFd,
-    },
     sync::{
         Mutex, PoisonError,
         atomic::{AtomicU64, Ordering},
@@ -16,21 +10,12 @@ use std::{
     time::Duration,
 };
 
-use libc::{F_GETFD, F_SETFD, FD_CLOEXEC, fcntl};
 use mirrord_intproxy_protocol::{
     IsLayerRequest, IsLayerRequestWithResponse, LayerId, LayerToProxyMessage, LocalMessage,
     MessageId, NewSessionRequest, ProxyToLayerMessage,
     codec::{self, CodecError, SyncDecoder, SyncEncoder},
 };
-use nix::{
-    errno::Errno,
-    sys::socket::{SockaddrStorage, getpeername, getsockopt},
-};
 use thiserror::Error;
-
-use crate::detour::DetourGuard;
-
-pub static INTPROXY_CONN_FD_ENV_VAR: &str = "MIRRORD_INTPROXY_CONNECTION_FD";
 
 #[derive(Debug, Error)]
 pub enum ProxyError {
@@ -49,16 +34,6 @@ pub enum ProxyError {
     LockPoisoned,
     #[error("{0}")]
     IoFailed(#[from] io::Error),
-    #[error("{INTPROXY_CONN_FD_ENV_VAR} is set to an invalid value: {0:?}")]
-    BadProxyConnFdEnv(OsString),
-    #[error(
-        "fd passed in {INTPROXY_CONN_FD_ENV_VAR} ({fd:?}) was not a valid socket. Errno: \"{errno}\" from {fn_name}"
-    )]
-    BadProxyConnFd {
-        fd: OwnedFd,
-        errno: Errno,
-        fn_name: &'static str,
-    },
 }
 
 impl<T> From<PoisonError<T>> for ProxyError {
@@ -84,10 +59,7 @@ impl ProxyConnection {
         session: NewSessionRequest,
         timeout: Duration,
     ) -> Result<Self> {
-        let guard = DetourGuard::new();
-        let connection = Self::acquire_connection(session.parent_layer.is_some(), proxy_addr)?;
-        drop(guard);
-
+        let connection = TcpStream::connect(proxy_addr)?;
         connection.set_read_timeout(Some(timeout))?;
         connection.set_write_timeout(Some(timeout))?;
 
@@ -114,57 +86,6 @@ impl ProxyConnection {
             layer_id: *layer_id,
             proxy_addr,
         })
-    }
-
-    fn make_new_connection(proxy_addr: SocketAddr) -> Result<TcpStream> {
-        let conn = TcpStream::connect(proxy_addr)?;
-
-        let fd = conn.as_raw_fd();
-        unsafe {
-            let flags = fcntl(fd, F_GETFD);
-            fcntl(fd, F_SETFD, flags & (!FD_CLOEXEC));
-        }
-        Ok(conn)
-    }
-
-    fn acquire_connection(have_parent_layer: bool, proxy_addr: SocketAddr) -> Result<TcpStream> {
-        // Parent layer is Some OR we don't have the env var set =>
-        // We're calling this from a fork(), i.e. this is a a brand
-        // new process and we have to establish a new connection to
-        // the intproxy.
-        if have_parent_layer {
-            return Self::make_new_connection(proxy_addr);
-        }
-
-        let fd: i32 = match std::env::var(INTPROXY_CONN_FD_ENV_VAR) {
-            Ok(var) => var
-                .parse()
-                .map_err(|_| ProxyError::BadProxyConnFdEnv(var.into()))?,
-            Err(VarError::NotPresent) => return Self::make_new_connection(proxy_addr),
-            Err(VarError::NotUnicode(os)) => return Err(ProxyError::BadProxyConnFdEnv(os)),
-        };
-
-        let owned_fd = unsafe { OwnedFd::from_raw_fd(fd) };
-
-        // Ensure the fd is a valid socket.
-        if let Err(errno) = getsockopt(&owned_fd, nix::sys::socket::sockopt::SockType) {
-            return Err(ProxyError::BadProxyConnFd {
-                fd: owned_fd,
-                errno,
-                fn_name: "getsockopt",
-            });
-        }
-
-        if let Err(errno) = getpeername::<SockaddrStorage>(fd) {
-            return Err(ProxyError::BadProxyConnFd {
-                fd: owned_fd,
-                errno,
-                fn_name: "getpeername",
-            });
-        }
-
-        // Recover the connection
-        Ok(TcpStream::from(owned_fd))
     }
 
     fn next_message_id(&self) -> MessageId {
@@ -220,12 +141,6 @@ impl ProxyConnection {
 
     pub fn proxy_addr(&self) -> SocketAddr {
         self.proxy_addr
-    }
-}
-
-impl AsRawFd for ProxyConnection {
-    fn as_raw_fd(&self) -> RawFd {
-        self.sender.lock().unwrap().as_ref().as_raw_fd()
     }
 }
 
