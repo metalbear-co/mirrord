@@ -39,17 +39,20 @@ pub(crate) fn remove_proxy_env() {
 /// Enable Santa-compatible signing mode when `santactl` is present.
 #[cfg(target_os = "macos")]
 pub(crate) fn maybe_enable_santa_mode() {
-    if let Ok(value) = env::var(MIRRORD_SANTA_MODE_ENV) {
-        if value.trim().to_ascii_lowercase().parse::<bool>().is_ok() {
-            return;
-        }
+    let already_set = env::var(MIRRORD_SANTA_MODE_ENV)
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .and_then(|value| value.parse::<bool>().ok())
+        .is_some();
+    if already_set {
+        return;
     }
 
     let present = which("santactl").is_ok();
     unsafe {
         env::set_var(
             MIRRORD_SANTA_MODE_ENV,
-            if present { "true" } else { "false" },
+            present.to_string(),
         );
     }
     tracing::debug!("santa mode: {present}")

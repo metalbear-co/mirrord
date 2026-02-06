@@ -97,9 +97,8 @@ fn sign_with_codesign_binary<PI: AsRef<Path>, PO: AsRef<Path>>(
     if output_status.status.success() {
         Ok(())
     } else {
-        let code = output_status.status.into_raw(); // Returns wait status if there's no exit status.
         Err(SipError::Sign(
-            code,
+            output_status.status,
             String::from_utf8_lossy(&output_status.stderr).to_string(),
         ))
     }
