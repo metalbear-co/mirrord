@@ -93,10 +93,6 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
         SipPatchOptions {
             patch: patch_binaries,
             skip: skip_patch_binaries,
-            use_codesign_binary: crate::setup()
-                .layer_config()
-                .experimental
-                .use_codesign_binary,
         },
         log_info,
     ) {

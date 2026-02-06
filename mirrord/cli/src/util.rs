@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+use std::env;
 use std::{io, net::SocketAddr};
 
 #[cfg(not(target_os = "windows"))]
@@ -7,12 +9,17 @@ use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
 use nix::libc;
 use tokio::{net::TcpListener, process::Command};
 use tracing::Level;
+#[cfg(target_os = "macos")]
+use which::which;
 
 /// Address for mirrord-console is listening on.
 pub(crate) const MIRRORD_CONSOLE_ADDR_ENV: &str = "MIRRORD_CONSOLE_ADDR";
 
 /// User git branch (set by plugins).
 pub(crate) const MIRRORD_BRANCH_NAME_ENV: &str = "MIRRORD_BRANCH_NAME";
+
+#[cfg(target_os = "macos")]
+pub(crate) const MIRRORD_SANTA_MODE_ENV: &str = "MIRRORD_SANTA_MODE";
 
 /// Removes `HTTP_PROXY` and `https_proxy` from the environment
 pub(crate) fn remove_proxy_env() {
@@ -24,6 +31,24 @@ pub(crate) fn remove_proxy_env() {
             // TODO: Audit that the environment access only happens in single-threaded code.
             unsafe { std::env::set_var(key, "") }
         }
+    }
+}
+
+/// Enable Santa-compatible signing mode when `santactl` is present.
+#[cfg(target_os = "macos")]
+pub(crate) fn maybe_enable_santa_mode() {
+    if let Ok(value) = env::var(MIRRORD_SANTA_MODE_ENV) {
+        if value.trim().to_ascii_lowercase().parse::<bool>().is_ok() {
+            return;
+        }
+    }
+
+    let present = which("santactl").is_ok();
+    unsafe {
+        env::set_var(
+            MIRRORD_SANTA_MODE_ENV,
+            if present { "true" } else { "false" },
+        );
     }
 }
 

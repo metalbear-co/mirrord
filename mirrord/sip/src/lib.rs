@@ -141,8 +141,6 @@ mod main {
         pub patch: &'a [String],
         /// A list of binaries to skip patching.
         pub skip: &'a [String],
-        /// Use `/usr/bin/codesign` instead of `apple-codesign` for signing patched binaries.
-        pub use_codesign_binary: bool,
     }
 
     /// Info for logging to `config.experimental.sip_log_destination`
@@ -324,7 +322,7 @@ mod main {
 
     /// Read the contents (or just the x86_64 section in case of a fat file) from the SIP binary at
     /// `path`, write it into `output`, give it the same permissions, and sign the new binary.
-    fn patch_binary(path: &Path, use_codesign_binary: bool) -> Result<PathBuf> {
+    fn patch_binary(path: &Path) -> Result<PathBuf> {
         set_fallback_frameworks_path_if_mac_app(path);
 
         let output = get_output_path(path)?;
@@ -366,7 +364,7 @@ mod main {
         }
 
         let signed_temp_file = tempfile::NamedTempFile::new()?;
-        codesign::sign(&temp_binary, &signed_temp_file, path, use_codesign_binary)?;
+        codesign::sign(&temp_binary, &signed_temp_file, path)?;
 
         // Give the new file the same permissions as the old file.
         // This needs to happen after the sign because it might change the permissions.
@@ -736,8 +734,7 @@ mod main {
         // NOT fork safe, and have been suspected to cause issues.
         let patch_result = match status {
             Ok(SipScript { path, shebang }) => {
-                let patched_interpreter =
-                    patch_binary(&shebang.interpreter_path, opts.use_codesign_binary)?;
+                let patched_interpreter = patch_binary(&shebang.interpreter_path)?;
                 let patched_script = patch_script(
                     &path,
                     shebang,
@@ -747,8 +744,8 @@ mod main {
                 Some(patched_script).transpose()
             }
             Ok(SipBinary(binary)) => {
-                let patched_binary = patch_binary(&binary, opts.use_codesign_binary)
-                    .map(|path| path.to_string_lossy().to_string());
+                let patched_binary =
+                    patch_binary(&binary).map(|path| path.to_string_lossy().to_string());
                 Some(patched_binary).transpose()
             }
             Ok(NoSip) => {

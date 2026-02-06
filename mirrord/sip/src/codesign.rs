@@ -22,9 +22,8 @@ pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>, PN: AsRef<Path>>(
     input: PI,
     output: PO,
     original: PN,
-    use_codesign_binary: bool,
 ) -> Result<()> {
-    if use_codesign_binary {
+    if use_codesign_binary() {
         sign_with_codesign_binary(input, output)
     } else {
         sign_with_apple_codesign(input, output, original)
@@ -98,4 +97,11 @@ fn sign_with_codesign_binary<PI: AsRef<Path>, PO: AsRef<Path>>(
             String::from_utf8_lossy(&output_status.stderr).to_string(),
         ))
     }
+}
+
+fn use_codesign_binary() -> bool {
+    std::env::var("MIRRORD_SANTA_MODE")
+        .ok()
+        .and_then(|value| value.trim().to_ascii_lowercase().parse::<bool>().ok())
+        .unwrap_or(false)
 }

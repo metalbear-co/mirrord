@@ -1599,14 +1599,6 @@
             "null"
           ]
         },
-        "use_codesign_binary": {
-          "title": "_experimental_ use_codesign_binary {#experimental-use_codesign_binary}",
-          "description": "Uses `/usr/bin/codesign` to sign SIP-patched binaries instead of the `apple-codesign` crate. macOS only.",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "use_dev_null": {
           "title": "_experimental_ use_dev_null {#experimental-use_dev_null}",
           "description": "Uses /dev/null for creating local fake files (should be better than using /tmp)",
