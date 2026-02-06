@@ -9,7 +9,6 @@ const EMPTY_ENTITLEMENTS_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 
 /// mirrord auto detects santa (or user can set it) and changes codesign behavior
 /// see sip logic for more info.
-#[cfg(target_os = "macos")]
 pub const MIRRORD_SANTA_MODE_ENV: &str = "MIRRORD_SANTA_MODE";
 
 /// Hex string from random 20 bytes (results in 40 hexadecimal digits).
