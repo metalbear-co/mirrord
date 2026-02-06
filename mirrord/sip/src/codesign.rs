@@ -24,6 +24,7 @@ pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>, PN: AsRef<Path>>(
     original: PN,
 ) -> Result<()> {
     if use_codesign_binary() {
+        tracing::debug!("using codesign binary");
         sign_with_codesign_binary(input, output)
     } else {
         sign_with_apple_codesign(input, output, original)
@@ -86,6 +87,11 @@ fn sign_with_codesign_binary<PI: AsRef<Path>, PO: AsRef<Path>>(
         .output()?;
 
     // Allow Santa some time to observe the new signature.
+    // https://northpole.dev/features/binary-authorization/#allowlist-compiler
+    // > While Santa tries to ensure all files created by allowlisted compilers are scanned
+    // > and transitive rules created as quickly as possible,
+    // > there is a race condition in certain scenarios that will cause execution to fail,
+    // > especially if a binary is executed immediately after being created.
     thread::sleep(Duration::from_millis(100));
 
     if output_status.status.success() {

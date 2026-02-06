@@ -50,6 +50,7 @@ pub(crate) fn maybe_enable_santa_mode() {
             if present { "true" } else { "false" },
         );
     }
+    tracing::debug!("santa mode: {present}")
 }
 
 /// Used to pipe std[in/out/err] to "/dev/null" to prevent any printing to prevent any unwanted
