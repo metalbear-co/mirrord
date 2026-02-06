@@ -1,7 +1,4 @@
-use std::{
-    ffi::OsStr, os::unix::process::ExitStatusExt, path::Path, process::Command, thread,
-    time::Duration,
-};
+use std::{ffi::OsStr, path::Path, process::Command, thread, time::Duration};
 
 use apple_codesign::{CodeSignatureFlags, SettingsScope, SigningSettings, UnifiedSigner};
 use rand::RngCore;
