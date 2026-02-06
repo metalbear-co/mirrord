@@ -6,14 +6,7 @@ use std::{
 };
 
 use libc::{c_char, c_int, pid_t};
-use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use mirrord_sip::{MIRRORD_PATCH_DIR, SipError, SipPatchOptions, sip_patch};
-use null_terminated::Nul;
-use tracing::{info, trace, warn};
-
-use crate::{
-    EXECUTABLE_ARGS,
-    common::{CheckedInto, strip_mirrord_path},
+use mirrord_layer_lib::{
     detour::{
         Bypass::{
             ExecOnNonExistingFile, FileOperationInMirrordBinTempDir, NoSipDetected, TooManyArgs,
@@ -22,6 +15,15 @@ use crate::{
         Detour::{Bypass, Error, Success},
     },
     error::HookError,
+};
+use mirrord_layer_macro::{hook_fn, hook_guard_fn};
+use mirrord_sip::{MIRRORD_PATCH_DIR, SipError, SipPatchOptions, sip_patch};
+use null_terminated::Nul;
+use tracing::{info, trace, warn};
+
+use crate::{
+    EXECUTABLE_ARGS,
+    common::{CheckedInto, strip_mirrord_path},
     exec_hooks::{hooks, *},
     graceful_exit,
     hooks::HookManager,
@@ -327,7 +329,7 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
 ) -> *const c_void {
     unsafe {
         // we hold the guard manually for tracing/internal code
-        let guard = crate::detour::DetourGuard::new();
+        let guard = mirrord_layer_lib::detour::DetourGuard::new();
         let detour: Detour<PathBuf> = raw_path.checked_into();
         let raw_path = if let Bypass(FileOperationInMirrordBinTempDir(ptr)) = detour {
             trace!("dlopen called with a path inside our patch dir, switching with fixed pointer.");

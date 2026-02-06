@@ -41,7 +41,6 @@ num-traits = "0.2"
 rand.workspace = true
 regex.workspace = true
 socket2.workspace = true
-thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
