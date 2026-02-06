@@ -94,6 +94,13 @@ pub struct ExperimentalConfig {
     #[config(default = None)]
     pub sip_log_destination: Option<PathBuf>,
 
+    /// ### _experimental_ use_codesign_binary {#experimental-use_codesign_binary}
+    ///
+    /// Uses `/usr/bin/codesign` to sign SIP-patched binaries instead of the `apple-codesign`
+    /// crate. macOS only.
+    #[config(default = false)]
+    pub use_codesign_binary: bool,
+
     /// ### _experimental_ hook_rename {#experimental-hook_rename}
     ///
     /// Enables hooking the `rename` function.
@@ -172,6 +179,7 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("latency_transmit_delay", self.latency.transmit_delay);
         analytics.add("latency_receive_delay", self.latency.receive_delay);
         analytics.add("applev", self.applev.is_some());
+        analytics.add("use_codesign_binary", self.use_codesign_binary);
     }
 }
 

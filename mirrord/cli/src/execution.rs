@@ -371,6 +371,7 @@ impl MirrordExecution {
                             .map(|x| x.to_vec())
                             .unwrap_or_default(),
                         skip: &config.skip_sip,
+                        use_codesign_binary: config.experimental.use_codesign_binary,
                     },
                     log_info,
                 )

@@ -1,9 +1,12 @@
-use std::{ffi::OsStr, path::Path};
+use std::{
+    ffi::OsStr, os::unix::process::ExitStatusExt, path::Path, process::Command, thread,
+    time::Duration,
+};
 
 use apple_codesign::{CodeSignatureFlags, SettingsScope, SigningSettings, UnifiedSigner};
 use rand::RngCore;
 
-use crate::error::Result;
+use crate::error::{Result, SipError};
 
 const EMPTY_ENTITLEMENTS_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict></dict></plist>"#;
 
@@ -16,6 +19,19 @@ fn generate_hex_string() -> String {
 }
 
 pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>, PN: AsRef<Path>>(
+    input: PI,
+    output: PO,
+    original: PN,
+    use_codesign_binary: bool,
+) -> Result<()> {
+    if use_codesign_binary {
+        sign_with_codesign_binary(input, output)
+    } else {
+        sign_with_apple_codesign(input, output, original)
+    }
+}
+
+fn sign_with_apple_codesign<PI: AsRef<Path>, PO: AsRef<Path>, PN: AsRef<Path>>(
     input: PI,
     output: PO,
     original: PN,
@@ -55,4 +71,31 @@ pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>, PN: AsRef<Path>>(
     let signer = UnifiedSigner::new(settings);
     signer.sign_path(input, output)?;
     Ok(())
+}
+
+fn sign_with_codesign_binary<PI: AsRef<Path>, PO: AsRef<Path>>(
+    input: PI,
+    output: PO,
+) -> Result<()> {
+    std::fs::copy(input.as_ref(), output.as_ref())?;
+    let output_status = Command::new("/usr/bin/codesign")
+        .arg("-s") // sign with identity
+        .arg("-") // adhoc identity
+        .arg("-f") // force (might have a signature already)
+        .arg(output.as_ref())
+        .env_clear()
+        .output()?;
+
+    // Allow Santa some time to observe the new signature.
+    thread::sleep(Duration::from_millis(100));
+
+    if output_status.status.success() {
+        Ok(())
+    } else {
+        let code = output_status.status.into_raw(); // Returns wait status if there's no exit status.
+        Err(SipError::Sign(
+            code,
+            String::from_utf8_lossy(&output_status.stderr).to_string(),
+        ))
+    }
 }

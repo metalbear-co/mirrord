@@ -261,6 +261,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
             mirrord_sip::SipPatchOptions {
                 patch: &patch_binaries,
                 skip: &skip_patch_binaries,
+                use_codesign_binary: config.experimental.use_codesign_binary,
             },
             log_info,
         ) {

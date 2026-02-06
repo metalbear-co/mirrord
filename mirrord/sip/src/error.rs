@@ -45,6 +45,9 @@ pub enum SipError {
 
     #[error("Code sign error: `{0}`")]
     CodeSignError(#[from] Box<apple_codesign::AppleCodesignError>),
+
+    #[error("Code sign failed with statuscode: `{0}`, output: `{1}`")]
+    Sign(i32, String),
 }
 
 /// NOTE(gabriela): this was introduced in https://github.com/metalbear-co/mirrord/pull/3687

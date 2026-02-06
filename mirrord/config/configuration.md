@@ -742,6 +742,11 @@ Defaults to `false`.
 Writes basic fork-safe SIP patching logs to a destination file.
 Useful for seeing the state of SIP when `stdout` may be affected by another process.
 
+### _experimental_ use_codesign_binary {#experimental-use_codesign_binary}
+
+Uses `/usr/bin/codesign` to sign SIP-patched binaries instead of the `apple-codesign` crate.
+macOS only.
+
 ### _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
 
 <https://github.com/metalbear-co/mirrord/issues/2421#issuecomment-2093200904>
@@ -3062,4 +3067,3 @@ doing any network requests. This is useful when the system sets a proxy
 but you don't want mirrord to use it.
 This also applies to the mirrord process (as it just removes the env).
 If the remote pod sets this env, the mirrord process will still use it.
-
