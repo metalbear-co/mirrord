@@ -1,0 +1,103 @@
+name: Auto Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_version:
+        description: 'Force specific version (optional)'
+        required: false
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.MIRRORD_RELEASE_PAT }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.MIRRORD_RELEASE_PAT }}
+
+      - name: Calculate Version
+        id: version
+        run: |
+          echo "Using Dockerized tools..."
+          if [[ -n "${{ github.event.inputs.force_version }}" ]]; then
+             next_version="${{ github.event.inputs.force_version }}"
+          else
+             # Run calculation using Docker image
+             next_version=$(docker run --rm -v $PWD:/workspace -w /workspace \
+               --entrypoint python3 ghcr.io/metalbear-co/ci/calculate-version-script:latest \
+               /usr/local/bin/calculate_version.py --file Cargo.toml --changelog-dir changelog.d)
+          fi
+          echo "next_version=$next_version" >> $GITHUB_OUTPUT
+          echo "Next version: $next_version"
+
+
+
+      - name: Install Rust tools
+        uses: metalbear-co/install-action@main
+        with:
+          tool: cargo-edit
+
+      - name: Update Files
+        run: |
+          v="${{ steps.version.outputs.next_version }}"
+          cargo set-version "$v"
+          cargo update -w -q
+
+      - name: Generate Changelog
+        run: |
+          v="${{ steps.version.outputs.next_version }}"
+          if grep -q "\[$v\]" CHANGELOG.md; then
+            echo "Changelog entry for $v already exists, skipping creation."
+          else
+            docker run --rm -v $PWD:/workspace -w /workspace \
+              --entrypoint towncrier \
+              ghcr.io/metalbear-co/ci/calculate-version-script:latest \
+              build --yes --version "$v"
+          fi
+          
+          # Extract the new entry for release body (excluding Internal sections)
+          awk '/^## / { if (p) exit; p=1; print; next } p { if (/^### Internal/) { skip=1; next } if (/^### /) { skip=0 } if (!skip) print }' CHANGELOG.md > RELEASE_NOTES.md
+
+      - name: Commit and Push
+        run: |
+          sudo chown -R $(id -u):$(id -g) .
+          v="${{ steps.version.outputs.next_version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock CHANGELOG.md changelog.d
+          if ! git diff --staged --quiet; then
+            git commit -m "Release $v"
+            git pull --rebase origin main
+            git push origin main
+          else
+            echo "No changes to commit, checking if tag exists..."
+          fi
+          if git rev-parse "$v" >/dev/null 2>&1; then
+            echo "Tag $v already exists, skipping creation."
+          else
+            git tag "$v"
+            git push origin "$v"
+          fi
+          
+      - name: Create Release
+        uses: metalbear-co/action-gh-release-1@v1
+        with:
+          tag_name: ${{ steps.version.outputs.next_version }}
+          body_path: RELEASE_NOTES.md
+      
+      - name: Summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: ${{ steps.version.outputs.next_version }}" >> $GITHUB_STEP_SUMMARY
