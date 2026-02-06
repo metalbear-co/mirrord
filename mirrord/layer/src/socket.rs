@@ -210,7 +210,7 @@ impl TryFrom<c_int> for SocketKind {
 // can't do that due to how `dup` interacts directly with our `Arc<UserSocket>`, because we just
 // `clone` the arc, we end up with exact duplicates, but `dup` generates a new fd that we have no
 // way of putting inside the duplicated `UserSocket`.
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, Clone, Encode, Decode)]
 #[allow(dead_code)]
 pub(crate) struct UserSocket {
     domain: c_int,
@@ -238,18 +238,24 @@ impl UserSocket {
     }
 
     /// Inform internal proxy about closing a listening port.
+    ///
+    /// **Important**
+    ///
+    /// Before calling this method, make sure that this socket does not have any living clones
+    /// (dup*) in the current process.
     #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()), ret)]
-    pub(crate) fn close(&self) -> HookResult<()> {
-        let result = match self {
+    pub(crate) fn close(&self) {
+        match self {
             Self {
                 state: SocketState::Listening(bound),
                 kind: SocketKind::Tcp(..),
                 ..
-            } => common::make_proxy_request_no_response(PortUnsubscribe {
-                port: bound.requested_address.port(),
-                listening_on: bound.address,
-            })
-            .map(|_| ()),
+            } => {
+                let _ = common::make_proxy_request_no_response(PortUnsubscribe {
+                    port: bound.requested_address.port(),
+                    listening_on: bound.address,
+                });
+            }
             Self {
                 state:
                     SocketState::Connected(Connected {
@@ -257,18 +263,13 @@ impl UserSocket {
                         ..
                     }),
                 ..
-            } => common::make_proxy_request_no_response(OutgoingConnCloseRequest { conn_id: *id })
-                .map(|_| ()),
-            _ => Ok(()),
-        };
-
-        result.inspect_err(|error| warn!(?error, "mirrord failed to send close socket message."))
-    }
-}
-
-impl Drop for UserSocket {
-    fn drop(&mut self) {
-        let _ = self.close();
+            } => {
+                let _ = common::make_proxy_request_no_response(OutgoingConnCloseRequest {
+                    conn_id: *id,
+                });
+            }
+            _ => {}
+        }
     }
 }
 
