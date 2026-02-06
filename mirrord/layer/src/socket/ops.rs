@@ -443,10 +443,23 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 
             Detour::Success(listen_result)
         }
-        SocketState::Bound { .. }
-        | SocketState::Initialized
-        | SocketState::Listening(_)
-        | SocketState::Connected(_) => Detour::Bypass(Bypass::InvalidState(sockfd)),
+        SocketState::Listening(_) => {
+            tracing::debug!("second listen called");
+            let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
+
+            SOCKETS.lock()?.insert(sockfd, socket);
+
+            if listen_result != 0 {
+                let error = io::Error::last_os_error();
+                error!("listen -> Failed `listen` sockfd {:#?}", sockfd);
+                Err(error)?
+            }
+
+            Detour::Success(listen_result)
+        }
+        SocketState::Bound { .. } | SocketState::Initialized | SocketState::Connected(_) => {
+            Detour::Bypass(Bypass::InvalidState(sockfd))
+        }
     }
 }
 

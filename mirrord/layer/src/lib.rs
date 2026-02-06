@@ -80,7 +80,7 @@ use std::{
     net::SocketAddr,
     os::unix::process::parent_id,
     panic,
-    sync::OnceLock,
+    sync::{Arc, OnceLock},
     time::Duration,
 };
 
@@ -739,14 +739,25 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         Some(socket) => {
             // Closed file is a socket, so if it's already bound to a port - notify agent to stop
             // mirroring/stealing that port.
+            //
+            // Mind that there might be more instances of this socket,
+            // stored in the SOCKETS map due to `dup*` calls.
+            // We only make the request if this is the last instance.
+            let socket_cloned = socket.as_ref().clone();
 
-            // [`UserSocket::close`] will be called in its `Drop` impl,
-            // when all handles (possibly created through `dup` and
-            // friends) have been closed.
-            drop(socket);
+            // Obtain weak pointer, and drop the strong one.
+            let weak = Arc::downgrade(&socket);
+            std::mem::drop(socket);
+
+            // If there are no other strong ones, make the request.
+            // There is no chance of missed close here, because we dropped the strong pointer first.
+            // There is a chance of double close, but the second request should be a noop in the
+            // intproxy.
+            if weak.strong_count() == 0 {
+                socket_cloned.close();
+            }
         }
         _ => {
-            // `close` called in [`RemoteFile::drop`]
             if setup().fs_config().is_active() {
                 OPEN_FILES
                     .lock()
