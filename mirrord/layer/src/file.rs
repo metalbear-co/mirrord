@@ -10,7 +10,6 @@ use mirrord_protocol::file::{
     OpenRelativeFileRequest, ReadFileRequest, ReadLimitedFileRequest, SeekFileRequest,
     WriteFileRequest, WriteLimitedFileRequest, XstatRequest,
 };
-use crate::mutex::Mutex;
 /// File operations on remote pod.
 ///
 /// Read-only file operations are enabled by default, you can turn it off by setting
@@ -22,6 +21,8 @@ use crate::mutex::Mutex;
 /// `[FsConfig]`.
 #[cfg(target_os = "linux")]
 use mirrord_protocol::file::{GetDEnts64Request, GetDEnts64Response};
+
+use crate::mutex::Mutex;
 
 pub(crate) mod hooks;
 pub(crate) mod open_dirs;

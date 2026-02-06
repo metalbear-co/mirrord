@@ -9,7 +9,7 @@ const TRY_LOCK_SLEEP: Duration = Duration::from_millis(10);
 const TRY_LOCK_TIMEOUT: Duration = Duration::from_secs(1);
 
 fn nodeadlock_enabled() -> bool {
-std::env::var(NODEADLOCK_ENV)
+    std::env::var(NODEADLOCK_ENV)
         .ok()
         .and_then(|value| value.trim().to_ascii_lowercase().parse::<bool>().ok())
         .unwrap_or(false)
