@@ -17,7 +17,7 @@ use mirrord_intproxy_protocol::{
 };
 use thiserror::Error;
 
-use crate::{detour::DetourGuard, mutex::Mutex};
+use crate::mutex::Mutex;
 
 #[derive(Debug, Error)]
 pub enum ProxyError {
