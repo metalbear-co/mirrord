@@ -18,6 +18,8 @@ pub(crate) const MIRRORD_CONSOLE_ADDR_ENV: &str = "MIRRORD_CONSOLE_ADDR";
 /// User git branch (set by plugins).
 pub(crate) const MIRRORD_BRANCH_NAME_ENV: &str = "MIRRORD_BRANCH_NAME";
 
+/// mirrord auto detects santa (or user can set it) and changes codesign behavior
+/// see sip logic for more info.
 #[cfg(target_os = "macos")]
 pub(crate) const MIRRORD_SANTA_MODE_ENV: &str = "MIRRORD_SANTA_MODE";
 

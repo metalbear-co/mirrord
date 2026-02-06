@@ -105,6 +105,9 @@ fn sign_with_codesign_binary<PI: AsRef<Path>, PO: AsRef<Path>>(
     }
 }
 
+/// macOS's codesign binary is usually set as a "Compiler Rule"
+/// and has transistive allowance - meaning any binary it creates is also allowed to run
+/// so if we use the systems' codesign, we can bypass Santa's block.
 fn use_codesign_binary() -> bool {
     std::env::var("MIRRORD_SANTA_MODE")
         .ok()
