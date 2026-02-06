@@ -2,21 +2,17 @@ use std::{sync::LazyLock, time::Instant};
 
 use futures::TryStreamExt;
 use k8s_openapi::api::core::v1::Namespace;
-use kube::client::ClientBuilder;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext, target::TargetType};
-use mirrord_kube::{
-    api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
-    error::KubeApiError,
-    retry::RetryKube,
-};
+use mirrord_kube::{api::kubernetes::seeker::KubeResourceSeeker, error::KubeApiError};
 use mirrord_operator::client::OperatorApi;
 use semver::VersionReq;
 use serde::{Serialize, Serializer, ser::SerializeSeq};
-use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
-use crate::{CliError, CliResult, Format, ListTargetArgs, util};
+use crate::{
+    CliError, CliResult, Format, ListTargetArgs, kube::kube_client_from_layer_config, util,
+};
 
 /// Name of the environment variable used to specify which resource types to list with `mirrord ls`.
 /// Primarily used by the plugins when the user picks a target to fetch fewer targets at once.
@@ -77,23 +73,7 @@ impl FoundTargets {
         rich_output: bool,
         target_types: Option<Vec<TargetType>>,
     ) -> CliResult<Self> {
-        let client = create_kube_config(
-            layer_config.accept_invalid_certificates,
-            layer_config.kubeconfig.clone(),
-            layer_config.kube_context.clone(),
-        )
-        .await
-        .and_then(|config| {
-            Ok(ClientBuilder::try_from(config.clone())?
-                .with_layer(&BufferLayer::new(1024))
-                .with_layer(&RetryLayer::new(RetryKube::try_from(
-                    &layer_config.startup_retry,
-                )?))
-                .build())
-        })
-        .map_err(|error| {
-            CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed)
-        })?;
+        let client = kube_client_from_layer_config(&layer_config).await?;
 
         let start = Instant::now();
         let mut reporter = NullReporter::default();
