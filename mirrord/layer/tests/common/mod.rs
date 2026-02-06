@@ -1006,6 +1006,8 @@ pub enum Application {
     DlopenCgo,
     /// C app that calls BSD connectx(2).
     Connectx,
+    /// Rust app that closes a clone socket.
+    DupListen,
 }
 
 impl Application {
@@ -1188,6 +1190,13 @@ impl Application {
             }
             Application::DlopenCgo => String::from("tests/apps/dlopen_cgo/out.cpp_dlopen_cgo"),
             Application::Connectx => String::from("tests/apps/connectx/out.c_test_app"),
+            Application::DupListen => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/dup-listen"
+                )
+            }
         }
     }
 
@@ -1308,7 +1317,8 @@ impl Application {
             | Application::RustIssue3248
             | Application::GoIssue2988(..)
             | Application::DlopenCgo
-            | Application::Connectx => vec![],
+            | Application::Connectx
+            | Application::DupListen => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
@@ -1350,7 +1360,8 @@ impl Application {
             | Application::GoFileOps(..)
             | Application::NodeHTTP
             | Application::RustIssue1054
-            | Application::PythonFlaskHTTP => 80,
+            | Application::PythonFlaskHTTP
+            | Application::DupListen => 80,
             // mapped from 9999 in `configs/port_mapping.json`
             Application::PythonFastApiHTTP | Application::PythonIssue864 => 1234,
             Application::RustIssue1123 => 41222,
