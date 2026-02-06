@@ -50,10 +50,7 @@ pub(crate) fn maybe_enable_santa_mode() {
 
     let present = which("santactl").is_ok();
     unsafe {
-        env::set_var(
-            MIRRORD_SANTA_MODE_ENV,
-            present.to_string(),
-        );
+        env::set_var(MIRRORD_SANTA_MODE_ENV, present.to_string());
     }
     tracing::debug!("santa mode: {present}")
 }
