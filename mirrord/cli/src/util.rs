@@ -5,6 +5,8 @@ use std::{io, net::SocketAddr};
 #[cfg(not(target_os = "windows"))]
 use io::Write;
 use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
+#[cfg(target_os = "macos")]
+use mirrord_sip::MIRRORD_SANTA_MODE_ENV;
 #[cfg(not(target_os = "windows"))]
 use nix::libc;
 use tokio::{net::TcpListener, process::Command};
