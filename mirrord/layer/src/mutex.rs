@@ -21,6 +21,12 @@ pub(crate) struct Mutex<T> {
     nodeadlock: bool,
 }
 
+impl<T: Default> Default for Mutex<T> {
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}
+
 impl<T> Mutex<T> {
     pub(crate) fn new(value: T) -> Self {
         Self {
