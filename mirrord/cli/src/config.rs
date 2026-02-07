@@ -1391,7 +1391,7 @@ pub(super) struct PreviewStopArgs {
     ///
     /// When neither this flag nor the config set a namespace, the command implicitly searches
     /// all namespaces (equivalent to `-A`).
-    #[arg(short = 'n', long = "namespace")]
+    #[arg(short = 'n')]
     pub namespace: Option<String>,
 
     /// Operate on all namespaces.

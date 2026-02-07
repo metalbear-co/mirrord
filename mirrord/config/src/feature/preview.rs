@@ -22,21 +22,21 @@ use crate::config::source::MirrordConfigSource;
 #[config(map_to = "PreviewFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct PreviewConfig {
-    /// ### feature.preview.image {#feature-preview-image}
+    /// #### feature.preview.image {#feature-preview-image}
     ///
     /// Container image to run in the preview pod.
     /// The image must be pre-built and pushed to a registry accessible by the cluster.
     #[config(env = "MIRRORD_PREVIEW_IMAGE")]
     pub image: Option<String>,
 
-    /// ### feature.preview.ttl_mins {#feature-preview-ttl_mins}
+    /// #### feature.preview.ttl_mins {#feature-preview-ttl_mins}
     ///
     /// How long (in minutes) the preview session is allowed to live after creation.
     /// The operator will terminate the session when this time elapses.
     #[config(env = "MIRRORD_PREVIEW_TTL_MINS", default = 60)]
     pub ttl_mins: u64,
 
-    /// ### feature.preview.creation_timeout_secs {#feature-preview-creation_timeout_secs}
+    /// #### feature.preview.creation_timeout_secs {#feature-preview-creation_timeout_secs}
     ///
     /// How long (in seconds) the CLI waits for the preview session to become ready.
     /// If the session hasn't reached `Ready` within this time, the CLI deletes it.

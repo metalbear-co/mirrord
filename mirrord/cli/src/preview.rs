@@ -7,16 +7,15 @@
 
 use std::{
     borrow::Cow,
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     ffi::OsStr,
     time::{Duration, Instant},
 };
 
-use drain::Watch;
 use futures::StreamExt;
 use kube::{
     Api, ResourceExt,
-    api::{DeleteParams, ListParams, PostParams},
+    api::{DeleteParams, ListParams, ObjectMeta, PostParams},
     client::ClientBuilder,
     runtime::watcher::{self, Event, watcher},
 };
@@ -37,21 +36,22 @@ use uuid::Uuid;
 use crate::{
     config::{PreviewArgs, PreviewCommand, PreviewStartArgs, PreviewStatusArgs, PreviewStopArgs},
     error::{CliError, CliResult},
-    user_data::UserData,
 };
 
 /// Handle commands related to preview environments: `mirrord preview ...`
-pub(crate) async fn preview_command(
-    args: PreviewArgs,
-    _watch: Watch,
-    _user_data: &UserData,
-) -> CliResult<()> {
+pub(crate) async fn preview_command(args: PreviewArgs) -> CliResult<()> {
     match args.command {
         PreviewCommand::Start(start_args) => preview_start(start_args).await,
         PreviewCommand::Status(status_args) => preview_status(status_args).await,
         PreviewCommand::Stop(stop_args) => preview_stop(stop_args).await,
     }
 }
+
+/// Label key used to store the preview session's environment key on the CR.
+///
+/// This allows server-side filtering with `ListParams::labels()` in the `status` and `stop`
+/// commands, avoiding the need to fetch all sessions and filter client-side.
+pub const PREVIEW_SESSION_KEY_LABEL: &str = "preview.mirrord.metalbear.co/key";
 
 /// Handle `mirrord preview start` command.
 ///
@@ -115,10 +115,18 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
     let sanitized_target = target.to_string().replace('/', "-");
     let uuid_short = Uuid::new_v4().simple().to_string();
     let uuid_short = &uuid_short[..8];
-    let preview = PreviewSessionCrd::new(
-        &format!("preview-session-{sanitized_target}-{uuid_short}"),
+    let preview = PreviewSessionCrd {
+        metadata: ObjectMeta {
+            name: Some(format!("preview-session-{sanitized_target}-{uuid_short}")),
+            labels: Some(BTreeMap::from([(
+                PREVIEW_SESSION_KEY_LABEL.to_owned(),
+                layer_config.key.as_str().to_owned(),
+            )])),
+            ..Default::default()
+        },
         spec,
-    );
+        status: None,
+    };
 
     let session = api
         .create(&PostParams::default(), &preview)
@@ -265,17 +273,20 @@ async fn preview_status(args: PreviewStatusArgs) -> CliResult<()> {
 
     let mut subtask = progress.subtask("listing preview sessions");
 
-    let sessions = api.list(&ListParams::default()).await.map_err(|e| {
-        subtask.failure(None);
-        CliError::PreviewListFailed(e.to_string())
-    })?;
-
     let key_filter = layer_config.key.provided();
-    let sessions: Vec<_> = sessions
-        .items
-        .into_iter()
-        .filter(|session| key_filter.is_none_or(|key| session.spec.key == key))
-        .collect();
+    let list_params = match key_filter {
+        Some(key) => ListParams::default().labels(&format!("{PREVIEW_SESSION_KEY_LABEL}={key}")),
+        None => ListParams::default(),
+    };
+
+    let sessions: Vec<_> = api
+        .list(&list_params)
+        .await
+        .map_err(|e| {
+            subtask.failure(None);
+            CliError::PreviewListFailed(e.to_string())
+        })?
+        .items;
 
     if sessions.is_empty() {
         subtask.success(Some("no preview sessions found"));
@@ -293,7 +304,7 @@ async fn preview_status(args: PreviewStatusArgs) -> CliResult<()> {
 
     // Display sessions grouped by key.
 
-    let mut grouped: HashMap<&str, Vec<&PreviewSessionCrd>> = HashMap::new();
+    let mut grouped: BTreeMap<&str, Vec<&PreviewSessionCrd>> = BTreeMap::new();
 
     for session in &sessions {
         grouped
@@ -363,20 +374,21 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
 
     let mut subtask = progress.subtask("finding preview sessions");
 
-    let sessions = api.list(&ListParams::default()).await.map_err(|e| {
-        subtask.failure(None);
-        CliError::PreviewListFailed(e.to_string())
-    })?;
+    let list_params = ListParams::default().labels(&format!("{PREVIEW_SESSION_KEY_LABEL}={key}"));
 
-    let sessions_to_delete: Vec<_> = sessions
+    let sessions_to_delete: Vec<_> = api
+        .list(&list_params)
+        .await
+        .map_err(|e| {
+            subtask.failure(None);
+            CliError::PreviewListFailed(e.to_string())
+        })?
         .items
         .into_iter()
         .filter(|session| {
-            session.spec.key == key
-                && args
-                    .target
-                    .as_ref()
-                    .is_none_or(|target| session.spec.target == *target)
+            args.target
+                .as_ref()
+                .is_none_or(|target| session.spec.target == *target)
         })
         .collect();
 
