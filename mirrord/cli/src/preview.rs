@@ -16,20 +16,18 @@ use futures::StreamExt;
 use kube::{
     Api, ResourceExt,
     api::{DeleteParams, ListParams, ObjectMeta, PostParams},
-    client::ClientBuilder,
     runtime::watcher::{self, Event, watcher},
 };
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_kube::{api::kubernetes::create_kube_config, retry::RetryKube};
 use mirrord_operator::{
     client::OperatorApi,
-    crd::preview::{
-        PreviewIncomingConfig, PreviewSession, PreviewSessionCrd, PreviewSessionStatus,
+    crd::{
+        NewOperatorFeature,
+        preview::{PreviewIncomingConfig, PreviewSession, PreviewSessionCrd, PreviewSessionStatus},
     },
 };
 use mirrord_progress::{Progress, ProgressTracker};
-use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 use uuid::Uuid;
 
@@ -64,20 +62,7 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
 
     let layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
 
-    // Connect to the operator — preview environments require an operator deployment.
-
-    let mut subtask = progress.subtask("connecting to operator");
-
-    let operator_api = OperatorApi::try_new(&layer_config, &mut NullReporter::default(), &progress)
-        .await?
-        .ok_or_else(|| {
-            subtask.failure(None);
-            CliError::OperatorRequiredForPreview
-        })?;
-
-    operator_api.check_license_validity(&progress)?;
-
-    subtask.success(Some("connected to operator"));
+    let (client, api) = create_preview_api(&layer_config, false, &progress).await?;
 
     // Create the `PreviewSessionCrd` resource in the cluster. The CR name is derived from
     // the target with a short random suffix to avoid collisions (e.g.
@@ -85,12 +70,6 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
     // and reconciles them into preview pods.
 
     let mut subtask = progress.subtask("creating preview session resource");
-
-    let namespace = layer_config
-        .target
-        .namespace
-        .as_deref()
-        .unwrap_or(operator_api.client().default_namespace());
 
     let target = layer_config.target.path.as_ref().ok_or_else(|| {
         subtask.failure(None);
@@ -109,8 +88,6 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
         incoming: PreviewIncomingConfig::from(&layer_config.feature.network.incoming),
         ttl_mins: layer_config.feature.preview.ttl_mins,
     };
-
-    let api = Api::<PreviewSessionCrd>::namespaced(operator_api.client().clone(), namespace);
 
     let sanitized_target = target.to_string().replace('/', "-");
     let uuid_short = Uuid::new_v4().simple().to_string();
@@ -240,6 +217,12 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
 
     // Display summary of the created preview environment.
 
+    let namespace = layer_config
+        .target
+        .namespace
+        .as_deref()
+        .unwrap_or(client.default_namespace());
+
     progress.success(None);
 
     let key = layer_config.key.as_str();
@@ -267,7 +250,7 @@ async fn preview_status(args: PreviewStatusArgs) -> CliResult<()> {
     // Default to all namespaces when no namespace is configured, so `mirrord preview status`
     // with no flags shows everything.
     let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
-    let (_, api) = create_client_and_api(&layer_config, all_namespaces).await?;
+    let (_, api) = create_preview_api(&layer_config, all_namespaces, &progress).await?;
 
     // List and filter sessions.
 
@@ -368,7 +351,7 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
 
     // Default to all namespaces when no namespace is configured, same as `status`.
     let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
-    let (client, api) = create_client_and_api(&layer_config, all_namespaces).await?;
+    let (client, api) = create_preview_api(&layer_config, all_namespaces, &progress).await?;
 
     // Find sessions matching the key and optional target filter.
 
@@ -457,29 +440,36 @@ fn load_preview_config(
     Ok(config)
 }
 
-/// Creates a Kubernetes client and a `PreviewSessionCrd` API handle scoped to the appropriate
-/// namespace(s). When `all_namespaces` is true the API queries across all namespaces; otherwise
-/// it uses the namespace from the config (or the default namespace).
-async fn create_client_and_api(
+/// Connects to the operator, validates the license and checks that the `PreviewEnv` feature is
+/// supported, then returns a Kubernetes client and a `PreviewSessionCrd` API handle scoped to
+/// the appropriate namespace(s).
+async fn create_preview_api(
     config: &LayerConfig,
     all_namespaces: bool,
+    progress: &ProgressTracker,
 ) -> CliResult<(kube::Client, Api<PreviewSessionCrd>)> {
-    let client = create_kube_config(
-        config.accept_invalid_certificates,
-        config.kubeconfig.clone(),
-        config.kube_context.clone(),
-    )
-    .await
-    .and_then(|kube_config| {
-        Ok(ClientBuilder::try_from(kube_config)?
-            .with_layer(&BufferLayer::new(1024))
-            .with_layer(&RetryLayer::new(RetryKube::try_from(
-                &config.startup_retry,
-            )?))
-            .build())
-    })
-    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
+    let mut subtask = progress.subtask("connecting to operator");
 
+    let operator_api = OperatorApi::try_new(config, &mut NullReporter::default(), progress)
+        .await?
+        .ok_or_else(|| {
+            subtask.failure(None);
+            CliError::OperatorRequiredForPreview
+        })?;
+
+    operator_api.check_license_validity(progress)?;
+
+    operator_api
+        .operator()
+        .spec
+        .require_feature(NewOperatorFeature::PreviewEnv)
+        .inspect_err(|_| {
+            subtask.failure(None);
+        })?;
+
+    subtask.success(Some("connected to operator"));
+
+    let client = operator_api.client().clone();
     let api = if all_namespaces {
         Api::all(client.clone())
     } else if let Some(namespace) = config.target.namespace.as_deref() {

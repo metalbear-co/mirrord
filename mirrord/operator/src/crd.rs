@@ -409,6 +409,7 @@ pub enum NewOperatorFeature {
     BypassCiCertificateVerification,
 
     MongodbBranching,
+    PreviewEnv,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -435,6 +436,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::MySqlBranching => "MySQL branching",
             NewOperatorFeature::PgBranching => "PostgreSQL branching",
             NewOperatorFeature::MongodbBranching => "MongoDB branching",
+            NewOperatorFeature::PreviewEnv => "preview environments",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
             NewOperatorFeature::BypassCiCertificateVerification => {
                 "BypassCiCertificateVerification"
