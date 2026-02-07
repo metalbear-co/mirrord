@@ -363,6 +363,9 @@ where
     }
 
     #[cfg(target_os = "macos")]
+    crate::util::maybe_enable_santa_mode();
+
+    #[cfg(target_os = "macos")]
     let binary_args = args
         .binary_args
         .iter()

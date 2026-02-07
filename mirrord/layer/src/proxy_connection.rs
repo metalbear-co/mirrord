@@ -4,7 +4,7 @@ use std::{
     io,
     net::{SocketAddr, TcpStream},
     sync::{
-        Mutex, PoisonError,
+        PoisonError,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
@@ -16,6 +16,8 @@ use mirrord_intproxy_protocol::{
     codec::{self, CodecError, SyncDecoder, SyncEncoder},
 };
 use thiserror::Error;
+
+use crate::mutex::Mutex;
 
 #[derive(Debug, Error)]
 pub enum ProxyError {
