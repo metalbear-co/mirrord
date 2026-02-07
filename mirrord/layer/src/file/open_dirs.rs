@@ -4,7 +4,7 @@
 use std::{
     collections::HashMap,
     ffi::{CStr, CString},
-    sync::{Arc, LazyLock, Mutex},
+    sync::{Arc, LazyLock},
 };
 
 use mirrord_protocol::file::{CloseDirRequest, DirEntryInternal, ReadDirRequest, ReadDirResponse};
@@ -15,6 +15,7 @@ use crate::{
     common,
     detour::{Bypass, Detour},
     error::HookError,
+    mutex::Mutex,
 };
 
 /// Global instance of [`OpenDirs`]. Used in hooks.

@@ -18,6 +18,9 @@ async fn mirrord_exec<P>(
 where
     P: Progress,
 {
+    #[cfg(target_os = "macos")]
+    crate::util::maybe_enable_santa_mode();
+
     let execution_info = MirrordExecution::start_internal(
         &mut config,
         #[cfg(target_os = "macos")]
