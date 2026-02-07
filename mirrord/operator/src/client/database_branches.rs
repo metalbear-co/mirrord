@@ -62,10 +62,16 @@ pub async fn create_mysql_branches<P: Progress>(
 
     for (id, params) in params {
         let name_prefix = params.name_prefix;
+        let annotations = if params.annotations.is_empty() {
+            None
+        } else {
+            Some(params.annotations)
+        };
         let branch = MysqlBranchDatabase {
             metadata: ObjectMeta {
                 generate_name: Some(name_prefix),
                 labels: Some(params.labels),
+                annotations,
                 ..Default::default()
             },
             spec: params.spec,
@@ -218,10 +224,16 @@ pub async fn create_pg_branches<P: Progress>(
 
     for (id, params) in params {
         let name_prefix = params.name_prefix;
+        let annotations = if params.annotations.is_empty() {
+            None
+        } else {
+            Some(params.annotations)
+        };
         let branch = PgBranchDatabase {
             metadata: ObjectMeta {
                 generate_name: Some(name_prefix),
                 labels: Some(params.labels),
+                annotations,
                 ..Default::default()
             },
             spec: params.spec,
@@ -373,10 +385,16 @@ pub async fn create_mongodb_branches<P: Progress>(
 
     for (id, params) in params {
         let name_prefix = params.name_prefix;
+        let annotations = if params.annotations.is_empty() {
+            None
+        } else {
+            Some(params.annotations)
+        };
         let branch = MongodbBranchDatabase {
             metadata: ObjectMeta {
                 generate_name: Some(name_prefix),
                 labels: Some(params.labels),
+                annotations,
                 ..Default::default()
             },
             spec: params.spec,
@@ -588,6 +606,7 @@ impl AsRef<str> for BranchDatabaseId {
 pub struct MysqlBranchParams {
     pub name_prefix: String,
     pub labels: BTreeMap<String, String>,
+    pub annotations: BTreeMap<String, String>,
     pub spec: MysqlBranchDatabaseSpec,
 }
 
@@ -628,6 +647,7 @@ impl MysqlBranchParams {
         Self {
             name_prefix,
             labels,
+            annotations: BTreeMap::new(),
             spec,
         }
     }
@@ -637,6 +657,7 @@ impl MysqlBranchParams {
 pub struct PgBranchParams {
     pub name_prefix: String,
     pub labels: BTreeMap<String, String>,
+    pub annotations: BTreeMap<String, String>,
     pub spec: PgBranchDatabaseSpec,
 }
 
@@ -667,6 +688,7 @@ impl PgBranchParams {
         Self {
             name_prefix,
             labels,
+            annotations: BTreeMap::new(),
             spec,
         }
     }
@@ -676,6 +698,7 @@ impl PgBranchParams {
 pub struct MongodbBranchParams {
     pub name_prefix: String,
     pub labels: BTreeMap<String, String>,
+    pub annotations: BTreeMap<String, String>,
     pub spec: MongodbBranchDatabaseSpec,
 }
 
@@ -716,6 +739,7 @@ impl MongodbBranchParams {
         Self {
             name_prefix,
             labels,
+            annotations: BTreeMap::new(),
             spec,
         }
     }
@@ -726,3 +750,6 @@ pub mod labels {
     pub(crate) const MIRRORD_MYSQL_BRANCH_ID_LABEL: &str = "mirrord-mysql-branch-id";
     pub(crate) const MIRRORD_PG_BRANCH_ID_LABEL: &str = "mirrord-pg-branch-id";
 }
+
+// Re-export for convenience
+pub use crate::crd::TARGET_NAMESPACE_ANNOTATION;

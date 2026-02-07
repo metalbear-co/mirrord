@@ -40,6 +40,12 @@ pub mod steal_tls;
 pub use kafka::MirrordKafkaEphemeralTopic;
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
+/// For Multi-Cluster Management-Only mode: Annotation used to specify the target namespace on
+/// remote clusters. When a CRD is created in the operator namespace on Primary, this annotation
+/// tells the sync controller which namespace to use on the Default cluster. If not present, the
+/// CRD's own namespace is used.
+pub const TARGET_NAMESPACE_ANNOTATION: &str = "mirrord.metalbear.co/target-namespace";
+
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
@@ -151,6 +157,10 @@ pub struct MirrordOperatorSpec {
     /// this field).
     #[deprecated(note = "use supported_features instead")]
     copy_target_enabled: Option<bool>,
+    /// The namespace where the operator is deployed.
+    /// Used by CLI in multi-cluster management-only mode to create CRDs
+    /// in the operator's namespace with a target-namespace annotation.
+    pub operator_namespace: Option<String>,
 }
 
 impl MirrordOperatorSpec {
@@ -160,6 +170,7 @@ impl MirrordOperatorSpec {
         supported_features: Vec<NewOperatorFeature>,
         license: LicenseInfoOwned,
         protocol_version: Option<String>,
+        operator_namespace: Option<String>,
     ) -> Self {
         let features = supported_features
             .contains(&NewOperatorFeature::ProxyApi)
@@ -175,6 +186,7 @@ impl MirrordOperatorSpec {
             protocol_version,
             features,
             copy_target_enabled,
+            operator_namespace,
         }
     }
 

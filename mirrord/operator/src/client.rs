@@ -1618,24 +1618,45 @@ impl OperatorApi<PreparedClientCert> {
         layer_config: &LayerConfig,
         progress: &P,
     ) -> OperatorApiResult<Vec<String>> {
+        use database_branches::TARGET_NAMESPACE_ANNOTATION;
+
         let mut subtask = progress.subtask("preparing branch databases");
         let target = layer_config
             .target
             .path
             .clone()
             .unwrap_or(Target::Targetless);
-        let namespace = layer_config
+        let target_namespace = layer_config
             .target
             .namespace
             .as_deref()
             .unwrap_or(self.client.default_namespace());
+
+        // In multi-cluster management-only mode, create CRDs in operator's namespace
+        // with an annotation specifying the target namespace for the sync controller.
+        let (api_namespace, target_ns_annotation) =
+            if let Some(op_ns) = &self.operator.spec.operator_namespace {
+                (op_ns.as_str(), Some(target_namespace.to_string()))
+            } else {
+                (target_namespace, None)
+            };
+
         let mysql_branch_api: Api<MysqlBranchDatabase> =
-            Api::namespaced(self.client.clone(), namespace);
+            Api::namespaced(self.client.clone(), api_namespace);
         let DatabaseBranchParams {
             mongodb: _create_mongodb_params,
             mysql: mut create_mysql_params,
             pg: _create_pg_params,
         } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+
+        // Add target namespace annotation if using operator namespace
+        if let Some(ref ns) = target_ns_annotation {
+            for params in create_mysql_params.values_mut() {
+                params
+                    .annotations
+                    .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+            }
+        }
 
         let reusable_mysql_branches =
             list_reusable_mysql_branches(&mysql_branch_api, &create_mysql_params, &subtask).await?;
@@ -1694,23 +1715,45 @@ impl OperatorApi<PreparedClientCert> {
         layer_config: &LayerConfig,
         progress: &P,
     ) -> OperatorApiResult<Vec<String>> {
+        use database_branches::TARGET_NAMESPACE_ANNOTATION;
+
         let mut subtask = progress.subtask("preparing branch databases");
         let target = layer_config
             .target
             .path
             .clone()
             .unwrap_or(Target::Targetless);
-        let namespace = layer_config
+        let target_namespace = layer_config
             .target
             .namespace
             .as_deref()
             .unwrap_or(self.client.default_namespace());
-        let pg_branch_api: Api<PgBranchDatabase> = Api::namespaced(self.client.clone(), namespace);
+
+        // In multi-cluster management-only mode, create CRDs in operator's namespace
+        // with an annotation specifying the target namespace for the sync controller.
+        let (api_namespace, target_ns_annotation) =
+            if let Some(op_ns) = &self.operator.spec.operator_namespace {
+                (op_ns.as_str(), Some(target_namespace.to_string()))
+            } else {
+                (target_namespace, None)
+            };
+
+        let pg_branch_api: Api<PgBranchDatabase> =
+            Api::namespaced(self.client.clone(), api_namespace);
         let DatabaseBranchParams {
             mongodb: _create_mongodb_params,
             mysql: _create_mysql_params,
             pg: mut create_pg_params,
         } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+
+        // Add target namespace annotation if using operator namespace
+        if let Some(ref ns) = target_ns_annotation {
+            for params in create_pg_params.values_mut() {
+                params
+                    .annotations
+                    .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+            }
+        }
 
         let reusable_pg_branches =
             list_reusable_pg_branches(&pg_branch_api, &create_pg_params, &subtask).await?;
@@ -1769,24 +1812,45 @@ impl OperatorApi<PreparedClientCert> {
         layer_config: &LayerConfig,
         progress: &P,
     ) -> OperatorApiResult<Vec<String>> {
+        use database_branches::TARGET_NAMESPACE_ANNOTATION;
+
         let mut subtask = progress.subtask("preparing MongoDB branch databases");
         let target = layer_config
             .target
             .path
             .clone()
             .unwrap_or(Target::Targetless);
-        let namespace = layer_config
+        let target_namespace = layer_config
             .target
             .namespace
             .as_deref()
             .unwrap_or(self.client.default_namespace());
+
+        // In multi-cluster management-only mode, create CRDs in operator's namespace
+        // with an annotation specifying the target namespace for the sync controller.
+        let (api_namespace, target_ns_annotation) =
+            if let Some(op_ns) = &self.operator.spec.operator_namespace {
+                (op_ns.as_str(), Some(target_namespace.to_string()))
+            } else {
+                (target_namespace, None)
+            };
+
         let mongodb_branch_api: Api<MongodbBranchDatabase> =
-            Api::namespaced(self.client.clone(), namespace);
+            Api::namespaced(self.client.clone(), api_namespace);
         let DatabaseBranchParams {
             mongodb: mut create_mongodb_params,
             mysql: _create_mysql_params,
             pg: _create_pg_params,
         } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+
+        // Add target namespace annotation if using operator namespace
+        if let Some(ref ns) = target_ns_annotation {
+            for params in create_mongodb_params.values_mut() {
+                params
+                    .annotations
+                    .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+            }
+        }
 
         let reusable_mongodb_branches =
             list_reusable_mongodb_branches(&mongodb_branch_api, &create_mongodb_params, &subtask)
