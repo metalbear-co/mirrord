@@ -28,6 +28,7 @@ pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
 pub mod mongodb_branching;
+pub mod multi_cluster;
 pub mod mysql_branching;
 pub mod patch;
 pub mod pg_branching;
@@ -38,6 +39,12 @@ pub mod steal_tls;
 
 pub use kafka::MirrordKafkaEphemeralTopic;
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
+
+/// For Multi-Cluster Management-Only mode: Annotation used to specify the target namespace on
+/// remote clusters. When a CRD is created in the operator namespace on Primary, this annotation
+/// tells the sync controller which namespace to use on the Default cluster. If not present, the
+/// CRD's own namespace is used.
+pub const TARGET_NAMESPACE_ANNOTATION: &str = "mirrord.metalbear.co/target-namespace";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
@@ -150,6 +157,10 @@ pub struct MirrordOperatorSpec {
     /// this field).
     #[deprecated(note = "use supported_features instead")]
     copy_target_enabled: Option<bool>,
+    /// The namespace where the operator is deployed.
+    /// Used by CLI in multi-cluster management-only mode to create CRDs
+    /// in the operator's namespace with a target-namespace annotation.
+    pub operator_namespace: Option<String>,
 }
 
 impl MirrordOperatorSpec {
@@ -159,6 +170,7 @@ impl MirrordOperatorSpec {
         supported_features: Vec<NewOperatorFeature>,
         license: LicenseInfoOwned,
         protocol_version: Option<String>,
+        operator_namespace: Option<String>,
     ) -> Self {
         let features = supported_features
             .contains(&NewOperatorFeature::ProxyApi)
@@ -174,6 +186,7 @@ impl MirrordOperatorSpec {
             protocol_version,
             features,
             copy_target_enabled,
+            operator_namespace,
         }
     }
 
@@ -803,6 +816,14 @@ pub struct MirrordSqsSessionSpec {
     // The Kubernetes API can't deal with 64 bit numbers (with most significant bit set)
     // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
+
+    /// Multi-cluster coordination: explicit output queue names.
+    ///
+    /// Maps original queue names to their corresponding output queue names.
+    /// For multi-cluster: the default cluster creates temp queues and passes the exact names here.
+    /// Other clusters use these names directly instead of generating their own.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub output_queue_names: HashMap<String, String>,
 }
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
