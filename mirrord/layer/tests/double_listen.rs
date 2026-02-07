@@ -53,7 +53,7 @@ async fn double_listen(dylib_path: &Path) {
 
     let file_request = match intproxy.recv().await {
         // Port unsubscribed after calling listen the second time
-        ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(port)) if port == 4567 => {
+        ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(4567)) => {
             panic!("listener socket closed")
         }
         ClientMessage::FileRequest(FileRequest::Open(req)) => req,

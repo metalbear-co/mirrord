@@ -476,6 +476,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/dup_listen
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/double_listen
+          cargo build
       - run: ./mirrord/layer/tests/apps/dlopen_cgo/build_test_app.sh
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
