@@ -3,7 +3,10 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use self::{copy_target::CopyTargetConfig, env::EnvConfig, fs::FsConfig, network::NetworkConfig};
+use self::{
+    copy_target::CopyTargetConfig, env::EnvConfig, fs::FsConfig, network::NetworkConfig,
+    preview::PreviewConfig,
+};
 use crate::{
     config::source::MirrordConfigSource,
     feature::{database_branches::DatabaseBranchesConfig, split_queues::SplitQueuesConfig},
@@ -14,6 +17,7 @@ pub mod database_branches;
 pub mod env;
 pub mod fs;
 pub mod network;
+pub mod preview;
 pub mod split_queues;
 
 /// Controls mirrord features.
@@ -117,6 +121,12 @@ pub struct FeatureConfig {
     /// Configuration for the database branching feature.
     #[config(nested, default, unstable)]
     pub db_branches: DatabaseBranchesConfig,
+
+    /// ### feature.preview {#feature-preview}
+    ///
+    /// Configuration for preview environments.
+    #[config(nested, default)]
+    pub preview: PreviewConfig,
 }
 
 impl CollectAnalytics for &FeatureConfig {
@@ -128,5 +138,6 @@ impl CollectAnalytics for &FeatureConfig {
         analytics.add("hostname", self.hostname);
         analytics.add("split_queues", &self.split_queues);
         analytics.add("db_branches", &self.db_branches);
+        analytics.add("preview", &self.preview);
     }
 }

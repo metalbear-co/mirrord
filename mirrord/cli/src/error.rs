@@ -493,6 +493,78 @@ pub(crate) enum CliError {
 
     #[error("error while fixing kubeconfig")]
     FixKubeconfig(#[from] FixKubeconfigError),
+
+    #[error("No image specified for preview environment")]
+    #[diagnostic(help(
+        "Specify the image using `-i <image>` or set `feature.preview.image` in your mirrord config file."
+    ))]
+    PreviewImageRequired,
+
+    #[error("No target specified for preview environment")]
+    #[diagnostic(help(
+        "Specify the target using `-t <target>` or set `target.path` in your mirrord config file."
+    ))]
+    PreviewTargetRequired,
+
+    #[error("Failed to create preview session resource: {0}")]
+    #[diagnostic(help(
+        "Please check that the operator is running and that you have sufficient permissions \
+        to create PreviewSession resources in the target namespace.{GENERAL_HELP}"
+    ))]
+    PreviewSessionRejected(String),
+
+    #[error("Preview session failed: {0}")]
+    #[diagnostic(help(
+        "The operator reported a failure while setting up the preview environment. \
+        Check the operator logs for more details.{GENERAL_HELP}"
+    ))]
+    PreviewSessionFailed(String),
+
+    #[error("Preview session was unexpectedly deleted while waiting for it to become ready")]
+    #[diagnostic(help(
+        "Something in your cluster deleted the PreviewSession resource before it became ready. \
+        Check for external controllers, admission webhooks, or resource quotas that may \
+        be removing custom resources.{GENERAL_HELP}"
+    ))]
+    PreviewSessionDeleted,
+
+    #[error("Failed to watch preview session status: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    PreviewWatchFailed(String),
+
+    #[error("Preview environment creation timed out")]
+    #[diagnostic(help(
+        "The preview pod did not become ready within the configured timeout. \
+        You can increase the timeout with `feature.preview.creation_timeout_secs` in your config file. \
+        Check the operator logs for more details.{GENERAL_HELP}"
+    ))]
+    PreviewTimeout,
+
+    #[error("Operator is required for preview environments")]
+    #[diagnostic(help(
+        "Preview environments require the mirrord operator. \
+        Please install the operator first: https://metalbear.com/mirrord/docs/overview/teams/"
+    ))]
+    OperatorRequiredForPreview,
+
+    #[error("Failed to list preview sessions: {0}")]
+    #[diagnostic(help(
+        "Please check that you have permissions to list PreviewSession resources \
+        and that the operator CRD is installed.{GENERAL_HELP}"
+    ))]
+    PreviewListFailed(String),
+
+    #[error("Failed to delete preview session `{name}`: {reason}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    PreviewDeleteFailed { name: String, reason: String },
+
+    #[error("No preview sessions found matching key `{0}`")]
+    #[diagnostic(help("Use `mirrord preview status` to see available preview environments."))]
+    PreviewNotFound(String),
+
+    #[error("Environment key is required for this command")]
+    #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
+    PreviewKeyRequired,
 }
 
 impl CliError {

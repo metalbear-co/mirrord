@@ -534,8 +534,7 @@ OpenTelemetry (OTel) / W3C baggage propagator. This is used in HTTP requests sen
 operator to manually set values in the trace span, which can help when processing traces.
 See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
 
-Only relevant for use with the operator. For more details, read
-the [docs on monitoring](https://metalbear.com/mirrord/docs/managing-mirrord/monitoring).
+Only relevant for use with the operator. For more details, read the [docs on monitoring](https://metalbear.com/mirrord/docs/managing-mirrord/monitoring).
 
 ## ci {#root-ci}
 
@@ -717,17 +716,19 @@ Disables any system wide proxy configuration for affecting the running applicati
 ### _experimental_ latency {#experimental-latency}
 
 Configuration for adding artificial latency to outgoing network operations.
+
+Configuration for adding artificial latency to outgoing network operations.
 Useful for testing application behavior under network delay conditions.
 
-#### _experimental_ latency.transmit_delay {#experimental-latency-transmit_delay}
+### _experimental_ latency.receive_delay {#experimental-latency-receive_delay}
 
-Delay in milliseconds for outgoing send operations (Layer → Agent).
+Delay in milliseconds for outgoing receive operations (Agent → Layer).
 
 Defaults to `0` (no delay).
 
-#### _experimental_ latency.receive_delay {#experimental-latency-receive_delay}
+### _experimental_ latency.transmit_delay {#experimental-latency-transmit_delay}
 
-Delay in milliseconds for outgoing receive operations (Agent → Layer).
+Delay in milliseconds for outgoing send operations (Layer → Agent).
 
 Defaults to `0` (no delay).
 
@@ -2594,6 +2595,39 @@ of regexes specified here. If there is a match, mirrord will connect your applic
 the target unix socket address on the target pod. Otherwise, it will leave the connection
 to happen locally on your machine.
 
+### feature.preview {#feature-preview}
+
+Configuration for preview environments.
+
+Controls the lifetime and creation behavior of preview sessions.
+
+```json
+{
+  "feature": {
+    "preview": {
+      "image": "my-registry/my-app:latest",
+      "ttl_mins": 60,
+      "creation_timeout_secs": 60
+    }
+  }
+}
+```
+
+### feature.preview.creation_timeout_secs {#feature-preview-creation_timeout_secs}
+
+How long (in seconds) the CLI waits for the preview session to become ready.
+If the session hasn't reached `Ready` within this time, the CLI deletes it.
+
+### feature.preview.image {#feature-preview-image}
+
+Container image to run in the preview pod.
+The image must be pre-built and pushed to a registry accessible by the cluster.
+
+### feature.preview.ttl_mins {#feature-preview-ttl_mins}
+
+How long (in minutes) the preview session is allowed to live after creation.
+The operator will terminate the session when this time elapses.
+
 ### feature.split_queues {#feature-split_queues}
 
 Define filters to split queues by, and make your local application consume only messages
@@ -3052,8 +3086,7 @@ operator to manually set the parent trace of the entry point, which can help whe
 processing traces.
 See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
 
-Only relevant for use with the operator. For more details, read
-the [docs on monitoring](https://metalbear.com/mirrord/docs/managing-mirrord/monitoring).
+Only relevant for use with the operator. For more details, read the [docs on monitoring](https://metalbear.com/mirrord/docs/managing-mirrord/monitoring).
 
 ## use_proxy {#root-use_proxy}
 
