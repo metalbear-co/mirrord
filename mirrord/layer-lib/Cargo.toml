@@ -29,11 +29,14 @@ mirrord-protocol = { path = "../protocol" }
 mirrord-progress = { path = "../progress" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
 mirrord-layer-macro = { path = "../layer/macro" }
+mirrord-console = { path = "../console" }
 
 base64.workspace = true
 bincode.workspace = true
 socket2.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
+chrono.workspace = true
 thiserror.workspace = true
 regex.workspace = true
 
