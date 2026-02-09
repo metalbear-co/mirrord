@@ -8,6 +8,19 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.187.0](https://github.com/metalbear-co/mirrord/tree/3.187.0) - 2026-02-09
+
+
+### Added
+
+- Add new fuctionality to support multi cluster sessions.
+
+
+### Internal
+
+- Added a regression test that verifies two consecutive calls of listen do not
+  close the socket.
+
 ## [3.186.0](https://github.com/metalbear-co/mirrord/tree/3.186.0) - 2026-02-06
 
 
