@@ -13,8 +13,7 @@ use super::session::{SessionOwner, SessionTarget};
     group = "operator.metalbear.co",
     version = "v1alpha",
     kind = "MirrordMultiClusterSession",
-    status = "MirrordMultiClusterSessionStatus",
-    namespaced
+    status = "MirrordMultiClusterSessionStatus"
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordMultiClusterSessionSpec {
