@@ -58,7 +58,7 @@ The reviewer can, of course, use AI however they like during their review, and t
 author's responsibility for a comprehensive and comprehensible PR.
 
 Both the author and the reviewer are encouraged to use LLMs as a first superficial review, that can easily find some
-small issues. An automatic solution for that can be incorporated in to the CI pipeline.
+small issues.
 
 The reviewer must still look at the actual code, and not only at AI-generated summaries etc.
 
