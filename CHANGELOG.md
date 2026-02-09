@@ -13,7 +13,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Added
 
-- Add new fuctionality to support multi cluster logic - Envoy.
+- Add new fuctionality to support multi cluster sessions.
 
 
 ### Internal
