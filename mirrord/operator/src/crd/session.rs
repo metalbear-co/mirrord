@@ -43,6 +43,14 @@ pub struct MirrordClusterSessionSpec {
     /// Set when the session uses a copied pod.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub copy_target: Option<SessionCopyTarget>,
+
+    /// Multi-cluster: name of the parent MirrordMultiClusterSession.
+    ///
+    /// When set, this is a child session created by the Primary operator
+    /// as part of a multi-cluster session. The parent session coordinates
+    /// all child sessions across clusters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multi_cluster_parent_name: Option<String>,
 }
 
 /// Describes an owner of a mirrord session.
