@@ -105,7 +105,7 @@ use mirrord_layer_lib::setup::SETUP;
 use mirrord_layer_lib::{
     detour::DetourGuard,
     error::{LayerError, Result},
-    logging,
+    logging::init_tracing,
     proxy_connection::{PROXY_CONNECTION, ProxyConnection},
     setup::{LayerSetup, init_layer_setup, setup},
     socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING,
@@ -336,7 +336,7 @@ fn mirrord_layer_entry_point() {
 /// 5. Fetches remote environment from the agent (if enabled with
 ///    [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
 fn layer_start(config: LayerConfig) {
-    logging::init_tracing();
+    init_tracing();
 
     let proxy_connection_timeout = *PROXY_CONNECTION_TIMEOUT
         .get_or_init(|| Duration::from_secs(config.internal_proxy.socket_timeout));
