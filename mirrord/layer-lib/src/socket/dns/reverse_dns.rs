@@ -3,6 +3,7 @@ use std::{
     net::IpAddr,
     sync::{LazyLock, Mutex},
 };
+use crate::mutex::Mutex;
 
 /// Holds the pair of [`IpAddr`] with their hostnames, resolved remotely through
 /// remote DNS resolution functions.

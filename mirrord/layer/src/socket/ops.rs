@@ -26,10 +26,9 @@ use mirrord_intproxy_protocol::{
 #[cfg(target_os = "macos")]
 use mirrord_layer_lib::socket::apple_dnsinfo::*;
 use mirrord_layer_lib::{
-    detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
+    detour::{Detour, OnceLockExt, OptionExt},
     error::{HookError, HookResult},
     graceful_exit,
-    mutex::Mutex,
     proxy_connection::make_proxy_request_with_response,
     socket::{
         Bound, Connected, SocketAddrExt, SocketKind, SocketState,
