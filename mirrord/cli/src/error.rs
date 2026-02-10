@@ -543,13 +543,6 @@ pub(crate) enum CliError {
     ))]
     PreviewTimeout,
 
-    #[error("Operator is required for preview environments")]
-    #[diagnostic(help(
-        "Preview environments require the mirrord operator. \
-        Please install the operator first: https://metalbear.com/mirrord/docs/overview/teams/"
-    ))]
-    OperatorRequiredForPreview,
-
     #[error("Failed to list preview sessions: {0}")]
     #[diagnostic(help(
         "Please check that you have permissions to list PreviewSession resources \
@@ -560,6 +553,13 @@ pub(crate) enum CliError {
     #[error("Failed to delete preview session `{name}`: {reason}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     PreviewDeleteFailed { name: String, reason: String },
+
+    #[error("A preview environment with key \"{key}\" already exists for target \"{target}\"")]
+    #[diagnostic(help(
+        "Use `mirrord preview stop` to stop the existing session first, \
+         or choose a different key with `--key`."
+    ))]
+    PreviewDuplicateSession { key: String, target: String },
 
     #[error("No preview sessions found matching key `{0}`")]
     #[diagnostic(help("Use `mirrord preview status` to see available preview environments."))]

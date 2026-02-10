@@ -1,6 +1,6 @@
 //! Handlers for `mirrord preview` commands.
 //!
-//! The CLI is responsible for creating `PreviewSessionCrd` resources and watching their status —
+//! The CLI is responsible for creating `PreviewSession` resources and watching their status —
 //! all actual work (pod creation, agent spawning, traffic routing) is done by the operator.
 //! The `start` command creates a CR and watches for the status to reach `Ready`, the `status`
 //! command lists existing sessions, and the `stop` command deletes them.
@@ -24,7 +24,8 @@ use mirrord_operator::{
     client::OperatorApi,
     crd::{
         NewOperatorFeature,
-        preview::{PreviewIncomingConfig, PreviewSession, PreviewSessionCrd, PreviewSessionStatus},
+        preview::{PreviewIncomingConfig, PreviewSession, PreviewSessionPhase, PreviewSessionSpec},
+        session::SessionTarget,
     },
 };
 use mirrord_progress::{Progress, ProgressTracker};
@@ -54,7 +55,7 @@ pub const PREVIEW_SESSION_KEY_LABEL: &str = "preview.mirrord.metalbear.co/key";
 /// Handle `mirrord preview start` command.
 ///
 /// Creates a new preview environment or updates an existing one by creating
-/// a `PreviewSessionCrd` resource that the operator will reconcile, then watches
+/// a `PreviewSession` resource that the operator will reconcile, then watches
 /// the status until `Ready` or failure.
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
@@ -64,7 +65,7 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
 
     let (client, api) = create_preview_api(&layer_config, false, &progress).await?;
 
-    // Create the `PreviewSessionCrd` resource in the cluster. The CR name is derived from
+    // Create the `PreviewSession` resource in the cluster. The CR name is derived from
     // the target with a short random suffix to avoid collisions (e.g.
     // `preview-session-deploy-my-app-a1b2c3d4`). The operator watches for these resources
     // and reconciles them into preview pods.
@@ -81,18 +82,52 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
         CliError::PreviewImageRequired
     })?;
 
-    let spec = PreviewSession {
+    let spec = PreviewSessionSpec {
         image: image.clone(),
         key: layer_config.key.as_str().to_owned(),
-        target: target.to_string(),
-        incoming: PreviewIncomingConfig::from(&layer_config.feature.network.incoming),
-        ttl_mins: layer_config.feature.preview.ttl_mins,
+        target: SessionTarget::from(target),
+        incoming: PreviewIncomingConfig::from_config(&layer_config.feature.network.incoming),
+        ttl_secs: layer_config.feature.preview.ttl_mins * 60,
     };
+
+    // Check for an existing session with the same key+target.
+    let key = layer_config.key.as_str();
+    let list_params = ListParams::default().labels(&format!("{PREVIEW_SESSION_KEY_LABEL}={key}"));
+    let existing = api.list(&list_params).await.map_err(|e| {
+        subtask.failure(None);
+        CliError::PreviewListFailed(e.to_string())
+    })?;
+
+    for session in existing.items {
+        if session.spec.target != spec.target {
+            continue;
+        }
+        match session.status.as_ref().map(|s| &s.phase) {
+            // Failed session — delete it so we can take its place.
+            Some(PreviewSessionPhase::Failed) => {
+                let name = session.name_any();
+                if let Err(e) = api.delete(&name, &DeleteParams::default()).await {
+                    subtask.warning(&format!(
+                        "failed to delete failed session '{name}': {e}, \
+                         you may need to delete it manually or with `mirrord preview stop`",
+                    ));
+                }
+            }
+            // Active session — reject the duplicate.
+            _ => {
+                subtask.failure(None);
+                return Err(CliError::PreviewDuplicateSession {
+                    key: key.to_owned(),
+                    target: spec.target.to_string(),
+                });
+            }
+        }
+    }
 
     let sanitized_target = target.to_string().replace('/', "-");
     let uuid_short = Uuid::new_v4().simple().to_string();
     let uuid_short = &uuid_short[..8];
-    let preview = PreviewSessionCrd {
+    let preview = PreviewSession {
         metadata: ObjectMeta {
             name: Some(format!("preview-session-{sanitized_target}-{uuid_short}")),
             labels: Some(BTreeMap::from([(
@@ -115,7 +150,7 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
 
     subtask.success(Some("preview session resource created"));
 
-    // Watch the `PreviewSessionCrd` status until it reaches `Ready` or `Failed`. Emits
+    // Watch the `PreviewSession` status until it reaches `Ready` or `Failed`. Emits
     // periodic warnings if initialization is taking longer than expected, so the user knows
     // the command hasn't hung. If the session does not become `Ready` within the timeout,
     // the CLI deletes the session resource.
@@ -165,18 +200,19 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
                 match event {
                     Some(Ok(Event::Apply(current) | Event::InitApply(current))) => {
                         if let Some(status) = &current.status {
-                            match status {
-                                PreviewSessionStatus::Initializing { .. } => {
+                            match &status.phase {
+                                PreviewSessionPhase::Initializing => {
                                     last_known_phase = "initializing preview env";
                                 }
-                                PreviewSessionStatus::Waiting { .. } => {
+                                PreviewSessionPhase::Waiting => {
                                     last_known_phase = "waiting for preview pod to be ready";
                                 }
-                                PreviewSessionStatus::Ready { pod_name } => {
+                                PreviewSessionPhase::Ready => {
                                     subtask.success(Some("preview pod is ready"));
-                                    break pod_name.clone();
+                                    break status.pod_name.clone().expect("Ready session must have pod_name");
                                 }
-                                PreviewSessionStatus::Failed { failure_message, .. } => {
+                                PreviewSessionPhase::Failed => {
+                                    let failure_message = status.failure_message.clone().expect("Failed session must have failure_message");
                                     // Sessions that fail to spawn should not be retained —
                                     // delete the CRD so the operator can clean up and the
                                     // user can retry without stale resources blocking them.
@@ -188,7 +224,7 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
                                         ));
                                     }
                                     subtask.failure(None);
-                                    return Err(CliError::PreviewSessionFailed(failure_message.clone()));
+                                    return Err(CliError::PreviewSessionFailed(failure_message));
                                 }
                             }
                         }
@@ -287,7 +323,7 @@ async fn preview_status(args: PreviewStatusArgs) -> CliResult<()> {
 
     // Display sessions grouped by key.
 
-    let mut grouped: BTreeMap<&str, Vec<&PreviewSessionCrd>> = BTreeMap::new();
+    let mut grouped: BTreeMap<&str, Vec<&PreviewSession>> = BTreeMap::new();
 
     for session in &sessions {
         grouped
@@ -303,18 +339,20 @@ async fn preview_status(args: PreviewStatusArgs) -> CliResult<()> {
             let pod_name = session
                 .status
                 .as_ref()
-                .and_then(PreviewSessionStatus::preview_pod_name)
-                .map(String::as_str)
+                .and_then(|s| s.pod_name.as_deref())
                 .unwrap_or("<unknown>");
 
-            let status = match &session.status {
-                Some(PreviewSessionStatus::Initializing { .. }) => "initializing".to_owned(),
-                Some(PreviewSessionStatus::Waiting { .. }) => "waiting".to_owned(),
-                Some(PreviewSessionStatus::Ready { .. }) => "running".to_owned(),
-                Some(PreviewSessionStatus::Failed {
-                    failure_message, ..
-                }) => {
-                    format!("failed ({failure_message})")
+            let status = match session.status.as_ref().map(|s| &s.phase) {
+                Some(PreviewSessionPhase::Initializing) => "initializing".to_owned(),
+                Some(PreviewSessionPhase::Waiting) => "waiting".to_owned(),
+                Some(PreviewSessionPhase::Ready) => "running".to_owned(),
+                Some(PreviewSessionPhase::Failed) => {
+                    let msg = session
+                        .status
+                        .as_ref()
+                        .and_then(|s| s.failure_message.as_deref())
+                        .unwrap_or("unknown");
+                    format!("failed ({msg})")
                 }
                 None => "pending".to_owned(),
             };
@@ -371,7 +409,7 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
         .filter(|session| {
             args.target
                 .as_ref()
-                .is_none_or(|target| session.spec.target == *target)
+                .is_none_or(|target| session.spec.target.to_string() == *target)
         })
         .collect();
 
@@ -406,7 +444,7 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
             .as_deref()
             .expect("preview session should have a namespace");
 
-        let namespaced_api = Api::<PreviewSessionCrd>::namespaced(client.clone(), namespace);
+        let namespaced_api = Api::<PreviewSession>::namespaced(client.clone(), namespace);
 
         if let Err(e) = namespaced_api.delete(name, &DeleteParams::default()).await {
             delete_subtask.failure(None);
@@ -441,20 +479,20 @@ fn load_preview_config(
 }
 
 /// Connects to the operator, validates the license and checks that the `PreviewEnv` feature is
-/// supported, then returns a Kubernetes client and a `PreviewSessionCrd` API handle scoped to
+/// supported, then returns a Kubernetes client and a `PreviewSession` API handle scoped to
 /// the appropriate namespace(s).
 async fn create_preview_api(
     config: &LayerConfig,
     all_namespaces: bool,
     progress: &ProgressTracker,
-) -> CliResult<(kube::Client, Api<PreviewSessionCrd>)> {
+) -> CliResult<(kube::Client, Api<PreviewSession>)> {
     let mut subtask = progress.subtask("connecting to operator");
 
     let operator_api = OperatorApi::try_new(config, &mut NullReporter::default(), progress)
         .await?
         .ok_or_else(|| {
             subtask.failure(None);
-            CliError::OperatorRequiredForPreview
+            CliError::OperatorNotInstalled
         })?;
 
     operator_api.check_license_validity(progress)?;

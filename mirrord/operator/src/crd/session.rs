@@ -1,5 +1,19 @@
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
+use std::fmt;
+
+use k8s_openapi::{
+    Resource,
+    api::{
+        apps::v1::{Deployment, ReplicaSet, StatefulSet},
+        batch::v1::{CronJob, Job},
+        core::v1::{Pod, Service},
+    },
+    apimachinery::pkg::apis::meta::v1::MicroTime,
+};
 use kube::CustomResource;
+use mirrord_config::{
+    config::ConfigError,
+    target::{Target, TargetDisplay},
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -79,6 +93,52 @@ pub struct SessionTarget {
     pub name: String,
     /// Name of the container defined in the Pod spec.
     pub container: String,
+}
+
+impl fmt::Display for SessionTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.kind, self.name)?;
+        if !self.container.is_empty() {
+            write!(f, "/container/{}", self.container)?;
+        }
+        Ok(())
+    }
+}
+
+impl From<&Target> for SessionTarget {
+    fn from(target: &Target) -> Self {
+        #[cfg(feature = "client")]
+        use mirrord_kube::api::kubernetes::rollout::Rollout;
+
+        let api_version = match target {
+            Target::CronJob(_) => <CronJob as Resource>::API_VERSION,
+            Target::Deployment(_) => <Deployment as Resource>::API_VERSION,
+            Target::Job(_) => <Job as Resource>::API_VERSION,
+            Target::Pod(_) => <Pod as Resource>::API_VERSION,
+            Target::Service(_) => <Service as Resource>::API_VERSION,
+            Target::StatefulSet(_) => <StatefulSet as Resource>::API_VERSION,
+            Target::ReplicaSet(_) => <ReplicaSet as Resource>::API_VERSION,
+            Target::Targetless => "",
+            #[cfg(feature = "client")]
+            Target::Rollout(_) => <Rollout as Resource>::API_VERSION,
+            #[cfg(not(feature = "client"))]
+            Target::Rollout(_) => "argoproj.io/v1alpha1",
+        };
+
+        Self {
+            api_version: api_version.to_owned(),
+            kind: target.type_().to_owned(),
+            name: target.name().to_owned(),
+            container: target.container().cloned().unwrap_or_default(),
+        }
+    }
+}
+
+impl SessionTarget {
+    /// Parse into a [`Target`] by reconstructing the canonical target path string and parsing it.
+    pub fn as_target(&self) -> Result<Target, ConfigError> {
+        self.to_string().parse()
+    }
 }
 
 /// Resources needed to report session metrics to the mirrord Jira app.

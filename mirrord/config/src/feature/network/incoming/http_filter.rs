@@ -87,9 +87,7 @@ use crate::{
 ///  ]
 /// }
 /// ```
-#[derive(
-    MirrordConfig, Default, PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize,
-)]
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(map_to = "HttpFilterFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct HttpFilterConfig {
@@ -187,11 +185,6 @@ impl HttpFilterConfig {
             || self.all_of.is_some()
             || self.any_of.is_some()
             || self.body_filter.is_some()
-    }
-
-    pub fn is_filter_not_set(&self) -> bool {
-        // :not:
-        self.is_filter_set().not()
     }
 
     pub fn ensure_usable_with(
