@@ -12,7 +12,10 @@ use crate::common::CheckedInto;
 #[cfg(target_os = "macos")]
 use crate::exec_utils::*;
 use crate::{
-    SOCKETS, hooks::HookManager, replace, socket::{SHARED_SOCKETS_ENV_VAR, UserSocket},
+    SOCKETS,
+    hooks::HookManager,
+    replace,
+    socket::{SHARED_SOCKETS_ENV_VAR, UserSocket},
 };
 
 /// Converts the [`SOCKETS`] map into a vector of pairs `(Fd, UserSocket)`, so we can rebuild

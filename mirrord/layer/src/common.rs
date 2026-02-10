@@ -5,8 +5,7 @@ use libc::c_char;
 pub use mirrord_layer_lib::{
     detour::{Bypass, Detour},
     proxy_connection::{
-        PROXY_CONNECTION, make_proxy_request_no_response,
-        make_proxy_request_with_response,
+        PROXY_CONNECTION, make_proxy_request_no_response, make_proxy_request_with_response,
     },
 };
 use mirrord_protocol::file::OpenOptionsInternal;

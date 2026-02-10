@@ -1,26 +1,27 @@
 // Unified socket collection for both Unix and Windows layers
-#[cfg(unix)]
-use std::os::fd::{BorrowedFd, RawFd};
 #[cfg(windows)]
 use std::mem::MaybeUninit;
+#[cfg(unix)]
+use std::os::fd::{BorrowedFd, RawFd};
 use std::{
     collections::HashMap,
     io,
     net::SocketAddr,
     sync::{Arc, LazyLock, Mutex},
 };
-#[cfg(unix)]
-use nix::sys::socket::{
-    SockaddrLike, SockaddrStorage, getsockname, getsockopt, sockopt,
-};
 
 use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
 #[cfg(unix)]
 use libc::{self, SOCK_DGRAM, SOCK_STREAM};
+#[cfg(unix)]
+use nix::sys::socket::{SockaddrLike, SockaddrStorage, getsockname, getsockopt, sockopt};
 #[cfg(windows)]
 use winapi::{
     shared::ws2def::AF_INET,
-    um::winsock2::{SOCKET, SOCK_DGRAM, SOCK_STREAM, SO_PROTOCOL_INFOA, SOCKET_ERROR, SOL_SOCKET, WSAPROTOCOL_INFOA, getsockopt,},
+    um::winsock2::{
+        SO_PROTOCOL_INFOA, SOCK_DGRAM, SOCK_STREAM, SOCKET, SOCKET_ERROR, SOL_SOCKET,
+        WSAPROTOCOL_INFOA, getsockopt,
+    },
 };
 
 use super::{SocketKind, SocketState, UserSocket};
