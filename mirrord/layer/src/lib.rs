@@ -103,9 +103,9 @@ use mirrord_intproxy_protocol::NewSessionRequest;
 #[cfg(doc)]
 use mirrord_layer_lib::setup::SETUP;
 use mirrord_layer_lib::{
-    logging,
     detour::DetourGuard,
     error::{LayerError, Result},
+    logging,
     proxy_connection::{PROXY_CONNECTION, ProxyConnection},
     setup::{LayerSetup, init_layer_setup, setup},
     socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING,
@@ -659,7 +659,7 @@ pub(crate) fn close_layer_fd(fd: c_int) {
             // Mind that there might be more instances of this socket,
             // stored in the SOCKETS map due to `dup*` calls.
             // We only make the request if this is the last instance.
-            let socket_cloned = socket.as_ref().clone();
+            let socket_cloned = socket.clone();
 
             // Obtain weak pointer, and drop the strong one.
             let weak = Arc::downgrade(&socket);

@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     net::IpAddr,
-    sync::{LazyLock, Mutex},
+    sync::LazyLock,
 };
 use crate::mutex::Mutex;
 

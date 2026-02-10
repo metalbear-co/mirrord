@@ -25,7 +25,7 @@ fn shared_sockets() -> Detour<Vec<(i32, UserSocket)>> {
         SOCKETS
             .lock()?
             .iter()
-            .map(|(key, value)| (*key, value.as_ref().clone()))
+            .map(|(key, value)| (*key, value.as_ref().to_owned()))
             .collect::<Vec<_>>(),
     )
 }

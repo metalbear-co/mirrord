@@ -1,11 +1,11 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{ffi::CStr, fmt::Debug, ops::Not, path::PathBuf};
+use std::{ffi::CStr, ops::Not, path::PathBuf};
 
 use libc::c_char;
 pub use mirrord_layer_lib::{
     detour::{Bypass, Detour},
     proxy_connection::{
-        PROXY_CONNECTION, make_proxy_request_no_response, make_proxy_request_with_response,
+        make_proxy_request_no_response, make_proxy_request_with_response,
     },
 };
 use mirrord_protocol::file::OpenOptionsInternal;

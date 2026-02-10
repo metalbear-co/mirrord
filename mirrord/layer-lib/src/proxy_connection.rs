@@ -18,8 +18,6 @@ use mirrord_intproxy_protocol::{
 };
 use thiserror::Error;
 
-#[cfg(unix)]
-use crate::detour::DetourGuard;
 use crate::{
     error::{HookError, HookResult},
     mutex::Mutex,
