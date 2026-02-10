@@ -1006,11 +1006,10 @@ pub enum Application {
     DlopenCgo,
     /// C app that calls BSD connectx(2).
     Connectx,
-    /// C app that calls closefrom
-    Closefrom,
-    /// C app that ensures FDs are inherited correctly across fork and
-    /// exec
-    SocketInheritance,
+    /// Rust app that closes a clone socket.
+    DupListen,
+    /// Rust app that listens on a socket twice
+    DoubleListen,
 }
 
 impl Application {
@@ -1193,9 +1192,19 @@ impl Application {
             }
             Application::DlopenCgo => String::from("tests/apps/dlopen_cgo/out.cpp_dlopen_cgo"),
             Application::Connectx => String::from("tests/apps/connectx/out.c_test_app"),
-            Application::Closefrom => String::from("tests/apps/closefrom/out.c_test_app"),
-            Application::SocketInheritance => {
-                String::from("tests/apps/socket_inheritance/out.c_test_app")
+            Application::DupListen => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/dup-listen"
+                )
+            }
+            Application::DoubleListen => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/double_listen"
+                )
             }
         }
     }
@@ -1317,9 +1326,9 @@ impl Application {
             | Application::RustIssue3248
             | Application::GoIssue2988(..)
             | Application::DlopenCgo
-            | Application::Closefrom
-            | Application::SocketInheritance
-            | Application::Connectx => vec![],
+            | Application::Connectx
+            | Application::DoubleListen
+            | Application::DupListen => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
@@ -1361,7 +1370,8 @@ impl Application {
             | Application::GoFileOps(..)
             | Application::NodeHTTP
             | Application::RustIssue1054
-            | Application::PythonFlaskHTTP => 80,
+            | Application::PythonFlaskHTTP
+            | Application::DupListen => 80,
             // mapped from 9999 in `configs/port_mapping.json`
             Application::PythonFastApiHTTP | Application::PythonIssue864 => 1234,
             Application::RustIssue1123 => 41222,
@@ -1413,8 +1423,7 @@ impl Application {
             | Application::DynamicApp(..)
             | Application::GoIssue2988(..)
             | Application::NodeMakeConnections
-            | Application::Closefrom
-            | Application::SocketInheritance
+            | Application::DoubleListen
             | Application::Connectx => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,

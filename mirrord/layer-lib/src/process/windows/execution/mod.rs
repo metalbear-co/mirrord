@@ -32,6 +32,7 @@ use winapi::{
 use super::sync::{LayerInitEvent, MIRRORD_LAYER_INIT_EVENT_NAME};
 use crate::{
     error::{LayerError, LayerResult, windows::WindowsError},
+    logging::MIRRORD_LAYER_LOG_PATH,
     proxy_connection::PROXY_CONNECTION,
     setup::setup,
     socket::{SOCKETS, sockets::SHARED_SOCKETS_ENV_VAR},
@@ -47,9 +48,6 @@ pub use debug::{
 pub const MIRRORD_AGENT_ADDR_ENV: &str = "MIRRORD_AGENT_ADDR";
 pub const MIRRORD_LAYER_ID_ENV: &str = "MIRRORD_LAYER_ID";
 pub const MIRRORD_LAYER_FILE_ENV: &str = "MIRRORD_LAYER_FILE";
-
-/// Environment variable for specifying layer log directory path
-pub const MIRRORD_LAYER_LOG_PATH: &str = "MIRRORD_LAYER_LOG_PATH";
 
 // Windows-specific child process inheritance environment variables
 pub const MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID: &str = "MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID";

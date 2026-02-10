@@ -41,7 +41,6 @@ pub use sockets::{
     get_socket, get_socket_state, is_socket_in_state, is_socket_managed, register_socket,
     remove_socket,
 };
-use tracing::warn;
 #[cfg(windows)]
 pub use winapi::{
     shared::{
@@ -252,18 +251,23 @@ impl UserSocket {
     /// Closes the socket and performs necessary cleanup.
     /// If this socket was listening and bound to a port, notifies agent to stop
     /// mirroring/stealing that port by sending PortUnsubscribe.
-    #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()), ret)]
-    pub fn close(&self) -> HookResult<()> {
-        let result = match self {
+    ///
+    /// **Important**
+    ///
+    /// Before calling this method, make sure that this socket does not have any living clones
+    /// (dup*) in the current process.
+    pub fn close(&self) {
+        match self {
             Self {
                 state: SocketState::Listening(bound),
                 kind: SocketKind::Tcp(..),
                 ..
-            } => make_proxy_request_no_response(PortUnsubscribe {
-                port: bound.requested_address.port(),
-                listening_on: bound.address,
-            })
-            .map(|_| ()),
+            } => {
+                let _ = make_proxy_request_no_response(PortUnsubscribe {
+                    port: bound.requested_address.port(),
+                    listening_on: bound.address,
+                });
+            }
             Self {
                 state:
                     SocketState::Connected(Connected {
@@ -271,18 +275,22 @@ impl UserSocket {
                         ..
                     }),
                 ..
-            } => make_proxy_request_no_response(OutgoingConnCloseRequest { conn_id: *id })
-                .map(|_| ()),
-            _ => Ok(()),
-        };
+            } => {
+                let _ = make_proxy_request_no_response(OutgoingConnCloseRequest { conn_id: *id });
+            }
+            _ => {}
+        }
 
-        result.inspect_err(|error| warn!(?error, "mirrord failed to send close socket message."))
-    }
-}
-
-impl Drop for UserSocket {
-    fn drop(&mut self) {
-        let _ = self.close();
+        // For steal mode on Windows, add a small delay to allow agent processing
+        // This prevents race conditions where subsequent requests arrive before
+        // the agent has processed the port unsubscription
+        #[cfg(target_os = "windows")]
+        {
+            if setup().incoming_mode().steal {
+                // Small delay to ensure agent processes unsubscription
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
     }
 }
 

@@ -1,10 +1,6 @@
 use alloc::ffi::CString;
 use core::{cmp, ffi::CStr};
-use std::{
-    collections::HashSet,
-    os::unix::io::RawFd,
-    sync::{LazyLock, Mutex},
-};
+use std::{collections::HashSet, os::unix::io::RawFd, sync::LazyLock};
 
 use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t};
 #[cfg(target_os = "macos")]
@@ -17,7 +13,7 @@ use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use nix::errno::Errno;
 
 use super::ops::*;
-use crate::{hooks::HookManager, replace};
+use crate::{hooks::HookManager, mutex::Mutex, replace};
 
 /// Here we keep addr infos that we allocated so we'll know when to use the original
 /// freeaddrinfo function and when to use our implementation

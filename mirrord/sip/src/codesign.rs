@@ -1,11 +1,15 @@
-use std::{ffi::OsStr, path::Path};
+use std::{ffi::OsStr, path::Path, process::Command, thread, time::Duration};
 
 use apple_codesign::{CodeSignatureFlags, SettingsScope, SigningSettings, UnifiedSigner};
 use rand::RngCore;
 
-use crate::error::Result;
+use crate::error::{Result, SipError};
 
 const EMPTY_ENTITLEMENTS_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict></dict></plist>"#;
+
+/// mirrord auto detects santa (or user can set it) and changes codesign behavior
+/// see sip logic for more info.
+pub const MIRRORD_SANTA_MODE_ENV: &str = "MIRRORD_SANTA_MODE";
 
 /// Hex string from random 20 bytes (results in 40 hexadecimal digits).
 fn generate_hex_string() -> String {
@@ -16,6 +20,19 @@ fn generate_hex_string() -> String {
 }
 
 pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>, PN: AsRef<Path>>(
+    input: PI,
+    output: PO,
+    original: PN,
+) -> Result<()> {
+    if use_codesign_binary() {
+        tracing::debug!("using codesign binary");
+        sign_with_codesign_binary(input, output)
+    } else {
+        sign_with_apple_codesign(input, output, original)
+    }
+}
+
+fn sign_with_apple_codesign<PI: AsRef<Path>, PO: AsRef<Path>, PN: AsRef<Path>>(
     input: PI,
     output: PO,
     original: PN,
@@ -55,4 +72,45 @@ pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>, PN: AsRef<Path>>(
     let signer = UnifiedSigner::new(settings);
     signer.sign_path(input, output)?;
     Ok(())
+}
+
+fn sign_with_codesign_binary<PI: AsRef<Path>, PO: AsRef<Path>>(
+    input: PI,
+    output: PO,
+) -> Result<()> {
+    std::fs::copy(input.as_ref(), output.as_ref())?;
+    let output_status = Command::new("/usr/bin/codesign")
+        .arg("-s") // sign with identity
+        .arg("-") // adhoc identity
+        .arg("-f") // force (might have a signature already)
+        .arg(output.as_ref())
+        .env_clear()
+        .output()?;
+
+    // Allow Santa some time to observe the new signature.
+    // https://northpole.dev/features/binary-authorization/#allowlist-compiler
+    // > While Santa tries to ensure all files created by allowlisted compilers are scanned
+    // > and transitive rules created as quickly as possible,
+    // > there is a race condition in certain scenarios that will cause execution to fail,
+    // > especially if a binary is executed immediately after being created.
+    thread::sleep(Duration::from_millis(100));
+
+    if output_status.status.success() {
+        Ok(())
+    } else {
+        Err(SipError::Sign(
+            output_status.status,
+            String::from_utf8_lossy(&output_status.stderr).to_string(),
+        ))
+    }
+}
+
+/// macOS's codesign binary is usually set as a "Compiler Rule"
+/// and has transistive allowance - meaning any binary it creates is also allowed to run
+/// so if we use the systems' codesign, we can bypass Santa's block.
+fn use_codesign_binary() -> bool {
+    std::env::var(MIRRORD_SANTA_MODE_ENV)
+        .ok()
+        .and_then(|value| value.trim().to_ascii_lowercase().parse::<bool>().ok())
+        .unwrap_or(false)
 }

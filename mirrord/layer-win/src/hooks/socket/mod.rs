@@ -32,7 +32,7 @@ use mirrord_layer_lib::{
                 MANAGED_ADDRINFO, free_managed_addrinfo, getaddrinfo, utils::ManagedAddrInfoAny,
             },
         },
-        get_connected_addresses,
+        get_connected_addresses, get_socket,
         hostname::remote_hostname_string,
         is_socket_managed,
         ops::{ConnectResult, send_to},
@@ -1798,6 +1798,9 @@ unsafe extern "system" fn sendto_detour(
 /// Socket management detour for closesocket() - closes a socket
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
+    // Get socket info BEFORE closing to send PortUnsubscribe if needed
+    let socket_info = get_socket(s);
+
     let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();
     let res = unsafe { original(s) };
 
@@ -1807,6 +1810,14 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
             "closesocket_detour -> successfully closed socket {}, removing from mirrord tracking",
             s
         );
+
+        // Call close() method to send PortUnsubscribe if socket was listening
+        if let Some(socket) = &socket_info
+            && socket.is_listening()
+        {
+            socket.close();
+        }
+
         remove_socket(s);
     } else {
         tracing::warn!(

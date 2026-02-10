@@ -1,42 +1,29 @@
 //! Common ProxyConnection implementation shared between Unix and Windows layers.
 use std::{
     collections::HashMap,
-    ffi::OsString,
     fmt::Debug,
     io,
     net::{SocketAddr, TcpStream},
     sync::{
-        Mutex, OnceLock, PoisonError,
+        OnceLock, PoisonError,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
-#[cfg(unix)]
-use std::{
-    env::VarError,
-    os::{
-        fd::{AsRawFd, FromRawFd, OwnedFd},
-        unix::prelude::RawFd,
-    },
-};
 
-#[cfg(unix)]
-use libc::{F_GETFD, F_SETFD, FD_CLOEXEC, fcntl};
 use mirrord_intproxy_protocol::{
     IsLayerRequest, IsLayerRequestWithResponse, LayerId, LayerToProxyMessage, LocalMessage,
     MessageId, NewSessionRequest, ProxyToLayerMessage,
     codec::{self, CodecError, SyncDecoder, SyncEncoder},
 };
-#[cfg(unix)]
-use nix::{
-    errno::Errno,
-    sys::socket::{SockaddrStorage, getpeername, getsockopt},
-};
 use thiserror::Error;
 
 #[cfg(unix)]
 use crate::detour::DetourGuard;
-use crate::error::{HookError, HookResult};
+use crate::{
+    error::{HookError, HookResult},
+    mutex::Mutex,
+};
 
 // TODO: We don't really need a lock, we just need a type that:
 //  1. Can be initialized as static (with a const constructor or whatever)
@@ -51,8 +38,6 @@ use crate::error::{HookError, HookResult};
 /// Should not be used directly. Use [`make_proxy_request_with_response`] or
 /// [`make_proxy_request_no_response`] functions instead.
 pub static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
-
-pub static INTPROXY_CONN_FD_ENV_VAR: &str = "MIRRORD_INTPROXY_CONNECTION_FD";
 
 #[derive(Debug, Error)]
 pub enum ProxyError {
@@ -71,17 +56,6 @@ pub enum ProxyError {
     LockPoisoned,
     #[error("{0}")]
     IoFailed(#[from] io::Error),
-    #[error("{INTPROXY_CONN_FD_ENV_VAR} is set to an invalid value: {0:?}")]
-    BadProxyConnFdEnv(OsString),
-    #[cfg(unix)]
-    #[error(
-        "fd passed in {INTPROXY_CONN_FD_ENV_VAR} ({fd:?}) was not a valid socket. Errno: \"{errno}\" from {fn_name}"
-    )]
-    BadProxyConnFd {
-        fd: OwnedFd,
-        errno: Errno,
-        fn_name: &'static str,
-    },
 }
 
 impl<T> From<PoisonError<T>> for ProxyError {
@@ -107,20 +81,7 @@ impl ProxyConnection {
         session: NewSessionRequest,
         timeout: Duration,
     ) -> Result<Self> {
-        let connection = {
-            #[cfg(unix)]
-            {
-                let guard = DetourGuard::new();
-                let connection =
-                    Self::acquire_connection(session.parent_layer.is_some(), proxy_addr)?;
-                drop(guard);
-                connection
-            }
-            #[cfg(windows)]
-            {
-                TcpStream::connect(proxy_addr)?
-            }
-        };
+        let connection = TcpStream::connect(proxy_addr)?;
         connection.set_read_timeout(Some(timeout))?;
         connection.set_write_timeout(Some(timeout))?;
 
@@ -147,59 +108,6 @@ impl ProxyConnection {
             layer_id: *layer_id,
             proxy_addr,
         })
-    }
-
-    #[cfg(unix)]
-    fn make_new_connection(proxy_addr: SocketAddr) -> Result<TcpStream> {
-        let conn = TcpStream::connect(proxy_addr)?;
-
-        let fd = conn.as_raw_fd();
-        unsafe {
-            let flags = fcntl(fd, F_GETFD);
-            fcntl(fd, F_SETFD, flags & (!FD_CLOEXEC));
-        }
-        Ok(conn)
-    }
-
-    #[cfg(unix)]
-    fn acquire_connection(have_parent_layer: bool, proxy_addr: SocketAddr) -> Result<TcpStream> {
-        // Parent layer is Some OR we don't have the env var set =>
-        // We're calling this from a fork(), i.e. this is a a brand
-        // new process and we have to establish a new connection to
-        // the intproxy.
-        if have_parent_layer {
-            return Self::make_new_connection(proxy_addr);
-        }
-
-        let fd: i32 = match std::env::var(INTPROXY_CONN_FD_ENV_VAR) {
-            Ok(var) => var
-                .parse()
-                .map_err(|_| ProxyError::BadProxyConnFdEnv(var.into()))?,
-            Err(VarError::NotPresent) => return Self::make_new_connection(proxy_addr),
-            Err(VarError::NotUnicode(os)) => return Err(ProxyError::BadProxyConnFdEnv(os)),
-        };
-
-        let owned_fd = unsafe { OwnedFd::from_raw_fd(fd) };
-
-        // Ensure the fd is a valid socket.
-        if let Err(errno) = getsockopt(&owned_fd, nix::sys::socket::sockopt::SockType) {
-            return Err(ProxyError::BadProxyConnFd {
-                fd: owned_fd,
-                errno,
-                fn_name: "getsockopt",
-            });
-        }
-
-        if let Err(errno) = getpeername::<SockaddrStorage>(fd) {
-            return Err(ProxyError::BadProxyConnFd {
-                fd: owned_fd,
-                errno,
-                fn_name: "getpeername",
-            });
-        }
-
-        // Recover the connection
-        Ok(TcpStream::from(owned_fd))
     }
 
     fn next_message_id(&self) -> MessageId {
@@ -255,13 +163,6 @@ impl ProxyConnection {
 
     pub fn proxy_addr(&self) -> SocketAddr {
         self.proxy_addr
-    }
-}
-
-#[cfg(unix)]
-impl AsRawFd for ProxyConnection {
-    fn as_raw_fd(&self) -> RawFd {
-        self.sender.lock().unwrap().as_ref().as_raw_fd()
     }
 }
 

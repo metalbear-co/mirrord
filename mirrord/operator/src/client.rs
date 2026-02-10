@@ -62,9 +62,9 @@ use crate::{
     },
 };
 
-mod connect_params;
+pub mod connect_params;
 mod credentials;
-mod database_branches;
+pub mod database_branches;
 mod discovery;
 pub mod error;
 mod upgrade;
@@ -715,14 +715,6 @@ impl OperatorApi<PreparedClientCert> {
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
 
-        let mongodb_branch_names = if layer_config.feature.db_branches.is_empty().not() {
-            Some(
-                self.prepare_mongodb_branch_dbs(layer_config, progress)
-                    .await?,
-            )
-        } else {
-            None
-        };
         let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
             Some(
                 self.prepare_mysql_branch_dbs(layer_config, progress)
@@ -733,6 +725,14 @@ impl OperatorApi<PreparedClientCert> {
         };
         let pg_branch_names = if layer_config.feature.db_branches.is_empty().not() {
             Some(self.prepare_pg_branch_dbs(layer_config, progress).await?)
+        } else {
+            None
+        };
+        let mongodb_branch_names = if layer_config.feature.db_branches.is_empty().not() {
+            Some(
+                self.prepare_mongodb_branch_dbs(layer_config, progress)
+                    .await?,
+            )
         } else {
             None
         };
@@ -883,6 +883,99 @@ impl OperatorApi<PreparedClientCert> {
             }
             Err(error) => return Err(error),
         };
+
+        Ok(OperatorSessionConnection {
+            session: Box::new(session),
+            conn,
+        })
+    }
+
+    /// Connect to operator using target config directly (no K8s resolution).
+    ///
+    /// Used when the target may not exist locally, e.g., in multi-cluster mode
+    /// where the primary cluster is management-only and targets exist only on
+    /// workload clusters. The operator handles target resolution on the appropriate cluster.
+    ///
+    /// This method skips:
+    /// - `assert_valid_mirrord_target` (operator validates on workload cluster)
+    /// - `runtime_data` warnings (operator handles on workload cluster)
+    /// - `copy_target` (not supported without local resolution)
+    pub async fn connect_in_multi_cluster_session<P>(
+        &self,
+        target: &Target,
+        layer_config: &mut LayerConfig,
+        progress: &P,
+        branch_name: Option<String>,
+        session_ci_info: Option<SessionCiInfo>,
+    ) -> OperatorApiResult<OperatorSessionConnection>
+    where
+        P: Progress,
+    {
+        use mirrord_config::target::TargetDisplay;
+
+        let namespace = layer_config.target.namespace.as_deref();
+
+        tracing::info!(
+            target_type = %target.type_(),
+            target_name = %target.name(),
+            namespace = ?namespace,
+            "Connecting to multi-cluster primary - workload cluster will resolve target"
+        );
+
+        let use_proxy_api = self
+            .operator
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::ProxyApi);
+
+        // Create branch CRDs on the cluster CLI has access to:
+        // - Single-cluster: CRDs created directly on target cluster, branching happens on the entry
+        //   cluster.
+        // - Multi-cluster: CRDs created on primary cluster. If Primary == Default, branching
+        //   happens locally. If Primary != Default, a sync controller copies CRDs to Default where
+        //   actual branching happens, then syncs status back.
+        let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
+            self.prepare_mysql_branch_dbs(layer_config, progress)
+                .await?
+        } else {
+            vec![]
+        };
+        let pg_branch_names = if layer_config.feature.db_branches.is_empty().not() {
+            self.prepare_pg_branch_dbs(layer_config, progress).await?
+        } else {
+            vec![]
+        };
+        let mongodb_branch_names = if layer_config.feature.db_branches.is_empty().not() {
+            self.prepare_mongodb_branch_dbs(layer_config, progress)
+                .await?
+        } else {
+            vec![]
+        };
+
+        let params = ConnectParams::new(
+            layer_config,
+            branch_name,
+            mongodb_branch_names,
+            mysql_branch_names,
+            pg_branch_names,
+            session_ci_info,
+        );
+
+        // If no namespace in config, use the kubeconfig's default namespace
+        let namespace = namespace.unwrap_or_else(|| self.client.default_namespace());
+        let connect_url =
+            Self::target_connect_url_from_config(use_proxy_api, target, namespace, &params);
+
+        let session = self.make_operator_session(
+            None,
+            connect_url,
+            layer_config.traceparent.clone(),
+            layer_config.baggage.clone(),
+        )?;
+
+        let mut connection_subtask = progress.subtask("connecting to the target");
+        let conn = Self::connect_target(&self.client, &session).await?;
+        connection_subtask.success(Some("connected to the target"));
 
         Ok(OperatorSessionConnection {
             session: Box::new(session),
@@ -1096,6 +1189,44 @@ impl OperatorApi<PreparedClientCert> {
         }
     }
 
+    /// Produces the URL from Target config directly (no K8s resolution needed).
+    /// Used when the target may not exist locally (e.g., multi-cluster with management-only
+    /// primary).
+    fn target_connect_url_from_config(
+        use_proxy: bool,
+        target: &Target,
+        namespace: &str,
+        connect_params: &ConnectParams<'_>,
+    ) -> String {
+        use mirrord_config::target::TargetDisplay;
+
+        let name = {
+            let mut urlfied_name = target.type_().to_string();
+            // For targetless, name() returns "targetless" which would result in
+            // "targetless.targetless" - so we skip this
+            if !matches!(target, Target::Targetless) {
+                urlfied_name.push('.');
+                urlfied_name.push_str(target.name());
+                if let Some(container) = target.container() {
+                    urlfied_name.push_str(".container.");
+                    urlfied_name.push_str(container);
+                }
+            }
+            urlfied_name
+        };
+
+        if use_proxy {
+            let api_version = TargetCrd::api_version(&());
+            let plural = TargetCrd::plural(&());
+            format!(
+                "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?{connect_params}"
+            )
+        } else {
+            let url_path = TargetCrd::url_path(&(), Some(namespace));
+            format!("{url_path}/{name}?{connect_params}")
+        }
+    }
+
     /// Produces the URL for making a copied target connection request to the operator.
     #[allow(clippy::too_many_arguments)]
     fn copy_target_connect_url(
@@ -1134,6 +1265,8 @@ impl OperatorApi<PreparedClientCert> {
             mysql_branch_names,
             pg_branch_names,
             session_ci_info,
+            is_default_cluster: None, // Only used in multi-cluster
+            sqs_output_queues: Default::default(), // Only used in multi-cluster
         };
 
         if use_proxy {
@@ -1485,24 +1618,45 @@ impl OperatorApi<PreparedClientCert> {
         layer_config: &LayerConfig,
         progress: &P,
     ) -> OperatorApiResult<Vec<String>> {
+        use database_branches::TARGET_NAMESPACE_ANNOTATION;
+
         let mut subtask = progress.subtask("preparing branch databases");
         let target = layer_config
             .target
             .path
             .clone()
             .unwrap_or(Target::Targetless);
-        let namespace = layer_config
+        let target_namespace = layer_config
             .target
             .namespace
             .as_deref()
             .unwrap_or(self.client.default_namespace());
+
+        // In multi-cluster management-only mode, create CRDs in operator's namespace
+        // with an annotation specifying the target namespace for the sync controller.
+        let (api_namespace, target_ns_annotation) =
+            if let Some(op_ns) = &self.operator.spec.operator_namespace {
+                (op_ns.as_str(), Some(target_namespace.to_string()))
+            } else {
+                (target_namespace, None)
+            };
+
         let mysql_branch_api: Api<MysqlBranchDatabase> =
-            Api::namespaced(self.client.clone(), namespace);
+            Api::namespaced(self.client.clone(), api_namespace);
         let DatabaseBranchParams {
             mongodb: _create_mongodb_params,
             mysql: mut create_mysql_params,
             pg: _create_pg_params,
         } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+
+        // Add target namespace annotation if using operator namespace
+        if let Some(ref ns) = target_ns_annotation {
+            for params in create_mysql_params.values_mut() {
+                params
+                    .annotations
+                    .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+            }
+        }
 
         let reusable_mysql_branches =
             list_reusable_mysql_branches(&mysql_branch_api, &create_mysql_params, &subtask).await?;
@@ -1561,23 +1715,45 @@ impl OperatorApi<PreparedClientCert> {
         layer_config: &LayerConfig,
         progress: &P,
     ) -> OperatorApiResult<Vec<String>> {
+        use database_branches::TARGET_NAMESPACE_ANNOTATION;
+
         let mut subtask = progress.subtask("preparing branch databases");
         let target = layer_config
             .target
             .path
             .clone()
             .unwrap_or(Target::Targetless);
-        let namespace = layer_config
+        let target_namespace = layer_config
             .target
             .namespace
             .as_deref()
             .unwrap_or(self.client.default_namespace());
-        let pg_branch_api: Api<PgBranchDatabase> = Api::namespaced(self.client.clone(), namespace);
+
+        // In multi-cluster management-only mode, create CRDs in operator's namespace
+        // with an annotation specifying the target namespace for the sync controller.
+        let (api_namespace, target_ns_annotation) =
+            if let Some(op_ns) = &self.operator.spec.operator_namespace {
+                (op_ns.as_str(), Some(target_namespace.to_string()))
+            } else {
+                (target_namespace, None)
+            };
+
+        let pg_branch_api: Api<PgBranchDatabase> =
+            Api::namespaced(self.client.clone(), api_namespace);
         let DatabaseBranchParams {
             mongodb: _create_mongodb_params,
             mysql: _create_mysql_params,
             pg: mut create_pg_params,
         } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+
+        // Add target namespace annotation if using operator namespace
+        if let Some(ref ns) = target_ns_annotation {
+            for params in create_pg_params.values_mut() {
+                params
+                    .annotations
+                    .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+            }
+        }
 
         let reusable_pg_branches =
             list_reusable_pg_branches(&pg_branch_api, &create_pg_params, &subtask).await?;
@@ -1636,24 +1812,45 @@ impl OperatorApi<PreparedClientCert> {
         layer_config: &LayerConfig,
         progress: &P,
     ) -> OperatorApiResult<Vec<String>> {
+        use database_branches::TARGET_NAMESPACE_ANNOTATION;
+
         let mut subtask = progress.subtask("preparing MongoDB branch databases");
         let target = layer_config
             .target
             .path
             .clone()
             .unwrap_or(Target::Targetless);
-        let namespace = layer_config
+        let target_namespace = layer_config
             .target
             .namespace
             .as_deref()
             .unwrap_or(self.client.default_namespace());
+
+        // In multi-cluster management-only mode, create CRDs in operator's namespace
+        // with an annotation specifying the target namespace for the sync controller.
+        let (api_namespace, target_ns_annotation) =
+            if let Some(op_ns) = &self.operator.spec.operator_namespace {
+                (op_ns.as_str(), Some(target_namespace.to_string()))
+            } else {
+                (target_namespace, None)
+            };
+
         let mongodb_branch_api: Api<MongodbBranchDatabase> =
-            Api::namespaced(self.client.clone(), namespace);
+            Api::namespaced(self.client.clone(), api_namespace);
         let DatabaseBranchParams {
             mongodb: mut create_mongodb_params,
             mysql: _create_mysql_params,
             pg: _create_pg_params,
         } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+
+        // Add target namespace annotation if using operator namespace
+        if let Some(ref ns) = target_ns_annotation {
+            for params in create_mongodb_params.values_mut() {
+                params
+                    .annotations
+                    .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+            }
+        }
 
         let reusable_mongodb_branches =
             list_reusable_mongodb_branches(&mongodb_branch_api, &create_mongodb_params, &subtask)
@@ -2071,9 +2268,90 @@ mod test {
             mysql_branch_names,
             pg_branch_names,
             session_ci_info,
+            is_default_cluster: None, // Only used in multi-cluster
+            sqs_output_queues: Default::default(), // Only used in multi-cluster
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
+        assert_eq!(produced, expected)
+    }
+
+    /// Verifies that [`OperatorApi::target_connect_url_from_config`] produces expected URLs.
+    ///
+    /// These URLs should not change for backward compatibility.
+    #[rstest]
+    #[case::deployment_no_container_no_proxy(
+        false,
+        mirrord_config::target::Target::Deployment(mirrord_config::target::deployment::DeploymentTarget {
+            deployment: "my-deployment".into(),
+            container: None,
+        }),
+        "my-namespace",
+        "/apis/operator.metalbear.co/v1/namespaces/my-namespace/targets/deployment.my-deployment?connect=true&on_concurrent_steal=abort"
+    )]
+    #[case::deployment_with_container_no_proxy(
+        false,
+        mirrord_config::target::Target::Deployment(mirrord_config::target::deployment::DeploymentTarget {
+            deployment: "my-deployment".into(),
+            container: Some("my-container".into()),
+        }),
+        "my-namespace",
+        "/apis/operator.metalbear.co/v1/namespaces/my-namespace/targets/deployment.my-deployment.container.my-container?connect=true&on_concurrent_steal=abort"
+    )]
+    #[case::deployment_with_container_proxy(
+        true,
+        mirrord_config::target::Target::Deployment(mirrord_config::target::deployment::DeploymentTarget {
+            deployment: "my-deployment".into(),
+            container: Some("my-container".into()),
+        }),
+        "my-namespace",
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/my-namespace/targets/deployment.my-deployment.container.my-container?connect=true&on_concurrent_steal=abort"
+    )]
+    #[case::targetless_no_proxy(
+        false,
+        mirrord_config::target::Target::Targetless,
+        "default",
+        "/apis/operator.metalbear.co/v1/namespaces/default/targets/targetless?connect=true&on_concurrent_steal=abort"
+    )]
+    #[case::targetless_proxy(
+        true,
+        mirrord_config::target::Target::Targetless,
+        "default",
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/targetless?connect=true&on_concurrent_steal=abort"
+    )]
+    #[case::pod_no_proxy(
+        false,
+        mirrord_config::target::Target::Pod(mirrord_config::target::pod::PodTarget {
+            pod: "my-pod".into(),
+            container: None,
+        }),
+        "test-ns",
+        "/apis/operator.metalbear.co/v1/namespaces/test-ns/targets/pod.my-pod?connect=true&on_concurrent_steal=abort"
+    )]
+    #[test]
+    fn target_connect_url_from_config(
+        #[case] use_proxy: bool,
+        #[case] target: mirrord_config::target::Target,
+        #[case] namespace: &str,
+        #[case] expected: &str,
+    ) {
+        let params = ConnectParams {
+            connect: true,
+            on_concurrent_steal: Some(ConcurrentSteal::Abort),
+            profile: None,
+            kafka_splits: Default::default(),
+            sqs_splits: Default::default(),
+            branch_name: None,
+            mongodb_branch_names: Default::default(),
+            mysql_branch_names: Default::default(),
+            pg_branch_names: Default::default(),
+            session_ci_info: None,
+            is_default_cluster: None,
+            sqs_output_queues: Default::default(),
+        };
+
+        let produced =
+            OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);
         assert_eq!(produced, expected)
     }
 }
