@@ -16,7 +16,7 @@ fn nodeadlock_enabled() -> bool {
 }
 
 #[derive(Debug)]
-pub(crate) struct Mutex<T> {
+pub struct Mutex<T> {
     inner: std::sync::Mutex<T>,
     nodeadlock: bool,
 }
@@ -28,14 +28,14 @@ impl<T: Default> Default for Mutex<T> {
 }
 
 impl<T> Mutex<T> {
-    pub(crate) fn new(value: T) -> Self {
+    pub fn new(value: T) -> Self {
         Self {
             inner: std::sync::Mutex::new(value),
             nodeadlock: nodeadlock_enabled(),
         }
     }
 
-    pub(crate) fn lock(&self) -> LockResult<MutexGuard<'_, T>> {
+    pub fn lock(&self) -> LockResult<MutexGuard<'_, T>> {
         if !self.nodeadlock {
             return self.inner.lock();
         }

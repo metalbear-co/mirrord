@@ -146,7 +146,6 @@ mod file;
 mod hooks;
 mod load;
 mod macros;
-mod mutex;
 mod socket;
 #[cfg(target_os = "macos")]
 mod tls;
