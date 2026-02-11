@@ -1,6 +1,6 @@
 #![allow(non_camel_case_types)]
 
-use mirrord_layer_lib::error::HookError;
+use crate::error::HookError;
 
 #[repr(C, packed(4))]
 pub struct dns_sortaddr_t {
