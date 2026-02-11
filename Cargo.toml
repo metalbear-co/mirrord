@@ -11,6 +11,7 @@ members = [
     "mirrord/agent/iptables",
     "mirrord/layer/tests/apps/fileops",
     "mirrord/layer/tests/apps/outgoing",
+    "mirrord/layer/tests/apps/double_listen",
     "mirrord/layer/tests/apps/listen_ports",
     "mirrord/layer/tests/apps/dns_resolve",
     "mirrord/layer/tests/apps/recv_from",
@@ -37,7 +38,7 @@ resolver = "2"
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.185.1"
+version = "3.187.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"

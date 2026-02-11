@@ -11,7 +11,7 @@ use std::{
     },
     path::PathBuf,
     ptr::{self, copy_nonoverlapping},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, OnceLock},
 };
 
 use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
@@ -46,6 +46,7 @@ use super::{hooks::*, *};
 use crate::{
     common::make_proxy_request_with_response,
     file::{self, OPEN_FILES},
+    mutex::Mutex,
 };
 
 /// Holds the pair of [`IpAddr`] with their hostnames, resolved remotely through

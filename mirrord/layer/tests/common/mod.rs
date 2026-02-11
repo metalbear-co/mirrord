@@ -1008,6 +1008,8 @@ pub enum Application {
     Connectx,
     /// Rust app that closes a clone socket.
     DupListen,
+    /// Rust app that listens on a socket twice
+    DoubleListen,
 }
 
 impl Application {
@@ -1197,6 +1199,13 @@ impl Application {
                     "../../target/debug/dup-listen"
                 )
             }
+            Application::DoubleListen => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/double_listen"
+                )
+            }
         }
     }
 
@@ -1318,6 +1327,7 @@ impl Application {
             | Application::GoIssue2988(..)
             | Application::DlopenCgo
             | Application::Connectx
+            | Application::DoubleListen
             | Application::DupListen => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
@@ -1413,6 +1423,7 @@ impl Application {
             | Application::DynamicApp(..)
             | Application::GoIssue2988(..)
             | Application::NodeMakeConnections
+            | Application::DoubleListen
             | Application::Connectx => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,

@@ -104,6 +104,7 @@ use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_lib::{
     detour::DetourGuard,
     error::{LayerError, Result},
+    logging,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
@@ -111,7 +112,6 @@ use nix::errno::Errno;
 use proxy_connection::ProxyConnection;
 use setup::LayerSetup;
 use socket::SOCKETS;
-use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     common::make_proxy_request_with_response,
@@ -135,6 +135,7 @@ mod integration_tests_deps {
     use tempfile as _;
     use test_cdylib as _;
     use tokio as _;
+    use tracing_subscriber as _;
 }
 
 mod common;
@@ -146,6 +147,7 @@ mod file;
 mod hooks;
 mod load;
 mod macros;
+mod mutex;
 mod proxy_connection;
 mod setup;
 mod socket;
@@ -345,25 +347,6 @@ fn mirrord_layer_entry_point() {
     }
 }
 
-/// Initialize logger. Set the logs to go according to the layer's config either to a trace file, to
-/// mirrord-console or to stderr.
-fn init_tracing() {
-    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-        mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
-    } else {
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_thread_ids(true)
-                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-                    .compact()
-                    .with_writer(std::io::stderr),
-            )
-            .with(tracing_subscriber::EnvFilter::from_default_env())
-            .init();
-    };
-}
-
 /// Occurs after [`layer_pre_initialization`] has succeeded.
 ///
 /// Initialized the main parts of mirrord-layer.
@@ -372,7 +355,7 @@ fn init_tracing() {
 ///
 /// Sets up a few things based on the [`LayerConfig`] given by the user:
 ///
-/// 1. [`tracing_subscriber`] or [`mirrord_console`];
+/// 1. [`logging::init_tracing`] for `tracing_subscriber` or `mirrord_console`
 ///
 /// 2. Global [`SETUP`];
 ///
@@ -404,7 +387,7 @@ fn layer_start(mut config: LayerConfig) {
         config.feature.network.outgoing.udp = false;
     }
 
-    init_tracing();
+    logging::init_tracing();
 
     let proxy_connection_timeout = *PROXY_CONNECTION_TIMEOUT
         .get_or_init(|| Duration::from_secs(config.internal_proxy.socket_timeout));

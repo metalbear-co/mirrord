@@ -2,10 +2,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     net::{SocketAddr, TcpStream},
-    sync::{
-        Mutex,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
@@ -15,6 +12,8 @@ use mirrord_intproxy_protocol::{
     codec::{self, SyncDecoder, SyncEncoder},
 };
 use mirrord_layer_lib::proxy_connection::{ProxyError, Result};
+
+use crate::mutex::Mutex;
 
 #[derive(Debug)]
 pub struct ProxyConnection {

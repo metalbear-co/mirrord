@@ -5,7 +5,7 @@ use std::{
     net::{SocketAddr, ToSocketAddrs},
     os::unix::io::RawFd,
     str::FromStr,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{Arc, LazyLock},
 };
 
 use base64::prelude::*;
@@ -28,6 +28,7 @@ use tracing::warn;
 
 use crate::{
     common,
+    mutex::Mutex,
     socket::ops::{REMOTE_DNS_REVERSE_MAPPING, remote_getaddrinfo},
 };
 

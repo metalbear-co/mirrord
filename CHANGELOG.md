@@ -8,6 +8,38 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.187.0](https://github.com/metalbear-co/mirrord/tree/3.187.0) - 2026-02-09
+
+
+### Added
+
+- Add new fuctionality to support multi cluster sessions.
+
+
+### Internal
+
+- Added a regression test that verifies two consecutive calls of listen do not
+  close the socket.
+
+## [3.186.0](https://github.com/metalbear-co/mirrord/tree/3.186.0) - 2026-02-06
+
+
+### Added
+
+- SIP - add option to re-sign binary using codesign for santa usecases if santa
+  detected.
+- Add new flag for debugging deadlock in mirrord layer - controlled by env
+  MIRRORD_NODEADLOCK.
+
+### Fixed
+
+- Fixed socket regressions.
+
+### Internal
+
+
+- make disk cleanup fallible in release.
+
 ## [3.185.1](https://github.com/metalbear-co/mirrord/tree/3.185.1) - 2026-02-04
 
 

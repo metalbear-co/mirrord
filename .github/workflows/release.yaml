@@ -845,7 +845,7 @@ jobs:
           # Get complete history
           fetch-depth: 0
 
-      - name: Update major version and latest tags
+      - name: Update major version and latest tags in git
         uses: metalbear-co/release-tracker-action@main
         env:
           # GitHub token to enable pushing tags
@@ -855,3 +855,8 @@ jobs:
           update-latest: true
           # Don't update the vX.Y tags
           update-minor: false
+
+      - name: Update latest release on GitHub (not latest git tag).
+        run: gh release edit "${{ github.ref_name }}" --latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

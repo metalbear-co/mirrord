@@ -304,6 +304,7 @@ mod extract;
 mod internal_proxy;
 #[cfg(target_os = "linux")]
 mod is_static;
+mod kube;
 mod list;
 mod local_redis;
 mod logging;
@@ -361,6 +362,9 @@ where
             sub_progress.success(Some("target binary is dynamically linked"));
         }
     }
+
+    #[cfg(target_os = "macos")]
+    crate::util::maybe_enable_santa_mode();
 
     #[cfg(target_os = "macos")]
     let binary_args = args

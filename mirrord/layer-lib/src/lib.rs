@@ -5,6 +5,7 @@
 pub mod detour;
 pub mod error;
 pub mod file;
+pub mod logging;
 pub mod macros;
 pub mod process;
 pub mod proxy_connection;

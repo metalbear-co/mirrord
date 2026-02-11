@@ -4,7 +4,7 @@
 use std::{
     collections::HashMap,
     ffi::{CStr, CString},
-    sync::{Arc, LazyLock, Mutex},
+    sync::{Arc, LazyLock},
 };
 
 use mirrord_layer_lib::{
@@ -15,7 +15,10 @@ use mirrord_protocol::file::{CloseDirRequest, DirEntryInternal, ReadDirRequest, 
 use tracing::Level;
 
 use super::{DirStreamFd, LocalFd, OPEN_FILES, RemoteFd};
-use crate::common;
+use crate::{
+    common,
+    mutex::Mutex,
+};
 
 /// Global instance of [`OpenDirs`]. Used in hooks.
 pub static OPEN_DIRS: LazyLock<OpenDirs> = LazyLock::new(OpenDirs::new);
