@@ -659,7 +659,7 @@ pub(crate) fn close_layer_fd(fd: c_int) {
             // Mind that there might be more instances of this socket,
             // stored in the SOCKETS map due to `dup*` calls.
             // We only make the request if this is the last instance.
-            let socket_cloned = socket.clone();
+            let socket_cloned = socket.as_ref().clone();
 
             // Obtain weak pointer, and drop the strong one.
             let weak = Arc::downgrade(&socket);

@@ -12,10 +12,9 @@ use crate::common::CheckedInto;
 #[cfg(target_os = "macos")]
 use crate::exec_utils::*;
 use crate::{
-    SOCKETS,
     hooks::HookManager,
     replace,
-    socket::{SHARED_SOCKETS_ENV_VAR, UserSocket},
+    socket::{SHARED_SOCKETS_ENV_VAR, SOCKETS, UserSocket},
 };
 
 /// Converts the [`SOCKETS`] map into a vector of pairs `(Fd, UserSocket)`, so we can rebuild
@@ -25,7 +24,7 @@ fn shared_sockets() -> Detour<Vec<(i32, UserSocket)>> {
         SOCKETS
             .lock()?
             .iter()
-            .map(|(key, value)| (*key, value.as_ref().to_owned()))
+            .map(|(key, value)| (*key, value.as_ref().clone()))
             .collect::<Vec<_>>(),
     )
 }
