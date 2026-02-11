@@ -19,12 +19,9 @@ use libc::{
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, statx};
+use mirrord_layer_lib::error::HookError;
 #[cfg(target_os = "linux")]
 use mirrord_layer_lib::error::HookError::ResponseError;
-use mirrord_layer_lib::{
-    detour::{Bypass, Detour, DetourGuard},
-    error::HookError,
-};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
@@ -42,6 +39,7 @@ use super::{OpenOptionsInternalExt, open_dirs, ops::*};
 use crate::{
     close_layer_fd,
     common::CheckedInto,
+    detour::{Bypass, Detour, DetourGuard},
     file::{
         open_dirs::OPEN_DIRS,
         ops::{access, lseek, open, read, write},

@@ -1,6 +1,5 @@
 use base64::prelude::*;
 use libc::{c_char, c_int};
-use mirrord_layer_lib::detour::{Bypass, Detour};
 #[cfg(not(target_os = "macos"))]
 use mirrord_layer_macro::hook_fn;
 #[cfg(target_os = "macos")]
@@ -13,6 +12,7 @@ use crate::common::CheckedInto;
 use crate::exec_utils::*;
 use crate::{
     SOCKETS,
+    detour::{Bypass, Detour},
     hooks::HookManager,
     replace,
     socket::{SHARED_SOCKETS_ENV_VAR, UserSocket},

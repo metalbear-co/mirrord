@@ -3,16 +3,16 @@ use std::{ffi::CStr, fmt::Debug, ops::Not, path::PathBuf};
 
 use libc::c_char;
 use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
-use mirrord_layer_lib::{
-    detour::{Bypass, Detour},
-    error::{HookError, HookResult},
-};
+use mirrord_layer_lib::error::{HookError, HookResult};
 use mirrord_protocol::file::OpenOptionsInternal;
 use null_terminated::Nul;
 use tracing::warn;
 
 use crate::{
-    PROXY_CONNECTION, exec_hooks::Argv, file::OpenOptionsInternalExt,
+    PROXY_CONNECTION,
+    detour::{Bypass, Detour},
+    exec_hooks::Argv,
+    file::OpenOptionsInternalExt,
     socket::SHARED_SOCKETS_ENV_VAR,
 };
 

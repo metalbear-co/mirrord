@@ -18,7 +18,6 @@ use libc::{AT_FDCWD, c_int, iovec};
 use libc::{c_char, statx, statx_timestamp};
 use mirrord_config::feature::fs::FsModeConfig;
 use mirrord_layer_lib::{
-    detour::{Bypass, Detour},
     error::{HookError, HookResult as Result},
     file::filter::FileFilter,
 };
@@ -39,9 +38,12 @@ use tracing::Level;
 use tracing::{error, trace};
 
 use super::{hooks::FN_OPEN, open_dirs::OPEN_DIRS, *};
-use crate::common;
 #[cfg(target_os = "linux")]
 use crate::common::CheckedInto;
+use crate::{
+    common,
+    detour::{Bypass, Detour},
+};
 
 /// 1 Megabyte. Large read requests can lead to timeouts.
 const MAX_READ_SIZE: u64 = 1024 * 1024;
@@ -665,7 +667,7 @@ pub(crate) fn statx_logic(
 
     use std::{mem, ops::Not};
 
-    use mirrord_layer_lib::detour::OptionDetourExt;
+    use crate::detour::OptionDetourExt;
 
     let statx_buf = unsafe { statx_buf.as_mut().ok_or(HookError::BadPointer)? };
 
@@ -921,10 +923,26 @@ mod test {
     use std::path::PathBuf;
 
     use mirrord_config::{feature::fs::FsConfig, util::VecOrSingle};
-    use mirrord_layer_lib::detour::Detour;
     use rstest::*;
 
     use super::{absolute_path, *};
+    use crate::detour::Detour;
+
+    #[test]
+    fn test_absolute_normal() {
+        assert_eq!(
+            absolute_path(PathBuf::from("/a/b/c")),
+            PathBuf::from("/a/b/c")
+        );
+        assert_eq!(
+            absolute_path(PathBuf::from("/a/b/../c")),
+            PathBuf::from("/a/c")
+        );
+        assert_eq!(
+            absolute_path(PathBuf::from("/a/b/./c")),
+            PathBuf::from("/a/b/c")
+        )
+    }
 
     /// Helper type for testing [`FileFilter`] results.
     #[derive(PartialEq, Eq, Debug)]
@@ -946,22 +964,6 @@ mod test {
                 Detour::Success(..) => DetourKind::Success,
             }
         }
-    }
-
-    #[test]
-    fn test_absolute_normal() {
-        assert_eq!(
-            absolute_path(PathBuf::from("/a/b/c")),
-            PathBuf::from("/a/b/c")
-        );
-        assert_eq!(
-            absolute_path(PathBuf::from("/a/b/../c")),
-            PathBuf::from("/a/c")
-        );
-        assert_eq!(
-            absolute_path(PathBuf::from("/a/b/./c")),
-            PathBuf::from("/a/b/c")
-        )
     }
 
     #[rstest]

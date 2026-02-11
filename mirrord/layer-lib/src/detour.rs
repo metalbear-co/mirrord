@@ -4,127 +4,18 @@
 //! Here we also have the convenient detour helpers that are used by the hooks to either return a
 //! [`Result`]-like value, or the special [`Bypass`] case, which makes the _detour_ function call
 //! the original [`libc`] equivalent, stored in a hook function pointer.
-#[cfg(unix)]
 use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::net::SocketAddr;
 #[cfg(unix)]
-use std::{cell::RefCell, ffi::CString, ops::Deref, path::PathBuf, sync::OnceLock};
+use std::{ffi::CString, path::PathBuf};
+use std::{net::SocketAddr, sync::OnceLock};
 
 #[cfg(target_os = "macos")]
 use libc::c_char;
 
-#[cfg(windows)]
-use crate::error::HookResult;
 use crate::{error::HookError, socket::sockets::SocketDescriptor};
-
-#[cfg(unix)]
-thread_local!(
-    /// Holds the thread-local state for bypassing the layer's detour functions.
-    ///
-    /// ## Warning
-    ///
-    /// Do **NOT** use this directly, instead use `DetourGuard::new` if you need to
-    /// create a bypass inside a function (like we have in
-    /// [`TcpHandler::create_local_stream`](crate::tcp::TcpHandler::create_local_stream)).
-    ///
-    /// Or rely on the [`hook_guard_fn`](mirrord_layer_macro::hook_guard_fn) macro.
-    ///
-    /// ## Details
-    ///
-    /// Some of the layer functions will interact with [`libc`] functions that we are hooking into,
-    /// thus we could end up _stealing_ a call by the layer itself rather than by the binary the
-    /// layer is injected into. An example of this  would be if we wanted to open a file locally,
-    /// the layer's `open_detour` intercepts the [`libc::open`] call, and we get a remote file
-    /// (if it exists), instead of the local file we wanted.
-    ///
-    /// We set this to `true` whenever an operation may require calling other [`libc`] functions,
-    /// and back to `false` after it's done.
-    static DETOUR_BYPASS: RefCell<bool> = const { RefCell::new(false) }
-);
-
-/// Sets [`DETOUR_BYPASS`] to `false`.
-///
-/// Prefer relying on the [`Drop`] implementation of [`DetourGuard`] instead.
-#[cfg(unix)]
-pub(super) fn detour_bypass_off() {
-    DETOUR_BYPASS.with(|enabled| {
-        if let Ok(mut bypass) = enabled.try_borrow_mut() {
-            *bypass = false
-        }
-    });
-}
-
-/// Handler for the layer's [`DETOUR_BYPASS`].
-///
-/// Sets [`DETOUR_BYPASS`] on creation, and turns it off on [`Drop`].
-///
-/// ## Warning
-///
-/// You should always use `DetourGuard::new`, if you construct this in any other way, it's
-/// not going to guard anything.
-#[cfg(unix)]
-pub struct DetourGuard;
-
-#[cfg(unix)]
-impl DetourGuard {
-    /// Create a new DetourGuard if it's not already enabled.
-    pub fn new() -> Option<Self> {
-        DETOUR_BYPASS.with(|enabled| {
-            if let Ok(bypass) = enabled.try_borrow()
-                && *bypass
-            {
-                None
-            } else {
-                match enabled.try_borrow_mut() {
-                    Ok(mut bypass) => {
-                        *bypass = true;
-                        Some(Self)
-                    }
-                    _ => None,
-                }
-            }
-        })
-    }
-}
-
-#[cfg(unix)]
-impl Drop for DetourGuard {
-    fn drop(&mut self) {
-        detour_bypass_off();
-    }
-}
-
-/// Wrapper around [`OnceLock`], mainly used for the [`Deref`] implementation
-/// to simplify calls to the original functions as `FN_ORIGINAL()`, instead of
-/// `FN_ORIGINAL.get().unwrap()`.
-#[cfg(unix)]
-#[derive(Debug)]
-pub struct HookFn<T>(OnceLock<T>);
-
-#[cfg(unix)]
-impl<T> Deref for HookFn<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.0.get().unwrap()
-    }
-}
-
-#[cfg(unix)]
-impl<T> HookFn<T> {
-    /// Helper function to set the inner [`OnceLock`] `T` of `self`.
-    pub fn set(&self, value: T) -> Result<(), T> {
-        self.0.set(value)
-    }
-
-    /// Until we can impl Default as const.
-    pub const fn default_const() -> Self {
-        Self(OnceLock::new())
-    }
-}
 
 /// Soft-errors that can be recovered from by calling the raw FFI function.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -266,7 +157,6 @@ impl Bypass {
 /// Conversion from `Option`:
 /// - `Option::Some` -> `Detour::Success`
 /// - `Option::None` -> `Detour::Bypass`
-#[cfg(unix)]
 #[must_use = "this `Detour` may be an `Error` or a `Bypass` variant, which should be handled"]
 #[derive(Debug)]
 pub enum Detour<S = ()> {
@@ -279,7 +169,6 @@ pub enum Detour<S = ()> {
     Error(HookError),
 }
 
-#[cfg(unix)]
 impl<S> Try for Detour<S> {
     type Output = S;
 
@@ -298,7 +187,6 @@ impl<S> Try for Detour<S> {
     }
 }
 
-#[cfg(unix)]
 impl<S> FromResidual<Detour<convert::Infallible>> for Detour<S> {
     fn from_residual(residual: Detour<convert::Infallible>) -> Self {
         match residual {
@@ -308,7 +196,6 @@ impl<S> FromResidual<Detour<convert::Infallible>> for Detour<S> {
     }
 }
 
-#[cfg(unix)]
 impl<S, E> FromResidual<Result<convert::Infallible, E>> for Detour<S>
 where
     E: Into<HookError>,
@@ -321,7 +208,6 @@ where
     }
 }
 
-#[cfg(unix)]
 impl<S, E> From<Result<S, E>> for Detour<S>
 where
     E: Into<HookError>,
@@ -337,19 +223,16 @@ where
     }
 }
 
-#[cfg(unix)]
 impl<S> FromResidual<Option<convert::Infallible>> for Detour<S> {
     fn from_residual(_none_residual: Option<convert::Infallible>) -> Self {
         Detour::Bypass(Bypass::EmptyOption)
     }
 }
 
-#[cfg(unix)]
 impl<S> Residual<S> for Detour<convert::Infallible> {
     type TryType = Detour<S>;
 }
 
-#[cfg(unix)]
 impl<S> Detour<S> {
     /// Calls `op` if the result is `Success`, otherwise returns the `Bypass` or `Error` value of
     /// self.
@@ -408,7 +291,6 @@ impl<S> Detour<S> {
     }
 }
 
-#[cfg(unix)]
 impl<S> Detour<S>
 where
     S: From<HookError>,
@@ -441,7 +323,6 @@ where
 }
 
 /// Extends `Option<T>` with the `Option::bypass` function.
-#[cfg(unix)]
 pub trait OptionExt {
     /// Inner `T` of the `Option<T>`.
     type Opt;
@@ -453,20 +334,7 @@ pub trait OptionExt {
     fn bypass(self, value: Bypass) -> Detour<Self::Opt>;
 }
 
-#[cfg(windows)]
-pub trait OptionExt {
-    /// Inner `T` of the `Option<T>`.
-    type Opt;
-
-    /// Converts `Option<T>` into `Detour<T>`, mapping:
-    ///
-    /// - `Some` => `Detour::Success`;
-    /// - `None` => `Detour::Bypass`.
-    fn bypass(self, value: Bypass) -> HookResult<Self::Opt>;
-}
-
 /// Extends `Option<T>` with `Detour<T>` conversion methods.
-#[cfg(unix)]
 pub trait OptionDetourExt<T>: OptionExt {
     /// Transposes an `Option` of a [`Detour`] into a [`Detour`] of an `Option`.
     ///
@@ -486,7 +354,6 @@ pub trait OptionDetourExt<T>: OptionExt {
     fn transpose(self) -> Detour<Option<T>>;
 }
 
-#[cfg(unix)]
 impl<T> OptionExt for Option<T> {
     type Opt = T;
 
@@ -498,19 +365,6 @@ impl<T> OptionExt for Option<T> {
     }
 }
 
-#[cfg(windows)]
-impl<T> OptionExt for Option<T> {
-    type Opt = T;
-
-    fn bypass(self, value: Bypass) -> HookResult<T> {
-        match self {
-            Some(v) => Ok(v),
-            None => Err(HookError::Bypass(value)),
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
 impl<T> OptionDetourExt<T> for Option<Detour<T>> {
     #[inline]
     fn transpose(self) -> Detour<Option<T>> {
@@ -524,7 +378,6 @@ impl<T> OptionDetourExt<T> for Option<Detour<T>> {
 }
 
 /// Extends [`OnceLock`] with a helper function to initialize it with a [`Detour`].
-#[cfg(unix)]
 pub trait OnceLockExt<T> {
     /// Initializes a [`OnceLock`] with a [`Detour`] (similar to [`OnceLock::get_or_try_init`]).
     fn get_or_detour_init<F>(&self, f: F) -> Detour<&T>
@@ -532,7 +385,6 @@ pub trait OnceLockExt<T> {
         F: FnOnce() -> Detour<T>;
 }
 
-#[cfg(unix)]
 impl<T> OnceLockExt<T> for OnceLock<T> {
     fn get_or_detour_init<F>(&self, f: F) -> Detour<&T>
     where

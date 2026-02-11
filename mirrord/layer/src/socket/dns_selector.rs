@@ -4,8 +4,9 @@ use mirrord_config::feature::network::{
     dns::{DnsConfig, DnsFilterConfig},
     filter::AddressFilter,
 };
-use mirrord_layer_lib::detour::{Bypass, Detour};
 use tracing::Level;
+
+use crate::detour::{Bypass, Detour};
 
 /// Generated from [`DnsConfig`] provided in the [`LayerConfig`](mirrord_config::LayerConfig).
 /// Decides whether DNS queries are done locally or remotely.

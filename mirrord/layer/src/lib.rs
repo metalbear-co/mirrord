@@ -102,7 +102,6 @@ use mirrord_config::{
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_lib::{
-    detour::DetourGuard,
     error::{LayerError, Result},
     logging,
 };
@@ -116,6 +115,7 @@ use socket::SOCKETS;
 use crate::{
     common::make_proxy_request_with_response,
     debugger_ports::DebuggerPorts,
+    detour::DetourGuard,
     load::LoadType,
     socket::{hooks::MANAGED_ADDRINFO, ops::REMOTE_DNS_REVERSE_MAPPING},
 };
@@ -140,6 +140,7 @@ mod integration_tests_deps {
 
 mod common;
 mod debugger_ports;
+mod detour;
 mod exec_hooks;
 #[cfg(target_os = "macos")]
 mod exec_utils;
