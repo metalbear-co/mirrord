@@ -325,9 +325,9 @@ async fn go_stat(
 #[cfg(target_os = "macos")]
 async fn go_dir(
     #[values(
-        Application::GoDir(GoVersion::GO_1_23),
         Application::GoDir(GoVersion::GO_1_24),
-        Application::GoDir(GoVersion::GO_1_25)
+        Application::GoDir(GoVersion::GO_1_25),
+        Application::GoDir(GoVersion::GO_1_26)
     )]
     application: Application,
     dylib_path: &Path,
