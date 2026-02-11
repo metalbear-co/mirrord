@@ -1,0 +1,1 @@
+expose feature.env.load_from_process as env MIRRORD_ENV_LOAD_FROM_PROCESS
