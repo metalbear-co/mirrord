@@ -13,7 +13,7 @@ pub use common::*;
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn test_issue2988(
-    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
+    #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let (mut test_process, _intproxy) = Application::GoIssue2988(go_version)
