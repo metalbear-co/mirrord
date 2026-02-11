@@ -7,7 +7,7 @@ use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t}
 use libc::{c_uint, iovec, sa_endpoints_t, sae_associd_t, sae_connid_t};
 use mirrord_config::experimental::ExperimentalConfig;
 #[cfg(target_os = "macos")]
-use mirrord_layer_lib::apple_dnsinfo::*;
+use mirrord_layer_lib::socket::apple_dnsinfo::*;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use nix::errno::Errno;
 
