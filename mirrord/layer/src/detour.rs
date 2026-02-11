@@ -7,8 +7,8 @@
 
 use std::{cell::RefCell, ops::Deref, sync::OnceLock};
 
-///! Re-exporting the detour helpers, so we can use them in the hooks without importing them
-/// from lib
+// Re-exporting the detour helpers, so we can use them in the hooks without importing them
+// from lib
 pub use mirrord_layer_lib::detour::*;
 
 thread_local!(

@@ -22,6 +22,8 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnMetadataRequest,
     OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe,
 };
+#[cfg(target_os = "macos")]
+use mirrord_layer_lib::socket::apple_dnsinfo::*;
 use mirrord_layer_lib::{error::HookError, graceful_exit};
 use mirrord_protocol::{
     dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
@@ -36,8 +38,6 @@ use socket2::SockAddr;
 use tracing::Level;
 use tracing::{error, trace};
 
-#[cfg(target_os = "macos")]
-use super::apple_dnsinfo::*;
 use super::{hooks::*, *};
 use crate::{
     common::make_proxy_request_with_response,

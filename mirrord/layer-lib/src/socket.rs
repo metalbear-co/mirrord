@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+pub mod apple_dnsinfo;
 pub mod dns;
 pub mod hostname;
 pub mod ops;
