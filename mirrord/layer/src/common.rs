@@ -100,7 +100,7 @@ pub fn strip_mirrord_path(path_str: &str) -> Option<&str> {
         let remain = &path_str[(MIRRORD_PATCH_DIR.len() + index)..];
         // if the case is lstat(MIRRORD_PATCH_DIR) the result would be lstat("") which ofc is very
         // sad. which is in that case we automatically insert "/"
-        if remain == "" { ROOT_DIR } else { remain }
+        if remain.is_empty() { ROOT_DIR } else { remain }
     })
 }
 
