@@ -421,8 +421,8 @@ jobs:
         run: |
           mkdir -p target/universal-apple-darwin/release
           mkdir -p target/aarch64-apple-darwin/release
-          cp artifacts/layer-universal/target/universal-apple-darwin/release/libmirrord_layer.dylib target/universal-apple-darwin/release/
-          cp artifacts/layer-universal/target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/
+          cp artifacts/layer-universal/universal-apple-darwin/release/libmirrord_layer.dylib target/universal-apple-darwin/release/
+          cp artifacts/layer-universal/aarch64-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/
       - name: Import Code-Signing Certificates
         uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
         with:
@@ -468,8 +468,8 @@ jobs:
         run: |
           mkdir -p target/universal-apple-darwin/release
           mkdir -p target/aarch64-apple-darwin/release
-          cp artifacts/layer-universal/target/universal-apple-darwin/release/libmirrord_layer.dylib target/universal-apple-darwin/release/
-          cp artifacts/layer-universal/target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/
+          cp artifacts/layer-universal/universal-apple-darwin/release/libmirrord_layer.dylib target/universal-apple-darwin/release/
+          cp artifacts/layer-universal/aarch64-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/
       - name: Import Code-Signing Certificates
         uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
         with:
@@ -515,7 +515,7 @@ jobs:
           mkdir -p target/universal-apple-darwin/release
           cp artifacts/cli-x86_64/mirrord target/x86_64-apple-darwin/release/
           cp artifacts/cli-aarch64/mirrord target/aarch64-apple-darwin/release/
-          cp artifacts/layer-universal/target/universal-apple-darwin/release/libmirrord_layer.dylib target/universal-apple-darwin/release/
+          cp artifacts/layer-universal/universal-apple-darwin/release/libmirrord_layer.dylib target/universal-apple-darwin/release/
       - name: Import Code-Signing Certificates
         uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
         with:
