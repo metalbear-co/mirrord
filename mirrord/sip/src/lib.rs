@@ -82,8 +82,10 @@ mod main {
     /// The version of mirrord is also added to the dir name, to force mirrord to re-patch files
     /// when there is a version change. This is to prevent badly patched files being re-used
     /// <https://github.com/metalbear-co/mirrord/issues/3245>
+    /// Add "/" in the end to solve a case where npm/service resolves MIRRORD_PATCH_DIR
+    /// we strip it down and left with just ""
     pub static MIRRORD_PATCH_DIR: &str =
-        concat!("mirrord-bin-ghu3278mz-", env!("CARGO_PKG_VERSION"));
+        concat!("mirrord-bin-ghu3278mz-", env!("CARGO_PKG_VERSION"), "/");
 
     pub const FRAMEWORKS_ENV_VAR_NAME: &str = "DYLD_FALLBACK_FRAMEWORK_PATH";
 

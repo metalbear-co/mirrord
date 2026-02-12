@@ -94,7 +94,8 @@ pub fn strip_mirrord_path(path_str: &str) -> Option<&str> {
     #[allow(clippy::indexing_slicing)]
     path_str
         .find(MIRRORD_PATCH_DIR)
-        .map(|index| &path_str[(MIRRORD_PATCH_DIR.len() + index)..])
+        // keep / (remove -1)
+        .map(|index| &path_str[(MIRRORD_PATCH_DIR.len() + index - 1)..])
 }
 
 impl CheckedInto<PathBuf> for *const c_char {
