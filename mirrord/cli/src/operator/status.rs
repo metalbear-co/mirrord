@@ -367,7 +367,7 @@ Operator License
         sessions.printstd();
         println!();
 
-        // Multi-cluster sessions (only present on Primary with multi-cluster enabled).
+        // Multi-cluster sessions are only on Primary cluster.
         if let Some(mc_sessions) = status.multi_cluster_sessions.as_ref() {
             if mc_sessions.is_empty() {
                 println!("No active multi-cluster sessions.");
