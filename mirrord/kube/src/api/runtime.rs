@@ -160,11 +160,22 @@ impl RuntimeData {
             })
             .collect();
 
-        let container_statuses = pod
+        let main_container_statuses = pod
             .status
             .as_ref()
             .and_then(|status| status.container_statuses.as_ref())
             .ok_or_else(|| KubeApiError::missing_field(pod, ".status.containerStatuses"))?;
+        let init_container_statuses = pod
+            .status
+            .as_ref()
+            .and_then(|status| status.init_container_statuses.as_ref())
+            .ok_or_else(|| KubeApiError::missing_field(pod, ".status.initContainerStatuses"))?;
+        let container_statuses = main_container_statuses
+            .iter()
+            .chain(init_container_statuses.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+
         let default_container_name = pod
             .metadata
             .annotations
