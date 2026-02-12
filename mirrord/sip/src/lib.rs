@@ -58,11 +58,8 @@ mod main {
     use fs4::fs_std::FileExt;
     use object::{
         Architecture, Endianness, FileKind,
-        macho::{self, LC_RPATH, MachHeader64},
-        read::{
-            self,
-            macho::{FatArch, LoadCommandVariant::Rpath, MachHeader},
-        },
+        macho::{self, FatArch32, FatArch64, LC_RPATH, MachHeader64},
+        read::macho::{FatArch, LoadCommandVariant::Rpath, MachHeader, MachOFatFile},
     };
     use once_cell::sync::Lazy;
     use tracing::{trace, warn};
@@ -110,31 +107,6 @@ mod main {
     pub static MIRRORD_TEMP_BIN_DIR_STRING: Lazy<String> =
         Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_TEMP_BIN_DIR_PATH_BUF));
 
-    /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
-    /// main cpu type is arm64. We only consider the lowest byte in the check.
-    fn is_cpu_subtype_arm64e(subtype: u32) -> bool {
-        // We only compare the lowest 8 bit since the higher bits may contain "capability bits".
-        // For example, usually arm64e would be
-        // `macho::CPU_SUBTYPE_ARM64E | macho::CPU_SUBTYPE_PTRAUTH_ABI`.
-        // Maybe we could also use arm64e binaries without pointer authentication, but we don't
-        // know if that exists in the wild so it was decided not to work with any arm64e
-        // binaries for now.
-        subtype as u8 == macho::CPU_SUBTYPE_ARM64E as u8
-    }
-
-    /// Return whether a binary that is a member of a fat binary is arm64 (not arm64e).
-    /// We don't include arm64e because the SIP patching trick does not work with arm64e binaries.
-    #[cfg(target_arch = "aarch64")]
-    fn is_fat_arm64_arch(arch: &&impl FatArch) -> bool {
-        matches!(arch.architecture(), Architecture::Aarch64)
-            && !is_cpu_subtype_arm64e(arch.cpusubtype())
-    }
-
-    /// Return whether a binary that is a member of a fat binary is x64.
-    fn is_fat_x64_arch(arch: &&impl FatArch) -> bool {
-        matches!(arch.architecture(), Architecture::X86_64)
-    }
-
     /// Options for the [main::sip_patch] function.
     #[derive(Clone, Copy, Default)]
     pub struct SipPatchOptions<'a> {
@@ -157,11 +129,16 @@ mod main {
     struct BinaryInfo {
         offset: usize,
         size: usize,
+        cpu_subtype: u32,
     }
 
     impl BinaryInfo {
-        fn new(offset: usize, size: usize) -> Self {
-            Self { offset, size }
+        fn new(offset: usize, size: usize, cpu_subtype: u32) -> Self {
+            Self {
+                offset,
+                size,
+                cpu_subtype,
+            }
         }
 
         /// Takes the cpu type and subtype and the bytes of a file that is a non-fat Mach-O, and
@@ -169,16 +146,48 @@ mod main {
         /// part of a fat file) if it is of a supported CPU architecture, or a
         /// `SipError::NoSupportedArchitecture` otherwise.
         fn from_thin_mach_o(cpu_type: u32, cpu_subtype: u32, bytes: &[u8]) -> Result<Self> {
-            if cpu_type == macho::CPU_TYPE_X86_64
-                || (cpu_type == macho::CPU_TYPE_ARM64 && !is_cpu_subtype_arm64e(cpu_subtype))
-            {
+            if cpu_type == macho::CPU_TYPE_X86_64 || cpu_type == macho::CPU_TYPE_ARM64 {
                 // The binary has an architecture we know how to patch, so proceed.
                 // We don't check if this is a thin arm binary on an intel chip because that would
                 // not run regardless of SIP.
-                Ok(Self::new(0, bytes.len()))
+                Ok(Self::new(0, bytes.len(), cpu_subtype))
             } else {
                 Err(SipError::NoSupportedArchitecture)
             }
+        }
+
+        /// Tries to find the first compatible architecture inside a fat mach-o file
+        fn from_fat_mach_o<Fat: FatArch>(bytes: &[u8]) -> Result<Self> {
+            let fat_file = MachOFatFile::<Fat>::parse(bytes).map_err(|_| {
+                SipError::UnsupportedFileFormat(format!(
+                    "Mach-O {}-bit",
+                    std::mem::size_of::<Fat::Word>() * 8
+                ))
+            })?;
+
+            let find_arch = |arch: Architecture| {
+                fat_file
+                    .arches()
+                    .iter()
+                    .find(|fat| fat.architecture() == arch)
+            };
+
+            #[cfg(target_arch = "aarch64")]
+            let found_arch =
+                find_arch(Architecture::Aarch64).or_else(|| find_arch(Architecture::X86_64));
+
+            #[cfg(target_arch = "x86_64")]
+            let found_arch = find_arch(Architecture::X86_64);
+
+            found_arch
+                .map(|arch| {
+                    Self::new(
+                        arch.offset().into() as usize,
+                        arch.size().into() as usize,
+                        arch.cpusubtype(),
+                    )
+                })
+                .ok_or(SipError::NoSupportedArchitecture)
         }
 
         /// Return the `BinaryInfo` of a supported binary from the file: if the file is a "thin"
@@ -210,49 +219,15 @@ mod main {
                     )
                 }
 
-                // This is probably where most fat binaries are handled (see comment above
+                // This is where most fat binaries are handled (see comment above
                 // `MachOFat64`). A 32 bit archive (fat Mach-O) can contain 64 bit binaries.
-                FileKind::MachOFat32 => {
-                    let fat_slice = read::macho::MachOFatFile32::parse(bytes).map_err(|_| {
-                        SipError::UnsupportedFileFormat("FatMach-O 32-bit".to_string())
-                    })?;
-                    #[cfg(target_arch = "aarch64")]
-                    let found_arch = fat_slice
-                        .arches()
-                        .iter()
-                        .find(is_fat_arm64_arch)
-                        .or_else(|| fat_slice.arches().iter().find(is_fat_x64_arch));
-
-                    #[cfg(target_arch = "x86_64")]
-                    let found_arch = fat_slice.arches().iter().find(is_fat_x64_arch);
-
-                    found_arch
-                        .map(|arch| Self::new(arch.offset() as usize, arch.size() as usize))
-                        .ok_or(SipError::NoSupportedArchitecture)
-                }
+                FileKind::MachOFat32 => Self::from_fat_mach_o::<FatArch32>(bytes),
 
                 // It seems like 64 bit fat Mach-Os are only used (if at all) when one of the
                 // binaries has 2^32 bytes or more (around 4 GB).
                 // See https://github.com/Homebrew/ruby-macho/issues/101#issuecomment-403202114
-                FileKind::MachOFat64 => {
-                    let fat_slice = read::macho::MachOFatFile64::parse(bytes).map_err(|_| {
-                        SipError::UnsupportedFileFormat("Mach-O 32-bit".to_string())
-                    })?;
+                FileKind::MachOFat64 => Self::from_fat_mach_o::<FatArch64>(bytes),
 
-                    #[cfg(target_arch = "aarch64")]
-                    let found_arch = fat_slice
-                        .arches()
-                        .iter()
-                        .find(is_fat_arm64_arch)
-                        .or_else(|| fat_slice.arches().iter().find(is_fat_x64_arch));
-
-                    #[cfg(target_arch = "x86_64")]
-                    let found_arch = fat_slice.arches().iter().find(is_fat_x64_arch);
-
-                    found_arch
-                        .map(|arch| Self::new(arch.offset() as usize, arch.size() as usize))
-                        .ok_or(SipError::NoSupportedArchitecture)
-                }
                 other => Err(SipError::UnsupportedFileFormat(format!("{other:?}"))),
             }
         }
@@ -344,7 +319,7 @@ mod main {
             "{:?} is a SIP protected binary, making non protected version at: {:?}",
             path, output
         );
-        let data = std::fs::read(path)?;
+        let mut data = std::fs::read(path)?;
 
         // Propagate Err if the binary does not contain any supported architecture (x64/arm64).
         let binary_info = BinaryInfo::from_object_bytes(&data)?;
@@ -352,10 +327,44 @@ mod main {
         // Just the thin binary - if the file was a thin binary of a supported architecture to
         // begin with then it's the whole file, if its a fat binary then it's just a part of it.
         let binary = data
-            .get(binary_info.offset..binary_info.offset + binary_info.size)
+            .get_mut(binary_info.offset..binary_info.offset + binary_info.size)
             .expect("invalid SIP binary");
 
-        std::fs::write(&temp_binary, binary)?;
+        // If we're executing an arm64e binary we need to patch the ptr auth ABI version to allow
+        // executing third party binaries.
+        //
+        // This can be analyzed by first stripping a properly codesigned arm64e binary out of its
+        // fat mach-o image:
+        // $ lipo /bin/sh -thin arm64e -output hax-sh
+        //
+        // Then looking at its header using something like otool/objdump:
+        // $ otool -vh hax-sh
+        // Mach header
+        //       magic cputype cpusubtype  caps filetype ncmds sizeofcmds flags
+        // MH_MAGIC_64   ARM64          E PAC00  EXECUTE    17       1296 NOUNDEFS DYLDLINK TWOLEVEL
+        //
+        // We're interested in the 'caps' (capabilities) column, which says "PAC00",
+        // meaning "Pointer Authentication Codes version 0". This version is controlled by the first
+        // 4 bits of the last byte of the 'cpusubtype' field, setting it to 1 allows us to
+        // execute arm64e binaries as long as they're codesigned! Yay!
+        //
+        // More info can be found on LLVM's objdump source code, e.g:
+        // https://github.com/llvm/llvm-project/blob/cbe7c49e93b630d3388dba2663b08a3c5c1bc8b6/llvm/include/llvm/BinaryFormat/MachO.h#L1642-L1678
+        // https://github.com/llvm/llvm-project/blob/7d1538cd3db3e228459e483ce9cdeb7fa4ae5e00/llvm/tools/llvm-objdump/MachODump.cpp#L8407-L8421
+        if (binary_info.cpu_subtype & !macho::CPU_SUBTYPE_MASK) == macho::CPU_SUBTYPE_ARM64E {
+            let versioned_ptrauth = (binary_info.cpu_subtype & macho::CPU_SUBTYPE_PTRAUTH_ABI) != 0;
+            if versioned_ptrauth {
+                const PTRAUTH_VERSION_MASK: u32 = 0x0f00_0000;
+                let ptrauth_version = (binary_info.cpu_subtype & PTRAUTH_VERSION_MASK) >> 24;
+                if ptrauth_version == 0 {
+                    // Override the ptrauth version to '1', allowing us to execute the file
+                    let new_subtype = binary_info.cpu_subtype | (1 << 24);
+                    binary.get_mut(8..12).expect("Mach-O header can't be malformed at this point since it has already been parsed").copy_from_slice(&new_subtype.to_ne_bytes());
+                }
+            }
+        }
+
+        std::fs::write(&temp_binary, &binary)?;
 
         if let Err(err) = get_rpath_entries(binary)
             .and_then(|rpath_entries| add_rpath_entries(&rpath_entries, path, temp_binary.as_ref()))

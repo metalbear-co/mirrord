@@ -10,6 +10,10 @@ use mirrord_protocol::file::OpenOptionsInternal;
 use null_terminated::Nul;
 use tracing::warn;
 
+/// Make it const so can be shared and re-used with by reference without fear.
+#[cfg(target_os = "macos")]
+const ROOT_DIR: &str = "/\0";
+
 use crate::{exec_hooks::Argv, file::OpenOptionsInternalExt, socket::SHARED_SOCKETS_ENV_VAR};
 
 /// Converts raw pointer values `P` to some other type.
@@ -54,9 +58,12 @@ pub fn strip_mirrord_path(path_str: &str) -> Option<&str> {
     // SAFETY: We only slice after we find the string in the path
     // so it must be valid
     #[allow(clippy::indexing_slicing)]
-    path_str
-        .find(MIRRORD_PATCH_DIR)
-        .map(|index| &path_str[(MIRRORD_PATCH_DIR.len() + index)..])
+    path_str.find(MIRRORD_PATCH_DIR).map(|index| {
+        let remain = &path_str[(MIRRORD_PATCH_DIR.len() + index)..];
+        // if the case is lstat(MIRRORD_PATCH_DIR) the result would be lstat("") which ofc is very
+        // sad. which is in that case we automatically insert "/"
+        if remain.is_empty() { ROOT_DIR } else { remain }
+    })
 }
 
 impl CheckedInto<PathBuf> for *const c_char {
