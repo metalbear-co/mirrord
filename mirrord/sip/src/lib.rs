@@ -333,11 +333,11 @@ mod main {
         // If we're executing an arm64e binary we need to patch the ptr auth ABI version to allow
         // executing third party binaries.
         //
-        // This can be analyzed by first stripping a properly codesigned arm64e binary out of it's
+        // This can be analyzed by first stripping a properly codesigned arm64e binary out of its
         // fat mach-o image:
         // $ lipo /bin/sh -thin arm64e -output hax-sh
         //
-        // Then looking at it's header using something like otool/objdump:
+        // Then looking at its header using something like otool/objdump:
         // $ otool -vh hax-sh
         // Mach header
         //       magic cputype cpusubtype  caps filetype ncmds sizeofcmds flags
