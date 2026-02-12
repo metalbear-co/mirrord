@@ -25,7 +25,7 @@ use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
 use mirrord_protocol::outgoing::SocketAddress;
 // Re-export ops module items
 pub use ops::{
-    ConnectFn, ConnectResult, SendtoFn, connect_outgoing, connect_outgoing_udp,
+    ConnectResult, SendtoFn, connect_outgoing, connect_outgoing_udp,
     create_outgoing_request, is_unix_address, prepare_outgoing_address, send_dns_patch, send_to,
     update_socket_connected_state,
 };

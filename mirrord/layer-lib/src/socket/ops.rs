@@ -14,8 +14,6 @@ use socket2::SockAddr;
 use tracing::{debug, error, trace};
 /// Platform-specific connect function types
 #[cfg(windows)]
-use winapi::shared::ws2def::SOCKADDR as SOCK_ADDR_T;
-#[cfg(windows)]
 use winapi::um::winsock2::SOCKET;
 #[cfg(windows)]
 use winapi::um::winsock2::{WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR};
@@ -35,35 +33,9 @@ pub type SocketDescriptor = RawFd;
 #[cfg(windows)]
 pub type SocketDescriptor = SOCKET;
 
-#[cfg(windows)]
-#[allow(non_camel_case_types)]
-pub type SOCK_ADDR_LEN_T = i32;
-
 #[cfg(unix)]
 #[allow(non_camel_case_types)]
 pub type SOCKET = i32;
-#[cfg(unix)]
-#[allow(non_camel_case_types)]
-pub type SOCK_ADDR_T = libc::sockaddr;
-#[cfg(unix)]
-#[allow(non_camel_case_types)]
-pub type SOCK_ADDR_LEN_T = libc::socklen_t;
-
-macro_rules! connect_fn_def {
-    ($conv:literal) => {
-        unsafe extern $conv fn (
-            sockfd: SocketDescriptor,
-            addr: *const SOCK_ADDR_T,
-            addrlen: SOCK_ADDR_LEN_T,
-        ) -> i32
-    };
-}
-
-// single xplatform ConnectFn definition of socket connect
-#[cfg(windows)]
-pub type ConnectFn = connect_fn_def!("system");
-#[cfg(unix)]
-pub type ConnectFn = connect_fn_def!("C");
 
 /// Result type for connect operations that preserves errno information
 #[derive(Debug)]
