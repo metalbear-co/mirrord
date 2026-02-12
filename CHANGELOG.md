@@ -13,7 +13,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Added
 
-- expose feature.env.load_from_process as env MIRRORD_ENV_LOAD_FROM_PROCESS
+- Expose feature.env.load_from_process as env MIRRORD_ENV_LOAD_FROM_PROCESS
 
 
 ### Fixed
