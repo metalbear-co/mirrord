@@ -289,7 +289,7 @@ jobs:
 
   # Stage 1: Build x86_64 layer (runs in parallel)
   build_layer_macos_x86_64:
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - run: rm rust-toolchain.toml
@@ -321,7 +321,7 @@ jobs:
 
   # Stage 1: Build aarch64 layer + shim (runs in parallel)
   build_layer_macos_aarch64:
-    runs-on: macos-latest
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - run: rm rust-toolchain.toml
@@ -355,7 +355,7 @@ jobs:
 
   # Stage 2: Link universal layer from pre-built layers
   link_layer_macos_universal:
-    runs-on: macos-latest
+    runs-on: macos-15
     needs: [build_layer_macos_x86_64, build_layer_macos_aarch64]
     steps:
       - uses: actions/checkout@v4
@@ -398,7 +398,7 @@ jobs:
 
   # Stage 3: Build x86_64 CLI (runs in parallel)
   build_cli_macos_x86_64:
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     needs: [build_wizard_frontend, link_layer_macos_universal]
     steps:
       - uses: actions/checkout@v4
@@ -445,7 +445,7 @@ jobs:
 
   # Stage 3: Build aarch64 CLI (runs in parallel)
   build_cli_macos_aarch64:
-    runs-on: macos-latest
+    runs-on: macos-15
     needs: [build_wizard_frontend, link_layer_macos_universal]
     steps:
       - uses: actions/checkout@v4
@@ -492,7 +492,7 @@ jobs:
 
   # Stage 4: Merge universal CLI from pre-built CLIs
   merge_cli_macos_universal:
-    runs-on: macos-latest
+    runs-on: macos-15
     needs: [build_cli_macos_x86_64, build_cli_macos_aarch64, link_layer_macos_universal]
     steps:
       - uses: actions/checkout@v4
