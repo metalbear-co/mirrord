@@ -82,7 +82,6 @@ mod init_containers_tests {
     }
 
     /// Test that we can target a native sidecar init container by name
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
@@ -107,7 +106,6 @@ mod init_containers_tests {
     }
 
     /// Test that we target a main container by default
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
