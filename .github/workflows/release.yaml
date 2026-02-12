@@ -269,24 +269,6 @@ jobs:
             ${{ env.MIRRORD_MSI }}.sha256
           if-no-files-found: error
 
-  # Stage 1: Build wizard frontend (runs in parallel with layer builds)
-  build_wizard_frontend:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 24
-      - run: npm install
-        working-directory: ./wizard-frontend
-      - run: npm run build
-        working-directory: ./wizard-frontend
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wizard-dist
-          path: wizard-frontend/dist/
-          if-no-files-found: error
-
   # Stage 1: Build x86_64 layer (runs in parallel)
   build_layer_macos_x86_64:
     runs-on: macos-15-intel
@@ -399,7 +381,7 @@ jobs:
   # Stage 3: Build x86_64 CLI (runs in parallel)
   build_cli_macos_x86_64:
     runs-on: macos-15-intel
-    needs: [build_wizard_frontend, link_layer_macos_universal]
+    needs: [link_layer_macos_universal]
     steps:
       - uses: actions/checkout@v4
       - run: rm rust-toolchain.toml
@@ -409,10 +391,9 @@ jobs:
           toolchain: nightly-2025-07-28
           rustflags: ""
           cache: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/setup-node@v3
         with:
-          name: wizard-dist
-          path: wizard-frontend/dist
+          node-version: 24
       - uses: actions/download-artifact@v4
         with:
           name: layer-universal-apple-darwin
@@ -434,6 +415,8 @@ jobs:
           brew install mitchellh/gon/gon
       - name: Build x86_64 CLI
         env:
+          MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/universal-apple-darwin/release/libmirrord_layer.dylib
+          MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/aarch64-apple-darwin/release/libmirrord_layer.dylib
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo +nightly-2025-07-28 xtask build-cli --platform macos-x86_64 --release
@@ -446,7 +429,7 @@ jobs:
   # Stage 3: Build aarch64 CLI (runs in parallel)
   build_cli_macos_aarch64:
     runs-on: macos-15
-    needs: [build_wizard_frontend, link_layer_macos_universal]
+    needs: [link_layer_macos_universal]
     steps:
       - uses: actions/checkout@v4
       - run: rm rust-toolchain.toml
@@ -456,10 +439,9 @@ jobs:
           toolchain: nightly-2025-07-28
           rustflags: ""
           cache: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/setup-node@v3
         with:
-          name: wizard-dist
-          path: wizard-frontend/dist
+          node-version: 24
       - uses: actions/download-artifact@v4
         with:
           name: layer-universal-apple-darwin
@@ -481,6 +463,8 @@ jobs:
           brew install mitchellh/gon/gon
       - name: Build aarch64 CLI
         env:
+          MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/universal-apple-darwin/release/libmirrord_layer.dylib
+          MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/aarch64-apple-darwin/release/libmirrord_layer.dylib
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo +nightly-2025-07-28 xtask build-cli --platform macos-aarch64 --release

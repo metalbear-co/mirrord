@@ -52,6 +52,11 @@ impl Target {
 
 /// Builds the mirrord layer for the specified target
 pub fn build_layer(target: Target, release: bool) -> Result<PathBuf> {
+    // Special case: MacosUniversal needs to build both architectures + shim
+    if matches!(target, Target::MacosUniversal) {
+        return build_macos_universal_layer(release);
+    }
+
     println!("Building mirrord-layer for {}...", target.triple());
 
     let mut cmd = Command::new("cargo");

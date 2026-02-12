@@ -78,8 +78,16 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
     match options.platform {
         Platform::MacosX86_64 => {
             let target = Target::MacosX86_64;
-            let layer_path =
-                layer::build_layer(target, options.release).context("Failed to build layer")?;
+            // Check if layer already exists via environment variable
+            let layer_path = if let Ok(existing_layer) = env::var("MIRRORD_LAYER_FILE") {
+                println!(
+                    "Using existing layer from MIRRORD_LAYER_FILE: {}",
+                    existing_layer
+                );
+                std::path::PathBuf::from(existing_layer)
+            } else {
+                layer::build_layer(target, options.release).context("Failed to build layer")?
+            };
             println!();
 
             cli::build_cli(target, options.release, &layer_path, options.with_wizard)
@@ -87,11 +95,21 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
         }
         Platform::MacosAarch64 => {
             let target = Target::MacosAarch64;
-            // Build layer
-            let layer_path =
-                layer::build_layer(target, options.release).context("Failed to build layer")?;
-            // Build shim
-            layer::build_shim(options.release).context("Failed to build shim")?;
+            // Check if layer already exists via environment variable
+            let layer_path = if let Ok(existing_layer) = env::var("MIRRORD_LAYER_FILE") {
+                println!(
+                    "Using existing layer from MIRRORD_LAYER_FILE: {}",
+                    existing_layer
+                );
+                std::path::PathBuf::from(existing_layer)
+            } else {
+                // Build layer
+                let layer_path =
+                    layer::build_layer(target, options.release).context("Failed to build layer")?;
+                // Build shim
+                layer::build_shim(options.release).context("Failed to build shim")?;
+                layer_path
+            };
             println!();
 
             cli::build_cli(target, options.release, &layer_path, options.with_wizard)
