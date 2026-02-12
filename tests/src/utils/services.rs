@@ -334,7 +334,7 @@ pub async fn internal_service(
                 namespace,
                 &kube_client,
             )
-                .await;
+            .await;
         }
     }
 
@@ -555,5 +555,5 @@ pub async fn stateful_set_service(
         false,
         TestWorkloadType::StatefulSet,
     )
-        .await
+    .await
 }

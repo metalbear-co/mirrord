@@ -48,7 +48,9 @@ impl KubeService {
 
     pub fn stateful_set_target(&self) -> String {
         if self.workload_type.is_stateful_set().not() {
-            panic!("Stateful set is not enabled for this service, did you mean to use a deployment?");
+            panic!(
+                "Stateful set is not enabled for this service, did you mean to use a deployment?"
+            );
         }
 
         format!("statefulset/{}", self.name)

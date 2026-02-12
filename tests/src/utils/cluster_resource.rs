@@ -1,8 +1,11 @@
-use k8s_openapi::{api::{
-    apps::v1::Deployment,
-    core::v1::{EnvFromSource, Probe, Service, TCPSocketAction},
-}, apimachinery::pkg::util::intstr::IntOrString, DeepMerge, Resource};
-use k8s_openapi::api::apps::v1::StatefulSet;
+use k8s_openapi::{
+    api::{
+        apps::v1::{Deployment, StatefulSet},
+        core::v1::{EnvFromSource, Probe, Service, TCPSocketAction},
+    },
+    apimachinery::pkg::util::intstr::IntOrString,
+    DeepMerge, Resource,
+};
 use kube::runtime::reflector::Lookup;
 use mirrord_kube::api::kubernetes::rollout::Rollout;
 use serde_json::{json, Value};
@@ -247,7 +250,7 @@ pub fn stateful_set_from_json(name: &str, image: &str, has_pvc: bool) -> Statefu
             }
         }
     }))
-        .expect("Failed creating `statefulset` from json spec!");
+    .expect("Failed creating `statefulset` from json spec!");
     if has_pvc {
         let volume_claims = serde_json::from_value(json!({
             "spec": {
@@ -281,7 +284,7 @@ pub fn stateful_set_from_json(name: &str, image: &str, has_pvc: bool) -> Statefu
             ]
             }
         }))
-            .expect("Failed creating `statefulset.spec` with `volumeClaimTemplates` from json spec!");
+        .expect("Failed creating `statefulset.spec` with `volumeClaimTemplates` from json spec!");
         set.merge_from(volume_claims);
     }
     set

@@ -3,8 +3,10 @@
 use std::{collections::HashMap, fmt};
 
 use futures::StreamExt;
-use k8s_openapi::api::apps::v1::StatefulSet;
-use k8s_openapi::api::core::v1::{Pod, Service};
+use k8s_openapi::api::{
+    apps::v1::StatefulSet,
+    core::v1::{Pod, Service},
+};
 use kube::{
     runtime::{
         self,
