@@ -79,22 +79,15 @@ pub fn build_layer(target: Target, release: bool) -> Result<PathBuf> {
     Ok(layer_path)
 }
 
-/// Builds the macOS universal layer (combines x86_64, aarch64, and shim)
-pub fn build_macos_universal_layer(release: bool) -> Result<PathBuf> {
-    println!("Building macOS universal layer...");
-
-    // Build both architectures
-    let x86_layer = build_layer(Target::MacosX86_64, release)?;
-    let arm_layer = build_layer(Target::MacosAarch64, release)?;
-
-    // Create universal directory
+/// Builds the arm64e shim for macOS
+pub fn build_shim(release: bool) -> Result<PathBuf> {
     let mode = if release { "release" } else { "debug" };
-    let universal_dir = Path::new("target/universal-apple-darwin").join(mode);
-    std::fs::create_dir_all(&universal_dir).context("Failed to create universal directory")?;
+    let shim_dir = Path::new("target/aarch64-apple-darwin").join(mode);
+    std::fs::create_dir_all(&shim_dir).context("Failed to create shim directory")?;
 
-    // Build shim
-    let shim_path = universal_dir.join("shim.dylib");
+    let shim_path = shim_dir.join("shim.dylib");
     println!("Building arm64e shim...");
+
     let status = Command::new("clang")
         .args(["-arch", "arm64e", "-dynamiclib", "-o"])
         .arg(&shim_path)
@@ -106,8 +99,86 @@ pub fn build_macos_universal_layer(release: bool) -> Result<PathBuf> {
         anyhow::bail!("Failed to build shim");
     }
 
+    // Sign shim
+    signing::sign_binary(&shim_path)?;
+
+    println!("✓ Shim built: {}", shim_path.display());
+    Ok(shim_path)
+}
+
+/// Links pre-built architecture-specific layers into universal binary
+pub fn link_macos_universal_layer(release: bool) -> Result<PathBuf> {
+    println!("Linking macOS universal layer from pre-built architectures...");
+
+    let mode = if release { "release" } else { "debug" };
+
+    // Check that all required files exist
+    let x86_layer = Path::new("target/x86_64-apple-darwin")
+        .join(mode)
+        .join("libmirrord_layer.dylib");
+    let arm_layer = Path::new("target/aarch64-apple-darwin")
+        .join(mode)
+        .join("libmirrord_layer.dylib");
+    let shim_path = Path::new("target/aarch64-apple-darwin")
+        .join(mode)
+        .join("shim.dylib");
+
+    if !x86_layer.exists() {
+        anyhow::bail!("x86_64 layer not found at {}", x86_layer.display());
+    }
+    if !arm_layer.exists() {
+        anyhow::bail!("aarch64 layer not found at {}", arm_layer.display());
+    }
+    if !shim_path.exists() {
+        anyhow::bail!("shim not found at {}", shim_path.display());
+    }
+
+    // Create universal directory
+    let universal_dir = Path::new("target/universal-apple-darwin").join(mode);
+    std::fs::create_dir_all(&universal_dir).context("Failed to create universal directory")?;
+
+    // Create universal dylib with lipo
+    let universal_layer = universal_dir.join("libmirrord_layer.dylib");
+    println!("Creating universal dylib with lipo...");
+
+    let status = Command::new("lipo")
+        .args(["-create", "-output"])
+        .arg(&universal_layer)
+        .arg(&x86_layer)
+        .arg(&shim_path)
+        .arg(&arm_layer)
+        .status()
+        .context("Failed to create universal binary")?;
+
+    if !status.success() {
+        anyhow::bail!("lipo failed");
+    }
+
+    // Sign universal layer
+    signing::sign_binary(&universal_layer)?;
+
+    println!("✓ Universal layer linked: {}", universal_layer.display());
+    Ok(universal_layer)
+}
+
+/// Builds the macOS universal layer (combines x86_64, aarch64, and shim)
+pub fn build_macos_universal_layer(release: bool) -> Result<PathBuf> {
+    println!("Building macOS universal layer...");
+
+    // Build both architectures
+    let x86_layer = build_layer(Target::MacosX86_64, release)?;
+    let arm_layer = build_layer(Target::MacosAarch64, release)?;
+
+    // Build shim
+    let shim_path = build_shim(release)?;
+
     // Sign architecture-specific layers (can batch sign with gon in CI)
     signing::sign_binaries(&[x86_layer.clone(), arm_layer.clone(), shim_path.clone()])?;
+
+    // Create universal directory
+    let mode = if release { "release" } else { "debug" };
+    let universal_dir = Path::new("target/universal-apple-darwin").join(mode);
+    std::fs::create_dir_all(&universal_dir).context("Failed to create universal directory")?;
 
     // Create universal dylib
     let universal_layer = universal_dir.join("libmirrord_layer.dylib");

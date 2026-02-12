@@ -90,6 +90,54 @@ pub fn build_cli(
     Ok(cli_path)
 }
 
+/// Merges pre-built architecture-specific CLIs into universal binary
+pub fn merge_macos_universal_cli(release: bool) -> Result<PathBuf> {
+    println!("Merging macOS universal CLI from pre-built architectures...");
+
+    let mode = if release { "release" } else { "debug" };
+
+    // Check that CLIs exist
+    let x86_cli = Path::new("target/x86_64-apple-darwin")
+        .join(mode)
+        .join("mirrord");
+    let arm_cli = Path::new("target/aarch64-apple-darwin")
+        .join(mode)
+        .join("mirrord");
+
+    if !x86_cli.exists() {
+        anyhow::bail!("x86_64 CLI not found at {}", x86_cli.display());
+    }
+    if !arm_cli.exists() {
+        anyhow::bail!("aarch64 CLI not found at {}", arm_cli.display());
+    }
+
+    // Create universal directory
+    let universal_dir = Path::new("target/universal-apple-darwin").join(mode);
+    std::fs::create_dir_all(&universal_dir).context("Failed to create universal directory")?;
+
+    // Create universal binary with lipo
+    let universal_cli = universal_dir.join("mirrord");
+    println!("Creating universal CLI with lipo...");
+
+    let status = Command::new("lipo")
+        .args(["-create", "-output"])
+        .arg(&universal_cli)
+        .arg(&x86_cli)
+        .arg(&arm_cli)
+        .status()
+        .context("Failed to create universal binary")?;
+
+    if !status.success() {
+        anyhow::bail!("lipo failed");
+    }
+
+    // Sign universal CLI
+    signing::sign_binary(&universal_cli)?;
+
+    println!("✓ Universal CLI merged: {}", universal_cli.display());
+    Ok(universal_cli)
+}
+
 /// Builds the macOS universal CLI (combines x86_64 and aarch64)
 pub fn build_macos_universal_cli(
     release: bool,

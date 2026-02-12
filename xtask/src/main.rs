@@ -16,7 +16,8 @@ struct Cli {
 enum Commands {
     /// Build CLI binaries (includes wizard and layer)
     BuildCli {
-        /// Target platform (linux-x86_64, linux-aarch64, macos-universal, windows)
+        /// Target platform (linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64,
+        /// macos-universal, windows)
         #[arg(short, long, value_parser = parse_platform)]
         platform: Option<Platform>,
 
@@ -42,16 +43,32 @@ enum Commands {
         #[arg(short, long)]
         release: bool,
     },
+
+    /// Link pre-built architecture-specific layers into universal binary
+    LinkLayerUniversal {
+        /// Build in release mode
+        #[arg(short, long)]
+        release: bool,
+    },
+
+    /// Merge pre-built architecture-specific CLIs into universal binary
+    MergeCliUniversal {
+        /// Build in release mode
+        #[arg(short, long)]
+        release: bool,
+    },
 }
 
 fn parse_platform(s: &str) -> Result<Platform, String> {
     match s {
         "linux-x86_64" | "linux-x86-64" | "linux-amd64" => Ok(Platform::LinuxX86_64),
         "linux-aarch64" | "linux-arm64" => Ok(Platform::LinuxAarch64),
+        "macos-x86_64" | "macos-x86-64" | "macos-intel" => Ok(Platform::MacosX86_64),
+        "macos-aarch64" | "macos-arm64" | "macos-apple-silicon" => Ok(Platform::MacosAarch64),
         "macos-universal" | "macos" | "darwin" => Ok(Platform::MacosUniversal),
         "windows" | "win" => Ok(Platform::Windows),
         _ => Err(format!(
-            "Invalid platform: {}. Valid options: linux-x86_64, linux-aarch64, macos-universal, windows",
+            "Invalid platform: {}. Valid options: linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64, macos-universal, windows",
             s
         )),
     }
@@ -97,6 +114,13 @@ fn main() -> Result<()> {
             });
 
             match platform {
+                Platform::MacosX86_64 => {
+                    tasks::layer::build_layer(tasks::layer::Target::MacosX86_64, release)?;
+                }
+                Platform::MacosAarch64 => {
+                    tasks::layer::build_layer(tasks::layer::Target::MacosAarch64, release)?;
+                    tasks::layer::build_shim(release)?;
+                }
                 Platform::MacosUniversal => {
                     tasks::layer::build_macos_universal_layer(release)?;
                 }
@@ -110,6 +134,14 @@ fn main() -> Result<()> {
                     tasks::layer::build_layer(tasks::layer::Target::Windows, release)?;
                 }
             }
+        }
+
+        Commands::LinkLayerUniversal { release } => {
+            tasks::layer::link_macos_universal_layer(release)?;
+        }
+
+        Commands::MergeCliUniversal { release } => {
+            tasks::cli::merge_macos_universal_cli(release)?;
         }
     }
 

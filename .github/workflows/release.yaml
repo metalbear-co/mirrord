@@ -269,76 +269,263 @@ jobs:
             ${{ env.MIRRORD_MSI }}.sha256
           if-no-files-found: error
 
-  build_binaries_macos:
+  # Stage 1: Build wizard frontend (runs in parallel with layer builds)
+  build_wizard_frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 24
+      - run: npm install
+        working-directory: ./wizard-frontend
+      - run: npm run build
+        working-directory: ./wizard-frontend
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wizard-dist
+          path: wizard-frontend/dist/
+          if-no-files-found: error
+
+  # Stage 1: Build x86_64 layer (runs in parallel)
+  build_layer_macos_x86_64:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
-          target: x86_64-apple-darwin,aarch64-apple-darwin
+          target: x86_64-apple-darwin
           toolchain: nightly-2025-07-28
           rustflags: ""
       - name: Import Code-Signing Certificates
         uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
         with:
-          # The certificates in a PKCS12 file encoded as a base64 string
           p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
-          # The password used to import the PKCS12 file.
           p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
       - name: Install gon via HomeBrew for code signing and app notarization
         run: |
           brew tap mitchellh/gon
           brew install mitchellh/gon/gon
-        # Instead of spoofing an arm64e by changing bits, we now use a code shim compiled as arm64e that loads the arm64 layer
-      - name: build mirrord-layer x86-64, arm and code shim
-        run: |
-          cargo +nightly-2025-07-28 build --release -p mirrord-layer --target=aarch64-apple-darwin
-          cargo +nightly-2025-07-28 build --release -p mirrord-layer --target=x86_64-apple-darwin
-          clang -arch arm64e -dynamiclib -o target/aarch64-apple-darwin/release/shim.dylib mirrord/layer/shim.c
-      - name: Sign layer binaries and code shim
+      - name: Build x86_64 layer
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: gon -log-level=debug -log-json .github/workflows/arch_dylib_sign.json
-      - name: create universal target dir
-        run: mkdir -p /tmp/target/universal-apple-darwin/release
-      - name: create universal dylib
-        run: lipo -create -output /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/shim.dylib target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/x86_64-apple-darwin/release/libmirrord_layer.dylib
-      - name: Sign layer universal
-        env:
-          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
-          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: gon -log-level=debug -log-json .github/workflows/universal_dylib_sign.json
-      - uses: actions/setup-node@v3
+        run: cargo +nightly-2025-07-28 xtask build-layer --platform macos-x86_64 --release
+      - uses: actions/upload-artifact@v4
         with:
-          node-version: 24
-      - run: npm install
-        working-directory: ./wizard-frontend
-      - name: build macOS arm cli with universal dylib
-        env:
-          MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
-          MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/aarch64-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo +nightly-2025-07-28 build --release -p mirrord --target=aarch64-apple-darwin --features "wizard"
-      - name: build macOS x86-64 cli with universal dylib
-        env:
-          MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
-          MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/aarch64-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo +nightly-2025-07-28 build --release -p mirrord --target=x86_64-apple-darwin --features "wizard"
-      - name: Sign cli binaries
+          name: layer-x86_64-apple-darwin
+          path: target/x86_64-apple-darwin/release/libmirrord_layer.dylib
+          if-no-files-found: error
+
+  # Stage 1: Build aarch64 layer + shim (runs in parallel)
+  build_layer_macos_aarch64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rm rust-toolchain.toml
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          target: aarch64-apple-darwin
+          toolchain: nightly-2025-07-28
+          rustflags: ""
+      - name: Import Code-Signing Certificates
+        uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
+        with:
+          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+      - name: Install gon via HomeBrew for code signing and app notarization
+        run: |
+          brew tap mitchellh/gon
+          brew install mitchellh/gon/gon
+      - name: Build aarch64 layer + shim
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: gon -log-level=debug -log-json .github/workflows/arch_cli_sign.json
-      - name: create universal macOS cli
-        run: lipo -create -output /tmp/target/universal-apple-darwin/release/mirrord target/aarch64-apple-darwin/release/mirrord target/x86_64-apple-darwin/release/mirrord
-      - name: Sign universal cli
+        run: cargo +nightly-2025-07-28 xtask build-layer --platform macos-aarch64 --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: layer-aarch64-apple-darwin
+          path: |
+            target/aarch64-apple-darwin/release/libmirrord_layer.dylib
+            target/aarch64-apple-darwin/release/shim.dylib
+          if-no-files-found: error
+
+  # Stage 2: Link universal layer from pre-built layers
+  link_layer_macos_universal:
+    runs-on: macos-latest
+    needs: [build_layer_macos_x86_64, build_layer_macos_aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: layer-x86_64-apple-darwin
+          path: artifacts/layer-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: layer-aarch64-apple-darwin
+          path: artifacts/layer-aarch64
+      - name: Recreate cargo target structure
+        run: |
+          mkdir -p target/x86_64-apple-darwin/release
+          mkdir -p target/aarch64-apple-darwin/release
+          cp artifacts/layer-x86_64/libmirrord_layer.dylib target/x86_64-apple-darwin/release/
+          cp artifacts/layer-aarch64/libmirrord_layer.dylib target/aarch64-apple-darwin/release/
+          cp artifacts/layer-aarch64/shim.dylib target/aarch64-apple-darwin/release/
+      - name: Import Code-Signing Certificates
+        uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
+        with:
+          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+      - name: Install gon via HomeBrew for code signing and app notarization
+        run: |
+          brew tap mitchellh/gon
+          brew install mitchellh/gon/gon
+      - name: Link universal layer
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: gon -log-level=debug -log-json .github/workflows/universal_cli_sign.json
-      - name: adjust directory layout for upload
-        run: cp -rf /tmp/target .
+        run: cargo xtask link-layer-universal --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: layer-universal-apple-darwin
+          path: |
+            target/universal-apple-darwin/release/libmirrord_layer.dylib
+            target/aarch64-apple-darwin/release/libmirrord_layer.dylib
+          if-no-files-found: error
+
+  # Stage 3: Build x86_64 CLI (runs in parallel)
+  build_cli_macos_x86_64:
+    runs-on: macos-latest
+    needs: [build_wizard_frontend, link_layer_macos_universal]
+    steps:
+      - uses: actions/checkout@v4
+      - run: rm rust-toolchain.toml
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          target: x86_64-apple-darwin
+          toolchain: nightly-2025-07-28
+          rustflags: ""
+      - uses: actions/download-artifact@v4
+        with:
+          name: wizard-dist
+          path: wizard-frontend/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: layer-universal-apple-darwin
+          path: artifacts/layer-universal
+      - name: Recreate layer structure
+        run: |
+          mkdir -p target/universal-apple-darwin/release
+          mkdir -p target/aarch64-apple-darwin/release
+          cp artifacts/layer-universal/libmirrord_layer.dylib target/universal-apple-darwin/release/
+          cp artifacts/layer-universal/libmirrord_layer.dylib target/aarch64-apple-darwin/release/
+      - name: Import Code-Signing Certificates
+        uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
+        with:
+          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+      - name: Install gon via HomeBrew for code signing and app notarization
+        run: |
+          brew tap mitchellh/gon
+          brew install mitchellh/gon/gon
+      - name: Build x86_64 CLI
+        env:
+          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
+          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
+        run: cargo +nightly-2025-07-28 xtask build-cli --platform macos-x86_64 --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-x86_64-apple-darwin
+          path: target/x86_64-apple-darwin/release/mirrord
+          if-no-files-found: error
+
+  # Stage 3: Build aarch64 CLI (runs in parallel)
+  build_cli_macos_aarch64:
+    runs-on: macos-latest
+    needs: [build_wizard_frontend, link_layer_macos_universal]
+    steps:
+      - uses: actions/checkout@v4
+      - run: rm rust-toolchain.toml
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          target: aarch64-apple-darwin
+          toolchain: nightly-2025-07-28
+          rustflags: ""
+      - uses: actions/download-artifact@v4
+        with:
+          name: wizard-dist
+          path: wizard-frontend/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: layer-universal-apple-darwin
+          path: artifacts/layer-universal
+      - name: Recreate layer structure
+        run: |
+          mkdir -p target/universal-apple-darwin/release
+          mkdir -p target/aarch64-apple-darwin/release
+          cp artifacts/layer-universal/libmirrord_layer.dylib target/universal-apple-darwin/release/
+          cp artifacts/layer-universal/libmirrord_layer.dylib target/aarch64-apple-darwin/release/
+      - name: Import Code-Signing Certificates
+        uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
+        with:
+          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+      - name: Install gon via HomeBrew for code signing and app notarization
+        run: |
+          brew tap mitchellh/gon
+          brew install mitchellh/gon/gon
+      - name: Build aarch64 CLI
+        env:
+          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
+          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
+        run: cargo +nightly-2025-07-28 xtask build-cli --platform macos-aarch64 --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-aarch64-apple-darwin
+          path: target/aarch64-apple-darwin/release/mirrord
+          if-no-files-found: error
+
+  # Stage 4: Merge universal CLI from pre-built CLIs
+  merge_cli_macos_universal:
+    runs-on: macos-latest
+    needs: [build_cli_macos_x86_64, build_cli_macos_aarch64, link_layer_macos_universal]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-x86_64-apple-darwin
+          path: artifacts/cli-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-aarch64-apple-darwin
+          path: artifacts/cli-aarch64
+      - uses: actions/download-artifact@v4
+        with:
+          name: layer-universal-apple-darwin
+          path: artifacts/layer-universal
+      - name: Recreate cargo target structure
+        run: |
+          mkdir -p target/x86_64-apple-darwin/release
+          mkdir -p target/aarch64-apple-darwin/release
+          mkdir -p target/universal-apple-darwin/release
+          cp artifacts/cli-x86_64/mirrord target/x86_64-apple-darwin/release/
+          cp artifacts/cli-aarch64/mirrord target/aarch64-apple-darwin/release/
+          cp artifacts/layer-universal/libmirrord_layer.dylib target/universal-apple-darwin/release/
+      - name: Import Code-Signing Certificates
+        uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
+        with:
+          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+      - name: Install gon via HomeBrew for code signing and app notarization
+        run: |
+          brew tap mitchellh/gon
+          brew install mitchellh/gon/gon
+      - name: Merge universal CLI
+        env:
+          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
+          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
+        run: cargo xtask merge-cli-universal --release
       - uses: actions/upload-artifact@v4
         with:
           name: universal-apple-darwin
@@ -529,7 +716,7 @@ jobs:
         build_binaries_aarch64-unknown-linux-gnu,
         build_binaries_x86_64-unknown-linux-gnu,
         build_binaries_windows,
-        build_binaries_macos,
+        merge_cli_macos_universal,
         release_docker_image,
         release_cli_docker_image,
       ]

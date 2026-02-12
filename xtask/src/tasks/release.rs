@@ -9,6 +9,8 @@ use super::{cli, layer, wizard};
 pub enum Platform {
     LinuxX86_64,
     LinuxAarch64,
+    MacosX86_64,
+    MacosAarch64,
     MacosUniversal,
     Windows,
 }
@@ -32,6 +34,8 @@ impl Platform {
         match self {
             Platform::LinuxX86_64 => "Linux x86_64",
             Platform::LinuxAarch64 => "Linux aarch64",
+            Platform::MacosX86_64 => "macOS x86_64",
+            Platform::MacosAarch64 => "macOS aarch64",
             Platform::MacosUniversal => "macOS Universal",
             Platform::Windows => "Windows",
         }
@@ -72,6 +76,27 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
 
     // Step 2: Build layer and CLI based on platform
     match options.platform {
+        Platform::MacosX86_64 => {
+            let target = Target::MacosX86_64;
+            let layer_path =
+                layer::build_layer(target, options.release).context("Failed to build layer")?;
+            println!();
+
+            cli::build_cli(target, options.release, &layer_path, options.with_wizard)
+                .context("Failed to build CLI")?;
+        }
+        Platform::MacosAarch64 => {
+            let target = Target::MacosAarch64;
+            // Build layer
+            let layer_path =
+                layer::build_layer(target, options.release).context("Failed to build layer")?;
+            // Build shim
+            layer::build_shim(options.release).context("Failed to build shim")?;
+            println!();
+
+            cli::build_cli(target, options.release, &layer_path, options.with_wizard)
+                .context("Failed to build CLI")?;
+        }
         Platform::MacosUniversal => {
             // Build universal layer
             let layer_path = layer::build_macos_universal_layer(options.release)
