@@ -8,6 +8,7 @@ use null_terminated::Nul;
 use tracing::warn;
 
 /// Make it const so can be shared and re-used with by reference without fear.
+#[cfg(target_os = "macos")]
 const ROOT_DIR: &str = "/\0";
 
 use crate::{
