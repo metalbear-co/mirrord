@@ -304,6 +304,7 @@ mod extract;
 mod internal_proxy;
 #[cfg(target_os = "linux")]
 mod is_static;
+mod kube;
 mod list;
 mod local_redis;
 mod logging;
