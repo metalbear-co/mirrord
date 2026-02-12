@@ -8,6 +8,10 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.188.1](https://github.com/metalbear-co/mirrord/tree/3.188.0) - 2026-02-12
+
+Re-releasing 3.188.0 for pipeline mistake.
+
 ## [3.188.0](https://github.com/metalbear-co/mirrord/tree/3.188.0) - 2026-02-12
 
 
