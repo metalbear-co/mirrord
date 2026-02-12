@@ -154,8 +154,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
         #[allow(clippy::indexing_slicing)]
         let stripped = arg_str
             .find(MIRRORD_PATCH_DIR)
-            // remove -1 from index.
-            .map(|index| &arg_str[(MIRRORD_PATCH_DIR.len() + index - 1)..])
+            .map(|index| &arg_str[(MIRRORD_PATCH_DIR.len() + index)..])
             .inspect(|original_path| {
                 trace!(
                     "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {}.",
