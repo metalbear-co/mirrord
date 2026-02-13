@@ -1,0 +1,1 @@
+Added a fixture for a test `KubeService` with a Stateful Set.
