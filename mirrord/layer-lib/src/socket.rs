@@ -173,7 +173,7 @@ impl TryFrom<c_int> for SocketKind {
         } else if (type_ & SOCK_DGRAM) > 0 {
             Ok(SocketKind::Udp(type_))
         } else {
-            return Err(Bypass::Type(type_));
+            Err(Bypass::Type(type_))
         }
     }
 }
