@@ -12,7 +12,7 @@ use std::{
 
 use libc::c_int;
 #[cfg(unix)]
-use libc::{AF_INET, AF_INET6, AF_UNIX, c_void, sockaddr, socklen_t};
+use libc::{AF_INET, AF_INET6, AF_UNIX};
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
 use mirrord_protocol::outgoing::SocketAddress;
 #[cfg(unix)]
