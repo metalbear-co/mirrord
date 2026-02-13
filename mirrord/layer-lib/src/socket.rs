@@ -17,9 +17,7 @@ use std::{
 
 use bincode::{Decode, Encode};
 // Re-export dns module items
-pub use dns::reverse_dns::{
-    clear_dns_reverse_mapping, dns_reverse_mapping_size, get_hostname_for_ip,
-};
+pub use dns::reverse_dns::get_hostname_for_ip;
 use libc::c_int;
 // Cross-platform socket constants
 #[cfg(unix)]

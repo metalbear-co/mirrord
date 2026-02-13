@@ -11,12 +11,6 @@ use crate::{
     setup::setup,
 };
 
-// HostnameResult states:
-//  - Ok(Some(hostname)) - Hostname was successfully resolved
-//  - Ok(None) - Hostname resolution was not attempted or failed, local fallback suggested
-//  - Err(HostnameResolveError) - An error occurred during hostname resolution
-// pub type HostnameResult<T = Option<String>, E = HostnameResolveError> = Result<T, E>;
-
 /// RAII wrapper for remote file operations that automatically closes the file when dropped
 struct ManagedRemoteFile {
     path: String,

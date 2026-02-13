@@ -80,20 +80,3 @@ pub fn update_dns_reverse_mapping_bulk(lookups: &Vec<(String, IpAddr)>) {
 pub fn get_hostname_for_ip(ip: IpAddr) -> Option<String> {
     REMOTE_DNS_REVERSE_MAPPING.lock().ok()?.get(&ip).cloned()
 }
-
-/// Clear all entries from the DNS reverse mapping.
-/// This can be used for cleanup or memory management.
-pub fn clear_dns_reverse_mapping() {
-    if let Ok(mut mapping) = REMOTE_DNS_REVERSE_MAPPING.lock() {
-        mapping.clear();
-    }
-}
-
-/// Get the current size of the DNS reverse mapping.
-/// Useful for monitoring and debugging.
-pub fn dns_reverse_mapping_size() -> usize {
-    REMOTE_DNS_REVERSE_MAPPING
-        .lock()
-        .map(|mapping| mapping.len())
-        .unwrap_or(0)
-}

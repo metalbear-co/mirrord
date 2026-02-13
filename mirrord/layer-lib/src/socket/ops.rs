@@ -11,7 +11,7 @@ use std::{
 };
 
 #[cfg(unix)]
-use libc::{AF_UNIX, c_void, sockaddr, socklen_t};
+use libc::AF_UNIX;
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
 use mirrord_protocol::outgoing::SocketAddress;
 #[cfg(unix)]
@@ -22,10 +22,7 @@ use tracing::error;
 use tracing::{debug, trace};
 /// Platform-specific connect function types
 #[cfg(windows)]
-use winapi::{
-    shared::ws2def::SOCKADDR as SOCK_ADDR_T,
-    um::winsock2::{SOCKET, WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR},
-};
+use winapi::um::winsock2::{SOCKET, WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR};
 
 use super::sockets::socket_descriptor_to_i64;
 #[cfg(windows)]
@@ -49,36 +46,6 @@ use crate::{error::windows::WindowsError, socket::sockets::find_listener_address
 pub type SocketDescriptor = RawFd;
 #[cfg(windows)]
 pub type SocketDescriptor = SOCKET;
-
-#[cfg(windows)]
-#[allow(non_camel_case_types)]
-pub type SOCK_ADDR_LEN_T = i32;
-
-#[cfg(unix)]
-#[allow(non_camel_case_types)]
-pub type SOCKET = i32;
-#[cfg(unix)]
-#[allow(non_camel_case_types)]
-pub type SOCK_ADDR_T = libc::sockaddr;
-#[cfg(unix)]
-#[allow(non_camel_case_types)]
-pub type SOCK_ADDR_LEN_T = libc::socklen_t;
-
-macro_rules! connect_fn_def {
-    ($conv:literal) => {
-        unsafe extern $conv fn (
-            sockfd: SocketDescriptor,
-            addr: *const SOCK_ADDR_T,
-            addrlen: SOCK_ADDR_LEN_T,
-        ) -> i32
-    };
-}
-
-// single xplatform ConnectFn definition of socket connect
-#[cfg(windows)]
-pub type ConnectFn = connect_fn_def!("system");
-#[cfg(unix)]
-pub type ConnectFn = connect_fn_def!("C");
 
 /// Result type for connect operations that preserves errno information
 #[derive(Debug)]
@@ -630,27 +597,6 @@ pub fn send_dns_patch(
 
     Ok(destination.into())
 }
-
-/// Platform-specific sendto function type definitions
-#[cfg(unix)]
-pub type SendtoFn = unsafe extern "C" fn(
-    sockfd: SocketDescriptor,
-    buf: *const c_void,
-    len: usize,
-    flags: i32,
-    dest_addr: *const sockaddr,
-    addrlen: socklen_t,
-) -> isize;
-
-#[cfg(windows)]
-pub type SendtoFn = unsafe extern "system" fn(
-    s: SOCKET,
-    buf: *const i8,
-    len: i32,
-    flags: i32,
-    to: *const winapi::shared::ws2def::SOCKADDR,
-    tolen: i32,
-) -> i32;
 
 /// ## DNS resolution on port `53`
 ///
