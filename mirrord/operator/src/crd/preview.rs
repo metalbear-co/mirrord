@@ -8,7 +8,6 @@
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use mirrord_config::{
-    config::ConfigError,
     feature::network::incoming::{IncomingConfig, IncomingMode},
     target::Target,
 };
@@ -54,8 +53,8 @@ pub struct PreviewSessionSpec {
 
 impl PreviewSessionSpec {
     /// Convert the [`SessionTarget`] into a [`mirrord_config::target::Target`].
-    pub fn parsed_target(&self) -> Result<Target, ConfigError> {
-        self.target.as_target()
+    pub fn config_target(&self) -> Option<Target> {
+        self.target.clone().into_config()
     }
 }
 
@@ -97,6 +96,9 @@ pub enum PreviewSessionPhase {
     Ready,
     /// Session has encountered an unrecoverable error.
     Failed,
+    /// For future compatibility.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Incoming traffic configuration for preview environments.

@@ -509,6 +509,13 @@ pub(crate) enum CliError {
     ))]
     PreviewTargetRequired,
 
+    #[error("Failed to resolve target `{0}` for preview environment")]
+    #[diagnostic(help(
+        "Targetless mode is not supported for preview environments. \
+         Please check that the target exists and has running pods.{GENERAL_HELP}"
+    ))]
+    PreviewTargetResolutionFailed(String),
+
     #[error("Failed to create preview session resource: {0}")]
     #[diagnostic(help(
         "Please check that the operator is running and that you have sufficient permissions \
@@ -568,6 +575,13 @@ pub(crate) enum CliError {
     #[error("Environment key is required for this command")]
     #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
     PreviewKeyRequired,
+
+    #[error("Failed to resolve target container: {0}")]
+    #[diagnostic(help(
+        "mirrord was unable to resolve the target container from the cluster. \
+        Please check that the target exists and has running pods.{GENERAL_HELP}"
+    ))]
+    RuntimeDataResolution(KubeApiError),
 }
 
 impl CliError {

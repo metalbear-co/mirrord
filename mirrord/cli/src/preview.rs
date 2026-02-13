@@ -19,7 +19,8 @@ use kube::{
     runtime::watcher::{self, Event, watcher},
 };
 use mirrord_analytics::NullReporter;
-use mirrord_config::{LayerConfig, config::ConfigContext};
+use mirrord_config::{LayerConfig, config::ConfigContext, target::TargetDisplay};
+use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
     client::OperatorApi,
     crd::{
@@ -72,7 +73,7 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
 
     let mut subtask = progress.subtask("creating preview session resource");
 
-    let target = layer_config.target.path.as_ref().ok_or_else(|| {
+    let config_target = layer_config.target.path.as_ref().ok_or_else(|| {
         subtask.failure(None);
         CliError::PreviewTargetRequired
     })?;
@@ -82,10 +83,33 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
         CliError::PreviewImageRequired
     })?;
 
+    let mut target = config_target.clone();
+    if target.container().is_none() {
+        let runtime_data = target
+            .runtime_data(&client, layer_config.target.namespace.as_deref())
+            .await
+            .map_err(CliError::RuntimeDataResolution)?;
+
+        if runtime_data.guessed_container {
+            subtask.warning(&format!(
+                "Target has multiple containers, mirrord picked \"{}\". \
+                 To target a different one, include it in the target path.",
+                runtime_data.container_name
+            ));
+        }
+
+        target.set_container(runtime_data.container_name);
+    }
+
+    let target = SessionTarget::from_config(target).ok_or_else(|| {
+        subtask.failure(None);
+        CliError::PreviewTargetResolutionFailed(config_target.to_string())
+    })?;
+
     let spec = PreviewSessionSpec {
         image: image.clone(),
         key: layer_config.key.as_str().to_owned(),
-        target: SessionTarget::from(target),
+        target,
         incoming: PreviewIncomingConfig::from_config(&layer_config.feature.network.incoming),
         ttl_secs: layer_config.feature.preview.ttl_mins * 60,
     };
@@ -124,7 +148,7 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
         }
     }
 
-    let sanitized_target = target.to_string().replace('/', "-");
+    let sanitized_target = config_target.to_string().replace('/', "-");
     let uuid_short = Uuid::new_v4().simple().to_string();
     let uuid_short = &uuid_short[..8];
     let preview = PreviewSession {
@@ -226,6 +250,7 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
                                     subtask.failure(None);
                                     return Err(CliError::PreviewSessionFailed(failure_message));
                                 }
+                                PreviewSessionPhase::Unknown => last_known_phase = "unknown",
                             }
                         }
                     }
@@ -354,6 +379,7 @@ async fn preview_status(args: PreviewStatusArgs) -> CliResult<()> {
                         .unwrap_or("unknown");
                     format!("failed ({msg})")
                 }
+                Some(PreviewSessionPhase::Unknown) => "unknown".to_owned(),
                 None => "pending".to_owned(),
             };
 
