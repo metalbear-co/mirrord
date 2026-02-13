@@ -1,0 +1,1 @@
+Added a checklist to the PR template for important tasks.
