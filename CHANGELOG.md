@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.188.2](https://github.com/metalbear-co/mirrord/tree/3.188.2) - 2026-02-13
+
+
+### Fixed
+
+- Rolled back the change for loading into arm64e, fixing many bugs on macOS.
+
+
+### Internal
+
+- Added a checklist to the PR template for important tasks.
+- Added a fixture for a test `KubeService` with a Stateful Set.
+- Added method on `ResolvedTarget` to get `VolumeClaimTemplates` (for
+  `StatefulSets`).
+
 ## [3.188.1](https://github.com/metalbear-co/mirrord/tree/3.188.0) - 2026-02-12
 
 Re-releasing 3.188.0 for pipeline mistake.
