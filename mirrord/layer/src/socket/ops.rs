@@ -80,7 +80,6 @@ static mut GETHOSTBYNAME_HOSTENT: hostent = hostent {
     h_addr_list: ptr::null_mut(),
 };
 
-
 /// Tries to bind the given socket to the requested address, with fallbacks.
 ///
 /// Tried addresses, in order:

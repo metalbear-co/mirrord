@@ -8,9 +8,9 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::{net::SocketAddr, sync::OnceLock};
 #[cfg(unix)]
 use std::{cell::RefCell, ffi::CString, ops::Deref, path::PathBuf};
+use std::{net::SocketAddr, sync::OnceLock};
 
 #[cfg(target_os = "macos")]
 use libc::c_char;

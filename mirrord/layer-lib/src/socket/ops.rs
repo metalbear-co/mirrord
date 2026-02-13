@@ -10,8 +10,9 @@ use std::{
     os::{fd::BorrowedFd, unix::io::RawFd},
 };
 
+use libc::c_int;
 #[cfg(unix)]
-use libc::{AF_UNIX, AF_INET, AF_INET6, c_void, sockaddr, socklen_t};
+use libc::{AF_INET, AF_INET6, AF_UNIX, c_void, sockaddr, socklen_t};
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
 use mirrord_protocol::outgoing::SocketAddress;
 #[cfg(unix)]
@@ -19,21 +20,20 @@ use nix::sys::socket::{SockaddrStorage, sockopt};
 use socket2::SockAddr;
 #[cfg(unix)]
 use tracing::error;
-use tracing::{debug, trace};
+use tracing::{Level, debug, trace};
 /// Platform-specific connect function types
 #[cfg(windows)]
 use winapi::{
     shared::ws2def::{AF_INET, AF_INET6, AF_UNIX},
     um::winsock2::{SOCKET, WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR},
 };
-use libc::c_int;
-use tracing::Level;
+
 use super::sockets::socket_descriptor_to_i64;
 #[cfg(windows)]
 use crate::socket::dns::windows::check_address_reachability;
 use crate::{
     HookError, HookResult,
-    detour::{Detour, Bypass},
+    detour::{Bypass, Detour},
     error::ConnectError,
     proxy_connection::make_proxy_request_with_response,
     setup::setup,
@@ -156,7 +156,12 @@ fn set_last_error(error: i32) {
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
 #[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), skip(call_original), ret)]
-pub fn socket<F>(call_original: F, domain: c_int, type_: c_int, protocol: c_int) -> Detour<SocketDescriptor> 
+pub fn socket<F>(
+    call_original: F,
+    domain: c_int,
+    type_: c_int,
+    protocol: c_int,
+) -> Detour<SocketDescriptor>
 where
     F: FnOnce() -> Detour<SocketDescriptor>,
 {

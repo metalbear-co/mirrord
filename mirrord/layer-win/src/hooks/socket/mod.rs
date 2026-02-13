@@ -35,7 +35,7 @@ use mirrord_layer_lib::{
         get_connected_addresses, get_socket,
         hostname::remote_hostname_string,
         is_socket_managed,
-        ops::{ConnectResult, socket, send_to},
+        ops::{ConnectResult, send_to, socket},
         register_socket, remove_socket,
         sockets::socket_kind_from_type,
     },
@@ -227,11 +227,12 @@ unsafe extern "system" fn socket_detour(af: INT, type_: INT, protocol: INT) -> S
             let socket_result = original(af, type_, protocol);
             if socket_result == INVALID_SOCKET {
                 Err(std::io::Error::from_raw_os_error(
-                    mirrord_layer_lib::socket::ops::get_last_error()
+                    mirrord_layer_lib::socket::ops::get_last_error(),
                 ))
             } else {
                 Ok(socket_result)
-            }.into()
+            }
+            .into()
         };
         socket(call_original, af, type_, protocol)
             .unwrap_or_bypass_with(|_| original(af, type_, protocol))

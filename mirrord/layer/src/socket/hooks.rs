@@ -8,11 +8,7 @@ use libc::{c_uint, iovec, sa_endpoints_t, sae_associd_t, sae_connid_t};
 use mirrord_config::experimental::ExperimentalConfig;
 #[cfg(target_os = "macos")]
 use mirrord_layer_lib::socket::apple_dnsinfo::*;
-use mirrord_layer_lib::{
-    detour::DetourGuard, 
-    socket::ops::socket,
-    mutex::Mutex
-};
+use mirrord_layer_lib::{detour::DetourGuard, mutex::Mutex, socket::ops::socket};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use nix::errno::Errno;
 
@@ -37,7 +33,8 @@ pub(crate) unsafe extern "C" fn socket_detour(
                 Err(std::io::Error::last_os_error())
             } else {
                 Ok(socket_result)
-            }.into()
+            }
+            .into()
         };
         socket(call_original, domain, type_, protocol)
             .unwrap_or_bypass_with(|_| FN_SOCKET(domain, type_, protocol))
