@@ -11,7 +11,7 @@ use std::{
 };
 
 #[cfg(unix)]
-use libc::{AF_UNIX, c_void, sockaddr, socklen_t};
+use libc::{AF_UNIX, AF_INET, AF_INET6, c_void, sockaddr, socklen_t};
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
 use mirrord_protocol::outgoing::SocketAddress;
 #[cfg(unix)]
@@ -23,16 +23,17 @@ use tracing::{debug, trace};
 /// Platform-specific connect function types
 #[cfg(windows)]
 use winapi::{
-    shared::ws2def::SOCKADDR as SOCK_ADDR_T,
+    shared::ws2def::{AF_INET, AF_INET6, AF_UNIX},
     um::winsock2::{SOCKET, WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR},
 };
-
+use libc::c_int;
+use tracing::Level;
 use super::sockets::socket_descriptor_to_i64;
 #[cfg(windows)]
 use crate::socket::dns::windows::check_address_reachability;
 use crate::{
     HookError, HookResult,
-    detour::Bypass,
+    detour::{Detour, Bypass},
     error::ConnectError,
     proxy_connection::make_proxy_request_with_response,
     setup::setup,
@@ -50,35 +51,9 @@ pub type SocketDescriptor = RawFd;
 #[cfg(windows)]
 pub type SocketDescriptor = SOCKET;
 
-#[cfg(windows)]
-#[allow(non_camel_case_types)]
-pub type SOCK_ADDR_LEN_T = i32;
-
 #[cfg(unix)]
 #[allow(non_camel_case_types)]
 pub type SOCKET = i32;
-#[cfg(unix)]
-#[allow(non_camel_case_types)]
-pub type SOCK_ADDR_T = libc::sockaddr;
-#[cfg(unix)]
-#[allow(non_camel_case_types)]
-pub type SOCK_ADDR_LEN_T = libc::socklen_t;
-
-macro_rules! connect_fn_def {
-    ($conv:literal) => {
-        unsafe extern $conv fn (
-            sockfd: SocketDescriptor,
-            addr: *const SOCK_ADDR_T,
-            addrlen: SOCK_ADDR_LEN_T,
-        ) -> i32
-    };
-}
-
-// single xplatform ConnectFn definition of socket connect
-#[cfg(windows)]
-pub type ConnectFn = connect_fn_def!("system");
-#[cfg(unix)]
-pub type ConnectFn = connect_fn_def!("C");
 
 /// Result type for connect operations that preserves errno information
 #[derive(Debug)]
@@ -154,7 +129,7 @@ fn errno_location() -> *mut libc::c_int {
     }
 }
 
-fn get_last_error() -> i32 {
+pub fn get_last_error() -> i32 {
     #[cfg(unix)]
     unsafe {
         *errno_location()
@@ -177,6 +152,33 @@ fn set_last_error(error: i32) {
     unsafe {
         winapi::um::winsock2::WSASetLastError(error)
     };
+}
+
+/// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
+#[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), skip(call_original), ret)]
+pub fn socket<F>(call_original: F, domain: c_int, type_: c_int, protocol: c_int) -> Detour<SocketDescriptor> 
+where
+    F: FnOnce() -> Detour<SocketDescriptor>,
+{
+    let socket_kind = type_.try_into()?;
+
+    if !((domain == AF_INET) || (domain == AF_INET6) || (cfg!(unix) && domain == AF_UNIX)) {
+        Err(Bypass::Domain(domain))
+    } else {
+        Ok(())
+    }?;
+
+    if domain == AF_INET6 && setup().layer_config().feature.network.ipv6.not() {
+        return Detour::Error(HookError::SocketUnsuportedIpv6);
+    }
+
+    let socket_fd = call_original()?;
+
+    let new_socket = UserSocket::new(domain, type_, protocol, Default::default(), socket_kind);
+
+    SOCKETS.lock()?.insert(socket_fd, Arc::new(new_socket));
+
+    Detour::Success(socket_fd)
 }
 
 pub fn nop_connect_fn(_addr: SockAddr) -> ConnectResult {
@@ -630,27 +632,6 @@ pub fn send_dns_patch(
 
     Ok(destination.into())
 }
-
-/// Platform-specific sendto function type definitions
-#[cfg(unix)]
-pub type SendtoFn = unsafe extern "C" fn(
-    sockfd: SocketDescriptor,
-    buf: *const c_void,
-    len: usize,
-    flags: i32,
-    dest_addr: *const sockaddr,
-    addrlen: socklen_t,
-) -> isize;
-
-#[cfg(windows)]
-pub type SendtoFn = unsafe extern "system" fn(
-    s: SOCKET,
-    buf: *const i8,
-    len: i32,
-    flags: i32,
-    to: *const winapi::shared::ws2def::SOCKADDR,
-    tolen: i32,
-) -> i32;
 
 /// ## DNS resolution on port `53`
 ///

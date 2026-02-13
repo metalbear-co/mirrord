@@ -260,11 +260,11 @@ pub fn remove_socket(socket: SocketDescriptor) {
 }
 
 /// Get socket info
-pub fn get_socket(socket: SocketDescriptor) -> Option<Arc<UserSocket>> {
+pub fn get_socket(socket: SocketDescriptor) -> Option<UserSocket> {
     SOCKETS
         .lock()
         .ok()
-        .and_then(|sockets| sockets.get(&socket).cloned())
+        .and_then(|sockets| sockets.get(&socket).map(|s| s.as_ref().clone()))
 }
 
 /// Check if a socket is managed by mirrord

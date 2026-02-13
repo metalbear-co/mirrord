@@ -165,10 +165,7 @@ impl From<SocketKind> for NetProtocol {
 }
 
 impl TryFrom<c_int> for SocketKind {
-    #[cfg(unix)]
     type Error = Bypass;
-    #[cfg(windows)]
-    type Error = i32;
 
     fn try_from(type_: c_int) -> Result<Self, Self::Error> {
         if (type_ & SOCK_STREAM) > 0 {
@@ -176,10 +173,7 @@ impl TryFrom<c_int> for SocketKind {
         } else if (type_ & SOCK_DGRAM) > 0 {
             Ok(SocketKind::Udp(type_))
         } else {
-            #[cfg(unix)]
             return Err(Bypass::Type(type_));
-            #[cfg(windows)]
-            return Err(type_);
         }
     }
 }

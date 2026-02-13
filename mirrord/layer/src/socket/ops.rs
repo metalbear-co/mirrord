@@ -80,35 +80,6 @@ static mut GETHOSTBYNAME_HOSTENT: hostent = hostent {
     h_addr_list: ptr::null_mut(),
 };
 
-/// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-#[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
-pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
-    let socket_kind = type_.try_into()?;
-
-    if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) || (domain == libc::AF_UNIX)) {
-        Err(Bypass::Domain(domain))
-    } else {
-        Ok(())
-    }?;
-
-    if domain == libc::AF_INET6 && crate::setup().layer_config().feature.network.ipv6.not() {
-        return Detour::Error(HookError::SocketUnsuportedIpv6);
-    }
-
-    let socket_result = unsafe { FN_SOCKET(domain, type_, protocol) };
-
-    let socket_fd = if socket_result == -1 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(socket_result)
-    }?;
-
-    let new_socket = UserSocket::new(domain, type_, protocol, Default::default(), socket_kind);
-
-    SOCKETS.lock()?.insert(socket_fd, Arc::new(new_socket));
-
-    Detour::Success(socket_fd)
-}
 
 /// Tries to bind the given socket to the requested address, with fallbacks.
 ///

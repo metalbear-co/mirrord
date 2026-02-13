@@ -20,7 +20,7 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, OutgoingConnMetadataRequest, PortSubscribe,
 };
 use mirrord_layer_lib::{
-    detour::{Bypass, OptionExt},
+    detour::Detour,
     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
     setup::{LayerSetup, NetworkHookConfig, setup},
@@ -35,7 +35,7 @@ use mirrord_layer_lib::{
         get_connected_addresses, get_socket,
         hostname::remote_hostname_string,
         is_socket_managed,
-        ops::{ConnectResult, send_to},
+        ops::{ConnectResult, socket, send_to},
         register_socket, remove_socket,
         sockets::socket_kind_from_type,
     },
@@ -219,37 +219,23 @@ static CLOSE_SOCKET_ORIGINAL: OnceLock<&CloseSocketType> = OnceLock::new();
 
 /// Windows socket hook for socket creation
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn socket_detour(af: INT, r#type: INT, protocol: INT) -> SOCKET {
-    tracing::info!(
-        "socket_detour -> af: {}, type: {}, protocol: {}",
-        af,
-        r#type,
-        protocol
-    );
-
+unsafe extern "system" fn socket_detour(af: INT, type_: INT, protocol: INT) -> SOCKET {
     // Call the original function to create the socket
-    let original = SOCKET_ORIGINAL.get().unwrap();
-    let socket = unsafe { original(af, r#type, protocol) };
-
-    if socket != INVALID_SOCKET {
-        if af == AF_INET || af == AF_INET6 {
-            register_socket(socket, af, r#type, protocol);
-            tracing::info!(
-                "socket_detour -> registered socket {} with mirrord (af: {}, type: {})",
-                socket,
-                af,
-                r#type
-            );
-        } else {
-            tracing::debug!(
-                "socket_detour -> skipping socket {} registration (unsupported af: {})",
-                socket,
-                af
-            );
-        }
+    unsafe {
+        let original = SOCKET_ORIGINAL.get().unwrap();
+        let call_original = || -> Detour<SOCKET> {
+            let socket_result = original(af, type_, protocol);
+            if socket_result == INVALID_SOCKET {
+                Err(std::io::Error::from_raw_os_error(
+                    mirrord_layer_lib::socket::ops::get_last_error()
+                ))
+            } else {
+                Ok(socket_result)
+            }.into()
+        };
+        socket(call_original, af, type_, protocol)
+            .unwrap_or_bypass_with(|_| original(af, type_, protocol))
     }
-
-    socket
 }
 
 /// Windows socket hook for WSASocket (advanced socket creation)
@@ -735,17 +721,9 @@ unsafe extern "system" fn getsockname_detour(
         unsafe { original(s, name, namelen) }
     };
 
-    let socket = match SOCKETS
-        .lock()
-        .expect("getsockname_detour -> failed to lock sockets for socket retrieval")
-        .get(&s)
-        .bypass(Bypass::LocalFdNotFound(s))
-    {
-        Ok(sock) => sock.clone(),
-        Err(err) => {
-            tracing::warn!("getsockname_detour -> failed to get socket: {}", err);
-            return getsockname_fn();
-        }
+    let Some(socket) = get_socket(s) else {
+        tracing::warn!("getsockname_detour -> failed to get socket: {}", s);
+        return getsockname_fn();
     };
 
     let local_address: Option<SocketAddr> = match &socket.state {
