@@ -458,6 +458,7 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
 
     let mut delete_subtask = progress.subtask("deleting sessions");
 
+    let mut result = Ok(());
     for session in sessions_to_delete {
         let name = session
             .metadata
@@ -473,12 +474,16 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
         let namespaced_api = Api::<PreviewSession>::namespaced(client.clone(), namespace);
 
         if let Err(e) = namespaced_api.delete(name, &DeleteParams::default()).await {
-            delete_subtask.failure(None);
-            return Err(CliError::PreviewDeleteFailed {
+            result = Err(CliError::PreviewDeleteFailed {
                 name: name.to_owned(),
                 reason: e.to_string(),
             });
         }
+    }
+
+    if result.is_err() {
+        delete_subtask.failure(None);
+        return result;
     }
 
     delete_subtask.success(Some("all sessions deleted"));
