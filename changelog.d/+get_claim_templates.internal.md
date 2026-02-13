@@ -1,1 +1,0 @@
-Added method on `ResolvedTarget` to get `VolumeClaimTemplates` (for `StatefulSets`).
