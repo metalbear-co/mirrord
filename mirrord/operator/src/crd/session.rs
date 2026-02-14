@@ -28,6 +28,9 @@ pub struct MirrordClusterSessionSpec {
     pub owner: SessionOwner,
     /// Kubernetes namespace of the session.
     pub namespace: String,
+    /// Key for this session, set manually by the user or generated
+    /// automatically.
+    pub key: String,
     /// Target of the session.
     ///
     /// None for targetless sessions.
