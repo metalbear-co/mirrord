@@ -63,6 +63,10 @@ pub struct ConnectParams<'a> {
         with = "sqs_output_queues_serde"
     )]
     pub sqs_output_queues: HashMap<String, String>,
+
+    /// Key for this session
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<&'a str>,
 }
 
 impl<'a> ConnectParams<'a> {
@@ -73,6 +77,7 @@ impl<'a> ConnectParams<'a> {
         mysql_branch_names: Vec<String>,
         pg_branch_names: Vec<String>,
         session_ci_info: Option<SessionCiInfo>,
+        key: &'a str,
     ) -> Self {
         Self {
             connect: true,
@@ -87,6 +92,7 @@ impl<'a> ConnectParams<'a> {
             session_ci_info,
             is_default_cluster: None,          // Only used in multi-cluster
             sqs_output_queues: HashMap::new(), // Only used in multi-cluster
+            key: Some(key),
         }
     }
 }

@@ -768,6 +768,7 @@ impl OperatorApi<PreparedClientCert> {
                 mysql_branch_names.clone().unwrap_or_default(),
                 pg_branch_names.clone().unwrap_or_default(),
                 session_ci_info.clone(),
+                layer_config.key.as_str(),
             );
             let session = self.make_operator_session(
                 id,
@@ -829,6 +830,7 @@ impl OperatorApi<PreparedClientCert> {
                 mysql_branch_names.clone().unwrap_or_default(),
                 pg_branch_names.clone().unwrap_or_default(),
                 session_ci_info.clone(),
+                layer_config.key.as_str(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
 
@@ -864,6 +866,7 @@ impl OperatorApi<PreparedClientCert> {
                     mysql_branch_names.unwrap_or_default(),
                     pg_branch_names.unwrap_or_default(),
                     session_ci_info.clone(),
+                    layer_config.key.as_str(),
                 );
                 let session_id = copied
                     .status
@@ -959,6 +962,7 @@ impl OperatorApi<PreparedClientCert> {
             mysql_branch_names,
             pg_branch_names,
             session_ci_info,
+            layer_config.key.as_str(),
         );
 
         // If no namespace in config, use the kubeconfig's default namespace
@@ -1238,6 +1242,7 @@ impl OperatorApi<PreparedClientCert> {
         mysql_branch_names: Vec<String>,
         pg_branch_names: Vec<String>,
         session_ci_info: Option<SessionCiInfo>,
+        key: &str,
     ) -> String {
         let name = crd
             .meta()
@@ -1267,6 +1272,7 @@ impl OperatorApi<PreparedClientCert> {
             session_ci_info,
             is_default_cluster: None, // Only used in multi-cluster
             sqs_output_queues: Default::default(), // Only used in multi-cluster
+            key: Some(key),
         };
 
         if use_proxy {
