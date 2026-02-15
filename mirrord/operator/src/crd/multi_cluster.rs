@@ -90,7 +90,7 @@ pub struct ClusterSessionStatus {
 }
 
 /// Phase of multi-cluster session lifecycle
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema, strum::Display)]
 pub enum MultiClusterSessionPhase {
     #[default]
     /// Creating sessions in remote clusters
