@@ -207,14 +207,18 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
         "Expires At"
     ]);
 
-    // filtering before constructing BranchInfo, that way only constructing BranchInfos for filtered
-    // branches, not all branches.
+    // When names are provided, only show matching branches.
+    // When no names are given, show all branches (empty set means no filter).
     fn get_iter<T: Resource + Into<BranchInfo>>(
         vec: Vec<T>,
         names: &HashSet<&String>,
     ) -> impl Iterator<Item = BranchInfo> {
         vec.into_iter()
             .filter(|branch| {
+                if names.is_empty() {
+                    return true;
+                }
+
                 branch
                     .meta()
                     .name

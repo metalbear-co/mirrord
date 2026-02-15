@@ -3,7 +3,7 @@ use std::{borrow::Cow, collections::BTreeMap};
 use k8s_openapi::api::{
     apps::v1::{Deployment, ReplicaSet, StatefulSet},
     batch::v1::{CronJob, Job},
-    core::v1::{EnvFromSource, EnvVar, Pod, PodSpec, Service},
+    core::v1::{EnvFromSource, EnvVar, PersistentVolumeClaim, Pod, PodSpec, Service},
 };
 use kube::{Client, Resource, ResourceExt};
 use mirrord_config::target::Target;
@@ -519,6 +519,20 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
                 .as_ref(),
             ResolvedTarget::Pod(inner) => inner.resource.spec.as_ref(),
             ResolvedTarget::Targetless(..) => None,
+        }
+    }
+
+    /// Get the volumeClaimTemplate of the target k8s resource (only exists on StatefulSet).
+    /// Returns an empty vec if there are none.
+    pub fn get_volume_claim_templates(&self) -> Vec<PersistentVolumeClaim> {
+        match self {
+            ResolvedTarget::StatefulSet(inner) => inner
+                .resource
+                .spec
+                .as_ref()
+                .and_then(|spec| spec.volume_claim_templates.clone())
+                .unwrap_or_default(),
+            _ => vec![],
         }
     }
 

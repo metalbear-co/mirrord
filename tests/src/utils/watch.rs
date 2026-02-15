@@ -3,7 +3,10 @@
 use std::{collections::HashMap, fmt};
 
 use futures::StreamExt;
-use k8s_openapi::api::core::v1::{Pod, Service};
+use k8s_openapi::api::{
+    apps::v1::StatefulSet,
+    core::v1::{Pod, Service},
+};
 use kube::{
     runtime::{
         self,
@@ -226,5 +229,46 @@ pub async fn wait_until_rollout_available(
     println!(
         "Rollout '{}' now has at least {} available replica(s)",
         rollout_name, min_available
+    );
+}
+
+/// Waits until the given [`StatefulSet`] has at least `min_available` available replicas.
+pub async fn wait_until_stateful_set_available(
+    stateful_set_name: &str,
+    namespace: &str,
+    min_available: usize,
+    client: Client,
+) {
+    let api = Api::<StatefulSet>::namespaced(client, namespace);
+    let config = Config {
+        field_selector: Some(format!("metadata.name={}", stateful_set_name)),
+        ..Default::default()
+    };
+
+    fn has_available_replicas(stateful_set: &StatefulSet, min: usize) -> bool {
+        let status = match &stateful_set.status {
+            Some(status) => status,
+            None => return false,
+        };
+
+        match status.available_replicas {
+            Some(available) => available >= min as i32,
+            None => false,
+        }
+    }
+
+    let mut watcher = Watcher::new(api, config, move |map| {
+        map.values()
+            .any(|set| has_available_replicas(set, min_available))
+    });
+
+    println!(
+        "Waiting for stateful set '{}' to have at least {} available replica(s)...",
+        stateful_set_name, min_available
+    );
+    watcher.run().await;
+    println!(
+        "Stateful set '{}' now has at least {} available replica(s)",
+        stateful_set_name, min_available
     );
 }
