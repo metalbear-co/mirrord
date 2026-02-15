@@ -91,7 +91,7 @@ pub struct ClusterSessionStatus {
 
 /// Phase of multi-cluster session lifecycle
 #[derive(
-    Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema, strum::Display,
+    Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema, strum_macros::Display,
 )]
 pub enum MultiClusterSessionPhase {
     #[default]
