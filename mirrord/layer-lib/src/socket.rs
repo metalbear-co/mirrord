@@ -21,7 +21,7 @@ pub use dns::reverse_dns::get_hostname_for_ip;
 use libc::c_int;
 // Cross-platform socket constants
 #[cfg(unix)]
-pub use libc::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM, sockaddr, socklen_t};
+pub use libc::{AF_INET, AF_INET6, AF_UNIX, SOCK_DGRAM, SOCK_STREAM, sockaddr, socklen_t};
 use mirrord_config::feature::network::{
     dns::{DnsConfig, DnsFilterConfig},
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
@@ -43,7 +43,8 @@ pub use sockets::{
 pub use winapi::{
     shared::{
         ws2def::{
-            AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM, SOCKADDR, SOCKADDR_IN, SOCKADDR_STORAGE,
+            AF_INET, AF_INET6, AF_UNIX, SOCK_DGRAM, SOCK_STREAM, SOCKADDR, SOCKADDR_IN,
+            SOCKADDR_STORAGE,
         },
         ws2ipdef::SOCKADDR_IN6,
     },
