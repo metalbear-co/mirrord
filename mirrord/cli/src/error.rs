@@ -412,7 +412,7 @@ pub(crate) enum CliError {
     "))]
     KubeAuthExecFailed(io::Error),
 
-    #[error("Failed while resolving target while using the mirrord-operator: {0}")]
+    #[error("Failed resolving target while using the mirrord-operator: {0}")]
     #[diagnostic(help(
         "
         mirrord failed to resolve or validate a target.

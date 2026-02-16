@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use cluster_resource::*;
 use k8s_openapi::api::{
-    apps::v1::Deployment,
+    apps::v1::{Deployment, StatefulSet},
     core::v1::{ConfigMap, EnvFromSource, Namespace, Service},
 };
 use kube::{api::DeleteParams, Api, Client, Resource, ResourceExt};
@@ -114,6 +114,7 @@ pub enum TestWorkloadType {
     Deployment,
     ArgoRolloutWithWorkloadRef,
     ArgoRolloutWithTemplate,
+    StatefulSet,
 }
 
 impl TestWorkloadType {
@@ -123,6 +124,10 @@ impl TestWorkloadType {
             TestWorkloadType::ArgoRolloutWithTemplate
                 | TestWorkloadType::ArgoRolloutWithWorkloadRef
         )
+    }
+
+    pub fn is_stateful_set(&self) -> bool {
+        matches!(self, TestWorkloadType::StatefulSet)
     }
 }
 
@@ -151,6 +156,34 @@ async fn create_rollout(
 
     // Wait for the rollout to have at least 1 available replica
     watch::wait_until_rollout_available(name, namespace, 1, kube_client.clone()).await;
+}
+
+async fn create_stateful_set(
+    stateful_set_api: Api<StatefulSet>,
+    stateful_set: &StatefulSet,
+    delete_after_fail: bool,
+    guards: &mut Vec<ResourceGuard>,
+    name: &str,
+    namespace: &str,
+    kube_client: &Client,
+) {
+    let (stateful_set_guard, stateful_set) =
+        ResourceGuard::create(stateful_set_api, stateful_set, delete_after_fail)
+            .await
+            .unwrap_or_else(|err| {
+                panic!(
+                    "Failed to create stateful set guard, Error: \n{err:?}\nStateful Set:\n{}",
+                    serde_json::to_string_pretty(&stateful_set).unwrap()
+                )
+            });
+    println!(
+        "Created stateful set\n{}",
+        serde_json::to_string_pretty(&stateful_set).unwrap()
+    );
+    guards.push(stateful_set_guard);
+
+    // Wait for the stateful set to have at least 1 available replica
+    watch::wait_until_stateful_set_available(name, namespace, 1, kube_client.clone()).await;
 }
 
 /// Internal function to create a custom [`KubeService`].
@@ -184,7 +217,8 @@ pub async fn internal_service(
     let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
     let rollout_api: Api<Rollout> = Api::namespaced(kube_client.clone(), namespace);
     let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
-    let mut guards = Vec::with_capacity(4);
+    let stateful_set_api: Api<StatefulSet> = Api::namespaced(kube_client.clone(), namespace);
+    let mut guards = Vec::with_capacity(5);
 
     let name = if randomize_name {
         format!("{}-{}", service_name, random_string())
@@ -200,6 +234,7 @@ pub async fn internal_service(
         let _ = service_api.delete(service_name, &delete_params).await;
         let _ = deployment_api.delete(service_name, &delete_params).await;
         let _ = rollout_api.delete(service_name, &delete_params).await;
+        let _ = stateful_set_api.delete(service_name, &delete_params).await;
 
         service_name.to_string()
     };
@@ -279,6 +314,20 @@ pub async fn internal_service(
             create_rollout(
                 rollout_api,
                 &rollout,
+                delete_after_fail,
+                &mut guards,
+                &name,
+                namespace,
+                &kube_client,
+            )
+            .await;
+        }
+        TestWorkloadType::StatefulSet => {
+            let stateful_set = stateful_set_from_json(&name, image, true);
+
+            create_stateful_set(
+                stateful_set_api,
+                &stateful_set,
                 delete_after_fail,
                 &mut guards,
                 &name,
@@ -480,6 +529,31 @@ pub async fn rollout_service(
         None,
         false,
         TestWorkloadType::ArgoRolloutWithWorkloadRef,
+    )
+    .await
+}
+
+#[fixture]
+pub async fn stateful_set_service(
+    #[default("default")] namespace: &str,
+    #[default("NodePort")] service_type: &str,
+    #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
+    #[default("http-echo")] service_name: &str,
+    #[default(true)] randomize_name: bool,
+    #[future] kube_client: Client,
+) -> KubeService {
+    internal_service(
+        namespace,
+        service_type,
+        image,
+        service_name,
+        randomize_name,
+        kube_client.await,
+        default_env(),
+        None,
+        None,
+        false,
+        TestWorkloadType::StatefulSet,
     )
     .await
 }
