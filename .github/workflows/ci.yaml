@@ -33,6 +33,7 @@ name: CI
 on:
   workflow_dispatch:
   push:
+    branches: [main, "*staging*", "windows-support", "gh-readonly-queue/*"]
   pull_request:
     branches: [main, "*staging*", "windows-support"]
     types: [opened, synchronize, reopened, ready_for_review]
@@ -189,7 +190,7 @@ jobs:
           echo ${{ steps.changed-configuration-md.outputs.any_changed }};
 
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
-          
+
   lint:
     runs-on: ubuntu-24.04
     needs: changed_files
@@ -233,7 +234,7 @@ jobs:
         working-directory: ./wizard-frontend
       - run: npm run lint
         working-directory: ./wizard-frontend
-  
+
 
   # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
   # the output of this test is a boolean indicating if it's a release branch
