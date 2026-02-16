@@ -1951,6 +1951,7 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        None,
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_no_container_proxy(
@@ -1975,7 +1976,8 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
-        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
+        Some("my-key"),
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort&key=my-key"
     )]
     #[case::deployment_container_no_proxy(
         false,
@@ -1999,6 +2001,7 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        None,
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_container_proxy(
@@ -2023,7 +2026,8 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
-        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
+        Some("auth-token-123"),
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&key=auth-token-123"
     )]
     #[case::deployment_container_proxy_profile(
         true,
@@ -2047,6 +2051,7 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        None,
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=no-steal"
     )]
     #[case::deployment_container_proxy_profile_escape(
@@ -2071,7 +2076,8 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
-        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=%2Fshould%3Fbe%26escaped"
+        Some("key-value"),
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=%2Fshould%3Fbe%26escaped&key=key-value"
     )]
     #[case::deployment_container_proxy_kafka_splits(
         true,
@@ -2101,6 +2107,7 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        None,
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&kafka_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
     )]
@@ -2132,8 +2139,9 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        Some("sqs-key"),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
-        ?connect=true&on_concurrent_steal=abort&sqs_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
+        ?connect=true&on_concurrent_steal=abort&sqs_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D&key=sqs-key",
     )]
     #[case::deployment_container_proxy_mysql_branches(
         true,
@@ -2157,6 +2165,7 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        None,
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&mysql_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
     )]
@@ -2182,8 +2191,9 @@ mod test {
         vec!["branch-1".into(), "branch-2".into()],
         Default::default(),
         Default::default(),
+        Some("pg-access-key"),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
-        ?connect=true&on_concurrent_steal=abort&pg_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
+        ?connect=true&on_concurrent_steal=abort&pg_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D&key=pg-access-key",
     )]
     #[case::deployment_container_proxy_mongodb_branches(
         true,
@@ -2207,6 +2217,7 @@ mod test {
         vec!["branch-1".into(), "branch-2".into()],
         Default::default(),
         Default::default(),
+        None,
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&pg_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
     )]
@@ -2237,7 +2248,58 @@ mod test {
             pipeline: Some("Wschodnie".into()),
             triggered_by: Some("Kononowicz".into())
         }),
-        "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort&session_ci_info=%7B%22provider%22%3A%22Krzysztof%22%2C%22environment%22%3A%22Kresy%22%2C%22pipeline%22%3A%22Wschodnie%22%2C%22triggeredBy%22%3A%22Kononowicz%22%7D"
+        Some("ci-key-123"),
+        "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort&session_ci_info=%7B%22provider%22%3A%22Krzysztof%22%2C%22environment%22%3A%22Kresy%22%2C%22pipeline%22%3A%22Wschodnie%22%2C%22triggeredBy%22%3A%22Kononowicz%22%7D&key=ci-key-123"
+    )]
+    #[case::deployment_with_key_none(
+        true,
+        ResolvedTarget::Deployment(ResolvedResource {
+            resource: Deployment {
+                metadata: ObjectMeta {
+                    name: Some("test-deployment".into()),
+                    namespace: Some("default".into()),
+                    ..Default::default()
+                },
+                spec: None,
+                status: None,
+            }.into(),
+            container: Some("test-container".into()),
+        }),
+        ConcurrentSteal::Abort,
+        None,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        None,
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.test-deployment.container.test-container?connect=true&on_concurrent_steal=abort"
+    )]
+    #[case::deployment_with_key_special_chars(
+        true,
+        ResolvedTarget::Deployment(ResolvedResource {
+            resource: Deployment {
+                metadata: ObjectMeta {
+                    name: Some("test-deployment".into()),
+                    namespace: Some("default".into()),
+                    ..Default::default()
+                },
+                spec: None,
+                status: None,
+            }.into(),
+            container: Some("test-container".into()),
+        }),
+        ConcurrentSteal::Abort,
+        None,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        Some("key/with?special&chars=value"),
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.test-deployment.container.test-container?connect=true&on_concurrent_steal=abort&key=key%2Fwith%3Fspecial%26chars%3Dvalue"
     )]
     #[test]
     fn target_connect_url(
@@ -2251,6 +2313,7 @@ mod test {
         #[case] pg_branch_names: Vec<String>,
         #[case] mongodb_branch_names: Vec<String>,
         #[case] session_ci_info: Option<SessionCiInfo>,
+        #[case] key: Option<&str>,
         #[case] expected: &str,
     ) {
         let kafka_splits = kafka_splits
@@ -2276,6 +2339,7 @@ mod test {
             session_ci_info,
             is_default_cluster: None, // Only used in multi-cluster
             sqs_output_queues: Default::default(), // Only used in multi-cluster
+            key,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
@@ -2293,6 +2357,7 @@ mod test {
             container: None,
         }),
         "my-namespace",
+        None,
         "/apis/operator.metalbear.co/v1/namespaces/my-namespace/targets/deployment.my-deployment?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_with_container_no_proxy(
@@ -2302,7 +2367,8 @@ mod test {
             container: Some("my-container".into()),
         }),
         "my-namespace",
-        "/apis/operator.metalbear.co/v1/namespaces/my-namespace/targets/deployment.my-deployment.container.my-container?connect=true&on_concurrent_steal=abort"
+        Some("auth-key-456"),
+        "/apis/operator.metalbear.co/v1/namespaces/my-namespace/targets/deployment.my-deployment.container.my-container?connect=true&on_concurrent_steal=abort&key=auth-key-456"
     )]
     #[case::deployment_with_container_proxy(
         true,
@@ -2311,18 +2377,21 @@ mod test {
             container: Some("my-container".into()),
         }),
         "my-namespace",
+        None,
         "/apis/operator.metalbear.co/v1/proxy/namespaces/my-namespace/targets/deployment.my-deployment.container.my-container?connect=true&on_concurrent_steal=abort"
     )]
     #[case::targetless_no_proxy(
         false,
         mirrord_config::target::Target::Targetless,
         "default",
-        "/apis/operator.metalbear.co/v1/namespaces/default/targets/targetless?connect=true&on_concurrent_steal=abort"
+        Some("targetless-key"),
+        "/apis/operator.metalbear.co/v1/namespaces/default/targets/targetless?connect=true&on_concurrent_steal=abort&key=targetless-key"
     )]
     #[case::targetless_proxy(
         true,
         mirrord_config::target::Target::Targetless,
         "default",
+        None,
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/targetless?connect=true&on_concurrent_steal=abort"
     )]
     #[case::pod_no_proxy(
@@ -2332,13 +2401,35 @@ mod test {
             container: None,
         }),
         "test-ns",
-        "/apis/operator.metalbear.co/v1/namespaces/test-ns/targets/pod.my-pod?connect=true&on_concurrent_steal=abort"
+        Some("pod-access-key"),
+        "/apis/operator.metalbear.co/v1/namespaces/test-ns/targets/pod.my-pod?connect=true&on_concurrent_steal=abort&key=pod-access-key"
+    )]
+    #[case::deployment_with_key_none(
+        true,
+        mirrord_config::target::Target::Deployment(mirrord_config::target::deployment::DeploymentTarget {
+            deployment: "test-deployment".into(),
+            container: Some("test-container".into()),
+        }),
+        "default",
+        None,
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.test-deployment.container.test-container?connect=true&on_concurrent_steal=abort"
+    )]
+    #[case::deployment_with_key_special_chars(
+        true,
+        mirrord_config::target::Target::Deployment(mirrord_config::target::deployment::DeploymentTarget {
+            deployment: "test-deployment".into(),
+            container: Some("test-container".into()),
+        }),
+        "default",
+        Some("key/with?special&chars=value"),
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.test-deployment.container.test-container?connect=true&on_concurrent_steal=abort&key=key%2Fwith%3Fspecial%26chars%3Dvalue"
     )]
     #[test]
     fn target_connect_url_from_config(
         #[case] use_proxy: bool,
         #[case] target: mirrord_config::target::Target,
         #[case] namespace: &str,
+        #[case] key: Option<&str>,
         #[case] expected: &str,
     ) {
         let params = ConnectParams {
@@ -2354,8 +2445,8 @@ mod test {
             session_ci_info: None,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
+            key,
         };
-
         let produced =
             OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);
         assert_eq!(produced, expected)
