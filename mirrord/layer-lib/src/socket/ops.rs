@@ -34,8 +34,8 @@ use crate::{
     proxy_connection::make_proxy_request_with_response,
     setup::setup,
     socket::{
-        Bound, Connected, ConnectionThrough, SOCKETS, SocketDescriptor,
-        SocketState, UserSocket, sockets::reconstruct_user_socket,
+        Bound, Connected, ConnectionThrough, SOCKETS, SocketDescriptor, SocketState, UserSocket,
+        sockets::reconstruct_user_socket,
     },
 };
 #[cfg(windows)]
