@@ -8,6 +8,55 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.188.2](https://github.com/metalbear-co/mirrord/tree/3.188.2) - 2026-02-13
+
+
+### Fixed
+
+- Rolled back the change for loading into arm64e, fixing many bugs on macOS.
+
+
+### Internal
+
+- Added a checklist to the PR template for important tasks.
+- Added a fixture for a test `KubeService` with a Stateful Set.
+- Added method on `ResolvedTarget` to get `VolumeClaimTemplates` (for
+  `StatefulSets`).
+
+## [3.188.1](https://github.com/metalbear-co/mirrord/tree/3.188.0) - 2026-02-12
+
+Re-releasing 3.188.0 for pipeline mistake.
+
+## [3.188.0](https://github.com/metalbear-co/mirrord/tree/3.188.0) - 2026-02-12
+
+
+### Added
+
+- Expose feature.env.load_from_process as env MIRRORD_ENV_LOAD_FROM_PROCESS
+
+
+### Fixed
+
+- Don't require emulation for macOS arm64e
+- The db-branches status command would fail when one of the branching features
+  (MySQL/PostgreSQL) was not enabled on the cluster.
+
+
+### Internal
+
+- Added CODE_REVIEW.md guide documenting code review standards and
+  responsibilities.
+- After a release is done and everything is published, set it to be the latest
+  release on GitHub.
+- Migrates the MIRRORD_LAYER_LOG_PATH capability to layer-lib, making it also
+  accessible to the unix layer crate.
+
+  MIRRORD_LAYER_LOG_PATH allows for the specification of a directory in which
+  layer tracing logs will be written, one per process in the format
+  `mirrord-layer_{%Y%m%d_%H%M%S}_{pid}_{processName}`.
+  Where processName is a sanitized version which only contains characters from
+  alphanumeric, `-`, `_`; any other character falls back to `_`.
+
 ## [3.187.0](https://github.com/metalbear-co/mirrord/tree/3.187.0) - 2026-02-09
 
 

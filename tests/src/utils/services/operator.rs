@@ -100,7 +100,7 @@ pub async fn service_for_mirrord_ls(
             .unwrap();
 
     // `StatefulSet`
-    let stateful_set = stateful_set_from_json(&name, image);
+    let stateful_set = stateful_set_from_json(&name, image, false);
     let (stateful_set_guard, _) =
         ResourceGuard::create(stateful_set_api.clone(), &stateful_set, delete_after_fail)
             .await
