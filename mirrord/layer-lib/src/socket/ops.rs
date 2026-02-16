@@ -33,8 +33,7 @@ use crate::{
     proxy_connection::make_proxy_request_with_response,
     setup::setup,
     socket::{
-        AF_INET, AF_INET6, AF_UNIX,
-        Bound, Connected, ConnectionThrough, SOCKETS, SocketDescriptor,
+        AF_INET, AF_INET6, AF_UNIX, Bound, Connected, ConnectionThrough, SOCKETS, SocketDescriptor,
         SocketState, UserSocket, sockets::reconstruct_user_socket,
     },
 };
