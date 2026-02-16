@@ -748,7 +748,7 @@ jobs:
           New-Item -ItemType File -Force -Path "target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll" -Value "content"
 
           cargo fmt --all -- --check
-          cargo clippy --target x86_64-pc-windows-msvc
+          cargo clippy --target x86_64-pc-windows-msvc --tests -- -Wclippy::indexing_slicing -D warnings
       - name: run UT
         run: |
           $ErrorActionPreference = "Stop"
