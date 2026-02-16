@@ -648,7 +648,7 @@ jobs:
       - name: mirrord layer tests
         run: cargo test -p mirrord-layer
       - name: mirrord layer-lib tests
-        run: cargo test -p mirrord-layer-lib
+        run: cargo test -p mirrord-layer-lib --lib --bins --tests
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
@@ -753,7 +753,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win -p mirrord-layer-lib
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win -p mirrord-layer-lib --lib --bins --tests
 
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
   # building concurrently can run faster the release ide tests
