@@ -1512,7 +1512,7 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
     // Try to resolve the hostname using mirrord's remote DNS resolution
     match remote_dns_resolve_via_proxy(hostname_cstr) {
         Ok(results) => {
-            if let Some((name, ip)) = results.get(0) {
+            if let Some((name, ip)) = results.first() {
                 // Use the first IP address from the results
                 tracing::debug!(
                     "Remote DNS resolution successful: {} -> {}",
