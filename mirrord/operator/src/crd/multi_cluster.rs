@@ -41,10 +41,6 @@ pub struct MirrordMultiClusterSessionSpec {
     /// specified.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_cluster: Option<String>,
-
-    /// Key for this session, set manually by the user or generated
-    /// automatically.
-    pub key: String,
 }
 
 /// Status of a multi-cluster session

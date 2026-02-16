@@ -51,10 +51,6 @@ pub struct MirrordClusterSessionSpec {
     /// all child sessions across clusters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub multi_cluster_parent_name: Option<String>,
-
-    /// Key for this session, set manually by the user or generated
-    /// automatically.
-    pub key: String,
 }
 
 /// Describes an owner of a mirrord session.
