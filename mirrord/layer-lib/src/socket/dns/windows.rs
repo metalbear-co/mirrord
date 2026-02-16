@@ -126,7 +126,7 @@ pub fn check_address_reachability(socket: SOCKET, remote_addr: &SocketAddr) -> i
             service_buffer.len() as u32,
             //When the NI_NAMEREQD flag is set, a host name that cannot be resolved by the DNS
             // results in an error.
-            winapi::shared::ws2def::NI_NAMEREQD, // | winapi::shared::ws2def::NI_DGRAM,
+            winapi::shared::ws2def::NI_NAMEREQD,
         )
     };
 

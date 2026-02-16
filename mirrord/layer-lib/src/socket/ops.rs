@@ -11,8 +11,6 @@ use std::{
 };
 
 use libc::c_int;
-#[cfg(unix)]
-use libc::{AF_INET, AF_INET6, AF_UNIX};
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
 use mirrord_protocol::outgoing::SocketAddress;
 #[cfg(unix)]
@@ -23,10 +21,7 @@ use tracing::error;
 use tracing::{Level, debug, trace};
 /// Platform-specific connect function types
 #[cfg(windows)]
-use winapi::{
-    shared::ws2def::{AF_INET, AF_INET6, AF_UNIX},
-    um::winsock2::{SOCKET, WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR},
-};
+use winapi::um::winsock2::{WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR};
 
 use super::sockets::socket_descriptor_to_i64;
 #[cfg(windows)]
@@ -38,22 +33,13 @@ use crate::{
     proxy_connection::make_proxy_request_with_response,
     setup::setup,
     socket::{
-        Bound, Connected, ConnectionThrough, SOCKETS, SocketState, UserSocket,
-        sockets::reconstruct_user_socket,
+        AF_INET, AF_INET6, AF_UNIX,
+        Bound, Connected, ConnectionThrough, SOCKETS, SocketDescriptor,
+        SocketState, UserSocket, sockets::reconstruct_user_socket,
     },
 };
 #[cfg(windows)]
 use crate::{error::windows::WindowsError, socket::sockets::find_listener_address_by_port};
-
-// Platform-specific socket descriptor type
-#[cfg(unix)]
-pub type SocketDescriptor = RawFd;
-#[cfg(windows)]
-pub type SocketDescriptor = SOCKET;
-
-#[cfg(unix)]
-#[allow(non_camel_case_types)]
-pub type SOCKET = i32;
 
 /// Result type for connect operations that preserves errno information
 #[derive(Debug)]
@@ -247,7 +233,7 @@ pub fn is_ignored_port(addr: &SocketAddr) -> bool {
 #[allow(clippy::result_large_err)]
 #[mirrord_layer_macro::instrument(level = "trace", skip(connect_fn), ret)]
 pub fn connect_common<F>(
-    sockfd: SOCKET,
+    sockfd: SocketDescriptor,
     remote_address: SockAddr,
     connect_fn: F,
 ) -> HookResult<ConnectResult>
