@@ -30,5 +30,5 @@ fancy-regex.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "process", "rt"] }
 tracing.workspace = true
 
-[dev-dependencies]
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 mockall = "0.13"
