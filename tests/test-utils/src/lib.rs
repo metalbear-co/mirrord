@@ -1,3 +1,5 @@
+#![allow(clippy::unused_io_amount)]
+
 use core::ops::Not;
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::process::ExitStatusExt;
@@ -9,6 +11,7 @@ use std::{
     time::Duration,
 };
 
+use chrono::{Timelike, Utc};
 use fancy_regex::Regex;
 use tempfile::TempDir;
 use tokio::{
@@ -18,7 +21,11 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::utils::format_time;
+/// Returns string with time format of hh:mm:ss
+fn format_time() -> String {
+    let now = Utc::now();
+    format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
+}
 
 /// Wraps a bunch of things of a [`Child`] process, so we can check its output for errors/specific
 /// messages.

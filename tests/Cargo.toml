@@ -34,6 +34,7 @@ serde_json.workspace = true
 mirrord = { artifact = "bin", path = "../mirrord/cli" }
 mirrord-operator = { path = "../mirrord/operator", features = ["crd"] }
 mirrord-tls-util = { path = "../mirrord/tls-util", optional = true }
+mirrord-test-utils = { path = "./test-utils" }
 serde.workspace = true
 futures.workspace = true
 rand.workspace = true

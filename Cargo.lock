@@ -4868,7 +4868,6 @@ dependencies = [
  "mirrord-layer-macro",
  "mirrord-protocol",
  "mirrord-sip",
- "mirrord-tests",
  "nix 0.29.0",
  "null-terminated",
  "num-traits",
@@ -5079,6 +5078,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-test-utils"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "fancy-regex",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "mirrord-tests"
 version = "0.1.0"
 dependencies = [
@@ -5102,6 +5111,7 @@ dependencies = [
  "mirrord-agent-env",
  "mirrord-kube",
  "mirrord-operator",
+ "mirrord-test-utils",
  "mirrord-tls-util",
  "pem",
  "rand 0.9.2",

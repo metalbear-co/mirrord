@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 use std::{fmt, time::Duration};
 
-use super::TestProcess;
+use mirrord_test_utils::TestProcess;
+
 use crate::utils::run_command::{run_exec_targetless, run_exec_with_target};
 
 pub mod env;
