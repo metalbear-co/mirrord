@@ -191,37 +191,32 @@ jobs:
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
 
   lint:
+    strategy:
+      matrix:
+        target: [aarch64-unknown-linux-gnu, x86_64-unknown-linux-gnu, aarch64-apple-darwin, x86_64-pc-windows-msvc]
     runs-on: ubuntu-24.04
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 24
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       # Otherwise the arguments to the setup-rust-toolchain action are ignored.
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           toolchain: nightly-2025-08-01
           components: rustfmt, clippy
-          target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu,aarch64-apple-darwin,x86_64-pc-windows-msvc
-      - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
+          target: ${{matrix.target}}
+      - name: Install the latest version of uv to install zig
+        uses: astral-sh/setup-uv@v7
       # ziglang version is pinned, because `cargo zigbuild clippy ...` fails with ziglang==0.14.0
-      - run: pip3 install --break-system-packages ziglang==0.13.0.post1 cargo-zigbuild
-      - run: cargo fmt --all -- --check
-      # x64
-      - run: cargo-zigbuild clippy --workspace --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
-      # Check that compiles for the supported linux targets (aarch64)
-      - run: cargo-zigbuild clippy --workspace --lib --bins --all-features --target aarch64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
-      # Check whether `mirrord-operator` crate compiles the way it's used in the operator
+      - run: uv venv && uv pip install ziglang==0.13.0.post1 cargo-zigbuild
+      - name: cargo fmt (run only on one platform)
+        run: cargo fmt --all -- --check
+        if: ${{matrix.target == x86_64-unknown-linux-gnu'}}
+        # Check whether `mirrord-operator` crate compiles the way it's used in the operator
       - run: cargo-zigbuild check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
-      - run: cargo-zigbuild clippy --workspace --lib --bins --all-features --target x86_64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
-      - run: cargo-zigbuild clippy --workspace --lib --bins --all-features --target aarch64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
-      - run: cargo-zigbuild clippy --workspace --lib --bins --all-features --target x86_64-pc-windows-msvc --tests -- -Wclippy::indexing_slicing -D warnings
+        if: ${{matrix.target == x86_64-unknown-linux-gnu'}}
+      - run: uv run -- cargo-zigbuild clippy --workspace --lib --bins --all-features --target ${{matrix.target}} --tests -- -Wclippy::indexing_slicing -D warnings
 
   wizard-frontend-lint:
     runs-on: ubuntu-24.04
