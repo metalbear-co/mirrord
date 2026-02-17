@@ -94,6 +94,10 @@ fn build_wizard_frontend() {
 }
 
 fn main() {
+    // don't run on clippy
+    if std::env::var("CARGO_CFG_CLIPPY").is_ok() {
+        return;
+    }
     // Make sure `MIRRORD_LAYER_FILE` is provided either by user, or computed.
     recheck_and_setup_layer_file();
 
