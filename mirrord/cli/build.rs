@@ -105,6 +105,15 @@ fn main() {
             "cargo:rustc-env=MIRRORD_LAYER_FILE_MACOS_ARM64={}",
             std::env::var("CARGO_MANIFEST_PATH").unwrap()
         );
+
+        let frontend_path = format!(
+            "{}/wizard-frontend.tar.gz",
+            std::env::var("OUT_DIR").unwrap()
+        );
+
+        if !std::fs::exists(&frontend_path).unwrap_or(false) {
+            std::fs::write(frontend_path, "").unwrap();
+        };
         return;
     }
     // Make sure `MIRRORD_LAYER_FILE` is provided either by user, or computed.
