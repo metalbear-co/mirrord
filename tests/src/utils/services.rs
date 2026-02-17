@@ -7,6 +7,7 @@ use k8s_openapi::api::{
 use kube::{api::DeleteParams, Api, Client, Resource, ResourceExt};
 use kube_service::KubeService;
 use mirrord_kube::api::kubernetes::rollout::Rollout;
+use mirrord_test_utils::format_time;
 use resource_guard::ResourceGuard;
 use rstest::*;
 use serde_json::{json, Value};
@@ -16,7 +17,6 @@ use crate::utils::{
     default_env, kube_client, random_string, set_ipv6_only, watch, PRESERVE_FAILED_ENV_NAME,
     TEST_RESOURCE_LABEL,
 };
-use mirrord_test_utils::format_time;
 
 pub(crate) mod operator;
 
