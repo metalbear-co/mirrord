@@ -26,7 +26,7 @@ members = [
     "sample/rust",
     "medschool",
     "tests",
-    "tests/test-utils",
+    "test-utils",
     "tests/rust-e2e-fileops",
     "tests/rust-unix-socket-client",
     "tests/rust-bypassed-unix-socket",
