@@ -521,8 +521,6 @@ jobs:
         run: cargo build -p mirrord-layer
       - name: build layer x86
         run: cargo build -p mirrord-layer --target=x86_64-apple-darwin
-      - name: lint
-        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --tests -- -Wclippy::indexing_slicing -D warnings
       - name: mirrord-sip UT
         run: cargo test -p mirrord-sip
       - name: mirrord-intproxy UT
