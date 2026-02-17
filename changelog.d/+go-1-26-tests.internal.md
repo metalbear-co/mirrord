@@ -1,0 +1,1 @@
+Replaced Go 1.23 with Go 1.26 in test suites.
