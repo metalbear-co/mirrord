@@ -12,9 +12,9 @@ use serde_json::json;
 
 use super::{cluster_resource, kube_service, resource_guard, TestWorkloadType};
 use crate::utils::{
-    default_env, format_time, kube_client, random_string, watch, PRESERVE_FAILED_ENV_NAME,
-    TEST_RESOURCE_LABEL,
+    default_env, kube_client, random_string, watch, PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
 };
+use mirrord_test_utils::format_time;
 
 #[fixture]
 pub async fn service_for_mirrord_ls(

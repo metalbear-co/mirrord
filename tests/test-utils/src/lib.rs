@@ -22,7 +22,7 @@ use tokio::{
 };
 
 /// Returns string with time format of hh:mm:ss
-fn format_time() -> String {
+pub fn format_time() -> String {
     let now = Utc::now();
     format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
 }
