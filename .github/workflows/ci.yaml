@@ -277,6 +277,7 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           toolchain: nightly-2025-08-01
+          cache: false
       # TODO(alex): `no-deps` here due to an issue in `futures-util`.
       - run: cargo doc --document-private-items --no-deps
 
@@ -308,33 +309,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Sanitize branch name for cache prefix
-        id: sanitize
-        run: |
-          BRANCH_NAME="${{ github.ref_name }}"
-          SANITIZED=$(echo "$BRANCH_NAME" | sed 's/\//-/g')
-          echo "cache_tag=$SANITIZED" >> "$GITHUB_OUTPUT"
-      - name: Check sccache secrets
-        env:
-          GCS_BUCKET: ${{ secrets.SCCACHE_GCS_BUCKET }}
-          GCP_CREDENTIALS: ${{ secrets.GCP_SCCACHE_CREDENTIALS }}
-        run: |
-          echo "Checking sccache GCS secrets"
-          if [[ -n "$GCS_BUCKET" ]]; then
-            echo "SCCACHE_GCS_BUCKET is set (length: ${#GCS_BUCKET})"
-          else
-            echo "SCCACHE_GCS_BUCKET is NOT set or empty"
-          fi
-          if [[ -n "$GCP_CREDENTIALS" ]]; then
-            echo "GCP_SCCACHE_CREDENTIALS is set (length: ${#GCP_CREDENTIALS})"
-          else
-            echo "GCP_SCCACHE_CREDENTIALS is NOT set or empty"
-          fi
-          echo "End secrets check"
       - name: build and export
         uses: docker/build-push-action@v6
-        env:
-          GCP_CREDENTIALS: ${{ secrets.GCP_SCCACHE_CREDENTIALS }}
         with:
           context: .
           tags: test
@@ -342,12 +318,6 @@ jobs:
           outputs: type=docker,dest=/tmp/test.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          secret-envs: |
-            gcp_credentials=GCP_CREDENTIALS
-          build-args: |
-            GCS_BUCKET=${{ secrets.SCCACHE_GCS_BUCKET }}
-            GCS_RW_MODE=READ_WRITE
-            GCS_PATH_PREFIX=mirrord-agent/${{ steps.sanitize.outputs.cache_tag }}
       - name: upload image
         uses: actions/upload-artifact@v4
         with:
