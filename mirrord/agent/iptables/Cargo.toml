@@ -18,7 +18,7 @@ edition.workspace = true
 [dependencies]
 
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(target_os = "linux")'.dependencies]
 iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }
 nix = { workspace = true, features = ["user"] }
 caps = "0.5"
