@@ -448,7 +448,7 @@ pub(super) struct DumpArgs {
 
     /// List of ports to dump data from.
     /// Can be specified multiple times.
-    #[arg(short = 'p', long, required = true)]
+    #[arg(short = 'p', long)]
     pub ports: Vec<u16>,
 }
 
