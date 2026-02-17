@@ -4868,6 +4868,7 @@ dependencies = [
  "mirrord-layer-macro",
  "mirrord-protocol",
  "mirrord-sip",
+ "mirrord-test-utils",
  "nix 0.29.0",
  "null-terminated",
  "num-traits",
