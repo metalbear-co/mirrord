@@ -57,21 +57,22 @@ fn build_wizard_frontend() {
         // https://doc.rust-lang.org/cargo/reference/build-scripts.html#rerun-if-changed)
         println!("cargo::rerun-if-changed=.");
 
-        let mut npm_install_command = Command::new("bash");
-        let status = npm_install_command
-            .args(["-c", "npm install"])
+        let status = Command::new("npm")
+            .args(["install"])
             .current_dir(input_path)
             .status()
             .expect("npm install command should finish");
         assert!(status.success(), "npm install command should succeed");
 
-        let mut npm_build_command = Command::new("bash");
-        let build_command_string = format!(
-            "npm run build -- --emptyOutDir --outDir {}",
-            &dist_path.display()
-        );
-        let status = npm_build_command
-            .args(["-c", &build_command_string])
+        let status = Command::new("npm")
+            .args([
+                "run",
+                "build",
+                "--",
+                "--emptyOutDir",
+                "--outDir",
+                &dist_path.display(),
+            ])
             .current_dir(input_path)
             .status()
             .expect("npm build command should finish");
