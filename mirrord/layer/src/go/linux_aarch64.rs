@@ -155,11 +155,7 @@ fn post_go1_23(hook_manager: &mut HookManager, go_version: f32, module_name: Opt
                     .expect("found go but couldn't find runtime.asmcgocall please file a bug"),
             );
         }
-        hook_symbol!(
-            hook_manager,
-            original_symbol,
-            go_syscall_new_detour
-        );
+        hook_symbol!(hook_manager, original_symbol, go_syscall_new_detour);
     }
 }
 
