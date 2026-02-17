@@ -120,7 +120,13 @@ fn post_go1_19(hook_manager: &mut HookManager, module_name: Option<&str>) {
 }
 
 /// Hooks for when hooking a post go 1.23 binary
-fn post_go1_23(hook_manager: &mut HookManager, module_name: Option<&str>) {
+fn post_go1_23(hook_manager: &mut HookManager, go_version: f32, module_name: Option<&str>) {
+    let original_symbol = if go_version >= 1.26 {
+        "internal/runtime/syscall/linux.Syscall6.abi0"
+    } else {
+        "internal/runtime/syscall.Syscall6.abi0"
+    };
+
     if let Some(module_name) = module_name {
         unsafe {
             FN_ASMCGOCALL = std::mem::transmute::<
@@ -135,7 +141,7 @@ fn post_go1_23(hook_manager: &mut HookManager, module_name: Option<&str>) {
         hook_symbol!(
             hook_manager,
             module_name,
-            "internal/runtime/syscall.Syscall6.abi0",
+            original_symbol,
             go_syscall_new_detour
         );
     } else {
@@ -151,7 +157,7 @@ fn post_go1_23(hook_manager: &mut HookManager, module_name: Option<&str>) {
         }
         hook_symbol!(
             hook_manager,
-            "internal/runtime/syscall.Syscall6.abi0",
+            original_symbol,
             go_syscall_new_detour
         );
     }
