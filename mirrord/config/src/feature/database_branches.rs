@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::{collections::HashMap, ops::Deref};
 
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use mirrord_config_derive::MirrordConfig;
@@ -163,10 +163,9 @@ pub struct DatabaseBranchBaseConfig {
 
 /// Different ways of connecting to the source database.
 ///
-/// Example:
+/// Supports two formats:
 ///
-/// A single complete connection URL stored in an environment variable accessible from
-/// the target pod template.
+/// **URL format** (old) — a single complete connection URL from an environment variable:
 ///
 /// ```json
 /// {
@@ -176,11 +175,68 @@ pub struct DatabaseBranchBaseConfig {
 ///   }
 /// }
 /// ```
+///
+/// **Params format** (new) — individual connection parameters from separate env vars:
+///
+/// ```json
+/// {
+///   "type": "env",
+///   "params": {
+///     "host": "DB_HOST",
+///     "port": "DB_PORT",
+///     "user": "DB_USER",
+///     "password": "DB_PASSWORD",
+///     "database": "DB_NAME"
+///   }
+/// }
+/// ```
+///
+/// `url` and `params` are mutually exclusive.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSource")]
-#[serde(rename_all = "snake_case")]
+#[serde(untagged)]
 pub enum ConnectionSource {
-    Url(TargetEnviromentVariableSource),
+    /// Old format: `{"url": {"type": "env", "variable": "..."}}`.
+    Url(UrlConnectionSource),
+    /// New format: `{"type": "env", "url": "..."}` or `{"type": "env", "params": {...}}`.
+    Flat(FlatConnectionSource),
+}
+
+/// Old-format wrapper: `{"url": <TargetEnviromentVariableSource>}`.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[schemars(rename = "DbBranchingUrlConnectionSource")]
+pub struct UrlConnectionSource {
+    pub url: TargetEnviromentVariableSource,
+}
+
+/// New flat format: `{"type": "env", "url": "VAR"}` or `{"type": "env", "params": {...}}`.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[schemars(rename = "DbBranchingFlatConnectionSource")]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FlatConnectionSource {
+    Env {
+        /// Complete connection URL env var name. Mutually exclusive with `params`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        url: Option<String>,
+        /// Individual connection parameter env var names. Mutually exclusive with `url`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        params: Option<HashMap<String, String>>,
+        /// Optional container name to scope the env var lookup.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        container: Option<String>,
+    },
+}
+
+impl ConnectionSource {
+    /// Get the env variable source for URL mode, regardless of format.
+    /// Returns `None` if this is a params-mode connection.
+    pub fn as_url_source(&self) -> Option<&TargetEnviromentVariableSource> {
+        match self {
+            ConnectionSource::Url(u) => Some(&u.url),
+            ConnectionSource::Flat(FlatConnectionSource::Env { url: Some(_), .. }) => None,
+            _ => None,
+        }
+    }
 }
 
 /// <!--${internal}-->

@@ -10,8 +10,8 @@ use kube::{
 };
 use mirrord_config::{
     feature::database_branches::{
-        ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig, MongodbBranchConfig,
-        MysqlBranchConfig, PgBranchConfig, TargetEnviromentVariableSource,
+        ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig, FlatConnectionSource,
+        MongodbBranchConfig, MysqlBranchConfig, PgBranchConfig, TargetEnviromentVariableSource,
     },
     target::{Target, TargetDisplay},
 };
@@ -25,18 +25,21 @@ use crate::{
     crd::{
         mongodb_branching::{
             BranchDatabasePhase as BranchDatabasePhaseMongodb,
+            ConnectionParamsSource as CrdConnectionParamsSourceMongodb,
             ConnectionSource as CrdConnectionSourceMongodb,
             ConnectionSourceKind as CrdConnectionSourceKindMongodb, MongodbBranchDatabase,
             MongodbBranchDatabaseSpec,
         },
         mysql_branching::{
             BranchDatabasePhase as BranchDatabasePhaseMysql,
+            ConnectionParamsSource as CrdConnectionParamsSourceMysql,
             ConnectionSource as CrdConnectionSourceMysql,
             ConnectionSourceKind as CrdConnectionSourceKindMysql, MysqlBranchDatabase,
             MysqlBranchDatabaseSpec,
         },
         pg_branching::{
             BranchDatabasePhase as BranchDatabasePhasePg,
+            ConnectionParamsSource as CrdConnectionParamsSourcePg,
             ConnectionSource as CrdConnectionSourcePg, IamAuthConfig as CrdIamAuthConfig,
             PgBranchDatabase, PgBranchDatabaseSpec,
         },
@@ -614,7 +617,7 @@ impl MysqlBranchParams {
     pub fn new(id: &str, config: &MysqlBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
         let connection_source = match &config.base.connection {
-            ConnectionSource::Url(kind) => match kind {
+            ConnectionSource::Url(url_source) => match &url_source.url {
                 TargetEnviromentVariableSource::Env {
                     container,
                     variable,
@@ -630,6 +633,25 @@ impl MysqlBranchParams {
                     variable: variable.clone(),
                 }),
             },
+            ConnectionSource::Flat(FlatConnectionSource::Env {
+                url,
+                params,
+                container,
+            }) => {
+                if let Some(url_var) = url {
+                    CrdConnectionSourceMysql::Url(CrdConnectionSourceKindMysql::Env {
+                        container: container.clone(),
+                        variable: url_var.clone(),
+                    })
+                } else if let Some(params) = params {
+                    CrdConnectionSourceMysql::Params(CrdConnectionParamsSourceMysql {
+                        container: container.clone(),
+                        params: params.clone(),
+                    })
+                } else {
+                    unreachable!("ConnectionSource::Flat must have either url or params")
+                }
+            }
         };
         let spec = MysqlBranchDatabaseSpec {
             id: id.to_string(),
@@ -665,7 +687,28 @@ impl PgBranchParams {
     pub fn new(id: &str, config: &PgBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
         let connection_source = match &config.base.connection {
-            ConnectionSource::Url(kind) => CrdConnectionSourcePg::Url(kind.into()),
+            ConnectionSource::Url(url_source) => CrdConnectionSourcePg::Url((&url_source.url).into()),
+            ConnectionSource::Flat(FlatConnectionSource::Env {
+                url,
+                params,
+                container,
+            }) => {
+                if let Some(url_var) = url {
+                    CrdConnectionSourcePg::Url(
+                        crate::crd::pg_branching::ConnectionSourceKind::Env {
+                            container: container.clone(),
+                            variable: url_var.clone(),
+                        },
+                    )
+                } else if let Some(params) = params {
+                    CrdConnectionSourcePg::Params(CrdConnectionParamsSourcePg {
+                        container: container.clone(),
+                        params: params.clone(),
+                    })
+                } else {
+                    unreachable!("ConnectionSource::Flat must have either url or params")
+                }
+            }
         };
 
         // Convert IAM auth config if present
@@ -706,7 +749,7 @@ impl MongodbBranchParams {
     pub(crate) fn new(id: &str, config: &MongodbBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
         let connection_source = match &config.base.connection {
-            ConnectionSource::Url(kind) => match kind {
+            ConnectionSource::Url(url_source) => match &url_source.url {
                 TargetEnviromentVariableSource::Env {
                     container,
                     variable,
@@ -722,6 +765,25 @@ impl MongodbBranchParams {
                     variable: variable.clone(),
                 }),
             },
+            ConnectionSource::Flat(FlatConnectionSource::Env {
+                url,
+                params,
+                container,
+            }) => {
+                if let Some(url_var) = url {
+                    CrdConnectionSourceMongodb::Url(CrdConnectionSourceKindMongodb::Env {
+                        container: container.clone(),
+                        variable: url_var.clone(),
+                    })
+                } else if let Some(params) = params {
+                    CrdConnectionSourceMongodb::Params(CrdConnectionParamsSourceMongodb {
+                        container: container.clone(),
+                        params: params.clone(),
+                    })
+                } else {
+                    unreachable!("ConnectionSource::Flat must have either url or params")
+                }
+            }
         };
         let spec = MongodbBranchDatabaseSpec {
             id: id.to_string(),

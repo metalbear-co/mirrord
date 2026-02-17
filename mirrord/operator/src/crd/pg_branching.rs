@@ -125,6 +125,19 @@ impl From<&PgIamAuthConfig> for IamAuthConfig {
 pub enum ConnectionSource {
     /// A complete connection URL.
     Url(ConnectionSourceKind),
+    /// Individual connection parameters from separate env vars.
+    Params(ConnectionParamsSource),
+}
+
+/// Individual connection parameter env var names (e.g. host, port, user, password, database).
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionParamsSource {
+    /// Optional container name to scope the env var lookup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
+    /// Map of parameter name to env var name (e.g. `{"host": "DB_HOST", "port": "DB_PORT"}`).
+    pub params: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
