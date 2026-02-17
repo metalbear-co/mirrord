@@ -686,7 +686,7 @@ mod post_go_1_25 {
 
         hook_symbol!(
             hook_manager,
-            "internal/runtime/syscall.Syscall6",
+            original_symbol,
             internal_runtime_syscall_syscall6_detour
         );
     }
@@ -712,7 +712,7 @@ mod post_go_1_25 {
         hook_symbol!(
             hook_manager,
             module_name,
-            "internal/runtime/syscall.Syscall6",
+            original_symbol,
             internal_runtime_syscall_syscall6_detour
         );
     }
