@@ -189,7 +189,7 @@ jobs:
           echo ${{ steps.changed-configuration-md.outputs.any_changed }};
 
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
-          
+
   lint:
     runs-on: ubuntu-24.04
     needs: changed_files
@@ -219,6 +219,9 @@ jobs:
       - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
       # Check whether `mirrord-operator` crate compiles the way it's used in the operator
       - run: cargo-zigbuild check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
+      - run: cargo-zigbuild clippy --lib --bins --all-features --target x86_64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo-zigbuild clippy --lib --bins --all-features --target x86_64-pc-windows-msvc --tests -- -Wclippy::indexing_slicing -D warnings
 
   wizard-frontend-lint:
     runs-on: ubuntu-24.04
@@ -233,7 +236,7 @@ jobs:
         working-directory: ./wizard-frontend
       - run: npm run lint
         working-directory: ./wizard-frontend
-  
+
 
   # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
   # the output of this test is a boolean indicating if it's a release branch
@@ -531,13 +534,6 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: verify SIP status
         run: csrutil status
-      # Build layer before linting because the `mirrord` crate expects `MIRRORD_LAYER_FILE_MACOS_ARM64` to point to an existing file.
-      - name: build layer
-        run: cargo build -p mirrord-layer
-      - name: build layer x86
-        run: cargo build -p mirrord-layer --target=x86_64-apple-darwin
-      - name: lint
-        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --tests -- -Wclippy::indexing_slicing -D warnings
       - name: mirrord-sip UT
         run: cargo test -p mirrord-sip
       - name: mirrord-intproxy UT
@@ -737,15 +733,7 @@ jobs:
           components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
           toolchain: nightly-2025-08-01
-      - name: run lint/fmt
-        run: |
-          $ErrorActionPreference = "Stop"
 
-          # create dummy mirrord
-          New-Item -ItemType File -Force -Path "target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll" -Value "content"
-
-          cargo fmt --all -- --check
-          cargo clippy --target x86_64-pc-windows-msvc
       - name: run UT
         run: |
           $ErrorActionPreference = "Stop"
