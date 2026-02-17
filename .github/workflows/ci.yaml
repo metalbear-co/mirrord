@@ -208,7 +208,7 @@ jobs:
         with:
           toolchain: nightly-2025-08-01
           components: rustfmt, clippy
-          target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
+          target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu,aarch64-apple-darwin,x86_64-pc-windows-msvc
       - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
       # ziglang version is pinned, because `cargo zigbuild clippy ...` fails with ziglang==0.14.0
       - run: pip3 install --break-system-packages ziglang==0.13.0.post1 cargo-zigbuild
