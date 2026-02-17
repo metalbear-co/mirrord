@@ -214,14 +214,14 @@ jobs:
       - run: pip3 install --break-system-packages ziglang==0.13.0.post1 cargo-zigbuild
       - run: cargo fmt --all -- --check
       # x64
-      - run: cargo-zigbuild clippy --workspace --no-deps --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo-zigbuild clippy --workspace --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
       # Check that compiles for the supported linux targets (aarch64)
-      - run: cargo-zigbuild clippy --workspace --no-deps --lib --bins --all-features --target aarch64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo-zigbuild clippy --workspace --lib --bins --all-features --target aarch64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
       # Check whether `mirrord-operator` crate compiles the way it's used in the operator
       - run: cargo-zigbuild check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
-      - run: cargo-zigbuild clippy --workspace --no-deps --lib --bins --all-features --target x86_64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
-      - run: cargo-zigbuild clippy --workspace --no-deps --lib --bins --all-features --target aarch64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
-      - run: cargo-zigbuild clippy --workspace --no-deps --lib --bins --all-features --target x86_64-pc-windows-msvc --tests -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo-zigbuild clippy --workspace --lib --bins --all-features --target x86_64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo-zigbuild clippy --workspace --lib --bins --all-features --target aarch64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo-zigbuild clippy --workspace --lib --bins --all-features --target x86_64-pc-windows-msvc --tests -- -Wclippy::indexing_slicing -D warnings
 
   wizard-frontend-lint:
     runs-on: ubuntu-24.04
