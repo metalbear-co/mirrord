@@ -71,7 +71,7 @@ fn build_wizard_frontend() {
                 "--",
                 "--emptyOutDir",
                 "--outDir",
-                dist_path.display().to_str(),
+                &dist_path.display().to_string(),
             ])
             .current_dir(input_path)
             .status()
