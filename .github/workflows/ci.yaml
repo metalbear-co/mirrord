@@ -526,6 +526,7 @@ jobs:
         run: cargo build -p mirrord-layer
       - name: build layer x86
         run: cargo build -p mirrord-layer --target=x86_64-apple-darwin
+      - run: ./scripts/build_c_apps.sh
       - name: mirrord layer tests
         run: cargo test -p mirrord-layer
       - name: save intproxy logs
