@@ -212,10 +212,10 @@ jobs:
       - run: uv venv && uv pip install ziglang==0.13.0.post1 cargo-zigbuild
       - name: cargo fmt (run only on one platform)
         run: cargo fmt --all -- --check
-        if: ${{matrix.target == x86_64-unknown-linux-gnu'}}
+        if: ${{matrix.target == 'x86_64-unknown-linux-gnu'}}
         # Check whether `mirrord-operator` crate compiles the way it's used in the operator
       - run: cargo-zigbuild check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
-        if: ${{matrix.target == x86_64-unknown-linux-gnu'}}
+        if: ${{matrix.target == 'x86_64-unknown-linux-gnu'}}
       - run: uv run -- cargo-zigbuild clippy --workspace --lib --bins --all-features --target ${{matrix.target}} --tests -- -Wclippy::indexing_slicing -D warnings
 
   wizard-frontend-lint:
