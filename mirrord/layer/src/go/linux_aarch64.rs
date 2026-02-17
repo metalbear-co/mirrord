@@ -171,7 +171,7 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
 
     if version >= 1.23 {
         trace!("found version >= 1.23");
-        post_go1_23(hook_manager, None);
+        post_go1_23(hook_manager, version, None);
     } else if version >= 1.19 {
         trace!("found version >= 1.19");
         post_go1_19(hook_manager, None);
@@ -188,7 +188,7 @@ pub(crate) fn enable_hooks_in_loaded_module(hook_manager: &mut HookManager, modu
 
     if version >= 1.23 {
         trace!("found version >= 1.23");
-        post_go1_23(hook_manager, Some(module_name.as_str()));
+        post_go1_23(hook_manager, version, Some(module_name.as_str()));
     } else if version >= 1.19 {
         trace!("found version >= 1.19");
         post_go1_19(hook_manager, Some(module_name.as_str()));
