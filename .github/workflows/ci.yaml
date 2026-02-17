@@ -31,9 +31,10 @@
 name: CI
 
 on:
+  merge_group:
   workflow_dispatch:
   push:
-    branches: [main, "*staging*", "windows-support", "gh-readonly-queue/*"]
+    branches: [main, "*staging*", "windows-support"]
   pull_request:
     branches: [main, "*staging*", "windows-support"]
     types: [opened, synchronize, reopened, ready_for_review]
