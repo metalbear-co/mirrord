@@ -34,7 +34,7 @@ on:
   merge_group:
   workflow_dispatch:
   push:
-    branches: [main, "*staging*", "windows-support"]
+    branches: [main, "*staging*", "windows-support", "gh-readonly-queue*"]
   pull_request:
     branches: [main, "*staging*", "windows-support"]
     types: [opened, synchronize, reopened, ready_for_review]
