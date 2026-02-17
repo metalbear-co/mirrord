@@ -30,9 +30,8 @@ pub fn format_time() -> String {
 /// Wraps a bunch of things of a [`Child`] process, so we can check its output for errors/specific
 /// messages.
 ///
-/// It's mostly created by one of the [`super::run_command`] functions, such as
-/// [`super::run_command::run_exec_with_target`], where we start a child test process running
-/// `mirrord`, wait for it to finish and look into its `stdout/stderr`.
+/// It's mostly created by helper functions in the tests crate, where we start a child test process
+/// running `mirrord`, wait for it to finish and look into its `stdout/stderr`.
 pub struct TestProcess {
     /// The [`Child`] process started, running `mirrord`.
     pub child: Child,
