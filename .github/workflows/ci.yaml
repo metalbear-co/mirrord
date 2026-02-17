@@ -520,7 +520,7 @@ jobs:
       - name: run UT
         run: |
           $ErrorActionPreference = "Stop"
-          New-Item target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll
+          New-Item -Path target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll -ItemType File -Force
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
 
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
