@@ -96,7 +96,15 @@ fn build_wizard_frontend() {
 fn main() {
     // don't run on clippy
     if std::env::var("CLIPPY_ARGS").is_ok() {
-        println!("cargo:rustc-env=MIRRORD_LAYER_FILE=Cargo.toml");
+        // stupid hack so we don't need dependencies or anything
+        println!(
+            "cargo:rustc-env=MIRRORD_LAYER_FILE={}",
+            std::env::var("CARGO_MANIFEST_PATH").unwrap()
+        );
+        println!(
+            "cargo:rustc-env=MIRRORD_LAYER_FILE_MACOS_ARM64={}",
+            std::env::var("CARGO_MANIFEST_PATH").unwrap()
+        );
         return;
     }
     // Make sure `MIRRORD_LAYER_FILE` is provided either by user, or computed.
