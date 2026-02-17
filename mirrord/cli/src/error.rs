@@ -246,6 +246,9 @@ pub(crate) enum CliError {
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
     ConfigError(#[from] mirrord_config::config::ConfigError),
 
+    #[error("Failed to run command `{command}` due to missing argument `{arg}`")]
+    MissingArg { command: String, arg: String },
+
     #[error("Failed to access env file at `{0}`: {1}")]
     #[diagnostic(help(
         "Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"
