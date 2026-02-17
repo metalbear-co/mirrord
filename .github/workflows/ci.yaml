@@ -195,9 +195,18 @@ jobs:
   lint:
     strategy:
       matrix:
-        target: [aarch64-unknown-linux-gnu, x86_64-unknown-linux-gnu, aarch64-apple-darwin]
-        # x86_64-pc-windows-msvc to add windows we need to upgrade nightly since cargo crashes.
-    runs-on: ubuntu-24.04
+        include:
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{matrix.os}}
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
@@ -209,17 +218,13 @@ jobs:
           toolchain: nightly-2025-08-01
           components: rustfmt, clippy
           target: ${{matrix.target}}
-      - name: Install the latest version of uv to install zig
-        uses: astral-sh/setup-uv@v7
-      # ziglang version is pinned, because `cargo zigbuild clippy ...` fails with ziglang==0.14.0
-      - run: uv venv && uv pip install ziglang==0.13.0.post1 cargo-zigbuild
       - name: cargo fmt (run only on one platform)
         run: cargo fmt --all -- --check
         if: ${{matrix.target == 'x86_64-unknown-linux-gnu'}}
         # Check whether `mirrord-operator` crate compiles the way it's used in the operator
-      - run: uv run -- cargo-zigbuild check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
+      - run: cargo check -p mirrord-operator --features crd --target ${{matrix.target}}
         if: ${{matrix.target == 'x86_64-unknown-linux-gnu'}}
-      - run: uv run -- cargo-zigbuild clippy --workspace --lib --bins --all-features --target ${{matrix.target}} --tests -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo clippy --workspace --lib --bins --all-features --target ${{matrix.target}} --tests -- -Wclippy::indexing_slicing -D warnings
 
   wizard-frontend-lint:
     runs-on: ubuntu-24.04
