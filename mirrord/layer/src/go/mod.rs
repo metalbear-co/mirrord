@@ -10,6 +10,11 @@ use tracing::trace;
 
 use crate::{close_detour, file::hooks::*, hooks::HookManager, socket::hooks::*};
 
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+pub(crate) mod c_shared;
 #[cfg_attr(
     all(target_os = "linux", target_arch = "x86_64"),
     path = "linux_x64.rs"
