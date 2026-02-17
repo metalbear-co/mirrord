@@ -524,6 +524,8 @@ jobs:
       # building layer is only needed for the bash_script, that should be moved to integration test....
       - name: build layer
         run: cargo build -p mirrord-layer --target=x86_64-apple-darwin
+      - name: build layer x86
+        run: cargo build -p mirrord-layer --target=x86_64-apple-darwin
       - name: mirrord layer tests
         run: cargo test -p mirrord-layer
       - name: save intproxy logs
