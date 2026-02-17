@@ -222,13 +222,19 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: cargo fmt (run only on one platform)
+        if: ${{matrix.target == 'x86_64-unknown-linux-gnu'}}
         run: cargo fmt --all -- --check
-        if: ${{matrix.target == 'x86_64-unknown-linux-gnu'}}
+
         # Check whether `mirrord-operator` crate compiles the way it's used in the operator
-      - run: cargo check -p mirrord-operator --features crd --target ${{matrix.target}}
-        if: ${{matrix.target == 'x86_64-unknown-linux-gnu'}}
+      - if: ${{matrix.target == 'x86_64-unknown-linux-gnu'}}
+        run: cargo check -p mirrord-operator --features crd --target ${{matrix.target}}
+
         # Wclippy is quoted for Windows T_T. They don't like ::
+      - if: ${{matrix.os == 'macos-latest'}}
+        run: touch /tmp/not-really-layer.dylib
       - run: cargo clippy --workspace --lib --bins --all-features --target ${{matrix.target}} --tests -- "-Wclippy::indexing_slicing" -D warnings
+        env:
+          MIRRORD_LAYER_FILE_MACOS_ARM64: /tmp/not-really-layer.dylib
 
   wizard-frontend-lint:
     runs-on: ubuntu-24.04
