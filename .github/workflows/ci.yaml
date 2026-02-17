@@ -195,7 +195,8 @@ jobs:
   lint:
     strategy:
       matrix:
-        target: [aarch64-unknown-linux-gnu, x86_64-unknown-linux-gnu, aarch64-apple-darwin, x86_64-pc-windows-msvc]
+        target: [aarch64-unknown-linux-gnu, x86_64-unknown-linux-gnu, aarch64-apple-darwin]
+        # x86_64-pc-windows-msvc to add windows we need to upgrade nightly since cargo crashes.
     runs-on: ubuntu-24.04
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
