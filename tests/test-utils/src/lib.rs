@@ -1,4 +1,5 @@
 #![allow(clippy::unused_io_amount)]
+#![allow(clippy::indexing_slicing)]
 
 use core::ops::Not;
 #[cfg(not(target_os = "windows"))]

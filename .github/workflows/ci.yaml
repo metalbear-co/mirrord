@@ -225,7 +225,7 @@ jobs:
       - run: cargo check -p mirrord-operator --features crd --target ${{matrix.target}}
         if: ${{matrix.target == 'x86_64-unknown-linux-gnu'}}
         # Wclippy is quoted for Windows T_T. They don't like ::
-      - run: cargo clippy --exclude mirrord-test-utils --workspace --lib --bins --all-features --target ${{matrix.target}} --tests -- "-Wclippy::indexing_slicing" -D warnings
+      - run: cargo clippy --workspace --lib --bins --all-features --target ${{matrix.target}} --tests -- "-Wclippy::indexing_slicing" -D warnings
 
   wizard-frontend-lint:
     runs-on: ubuntu-24.04
