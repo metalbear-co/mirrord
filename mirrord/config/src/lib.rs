@@ -1237,6 +1237,7 @@ mod tests {
                 split_queues: None,
                 db_branches: None,
                 magic: None,
+                preview: None,
             }),
             container: None,
             operator: None,

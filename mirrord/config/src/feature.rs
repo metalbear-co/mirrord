@@ -3,7 +3,10 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use self::{copy_target::CopyTargetConfig, env::EnvConfig, fs::FsConfig, network::NetworkConfig};
+use self::{
+    copy_target::CopyTargetConfig, env::EnvConfig, fs::FsConfig, network::NetworkConfig,
+    preview::PreviewConfig,
+};
 use crate::{
     config::source::MirrordConfigSource,
     feature::{
@@ -18,6 +21,7 @@ pub mod env;
 pub mod fs;
 pub mod magic;
 pub mod network;
+pub mod preview;
 pub mod split_queues;
 
 /// Controls mirrord features.
@@ -128,6 +132,12 @@ pub struct FeatureConfig {
     /// individually if it conflicts with your setup.
     #[config(nested)]
     pub magic: MagicConfig,
+
+    /// ### feature.preview {#feature-preview}
+    ///
+    /// Configuration for preview environments.
+    #[config(nested, default)]
+    pub preview: PreviewConfig,
 }
 
 impl CollectAnalytics for &FeatureConfig {
@@ -140,5 +150,6 @@ impl CollectAnalytics for &FeatureConfig {
         analytics.add("split_queues", &self.split_queues);
         analytics.add("db_branches", &self.db_branches);
         analytics.add("magic", &self.magic);
+        analytics.add("preview", &self.preview);
     }
 }
