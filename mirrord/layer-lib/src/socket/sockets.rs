@@ -83,13 +83,10 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
                 .ok()
             })
             .map(|(fds_and_sockets, _)| {
-                // Note: filter_map is needed for unix filtering,
-                //  on windows it's just a map, shush clippy.
-                #[allow(clippy::unnecessary_filter_map)]
-                Mutex::new(HashMap::from_iter(fds_and_sockets.into_iter().filter_map(
-                    |(fd, socket)| {
-                        #[cfg(unix)]
-                        {
+                #[cfg(unix)]
+                {
+                    Mutex::new(HashMap::from_iter(fds_and_sockets.into_iter().filter_map(
+                        |(fd, socket)| {
                             // Do not inherit sockets that are `FD_CLOEXEC`.
                             // NOTE: The original `fcntl` is called instead of `FN_FCNTL` because
                             // the latter may be null at this point,
@@ -99,11 +96,18 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
                             if unsafe { libc::fcntl(fd, libc::F_GETFD, 0) } == -1 {
                                 return None;
                             }
-                        }
-
-                        Some((fd as SocketDescriptor, Arc::new(socket)))
-                    },
-                )))
+                            Some((fd as SocketDescriptor, Arc::new(socket)))
+                        },
+                    )))
+                }
+                #[cfg(windows)]
+                {
+                    Mutex::new(HashMap::from_iter(
+                        fds_and_sockets
+                            .into_iter()
+                            .map(|(fd, socket)| (fd as SocketDescriptor, Arc::new(socket))),
+                    ))
+                }
             })
             .unwrap_or_default()
     });
