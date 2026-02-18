@@ -30,9 +30,9 @@ mod env_tests {
     pub async fn remote_env_vars_works(
         #[future] basic_service: KubeService,
         #[values(
-            EnvApp::Go(GoVersion::GO_1_23),
             EnvApp::Go(GoVersion::GO_1_24),
             EnvApp::Go(GoVersion::GO_1_25),
+            EnvApp::Go(GoVersion::GO_1_26),
             EnvApp::NodeInclude,
             EnvApp::NodeExclude
         )]

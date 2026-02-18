@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 use std::{fmt, time::Duration};
 
-use super::TestProcess;
+use mirrord_test_utils::TestProcess;
+
 use crate::utils::run_command::{run_exec_targetless, run_exec_with_target};
 
 pub mod env;
@@ -11,21 +12,21 @@ pub(crate) mod file_ops;
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy)]
 pub enum GoVersion {
-    GO_1_23,
     GO_1_24,
     GO_1_25,
+    GO_1_26,
 }
 
 impl GoVersion {
-    pub const LATEST: Self = Self::GO_1_25;
+    pub const LATEST: Self = Self::GO_1_26;
 }
 
 impl fmt::Display for GoVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let as_str = match self {
-            Self::GO_1_23 => "23",
             Self::GO_1_24 => "24",
             Self::GO_1_25 => "25",
+            Self::GO_1_26 => "26",
         };
         f.write_str(as_str)
     }

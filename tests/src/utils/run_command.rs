@@ -1,10 +1,9 @@
 #![allow(dead_code)]
 use std::{collections::HashMap, process::Stdio};
 
+use mirrord_test_utils::TestProcess;
 use tempfile::tempdir;
 use tokio::process::Command;
-
-use super::process::TestProcess;
 
 /// See [`run_exec`].
 pub async fn run_exec_with_target(

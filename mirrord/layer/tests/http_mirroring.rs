@@ -1,3 +1,4 @@
+#![cfg(target_family = "unix")]
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 #![allow(non_snake_case)]
@@ -22,9 +23,9 @@ async fn mirroring_with_http(
         Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
         Application::NodeHTTP,
-        Application::GoHTTP(GoVersion::GO_1_23),
         Application::GoHTTP(GoVersion::GO_1_24),
-        Application::GoHTTP(GoVersion::GO_1_25)
+        Application::GoHTTP(GoVersion::GO_1_25),
+        Application::GoHTTP(GoVersion::GO_1_26)
     )]
     application: Application,
     dylib_path: &Path,
