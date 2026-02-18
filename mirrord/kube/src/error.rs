@@ -155,6 +155,7 @@ impl KubeApiError {
     }
 }
 
+// This is a helper for rust type magic, it should never actually attempt the conversion
 impl From<Infallible> for KubeApiError {
     fn from(_: Infallible) -> Self {
         unreachable!()

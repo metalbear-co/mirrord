@@ -887,7 +887,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         Err(AgentError::TestError)?
     }
 
-    let idle_ttl = Duration::from_secs(envs::IDDLE_TTL.from_env_or_default());
+    let idle_ttl = Duration::from_secs(envs::IDLE_TTL.from_env_or_default());
     loop {
         let exit_idle =
             OptionFuture::from(clients.is_empty().then_some(tokio::time::sleep(idle_ttl)));

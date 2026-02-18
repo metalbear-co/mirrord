@@ -10,3 +10,7 @@ pub mod crd;
 
 /// Types used in the operator that don't require any special dependencies
 pub mod types;
+
+// small patch to hide `unused_crate_dependencies` error when "crd" featrue isn't selected
+#[cfg(all(test, not(feature = "crd")))]
+use rstest as _;

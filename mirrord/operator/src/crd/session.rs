@@ -1,7 +1,24 @@
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
+use std::fmt;
+
+use k8s_openapi::{
+    Resource as _,
+    api::{
+        apps::v1::{Deployment, ReplicaSet, StatefulSet},
+        batch::v1::{CronJob, Job},
+        core::v1::{Pod, Service},
+    },
+    apimachinery::pkg::apis::meta::v1::MicroTime,
+};
 use kube::CustomResource;
+use mirrord_config::target::{
+    Target, TargetConfig, cron_job::CronJobTarget, deployment::DeploymentTarget, job::JobTarget,
+    pod::PodTarget, replica_set::ReplicaSetTarget, rollout::RolloutTarget, service::ServiceTarget,
+    stateful_set::StatefulSetTarget,
+};
+use mirrord_kube::api::kubernetes::{AgentKubernetesConnectInfo, rollout::Rollout};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[kube(
@@ -53,6 +70,56 @@ pub struct MirrordClusterSessionSpec {
     pub multi_cluster_parent_name: Option<String>,
 }
 
+impl MirrordClusterSessionSpec {
+    pub fn as_target(&self) -> Result<Target, SessionTarget> {
+        let Some(target) = &self.target else {
+            return Ok(Target::Targetless);
+        };
+
+        match (target.api_version.as_str(), target.kind.as_str()) {
+            (Deployment::API_VERSION, Deployment::KIND) => {
+                Ok(Target::Deployment(DeploymentTarget {
+                    deployment: target.name.clone(),
+                    container: Some(target.container.clone()),
+                }))
+            }
+            (Pod::API_VERSION, Pod::KIND) => Ok(Target::Pod(PodTarget {
+                pod: target.name.clone(),
+                container: Some(target.container.clone()),
+            })),
+            (Rollout::API_VERSION, Rollout::KIND) => Ok(Target::Rollout(RolloutTarget {
+                rollout: target.name.clone(),
+                container: Some(target.container.clone()),
+            })),
+            (Job::API_VERSION, Job::KIND) => Ok(Target::Job(JobTarget {
+                job: target.name.clone(),
+                container: Some(target.container.clone()),
+            })),
+            (CronJob::API_VERSION, CronJob::KIND) => Ok(Target::CronJob(CronJobTarget {
+                cron_job: target.name.clone(),
+                container: Some(target.container.clone()),
+            })),
+            (StatefulSet::API_VERSION, StatefulSet::KIND) => {
+                Ok(Target::StatefulSet(StatefulSetTarget {
+                    stateful_set: target.name.clone(),
+                    container: Some(target.container.clone()),
+                }))
+            }
+            (Service::API_VERSION, Service::KIND) => Ok(Target::Service(ServiceTarget {
+                service: target.name.clone(),
+                container: Some(target.container.clone()),
+            })),
+            (ReplicaSet::API_VERSION, ReplicaSet::KIND) => {
+                Ok(Target::ReplicaSet(ReplicaSetTarget {
+                    replica_set: target.name.clone(),
+                    container: Some(target.container.clone()),
+                }))
+            }
+            _ => Err(target.clone()),
+        }
+    }
+}
+
 /// Describes an owner of a mirrord session.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -65,6 +132,93 @@ pub struct SessionOwner {
     pub hostname: String,
     /// Name of the Kubernetes user who's identity was assumed by the CLI.
     pub k8s_username: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Hash, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct AgentPodTarget {
+    /// Target namespace
+    pub namespace: String,
+
+    /// Target name
+    pub name: String,
+
+    /// Target's container id
+    pub container_id: String,
+
+    /// Target's container name
+    pub container_name: String,
+
+    /// Target's pod uid
+    #[schemars(with = "String")]
+    pub uid: Uuid,
+}
+
+impl fmt::Display for AgentPodTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!(
+            "{}/{}/{}",
+            self.namespace, self.name, self.container_name
+        ))
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Hash, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentTarget {
+    Targetless {
+        /// Target namespace
+        namespace: String,
+
+        /// Target namespace uid
+        #[schemars(with = "String")]
+        uid: Uuid,
+    },
+    Pod(AgentPodTarget),
+}
+
+impl AgentTarget {
+    /// Target's namespace
+    pub fn namespace(&self) -> &str {
+        match self {
+            AgentTarget::Targetless { namespace, .. } => namespace,
+            AgentTarget::Pod(AgentPodTarget { namespace, .. }) => namespace,
+        }
+    }
+
+    pub fn uid(&self) -> Uuid {
+        match self {
+            AgentTarget::Targetless { uid, .. } => *uid,
+            AgentTarget::Pod(AgentPodTarget { uid, .. }) => *uid,
+        }
+    }
+
+    pub fn as_target_config(&self) -> TargetConfig {
+        TargetConfig {
+            path: match self {
+                AgentTarget::Targetless { .. } => None,
+                AgentTarget::Pod(target) => Some(Target::Pod(PodTarget {
+                    pod: target.name.clone(),
+                    container: Some(target.container_name.clone()),
+                })),
+            },
+            namespace: Some(self.namespace().to_string()),
+        }
+    }
+}
+
+impl From<AgentPodTarget> for AgentTarget {
+    fn from(pod_target: AgentPodTarget) -> Self {
+        AgentTarget::Pod(pod_target)
+    }
+}
+
+impl fmt::Display for AgentTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AgentTarget::Targetless { namespace, .. } => write!(f, "targetless/{namespace}"),
+            AgentTarget::Pod(pod) => write!(f, "pod/{pod}"),
+        }
+    }
 }
 
 /// Describes a target of a mirrord session.
@@ -98,15 +252,37 @@ pub struct SessionCopyTarget {
 }
 
 /// Status of a mirrord session.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrordClusterSessionAgent {
+    /// Agent connection info to target's agents.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection_info: Option<AgentKubernetesConnectInfo>,
+    /// If the agent is of the ephemeral variaty
+    pub ephemeral: bool,
+    /// Agent spawn error if there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ErrorMessage>,
+    /// The phase of agent's pod.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    /// Resolved agent target.
+    pub target: AgentTarget,
+}
+
+/// Describes an owner of a mirrord session.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterSessionStatus {
+    /// Running agents status
+    #[serde(default)]
+    pub agents: Vec<MirrordClusterSessionAgent>,
     /// Last time when the session was observed to have an open user connection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connected_timestamp: Option<MicroTime>,
     /// If the session has been closed, describes the reason.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub closed: Option<SessionClosed>,
+    pub closed: Option<ErrorMessage>,
     /// Copy target status for sessions using a copied pod.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub copy_target: Option<SessionCopyTargetStatus>,
@@ -140,7 +316,7 @@ pub struct CopiedPodStatus {
 /// Describes the reason for with a mirrord session was closed.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionClosed {
+pub struct ErrorMessage {
     /// Short reason in PascalCase.
     pub reason: String,
     /// Optional human friendly message.
