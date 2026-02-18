@@ -1,7 +1,9 @@
 use std::{collections::HashMap, fmt::Formatter};
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
-use mirrord_config::feature::database_branches::TargetEnviromentVariableSource;
+use mirrord_config::feature::database_branches::{
+    ConnectionParamsConfig, ConnectionSourceType, TargetEnviromentVariableSource,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -12,6 +14,24 @@ use crate::crd::session::SessionOwner;
 pub enum ConnectionSource {
     /// A complete connection URL.
     Url(ConnectionSourceKind),
+    /// Individual connection parameters (host, port, user, password, database).
+    Params(ConnectionParamsSpec),
+}
+
+/// Individual connection parameters, each resolved from a separate environment variable.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionParamsSpec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<ConnectionSourceKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<ConnectionSourceKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<ConnectionSourceKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<ConnectionSourceKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database: Option<ConnectionSourceKind>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -68,6 +88,30 @@ impl From<&TargetEnviromentVariableSource> for ConnectionSourceKind {
                 container: container.clone(),
                 variable: variable.clone(),
             },
+        }
+    }
+}
+
+impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
+    fn from(config: &ConnectionParamsConfig) -> Self {
+        let wrap = |var: &Option<String>| -> Option<ConnectionSourceKind> {
+            var.as_ref().map(|v| match &config.source_type {
+                ConnectionSourceType::Env => ConnectionSourceKind::Env {
+                    container: None,
+                    variable: v.clone(),
+                },
+                ConnectionSourceType::EnvFrom => ConnectionSourceKind::EnvFrom {
+                    container: None,
+                    variable: v.clone(),
+                },
+            })
+        };
+        Self {
+            host: wrap(&config.params.host),
+            port: wrap(&config.params.port),
+            user: wrap(&config.params.user),
+            password: wrap(&config.params.password),
+            database: wrap(&config.params.database),
         }
     }
 }

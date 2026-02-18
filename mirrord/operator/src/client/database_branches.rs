@@ -11,7 +11,7 @@ use kube::{
 use mirrord_config::{
     feature::database_branches::{
         ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig, MongodbBranchConfig,
-        MysqlBranchConfig, PgBranchConfig, TargetEnviromentVariableSource,
+        MysqlBranchConfig, PgBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -24,8 +24,8 @@ use crate::{
     client::error::{OperatorApiError, OperatorOperation},
     crd::db_branching::{
         core::{
-            BranchDatabasePhase, ConnectionSource as CrdConnectionSource,
-            ConnectionSourceKind as CrdConnectionSourceKind, IamAuthConfig as CrdIamAuthConfig,
+            BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
+            IamAuthConfig as CrdIamAuthConfig,
         },
         mongodb::{MongodbBranchDatabase, MongodbBranchDatabaseSpec},
         mysql::{MysqlBranchDatabase, MysqlBranchDatabaseSpec},
@@ -592,6 +592,15 @@ impl AsRef<str> for BranchDatabaseId {
     }
 }
 
+fn convert_connection_source(source: &ConnectionSource) -> CrdConnectionSource {
+    match source {
+        ConnectionSource::Url(kind) => CrdConnectionSource::Url(kind.into()),
+        ConnectionSource::Params(config) => {
+            CrdConnectionSource::Params(ConnectionParamsSpec::from(config))
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MysqlBranchParams {
     pub name_prefix: String,
@@ -603,24 +612,7 @@ pub struct MysqlBranchParams {
 impl MysqlBranchParams {
     pub fn new(id: &str, config: &MysqlBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
-        let connection_source = match &config.base.connection {
-            ConnectionSource::Url(kind) => match kind {
-                TargetEnviromentVariableSource::Env {
-                    container,
-                    variable,
-                } => CrdConnectionSource::Url(CrdConnectionSourceKind::Env {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-                TargetEnviromentVariableSource::EnvFrom {
-                    container,
-                    variable,
-                } => CrdConnectionSource::Url(CrdConnectionSourceKind::EnvFrom {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-            },
-        };
+        let connection_source = convert_connection_source(&config.base.connection);
         let spec = MysqlBranchDatabaseSpec {
             id: id.to_string(),
             database_name: config.base.name.clone(),
@@ -654,9 +646,7 @@ pub struct PgBranchParams {
 impl PgBranchParams {
     pub fn new(id: &str, config: &PgBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
-        let connection_source = match &config.base.connection {
-            ConnectionSource::Url(kind) => CrdConnectionSource::Url(kind.into()),
-        };
+        let connection_source = convert_connection_source(&config.base.connection);
 
         // Convert IAM auth config if present
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
@@ -695,24 +685,7 @@ pub struct MongodbBranchParams {
 impl MongodbBranchParams {
     pub(crate) fn new(id: &str, config: &MongodbBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
-        let connection_source = match &config.base.connection {
-            ConnectionSource::Url(kind) => match kind {
-                TargetEnviromentVariableSource::Env {
-                    container,
-                    variable,
-                } => CrdConnectionSource::Url(CrdConnectionSourceKind::Env {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-                TargetEnviromentVariableSource::EnvFrom {
-                    container,
-                    variable,
-                } => CrdConnectionSource::Url(CrdConnectionSourceKind::EnvFrom {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-            },
-        };
+        let connection_source = convert_connection_source(&config.base.connection);
         let spec = MongodbBranchDatabaseSpec {
             id: id.to_string(),
             database_name: config.base.name.clone(),
