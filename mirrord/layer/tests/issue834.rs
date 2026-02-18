@@ -1,3 +1,4 @@
+#![cfg(target_family = "unix")]
 #![feature(assert_matches)]
 #![cfg(target_os = "linux")]
 #![warn(clippy::indexing_slicing)]
