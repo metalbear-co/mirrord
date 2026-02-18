@@ -1,3 +1,4 @@
+#![cfg(target_family = "unix")]
 #![feature(assert_matches)]
 use std::{net::IpAddr, path::Path, time::Duration};
 
