@@ -497,13 +497,44 @@ impl LayerConfig {
     /// This function **does not** use [`LayerConfig::RESOLVED_CONFIG_ENV`] nor
     /// [`LayerConfig::decode`]. It resolves the config from scratch.
     pub fn resolve(context: &mut ConfigContext) -> Result<Self, ConfigError> {
-        if let Ok(path) = context.get_env(Self::FILE_PATH_ENV) {
-            LayerFileConfig::from_path(path, context)?.generate_config(context)
+        let mut config = if let Ok(path) = context.get_env(Self::FILE_PATH_ENV) {
+            LayerFileConfig::from_path(path, context)?.generate_config(context)?
         } else {
-            LayerFileConfig::default().generate_config(context)
-        }
+            LayerFileConfig::default().generate_config(context)?
+        };
+        config.apply_magic();
+        Ok(config)
     }
 
+    /// Apply magic. Use `feature.magic` configuration to change the final configuration moment
+    /// before we pass it back to the caller.
+    fn apply_magic(&mut self) {
+        if self.feature.magic.aws {
+            let mut unset: Vec<String> = self
+                .feature
+                .env
+                .unset
+                .take()
+                .map(Vec::from)
+                .unwrap_or_default();
+            if !unset.contains(&"AWS_PROFILE".to_owned()) {
+                unset.push("AWS_PROFILE".to_owned());
+            }
+            self.feature.env.unset = Some(VecOrSingle::Multiple(unset));
+
+            if let Ok(home) = std::env::var("HOME") {
+                let tmpdir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_owned());
+                let pattern = format!("^{home}/\\.aws(/.*)?");
+                let replacement = format!("{tmpdir}/.aws$1");
+                self.feature
+                    .fs
+                    .mapping
+                    .get_or_insert_with(HashMap::new)
+                    .entry(pattern)
+                    .or_insert(replacement);
+            }
+        }
+    }
     /// Verifies that there are no conflicting settings in this config.
     ///
     /// Fills the given [`ConfigContext`] with warnings.
