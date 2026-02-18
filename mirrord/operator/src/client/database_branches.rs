@@ -22,24 +22,14 @@ use uuid::Uuid;
 
 use crate::{
     client::error::{OperatorApiError, OperatorOperation},
-    crd::{
-        mongodb_branching::{
-            BranchDatabasePhase as BranchDatabasePhaseMongodb,
-            ConnectionSource as CrdConnectionSourceMongodb,
-            ConnectionSourceKind as CrdConnectionSourceKindMongodb, MongodbBranchDatabase,
-            MongodbBranchDatabaseSpec,
+    crd::branching::{
+        core::{
+            BranchDatabasePhase, ConnectionSource as CrdConnectionSource,
+            ConnectionSourceKind as CrdConnectionSourceKind, IamAuthConfig as CrdIamAuthConfig,
         },
-        mysql_branching::{
-            BranchDatabasePhase as BranchDatabasePhaseMysql,
-            ConnectionSource as CrdConnectionSourceMysql,
-            ConnectionSourceKind as CrdConnectionSourceKindMysql, MysqlBranchDatabase,
-            MysqlBranchDatabaseSpec,
-        },
-        pg_branching::{
-            BranchDatabasePhase as BranchDatabasePhasePg,
-            ConnectionSource as CrdConnectionSourcePg, IamAuthConfig as CrdIamAuthConfig,
-            PgBranchDatabase, PgBranchDatabaseSpec,
-        },
+        mongodb::{MongodbBranchDatabase, MongodbBranchDatabaseSpec},
+        mysql::{MysqlBranchDatabase, MysqlBranchDatabaseSpec},
+        pg::{PgBranchDatabase, PgBranchDatabaseSpec},
     },
 };
 
@@ -108,8 +98,8 @@ pub async fn create_mysql_branches<P: Progress>(
             await_condition(api.clone(), name, |db: Option<&MysqlBranchDatabase>| {
                 db.and_then(|db| {
                     db.status.as_ref().map(|status| {
-                        status.phase == BranchDatabasePhaseMysql::Ready
-                            || status.phase == BranchDatabasePhaseMysql::Failed
+                        status.phase == BranchDatabasePhase::Ready
+                            || status.phase == BranchDatabasePhase::Failed
                     })
                 })
                 .unwrap_or(false)
@@ -130,7 +120,7 @@ pub async fn create_mysql_branches<P: Progress>(
             continue;
         };
         if let Some(status) = &db.status
-            && status.phase == BranchDatabasePhaseMysql::Failed
+            && status.phase == BranchDatabasePhase::Failed
         {
             let error_msg = status
                 .error
@@ -190,7 +180,7 @@ pub async fn list_reusable_mysql_branches<P: Progress>(
         .into_iter()
         .filter(|db| {
             if let Some(status) = &db.status {
-                status.phase == BranchDatabasePhaseMysql::Ready
+                status.phase == BranchDatabasePhase::Ready
             } else {
                 false
             }
@@ -270,8 +260,8 @@ pub async fn create_pg_branches<P: Progress>(
             await_condition(api.clone(), name, |db: Option<&PgBranchDatabase>| {
                 db.and_then(|db| {
                     db.status.as_ref().map(|status| {
-                        status.phase == BranchDatabasePhasePg::Ready
-                            || status.phase == BranchDatabasePhasePg::Failed
+                        status.phase == BranchDatabasePhase::Ready
+                            || status.phase == BranchDatabasePhase::Failed
                     })
                 })
                 .unwrap_or(false)
@@ -292,7 +282,7 @@ pub async fn create_pg_branches<P: Progress>(
             continue;
         };
         if let Some(status) = &db.status
-            && status.phase == BranchDatabasePhasePg::Failed
+            && status.phase == BranchDatabasePhase::Failed
         {
             let error_msg = status
                 .error
@@ -351,7 +341,7 @@ pub async fn list_reusable_pg_branches<P: Progress>(
         .into_iter()
         .filter(|db| {
             if let Some(status) = &db.status {
-                status.phase == BranchDatabasePhasePg::Ready
+                status.phase == BranchDatabasePhase::Ready
             } else {
                 false
             }
@@ -431,7 +421,7 @@ pub async fn create_mongodb_branches<P: Progress>(
                 db.and_then(|db| {
                     db.status
                         .as_ref()
-                        .map(|status| status.phase == BranchDatabasePhaseMongodb::Ready)
+                        .map(|status| status.phase == BranchDatabasePhase::Ready)
                 })
                 .unwrap_or(false)
             })
@@ -491,7 +481,7 @@ pub async fn list_reusable_mongodb_branches<P: Progress>(
         .into_iter()
         .filter(|db| {
             if let Some(status) = &db.status {
-                status.phase == BranchDatabasePhaseMongodb::Ready
+                status.phase == BranchDatabasePhase::Ready
             } else {
                 false
             }
@@ -618,14 +608,14 @@ impl MysqlBranchParams {
                 TargetEnviromentVariableSource::Env {
                     container,
                     variable,
-                } => CrdConnectionSourceMysql::Url(CrdConnectionSourceKindMysql::Env {
+                } => CrdConnectionSource::Url(CrdConnectionSourceKind::Env {
                     container: container.clone(),
                     variable: variable.clone(),
                 }),
                 TargetEnviromentVariableSource::EnvFrom {
                     container,
                     variable,
-                } => CrdConnectionSourceMysql::Url(CrdConnectionSourceKindMysql::EnvFrom {
+                } => CrdConnectionSource::Url(CrdConnectionSourceKind::EnvFrom {
                     container: container.clone(),
                     variable: variable.clone(),
                 }),
@@ -665,7 +655,7 @@ impl PgBranchParams {
     pub fn new(id: &str, config: &PgBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
         let connection_source = match &config.base.connection {
-            ConnectionSource::Url(kind) => CrdConnectionSourcePg::Url(kind.into()),
+            ConnectionSource::Url(kind) => CrdConnectionSource::Url(kind.into()),
         };
 
         // Convert IAM auth config if present
@@ -710,14 +700,14 @@ impl MongodbBranchParams {
                 TargetEnviromentVariableSource::Env {
                     container,
                     variable,
-                } => CrdConnectionSourceMongodb::Url(CrdConnectionSourceKindMongodb::Env {
+                } => CrdConnectionSource::Url(CrdConnectionSourceKind::Env {
                     container: container.clone(),
                     variable: variable.clone(),
                 }),
                 TargetEnviromentVariableSource::EnvFrom {
                     container,
                     variable,
-                } => CrdConnectionSourceMongodb::Url(CrdConnectionSourceKindMongodb::EnvFrom {
+                } => CrdConnectionSource::Url(CrdConnectionSourceKind::EnvFrom {
                     container: container.clone(),
                     variable: variable.clone(),
                 }),
