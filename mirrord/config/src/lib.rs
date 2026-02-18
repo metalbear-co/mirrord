@@ -506,8 +506,7 @@ impl LayerConfig {
         Ok(config)
     }
 
-    /// Apply magic. Use `feature.magic` configuration to change the final configuration moment
-    /// before we pass it back to the caller.
+    /// Applies the presets in `feature.magic` to the config, modifying it in-place.
     fn apply_magic(&mut self) {
         if self.feature.magic.aws {
             let mut unset: Vec<String> = self
@@ -517,9 +516,7 @@ impl LayerConfig {
                 .take()
                 .map(Vec::from)
                 .unwrap_or_default();
-            if !unset.contains(&"AWS_PROFILE".to_owned()) {
-                unset.push("AWS_PROFILE".to_owned());
-            }
+            unset.push("AWS_PROFILE".to_owned());
             self.feature.env.unset = Some(VecOrSingle::Multiple(unset));
 
             if let Ok(home) = std::env::var("HOME") {
