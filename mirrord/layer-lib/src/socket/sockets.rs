@@ -28,6 +28,7 @@ use super::{SocketKind, SocketState, UserSocket};
 use crate::{
     detour::Bypass,
     error::{HookError, HookResult},
+    setup::setup,
 };
 
 // Platform-specific socket descriptors
@@ -320,6 +321,9 @@ pub fn get_bound_address(socket: SocketDescriptor) -> Option<SocketAddr> {
 /// Find the actual bound address of a listening socket that matches the given port and protocol.
 /// Used to detect local self-connections so they can be handled without proxying.
 pub fn find_listener_address_by_port(port: u16, protocol: i32) -> Option<SocketAddr> {
+    if setup().outgoing_config().ignore_localhost {
+        return None;
+    }
     SOCKETS.lock().ok().and_then(|sockets| {
         sockets.iter().find_map(|(_, socket)| match socket.state {
             SocketState::Listening(bound) => {

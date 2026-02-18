@@ -231,8 +231,7 @@ where
         // Handle localhost/unspecified addresses first -
         //  if applicable, connect locally without proxy
         let ip = ip_address.ip();
-        if !setup().outgoing_config().ignore_localhost && (ip.is_loopback() || ip.is_unspecified())
-        {
+        if ip.is_loopback() || ip.is_unspecified() {
             // Note(Daniel): the next 2 if blocks are logically equivalent but were brought from
             // layer and layer-win separately, they work and im only doing plumbing
             // unification, so i rather keep both and each platform will run its own flavoring of
