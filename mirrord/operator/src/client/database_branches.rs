@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 use crate::{
     client::error::{OperatorApiError, OperatorOperation},
-    crd::branching::{
+    crd::db_branching::{
         core::{
             BranchDatabasePhase, ConnectionSource as CrdConnectionSource,
             ConnectionSourceKind as CrdConnectionSourceKind, IamAuthConfig as CrdIamAuthConfig,
