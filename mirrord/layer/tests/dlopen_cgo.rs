@@ -1,3 +1,4 @@
+#![cfg(target_family = "unix")]
 #![cfg(all(
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64",)

@@ -28,6 +28,7 @@ use super::{SocketKind, SocketState, UserSocket};
 use crate::{
     detour::Bypass,
     error::{HookError, HookResult},
+    setup::setup,
 };
 
 // Platform-specific socket descriptors
@@ -83,13 +84,10 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
                 .ok()
             })
             .map(|(fds_and_sockets, _)| {
-                // Note: filter_map is needed for unix filtering,
-                //  on windows it's just a map, shush clippy.
-                #[allow(clippy::unnecessary_filter_map)]
-                Mutex::new(HashMap::from_iter(fds_and_sockets.into_iter().filter_map(
-                    |(fd, socket)| {
-                        #[cfg(unix)]
-                        {
+                #[cfg(unix)]
+                {
+                    Mutex::new(HashMap::from_iter(fds_and_sockets.into_iter().filter_map(
+                        |(fd, socket)| {
                             // Do not inherit sockets that are `FD_CLOEXEC`.
                             // NOTE: The original `fcntl` is called instead of `FN_FCNTL` because
                             // the latter may be null at this point,
@@ -99,11 +97,18 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
                             if unsafe { libc::fcntl(fd, libc::F_GETFD, 0) } == -1 {
                                 return None;
                             }
-                        }
-
-                        Some((fd as SocketDescriptor, Arc::new(socket)))
-                    },
-                )))
+                            Some((fd as SocketDescriptor, Arc::new(socket)))
+                        },
+                    )))
+                }
+                #[cfg(windows)]
+                {
+                    Mutex::new(HashMap::from_iter(
+                        fds_and_sockets
+                            .into_iter()
+                            .map(|(fd, socket)| (fd as SocketDescriptor, Arc::new(socket))),
+                    ))
+                }
             })
             .unwrap_or_default()
     });
@@ -316,6 +321,9 @@ pub fn get_bound_address(socket: SocketDescriptor) -> Option<SocketAddr> {
 /// Find the actual bound address of a listening socket that matches the given port and protocol.
 /// Used to detect local self-connections so they can be handled without proxying.
 pub fn find_listener_address_by_port(port: u16, protocol: i32) -> Option<SocketAddr> {
+    if setup().outgoing_config().ignore_localhost {
+        return None;
+    }
     SOCKETS.lock().ok().and_then(|sockets| {
         sockets.iter().find_map(|(_, socket)| match socket.state {
             SocketState::Listening(bound) => {
