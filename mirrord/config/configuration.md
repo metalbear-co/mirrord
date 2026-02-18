@@ -1784,6 +1784,43 @@ This improves performance when the user application reads data in small portions
 
 Should mirrord return the hostname of the target pod when calling `gethostname`
 
+### feature.magic {#feature-magic}
+
+Sensible defaults that improve the experience for most users. Each flag can be disabled
+individually if it conflicts with your setup.
+
+Sensible default behaviors that help most users. Disable individual flags only if they conflict
+with your setup.
+
+```json
+{
+  "feature": {
+    "magic": {
+      "aws": true
+    }
+  }
+}
+```
+
+### feature.magic.aws {#feature-magic-aws}
+
+The AWS CLI prefers local credentials (e.g. `~/.aws`, `AWS_PROFILE`) over the remote pod's
+identity (IAM role, instance profile, IRSA). When those local credentials are present, the
+pod's own identity is never used, which is rarely what you want in a mirrord session.
+
+When enabled, mirrord makes local AWS configuration unavailable to the process by:
+- Unsetting `AWS_PROFILE` and related AWS environment variables.
+- Mapping `~/.aws` to a temporary directory, so the AWS CLI cannot read local credentials
+  and also has a writable location for its credential cache (avoiding errors on cache
+  writes).
+
+This allows the remote pod's IAM role / instance profile to be used as intended.
+
+Disable this only if you intentionally need local AWS credentials inside the local mirrord'
+process.
+
+Defaults to `true`.
+
 ### feature.network {#feature-network}
 
 Controls mirrord network operations.
