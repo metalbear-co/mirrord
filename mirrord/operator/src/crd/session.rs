@@ -1,3 +1,5 @@
+use std::fmt;
+
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use schemars::JsonSchema;
@@ -65,6 +67,16 @@ pub struct SessionOwner {
     pub hostname: String,
     /// Name of the Kubernetes user who's identity was assumed by the CLI.
     pub k8s_username: String,
+}
+
+impl fmt::Display for SessionOwner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}/{}@{}",
+            self.username, self.k8s_username, self.hostname,
+        )
+    }
 }
 
 /// Describes a target of a mirrord session.
