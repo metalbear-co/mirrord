@@ -1802,7 +1802,7 @@ with your setup.
 }
 ```
 
-### feature.magic.aws {#feature-magic-aws}
+#### feature.magic.aws {#feature-magic-aws}
 
 The AWS CLI prefers local credentials (e.g. `~/.aws`, `AWS_PROFILE`) over the remote pod's
 identity (IAM role, instance profile, IRSA). When those local credentials are present, the
