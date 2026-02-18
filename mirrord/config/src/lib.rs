@@ -1239,6 +1239,7 @@ mod tests {
                 hostname: None,
                 split_queues: None,
                 db_branches: None,
+                magic: None,
             }),
             container: None,
             operator: None,
