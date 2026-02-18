@@ -313,7 +313,7 @@ impl MirrordExecution {
 
         // Windows-Compatibility: this wait hangs after agent EnvVarsResponse
         //  Skipping it works around the issue.
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(unix)]
         {
             // The pre_exec(reparent_to_init) causes the process to fork and our immediate child
             // promptly exits (which is what we wait for here), reparenting our (now former)

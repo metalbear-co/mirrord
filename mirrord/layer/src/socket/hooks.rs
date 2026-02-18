@@ -6,13 +6,14 @@ use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t}
 #[cfg(target_os = "macos")]
 use libc::{c_uint, iovec, sa_endpoints_t, sae_associd_t, sae_connid_t};
 use mirrord_config::experimental::ExperimentalConfig;
+#[cfg(target_os = "macos")]
+use mirrord_layer_lib::socket::apple_dnsinfo::*;
+use mirrord_layer_lib::{detour::DetourGuard, mutex::Mutex, socket::ops::socket};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use nix::errno::Errno;
 
-#[cfg(target_os = "macos")]
-use super::apple_dnsinfo::*;
 use super::ops::*;
-use crate::{detour::DetourGuard, hooks::HookManager, mutex::Mutex, replace};
+use crate::{hooks::HookManager, replace};
 
 /// Here we keep addr infos that we allocated so we'll know when to use the original
 /// freeaddrinfo function and when to use our implementation
@@ -26,7 +27,16 @@ pub(crate) unsafe extern "C" fn socket_detour(
     protocol: c_int,
 ) -> c_int {
     unsafe {
-        socket(domain, type_, protocol)
+        let call_original = || {
+            let socket_result = FN_SOCKET(domain, type_, protocol);
+            if socket_result == -1 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(socket_result)
+            }
+            .into()
+        };
+        socket(call_original, domain, type_, protocol)
             .unwrap_or_bypass_with(|_| FN_SOCKET(domain, type_, protocol))
     }
 }
