@@ -63,6 +63,8 @@ use crate::{
 
 /// Environment variable we use to pass the internal proxy address to the layer.
 pub const MIRRORD_LAYER_INTPROXY_ADDR: &str = "MIRRORD_LAYER_INTPROXY_ADDR";
+/// Test-only override for exec: use an already-running intproxy address.
+pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";
 
 /// Environment variable to indicate towards layer to wait for debugger.
 pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGGER";
