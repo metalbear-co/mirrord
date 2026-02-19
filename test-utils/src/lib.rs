@@ -1,3 +1,6 @@
+#![allow(clippy::unused_io_amount)]
+#![allow(clippy::indexing_slicing)]
+
 use core::ops::Not;
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::process::ExitStatusExt;
@@ -9,6 +12,7 @@ use std::{
     time::Duration,
 };
 
+use chrono::{Timelike, Utc};
 use fancy_regex::Regex;
 use tempfile::TempDir;
 use tokio::{
@@ -18,14 +22,17 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::utils::format_time;
+/// Returns string with time format of hh:mm:ss
+pub fn format_time() -> String {
+    let now = Utc::now();
+    format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
+}
 
 /// Wraps a bunch of things of a [`Child`] process, so we can check its output for errors/specific
 /// messages.
 ///
-/// It's mostly created by one of the [`super::run_command`] functions, such as
-/// [`super::run_command::run_exec_with_target`], where we start a child test process running
-/// `mirrord`, wait for it to finish and look into its `stdout/stderr`.
+/// It's mostly created by helper functions in the tests crate, where we start a child test process
+/// running `mirrord`, wait for it to finish and look into its `stdout/stderr`.
 pub struct TestProcess {
     /// The [`Child`] process started, running `mirrord`.
     pub child: Child,
