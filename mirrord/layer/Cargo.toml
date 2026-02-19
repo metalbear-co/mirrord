@@ -55,6 +55,7 @@ resolv-conf = "0.7"
 
 [dev-dependencies]
 mirrord-intproxy = { path = "../intproxy" }
+mirrord-layer-test-utils = { path = "../layer-test-utils" }
 
 actix-codec.workspace = true
 futures.workspace = true

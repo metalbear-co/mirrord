@@ -4866,6 +4866,7 @@ dependencies = [
  "mirrord-intproxy-protocol",
  "mirrord-layer-lib",
  "mirrord-layer-macro",
+ "mirrord-layer-test-utils",
  "mirrord-protocol",
  "mirrord-sip",
  "mirrord-test-utils",
@@ -4904,6 +4905,7 @@ dependencies = [
  "mirrord-console",
  "mirrord-intproxy-protocol",
  "mirrord-layer-macro",
+ "mirrord-layer-test-utils",
  "mirrord-progress",
  "mirrord-protocol",
  "mirrord-sip",
@@ -4929,6 +4931,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.114",
+]
+
+[[package]]
+name = "mirrord-layer-test-utils"
+version = "3.188.2"
+dependencies = [
+ "actix-codec",
+ "futures",
+ "mirrord-config",
+ "mirrord-intproxy",
+ "mirrord-protocol",
+ "tokio",
 ]
 
 [[package]]
