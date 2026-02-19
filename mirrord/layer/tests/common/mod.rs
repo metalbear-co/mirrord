@@ -12,7 +12,7 @@ use std::{
 };
 
 use mirrord_config::{LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, config::ConfigContext};
-use mirrord_layer_test_utils::intproxy::TestIntProxy;
+pub use mirrord_layer_test_utils::intproxy::TestIntProxy;
 #[cfg(target_os = "macos")]
 use mirrord_sip::{SipPatchOptions, sip_patch};
 pub use mirrord_test_utils::TestProcess;
