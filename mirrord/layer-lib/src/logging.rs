@@ -138,12 +138,14 @@ mod tests {
     fn init_tracing_creates_log_file() {
         let temp_dir = tempdir().expect("temp dir");
 
+        let prev_log_level = std::env::var("RUST_LOG").ok();
         let prev_log_path = std::env::var(MIRRORD_LAYER_LOG_PATH).ok();
         let prev_console_addr = std::env::var("MIRRORD_CONSOLE_ADDR").ok();
 
         unsafe {
             std::env::remove_var("MIRRORD_CONSOLE_ADDR");
             std::env::set_var(MIRRORD_LAYER_LOG_PATH, temp_dir.path());
+            std::env::set_var("RUST_LOG", "debug");
         }
 
         init_tracing();
@@ -176,6 +178,10 @@ mod tests {
             match prev_console_addr {
                 Some(value) => std::env::set_var("MIRRORD_CONSOLE_ADDR", value),
                 None => std::env::remove_var("MIRRORD_CONSOLE_ADDR"),
+            }
+            match prev_log_level {
+                Some(value) => std::env::set_var("RUST_LOG", value),
+                None => std::env::remove_var("RUST_LOG"),
             }
         }
     }
