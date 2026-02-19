@@ -1,3 +1,4 @@
+#![cfg(target_family = "unix")]
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 use std::{assert_matches::assert_matches, net::SocketAddr, path::Path, time::Duration};

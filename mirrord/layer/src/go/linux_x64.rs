@@ -618,7 +618,7 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
 
     tracing::trace!(version, "Detected Go");
     if version >= 1.25 {
-        go_1_25::hook(hook_manager);
+        post_go_1_25::hook(hook_manager, version);
     } else if version >= 1.23 {
         post_go1_23(hook_manager, None);
     } else if version >= 1.19 {
@@ -641,7 +641,7 @@ pub(crate) fn enable_hooks_in_loaded_module(hook_manager: &mut HookManager, modu
     };
 
     if version >= 1.25 {
-        go_1_25::hook_in_module(hook_manager, module_name.as_str());
+        post_go_1_25::hook_in_module(hook_manager, version, module_name.as_str());
     } else if version >= 1.23 {
         post_go1_23(hook_manager, Some(module_name.as_str()));
     } else if version >= 1.19 {
@@ -658,15 +658,15 @@ pub(crate) fn enable_hooks_in_loaded_module(hook_manager: &mut HookManager, modu
     );
 }
 
-/// Implementation for Go runtime 1.25.
-mod go_1_25 {
+/// Implementation for Go runtimes >= 1.25.
+mod post_go_1_25 {
     use std::{arch::naked_asm, ffi::c_void};
 
     use crate::{hooks::HookManager, macros::hook_symbol};
 
     static mut FN_GOSAVE_SYSTEMSTACK_SWITCH: *const c_void = std::ptr::null();
 
-    pub fn hook(hook_manager: &mut HookManager) {
+    pub fn hook(hook_manager: &mut HookManager, go_version: f32) {
         let gosave_address = hook_manager
             .resolve_symbol_main_module("gosave_systemstack_switch")
             .expect(
@@ -678,14 +678,20 @@ mod go_1_25 {
             FN_GOSAVE_SYSTEMSTACK_SWITCH = gosave_address.0;
         }
 
+        let original_symbol = if go_version >= 1.26 {
+            "internal/runtime/syscall/linux.Syscall6"
+        } else {
+            "internal/runtime/syscall.Syscall6"
+        };
+
         hook_symbol!(
             hook_manager,
-            "internal/runtime/syscall.Syscall6",
+            original_symbol,
             internal_runtime_syscall_syscall6_detour
         );
     }
 
-    pub fn hook_in_module(hook_manager: &mut HookManager, module_name: &str) {
+    pub fn hook_in_module(hook_manager: &mut HookManager, go_version: f32, module_name: &str) {
         let gosave_address = hook_manager
             .resolve_symbol_in_module(module_name, "gosave_systemstack_switch")
             .expect(
@@ -697,10 +703,16 @@ mod go_1_25 {
             FN_GOSAVE_SYSTEMSTACK_SWITCH = gosave_address.0;
         }
 
+        let original_symbol = if go_version >= 1.26 {
+            "internal/runtime/syscall/linux.Syscall6"
+        } else {
+            "internal/runtime/syscall.Syscall6"
+        };
+
         hook_symbol!(
             hook_manager,
             module_name,
-            "internal/runtime/syscall.Syscall6",
+            original_symbol,
             internal_runtime_syscall_syscall6_detour
         );
     }
