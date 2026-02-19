@@ -49,15 +49,6 @@ pub struct BuildOptions {
     pub with_wizard: bool,
 }
 
-impl Default for BuildOptions {
-    fn default() -> Self {
-        Self {
-            platform: Platform::detect().unwrap_or(Platform::MacosUniversal),
-            release: true,
-            with_wizard: true,
-        }
-    }
-}
 
 /// Main task: builds release CLI for the specified platform
 pub fn build_release_cli(options: BuildOptions) -> Result<()> {
