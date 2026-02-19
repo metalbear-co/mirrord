@@ -8,6 +8,31 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.189.0](https://github.com/metalbear-co/mirrord/tree/3.189.0) - 2026-02-19
+
+
+### Added
+
+- Added feature.magic.aws — allows using the AWS CLI within mirrord with the remote pod's identity by default.
+- Inject mirrord session key headers into incoming requests.
+- mirrord now supports "Preview Environments" — a new type of mirrord session that runs directly in the cluster and can be shared with other users.
+
+### Fixed
+
+- Show all branches in the db-branching status command when no branch name is specified.
+- `mirrord dump` no longer hangs if the required `--ports` flag is not specified.
+  It also no longer reports an incorrect error when no target is specified.
+
+### Internal
+
+- Removed github pages.
+- Replaced Go 1.23 with Go 1.26 in test.
+- Updated the flake lockfile.
+- Changed linting to run on all platforms from one job using zigbuild.
+- Avoid running CI twice on PR + branch.
+- Removed chef from docker agent build, cache sccache in the GHA cache.
+
+
 ## [3.188.2](https://github.com/metalbear-co/mirrord/tree/3.188.2) - 2026-02-13
 
 
