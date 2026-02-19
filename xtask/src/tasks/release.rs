@@ -49,7 +49,6 @@ pub struct BuildOptions {
     pub with_wizard: bool,
 }
 
-
 /// Main task: builds release CLI for the specified platform
 pub fn build_release_cli(options: BuildOptions) -> Result<()> {
     println!("════════════════════════════════════════════════════════");
