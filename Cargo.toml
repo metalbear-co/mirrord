@@ -26,6 +26,7 @@ members = [
     "sample/rust",
     "medschool",
     "tests",
+    "test-utils",
     "tests/rust-e2e-fileops",
     "tests/rust-unix-socket-client",
     "tests/rust-bypassed-unix-socket",
@@ -39,7 +40,7 @@ resolver = "2"
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.187.0"
+version = "3.189.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -279,6 +280,3 @@ lto = false
 [patch.crates-io]
 tree-sitter = { git = "https://github.com/metalbear-co/tree-sitter.git", tag = "hotfix" }
 tree-sitter-language = { git = "https://github.com/metalbear-co/tree-sitter.git", tag = "hotfix" }
-
-
-
