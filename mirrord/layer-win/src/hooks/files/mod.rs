@@ -525,7 +525,7 @@ unsafe extern "system" fn nt_read_file_hook(
             };
 
             if let Some(bytes) = bytes {
-                if cursor as usize >= bytes.len() {
+                if bytes.is_empty() {
                     (*io_status_block).__bindgen_anon_1.Status =
                         ManuallyDrop::new(STATUS_END_OF_FILE);
                     (*io_status_block).Information = 0;
