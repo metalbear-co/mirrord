@@ -243,17 +243,6 @@ impl UserSocket {
             }
             _ => {}
         }
-
-        // For steal mode on Windows, add a small delay to allow agent processing
-        // This prevents race conditions where subsequent requests arrive before
-        // the agent has processed the port unsubscription
-        #[cfg(target_os = "windows")]
-        {
-            if setup().incoming_mode().steal {
-                // Small delay to ensure agent processes unsubscription
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-        }
     }
 }
 
