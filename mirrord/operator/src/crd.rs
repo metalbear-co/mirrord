@@ -485,6 +485,8 @@ pub enum NewOperatorFeature {
     MultiClusterPrimary,
     /// This operator can be connected to by a primary.
     MultiClusterRemote,
+    /// This operator can accept jq filters for SQS queue splitting.
+    SqsQueueSplittingWithJqFilter,
 
     PreviewEnv,
 
@@ -521,6 +523,9 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::MultiClusterPrimary => "multi-cluster primary",
             NewOperatorFeature::MultiClusterRemote => "multi-cluster remote",
+            NewOperatorFeature::SqsQueueSplittingWithJqFilter => {
+                "Splitting SQS queues with a jq filter"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
