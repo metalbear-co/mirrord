@@ -13,19 +13,19 @@ mod hooks;
 mod macros;
 pub mod process;
 mod subprocess;
-mod trace_only;
 
 use std::{io::Write, thread};
 
 use libc::EXIT_FAILURE;
 use minhook_detours_rs::guard::DetourGuard;
-pub use mirrord_layer_lib::setup::layer_setup;
+use mirrord_config::util::read_resolved_config;
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult},
     logging::init_tracing,
     process::windows::{execution::debug::should_wait_for_debugger, sync::LayerInitEvent},
     proxy_connection::PROXY_CONNECTION,
-    setup::init_setup,
+    setup::init_layer_setup,
+    trace_only::is_trace_only_mode,
 };
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
@@ -34,8 +34,7 @@ use winapi::{
 
 use crate::{
     hooks::initialize_hooks,
-    subprocess::{create_proxy_connection, detect_process_context, get_setup_address},
-    trace_only::{is_trace_only_mode, modify_config_for_trace_only},
+    subprocess::{create_proxy_connection, detect_process_context},
 };
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
 
@@ -67,50 +66,27 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
     let process_context = detect_process_context()?;
     let connection = create_proxy_connection(&process_context)?;
 
-    PROXY_CONNECTION.set(connection).map_err(|_| {
-        LayerError::GlobalAlreadyInitialized("Proxy connection already initialized")
-    })?;
+    unsafe {
+        // SAFETY
+        // Called only from library constructor.
+        #[allow(static_mut_refs)]
+        PROXY_CONNECTION
+            .set(connection)
+            .expect("setting PROXY_CONNECTION singleton")
+    }
 
-    setup_layer_config(&process_context)?;
     Ok(())
 }
 
-fn setup_layer_config(context: &subprocess::ProcessContext) -> LayerResult<()> {
-    // Read and initialize configuration using the standard method
-    let mut config = mirrord_config::util::read_resolved_config().map_err(LayerError::Config)?;
-
-    // Check if we're in trace only mode (no agent)
-    let trace_only = is_trace_only_mode();
-    let proxy_address = if trace_only {
-        modify_config_for_trace_only(&mut config);
-
-        // In trace-only mode, we still need to initialize setup but with a dummy proxy address
-        // since no actual proxy communication will occur
-        "127.0.0.1:0".parse().unwrap()
-    } else {
-        // Normal mode - get the real proxy address for layer setup
-        get_setup_address(context)?
-    };
-
-    let local_hostname = trace_only || !config.feature.hostname;
-
-    init_setup(config, proxy_address, local_hostname)
-}
-
-fn mirrord_start() -> LayerResult<()> {
+fn layer_start() -> LayerResult<()> {
     // Create layer initialization event first
     let init_event = LayerInitEvent::for_child()?;
 
-    // Check for trace-only mode and initialize accordingly
+    let config = read_resolved_config().map_err(LayerError::Config)?;
+    init_layer_setup(config, false);
+
     if is_trace_only_mode() {
-        tracing::info!("Running in trace-only mode - skipping proxy connection");
-
-        // In trace-only mode, we still need to set up configuration but skip proxy connection
-        let process_context = detect_process_context()?;
-
-        setup_layer_config(&process_context)?;
-
-        tracing::info!("Configuration setup completed in trace-only mode");
+        tracing::info!("Running in trace-only mode - skipping proxy connection initialization");
     } else {
         // Normal mode - initialize proxy connection
         initialize_windows_proxy_connection()?;
@@ -153,8 +129,8 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     let _ = thread::spawn(move || {
         init_tracing();
 
-        if let Err(e) = mirrord_start() {
-            tracing::error!("Failed call to mirrord_start: {e}");
+        if let Err(e) = layer_start() {
+            tracing::error!("Failed call to layer_start: {e}");
             let _ = std::io::stdout().flush();
             let _ = std::io::stderr().flush();
             std::process::exit(EXIT_FAILURE);

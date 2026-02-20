@@ -467,6 +467,7 @@ jobs:
           cargo build
       - run: ./mirrord/layer/tests/apps/dlopen_cgo/build_test_app.sh
       - run: ./scripts/build_c_apps.sh
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-lib --lib --bins --tests
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: create dummy file to compile wizard feature
         run: touch wizard-frontend.tar.gz
@@ -629,6 +630,8 @@ jobs:
       - run: npm install portfinder # For a node specific test
       - name: mirrord layer tests
         run: cargo test -p mirrord-layer
+      - name: mirrord layer-lib tests
+        run: cargo test -p mirrord-layer-lib
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}

@@ -34,8 +34,8 @@ use crate::{
     error::{LayerError, LayerResult, windows::WindowsError},
     logging::MIRRORD_LAYER_LOG_PATH,
     proxy_connection::PROXY_CONNECTION,
-    setup::layer_setup,
-    socket::sockets::SHARED_SOCKETS_ENV_VAR,
+    setup::setup,
+    socket::{SOCKETS, sockets::SHARED_SOCKETS_ENV_VAR},
 };
 
 pub mod debug;
@@ -139,47 +139,44 @@ impl LayerManagedProcess {
         }
 
         // Encode and forward current socket state to child process (like Unix prepare_execve_envp)
-        match crate::socket::sockets::shared_sockets() {
-            Ok(sockets) => {
-                let socket_count = sockets.len();
-                match bincode::encode_to_vec(&sockets, bincode::config::standard()) {
-                    Ok(encoded_bytes) => {
-                        let encoded_sockets = BASE64_URL_SAFE.encode(encoded_bytes);
-                        env_vars
-                            .insert(SHARED_SOCKETS_ENV_VAR.to_string(), encoded_sockets.clone());
-                        tracing::debug!(
-                            "Encoded and forwarding {} shared sockets to child process: {}",
-                            socket_count,
-                            encoded_sockets
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to encode shared sockets: {}", e);
-                        // Fallback: try to forward existing environment variable if it exists
-                        if let Ok(existing_sockets) = std::env::var(SHARED_SOCKETS_ENV_VAR) {
-                            env_vars.insert(
-                                SHARED_SOCKETS_ENV_VAR.to_string(),
-                                existing_sockets.clone(),
-                            );
-                            tracing::debug!(
-                                "Fallback: forwarding existing shared sockets: {}",
-                                existing_sockets
-                            );
-                        }
+        let encoded_sockets = match SOCKETS.lock() {
+            Ok(lock) => {
+                let shared_sockets = lock
+                    .iter()
+                    .map(|(key, value)| (*key, value))
+                    .collect::<Vec<_>>();
+                let socket_count = shared_sockets.len();
+                let encoded = bincode::encode_to_vec(shared_sockets, bincode::config::standard())
+                    .map(|bytes| BASE64_URL_SAFE.encode(bytes));
+                drop(lock);
+
+                match encoded {
+                    Ok(encoded_sockets) => Some((encoded_sockets, socket_count)),
+                    Err(error) => {
+                        tracing::warn!("Failed to encode shared sockets: {}", error);
+                        None
                     }
                 }
             }
-            Err(e) => {
-                tracing::warn!("Failed to get shared sockets: {}", e);
-                // Fallback: try to forward existing environment variable if it exists
-                if let Ok(existing_sockets) = std::env::var(SHARED_SOCKETS_ENV_VAR) {
-                    env_vars.insert(SHARED_SOCKETS_ENV_VAR.to_string(), existing_sockets.clone());
-                    tracing::debug!(
-                        "Fallback: forwarding existing shared sockets: {}",
-                        existing_sockets
-                    );
-                }
+            Err(error) => {
+                tracing::warn!("Failed to lock shared sockets: {}", error);
+                None
             }
+        };
+
+        if let Some((encoded_sockets, socket_count)) = encoded_sockets {
+            env_vars.insert(SHARED_SOCKETS_ENV_VAR.to_string(), encoded_sockets.clone());
+            tracing::debug!(
+                "Encoded and forwarding {} shared sockets to child process: {}",
+                socket_count,
+                encoded_sockets
+            );
+        } else if let Ok(existing_sockets) = std::env::var(SHARED_SOCKETS_ENV_VAR) {
+            env_vars.insert(SHARED_SOCKETS_ENV_VAR.to_string(), existing_sockets.clone());
+            tracing::debug!(
+                "Fallback: forwarding existing shared sockets: {}",
+                existing_sockets
+            );
         }
 
         // Add resolved config for child process inheritance
@@ -195,7 +192,7 @@ impl LayerManagedProcess {
             } else {
                 // Fallback: try to encode current config if layer setup is available
                 // Use a safe approach that doesn't panic if setup isn't initialized
-                match std::panic::catch_unwind(|| layer_setup().layer_config().encode()) {
+                match std::panic::catch_unwind(|| setup().layer_config().encode()) {
                     Ok(Ok(encoded_config)) => {
                         env_vars
                             .insert(LayerConfig::RESOLVED_CONFIG_ENV.to_string(), encoded_config);
@@ -219,24 +216,27 @@ impl LayerManagedProcess {
         }
 
         // Add Windows-specific child process inheritance variables if proxy connection exists
-        if let Some(proxy_conn) = PROXY_CONNECTION.get() {
-            // Pass current process ID as parent PID for child
-            env_vars.insert(
-                MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID.to_string(),
-                std::process::id().to_string(),
-            );
+        #[allow(static_mut_refs)]
+        unsafe {
+            if let Some(proxy_conn) = PROXY_CONNECTION.get() {
+                // Pass current process ID as parent PID for child
+                env_vars.insert(
+                    MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID.to_string(),
+                    std::process::id().to_string(),
+                );
 
-            // Pass current layer ID for child inheritance
-            env_vars.insert(
-                MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID.to_string(),
-                proxy_conn.layer_id().0.to_string(),
-            );
+                // Pass current layer ID for child inheritance
+                env_vars.insert(
+                    MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID.to_string(),
+                    proxy_conn.layer_id().0.to_string(),
+                );
 
-            // Pass proxy address for child connection
-            env_vars.insert(
-                MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR.to_string(),
-                proxy_conn.proxy_addr().to_string(),
-            );
+                // Pass proxy address for child connection
+                env_vars.insert(
+                    MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR.to_string(),
+                    proxy_conn.proxy_addr().to_string(),
+                );
+            }
         }
     }
 
