@@ -1,4 +1,4 @@
-use std::{collections::HashSet, net::SocketAddr, ops::Not, str::FromStr, sync::OnceLock};
+use std::{collections::HashSet, net::SocketAddr, ops::Not, sync::OnceLock};
 
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
@@ -259,6 +259,7 @@ impl LayerSetup {
     }
 
     /// Check if process hooks should be enabled (always true for Windows)
+    #[cfg(windows)]
     pub fn process_hooks_enabled(&self) -> bool {
         // Process hooks always needed for Windows DLL injection
         true
@@ -347,6 +348,7 @@ impl IncomingMode {
 }
 
 /// Helper trait for network hook decisions
+#[cfg(windows)]
 pub trait NetworkHookConfig {
     fn requires_incoming_hooks(&self) -> bool;
     fn requires_outgoing_hooks(&self) -> bool;
@@ -354,6 +356,7 @@ pub trait NetworkHookConfig {
     fn requires_udp_hooks(&self) -> bool;
 }
 
+#[cfg(windows)]
 impl NetworkHookConfig for NetworkConfig {
     fn requires_incoming_hooks(&self) -> bool {
         self.incoming.mode != ConfigIncomingMode::Off

@@ -4,6 +4,7 @@
 use std::{env, path::PathBuf};
 
 /// Macro to safely allocate memory for Windows structures with error handling
+#[cfg(windows)]
 #[macro_export]
 macro_rules! unsafe_alloc {
     ($type:ty, $err: expr) => {{

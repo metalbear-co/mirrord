@@ -1815,7 +1815,7 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
 
         // Call close() method to send PortUnsubscribe if socket was listening
         if let Some(socket) = &socket_info
-            && socket.is_listening()
+            && matches!(socket.state, SocketState::Listening(_))
         {
             socket.close();
         }
