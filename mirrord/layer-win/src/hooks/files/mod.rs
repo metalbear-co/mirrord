@@ -495,14 +495,16 @@ unsafe extern "system" fn nt_read_file_hook(
             handle_context.access_time = WindowsTime::current().as_file_time();
 
             // Get cursor, or update cursor if we have a byte offset.
-            let Some(cursor) = try_seek(
+            if try_seek(
                 handle_context.fd,
                 if byte_offset.is_null() {
                     SeekFromInternal::Current(0)
                 } else {
                     SeekFromInternal::Start(*(*byte_offset).QuadPart() as _)
                 },
-            ) else {
+            )
+            .is_none()
+            {
                 tracing::error!(
                     fd = handle_context.fd,
                     path = handle_context.path,
