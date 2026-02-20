@@ -617,6 +617,18 @@ where
                 .require_feature(NewOperatorFeature::KafkaQueueSplitting)?;
         }
 
+        if layer_config
+            .feature
+            .split_queues
+            .sqs_jq_filters()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::SqsQueueSplittingWithJqFilter)?;
+        }
+
         Ok(())
     }
 

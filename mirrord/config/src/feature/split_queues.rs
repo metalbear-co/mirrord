@@ -54,13 +54,32 @@ impl SplitQueuesConfig {
         !self.0.is_empty()
     }
 
-    /// Out of the whole queue splitting config, get only the sqs queues.
+    /// Get all the SQS queue ids from the config.
+    pub fn sqs_queues(&self) -> impl '_ + Iterator<Item = &'_ str> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::Sqs { .. } => Some(name.as_str()),
+            _ => None,
+        })
+    }
+
+    /// Out of the whole queue splitting config, get only the sqs message attribute filters.
     pub fn sqs(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ QueueMessageFilter)> {
         self.0.iter().filter_map(|(name, filter)| match filter {
             QueueFilter::Sqs {
                 message_filter: Some(message_filter),
                 ..
             } => Some((name.as_str(), message_filter)),
+            _ => None,
+        })
+    }
+
+    /// Out of the whole queue splitting config, get only the sqs jq filters.
+    pub fn sqs_jq_filters(&self) -> impl '_ + Iterator<Item = (&'_ str, &str)> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::Sqs {
+                jq_filter: Some(jq),
+                ..
+            } => Some((name.as_str(), jq.as_str())),
             _ => None,
         })
     }
@@ -211,7 +230,11 @@ pub enum QueueFilter {
 
 impl CollectAnalytics for &SplitQueuesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
-        analytics.add("sqs_queue_count", self.sqs().count());
+        analytics.add("sqs_queue_count", self.sqs_queues().count());
+        // The number of SQS queues filtered with message attribute filters.
+        analytics.add("sqs_message_attr_filter_queue_count", self.sqs().count());
+        // The number of SQS queues filtered with jq filters.
+        analytics.add("sqs_jq_filter_count", self.sqs_jq_filters().count());
         analytics.add("kafka_queue_count", self.kafka().count());
     }
 }
