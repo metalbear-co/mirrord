@@ -311,6 +311,7 @@ mod logging;
 mod newsletter;
 mod operator;
 mod port_forward;
+mod preview;
 mod profile;
 mod teams;
 mod user_data;
@@ -687,7 +688,13 @@ pub(crate) fn print_config<P>(
         config.internal_proxy.log_destination.display()
     ));
 
-    progress.info(&format!("key: {}", config.key.as_str()));
+    if operator_used {
+        progress.info(&format!(
+            "Session key: {}\nIf enabled, a `mirrord-key` header with this value will be injected \
+into redirected HTTP requests before they're routed to the target.",
+            config.key.as_str()
+        ));
+    }
 }
 
 async fn exec(
@@ -1041,6 +1048,7 @@ fn main() -> miette::Result<()> {
             Commands::Ci(args) => windows_unsupported!(args, "ci", {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
+            Commands::Preview(args) => preview::preview_command(*args).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             #[cfg(feature = "wizard")]
             Commands::Wizard(args) => {

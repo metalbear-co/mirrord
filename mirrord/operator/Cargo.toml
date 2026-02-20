@@ -46,6 +46,7 @@ crd = [
   "dep:kube",
   "dep:mirrord-agent-env",
   "dep:mirrord-config",
+  "dep:mirrord-kube",
   "dep:semver",
   "dep:serde_json",
   "dep:thiserror",
