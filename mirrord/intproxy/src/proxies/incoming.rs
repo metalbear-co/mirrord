@@ -52,16 +52,16 @@ use crate::{
 };
 
 mod bound_socket;
-mod http;
+pub mod http;
 mod http_gateway;
 mod metadata_store;
 mod port_subscription_ext;
 mod subscriptions;
-mod tasks;
+pub mod tasks;
 mod tcp_proxy;
 #[cfg(test)]
 mod tests;
-mod tls;
+pub mod tls;
 
 /// Maps IDs of remote connections to `T`.
 ///
