@@ -88,9 +88,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 futures = "0.3"
 thiserror = "2"
 k8s-openapi = { version = "0.24", features = ["v1_30"] }
-reqwest = { version = "0.12", default-features = false, features = [
+reqwest = { version = "0.13", default-features = false, features = [
     "blocking",
-    "rustls-tls-native-roots",
+    "rustls",
     "json",
     "socks",
     "http2",
