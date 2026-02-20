@@ -11,7 +11,7 @@ use kube::{
 use mirrord_config::{
     feature::database_branches::{
         ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig, MongodbBranchConfig,
-        MysqlBranchConfig, PgBranchConfig, TargetEnviromentVariableSource,
+        MysqlBranchConfig, PgBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -22,24 +22,14 @@ use uuid::Uuid;
 
 use crate::{
     client::error::{OperatorApiError, OperatorOperation},
-    crd::{
-        mongodb_branching::{
-            BranchDatabasePhase as BranchDatabasePhaseMongodb,
-            ConnectionSource as CrdConnectionSourceMongodb,
-            ConnectionSourceKind as CrdConnectionSourceKindMongodb, MongodbBranchDatabase,
-            MongodbBranchDatabaseSpec,
+    crd::db_branching::{
+        core::{
+            BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
+            IamAuthConfig as CrdIamAuthConfig,
         },
-        mysql_branching::{
-            BranchDatabasePhase as BranchDatabasePhaseMysql,
-            ConnectionSource as CrdConnectionSourceMysql,
-            ConnectionSourceKind as CrdConnectionSourceKindMysql, MysqlBranchDatabase,
-            MysqlBranchDatabaseSpec,
-        },
-        pg_branching::{
-            BranchDatabasePhase as BranchDatabasePhasePg,
-            ConnectionSource as CrdConnectionSourcePg, IamAuthConfig as CrdIamAuthConfig,
-            PgBranchDatabase, PgBranchDatabaseSpec,
-        },
+        mongodb::{MongodbBranchDatabase, MongodbBranchDatabaseSpec},
+        mysql::{MysqlBranchDatabase, MysqlBranchDatabaseSpec},
+        pg::{PgBranchDatabase, PgBranchDatabaseSpec},
     },
 };
 
@@ -108,8 +98,8 @@ pub async fn create_mysql_branches<P: Progress>(
             await_condition(api.clone(), name, |db: Option<&MysqlBranchDatabase>| {
                 db.and_then(|db| {
                     db.status.as_ref().map(|status| {
-                        status.phase == BranchDatabasePhaseMysql::Ready
-                            || status.phase == BranchDatabasePhaseMysql::Failed
+                        status.phase == BranchDatabasePhase::Ready
+                            || status.phase == BranchDatabasePhase::Failed
                     })
                 })
                 .unwrap_or(false)
@@ -130,7 +120,7 @@ pub async fn create_mysql_branches<P: Progress>(
             continue;
         };
         if let Some(status) = &db.status
-            && status.phase == BranchDatabasePhaseMysql::Failed
+            && status.phase == BranchDatabasePhase::Failed
         {
             let error_msg = status
                 .error
@@ -190,7 +180,7 @@ pub async fn list_reusable_mysql_branches<P: Progress>(
         .into_iter()
         .filter(|db| {
             if let Some(status) = &db.status {
-                status.phase == BranchDatabasePhaseMysql::Ready
+                status.phase == BranchDatabasePhase::Ready
             } else {
                 false
             }
@@ -270,8 +260,8 @@ pub async fn create_pg_branches<P: Progress>(
             await_condition(api.clone(), name, |db: Option<&PgBranchDatabase>| {
                 db.and_then(|db| {
                     db.status.as_ref().map(|status| {
-                        status.phase == BranchDatabasePhasePg::Ready
-                            || status.phase == BranchDatabasePhasePg::Failed
+                        status.phase == BranchDatabasePhase::Ready
+                            || status.phase == BranchDatabasePhase::Failed
                     })
                 })
                 .unwrap_or(false)
@@ -292,7 +282,7 @@ pub async fn create_pg_branches<P: Progress>(
             continue;
         };
         if let Some(status) = &db.status
-            && status.phase == BranchDatabasePhasePg::Failed
+            && status.phase == BranchDatabasePhase::Failed
         {
             let error_msg = status
                 .error
@@ -351,7 +341,7 @@ pub async fn list_reusable_pg_branches<P: Progress>(
         .into_iter()
         .filter(|db| {
             if let Some(status) = &db.status {
-                status.phase == BranchDatabasePhasePg::Ready
+                status.phase == BranchDatabasePhase::Ready
             } else {
                 false
             }
@@ -431,7 +421,7 @@ pub async fn create_mongodb_branches<P: Progress>(
                 db.and_then(|db| {
                     db.status
                         .as_ref()
-                        .map(|status| status.phase == BranchDatabasePhaseMongodb::Ready)
+                        .map(|status| status.phase == BranchDatabasePhase::Ready)
                 })
                 .unwrap_or(false)
             })
@@ -491,7 +481,7 @@ pub async fn list_reusable_mongodb_branches<P: Progress>(
         .into_iter()
         .filter(|db| {
             if let Some(status) = &db.status {
-                status.phase == BranchDatabasePhaseMongodb::Ready
+                status.phase == BranchDatabasePhase::Ready
             } else {
                 false
             }
@@ -602,6 +592,15 @@ impl AsRef<str> for BranchDatabaseId {
     }
 }
 
+fn convert_connection_source(source: &ConnectionSource) -> CrdConnectionSource {
+    match source {
+        ConnectionSource::Url(kind) => CrdConnectionSource::Url(kind.into()),
+        ConnectionSource::Params(config) => {
+            CrdConnectionSource::Params(ConnectionParamsSpec::from(config))
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MysqlBranchParams {
     pub name_prefix: String,
@@ -613,24 +612,7 @@ pub struct MysqlBranchParams {
 impl MysqlBranchParams {
     pub fn new(id: &str, config: &MysqlBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
-        let connection_source = match &config.base.connection {
-            ConnectionSource::Url(kind) => match kind {
-                TargetEnviromentVariableSource::Env {
-                    container,
-                    variable,
-                } => CrdConnectionSourceMysql::Url(CrdConnectionSourceKindMysql::Env {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-                TargetEnviromentVariableSource::EnvFrom {
-                    container,
-                    variable,
-                } => CrdConnectionSourceMysql::Url(CrdConnectionSourceKindMysql::EnvFrom {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-            },
-        };
+        let connection_source = convert_connection_source(&config.base.connection);
         let spec = MysqlBranchDatabaseSpec {
             id: id.to_string(),
             database_name: config.base.name.clone(),
@@ -664,9 +646,7 @@ pub struct PgBranchParams {
 impl PgBranchParams {
     pub fn new(id: &str, config: &PgBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
-        let connection_source = match &config.base.connection {
-            ConnectionSource::Url(kind) => CrdConnectionSourcePg::Url(kind.into()),
-        };
+        let connection_source = convert_connection_source(&config.base.connection);
 
         // Convert IAM auth config if present
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
@@ -705,24 +685,7 @@ pub struct MongodbBranchParams {
 impl MongodbBranchParams {
     pub(crate) fn new(id: &str, config: &MongodbBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
-        let connection_source = match &config.base.connection {
-            ConnectionSource::Url(kind) => match kind {
-                TargetEnviromentVariableSource::Env {
-                    container,
-                    variable,
-                } => CrdConnectionSourceMongodb::Url(CrdConnectionSourceKindMongodb::Env {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-                TargetEnviromentVariableSource::EnvFrom {
-                    container,
-                    variable,
-                } => CrdConnectionSourceMongodb::Url(CrdConnectionSourceKindMongodb::EnvFrom {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-            },
-        };
+        let connection_source = convert_connection_source(&config.base.connection);
         let spec = MongodbBranchDatabaseSpec {
             id: id.to_string(),
             database_name: config.base.name.clone(),
