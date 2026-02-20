@@ -819,6 +819,23 @@ pub struct MirrordSqsSessionSpec {
     /// The name of the queue on AWS.
     pub queue_filters: HashMap<QueueId, QueueMessageFilter>,
 
+    /// Specify jq programs that will be used to filter messages from queues.
+    /// For queues with a specified jq program - for every message, a JSON will be constructed as:
+    /// ```json
+    /// {
+    ///   "message_attributes": {
+    ///     "attribute1": "value1",
+    ///     "attribute2": "value2"
+    ///   }
+    ///   "message_body": "whatever is in the message body. could be a JSON"
+    /// }
+    /// ```
+    ///
+    /// The js program will run with that JSON as an input, and if it outputs `true`, that
+    /// message will be considered as matching the filter.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub queue_jq_filters: HashMap<QueueId, String>,
+
     /// The target of this session.
     pub queue_consumer: QueueConsumer,
 
