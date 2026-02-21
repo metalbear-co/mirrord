@@ -9,6 +9,7 @@ mod cli;
 mod env;
 mod file_ops;
 mod http;
+mod init_containers;
 #[cfg(any(feature = "cli", feature = "operator"))]
 mod ls;
 mod targetless;

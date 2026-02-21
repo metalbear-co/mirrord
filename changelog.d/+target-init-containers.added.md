@@ -1,0 +1,3 @@
+Added support for targeting init containers, including [Kubernetes Sidecar Containers](https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/). 
+
+mirrord can now target any container in a pod, whether it's a regular application container or an init/sidecar container. This is particularly useful when working with service meshes, authentication sidecars, or other patterns that rely on long-running init containers.
