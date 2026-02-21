@@ -159,7 +159,7 @@ tun2 = { version = "4", features = ["async"] }
 chrono = "0.4"
 
 # Used by `kube`, `agent`, `layer`.
-tower = "0.5"
+tower = {version = "0.5", features = ["retry"] }
 
 # Used by `agent`, `intproxy`, `cli`.
 tokio-rustls = "0.26"
