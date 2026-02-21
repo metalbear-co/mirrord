@@ -149,8 +149,12 @@ impl DnsWorker {
             let resolv_conf_path = etc_path.join("resolv.conf");
             let hosts_path = etc_path.join("hosts");
 
-            let resolv_conf = fs::read(resolv_conf_path).await?;
-            let hosts_conf = fs::read(hosts_path).await?;
+            let resolv_conf = fs::read(resolv_conf_path)
+                .await
+                .map_err(InternalLookupError::from)?;
+            let hosts_conf = fs::read(hosts_path)
+                .await
+                .map_err(InternalLookupError::from)?;
 
             let (config, mut options) = parse_resolv_conf(resolv_conf)?;
             tracing::debug!(?config, ?options, "Parsed resolv configuration");
