@@ -9708,6 +9708,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
 
 [[package]]
+name = "xtask"
+version = "3.187.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde_json",
+ "which",
+]
+
+[[package]]
 name = "xz"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
