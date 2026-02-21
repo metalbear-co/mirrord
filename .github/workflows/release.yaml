@@ -1,4 +1,8 @@
 name: Release
+
+env:
+  NIGHTLY_TOOLCHAIN: nightly-2026-02-12
+
 on:
   push:
     tags:
@@ -277,7 +281,7 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           target: x86_64-apple-darwin,aarch64-apple-darwin
-          toolchain: nightly-2025-07-28
+          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
           rustflags: ""
       - name: Import Code-Signing Certificates
         uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
@@ -293,8 +297,8 @@ jobs:
         # Instead of spoofing an arm64e by changing bits, we now use a code shim compiled as arm64e that loads the arm64 layer
       - name: build mirrord-layer x86-64, arm and code shim
         run: |
-          cargo +nightly-2025-07-28 build --release -p mirrord-layer --target=aarch64-apple-darwin
-          cargo +nightly-2025-07-28 build --release -p mirrord-layer --target=x86_64-apple-darwin
+          cargo +${{ env.NIGHTLY_TOOLCHAIN }} build --release -p mirrord-layer --target=aarch64-apple-darwin
+          cargo +${{ env.NIGHTLY_TOOLCHAIN }} build --release -p mirrord-layer --target=x86_64-apple-darwin
           clang -arch arm64e -dynamiclib -o target/aarch64-apple-darwin/release/shim.dylib mirrord/layer/shim.c
       - name: Sign layer binaries and code shim
         env:
@@ -319,12 +323,12 @@ jobs:
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
           MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/aarch64-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo +nightly-2025-07-28 build --release -p mirrord --target=aarch64-apple-darwin --features "wizard"
+        run: cargo +${{ env.NIGHTLY_TOOLCHAIN }} build --release -p mirrord --target=aarch64-apple-darwin --features "wizard"
       - name: build macOS x86-64 cli with universal dylib
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
           MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/aarch64-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo +nightly-2025-07-28 build --release -p mirrord --target=x86_64-apple-darwin --features "wizard"
+        run: cargo +${{ env.NIGHTLY_TOOLCHAIN }} build --release -p mirrord --target=x86_64-apple-darwin --features "wizard"
       - name: Sign cli binaries
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
