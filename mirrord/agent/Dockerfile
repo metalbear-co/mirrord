@@ -54,7 +54,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-agent-
     echo "sccache failed to start, continuing without cache"; \
     unset RUSTC_WRAPPER; \
     fi && \
-    cargo +nightly-2025-08-01 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release && \
+    cargo +nightly-2026-02-12 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release && \
     echo "sccache stats" && \
     (sccache --show-stats || echo "sccache stats unavailable") && \
     # Copy binary out of cached target directory
