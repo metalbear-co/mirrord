@@ -59,5 +59,7 @@ allow-git = [
   "https://github.com/metalbear-co/kube",
   "https://github.com/metalbear-co/minhook-detours-rs",
   "https://github.com/metalbear-co/tree-sitter",
-  "https://github.com/metalbear-co/null-terminated.rs"
+  "https://github.com/metalbear-co/null-terminated.rs",
+  "https://github.com/containerd/rust-extensions",
+  "https://github.com/metalbear-co/k8s-cri"
 ]
