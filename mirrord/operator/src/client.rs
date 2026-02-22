@@ -1925,7 +1925,6 @@ impl OperatorApi<PreparedClientCert> {
 }
 
 #[cfg(test)]
-#[allow(clippy::too_many_arguments)]
 mod test {
     use std::collections::{BTreeMap, HashMap};
 
