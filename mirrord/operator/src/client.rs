@@ -1925,396 +1925,236 @@ mod test {
     use super::OperatorApi;
     use crate::{client::connect_params::ConnectParams, crd::session::SessionCiInfo};
 
+    /// A test case for the [`target_connect_url`] test.
+    ///
+    /// We have a lot of parameters for that case, and without this struct it's hard to
+    /// see which parameter is which.
+    #[derive(Debug)]
+    struct TargetConnectUrlTestCase {
+        use_proxy: bool,
+        target: ResolvedTarget<true>,
+        concurrent_steal: ConcurrentSteal,
+        profile: Option<&'static str>,
+        kafka_splits: HashMap<&'static str, BTreeMap<String, String>>,
+        sqs_splits: HashMap<&'static str, BTreeMap<String, String>>,
+        mysql_branch_names: Vec<String>,
+        pg_branch_names: Vec<String>,
+        mongodb_branch_names: Vec<String>,
+        session_ci_info: Option<SessionCiInfo>,
+        key: Option<&'static str>,
+        expected: &'static str,
+    }
+
+    impl Default for TargetConnectUrlTestCase {
+        fn default() -> Self {
+            Self {
+                use_proxy: Default::default(),
+                target: ResolvedTarget::Deployment(ResolvedResource {
+                    resource: Deployment {
+                        metadata: ObjectMeta {
+                            name: Some("py-serv-deployment".into()),
+                            namespace: Some("default".into()),
+                            ..Default::default()
+                        },
+                        spec: None,
+                        status: None,
+                    }
+                    .into(),
+                    container: None,
+                }),
+                concurrent_steal: Default::default(),
+                profile: None,
+                kafka_splits: Default::default(),
+                sqs_splits: Default::default(),
+                mysql_branch_names: Default::default(),
+                pg_branch_names: Default::default(),
+                mongodb_branch_names: Default::default(),
+                session_ci_info: Default::default(),
+                key: Default::default(),
+                expected: Default::default(),
+            }
+        }
+    }
+
+    fn deployment_with_container() -> ResolvedTarget<true> {
+        ResolvedTarget::Deployment(ResolvedResource {
+            resource: Deployment {
+                metadata: ObjectMeta {
+                    name: Some("py-serv-deployment".into()),
+                    namespace: Some("default".into()),
+                    ..Default::default()
+                },
+                spec: None,
+                status: None,
+            }
+            .into(),
+            container: Some("py-serv".into()),
+        })
+    }
+
     /// Verifies that [`OperatorApi::target_connect_url`] produces expected URLs.
     ///
     /// These URLs should not change for backward compatibility.
     #[rstest]
     #[case::deployment_no_container_no_proxy(
-        false,
-        ResolvedTarget::Deployment(ResolvedResource {
-            resource: Deployment {
-                metadata: ObjectMeta {
-                    name: Some("py-serv-deployment".into()),
-                    namespace: Some("default".into()),
-                    ..Default::default()
-                },
-                spec: None,
-                status: None,
-            }.into(),
-            container: None,
-        }),
-        ConcurrentSteal::Abort,
-        None,
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        None,
-        "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
+        TargetConnectUrlTestCase{
+            expected: "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort",
+            ..Default::default()
+        }
     )]
     #[case::deployment_no_container_proxy(
-        true,
-        ResolvedTarget::Deployment(ResolvedResource {
-            resource: Deployment {
-                metadata: ObjectMeta {
-                    name: Some("py-serv-deployment".into()),
-                    namespace: Some("default".into()),
-                    ..Default::default()
-                },
-                spec: None,
-                status: None,
-            }.into(),
-            container: None,
-        }),
-        ConcurrentSteal::Abort,
-        None,
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Some("my-key"),
-        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort&key=my-key"
+        TargetConnectUrlTestCase{
+            use_proxy: true,
+            key: Some("my-key"),
+            expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort&key=my-key",
+            ..Default::default()
+        }
     )]
     #[case::deployment_container_no_proxy(
-        false,
-        ResolvedTarget::Deployment(ResolvedResource {
-            resource: Deployment {
-                metadata: ObjectMeta {
-                    name: Some("py-serv-deployment".into()),
-                    namespace: Some("default".into()),
-                    ..Default::default()
-                },
-                spec: None,
-                status: None,
-            }.into(),
-            container: Some("py-serv".into()),
-        }),
-        ConcurrentSteal::Abort,
-        None,
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        None,
-        "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
+        TargetConnectUrlTestCase{
+            target: deployment_with_container(),
+            expected: "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort",
+            ..Default::default()
+            }
     )]
-    #[case::deployment_container_proxy(
-        true,
-        ResolvedTarget::Deployment(ResolvedResource {
-            resource: Deployment {
-                metadata: ObjectMeta {
-                    name: Some("py-serv-deployment".into()),
-                    namespace: Some("default".into()),
-                    ..Default::default()
-                },
-                spec: None,
-                status: None,
-            }.into(),
-            container: Some("py-serv".into()),
-        }),
-        ConcurrentSteal::Abort,
-        None,
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Some("auth-token-123"),
-        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&key=auth-token-123"
+    #[case::deployment_container_proxy_key(
+        TargetConnectUrlTestCase{
+            use_proxy: true,
+            target: deployment_with_container(),
+            key: Some("auth-token-123"),
+            expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&key=auth-token-123",
+            ..Default::default()
+        }
     )]
     #[case::deployment_container_proxy_profile(
-        true,
-        ResolvedTarget::Deployment(ResolvedResource {
-            resource: Deployment {
-                metadata: ObjectMeta {
-                    name: Some("py-serv-deployment".into()),
-                    namespace: Some("default".into()),
-                    ..Default::default()
-                },
-                spec: None,
-                status: None,
-            }.into(),
-            container: Some("py-serv".into()),
-        }),
-        ConcurrentSteal::Abort,
-        Some("no-steal"),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        None,
-        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=no-steal"
+        TargetConnectUrlTestCase{
+            use_proxy: true,
+            target: deployment_with_container(),
+            profile: Some("no-steal"),
+            expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=no-steal",
+            ..Default::default()
+        }
     )]
     #[case::deployment_container_proxy_profile_escape(
-        true,
-        ResolvedTarget::Deployment(ResolvedResource {
-            resource: Deployment {
-                metadata: ObjectMeta {
-                    name: Some("py-serv-deployment".into()),
-                    namespace: Some("default".into()),
-                    ..Default::default()
-                },
-                spec: None,
-                status: None,
-            }.into(),
-            container: Some("py-serv".into()),
-        }),
-        ConcurrentSteal::Abort,
-        Some("/should?be&escaped"),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Some("key-value"),
-        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=%2Fshould%3Fbe%26escaped&key=key-value"
+        TargetConnectUrlTestCase{
+            use_proxy: true,
+            target: deployment_with_container(),
+            profile: Some("/should?be&escaped"),
+            key: Some("key-value"),
+            expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=%2Fshould%3Fbe%26escaped&key=key-value",
+            ..Default::default()
+        }
     )]
     #[case::deployment_container_proxy_kafka_splits(
-        true,
-        ResolvedTarget::Deployment(ResolvedResource {
-            resource: Deployment {
-                metadata: ObjectMeta {
-                    name: Some("py-serv-deployment".into()),
-                    namespace: Some("default".into()),
-                    ..Default::default()
-                },
-                spec: None,
-                status: None,
-            }.into(),
-            container: Some("py-serv".into()),
-        }),
-        ConcurrentSteal::Abort,
-        None,
-        HashMap::from([(
-            "topic-id",
-            BTreeMap::from([
-                ("header-1".to_string(), "filter-1".to_string()),
-                ("header-2".to_string(), "filter-2".to_string()),
-            ]),
-        )]),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        None,
-        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
+        TargetConnectUrlTestCase{
+            use_proxy: true,
+            target: deployment_with_container(),
+            kafka_splits: HashMap::from([(
+                "topic-id",
+                BTreeMap::from([
+                    ("header-1".to_string(), "filter-1".to_string()),
+                    ("header-2".to_string(), "filter-2".to_string()),
+                ]),
+            )]),
+            expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&kafka_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
+            ..Default::default()
+        }
     )]
     #[case::deployment_container_proxy_sqs_splits(
-        true,
-        ResolvedTarget::Deployment(ResolvedResource {
-            resource: Deployment {
-                metadata: ObjectMeta {
-                    name: Some("py-serv-deployment".into()),
-                    namespace: Some("default".into()),
-                    ..Default::default()
-                },
-                spec: None,
-                status: None,
-            }.into(),
-            container: Some("py-serv".into()),
-        }),
-        ConcurrentSteal::Abort,
-        None,
-        Default::default(),
-        HashMap::from([(
-            "topic-id",
-            BTreeMap::from([
-                ("header-1".to_string(), "filter-1".to_string()),
-                ("header-2".to_string(), "filter-2".to_string()),
-            ]),
-        )]),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Some("sqs-key"),
-        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
-        ?connect=true&on_concurrent_steal=abort&sqs_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D&key=sqs-key",
+        TargetConnectUrlTestCase{
+            use_proxy: true,
+            target: deployment_with_container(),
+            sqs_splits: HashMap::from([(
+                "topic-id",
+                BTreeMap::from([
+                    ("header-1".to_string(), "filter-1".to_string()),
+                    ("header-2".to_string(), "filter-2".to_string()),
+                ]),
+            )]),
+            key: Some("sqs-key"),
+            expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
+            ?connect=true&on_concurrent_steal=abort&sqs_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D&key=sqs-key",
+            ..Default::default()
+        }
     )]
     #[case::deployment_container_proxy_mysql_branches(
-        true,
-        ResolvedTarget::Deployment(ResolvedResource {
-            resource: Deployment {
-                metadata: ObjectMeta {
-                    name: Some("py-serv-deployment".into()),
-                    namespace: Some("default".into()),
-                    ..Default::default()
-                },
-                spec: None,
-                status: None,
-            }.into(),
-            container: Some("py-serv".into()),
-        }),
-        ConcurrentSteal::Abort,
-        None,
-        Default::default(),
-        Default::default(),
-        vec!["branch-1".into(), "branch-2".into()],
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        None,
-        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
-        ?connect=true&on_concurrent_steal=abort&mysql_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
+        TargetConnectUrlTestCase{
+            use_proxy: true,
+            target: deployment_with_container(),
+            mysql_branch_names: vec!["branch-1".into(), "branch-2".into()],
+            expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
+            ?connect=true&on_concurrent_steal=abort&mysql_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
+            ..Default::default()
+        }
     )]
     #[case::deployment_container_proxy_pg_branches(
-        true,
-        ResolvedTarget::Deployment(ResolvedResource {
-            resource: Deployment {
-                metadata: ObjectMeta {
-                    name: Some("py-serv-deployment".into()),
-                    namespace: Some("default".into()),
-                    ..Default::default()
-                },
-                spec: None,
-                status: None,
-            }.into(),
-            container: Some("py-serv".into()),
-        }),
-        ConcurrentSteal::Abort,
-        None,
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        vec!["branch-1".into(), "branch-2".into()],
-        Default::default(),
-        Default::default(),
-        Some("pg-access-key"),
-        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
-        ?connect=true&on_concurrent_steal=abort&pg_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D&key=pg-access-key",
+        TargetConnectUrlTestCase{
+            use_proxy: true,
+            target: deployment_with_container(),
+            pg_branch_names: vec!["branch-1".into(), "branch-2".into()],
+            key: Some("pg-access-key"),
+            expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
+            ?connect=true&on_concurrent_steal=abort&pg_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D&key=pg-access-key",
+            ..Default::default()
+        }
     )]
     #[case::deployment_container_proxy_mongodb_branches(
-        true,
-        ResolvedTarget::Deployment(ResolvedResource {
-            resource: Deployment {
-                metadata: ObjectMeta {
-                    name: Some("py-serv-deployment".into()),
-                    namespace: Some("default".into()),
-                    ..Default::default()
-                },
-                spec: None,
-                status: None,
-            }.into(),
-            container: Some("py-serv".into()),
-        }),
-        ConcurrentSteal::Abort,
-        None,
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        vec!["branch-1".into(), "branch-2".into()],
-        Default::default(),
-        Default::default(),
-        None,
-        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
-        ?connect=true&on_concurrent_steal=abort&pg_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
+        TargetConnectUrlTestCase{
+            use_proxy: true,
+            target: deployment_with_container(),
+            mongodb_branch_names: vec!["branch-1".into(), "branch-2".into()],
+            expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
+            ?connect=true&on_concurrent_steal=abort&mongodb_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
+            ..Default::default()
+        }
     )]
     #[case::deployment_no_container_no_proxy_with_session_ci_info(
-        false,
-        ResolvedTarget::Deployment(ResolvedResource {
-            resource: Deployment {
-                metadata: ObjectMeta {
-                    name: Some("py-serv-deployment".into()),
-                    namespace: Some("default".into()),
-                    ..Default::default()
-                },
-                spec: None,
-                status: None,
-            }.into(),
-            container: None,
-        }),
-        ConcurrentSteal::Abort,
-        None,
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Some(SessionCiInfo {
-            provider: Some("Krzysztof".into()),
-            environment: Some("Kresy".into()),
-            pipeline: Some("Wschodnie".into()),
-            triggered_by: Some("Kononowicz".into())
-        }),
-        Some("ci-key-123"),
-        "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort&session_ci_info=%7B%22provider%22%3A%22Krzysztof%22%2C%22environment%22%3A%22Kresy%22%2C%22pipeline%22%3A%22Wschodnie%22%2C%22triggeredBy%22%3A%22Kononowicz%22%7D&key=ci-key-123"
+        TargetConnectUrlTestCase{
+            session_ci_info: Some(SessionCiInfo {
+                provider: Some("Krzysztof".into()),
+                environment: Some("Kresy".into()),
+                pipeline: Some("Wschodnie".into()),
+                triggered_by: Some("Kononowicz".into())
+            }),
+            key: Some("ci-key-123"),
+            expected: "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort&session_ci_info=%7B%22provider%22%3A%22Krzysztof%22%2C%22environment%22%3A%22Kresy%22%2C%22pipeline%22%3A%22Wschodnie%22%2C%22triggeredBy%22%3A%22Kononowicz%22%7D&key=ci-key-123",
+            ..Default::default()
+        }
     )]
     #[case::deployment_with_key_none(
-        true,
-        ResolvedTarget::Deployment(ResolvedResource {
-            resource: Deployment {
-                metadata: ObjectMeta {
-                    name: Some("test-deployment".into()),
-                    namespace: Some("default".into()),
-                    ..Default::default()
-                },
-                spec: None,
-                status: None,
-            }.into(),
-            container: Some("test-container".into()),
-        }),
-        ConcurrentSteal::Abort,
-        None,
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        None,
-        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.test-deployment.container.test-container?connect=true&on_concurrent_steal=abort"
+        TargetConnectUrlTestCase{
+            use_proxy: true,
+            target: deployment_with_container(),
+            expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort",
+            ..Default::default()
+        }
     )]
     #[case::deployment_with_key_special_chars(
-        true,
-        ResolvedTarget::Deployment(ResolvedResource {
-            resource: Deployment {
-                metadata: ObjectMeta {
-                    name: Some("test-deployment".into()),
-                    namespace: Some("default".into()),
-                    ..Default::default()
-                },
-                spec: None,
-                status: None,
-            }.into(),
-            container: Some("test-container".into()),
-        }),
-        ConcurrentSteal::Abort,
-        None,
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Some("key/with?special&chars=value"),
-        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.test-deployment.container.test-container?connect=true&on_concurrent_steal=abort&key=key%2Fwith%3Fspecial%26chars%3Dvalue"
+        TargetConnectUrlTestCase{
+            use_proxy: true,
+            target: deployment_with_container(),
+            key: Some("key/with?special&chars=value"),
+            expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&key=key%2Fwith%3Fspecial%26chars%3Dvalue",
+            ..Default::default()
+        }
     )]
     #[test]
     fn target_connect_url(
-        #[case] use_proxy: bool,
-        #[case] target: ResolvedTarget<true>,
-        #[case] concurrent_steal: ConcurrentSteal,
-        #[case] profile: Option<&str>,
-        #[case] kafka_splits: HashMap<&str, BTreeMap<String, String>>,
-        #[case] sqs_splits: HashMap<&str, BTreeMap<String, String>>,
-        #[case] mysql_branch_names: Vec<String>,
-        #[case] pg_branch_names: Vec<String>,
-        #[case] mongodb_branch_names: Vec<String>,
-        #[case] session_ci_info: Option<SessionCiInfo>,
-        #[case] key: Option<&str>,
-        #[case] expected: &str,
+        #[case] TargetConnectUrlTestCase {
+            use_proxy,
+            target,
+            concurrent_steal,
+            profile,
+            kafka_splits,
+            sqs_splits,
+            mysql_branch_names,
+            pg_branch_names,
+            mongodb_branch_names,
+            session_ci_info,
+            key,
+            expected,
+        }: TargetConnectUrlTestCase,
     ) {
         let kafka_splits = kafka_splits
             .iter()
