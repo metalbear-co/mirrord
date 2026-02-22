@@ -27,6 +27,10 @@ pub struct ConnectParams<'a> {
 
     #[serde(with = "queue_splits_serde")]
     pub sqs_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub sqs_jq_filters: HashMap<&'a str, &'a str>,
+
     /// User's current git branch name - may be an empty string if user is in detached head mode or
     /// another error occurred: this case handled by the operator
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -85,6 +89,7 @@ impl<'a> ConnectParams<'a> {
             profile: config.profile.as_deref(),
             kafka_splits: config.feature.split_queues.kafka().collect(),
             sqs_splits: config.feature.split_queues.sqs().collect(),
+            sqs_jq_filters: config.feature.split_queues.sqs_jq_filters().collect(),
             branch_name,
             mongodb_branch_names,
             mysql_branch_names,
