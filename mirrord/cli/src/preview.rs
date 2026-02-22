@@ -20,7 +20,11 @@ use kube::{
     runtime::watcher::{self, Event, watcher},
 };
 use mirrord_analytics::NullReporter;
-use mirrord_config::{LayerConfig, config::ConfigContext, target::TargetDisplay};
+use mirrord_config::{
+    LayerConfig,
+    config::ConfigContext,
+    target::{Target, TargetDisplay},
+};
 use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
     client::OperatorApi,
@@ -86,30 +90,13 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
         CliError::PreviewImageRequired
     })?;
 
-    let session_target = {
-        let mut config_target_with_container = config_target.clone();
-        if config_target_with_container.container().is_none() {
-            let runtime_data = config_target_with_container
-                .runtime_data(&client, layer_config.target.namespace.as_deref())
-                .await
-                .map_err(CliError::RuntimeDataResolution)?;
-
-            if runtime_data.guessed_container {
-                subtask.warning(&format!(
-                    "Target has multiple containers, mirrord picked \"{}\". \
-                 To target a different one, include it in the target path.",
-                    runtime_data.container_name
-                ));
-            }
-
-            config_target_with_container.set_container(runtime_data.container_name);
-        }
-
-        SessionTarget::from_config(config_target_with_container).ok_or_else(|| {
-            subtask.failure(None);
-            CliError::PreviewTargetResolutionFailed(config_target.to_string())
-        })?
-    };
+    let session_target = resolve_config_target(
+        config_target,
+        &client,
+        layer_config.target.namespace.as_deref(),
+    )
+    .await
+    .inspect_err(|_| subtask.failure(None))?;
 
     // Check for an existing session with the same key+target.
     let key = layer_config.key.as_str();
@@ -474,9 +461,25 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
     let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
     let (client, api) = create_preview_api(&layer_config, all_namespaces, &progress).await?;
 
-    // Find sessions matching the key and optional target filter.
-
     let mut subtask = progress.subtask("finding preview sessions");
+
+    // Resolve the config target (if provided) to a full SessionTarget for comparison.
+    // This allows the user to type, for example, "deployment/foo" and have it match a session that
+    // has `spec.target` set to "Deployment/foo/container/foo"
+    let session_target = match &layer_config.target.path {
+        Some(config_target) => {
+            let session_target = resolve_config_target(
+                config_target,
+                &client,
+                layer_config.target.namespace.as_deref(),
+            )
+            .await
+            .inspect_err(|_| subtask.failure(None))?;
+
+            Some(session_target)
+        }
+        None => None,
+    };
 
     let list_params = ListParams::default().labels(&format!("{PREVIEW_SESSION_KEY_LABEL}={key}"));
 
@@ -490,9 +493,9 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
         .items
         .into_iter()
         .filter(|session| {
-            args.target
+            session_target
                 .as_ref()
-                .is_none_or(|target| session.spec.target.to_string() == *target)
+                .is_none_or(|target| session.spec.target == *target)
         })
         .collect();
 
@@ -547,6 +550,26 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
     progress.success(None);
 
     Ok(())
+}
+
+/// Resolves a [`Target`] to a [`SessionTarget`] by auto-detecting the container if not
+/// specified, then converting to the session representation.
+async fn resolve_config_target(
+    config_target: &Target,
+    client: &kube::Client,
+    namespace: Option<&str>,
+) -> CliResult<SessionTarget> {
+    let mut config_target_with_container = config_target.clone();
+    if config_target_with_container.container().is_none() {
+        let runtime_data = config_target
+            .runtime_data(client, namespace)
+            .await
+            .map_err(CliError::RuntimeDataResolution)?;
+        config_target_with_container.set_container(runtime_data.container_name);
+    }
+
+    SessionTarget::from_config(config_target_with_container)
+        .ok_or_else(|| CliError::PreviewTargetResolutionFailed(config_target.to_string()))
 }
 
 fn load_preview_config(
