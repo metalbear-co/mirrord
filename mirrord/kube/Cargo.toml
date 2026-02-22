@@ -43,7 +43,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tokio-retry = { workspace = true, optional = true }
-tower = { workspace = true, features = ["retry"] }
+tower.workspace = true
 http.workspace = true
 itertools.workspace = true
 

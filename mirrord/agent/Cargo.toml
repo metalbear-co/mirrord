@@ -24,7 +24,8 @@ mirrord-agent-env = { path = "./env", default-features = false }
 mirrord-agent-iptables = { path = "./iptables" }
 mirrord-tls-util = { path = "../tls-util" }
 
-containerd-client = "0.6"
+# they didn't release version with latest tonic..
+containerd-client = {git = "https://github.com/containerd/rust-extensions.git", rev = "3b272b01a2328ddb5c58e7f5c8b8ecaaf7af262f"}
 tokio = { workspace = true, features = [
     "rt",
     "net",
@@ -46,7 +47,7 @@ tracing-subscriber.workspace = true
 tokio-stream.workspace = true
 thiserror.workspace = true
 hickory-resolver.workspace = true
-bollard = "0.18"
+bollard = "0.20"
 tokio-util.workspace = true
 streammap-ext.workspace = true
 libc.workspace = true
@@ -59,19 +60,19 @@ hyper = { workspace = true, features = ["full"] }
 hyper-util.workspace = true
 httparse = "1"
 fancy-regex = { workspace = true }
-oci-spec = "0.7.0"
-tonic = "0.12"
+oci-spec = "0.9.0"
+tonic = "0.14"
 tower.workspace = true
 http.workspace = true
-k8s-cri = "0.9"
+k8s-cri = {git = "https://github.com/metalbear-co/k8s-cri.git", rev = "14d24d6a35b6ea44e8a74f9e5904db94162f304a"}
 semver.workspace = true
 tokio-rustls.workspace = true
 x509-parser.workspace = true
 rustls.workspace = true
 socket2.workspace = true
 prometheus = { version = "0.14", features = ["process"] }
-axum = { version = "0.7", features = ["macros"] }
-procfs = "0.17.0"
+axum = { version = "0.8", features = ["macros"] }
+procfs = "0.18.0"
 rcgen.workspace = true
 serde_json_path.workspace = true
 dns-lookup = "3"

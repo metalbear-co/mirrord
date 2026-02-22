@@ -7,7 +7,6 @@
 #![feature(try_trait_v2_residual)]
 #![feature(c_size_t)]
 #![feature(once_cell_try)]
-#![feature(vec_into_raw_parts)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]

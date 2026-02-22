@@ -27,7 +27,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 serde_yaml.workspace = true
-toml = "0.8"
+toml = "1.0"
 schemars.workspace = true
 bimap = { version = "0.6" }
 nom = "7.1"

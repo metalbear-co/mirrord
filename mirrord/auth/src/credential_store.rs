@@ -12,7 +12,6 @@ use tokio::{
     fs,
     io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, SeekFrom},
 };
-use whoami::fallible;
 
 use crate::{
     certificate::Certificate,
@@ -61,10 +60,8 @@ pub struct UserIdentity {
 impl UserIdentity {
     pub fn load() -> Self {
         Self {
-            // next release of whoami (v2) will have fallible types
-            // so keep this Option for then :)
-            name: Some(whoami::realname()),
-            hostname: fallible::hostname().ok(),
+            name: whoami::realname().ok(),
+            hostname: whoami::hostname().ok(),
         }
     }
 }
@@ -96,7 +93,7 @@ impl CredentialStore {
 
     /// Get hostname to be used as common name in a certification request.
     fn certificate_common_name() -> String {
-        let mut hostname = fallible::hostname().unwrap_or_else(|_| "localhost".to_string());
+        let mut hostname = whoami::hostname().unwrap_or_else(|_| "localhost".to_string());
 
         hostname.make_ascii_lowercase();
         hostname

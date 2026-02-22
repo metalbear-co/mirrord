@@ -38,7 +38,7 @@ client = [
 base64.workspace = true
 bincode.workspace = true
 chrono.workspace = true
-whoami = { version = "1", optional = true }
+whoami = { version = "2", optional = true }
 home = { workspace = true, optional = true }
 pem.workspace = true
 flate2 = { version = "1", default-features = false, features = ["rust_backend"], optional = true }
@@ -49,7 +49,7 @@ serde = { version = "1", features = ["derive"] }
 serde_yaml = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["fs"], optional = true  }
 thiserror = { workspace = true, optional = true }
-x509-certificate = "0.24"
+x509-certificate = "0.25"
 reqwest = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 

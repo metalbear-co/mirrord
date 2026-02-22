@@ -1,7 +1,7 @@
 use std::{io::Write, path::Path, sync::Arc};
 
 use pem::{EncodeConfig, LineEnding, Pem};
-use rcgen::CertifiedKey;
+use rcgen::{CertifiedKey, KeyPair};
 use rustls::{ClientConfig, RootCertStore, server::WebPkiClientVerifier};
 use tempfile::NamedTempFile;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
@@ -39,7 +39,7 @@ impl SecureChannelSetup {
 
     /// Creates a PEM file containing a certificate chain and a private key.
     fn prepare_single_pem(
-        root: &CertifiedKey,
+        root: &CertifiedKey<KeyPair>,
         server_name: &str,
     ) -> Result<NamedTempFile, SecureChannelError> {
         let cert = crate::generate_cert(server_name, Some(root), false)?;
@@ -48,7 +48,7 @@ impl SecureChannelSetup {
             &[
                 Pem::new("CERTIFICATE", cert.cert.der().to_vec()),
                 Pem::new("CERTIFICATE", root.cert.der().to_vec()),
-                Pem::new("PRIVATE KEY", cert.key_pair.serialize_der()),
+                Pem::new("PRIVATE KEY", cert.signing_key.serialize_der()),
             ],
             EncodeConfig::new().set_line_ending(LineEnding::LF),
         );

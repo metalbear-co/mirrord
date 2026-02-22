@@ -1,5 +1,5 @@
 # Using the agent's build image, that has rustup targets, zigbuild etc.
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:75752d06e0de748b7bc5e5b1a54575e3c968f5cf AS build-env
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build-staging:2632fb42ecea92d16d2c2f768c0f1d69c97abecf AS build-env
 ARG TARGETARCH
 
 WORKDIR /build
@@ -25,4 +25,3 @@ WORKDIR /app
 COPY --from=build-env /rust-sqs-printer .
 
 CMD ["./rust-sqs-printer"]
-

@@ -347,9 +347,10 @@ impl OperatorApi<NoClientCert> {
                 .map_err(KubeApiError::from)
                 .map_err(OperatorApiError::CreateKubeClient)?
                 .with_layer(&BufferLayer::new(1024))
-                .with_layer(&RetryLayer::new(RetryKube::try_from(
-                    &layer_config.startup_retry,
-                )?))
+                .with_layer(&RetryLayer::new(
+                    RetryKube::try_from(&layer_config.startup_retry)
+                        .map_err(OperatorApiError::from)?,
+                ))
                 .build();
 
             (client, certificate)
@@ -1570,9 +1571,15 @@ impl OperatorApi<PreparedClientCert> {
             #[error(transparent)]
             DecodeError(#[from] bincode::error::DecodeError),
             #[error(transparent)]
-            WsError(#[from] tungstenite::Error),
+            WsError(Box<tungstenite::Error>),
             #[error("invalid message: {0:?}")]
             InvalidMessage(tungstenite::Message),
+        }
+
+        impl From<tungstenite::Error> for OperatorClientError {
+            fn from(e: tungstenite::Error) -> Self {
+                Self::WsError(Box::new(e))
+            }
         }
 
         let ws = upgrade::connect_ws(client, request)
@@ -1582,10 +1589,12 @@ impl OperatorApi<PreparedClientCert> {
                 operation: OperatorOperation::WebsocketConnection,
             })?
             .with(|e: Vec<u8>| async {
-                Ok::<_, OperatorClientError>(tungstenite::Message::Binary(e))
+                Ok::<_, OperatorClientError>(tungstenite::Message::Binary(
+                    tungstenite::Bytes::from(e),
+                ))
             })
             .map(|i| match i.map_err(OperatorClientError::from)? {
-                tungstenite::Message::Binary(pl) => Ok(pl),
+                tungstenite::Message::Binary(pl) => Ok(pl.into()),
                 other => Err(OperatorClientError::InvalidMessage(other)),
             });
 

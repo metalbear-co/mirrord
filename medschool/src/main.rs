@@ -145,7 +145,7 @@ mod test {
     struct Root {
         /// ## Root - e_field
         e_field: Root_E_Edge,
-        
+
         /// ## Root - root_field
         ///
         /// Root - edge - root_field
@@ -240,11 +240,11 @@ mod test {
 
         /// ## UnorderedField - a
         a_field: ExampleEnum,
-    }    
+    }
 
     /// # Example Enum
-    enum ExampleEnum {        
-        A,        
+    enum ExampleEnum {
+        A,
         B,
     }
     "#,
@@ -310,7 +310,7 @@ mod test {
 
         for _ in 0..32 {
             let mut files = files.clone();
-            files.sort_unstable_by(|_, _| rand::random::<i32>().cmp(&rand::random()));
+            files.sort_unstable_by_key(|_| rand::random::<i32>());
 
             let type_docs = super::parse_docs_into_set(files).unwrap();
             let root_type = resolve_references(type_docs.clone()).unwrap();

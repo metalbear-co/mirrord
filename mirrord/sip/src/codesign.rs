@@ -1,7 +1,7 @@
 use std::{ffi::OsStr, path::Path, process::Command, thread, time::Duration};
 
 use apple_codesign::{CodeSignatureFlags, SettingsScope, SigningSettings, UnifiedSigner};
-use rand::RngCore;
+use rand::Rng;
 
 use crate::error::{Result, SipError};
 

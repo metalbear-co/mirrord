@@ -1,3 +1,4 @@
+#![feature(assert_matches)]
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use std::sync::OnceLock;
 use std::{

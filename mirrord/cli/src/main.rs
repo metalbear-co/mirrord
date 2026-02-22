@@ -1098,10 +1098,14 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
         .unwrap_or(true);
 
     if check_version {
-        let result: Result<(), Box<dyn std::error::Error>> = try {
+        // we don't care about the result since it can't make us fail
+        // having it as error would require casting and other annoying things
+        // so option is our best.. option!
+        let _: Option<()> = try {
             let client = reqwest::Client::builder()
                 .user_agent(format!("mirrord-cli/{CURRENT_VERSION}"))
-                .build()?;
+                .build()
+                .ok()?;
 
             let sent = client
                 .get(format!(
@@ -1110,11 +1114,11 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                     platform = std::env::consts::OS,
                 ))
                 .timeout(Duration::from_secs(1))
-                .send().await?;
+                .send().await.ok()?;
 
-            let latest_version = Version::parse(&sent.text().await.unwrap())?;
+            let latest_version = Version::parse(&sent.text().await.ok()?).ok()?;
 
-            if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
+            if latest_version > Version::parse(CURRENT_VERSION).ok()? {
                 let is_homebrew = which("mirrord")
                     .ok()
                     .map(|mirrord_path| mirrord_path.to_string_lossy().contains("homebrew"))
@@ -1135,8 +1139,6 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                 progress.success(Some("running on latest!"));
             }
         };
-
-        result.ok();
     }
 }
 

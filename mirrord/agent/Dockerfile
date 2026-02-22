@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:75752d06e0de748b7bc5e5b1a54575e3c968f5cf AS builder
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build-staging:2632fb42ecea92d16d2c2f768c0f1d69c97abecf AS builder
 ARG TARGETARCH
 WORKDIR /app
 
@@ -54,7 +54,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-agent-
     echo "sccache failed to start, continuing without cache"; \
     unset RUSTC_WRAPPER; \
     fi && \
-    cargo +nightly-2025-08-01 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release && \
+    cargo +nightly-2026-02-12 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release && \
     echo "sccache stats" && \
     (sccache --show-stats || echo "sccache stats unavailable") && \
     # Copy binary out of cached target directory

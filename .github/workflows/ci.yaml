@@ -50,6 +50,7 @@ permissions:
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
+  NIGHTLY_TOOLCHAIN: nightly-2026-02-12
 
 jobs:
   towncrier_check:
@@ -215,7 +216,7 @@ jobs:
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
-          toolchain: nightly-2025-08-01
+          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
           components: rustfmt, clippy
           target: ${{matrix.target}}
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
@@ -274,7 +275,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: metalbear-co/cargo-deny-action@76cd80eb775d7bbbd2d80292136d74d39e1b4918
         with:
-          rust-version: nightly-2025-08-01
+          rust-version: ${{ env.NIGHTLY_TOOLCHAIN }}
 
   check-rust-docs:
     runs-on: ubuntu-24.04
@@ -290,7 +291,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
-          toolchain: nightly-2025-08-01
+          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
           cache: false
       # TODO(alex): `no-deps` here due to an issue in `futures-util`.
       - run: cargo doc --document-private-items --no-deps
@@ -308,7 +309,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       # the setup rust toolchain action ignores the input if file exists.. so remove it
       - run: rm rust-toolchain.toml
-      - run: rustup default nightly-2025-08-01
+      - run: rustup default ${{ env.NIGHTLY_TOOLCHAIN }}
       - name: mirrord-agent UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent
       - name: mirrord-agent-env UT
@@ -510,7 +511,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: x86_64-apple-darwin, aarch64-apple-darwin
-          toolchain: nightly-2025-08-01
+          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
       - name: Install Protoc
         uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
@@ -719,7 +720,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
-          toolchain: nightly-2025-08-01
+          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
 
       - name: run UT
         run: |

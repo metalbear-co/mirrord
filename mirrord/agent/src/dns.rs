@@ -1,14 +1,18 @@
 use std::{
-    collections::HashMap, future, io, path::PathBuf, sync::atomic::Ordering, time::Duration,
+    collections::HashMap,
+    future, io,
+    path::PathBuf,
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
 };
 
 use futures::{StreamExt, stream::FuturesOrdered};
 use hickory_resolver::{
-    Hosts, TokioAsyncResolver,
+    Hosts, ResolveError, ResolveErrorKind,
     config::{LookupIpStrategy, ServerOrderingStrategy},
-    error::{ResolveError, ResolveErrorKind},
     lookup_ip::LookupIp,
-    proto::error::ProtoErrorKind,
+    name_server::TokioConnectionProvider,
+    proto::ProtoErrorKind,
     system_conf::parse_resolv_conf,
 };
 use mirrord_agent_env::envs;
@@ -149,8 +153,12 @@ impl DnsWorker {
             let resolv_conf_path = etc_path.join("resolv.conf");
             let hosts_path = etc_path.join("hosts");
 
-            let resolv_conf = fs::read(resolv_conf_path).await?;
-            let hosts_conf = fs::read(hosts_path).await?;
+            let resolv_conf = fs::read(resolv_conf_path)
+                .await
+                .map_err(InternalLookupError::from)?;
+            let hosts_conf = fs::read(hosts_path)
+                .await
+                .map_err(InternalLookupError::from)?;
 
             let (config, mut options) = parse_resolv_conf(resolv_conf)?;
             tracing::debug!(?config, ?options, "Parsed resolv configuration");
@@ -174,11 +182,20 @@ impl DnsWorker {
 
             tracing::debug!(?config, ?options, "Updated resolv configuration");
 
-            let mut resolver = TokioAsyncResolver::tokio(config, options);
+            let mut hosts = Hosts::default();
+            hosts
+                .read_hosts_conf(hosts_conf.as_slice())
+                .map_err(InternalLookupError::from)?;
+
+            let mut resolver = hickory_resolver::Resolver::builder_with_config(
+                config,
+                TokioConnectionProvider::default(),
+            )
+            .with_options(options)
+            .build();
             tracing::debug!(?resolver, "Build a DNS resolver");
 
-            let hosts = Hosts::default().read_hosts_conf(hosts_conf.as_slice())?;
-            resolver.set_hosts(Some(hosts));
+            resolver.set_hosts(Arc::new(hosts));
 
             resolver
         };
@@ -394,7 +411,7 @@ impl ProtocolConversion<DnsLookup> for LookupIp {
             .records()
             .iter()
             .filter_map(|record| {
-                let ip = record.data()?.ip_addr()?;
+                let ip = record.data().ip_addr()?;
                 Some(LookupRecord {
                     name: record.name().to_string(),
                     ip,

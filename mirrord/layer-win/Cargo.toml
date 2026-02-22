@@ -31,7 +31,7 @@ socket2.workspace = true
 # Used for logging and tracing
 tracing.workspace = true
 
-libc = "0.2.175"
+libc = "0.2.182"
 [target.'cfg(windows)'.dependencies]
 phnt = "0.1.2"
 

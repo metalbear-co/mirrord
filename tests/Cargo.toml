@@ -11,13 +11,13 @@ workspace = true
 doctest = false
 
 [dependencies]
-aws-config = { version = "1.5", features = [
+aws-config = { version = "1.8", features = [
     "behavior-version-latest",
 ], optional = true }
 aws-credential-types = "1.2"
-aws-sdk-sqs = { version = "1.39", optional = true }
+aws-sdk-sqs = { version = "1.95", optional = true }
 aws-types = "1.3"
-json-patch = "4.0"
+json-patch = "4.1"
 jsonptr = "0.7"
 k8s-openapi.workspace = true
 kube.workspace = true

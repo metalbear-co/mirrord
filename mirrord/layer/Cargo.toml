@@ -29,13 +29,13 @@ mirrord-layer-lib = { path = "../layer-lib" }
 
 base64.workspace = true
 bincode.workspace = true
-ctor = "0.2"
+ctor = "0.6"
 dotenvy.workspace = true
 frida-gum = { version = "0.17", features = ["auto-download", "std"] }
 http.workspace = true
 libc.workspace = true
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
-null-terminated = { version = "0.3", default-features = false }
+null-terminated = { git = "https://github.com/metalbear-co/null-terminated.rs.git", default-features = false, rev = "bc2121e31907f5dc8a174befe5da2d9bd5a7996f" }
 num-traits = "0.2"
 rand.workspace = true
 regex.workspace = true
@@ -44,7 +44,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-syscalls = { version = "0.6", features = ["full"] }
+syscalls = { version = "0.8", features = ["full"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
