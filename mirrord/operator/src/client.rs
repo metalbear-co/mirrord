@@ -2117,7 +2117,7 @@ mod test {
             target: deployment_with_container(),
             mongodb_branch_names: vec!["branch-1".into(), "branch-2".into()],
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
-            ?connect=true&on_concurrent_steal=abort&pg_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
+            ?connect=true&on_concurrent_steal=abort&mongodb_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
             ..Default::default()
         }
     )]
