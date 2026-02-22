@@ -19,4 +19,4 @@ workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "1.26", features = ["rt", "rt-multi-thread", "macros", "net", "io-util"] }
+tokio = { version = "1.49", features = ["rt", "rt-multi-thread", "macros", "net", "io-util"] }

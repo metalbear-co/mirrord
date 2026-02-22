@@ -5,7 +5,7 @@ edition = "2021"
 license.workspace = true
 
 [dependencies]
-aws-config = { version = "1.5", features = ["behavior-version-latest"] }
-aws-sdk-sqs = { version = "1.39" }
+aws-config = { version = "1.8", features = ["behavior-version-latest"] }
+aws-sdk-sqs = { version = "1.95" }
 serde_json = "1.0"
-tokio = { version = "1.39", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1.49", features = ["rt", "rt-multi-thread", "macros"] }

@@ -1589,10 +1589,12 @@ impl OperatorApi<PreparedClientCert> {
                 operation: OperatorOperation::WebsocketConnection,
             })?
             .with(|e: Vec<u8>| async {
-                Ok::<_, OperatorClientError>(tungstenite::Message::Binary(e))
+                Ok::<_, OperatorClientError>(tungstenite::Message::Binary(
+                    tungstenite::Bytes::from(e),
+                ))
             })
             .map(|i| match i.map_err(OperatorClientError::from)? {
-                tungstenite::Message::Binary(pl) => Ok(pl),
+                tungstenite::Message::Binary(pl) => Ok(pl.into()),
                 other => Err(OperatorClientError::InvalidMessage(other)),
             });
 

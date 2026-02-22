@@ -31,4 +31,4 @@ tokio = { workspace = true, features = ["fs", "macros", "process", "rt"] }
 tracing.workspace = true
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-mockall = "0.13"
+mockall = "0.14"

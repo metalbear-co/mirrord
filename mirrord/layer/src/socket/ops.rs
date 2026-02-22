@@ -586,7 +586,14 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
         let connect_result: ConnectResult = if CALL_CONNECT {
             let layer_address = SockAddr::try_from(layer_address.clone())?;
 
-            unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
+            unsafe {
+                FN_CONNECT(
+                    sockfd,
+                    layer_address.as_ptr() as *const libc::sockaddr,
+                    layer_address.len(),
+                )
+            }
+            .into()
         } else {
             ConnectResult {
                 result: 0,
@@ -667,7 +674,11 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
                 let rawish_local_addr = SockAddr::from(addr);
 
                 let connect_result = ConnectResult::from(unsafe {
-                    FN_CONNECT(sockfd, rawish_local_addr.as_ptr(), rawish_local_addr.len())
+                    FN_CONNECT(
+                        sockfd,
+                        rawish_local_addr.as_ptr() as *const libc::sockaddr,
+                        rawish_local_addr.len(),
+                    )
                 });
 
                 Detour::Success(connect_result)
@@ -707,7 +718,7 @@ fn connect_to_local_address(
                 .map(|rawish_remote_address| unsafe {
                     FN_CONNECT(
                         sockfd,
-                        rawish_remote_address.as_ptr(),
+                        rawish_remote_address.as_ptr() as *const libc::sockaddr,
                         rawish_remote_address.len(),
                     )
                 })
@@ -1214,7 +1225,8 @@ pub(super) fn getaddrinfo(
             let ai_family = rawish_sock_addr.family() as _;
 
             // Must outlive this function, as it is stored as a pointer in `libc::addrinfo`.
-            let ai_addr = Box::into_raw(Box::new(unsafe { *rawish_sock_addr.as_ptr() }));
+            let ai_addr = Box::into_raw(Box::new(unsafe { ptr::read(rawish_sock_addr.as_ptr()) }))
+                as *mut libc::sockaddr;
             let ai_canonname = CString::new(name).unwrap().into_raw();
 
             libc::addrinfo {
@@ -1575,7 +1587,7 @@ pub(super) fn send_to(
                 raw_message,
                 message_length,
                 flags,
-                rawish_true_destination.as_ptr(),
+                rawish_true_destination.as_ptr() as *const libc::sockaddr,
                 rawish_true_destination.len(),
             )
         }
@@ -1600,7 +1612,7 @@ pub(super) fn send_to(
             })
             .map(SocketAddress::try_into)??;
 
-        let raw_interceptor_address = layer_address.as_ptr();
+        let raw_interceptor_address = layer_address.as_ptr() as *const libc::sockaddr;
         let raw_interceptor_length = layer_address.len();
 
         unsafe {
