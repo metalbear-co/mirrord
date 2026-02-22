@@ -463,6 +463,8 @@ pub enum NewOperatorFeature {
     MultiClusterPrimary,
     /// This operator can be connected to by a primary.
     MultiClusterRemote,
+    /// This operator can accept jq filters for SQS queue splitting.
+    SqsQueueSplittingWithJqFilter,
 
     PreviewEnv,
 
@@ -499,6 +501,9 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::MultiClusterPrimary => "multi-cluster primary",
             NewOperatorFeature::MultiClusterRemote => "multi-cluster remote",
+            NewOperatorFeature::SqsQueueSplittingWithJqFilter => {
+                "Splitting SQS queues with a jq filter"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -813,6 +818,23 @@ pub struct MirrordSqsSessionSpec {
     /// The queue_id for a queue is determined at the queue registry. It is not (necessarily)
     /// The name of the queue on AWS.
     pub queue_filters: HashMap<QueueId, QueueMessageFilter>,
+
+    /// Specify jq programs that will be used to filter messages from queues.
+    /// For queues with a specified jq program - for every message, a JSON will be constructed as:
+    /// ```json
+    /// {
+    ///   "message_attributes": {
+    ///     "attribute1": "value1",
+    ///     "attribute2": "value2"
+    ///   }
+    ///   "message_body": "whatever is in the message body. could be a JSON"
+    /// }
+    /// ```
+    ///
+    /// The js program will run with that JSON as an input, and if it outputs `true`, that
+    /// message will be considered as matching the filter.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub queue_jq_filters: HashMap<QueueId, String>,
 
     /// The target of this session.
     pub queue_consumer: QueueConsumer,
