@@ -310,7 +310,7 @@ mod test {
 
         for _ in 0..32 {
             let mut files = files.clone();
-            files.sort_unstable_by_key(|_| rand::random::<i32>);
+            files.sort_unstable_by_key(|_| rand::random::<i32>());
 
             let type_docs = super::parse_docs_into_set(files).unwrap();
             let root_type = resolve_references(type_docs.clone()).unwrap();
