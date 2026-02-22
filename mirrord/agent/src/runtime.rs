@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use bollard::{API_DEFAULT_VERSION, Docker, container::InspectContainerOptions};
+use bollard::{API_DEFAULT_VERSION, Docker, query_parameters::InspectContainerOptions};
 use containerd_client::{
     services::v1::{
         GetContainerRequest, GetRequest, containers_client::ContainersClient,

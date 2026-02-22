@@ -9,7 +9,7 @@ use std::{
 
 use mirrord_protocol::vpn::{ClientVpn, NetworkConfiguration, ServerVpn};
 use nix::sys::socket::SockaddrStorage;
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use socket2::{Domain, Protocol, SockAddr, SockAddrStorage, Socket, Type};
 use tokio::{
     io::unix::{AsyncFd, AsyncFdReadyGuard},
     net::UdpSocket,
@@ -198,7 +198,7 @@ impl fmt::Debug for VpnTask {
 }
 
 fn interface_index_to_sock_addr(index: i32) -> io::Result<SockAddr> {
-    let mut addr_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    let mut addr_storage = SockAddrStorage::zeroed();
     let len = std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t;
     let macs = procfs::net::arp().map_err(io::Error::other)?;
     tracing::debug!(?macs, "arp entries");
@@ -209,7 +209,7 @@ fn interface_index_to_sock_addr(index: i32) -> io::Result<SockAddr> {
         .ok_or_else(|| io::Error::other("no entry with hw address"))?;
 
     unsafe {
-        let sock_addr = std::ptr::addr_of_mut!(addr_storage) as *mut libc::sockaddr_ll;
+        let sock_addr = addr_storage.view_as::<libc::sockaddr_ll>();
         (*sock_addr).sll_family = libc::AF_PACKET as u16;
         (*sock_addr).sll_protocol = (libc::ETH_P_IP as u16).to_be();
         (*sock_addr).sll_ifindex = index;
