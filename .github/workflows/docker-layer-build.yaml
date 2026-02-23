@@ -17,7 +17,7 @@ jobs:
       tag: ${{ steps.set-tags.outputs.tag }}
       tag_aarch64: ${{ steps.set-tags-aarch64.outputs.tag }}
     permissions:
-      packages: write
+      # packages: write
       contents: read
     steps:
       - name: Checkout
@@ -30,7 +30,7 @@ jobs:
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ttl.sh
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -48,8 +48,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/metalbear-co/ci-layer-build:latest
-            ghcr.io/metalbear-co/ci-layer-build:${{ steps.set-tags.outputs.tag }}
+            ttl.sh/metalbear-co/ci-layer-build:latest
+            ttl.sh/metalbear-co/ci-layer-build:${{ steps.set-tags.outputs.tag }}
 
       - name: Determine aarch test image version
         uses: ./ci/get-image-tag
@@ -65,5 +65,5 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/metalbear-co/ci-layer-build-aarch64:latest
-            ghcr.io/metalbear-co/ci-layer-build-aarch64:${{ steps.set-tags-aarch64.outputs.tag }}
+            ttl.sh/metalbear-co/ci-layer-build-aarch64:latest
+            ttl.sh/metalbear-co/ci-layer-build-aarch64:${{ steps.set-tags-aarch64.outputs.tag }}

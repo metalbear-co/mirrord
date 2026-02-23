@@ -16,7 +16,7 @@ jobs:
     outputs:
       tag: ${{ steps.set-tags.outputs.tag }}
     permissions:
-      packages: write
+      # packages: write
       contents: read
     steps:
       - name: Checkout
@@ -29,7 +29,7 @@ jobs:
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ttl.sh
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Determine test image version
@@ -46,15 +46,15 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/metalbear-co/ci-agent-build:latest
-            ghcr.io/metalbear-co/ci-agent-build:${{ steps.set-tags.outputs.tag }}
+            ttl.sh/metalbear-co/ci-agent-build:latest
+            ttl.sh/metalbear-co/ci-agent-build:${{ steps.set-tags.outputs.tag }}
 
   runtime:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.set-tags.outputs.tag }}
     permissions:
-      packages: write
+      # packages: write
       contents: read
     steps:
       - name: Checkout
@@ -67,7 +67,7 @@ jobs:
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ttl.sh
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Determine test image version
@@ -84,5 +84,5 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/metalbear-co/ci-agent-runtime:latest
-            ghcr.io/metalbear-co/ci-agent-runtime:${{ steps.set-tags.outputs.tag }}
+            ttl.sh/metalbear-co/ci-agent-runtime:latest
+            ttl.sh/metalbear-co/ci-agent-runtime:${{ steps.set-tags.outputs.tag }}
