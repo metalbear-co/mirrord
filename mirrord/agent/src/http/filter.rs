@@ -2,7 +2,7 @@ use std::{fmt::Debug, io::Read};
 
 use fancy_regex::Regex;
 use hyper::http::request::Parts;
-use mirrord_protocol::tcp::HttpMethodFilter;
+use mirrord_protocol::tcp::{HttpMethodFilter, JqQuery};
 use serde_json::Value;
 use serde_json_path::JsonPath;
 use tracing::Level;
@@ -27,6 +27,9 @@ pub enum HttpFilter {
 
     /// Filter based on request body
     Body(HttpBodyFilter),
+
+    /// Header based on header using jq
+    HeaderJq(JqQuery),
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -36,6 +39,9 @@ pub enum FilterCreationError {
 
     #[error("error compiling jsonpath query: {0}")]
     JsonPath(#[from] serde_json_path::ParseError),
+
+    #[error("error compiling jq expression: {0}")]
+    Jq(String),
 }
 
 impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
@@ -60,6 +66,12 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
             }
             mirrord_protocol::tcp::HttpFilter::Body(http_body_filter) => {
                 Ok(Self::Body(http_body_filter.try_into()?))
+            }
+            mirrord_protocol::tcp::HttpFilter::HeaderJq(header) => {
+                // Recompile to validate again
+                JqQuery::new(&header)
+                    .map(HttpFilter::HeaderJq)
+                    .map_err(FilterCreationError::Jq)
             }
         }
     }
@@ -171,6 +183,9 @@ impl HttpFilter {
                         })
                     }
                 }
+            }
+            Self::HeaderJq(jq) => {
+                todo!();
             }
         }
     }
