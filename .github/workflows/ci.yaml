@@ -143,6 +143,10 @@ jobs:
           files: |
             mirrord/agent/Dockerfile
             mirrord/cli/Dockerfile
+            ci/agent-build/runtime.Dockerfile
+            ci/agent-build/Dockerfile
+            ci/layer-build/Dockerfile
+            ci/layer-build/*.Dockerfile
 
       - name: get wizard frontend changes
         id: changed-wizard-frontend
@@ -295,12 +299,27 @@ jobs:
       # TODO(alex): `no-deps` here due to an issue in `futures-util`.
       - run: cargo doc --document-private-items --no-deps
 
+  build_base_images:
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true'}}
+    uses: ./.github/workflows/docker-base-images.yaml
+    secrets: inherit
+
+  build_layer_images:
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.ci_changed == 'true'}}
+    uses: ./.github/workflows/docker-layer-build.yaml
+    secrets: inherit
+
   test_agent:
     runs-on: ubuntu-24.04
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    needs: [changed_files, build_base_images]
+    if: |
+      always() && 
+      (needs.build_base_images.result == 'success' || needs.build_base_images.result == 'skipped') &&
+      (needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true')
     container:
-      image: ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9
+      image: ghcr.io/metalbear-co/ci-agent-build:${{ needs.build_base_images.outputs.agent_tag || 'latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
@@ -318,8 +337,11 @@ jobs:
 
   test_agent_image:
     runs-on: ubuntu-24.04
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
+    needs: [changed_files, build_base_images]
+    if: |
+      always() &&
+      (needs.build_base_images.result == 'success' || needs.build_base_images.result == 'skipped') &&
+      (needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true')
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -329,6 +351,8 @@ jobs:
           context: .
           tags: test
           file: mirrord/agent/Dockerfile
+          build-args: |
+            BASE_IMAGE_TAG=${{ needs.build_base_images.outputs.agent_tag || 'latest' }}
           outputs: type=docker,dest=/tmp/test.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -340,8 +364,11 @@ jobs:
 
   test_cli_image:
     runs-on: ubuntu-24.04
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
+    needs: [changed_files, build_base_images]
+    if: |
+      always() &&
+      (needs.build_base_images.result == 'success' || needs.build_base_images.result == 'skipped') &&
+      (needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true')
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -351,6 +378,8 @@ jobs:
           context: .
           tags: cli_image
           file: mirrord/cli/Dockerfile
+          build-args: |
+            BASE_IMAGE_TAG=${{ needs.build_base_images.outputs.agent_tag || 'latest' }}
           outputs: type=docker,dest=/tmp/cli_image.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -657,7 +686,7 @@ jobs:
         with:
           node-version: 22
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
-      - uses: metalbear-co/ci/e2e-setup-action@main
+      - uses: ./ci/e2e-setup-action
         with:
           container-runtime: ${{matrix.container-runtime}}
       - name: download image

@@ -1,0 +1,145 @@
+# e2e-actions
+#
+# When adding new e2e apps that require compilation (such as a new Rust test app) you have to add
+# the building step here.
+#
+# For Rust apps, we have a little script (see # Build Rust test apps) that loops through the
+# existing directories doing a `cargo build`.
+#
+# Be very careful when adding new build steps, as they have an impact on every other PR in 
+# the `mirrord` repo.
+#
+# If you add a new build step, say to compile a Go program, but the code for this program is only
+# in your PR, then all other PRs will start failing, as they lack yours.
+#
+# The best way to add new build steps here is to either do something similar to what's being done
+# for Rust, or to do it as a conditional build, first checking if the directory/code exists before
+# calling a compiler.
+name: 'Setup mirrord e2e environment'
+description: 'Install all required dependencies for mirrord e2e tests'
+inputs:
+  container-runtime:
+    description: 'Container runtime to setup with minikube'
+    default: 'containerd'
+  sccache-gcs-bucket:
+    description: 'GCS bucket for sccache (optional)'
+    required: false
+    default: ''
+  sccache-gcp-credentials:
+    description: 'GCP credentials for sccache (optional)'
+    required: false
+    default: ''
+  sccache-key-prefix:
+    description: 'sccache key prefix (optional)'
+    required: false
+    default: 'e2e-setup'
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-node@v3
+      with:
+        node-version: 24
+
+    - run: npm install express
+      shell: bash
+
+    - uses: actions/setup-python@v3
+
+    - run: pip3 install flask fastapi uvicorn[standard]
+      shell: bash
+
+    - uses: actions/setup-go@v3
+      with:
+        go-version: "1.23"
+        cache-dependency-path: tests/go-e2e/go.sum
+
+    - run: |
+        go version
+      shell: bash
+
+    - run: | # Build Go test apps.
+        ./scripts/build_go_apps.sh 23
+      shell: bash
+
+    # don't use "cache" for other Gos since it will try to overwrite and have bad results.
+    - uses: actions/setup-go@v4
+      with:
+        go-version: "1.24"
+        cache: false
+
+    - run: |
+        go version
+      shell: bash
+
+    - run: | # Build Go test apps.
+        ./scripts/build_go_apps.sh 24
+      shell: bash
+
+    - uses: actions/setup-go@v4
+      with:
+        go-version: "1.25"
+        cache: false
+        
+    - run: |
+        go version
+      shell: bash
+    - run: | # Build Go test apps.
+        ./scripts/build_go_apps.sh 25
+      shell: bash
+    - uses: actions/setup-go@v4
+      with:
+        go-version: "1.26"
+        cache: false
+    - run: |
+        go version
+      shell: bash
+    - run: | # Build Go test apps.
+        ./scripts/build_go_apps.sh 26
+      shell: bash
+    - name: Setup sccache for Rust builds
+      if: ${{ inputs.sccache-gcs-bucket != '' && inputs.sccache-gcp-credentials != '' }}
+      run: |
+        # Install sccache
+        SCCACHE_VERSION=0.12.0
+        curl -fsSL https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz \
+          | tar -xzv --strip-components=1 -C /usr/local/bin sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache
+        chmod +x /usr/local/bin/sccache
+        sccache --version
+        
+        # Setup GCP credentials
+        echo "${{ inputs.sccache-gcp-credentials }}" > /tmp/gcp-sccache-credentials.json
+        
+        # Configure sccache environment
+        echo "SCCACHE_GCS_BUCKET=${{ inputs.sccache-gcs-bucket }}" >> $GITHUB_ENV
+        echo "SCCACHE_GCS_KEY_PATH=/tmp/gcp-sccache-credentials.json" >> $GITHUB_ENV
+        echo "SCCACHE_GCS_KEY_PREFIX=${{ inputs.sccache-key-prefix }}" >> $GITHUB_ENV
+        echo "SCCACHE_GCS_RW_MODE=READ_WRITE" >> $GITHUB_ENV
+        echo "RUSTC_WRAPPER=/usr/local/bin/sccache" >> $GITHUB_ENV
+        echo "::notice::sccache configured for e2e-setup-action"
+      shell: bash
+    - name: Build Rust test apps
+      run: |
+        for cargo_dir in $(find tests/*/* -name Cargo.toml -printf '%h\n'); do
+            echo "Building test app in: $cargo_dir"
+            pushd "$cargo_dir"
+            cargo build
+            popd
+        done
+      shell: bash
+    - name: Show sccache stats
+      if: ${{ inputs.sccache-gcs-bucket != '' && inputs.sccache-gcp-credentials != '' }}
+      run: |
+        if command -v sccache &> /dev/null; then
+          sccache --show-stats
+        fi
+      shell: bash
+    - name: Build C test apps
+      run: ./scripts/build_c_apps.sh
+      shell: bash
+    # start last thing, to have previous steps faster (no cpu in background)
+    - name: start minikube
+      uses: metalbear-co/setup-minikube@3fa06c2257eb48a3ca8e24fedece59ee2479255a
+      with:
+        container-runtime: ${{ inputs.container-runtime }}
+        cpus: 'max'
+        memory: '4gb'

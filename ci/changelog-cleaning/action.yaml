@@ -1,0 +1,58 @@
+name: 'Changelog Cleaning'
+description: 'Cleans up the changelog to be suitable for the website docs and commits to destination repo'
+inputs:
+  local_file_path:
+    description: 'Path to the local file to read'
+    required: true
+  destination_repo:
+    description: 'Destination repository in owner/repo format'
+    required: true
+  destination_file_path:
+    description: 'Relative path to the destination file within the destination repo'
+    required: true
+  checkout_directory:
+    description: 'Directory into which the destination repository can be checked out'
+    required: true
+  git_user:
+    description: 'Username for the git commit'
+    required: true
+  git_email:
+    description: 'Email address for the git commit'
+    required: true
+  git_access_token:
+    description: 'Access token for the git commit'
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout destination repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.destination_repo }}
+        path: ${{ inputs.checkout_directory }}
+        token: ${{ inputs.git_access_token }}
+    - name: Set up Rust toolchain
+      uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+    - name: Install rust-script
+      run: cargo install rust-script --locked
+      shell: bash
+    - name: Run main.rs with rust-script and overwrite destination file
+      run: |
+        cat "${{ inputs.local_file_path }}" | \
+        rust-script "${{ github.action_path }}/src/main.rs" > "${{ inputs.checkout_directory }}/${{ inputs.destination_file_path }}"
+      shell: bash
+    - name: Commit to destination repo
+      working-directory: ${{ inputs.checkout_directory }}
+      run: |
+        git config --local user.email "${{ inputs.git_email }}"
+        git config --local user.name "${{ inputs.git_user }}"
+        git add .
+        git commit -m "Update changelog"
+        git push
+      shell: bash
+    - name: Cleanup
+      continue-on-error: true
+      if: ${{ always() }}
+      run: |
+        rm -rf "${{ inputs.checkout_directory }}"
+      shell: bash

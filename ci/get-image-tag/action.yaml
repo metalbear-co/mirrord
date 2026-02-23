@@ -1,0 +1,24 @@
+name: 'Determine test image version'
+description: 'Get the test image tag based on ci folder changes.'
+inputs:
+  ci_changed:
+    description: 'When changed_files indicates that CI changed'
+    required: true
+  target_dir:
+    description: 'Target directory to check for changes in'
+    required: true
+outputs:
+  tag:
+    description: 'Docker image tag to use'
+    value: ${{ steps.get-tag.outputs.tag }}
+runs:
+  using: "composite"
+  steps:
+    - id: get-tag
+      shell: bash
+      run: |
+        if [ "${{ inputs.ci_changed }}" == "true" ] || git diff --name-only origin/main -- "${{ inputs.target_dir }}" | grep -q "^${{ inputs.target_dir }}/"; then
+          echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+        else
+          echo "tag=latest" >> $GITHUB_OUTPUT
+        fi

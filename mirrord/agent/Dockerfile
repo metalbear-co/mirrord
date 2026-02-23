@@ -1,4 +1,6 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:75752d06e0de748b7bc5e5b1a54575e3c968f5cf AS builder
+ARG BASE_IMAGE_TAG=75752d06e0de748b7bc5e5b1a54575e3c968f5cf
+
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:${BASE_IMAGE_TAG} AS builder
 ARG TARGETARCH
 WORKDIR /app
 
@@ -60,7 +62,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-agent-
     # Copy binary out of cached target directory
     cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
 
-FROM ghcr.io/metalbear-co/ci-agent-runtime:30dca9bcb32306a028178cac371b1e47e403916c
+ARG BASE_IMAGE_TAG=30dca9bcb32306a028178cac371b1e47e403916c
+
+FROM ghcr.io/metalbear-co/ci-agent-runtime:${BASE_IMAGE_TAG}
 COPY --from=builder /mirrord-agent /
 
 CMD ["./mirrord-agent"]

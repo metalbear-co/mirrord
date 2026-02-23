@@ -1,4 +1,5 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:75752d06e0de748b7bc5e5b1a54575e3c968f5cf AS chef
+ARG BASE_IMAGE_TAG=latest
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:${BASE_IMAGE_TAG} AS chef
 ARG TARGETARCH
 WORKDIR /build
 

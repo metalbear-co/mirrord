@@ -1,0 +1,22 @@
+name: Set Docker Tags
+description: Determines Docker tags based on the GitHub event and image name
+inputs:
+  base-name:
+    description: Base name of the Docker image
+    required: true
+outputs:
+  tags:
+    description: The Docker tags to use
+    value: ${{ steps.set-tags.outputs.tags }}
+runs:
+  using: composite
+  steps:
+    - name: Determine Docker tags
+      id: set-tags
+      shell: bash
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "tags=ghcr.io/metalbear-co/${{ inputs.base-name }}-staging:${{ github.sha }}" >> $GITHUB_OUTPUT
+        else
+          echo "tags=ghcr.io/metalbear-co/${{ inputs.base-name }}:latest,ghcr.io/metalbear-co/${{ inputs.base-name }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+        fi
