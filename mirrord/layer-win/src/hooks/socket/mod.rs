@@ -20,7 +20,7 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, OutgoingConnMetadataRequest, PortSubscribe,
 };
 use mirrord_layer_lib::{
-    detour::{Detour, Bypass, OptionExt},
+    detour::{Bypass, Detour, OptionExt},
     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
     setup::{LayerSetup, NetworkHookConfig, setup},
