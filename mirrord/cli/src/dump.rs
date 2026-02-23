@@ -6,7 +6,7 @@ use std::{
 };
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter};
-use mirrord_config::{LayerConfig, config::ConfigContext};
+use mirrord_config::{LayerConfig, config::ConfigContext, target::Target};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonMessage, LogLevel, LogMessage, RequestId, ResponseError,
@@ -25,7 +25,7 @@ use tokio::{
 use tracing::{debug, info};
 
 use super::config::DumpArgs;
-use crate::{connection::create_and_connect, error::CliResult, user_data::UserData};
+use crate::{CliError, connection::create_and_connect, error::CliResult, user_data::UserData};
 
 /// Implements the `mirrord dump` command.
 ///
@@ -50,6 +50,14 @@ pub async fn dump_command(
         watch,
         user_data.machine_id(),
     );
+
+    // Ensure a target was specified
+    if matches!(config.target.path, Some(Target::Targetless)) || config.target.path.is_none() {
+        return Err(CliError::MissingArg {
+            command: "mirrord dump".to_string(),
+            arg: "target".to_string(),
+        });
+    }
 
     if !args.params.disable_version_check {
         super::prompt_outdated_version(&progress).await;

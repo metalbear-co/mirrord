@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
-use crate::utils::{application::GoVersion, TestProcess};
+use mirrord_test_utils::TestProcess;
+
+use crate::utils::application::GoVersion;
 
 #[derive(Debug)]
 pub enum FileOps {

@@ -1850,6 +1850,8 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
         Ok(results) => {
             if !results.is_empty() {
                 // Use the first IP address from the results
+                // we already checked it's not empty so this can't error
+                #[allow(clippy::indexing_slicing)]
                 let (name, ip) = &results[0];
                 tracing::debug!(
                     "Remote DNS resolution successful: {} -> {}",

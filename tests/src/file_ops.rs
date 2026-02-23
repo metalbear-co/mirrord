@@ -235,7 +235,7 @@ mod file_ops_tests {
         #[future]
         #[notrace]
         basic_service: KubeService,
-        #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
+        #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
     ) {
         let service = basic_service.await;
         let command = FileOps::GoDir(go_version).command();

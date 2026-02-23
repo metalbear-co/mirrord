@@ -446,22 +446,40 @@ unsafe extern "system" fn nt_create_file_hook(
     }
 }
 
-/// [`nt_read_file_hook`] is the function responsible for reading the contents of the acquired
-/// file descriptor from the pod.
+/// [`nt_read_file_hook`] is the function responsible for reading the contents of a remote file
+/// via a previously acquired [`managed_handle::MirrordHandle`].
 ///
 /// The mechanism is:
-/// - We check if the `file` argument is present in the [`MANAGED_HANDLES`] structure, and, if it
-///   is, we then begin taking over execution.
-/// - We try to, either, acquire the current seek head, or update to the user-desired seek head,
-///   which may be specified by the `byte_offset` structure's contents.
-/// - Once a buffer is obtained from the pod, it is matching the current seek head of the file, and
-///   the desired length to be read, we copy the slice we made over our newly returned buffer, to
-///   the user-provided buffer, should all the preconditions for this be met.
-/// - If there is not a specified `byte_offset`, we assume the intent is to call the API until we've
-///   run out of content to read. Therefore, we seek from current with the calculated length that
-///   was copied to the user provided buffer.
-/// - Otherwise, in the presence of a `byte_offset` structure, the seek head is reset. It can also
-///   be reset by `NtSetInformationFile` using `FilePositionInfo`.
+///
+/// 1. We check if the `file` argument is present in [`MANAGED_HANDLES`], and acquire a write lock
+///    over the [`HandleContext`].
+///     * If `file` is not a managed handle, we fall through to the original `NtReadFile`
+///       implementation.
+///     * Both `buffer` and `io_status_block` are validated for pointer provenance at this point. If
+///       either is invalid, we return [`STATUS_ACCESS_VIOLATION`].
+/// 2. We update the [`HandleContext`] access time to the current time, as a read is taking place.
+/// 3. We seek to the appropriate position on the remote file descriptor:
+///     * If `byte_offset` is null, we issue a no-op seek (`Current(0)`) to obtain the current seek
+///       head without moving it.
+///     * If `byte_offset` is non-null, we seek to the absolute offset specified by its `QuadPart`
+///       value, overwriting the current seek head.
+///     * If the seek fails, we return [`STATUS_UNEXPECTED_NETWORK_ERROR`].
+/// 4. We send a [`ReadFileRequest`] to the pod, requesting `length` bytes starting at the seek head
+///    established in step 3.
+///     * 4.1. If the request fails (network or protocol error), we return
+///       [`STATUS_UNEXPECTED_NETWORK_ERROR`].
+/// 5. We check if the returned byte buffer is empty, which signals EOF at the current seek head.
+///     * If so, we fill `io_status_block` with [`STATUS_END_OF_FILE`] and return it.
+/// 6. We calculate the maximum copyable length as `min(bytes.len(), length)`, then copy that many
+///    bytes into the user-provided `buffer` - which was already validated for pointer provenance in
+///    step 1 - and record the byte count in `io_status_block.Information`.
+/// 7. We update or reset the remote seek head depending on the presence of `byte_offset`:
+///     * If `byte_offset` is null (sequential read), we advance the seek head forward by the number
+///       of bytes that were copied.
+///     * If `byte_offset` is non-null (absolute read), we reset the seek head to the start of the
+///       file.
+///     * If this seek fails, we return [`STATUS_UNEXPECTED_NETWORK_ERROR`].
+/// 8. We return [`STATUS_SUCCESS`].
 ///
 /// All instances of a failed network operation are marked by the return value of
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
@@ -495,14 +513,16 @@ unsafe extern "system" fn nt_read_file_hook(
             handle_context.access_time = WindowsTime::current().as_file_time();
 
             // Get cursor, or update cursor if we have a byte offset.
-            let Some(cursor) = try_seek(
+            if try_seek(
                 handle_context.fd,
                 if byte_offset.is_null() {
                     SeekFromInternal::Current(0)
                 } else {
                     SeekFromInternal::Start(*(*byte_offset).QuadPart() as _)
                 },
-            ) else {
+            )
+            .is_none()
+            {
                 tracing::error!(
                     fd = handle_context.fd,
                     path = handle_context.path,
@@ -525,7 +545,9 @@ unsafe extern "system" fn nt_read_file_hook(
             };
 
             if let Some(bytes) = bytes {
-                if cursor as usize >= bytes.len() {
+                // Once there is no longer any bytes returned from the [`ReadFileRequest`] at
+                // cursor, this signifies that we've reachced EOF.
+                if bytes.is_empty() {
                     (*io_status_block).__bindgen_anon_1.Status =
                         ManuallyDrop::new(STATUS_END_OF_FILE);
                     (*io_status_block).Information = 0;
