@@ -5035,6 +5035,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
+ "strum_macros 0.27.2",
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite 0.24.0",
@@ -9532,7 +9533,7 @@ checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
 
 [[package]]
 name = "xtask"
-version = "3.187.0"
+version = "3.189.0"
 dependencies = [
  "anyhow",
  "clap",
