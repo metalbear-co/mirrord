@@ -20,7 +20,7 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, OutgoingConnMetadataRequest, PortSubscribe,
 };
 use mirrord_layer_lib::{
-    detour::Detour,
+    detour::{Detour, Bypass, OptionExt},
     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
     setup::{LayerSetup, NetworkHookConfig, setup},
@@ -722,9 +722,17 @@ unsafe extern "system" fn getsockname_detour(
         unsafe { original(s, name, namelen) }
     };
 
-    let Some(socket) = get_socket(s) else {
-        tracing::warn!("getsockname_detour -> failed to get socket: {}", s);
-        return getsockname_fn();
+    let socket = match SOCKETS
+        .lock()
+        .expect("getsockname_detour -> failed to lock sockets for socket retrieval")
+        .get(&s)
+        .bypass(Bypass::LocalFdNotFound(s))
+    {
+        Ok(sock) => sock.clone(),
+        Err(err) => {
+            tracing::warn!("getsockname_detour -> failed to get socket: {}", err);
+            return getsockname_fn();
+        }
     };
 
     let local_address: Option<SocketAddr> = match &socket.state {

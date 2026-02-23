@@ -33,6 +33,7 @@ members = [
     "tests/issue1317",
     "tests/rust-websockets",
     "tests/rust-sqs-printer",
+    "xtask",
 ]
 resolver = "2"
 

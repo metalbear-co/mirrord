@@ -1,6 +1,9 @@
 [unstable]
 bindeps = true
 
+[alias]
+xtask = "run --package xtask --"
+
 [profile.dev]
 opt-level = 0
 debug = true
