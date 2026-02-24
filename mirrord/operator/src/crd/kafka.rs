@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
     namespaced,
     printcolumn = r#"{"name":"PARENT", "type":"string", "description":"Name of parent configuration.", "jsonPath":".spec.parent"}"#,
     printcolumn = r#"{"name":"SECRET", "type":"string", "description":"Name of Secret to load from.", "jsonPath":".spec.loadFromSecret"}"#,
+    printcolumn = r#"{"name":"CLIENT", "type":"string", "description":"Implementation of Kafka client to use.", "jsonPath":".spec.clientImplementation"}"#,
     printcolumn = r#"{"name":"AUTHENTICATION_EXTRA", "type":"string", "description":"Additional authentication config.", "jsonPath":".spec.authenticationExtra"}"#
 )]
 #[serde(rename_all = "camelCase")]
@@ -21,7 +22,8 @@ pub struct MirrordKafkaClientConfigSpec {
 
     /// Properties to set.
     ///
-    /// When performing Kafka splitting, the operator will override `group.id`/`application.id` property.
+    /// When performing Kafka splitting, the operator will override `group.id`/`application.id`
+    /// property.
     ///
     /// The list of all available properties can be found [here](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md)
     /// for librdkafka clients, and [here](https://docs.confluent.io/platform/current/installation/configuration/index.html#ak-configuration-reference-for-cp) for Java clients.
@@ -40,9 +42,9 @@ pub struct MirrordKafkaClientConfigSpec {
     pub authentication_extra: Option<MirrordKafkaClientAuthExtra>,
 
     /// Kafka client implementation to use.
-    /// 
+    ///
     /// One of: `librdkafka`, `java`.
-    /// 
+    ///
     /// Defaults to `librdkafka`.
     pub client_implementation: Option<String>,
 }
