@@ -43,6 +43,8 @@ mod reverse_dns;
 #[cfg(target_os = "linux")]
 mod runtime;
 #[cfg(target_os = "linux")]
+mod safejaq;
+#[cfg(target_os = "linux")]
 mod steal;
 #[cfg(target_os = "linux")]
 mod task;
@@ -50,8 +52,6 @@ mod task;
 mod util;
 #[cfg(target_os = "linux")]
 mod vpn;
-#[cfg(target_os = "linux")]
-mod safejaq;
 
 #[cfg(target_os = "linux")]
 #[tokio::main(flavor = "current_thread")]

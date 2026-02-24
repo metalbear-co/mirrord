@@ -72,7 +72,7 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
             }
             mirrord_protocol::tcp::HttpFilter::HeaderJq(header) => {
                 // Recompile to validate again
-                JqQuery::new(&header)
+                JqQuery::new(header)
                     .map(HttpFilter::HeaderJq)
                     .map_err(FilterCreationError::Jq)
             }
@@ -198,10 +198,10 @@ impl HttpFilter {
                 }
             }
             Self::HeaderJq(filter) => {
-                const MEM_LIMIT: LazyLock<u64> =
+                static MEM_LIMIT: LazyLock<u64> =
                     LazyLock::new(|| JAQ_MEM_LIMIT.from_env_or_default());
 
-                const TIME_LIMIT: LazyLock<Duration> =
+                static TIME_LIMIT: LazyLock<Duration> =
                     LazyLock::new(|| Duration::from_secs(JAQ_TIME_LIMIT.from_env_or_default()));
 
                 let safejaq = SafeJaq::new(*TIME_LIMIT, *MEM_LIMIT);
@@ -222,7 +222,7 @@ impl HttpFilter {
                 });
 
                 for header in headers.0.iter() {
-                    match safejaq.evaluate(&filter, &header.clone().into()).await {
+                    match safejaq.evaluate(filter, &header.clone().into()).await {
                         Ok(true) => return true,
                         Ok(false) => (),
                         Err(err) => {

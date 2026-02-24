@@ -185,7 +185,7 @@ impl SafeJaq {
 }
 
 pub fn evaluator_main(memory_limit: u64, time_limit: u64) -> ! {
-    set_limits(memory_limit.into(), time_limit.into());
+    set_limits(memory_limit, time_limit);
 
     let mut buf = Vec::new();
     std::io::stdin()

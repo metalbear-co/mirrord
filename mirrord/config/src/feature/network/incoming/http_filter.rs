@@ -417,7 +417,7 @@ impl HttpFilterConfig {
                     body_filter.as_protocol_http_body_filter()?,
                 )),
                 InnerFilter::HeaderJq { query } => Ok(HttpFilter::HeaderJq(
-                    JqQuery::new(&query).map_err(HttpFilterParseError::Jq)?,
+                    JqQuery::new(query).map_err(HttpFilterParseError::Jq)?,
                 )),
             })
             .collect::<Result<Vec<_>, HttpFilterParseError>>()?;
