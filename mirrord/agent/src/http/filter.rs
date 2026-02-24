@@ -274,8 +274,8 @@ mod test {
 
     use super::HttpFilter;
 
-    #[test]
-    fn matching_all_filter() {
+    #[tokio::test]
+    async fn matching_all_filter() {
         let tcp_filter = tcp::HttpFilter::Composite {
             all: true,
             filters: vec![
@@ -295,7 +295,7 @@ mod test {
             .into_parts()
             .0;
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
-        assert!(filter.matches::<&[u8]>(&mut input, None));
+        assert!(filter.matches::<&[u8]>(&mut input, None).await);
 
         // should fail
         let mut input = Request::builder()
@@ -306,11 +306,11 @@ mod test {
             .unwrap()
             .into_parts()
             .0;
-        assert!(filter.matches::<&[u8]>(&mut input, None).not());
+        assert!(filter.matches::<&[u8]>(&mut input, None).await.not());
     }
 
-    #[test]
-    fn matching_any_filter() {
+    #[tokio::test]
+    async fn matching_any_filter() {
         let tcp_filter = tcp::HttpFilter::Composite {
             all: false,
             filters: vec![
@@ -332,7 +332,7 @@ mod test {
             .into_parts()
             .0;
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
-        assert!(filter.matches::<&[u8]>(&mut input, None));
+        assert!(filter.matches::<&[u8]>(&mut input, None).await);
 
         // should fail
         let mut input = Request::builder()
@@ -344,6 +344,6 @@ mod test {
             .into_parts()
             .0;
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
-        assert!(!filter.matches::<&[u8]>(&mut input, None));
+        assert!(!filter.matches::<&[u8]>(&mut input, None).await);
     }
 }

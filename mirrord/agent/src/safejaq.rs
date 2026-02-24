@@ -13,7 +13,6 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::Command,
 };
-use tracing::Instrument;
 
 /// Request to evaluate a JAQ filter against a payload.
 #[derive(Deserialize, Serialize)]
@@ -25,7 +24,10 @@ pub struct EvaluationRequest<'a> {
 /// Result of evaluating a JAQ filter against a payload.
 pub type EvaluationResult = Result<bool, String>;
 
-/// Allows for evaluating untrusted JAQ filters with configurable time and memory limits.
+/// Allows for evaluating untrusted JAQ filters with configurable time
+/// and memory limits. Works by re-execing the mirrord-agent
+/// executable with special commandline flags and using rlimit on the
+/// child process.
 pub struct SafeJaq {
     time_limit: Duration,
     memory_limit: u64,
@@ -143,7 +145,9 @@ impl SafeJaq {
                         tracing::error!(
                             "JAQ evaluator command does not want to exit, shutting it down forcefully."
                         );
-                        child.kill().await;
+                        if let Err(err) = child.kill().await {
+                            tracing::warn!(?err, "failed to kill misbehaving jaq evaluator child");
+                        }
                     }
                 }
             });
@@ -232,8 +236,7 @@ fn evaluate(request: EvaluationRequest) -> Result<bool, String> {
         .load(&arena, program)
         .map_err(|errors| format!("failed to parse the filter: {errors:?}"))?;
 
-    // let filter =
-    // jaq_core::Compiler::default().with_funs(jaq_std::funs().chain(jaq_json::funs()));
+    let filter = jaq_core::Compiler::default().with_funs(jaq_std::funs().chain(jaq_json::funs()));
 
     let filter = filter
         .compile(modules)
@@ -284,7 +287,7 @@ mod tests {
         None,
     )]
     #[test]
-    fn test_evaluate(
+    fn test_evaluate_inner(
         #[case] filter: &str,
         #[case] payload: serde_json::Value,
         #[case] expected: Option<bool>,
@@ -302,21 +305,4 @@ mod tests {
             (result, None) => panic!("unexpected result: {result:?}, expected an error"),
         }
     }
-
-    // #[tokio::test]
-    // async fn test_evaluate() {
-    //     let dir = tempfile::tempdir().unwrap();
-    //     let jaq = SafeJaq::new(Duration::from_millis(250), 64 * 1024).unwrap();
-    //     let value = std::iter::repeat('a')
-    //         .take(64 * 1024 * 1024)
-    //         .collect::<String>();
-    //     let error = jaq
-    //         .evaluate(".[]".into(), serde_json::json!({"key": value}))
-    //         .await
-    //         .unwrap_err();
-    //     match error {
-    //         SafeJaqError::LimitExceeded(..) => {}
-    //         other => panic!("unexpected error: {other:?}"),
-    //     }
-    // }
 }
