@@ -1026,46 +1026,6 @@ Individual database connection parameter sources.
 At least one parameter must be specified.
 Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
 
-A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-reference (object).
-
-As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
-
-As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-Kubernetes Secret.
-
-A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-reference (object).
-
-As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
-
-As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-Kubernetes Secret.
-
-A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-reference (object).
-
-As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
-
-As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-Kubernetes Secret.
-
-A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-reference (object).
-
-As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
-
-As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-Kubernetes Secret.
-
-A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-reference (object).
-
-As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
-
-As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-Kubernetes Secret.
-
 The type of environment variable source for connection params.
 
 #### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
@@ -1190,46 +1150,6 @@ Connection parameters specified as individual environment variable names.
 Individual database connection parameter sources.
 At least one parameter must be specified.
 Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
-
-A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-reference (object).
-
-As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
-
-As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-Kubernetes Secret.
-
-A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-reference (object).
-
-As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
-
-As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-Kubernetes Secret.
-
-A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-reference (object).
-
-As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
-
-As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-Kubernetes Secret.
-
-A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-reference (object).
-
-As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
-
-As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-Kubernetes Secret.
-
-A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-reference (object).
-
-As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
-
-As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-Kubernetes Secret.
 
 The type of environment variable source for connection params.
 
@@ -1357,46 +1277,6 @@ Connection parameters specified as individual environment variable names.
 Individual database connection parameter sources.
 At least one parameter must be specified.
 Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
-
-A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-reference (object).
-
-As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
-
-As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-Kubernetes Secret.
-
-A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-reference (object).
-
-As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
-
-As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-Kubernetes Secret.
-
-A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-reference (object).
-
-As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
-
-As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-Kubernetes Secret.
-
-A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-reference (object).
-
-As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
-
-As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-Kubernetes Secret.
-
-A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-reference (object).
-
-As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
-
-As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-Kubernetes Secret.
 
 The type of environment variable source for connection params.
 

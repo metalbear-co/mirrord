@@ -318,6 +318,7 @@ pub struct ConnectionParamsConfig {
     pub params: ConnectionParamsVars,
 }
 
+/// <!--${internal}-->
 /// A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
 /// reference (object).
 ///
