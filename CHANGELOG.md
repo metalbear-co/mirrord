@@ -1125,7 +1125,7 @@ Re-releasing 3.188.0 for pipeline mistake.
 ### Internal
 
 - E2E test SQS with argo rollouts.
-- Updated Rust toolchain to nightly-2025-08-01.
+- Updated Rust toolchain to nightly-2026-02-24.
 - Use return-dispatch action to trigger operator e2e from mirrord.
 
 ## [3.154.1](https://github.com/metalbear-co/mirrord/tree/3.154.1) - 2025-08-04

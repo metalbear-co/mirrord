@@ -347,9 +347,9 @@ impl OperatorApi<NoClientCert> {
                 .map_err(KubeApiError::from)
                 .map_err(OperatorApiError::CreateKubeClient)?
                 .with_layer(&BufferLayer::new(1024))
-                .with_layer(&RetryLayer::new(RetryKube::try_from(
-                    &layer_config.startup_retry,
-                )?))
+                .with_layer(&RetryLayer::new(
+                    RetryKube::try_from(&layer_config.startup_retry).map_err(From::from)?,
+                ))
                 .build();
 
             (client, certificate)

@@ -5349,9 +5349,8 @@ dependencies = [
 
 [[package]]
 name = "null-terminated"
-version = "0.3.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db3ab2c625aa6bd21571b3599f3c4318b4456ec89efc62c0b47c1a8de14e30bf"
+version = "0.3.16"
+source = "git+https://github.com/metalbear-co/null-terminated.rs#bc2121e31907f5dc8a174befe5da2d9bd5a7996f"
 dependencies = [
  "byte-strings-proc_macros",
  "unreachable",
