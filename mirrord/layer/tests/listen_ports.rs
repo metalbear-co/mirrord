@@ -3,7 +3,6 @@
 #![warn(clippy::indexing_slicing)]
 
 use std::{
-    assert_matches::assert_matches,
     io::Write,
     net::{Ipv4Addr, SocketAddr},
     path::Path,

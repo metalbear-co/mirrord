@@ -1,8 +1,6 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-#[cfg(target_os = "linux")]
-use std::assert_matches::assert_matches;
 #[cfg(target_os = "macos")]
 use std::{env, fs};
 use std::{

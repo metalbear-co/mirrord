@@ -1,6 +1,6 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
-use std::{assert_matches::assert_matches, net::SocketAddr, path::Path, time::Duration};
+use std::{net::SocketAddr, path::Path, time::Duration};
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
