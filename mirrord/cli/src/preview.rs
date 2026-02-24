@@ -32,6 +32,7 @@ use mirrord_operator::{
     types::OPERATOR_OWNERSHIP_LABEL,
 };
 use mirrord_progress::{Progress, ProgressTracker};
+use oci_spec::distribution::Reference;
 use tracing::Level;
 use uuid::Uuid;
 
@@ -123,26 +124,54 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
         .into_iter()
         .filter(|session| session.spec.target == session_target)
     {
-        match session.status.as_ref().map(|s| &s.phase) {
-            // Failed session — delete it so we can take its place.
-            Some(PreviewSessionPhase::Failed) => {
-                let name = session.name_any();
-                if let Err(e) = api.delete(&name, &DeleteParams::default()).await {
-                    subtask.warning(&format!(
-                        "failed to delete failed session '{name}': {e}, \
-                         you may need to delete it manually or with `mirrord preview stop`",
-                    ));
+        let phase = session.status.as_ref().map(|s| s.phase);
+        // Check if we're replacing a failed/stale session or updating the config/image of an
+        // active session
+        if matches!(phase, None | Some(PreviewSessionPhase::Failed))
+            || images_match(&session.spec.image, image)?
+        {
+            let name = session.name_any();
+
+            subtask.warning(&format!(
+                "replacing existing session '{name}' with updated parameters",
+            ));
+
+            // Delete and wait for the existing session to be fully removed.
+            match tokio::time::timeout(
+                Duration::from_secs(60),
+                kube::runtime::wait::delete::delete_and_finalize(
+                    api.clone(),
+                    &name,
+                    &DeleteParams::default(),
+                ),
+            )
+            .await
+            {
+                Err(_) => {
+                    subtask.failure(None);
+                    return Err(CliError::PreviewDeleteFailed {
+                        name: name.clone(),
+                        reason: "timed out waiting for previous session to be deleted".to_owned(),
+                    });
                 }
-            }
-            // Active session — reject the duplicate.
-            _ => {
-                subtask.failure(None);
-                return Err(CliError::PreviewDuplicateSession {
-                    key: key.to_owned(),
-                    target: config_target.to_string(),
-                });
-            }
+                Ok(Err(e)) => {
+                    subtask.failure(None);
+                    return Err(CliError::PreviewDeleteFailed {
+                        name,
+                        reason: e.to_string(),
+                    });
+                }
+                _ => continue,
+            };
         }
+
+        // Reaching this point means we're not replacing an existing session, so we're trying to
+        // create a duplicate one.
+        subtask.failure(None);
+        return Err(CliError::PreviewDuplicateSession {
+            key: key.to_owned(),
+            target: config_target.to_string(),
+        });
     }
 
     let session_name = {
@@ -576,4 +605,35 @@ async fn create_preview_api(
     };
 
     Ok((client, api))
+}
+
+/// Returns `true` when two OCI image references point at the same repository, ignoring any tag or
+/// digest difference. Used to determine whether we should redeploy/update an existing preview env.
+fn images_match(a: &str, b: &str) -> CliResult<bool> {
+    let a: Reference = a
+        .parse()
+        .map_err(|e| CliError::PreviewInvalidImage(format!("{a}: {e}")))?;
+    let b: Reference = b
+        .parse()
+        .map_err(|e| CliError::PreviewInvalidImage(format!("{b}: {e}")))?;
+    Ok(a.registry() == b.registry() && a.repository() == b.repository())
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::images_match;
+
+    #[rstest]
+    #[case("myapp:v1", "myapp:v2", true)]
+    #[case("myapp:v1", "myapp:v1", true)]
+    #[case("myapp", "myapp:latest", true)]
+    #[case("ghcr.io/org/app:v1", "ghcr.io/org/app:v2", true)]
+    #[case("registry:5000/app:v1", "registry:5000/app:v2", true)]
+    #[case("myapp:v1", "otherapp:v1", false)]
+    #[case("ghcr.io/org/app:v1", "docker.io/org/app:v1", false)]
+    fn test_images_same_name(#[case] a: &str, #[case] b: &str, #[case] expected: bool) {
+        assert_eq!(images_match(a, b).unwrap(), expected);
+    }
 }
