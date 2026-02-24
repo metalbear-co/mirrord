@@ -1,2 +1,0 @@
-# ci
-CI related resources
