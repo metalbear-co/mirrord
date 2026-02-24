@@ -29,7 +29,7 @@ trait PathExt {
     /// trailing slash.
     ///
     /// [`Path::strip_prefix`] has a bug that also strips trailing
-    /// slashes ([`https://github.com/rust-lang/rust/issues/148267`]).
+    /// slashes (<https://github.com/rust-lang/rust/issues/148267>).
     /// Apparently Rust's path API hates trailing slashes so we have
     /// to do this overcomplicated trickery.
     fn strip_prefix_root(&self) -> Result<PathBuf, StripPrefixError>;

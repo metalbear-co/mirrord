@@ -13,7 +13,7 @@
 
 //! Loaded dynamically with your local process.
 //!
-//! Paired with [`mirrord-agent`], it makes your local process behave as if it was running in a
+//! Paired with `mirrord-agent`, it makes your local process behave as if it was running in a
 //! remote context.
 //!
 //! Check out the [Introduction](https://metalbear.com/mirrord/docs/overview/introduction/) guide to learn
