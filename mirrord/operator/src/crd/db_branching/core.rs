@@ -51,8 +51,7 @@ pub enum ConnectionSourceKind {
     },
 
     /// Value read directly from a Kubernetes Secret at resolution time.
-    /// `env` specifies which environment variable to override with the branch value.
-    Secret { name: String, key: String, env: String },
+    Secret { name: String, key: String },
 }
 
 impl From<TargetEnviromentVariableSource> for ConnectionSourceKind {
@@ -72,8 +71,8 @@ impl From<TargetEnviromentVariableSource> for ConnectionSourceKind {
                 container,
                 variable,
             },
-            TargetEnviromentVariableSource::Secret { name, key, env } => {
-                ConnectionSourceKind::Secret { name, key, env }
+            TargetEnviromentVariableSource::Secret { name, key } => {
+                ConnectionSourceKind::Secret { name, key }
             }
         }
     }
@@ -96,11 +95,10 @@ impl From<&TargetEnviromentVariableSource> for ConnectionSourceKind {
                 container: container.clone(),
                 variable: variable.clone(),
             },
-            TargetEnviromentVariableSource::Secret { name, key, env } => {
+            TargetEnviromentVariableSource::Secret { name, key } => {
                 ConnectionSourceKind::Secret {
                     name: name.clone(),
                     key: key.clone(),
-                    env: env.clone(),
                 }
             }
         }
@@ -121,10 +119,9 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
                         variable: v.clone(),
                     },
                 },
-                ParamSource::Secret { name, key, env } => ConnectionSourceKind::Secret {
+                ParamSource::Secret { name, key } => ConnectionSourceKind::Secret {
                     name: name.clone(),
                     key: key.clone(),
-                    env: env.clone(),
                 },
             })
         };

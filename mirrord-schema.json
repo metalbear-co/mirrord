@@ -2761,43 +2761,25 @@
       ]
     },
     "ParamSource": {
-      "description": "A connection parameter source: either a plain env var name (string) or a Kubernetes Secret reference (object).\n\nAs a string: `\"DB_HOST\"` — resolved using the parent `type` field (env or env_from).\n\nAs an object: `{ \"secret\": \"my-secret\", \"key\": \"password\" }` — read directly from a Kubernetes Secret.",
-      "oneOf": [
+      "description": "<!--${internal}--> A connection parameter source: either a plain env var name (string) or a Kubernetes Secret reference (object).\n\nAs a string: `\"DB_HOST\"` — resolved using the parent `type` field (env or env_from).\n\nAs an object: `{ \"secret\": \"my-secret\", \"key\": \"password\" }` — read directly from a Kubernetes Secret.",
+      "anyOf": [
         {
-          "type": "object",
-          "required": [
-            "Variable"
-          ],
-          "properties": {
-            "Variable": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
+          "type": "string"
         },
         {
           "type": "object",
           "required": [
-            "Secret"
+            "key",
+            "secret"
           ],
           "properties": {
-            "Secret": {
-              "type": "object",
-              "required": [
-                "key",
-                "name"
-              ],
-              "properties": {
-                "key": {
-                  "type": "string"
-                },
-                "name": {
-                  "type": "string"
-                }
-              }
+            "key": {
+              "type": "string"
+            },
+            "secret": {
+              "type": "string"
             }
-          },
-          "additionalProperties": false
+          }
         }
       ]
     },
