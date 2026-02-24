@@ -190,7 +190,7 @@ impl KubernetesAPI {
         target: &TargetConfig,
         mut config: ContainerConfig,
     ) -> Result<(ContainerParams, Option<RuntimeData>), KubeApiError> {
-        let runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
+        let mut runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
             Target::Targetless => None,
             path => path
                 .runtime_data(&self.client, target.namespace.as_deref())
