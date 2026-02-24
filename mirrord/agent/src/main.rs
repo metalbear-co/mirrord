@@ -43,8 +43,6 @@ mod reverse_dns;
 #[cfg(target_os = "linux")]
 mod runtime;
 #[cfg(target_os = "linux")]
-mod safejaq;
-#[cfg(target_os = "linux")]
 mod steal;
 #[cfg(target_os = "linux")]
 mod task;

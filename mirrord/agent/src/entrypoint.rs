@@ -49,7 +49,6 @@ use crate::{
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     reverse_dns::ReverseDnsApi,
     runtime::{self, get_container},
-    safejaq,
     steal::{StealerCommand, TcpStealerApi},
     task::{BgTaskRuntime, RuntimeNamespace, status::BgTaskStatus},
     util::{ClientId, protocol_version::ClientProtocolVersion},

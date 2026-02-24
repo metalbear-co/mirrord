@@ -4,11 +4,10 @@ use fancy_regex::Regex;
 use hyper::http::request::Parts;
 use mirrord_agent_env::envs::{JAQ_MEM_LIMIT, JAQ_TIME_LIMIT};
 use mirrord_protocol::tcp::{HttpMethodFilter, JqQuery};
+use safejaq::SafeJaq;
 use serde_json::Value;
 use serde_json_path::JsonPath;
 use tracing::Level;
-
-use crate::safejaq::SafeJaq;
 
 /// Currently supported filtering criterias.
 #[derive(Debug, Clone)]

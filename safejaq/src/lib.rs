@@ -5,8 +5,7 @@ use jaq_core::{
     load::{Arena, File, Loader},
 };
 use jaq_json::Val;
-use libc::rlim_t;
-use nix::sys::resource::Resource;
+use nix::{libc::rlim_t, sys::resource::Resource};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
@@ -200,7 +199,6 @@ pub fn evaluator_main(memory_limit: u64, time_limit: u64) -> ! {
 
     std::process::exit(0)
 }
-
 fn set_limits(memory_limit: rlim_t, time_limit: rlim_t) {
     // Set the total virtual memory limit
     let (soft_limit, _) =
