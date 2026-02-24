@@ -3,11 +3,9 @@
 
 use std::{collections::BTreeMap, path::PathBuf, sync::Once};
 
-use chrono::{Timelike, Utc};
 use k8s_openapi::api::core::v1::Service;
 use kube::{api::GroupVersionKind, discovery, Client, Config, Resource};
 use mirrord_operator::crd::MirrordOperatorCrd;
-pub use process::TestProcess;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest::{RequestBuilder, StatusCode};
 use rstest::*;
@@ -18,7 +16,6 @@ pub mod cluster_resource;
 pub mod ipv6;
 pub mod kube_service;
 pub mod port_forwarder;
-pub mod process;
 pub mod resource_guard;
 pub mod run_command;
 pub mod services;
@@ -51,12 +48,6 @@ pub fn random_string() -> String {
     Alphanumeric
         .sample_string(&mut rand::rng(), 7)
         .to_ascii_lowercase()
-}
-
-/// Returns string with time format of hh:mm:ss
-fn format_time() -> String {
-    let now = Utc::now();
-    format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
 }
 
 static CRYPTO_PROVIDER_INSTALLED: Once = Once::new();

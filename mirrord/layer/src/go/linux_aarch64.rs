@@ -120,7 +120,13 @@ fn post_go1_19(hook_manager: &mut HookManager, module_name: Option<&str>) {
 }
 
 /// Hooks for when hooking a post go 1.23 binary
-fn post_go1_23(hook_manager: &mut HookManager, module_name: Option<&str>) {
+fn post_go1_23(hook_manager: &mut HookManager, go_version: f32, module_name: Option<&str>) {
+    let original_symbol = if go_version >= 1.26 {
+        "internal/runtime/syscall/linux.Syscall6.abi0"
+    } else {
+        "internal/runtime/syscall.Syscall6.abi0"
+    };
+
     if let Some(module_name) = module_name {
         unsafe {
             FN_ASMCGOCALL = std::mem::transmute::<
@@ -135,7 +141,7 @@ fn post_go1_23(hook_manager: &mut HookManager, module_name: Option<&str>) {
         hook_symbol!(
             hook_manager,
             module_name,
-            "internal/runtime/syscall.Syscall6.abi0",
+            original_symbol,
             go_syscall_new_detour
         );
     } else {
@@ -149,11 +155,7 @@ fn post_go1_23(hook_manager: &mut HookManager, module_name: Option<&str>) {
                     .expect("found go but couldn't find runtime.asmcgocall please file a bug"),
             );
         }
-        hook_symbol!(
-            hook_manager,
-            "internal/runtime/syscall.Syscall6.abi0",
-            go_syscall_new_detour
-        );
+        hook_symbol!(hook_manager, original_symbol, go_syscall_new_detour);
     }
 }
 
@@ -169,7 +171,7 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
 
     if version >= 1.23 {
         trace!("found version >= 1.23");
-        post_go1_23(hook_manager, None);
+        post_go1_23(hook_manager, version, None);
     } else if version >= 1.19 {
         trace!("found version >= 1.19");
         post_go1_19(hook_manager, None);
@@ -186,7 +188,7 @@ pub(crate) fn enable_hooks_in_loaded_module(hook_manager: &mut HookManager, modu
 
     if version >= 1.23 {
         trace!("found version >= 1.23");
-        post_go1_23(hook_manager, Some(module_name.as_str()));
+        post_go1_23(hook_manager, version, Some(module_name.as_str()));
     } else if version >= 1.19 {
         trace!("found version >= 1.19");
         post_go1_19(hook_manager, Some(module_name.as_str()));

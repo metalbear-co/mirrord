@@ -39,7 +39,7 @@ use mirrord_protocol::{
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::{SipPatchOptions, sip_patch};
-pub use mirrord_tests::utils::process::TestProcess;
+pub use mirrord_test_utils::TestProcess;
 use rstest::fixture;
 use tokio::{
     io::AsyncWriteExt,
@@ -911,17 +911,17 @@ impl TestIntProxy {
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy)]
 pub enum GoVersion {
-    GO_1_23,
     GO_1_24,
     GO_1_25,
+    GO_1_26,
 }
 
 impl fmt::Display for GoVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let as_str = match self {
-            Self::GO_1_23 => "23",
             Self::GO_1_24 => "24",
             Self::GO_1_25 => "25",
+            Self::GO_1_26 => "26",
         };
         f.write_str(as_str)
     }
@@ -1525,6 +1525,7 @@ pub fn config_dir() -> PathBuf {
 /// 6. Given `extra_vars`
 ///
 /// `extra_vars` are also added to the [`ConfigContext`] for [`LayerConfig::resolve`].
+#[allow(unused_variables)]
 pub fn get_env(
     dylib_path: &Path,
     intproxy_addr: SocketAddr,

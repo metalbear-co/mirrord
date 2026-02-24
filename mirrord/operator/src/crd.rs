@@ -33,6 +33,7 @@ pub mod mysql_branching;
 pub mod patch;
 pub mod pg_branching;
 pub mod policy;
+pub mod preview;
 pub mod profile;
 pub mod session;
 pub mod steal_tls;
@@ -293,6 +294,30 @@ pub struct MirrordOperatorStatus {
     /// Status of connected remote clusters (only on primary with multi-cluster enabled).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connected_clusters: Option<Vec<ConnectedClusterStatus>>,
+
+    /// Active multi-cluster sessions (only on primary with multi-cluster enabled).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multi_cluster_sessions: Option<Vec<MultiClusterSessionInfo>>,
+}
+
+/// Display representation of a multi-cluster session for `mirrord operator status`.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MultiClusterSessionInfo {
+    /// Session ID (CRD name).
+    pub id: String,
+    /// Duration of the session in seconds.
+    pub duration_secs: u64,
+    /// User who created the session.
+    pub user: String,
+    /// Target identifier (e.g., "deployment/my-app").
+    pub target: String,
+    /// Namespace for the target.
+    pub namespace: String,
+    /// List of clusters this session spans.
+    pub clusters: Vec<String>,
+    /// Current phase of the session.
+    pub phase: String,
 }
 
 /// Status of a connected remote cluster.
@@ -462,6 +487,9 @@ pub enum NewOperatorFeature {
     MultiClusterPrimary,
     /// This operator can be connected to by a primary.
     MultiClusterRemote,
+
+    PreviewEnv,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -488,6 +516,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::MySqlBranching => "MySQL branching",
             NewOperatorFeature::PgBranching => "PostgreSQL branching",
             NewOperatorFeature::MongodbBranching => "MongoDB branching",
+            NewOperatorFeature::PreviewEnv => "preview environments",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
             NewOperatorFeature::BypassCiCertificateVerification => {
                 "BypassCiCertificateVerification"

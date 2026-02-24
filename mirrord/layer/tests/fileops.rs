@@ -1,3 +1,4 @@
+#![cfg(target_family = "unix")]
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
@@ -36,7 +37,7 @@ fn get_rw_test_file_env_vars() -> Vec<(&'static str, &'static str)> {
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
 async fn go_self_open(
-    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
+    #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();
@@ -259,7 +260,7 @@ async fn node_close(
 #[timeout(Duration::from_secs(60))]
 #[cfg(target_os = "linux")]
 async fn go_stat(
-    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
+    #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();
@@ -325,9 +326,9 @@ async fn go_stat(
 #[cfg(target_os = "macos")]
 async fn go_dir(
     #[values(
-        Application::GoDir(GoVersion::GO_1_23),
         Application::GoDir(GoVersion::GO_1_24),
-        Application::GoDir(GoVersion::GO_1_25)
+        Application::GoDir(GoVersion::GO_1_25),
+        Application::GoDir(GoVersion::GO_1_26)
     )]
     application: Application,
     dylib_path: &Path,
@@ -448,7 +449,7 @@ async fn go_dir(
 #[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "linux")]
 async fn go_dir_on_linux(
-    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
+    #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();
@@ -540,7 +541,7 @@ async fn go_dir_on_linux(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn go_dir_bypass(
-    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
+    #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();
@@ -580,7 +581,7 @@ async fn go_dir_bypass(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn read_go(
-    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
+    #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();
@@ -621,7 +622,7 @@ async fn read_go(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn write_go(
-    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
+    #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();
@@ -649,7 +650,7 @@ async fn write_go(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn lseek_go(
-    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
+    #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();
@@ -679,7 +680,7 @@ async fn lseek_go(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn faccessat_go(
-    #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
+    #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
     dylib_path: &Path,
 ) {
     let _tracing = init_tracing();

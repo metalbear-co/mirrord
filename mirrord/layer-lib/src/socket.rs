@@ -1,43 +1,63 @@
+#[cfg(target_os = "macos")]
+pub mod apple_dnsinfo;
 pub mod dns;
+pub mod dns_selector;
 pub mod hostname;
 pub mod ops;
 pub mod sockets;
 
-use std::{collections::HashSet, net::SocketAddr, ops::Deref, str::FromStr};
+#[cfg(windows)]
+use std::mem;
+use std::{
+    collections::HashSet,
+    net::{SocketAddr, ToSocketAddrs},
+    str::FromStr,
+};
 
 use bincode::{Decode, Encode};
 // Re-export dns module items
-pub use dns::{
-    REMOTE_DNS_REVERSE_MAPPING, clear_dns_reverse_mapping, dns_reverse_mapping_size,
-    get_hostname_for_ip, update_dns_reverse_mapping,
-};
+pub use dns::reverse_dns::get_hostname_for_ip;
+use libc::c_int;
 // Cross-platform socket constants
 #[cfg(unix)]
-use libc::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
+pub use libc::{AF_INET, AF_INET6, AF_UNIX, SOCK_DGRAM, SOCK_STREAM, sockaddr, socklen_t};
 use mirrord_config::feature::network::{
-    dns::{DnsConfig, DnsFilterConfig},
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
     outgoing::{OutgoingConfig, OutgoingFilterConfig},
 };
-use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
-use mirrord_protocol::outgoing::SocketAddress;
-// Re-export ops module items
-pub use ops::{
-    ConnectFn, ConnectResult, SendtoFn, connect_outgoing, connect_outgoing_udp,
-    create_outgoing_request, is_unix_address, prepare_outgoing_address, send_dns_patch, send_to,
-    update_socket_connected_state,
+use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnCloseRequest, PortUnsubscribe};
+use mirrord_protocol::{
+    DnsLookupError, ResolveErrorKindInternal, ResponseError, outgoing::SocketAddress,
 };
+#[cfg(unix)]
 use socket2::SockAddr;
 // Re-export sockets module items
 pub use sockets::{
     SHARED_SOCKETS_ENV_VAR, SOCKETS, SocketDescriptor, get_bound_address, get_connected_addresses,
     get_socket, get_socket_state, is_socket_in_state, is_socket_managed, register_socket,
-    remove_socket, set_socket_state, shared_sockets,
+    remove_socket,
 };
 #[cfg(windows)]
-use winapi::shared::ws2def::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
+pub use winapi::{
+    shared::{
+        ws2def::{
+            AF_INET, AF_INET6, AF_UNIX, SOCK_DGRAM, SOCK_STREAM, SOCKADDR, SOCKADDR_IN,
+            SOCKADDR_STORAGE,
+        },
+        ws2ipdef::SOCKADDR_IN6,
+    },
+    um::{winnt::INT, winsock2::WSAEFAULT},
+};
 
-pub use crate::{ConnectError, HookResult, proxy_connection::make_proxy_request_no_response};
+#[cfg(unix)]
+use crate::detour::DetourGuard;
+#[cfg(windows)]
+use crate::error::windows::{WindowsError, WindowsResult};
+pub use crate::{
+    ConnectError, HookError, HookResult, detour::Bypass,
+    proxy_connection::make_proxy_request_no_response, setup::setup,
+    socket::dns::remote_getaddrinfo,
+};
 
 /// Contains the addresses of a mirrord connected socket.
 ///
@@ -52,7 +72,11 @@ pub struct Connected {
     /// but use this address in the `recvfrom` handling of `fill_address`.
     pub remote_address: SocketAddress,
 
-    /// Local address (pod-wise)
+    /// Local address of the agent's socket.
+    ///
+    /// Whenever the user calls `getsockname`, this is the address we return to them.
+    ///
+    /// Not available in case of experimental non-blocking TCP connections.
     ///
     /// ## Example
     ///
@@ -65,11 +89,16 @@ pub struct Connected {
     ///
     /// We would set this ip as `1.2.3.4:{port}` in `bind`, where `{port}` is the user requested
     /// port.
-    pub local_address: SocketAddress,
+    pub local_address: Option<SocketAddress>,
 
     /// The address of the interceptor socket, this is what we're really connected to in the
     /// outgoing feature.
     pub layer_address: Option<SocketAddress>,
+
+    /// Unique ID of this connection.
+    ///
+    /// Only for sockets used for outgoing connections.
+    pub connection_id: Option<u128>,
 }
 
 /// Represents a [`SocketState`] where the user made a `bind` call, and we intercepted it.
@@ -97,15 +126,20 @@ pub struct Bound {
 pub enum SocketState {
     #[default]
     Initialized,
-    Bound(Bound),
+    Bound {
+        bound: Bound,
+        // if true, the socket has a mapped BUT should not be used to make port subscriptions
+        // used for listen_ports (COR-1014).
+        is_only_bound: bool,
+    },
     Listening(Bound),
     Connected(Connected),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
 pub enum SocketKind {
-    Tcp(i32),
-    Udp(i32),
+    Tcp(c_int),
+    Udp(c_int),
 }
 
 impl SocketKind {
@@ -118,24 +152,6 @@ impl SocketKind {
     }
 }
 
-impl TryFrom<i32> for SocketKind {
-    type Error = i32;
-
-    fn try_from(socket_type: i32) -> Result<Self, Self::Error> {
-        // Mask out any flags (like SOCK_NONBLOCK, SOCK_CLOEXEC) to get the base socket type
-        let base_type = socket_type & 0xFF;
-
-        match base_type {
-            SOCK_STREAM => Ok(SocketKind::Tcp(socket_type)),
-            SOCK_DGRAM => Ok(SocketKind::Udp(socket_type)),
-            _ => {
-                // Return error for unknown socket types instead of defaulting
-                Err(socket_type)
-            }
-        }
-    }
-}
-
 impl From<SocketKind> for NetProtocol {
     fn from(kind: SocketKind) -> Self {
         match kind {
@@ -145,25 +161,44 @@ impl From<SocketKind> for NetProtocol {
     }
 }
 
+impl TryFrom<c_int> for SocketKind {
+    #[cfg(unix)]
+    type Error = Bypass;
+    #[cfg(windows)]
+    type Error = i32;
+
+    fn try_from(type_: c_int) -> Result<Self, Self::Error> {
+        if (type_ & SOCK_STREAM) > 0 {
+            Ok(SocketKind::Tcp(type_))
+        } else if (type_ & SOCK_DGRAM) > 0 {
+            Ok(SocketKind::Udp(type_))
+        } else {
+            #[cfg(unix)]
+            return Err(Bypass::Type(type_));
+            #[cfg(windows)]
+            return Err(type_);
+        }
+    }
+}
+
 // TODO(alex): We could treat `sockfd` as being the same as `&self` for socket ops, we currently
 // can't do that due to how `dup` interacts directly with our `Arc<UserSocket>`, because we just
 // `clone` the arc, we end up with exact duplicates, but `dup` generates a new fd that we have no
 // way of putting inside the duplicated `UserSocket`.
-/// Cross-platform socket structure that holds socket metadata and state.
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Encode, Decode, Clone)]
 pub struct UserSocket {
-    pub domain: i32,
-    pub type_: i32,
-    pub protocol: i32,
+    pub domain: c_int,
+    pub type_: c_int,
+    pub protocol: c_int,
     pub state: SocketState,
     pub kind: SocketKind,
 }
 
 impl UserSocket {
     pub fn new(
-        domain: i32,
-        type_: i32,
-        protocol: i32,
+        domain: c_int,
+        type_: c_int,
+        protocol: c_int,
         state: SocketState,
         kind: SocketKind,
     ) -> Self {
@@ -176,100 +211,251 @@ impl UserSocket {
         }
     }
 
-    /// Gets the bound address from the socket state, if available
-    pub fn bound_address(&self) -> Option<Bound> {
-        match &self.state {
-            SocketState::Bound(bound) | SocketState::Listening(bound) => Some(*bound),
-            _ => None,
-        }
-    }
-
-    /// Gets the connected address from the socket state, if available
-    pub fn connected_address(&self) -> Option<&Connected> {
-        match &self.state {
-            SocketState::Connected(connected) => Some(connected),
-            _ => None,
-        }
-    }
-
-    /// Checks if the socket is in listening state
-    pub fn is_listening(&self) -> bool {
-        matches!(self.state, SocketState::Listening(_))
-    }
-
-    /// Checks if the socket is connected
-    pub fn is_connected(&self) -> bool {
-        matches!(self.state, SocketState::Connected(_))
-    }
-
-    /// Checks if the socket is bound
-    pub fn is_bound(&self) -> bool {
-        matches!(
-            self.state,
-            SocketState::Bound(_) | SocketState::Listening(_)
-        )
-    }
-
     /// Closes the socket and performs necessary cleanup.
     /// If this socket was listening and bound to a port, notifies agent to stop
     /// mirroring/stealing that port by sending PortUnsubscribe.
+    ///
+    /// **Important**
+    ///
+    /// Before calling this method, make sure that this socket does not have any living clones
+    /// (dup*) in the current process.
     pub fn close(&self) {
-        if self.is_listening()
-            && let Some(bound) = self.bound_address()
-        {
-            let port_unsubscribe = PortUnsubscribe {
-                port: bound.address.port(),
-                listening_on: bound.address,
-            };
-
-            // Send unsubscribe request to stop port operations
-            let _ = make_proxy_request_no_response(port_unsubscribe);
-
-            // For steal mode on Windows, add a small delay to allow agent processing
-            // This prevents race conditions where subsequent requests arrive before
-            // the agent has processed the port unsubscription
-            #[cfg(target_os = "windows")]
-            {
-                use crate::setup::layer_setup;
-
-                if layer_setup().incoming_mode().steal {
-                    // Small delay to ensure agent processes unsubscription
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                }
+        match self {
+            Self {
+                state: SocketState::Listening(bound),
+                kind: SocketKind::Tcp(..),
+                ..
+            } => {
+                let _ = make_proxy_request_no_response(PortUnsubscribe {
+                    port: bound.requested_address.port(),
+                    listening_on: bound.address,
+                });
             }
+            Self {
+                state:
+                    SocketState::Connected(Connected {
+                        connection_id: Some(id),
+                        ..
+                    }),
+                ..
+            } => {
+                let _ = make_proxy_request_no_response(OutgoingConnCloseRequest { conn_id: *id });
+            }
+            _ => {}
         }
     }
 }
 
-/// Trait for DNS resolution functionality that can be implemented by platform-specific layers
-pub trait DnsResolver {
-    type Error;
-
-    /// Resolve a hostname to IP addresses
-    fn resolve_hostname(
-        hostname: &str,
-        port: u16,
-        family: i32,
-        protocol: i32,
-    ) -> Result<Vec<std::net::IpAddr>, Self::Error>;
-
-    /// Check if remote DNS is enabled
-    fn remote_dns_enabled() -> bool;
-}
-
-/// Cross-platform address conversion utilities
+#[cfg(unix)]
 pub trait SocketAddrExt {
-    // Platform-specific implementations should provide their own address conversion methods
+    /// Converts a raw [`sockaddr`] pointer into a more _Rusty_ type
+    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> HookResult<Self>
+    where
+        Self: Sized;
 }
 
+#[cfg(unix)]
 impl SocketAddrExt for SockAddr {
-    // Platform-specific implementations should override this
+    fn try_from_raw(
+        raw_address: *const sockaddr,
+        address_length: socklen_t,
+    ) -> HookResult<SockAddr> {
+        unsafe {
+            SockAddr::try_init(|storage, len| {
+                // storage and raw_address size is dynamic.
+                (storage as *mut u8)
+                    .copy_from_nonoverlapping(raw_address as *const u8, address_length as usize);
+                *len = address_length;
+                Ok(())
+            })
+        }
+        .map_err(|_| HookError::Bypass(Bypass::AddressConversion))
+        .map(|((), address)| address)
+    }
 }
 
-/// Helper function to check if a port should be ignored (port 0)
-#[inline]
-pub fn is_ignored_port(addr: &SocketAddr) -> bool {
-    addr.port() == 0
+#[cfg(unix)]
+impl SocketAddrExt for SocketAddr {
+    fn try_from_raw(
+        raw_address: *const sockaddr,
+        address_length: socklen_t,
+    ) -> HookResult<SocketAddr> {
+        SockAddr::try_from_raw(raw_address, address_length).and_then(|address| {
+            address
+                .as_socket()
+                .ok_or(HookError::Bypass(Bypass::AddressConversion))
+        })
+    }
+}
+
+#[cfg(windows)]
+pub trait SocketAddrExt {
+    /// Converts a raw Windows SOCKADDR pointer into a more _Rusty_ type.
+    ///
+    /// # Safety
+    /// The caller must guarantee that `raw_address` points to readable memory for at least
+    /// `address_length` bytes containing a valid `SOCKADDR` (or larger) structure originating from
+    /// the OS. Passing dangling or undersized pointers causes undefined behavior.
+    unsafe fn try_from_raw(raw_address: *const SOCKADDR, address_length: INT) -> Option<Self>
+    where
+        Self: Sized;
+
+    /// Copies the socket address data into a Windows SOCKADDR structure for API calls.
+    ///
+    /// # Safety
+    /// `name` must point to writable memory of size `*namelen`, and `namelen` must be a valid
+    /// pointer to an `INT`. The buffer must be large enough for the address family stored in
+    /// `self`.
+    unsafe fn copy_to(&self, name: *mut SOCKADDR, namelen: *mut INT) -> WindowsResult<()>;
+
+    /// Creates an owned SOCKADDR representation of this address
+    fn to_sockaddr(&self) -> WindowsResult<(SOCKADDR_STORAGE, INT)> {
+        let mut storage: SOCKADDR_STORAGE = unsafe { mem::zeroed() };
+        let mut len = mem::size_of::<SOCKADDR_STORAGE>() as INT;
+        unsafe {
+            self.copy_to(&mut storage as *mut _ as *mut SOCKADDR, &mut len)?;
+        }
+        Ok((storage, len))
+    }
+}
+
+#[cfg(windows)]
+impl SocketAddrExt for SocketAddr {
+    unsafe fn try_from_raw(
+        raw_address: *const SOCKADDR,
+        address_length: INT,
+    ) -> Option<SocketAddr> {
+        unsafe { sockaddr_to_socket_addr(raw_address, address_length) }
+    }
+    unsafe fn copy_to(&self, name: *mut SOCKADDR, namelen: *mut INT) -> WindowsResult<()> {
+        unsafe { socketaddr_to_windows_sockaddr(self, name, namelen) }
+    }
+}
+
+#[cfg(windows)]
+impl SocketAddrExt for SocketAddress {
+    unsafe fn try_from_raw(raw_address: *const SOCKADDR, address_length: INT) -> Option<Self> {
+        unsafe { SocketAddr::try_from_raw(raw_address, address_length) }.map(SocketAddress::from)
+    }
+    unsafe fn copy_to(&self, name: *mut SOCKADDR, namelen: *mut INT) -> WindowsResult<()> {
+        let std_addr =
+            SocketAddr::try_from(self.clone()).map_err(|_| WindowsError::WinSock(WSAEFAULT))?;
+        unsafe { std_addr.copy_to(name, namelen) }
+    }
+    fn to_sockaddr(&self) -> WindowsResult<(SOCKADDR_STORAGE, INT)> {
+        let std_addr =
+            SocketAddr::try_from(self.clone()).map_err(|_| WindowsError::WinSock(WSAEFAULT))?;
+        std_addr.to_sockaddr()
+    }
+}
+/// Helper function to convert Windows SOCKADDR to Rust SocketAddr
+#[cfg(windows)]
+unsafe fn sockaddr_to_socket_addr(addr: *const SOCKADDR, addrlen: INT) -> Option<SocketAddr> {
+    if addr.is_null() || addrlen < mem::size_of::<SOCKADDR_IN>() as INT {
+        return None;
+    }
+
+    let sa_family = unsafe { (*addr).sa_family };
+    match sa_family as i32 {
+        AF_INET => {
+            if addrlen < mem::size_of::<SOCKADDR_IN>() as INT {
+                return None;
+            }
+            let addr_in = unsafe { &*(addr as *const SOCKADDR_IN) };
+            let ip =
+                unsafe { std::net::Ipv4Addr::from(u32::from_be(*addr_in.sin_addr.S_un.S_addr())) };
+            let port = u16::from_be(addr_in.sin_port);
+            Some(SocketAddr::new(ip.into(), port))
+        }
+        AF_INET6 => {
+            if addrlen < mem::size_of::<SOCKADDR_IN6>() as INT {
+                return None;
+            }
+            let addr_in6 = unsafe { &*(addr as *const SOCKADDR_IN6) };
+            let ip = unsafe { std::net::Ipv6Addr::from(*addr_in6.sin6_addr.u.Byte()) };
+            let port = u16::from_be(addr_in6.sin6_port);
+            Some(SocketAddr::new(ip.into(), port))
+        }
+        _ => None,
+    }
+}
+
+/// Convert SocketAddr to Windows SOCKADDR for address return functions
+///
+/// # Safety
+/// `name` and `namelen` must be valid writable pointers, and the caller must provide enough space
+/// in `name` for the resulting `SOCKADDR`.
+#[cfg(windows)]
+pub unsafe fn socketaddr_to_windows_sockaddr(
+    addr: &SocketAddr,
+    name: *mut SOCKADDR,
+    namelen: *mut INT,
+) -> WindowsResult<()> {
+    if name.is_null() || namelen.is_null() {
+        return Err(WindowsError::WinSock(WSAEFAULT));
+    }
+
+    let name_len_value = unsafe { *namelen };
+    if name_len_value < 0 {
+        return Err(WindowsError::WinSock(WSAEFAULT));
+    }
+
+    match addr {
+        SocketAddr::V4(addr_v4) => {
+            let size = mem::size_of::<SOCKADDR_IN>() as INT;
+            if name_len_value < size {
+                return Err(WindowsError::WinSock(WSAEFAULT));
+            }
+
+            let mut sockaddr_in: SOCKADDR_IN = unsafe { mem::zeroed() };
+            sockaddr_in.sin_family = AF_INET as u16;
+            sockaddr_in.sin_port = addr_v4.port().to_be();
+            unsafe {
+                *sockaddr_in.sin_addr.S_un.S_addr_mut() = u32::from(*addr_v4.ip()).to_be();
+            }
+
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    &sockaddr_in as *const _ as *const u8,
+                    name as *mut u8,
+                    size as usize,
+                );
+                *namelen = size;
+            }
+
+            Ok(())
+        }
+        SocketAddr::V6(addr_v6) => {
+            let size = mem::size_of::<SOCKADDR_IN6>() as INT;
+            if name_len_value < size {
+                return Err(WindowsError::WinSock(WSAEFAULT));
+            }
+
+            let mut sockaddr_in6: SOCKADDR_IN6 = unsafe { mem::zeroed() };
+            sockaddr_in6.sin6_family = AF_INET6 as u16;
+            sockaddr_in6.sin6_port = addr_v6.port().to_be();
+            sockaddr_in6.sin6_flowinfo = addr_v6.flowinfo();
+            // Note: scope_id is not available in SOCKADDR_IN6_LH
+
+            // Copy the IPv6 address bytes
+            let ip_bytes = addr_v6.ip().octets();
+            unsafe {
+                let bytes_ptr = sockaddr_in6.sin6_addr.u.Byte().as_ptr() as *mut u8;
+                std::ptr::copy_nonoverlapping(ip_bytes.as_ptr(), bytes_ptr, 16);
+            }
+
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    &sockaddr_in6 as *const _ as *const u8,
+                    name as *mut u8,
+                    size as usize,
+                );
+                *namelen = size;
+            }
+
+            Ok(())
+        }
+    }
 }
 
 /// Holds valid address that we should use to `connect_outgoing`.
@@ -366,11 +552,12 @@ impl OutgoingSelector {
     ///
     /// So if the user specified a selector with `0.0.0.0:0`, we're going to be always matching on
     /// it.
-    pub fn get_connection_through_with_resolver<R: DnsResolver>(
+    #[mirrord_layer_macro::instrument(level = "trace", ret)]
+    pub fn get_connection_through(
         &self,
         address: SocketAddr,
         protocol: NetProtocol,
-    ) -> Result<ConnectionThrough, R::Error> {
+    ) -> HookResult<ConnectionThrough> {
         let (filters, selector_is_local) = match self {
             Self::Unfiltered => return Ok(ConnectionThrough::Remote(address)),
             Self::Local(filters) => (filters, true),
@@ -378,14 +565,12 @@ impl OutgoingSelector {
         };
 
         for filter in filters {
-            if !filter.matches_with_resolver::<R>(address, protocol, selector_is_local)? {
+            if !filter.matches(address, protocol, selector_is_local)? {
                 continue;
             }
 
             return if selector_is_local {
-                // For local connections, platform-specific implementations should handle address
-                // resolution
-                Ok(ConnectionThrough::Local(address))
+                Self::get_local_address_to_connect(address).map(ConnectionThrough::Local)
             } else {
                 Ok(ConnectionThrough::Remote(address))
             };
@@ -394,10 +579,50 @@ impl OutgoingSelector {
         if selector_is_local {
             Ok(ConnectionThrough::Remote(address))
         } else {
-            // For local fallback, platform-specific implementations should handle address
-            // resolution
-            Ok(ConnectionThrough::Local(address))
+            Self::get_local_address_to_connect(address).map(ConnectionThrough::Local)
         }
+    }
+
+    /// Helper function that looks into
+    /// [`reverse_dns::REMOTE_DNS_REVERSE_MAPPING`](crate::socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING)
+    /// for `address`, so we can
+    /// retrieve the hostname and resolve it locally (when applicable).
+    ///
+    /// - `address`: the [`SocketAddr`] that was passed to `connect`;
+    ///
+    /// We only get here when the [`OutgoingSelector::Remote`] matched nothing, or when the
+    /// [`OutgoingSelector::Local`] matched on something.
+    ///
+    /// Returns 1 of 2 possibilities:
+    ///
+    /// 1. `address` is in
+    /// [`reverse_dns::REMOTE_DNS_REVERSE_MAPPING`](crate::socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING):
+    ///    resolves the hostname locally, then
+    /// return the first result
+    /// 2. `address` is **NOT** in
+    /// [`reverse_dns::REMOTE_DNS_REVERSE_MAPPING`](crate::socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING):
+    ///    return the `address` as is;
+    #[mirrord_layer_macro::instrument(level = "trace", ret)]
+    fn get_local_address_to_connect(address: SocketAddr) -> HookResult<SocketAddr> {
+        // Aviram: I think this whole function and logic is weird but I really need to get
+        // https://github.com/metalbear-co/mirrord/issues/2389 fixed and I don't have time to
+        // fully understand or refactor, and the logic is sound (if it's loopback, just connect to
+        // it)
+        if address.ip().is_loopback() {
+            return Ok(address);
+        }
+
+        let cached = get_hostname_for_ip(address.ip());
+        let Some(hostname) = cached else {
+            return Ok(address);
+        };
+
+        #[cfg(unix)]
+        let _guard = DetourGuard::new();
+        (hostname, address.port())
+            .to_socket_addrs()?
+            .next()
+            .ok_or(HookError::DNSNoName)
     }
 
     /// Returns whether this selector is configured for remote traffic
@@ -424,126 +649,8 @@ impl OutgoingSelector {
     }
 }
 
-/// Generated from [`DnsConfig`] provided in the [`LayerConfig`](mirrord_config::LayerConfig).
-/// Decides whether DNS queries are done locally or remotely.
-#[derive(Debug)]
-pub struct DnsSelector {
-    /// Filters provided in the config.
-    filters: Vec<AddressFilter>,
-    /// Whether a query matching one of [`Self::filters`] should be done locally.
-    filter_is_local: bool,
-}
-
-impl DnsSelector {
-    /// Creates a new DnsSelector from configuration
-    pub fn new(config: &DnsConfig) -> Self {
-        if !config.enabled {
-            return Self {
-                filters: Default::default(),
-                filter_is_local: false,
-            };
-        }
-
-        let (filters, filter_is_local) = match &config.filter {
-            Some(DnsFilterConfig::Local(filters)) => (Some(filters.deref()), true),
-            Some(DnsFilterConfig::Remote(filters)) => (Some(filters.deref()), false),
-            None => (None, true),
-        };
-
-        let filters = filters
-            .into_iter()
-            .flatten()
-            .map(|filter| {
-                filter
-                    .parse::<AddressFilter>()
-                    .expect("bad address filter, should be verified in the CLI")
-            })
-            .collect();
-
-        Self {
-            filters,
-            filter_is_local,
-        }
-    }
-
-    /// Returns whether DNS is enabled (based on whether filters exist)
-    pub fn is_enabled(&self) -> bool {
-        !self.filters.is_empty() || self.filter_is_local
-    }
-
-    /// Returns whether queries matching filters should be done locally
-    pub fn filter_is_local(&self) -> bool {
-        self.filter_is_local
-    }
-
-    /// Gets the filters
-    pub fn filters(&self) -> &[AddressFilter] {
-        &self.filters
-    }
-
-    /// Checks if a query should be handled locally or remotely.
-    /// Returns true if it should be handled locally.
-    pub fn should_be_local(&self, node: &str, port: u16) -> bool {
-        let matched = self
-            .filters
-            .iter()
-            .filter(|filter| {
-                let filter_port = filter.port();
-                filter_port == 0 || filter_port == port
-            })
-            .any(|filter| match filter {
-                AddressFilter::Port(..) => true,
-                AddressFilter::Name(filter_name, _) => filter_name == node,
-                AddressFilter::Socket(filter_socket) => {
-                    filter_socket.ip().is_unspecified()
-                        || Some(filter_socket.ip()) == node.parse().ok()
-                }
-                AddressFilter::Subnet(filter_subnet, _) => {
-                    let Ok(ip): std::result::Result<std::net::IpAddr, _> = node.parse() else {
-                        return false;
-                    };
-
-                    filter_subnet.contains(&ip)
-                }
-            });
-
-        matched == self.filter_is_local
-    }
-
-    /// Check if a DNS query should be resolved remotely (Windows layer compatibility)
-    pub fn should_resolve_remotely(&self, node: &str, port: u16) -> bool {
-        !self.should_be_local(node, port)
-    }
-
-    /// Bypasses queries that should be done locally (Unix layer compatibility)
-    /// This returns a platform-specific result type that can be used by the Unix layer
-    pub fn check_query_result(&self, node: &str, port: u16) -> CheckQueryResult {
-        if self.should_be_local(node, port) {
-            CheckQueryResult::Local
-        } else {
-            CheckQueryResult::Remote
-        }
-    }
-}
-
-impl From<&DnsConfig> for DnsSelector {
-    fn from(config: &DnsConfig) -> Self {
-        Self::new(config)
-    }
-}
-
-/// Result of DNS query checking - whether to handle locally or remotely
-#[derive(Debug, PartialEq, Eq)]
-pub enum CheckQueryResult {
-    /// Handle the query locally
-    Local,
-    /// Handle the query remotely
-    Remote,
-}
-
 /// [`ProtocolAndAddressFilter`] extension.
-/// Advanced filter matching with DNS resolution capability
-pub trait ProtocolAndAddressFilterExt {
+trait ProtocolAndAddressFilterExt {
     /// Matches the outgoing connection request (given as [[`SocketAddr`], [`NetProtocol`]] pair)
     /// against this filter.
     ///
@@ -551,34 +658,28 @@ pub trait ProtocolAndAddressFilterExt {
     ///
     /// This method may require a DNS resolution (when [`ProtocolAndAddressFilter::address`] is
     /// [`AddressFilter::Name`]). If remote DNS is disabled or `force_local_dns`
-    /// flag is used, the method uses local resolution `ToSocketAddrs`. Otherwise, it uses
-    /// remote resolution `remote_getaddrinfo`.
-    /// Matches the outgoing connection request against this filter with optional DNS resolution
-    fn matches_with_resolver<R: DnsResolver>(
+    /// flag is used, the method uses local resolution [`ToSocketAddrs`]. Otherwise, it uses
+    /// remote resolution [`remote_getaddrinfo`].
+    fn matches(
         &self,
         address: SocketAddr,
         protocol: NetProtocol,
         force_local_dns: bool,
-    ) -> Result<bool, R::Error>;
+    ) -> HookResult<bool>;
 }
 
 impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
-    fn matches_with_resolver<R: DnsResolver>(
+    fn matches(
         &self,
         address: SocketAddr,
         protocol: NetProtocol,
         force_local_dns: bool,
-    ) -> Result<bool, R::Error> {
-        // Check protocol match
-        let protocol_matches = matches!(
-            (&self.protocol, protocol),
-            (ProtocolFilter::Any, _)
-                | (ProtocolFilter::Tcp, NetProtocol::Stream)
-                | (ProtocolFilter::Udp, NetProtocol::Datagrams)
-        );
-        if !protocol_matches {
+    ) -> HookResult<bool> {
+        if let (ProtocolFilter::Tcp, NetProtocol::Datagrams)
+        | (ProtocolFilter::Udp, NetProtocol::Stream) = (self.protocol, protocol)
+        {
             return Ok(false);
-        }
+        };
 
         let port = self.address.port();
         if port != 0 && port != address.port() {
@@ -595,14 +696,41 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
 
         match &self.address {
             AddressFilter::Name(name, port) => {
-                let resolved_ips = if R::remote_dns_enabled() && !force_local_dns {
-                    R::resolve_hostname(name, *port, family, addr_protocol)?
+                let resolved_ips = if setup().remote_dns_enabled() && !force_local_dns {
+                    match remote_getaddrinfo(name.to_string(), *port, 0, family, 0, addr_protocol) {
+                        Ok(res) => res.into_iter().map(|(_, ip)| ip).collect(),
+                        Err(HookError::ResponseError(ResponseError::DnsLookup(
+                            DnsLookupError {
+                                kind: ResolveErrorKindInternal::NoRecordsFound(..),
+                            },
+                        ))) => vec![],
+                        Err(e) => {
+                            tracing::error!(error = ?e, "Remote resolution of OutgoingFilter failed");
+                            return Err(e);
+                        }
+                    }
                 } else {
+                    #[cfg(unix)]
+                    let _guard = DetourGuard::new();
+
                     // Use standard library DNS resolution as fallback
-                    use std::net::ToSocketAddrs;
                     match (name.as_str(), *port).to_socket_addrs() {
                         Ok(addresses) => addresses.map(|addr| addr.ip()).collect(),
-                        Err(_) => vec![], // No records found
+                        Err(e) => {
+                            let as_string = e.to_string();
+                            if as_string.contains("Temporary failure in name resolution")
+                                || as_string
+                                    .contains("nodename nor servname provided, or not known")
+                            {
+                                // There is no special `ErrorKind` for case when no records are
+                                // found. We catch this case based
+                                // on error message.
+                                vec![]
+                            } else {
+                                tracing::error!(error = ?e, "Local resolution of OutgoingFilter failed");
+                                return Err(e.into());
+                            }
+                        }
                     }
                 };
 

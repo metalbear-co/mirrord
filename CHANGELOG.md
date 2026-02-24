@@ -8,6 +8,60 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.190.0](https://github.com/metalbear-co/mirrord/tree/3.190.0) - 2026-02-23
+
+
+### Added
+
+- Add multi cluster session to the CLI status.
+- The `mirrord preview status` command will now show the remaining TTL of each
+  preview environment session.
+
+
+### Changed
+
+- Update reqwest dependency
+
+
+### Fixed
+
+- Fixed a Windows file-read regression where remote reads could return EOF too
+  early when reading beyond the first chunk of data.
+
+
+### Internal
+
+- Add xtask, change release to use it + improve macOS release time
+- Refactor and fix connect param tests.
+- Unify Layer crates - LayerSetup and some socket operations unified in
+  `layer-lib`
+- fix go26 windows e2e
+
+## [3.189.0](https://github.com/metalbear-co/mirrord/tree/3.189.0) - 2026-02-19
+
+
+### Added
+
+- Added feature.magic.aws — allows using the AWS CLI within mirrord with the remote pod's identity by default.
+- Inject mirrord session key headers into incoming requests.
+- mirrord now supports "Preview Environments" — a new type of mirrord session that runs directly in the cluster and can be shared with other users.
+
+### Fixed
+
+- Show all branches in the db-branching status command when no branch name is specified.
+- `mirrord dump` no longer hangs if the required `--ports` flag is not specified.
+  It also no longer reports an incorrect error when no target is specified.
+
+### Internal
+
+- Removed github pages.
+- Replaced Go 1.23 with Go 1.26 in test.
+- Updated the flake lockfile.
+- Changed linting to run on all platforms from one job using zigbuild.
+- Avoid running CI twice on PR + branch.
+- Removed chef from docker agent build, cache sccache in the GHA cache.
+
+
 ## [3.188.2](https://github.com/metalbear-co/mirrord/tree/3.188.2) - 2026-02-13
 
 

@@ -6,14 +6,14 @@ use k8s_openapi::api::{
 };
 use kube::{api::DeleteParams, Api, Client};
 use kube_service::KubeService;
+use mirrord_test_utils::format_time;
 use resource_guard::ResourceGuard;
 use rstest::*;
 use serde_json::json;
 
 use super::{cluster_resource, kube_service, resource_guard, TestWorkloadType};
 use crate::utils::{
-    default_env, format_time, kube_client, random_string, watch, PRESERVE_FAILED_ENV_NAME,
-    TEST_RESOURCE_LABEL,
+    default_env, kube_client, random_string, watch, PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
 };
 
 #[fixture]
