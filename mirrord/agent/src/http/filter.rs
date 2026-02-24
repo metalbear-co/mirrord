@@ -1,11 +1,14 @@
-use std::{fmt::Debug, io::Read};
+use std::{fmt::Debug, io::Read, ops::Not, sync::LazyLock, time::Duration};
 
 use fancy_regex::Regex;
 use hyper::http::request::Parts;
+use mirrord_agent_env::envs::{JAQ_MEM_LIMIT, JAQ_TIME_LIMIT};
 use mirrord_protocol::tcp::{HttpMethodFilter, JqQuery};
 use serde_json::Value;
 use serde_json_path::JsonPath;
 use tracing::Level;
+
+use crate::safejaq::SafeJaq;
 
 /// Currently supported filtering criterias.
 #[derive(Debug, Clone)]
@@ -98,7 +101,7 @@ impl TryFrom<&mirrord_protocol::tcp::HttpBodyFilter> for HttpBodyFilter {
 impl HttpFilter {
     /// Checks whether the given request [`Parts`] match this filter.
     #[tracing::instrument(level = Level::DEBUG, skip_all, fields(has_body = body.is_some()), ret)]
-    pub fn matches<T: Read + Copy>(&self, parts: &mut Parts, body: Option<T>) -> bool {
+    pub async fn matches<T: Read + Copy>(&self, parts: &mut Parts, body: Option<T>) -> bool {
         match self {
             Self::Header(filter) => {
                 let headers = parts.extensions.get_or_insert_with(|| {
@@ -150,14 +153,24 @@ impl HttpFilter {
                 // beginning. Need to make sure that we don't read
                 // anything from `body` before passing (copies of) it
                 // to other fns.
-                filters.iter().all(|f| f.matches(parts, body))
+                for filter in filters {
+                    if Box::pin(filter.matches(parts, body)).await.not() {
+                        return false;
+                    }
+                }
+                true
             }
             Self::Composite {
                 all: false,
                 filters,
             } => {
                 // Same as above
-                filters.iter().any(|f| f.matches(parts, body))
+                for filter in filters {
+                    if Box::pin(filter.matches(parts, body)).await {
+                        return true;
+                    }
+                }
+                false
             }
             Self::Body(filter) => {
                 let Some(body) = body else { return false };
@@ -184,8 +197,41 @@ impl HttpFilter {
                     }
                 }
             }
-            Self::HeaderJq(jq) => {
-                todo!();
+            Self::HeaderJq(filter) => {
+                const MEM_LIMIT: LazyLock<u64> =
+                    LazyLock::new(|| JAQ_MEM_LIMIT.from_env_or_default());
+
+                const TIME_LIMIT: LazyLock<Duration> =
+                    LazyLock::new(|| Duration::from_secs(JAQ_TIME_LIMIT.from_env_or_default()));
+
+                let safejaq = SafeJaq::new(*TIME_LIMIT, *MEM_LIMIT);
+
+                let headers = parts.extensions.get_or_insert_with(|| {
+                    let normalized = parts
+                        .headers
+                        .iter()
+                        .filter_map(|(header_name, header_value)| {
+                            header_value
+                                .to_str()
+                                .ok()
+                                .map(|header_value| format!("{header_name}: {header_value}"))
+                        })
+                        .collect::<Vec<_>>();
+
+                    NormalizedHeaders(normalized)
+                });
+
+                for header in headers.0.iter() {
+                    match safejaq.evaluate(&filter, &header.clone().into()).await {
+                        Ok(true) => return true,
+                        Ok(false) => (),
+                        Err(err) => {
+                            tracing::error!(?err, ?header, ?filter, "failed to run jaq query");
+                        }
+                    }
+                }
+
+                false
             }
         }
     }

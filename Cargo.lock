@@ -3959,6 +3959,7 @@ dependencies = [
  "indexmap 2.13.0",
  "jaq-core",
  "jaq-std",
+ "serde_json",
 ]
 
 [[package]]
@@ -4657,6 +4658,9 @@ dependencies = [
  "httparse",
  "hyper 1.8.1",
  "hyper-util",
+ "jaq-core",
+ "jaq-json",
+ "jaq-std",
  "k8s-cri",
  "libc",
  "mirrord-agent-env",

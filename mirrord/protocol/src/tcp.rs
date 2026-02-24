@@ -284,25 +284,15 @@ pub struct JqQuery(String);
 
 impl JqQuery {
     pub fn new(expr: &str) -> Result<Self, String> {
-        let program = File {
-            code: expr,
-            path: (),
-        };
-        let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
-        let arena = Arena::default();
+        let inner = || {
+            let program = File {
+                code: expr,
+                path: (),
+            };
+            let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
+            let arena = Arena::default();
 
-        let modules = loader.load(&arena, program).map_err(|errors| {
-            errors
-                .into_iter()
-                .map(|e| format!("{e:?}"))
-                .collect::<Vec<_>>()
-                .join("; ")
-        })?;
-
-        Compiler::default()
-            .with_funs(jaq_std::funs().chain(jaq_json::funs()))
-            .compile(modules)
-            .map_err(|errors| {
+            let modules = loader.load(&arena, program).map_err(|errors| {
                 errors
                     .into_iter()
                     .map(|e| format!("{e:?}"))
@@ -310,7 +300,33 @@ impl JqQuery {
                     .join("; ")
             })?;
 
-        Ok(JqQuery(expr.to_owned()))
+            Compiler::default()
+                .with_funs(jaq_std::funs().chain(jaq_json::funs()))
+                .compile(modules)
+                .map_err(|errors| {
+                    errors
+                        .into_iter()
+                        .map(|e| format!("{e:?}"))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                })?;
+
+            Ok(JqQuery(expr.to_owned()))
+        };
+
+        inner().inspect_err(|fail| {
+            tracing::error!(
+                r"
+                Something went wrong while compiling jaq query {expr:?}
+
+                >> Please check that the string supplied is a valid jaq expression according to
+                   https://gedenkt.at/jaq/manual/.
+
+                > Error:
+                {fail:#?}
+                "
+            )
+        })
     }
 }
 

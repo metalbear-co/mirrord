@@ -50,6 +50,8 @@ mod task;
 mod util;
 #[cfg(target_os = "linux")]
 mod vpn;
+#[cfg(target_os = "linux")]
+mod safejaq;
 
 #[cfg(target_os = "linux")]
 #[tokio::main(flavor = "current_thread")]

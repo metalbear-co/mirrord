@@ -37,7 +37,7 @@ tokio = { workspace = true, features = [
 async-pidfd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-nix = { workspace = true, features = ["mount", "sched", "user"] }
+nix = { workspace = true, features = ["mount", "sched", "user", "resource"] }
 clap = { workspace = true, features = ["env"] }
 actix-codec.workspace = true
 futures.workspace = true
@@ -75,6 +75,10 @@ procfs = "0.17.0"
 rcgen.workspace = true
 serde_json_path.workspace = true
 dns-lookup = "3"
+
+jaq-std.workspace = true
+jaq-core.workspace = true
+jaq-json = { workspace = true, features = ["serde_json"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 pem.workspace = true

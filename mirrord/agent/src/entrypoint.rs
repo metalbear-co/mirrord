@@ -49,6 +49,7 @@ use crate::{
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     reverse_dns::ReverseDnsApi,
     runtime::{self, get_container},
+    safejaq,
     steal::{StealerCommand, TcpStealerApi},
     task::{BgTaskRuntime, RuntimeNamespace, status::BgTaskStatus},
     util::{ClientId, protocol_version::ClientProtocolVersion},
@@ -140,6 +141,7 @@ impl State {
                 (true, Some(container_handle))
             }
             cli::Mode::Targetless => (false, None),
+            cli::Mode::JaqEval { .. } => unreachable!(),
         };
 
         let network_runtime = match container.as_ref().map(ContainerHandle::pid) {
@@ -1077,6 +1079,16 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
 /// termination) or be killed with a signal, the parent will a chance to clean iptables. If we leave
 /// the iptables dirty, the whole target pod is broken, probably forever.
 pub async fn main() -> AgentResult<()> {
+    let args = cli::parse_args();
+
+    if let cli::Mode::JaqEval {
+        memory_limit,
+        time_limit,
+    } = args.mode
+    {
+        safejaq::evaluator_main(memory_limit, time_limit)
+    }
+
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
 
@@ -1108,7 +1120,6 @@ pub async fn main() -> AgentResult<()> {
         env!("CARGO_PKG_VERSION")
     );
 
-    let args = cli::parse_args();
     let second_process = std::env::var(CHILD_PROCESS_ENV).is_ok();
 
     if args.mode.is_targetless() || second_process {

@@ -94,3 +94,9 @@ pub const MAX_BODY_BUFFER_TIMEOUT: CheckedEnv<u32> =
 /// When set, the agent will clean any existing iptables rules.
 pub const CLEAN_IPTABLES_ON_START: CheckedEnv<bool> =
     CheckedEnv::new("MIRRORD_AGENT_CLEAN_IPTABLES_ON_START");
+
+/// Jaq process memory limit (bytes)
+pub const JAQ_MEM_LIMIT: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_JAQ_MEM_LIMIT");
+
+/// Jaq process time limit (CPU seconds)
+pub const JAQ_TIME_LIMIT: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_JAQ_TIME_LIMIT");
