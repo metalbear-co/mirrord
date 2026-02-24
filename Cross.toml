@@ -10,4 +10,4 @@ volumes = ["WIZARD_DIST_DIR"]
 image = "ghcr.io/metalbear-co/ci-layer-build:${MIRRORD_LAYER_IMAGE_TAG:-latest}"
 
 [target.aarch64-unknown-linux-gnu]
-image = "ghcr.io/metalbear-co/ci-layer-build-aarch64:${MIRRORD_LAYER_IMAGE_TAG:-latest}"
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main"
