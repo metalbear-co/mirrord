@@ -933,20 +933,32 @@ Configuration for the database branching feature.
 
 A list of configurations for database branches.
 
+Using a connection URL:
 ```json
 {
   "feature": {
     "db_branches": [
       {
-        "name": "my-database-name",
-        "ttl_secs": 120,
         "type": "mysql",
-        "version": "8.0",
         "connection": {
-          "url": {
-            "type": "env",
-            "variable": "DB_CONNECTION_URL"
-          }
+          "url": { "type": "env", "variable": "DB_CONNECTION_URL" }
+        }
+      }
+    ]
+  }
+}
+```
+
+Using individual connection params:
+```json
+{
+  "feature": {
+    "db_branches": [
+      {
+        "type": "mysql",
+        "connection": {
+          "type": "env",
+          "params": { "host": "DB_HOST", "port": "DB_PORT", "database": "DB_NAME" }
         }
       }
     ]
@@ -986,19 +998,29 @@ information with the branch database's.
 
 Different ways of connecting to the source database.
 
-Example:
+Accepts three formats:
 
-A single complete connection URL stored in an environment variable accessible from
-the target pod template.
-
+Legacy URL (backward compatible):
 ```json
-{
-  "url": {
-    "type": "env",
-    "variable": "DB_CONNECTION_URL"
-  }
-}
+{ "url": { "type": "env", "variable": "DB_CONNECTION_URL" } }
 ```
+
+Flat URL:
+```json
+{ "type": "env", "url": "DB_CONNECTION_URL" }
+```
+
+Individual connection params:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
+```
+
+Connection parameters specified as individual environment variable names.
+
+Individual database connection parameter variable names.
+At least one parameter must be specified.
+
+The type of environment variable source for connection params.
 
 #### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
 
@@ -1095,19 +1117,29 @@ information with the branch database's.
 
 Different ways of connecting to the source database.
 
-Example:
+Accepts three formats:
 
-A single complete connection URL stored in an environment variable accessible from
-the target pod template.
-
+Legacy URL (backward compatible):
 ```json
-{
-  "url": {
-    "type": "env",
-    "variable": "DB_CONNECTION_URL"
-  }
-}
+{ "url": { "type": "env", "variable": "DB_CONNECTION_URL" } }
 ```
+
+Flat URL:
+```json
+{ "type": "env", "url": "DB_CONNECTION_URL" }
+```
+
+Individual connection params:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
+```
+
+Connection parameters specified as individual environment variable names.
+
+Individual database connection parameter variable names.
+At least one parameter must be specified.
+
+The type of environment variable source for connection params.
 
 #### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
 
@@ -1206,19 +1238,29 @@ information with the branch database's.
 
 Different ways of connecting to the source database.
 
-Example:
+Accepts three formats:
 
-A single complete connection URL stored in an environment variable accessible from
-the target pod template.
-
+Legacy URL (backward compatible):
 ```json
-{
-  "url": {
-    "type": "env",
-    "variable": "DB_CONNECTION_URL"
-  }
-}
+{ "url": { "type": "env", "variable": "DB_CONNECTION_URL" } }
 ```
+
+Flat URL:
+```json
+{ "type": "env", "url": "DB_CONNECTION_URL" }
+```
+
+Individual connection params:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
+```
+
+Connection parameters specified as individual environment variable names.
+
+Individual database connection parameter variable names.
+At least one parameter must be specified.
+
+The type of environment variable source for connection params.
 
 #### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
 
@@ -1803,7 +1845,7 @@ with your setup.
 }
 ```
 
-#### feature.magic.aws {#feature-magic-aws}
+### feature.magic.aws {#feature-magic-aws}
 
 The AWS CLI prefers local credentials (e.g. `~/.aws`, `AWS_PROFILE`) over the remote pod's
 identity (IAM role, instance profile, IRSA). When those local credentials are present, the
@@ -2650,17 +2692,17 @@ Controls the lifetime and creation behavior of preview sessions.
 }
 ```
 
-### feature.preview.creation_timeout_secs {#feature-preview-creation_timeout_secs}
+#### feature.preview.creation_timeout_secs {#feature-preview-creation_timeout_secs}
 
 How long (in seconds) the CLI waits for the preview session to become ready.
 If the session hasn't reached `Ready` within this time, the CLI deletes it.
 
-### feature.preview.image {#feature-preview-image}
+#### feature.preview.image {#feature-preview-image}
 
 Container image to run in the preview pod.
 The image must be pre-built and pushed to a registry accessible by the cluster.
 
-### feature.preview.ttl_mins {#feature-preview-ttl_mins}
+#### feature.preview.ttl_mins {#feature-preview-ttl_mins}
 
 How long (in minutes) the preview session is allowed to live after creation.
 The operator will terminate the session when this time elapses.
@@ -3132,3 +3174,4 @@ doing any network requests. This is useful when the system sets a proxy
 but you don't want mirrord to use it.
 This also applies to the mirrord process (as it just removes the env).
 If the remote pod sets this env, the mirrord process will still use it.
+
