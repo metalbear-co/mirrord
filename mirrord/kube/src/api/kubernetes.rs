@@ -198,12 +198,8 @@ impl KubernetesAPI {
                 .into(),
         };
 
-        let runtime_data = match runtime_data {
-            Some(mut runtime_data) => {
-                runtime_data.try_resolve_node_hostname(&self.client).await;
-                Some(runtime_data)
-            }
-            None => None,
+        if let Some(runtime_data) = runtime_data.as_mut() {
+            runtime_data.try_resolve_node_hostname(&self.client).await;
         };
 
         let pod_ips = runtime_data

@@ -249,14 +249,18 @@ impl RuntimeData {
     pub async fn try_resolve_node_hostname(&mut self, client: &Client) {
         const NODE_HOSTNAME_LABEL: &str = "kubernetes.io/hostname";
 
+        if self.node_hostname.is_some() {
+            return;
+        }
+
         let node_api: Api<Node> = Api::all(client.clone());
 
         let resolved = node_api
-            .get(&self.node_name)
+            .get_metadata(&self.node_name)
             .await
             .ok()
             .and_then(|node| node.metadata.labels)
-            .and_then(|labels| labels.get(NODE_HOSTNAME_LABEL).cloned());
+            .and_then(|mut labels| labels.remove(NODE_HOSTNAME_LABEL));
 
         self.node_hostname = resolved;
     }
