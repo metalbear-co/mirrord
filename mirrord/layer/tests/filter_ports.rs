@@ -3,6 +3,7 @@
 
 mod common;
 
+use core::assert_matches;
 use std::{io::Write, ops::Not, path::Path, time::Duration};
 
 pub use common::*;

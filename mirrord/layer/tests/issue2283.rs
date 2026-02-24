@@ -1,5 +1,6 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
+use core::assert_matches;
 use std::{net::SocketAddr, path::Path, time::Duration};
 
 use mirrord_protocol::{

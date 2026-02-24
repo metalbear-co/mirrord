@@ -2,6 +2,7 @@
 #![cfg(target_os = "linux")]
 #![warn(clippy::indexing_slicing)]
 
+use core::assert_matches;
 use std::{
     io::Write,
     net::{Ipv4Addr, SocketAddr},
