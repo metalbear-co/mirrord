@@ -79,6 +79,16 @@ pub struct SessionOwner {
     pub k8s_username: String,
 }
 
+impl fmt::Display for SessionOwner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}/{}@{}",
+            self.username, self.k8s_username, self.hostname,
+        )
+    }
+}
+
 /// Describes a target of a mirrord session.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]

@@ -39,12 +39,13 @@ tracing-subscriber.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
 regex.workspace = true
+http.workspace = true
+libc.workspace = true
 
 # Tokio for async pipe operations
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 [target.'cfg(unix)'.dependencies]
-libc.workspace = true
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
 frida-gum = { version = "0.17", features = ["auto-download", "std"] }
 
@@ -58,6 +59,7 @@ winapi.workspace = true
 dll-syringe.workspace = true
 anyhow.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }
+windows-strings.workspace = true
 
 [dev-dependencies]
 mirrord-intproxy-protocol = { path = "../intproxy/protocol" }

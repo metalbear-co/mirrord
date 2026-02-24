@@ -1,12 +1,13 @@
 use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
+#[cfg(target_os = "macos")]
+use std::os::fd::BorrowedFd;
 use std::{
-    collections::HashMap,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpStream},
     ops::Not,
     os::{
-        fd::{BorrowedFd, FromRawFd, IntoRawFd},
+        fd::{FromRawFd, IntoRawFd},
         unix::io::RawFd,
     },
     path::PathBuf,
@@ -20,40 +21,36 @@ use libc::{SAE_ASSOCID_ANY, c_uint, iovec, sa_endpoints_t, sae_associd_t, sae_co
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnMetadataRequest,
-    OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe,
+    PortSubscribe,
 };
-use mirrord_layer_lib::graceful_exit;
+#[cfg(target_os = "macos")]
+use mirrord_layer_lib::socket::apple_dnsinfo::*;
+use mirrord_layer_lib::{
+    detour::{Detour, OnceLockExt, OptionExt},
+    error::{HookError, HookResult},
+    graceful_exit,
+    proxy_connection::make_proxy_request_with_response,
+    socket::{
+        Bound, Connected, SocketAddrExt, SocketKind, SocketState,
+        dns::{remote_getaddrinfo, unix::getaddrinfo as getaddrinfo_lib},
+        ops::{ConnectResult, connect_common, connect_outgoing_common, nop_connect_fn},
+    },
+};
 use mirrord_protocol::{
-    dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
+    outgoing::SocketAddress,
 };
 use nix::{
     errno::Errno,
-    sys::socket::{SockaddrLike, SockaddrStorage, sockopt},
+    sys::socket::{SockaddrLike, SockaddrStorage},
 };
 use socket2::SockAddr;
 #[cfg(debug_assertions)]
 use tracing::Level;
-use tracing::{error, trace};
+use tracing::{error, trace, warn};
 
-#[cfg(target_os = "macos")]
-use super::apple_dnsinfo::*;
 use super::{hooks::*, *};
-use crate::{
-    common::make_proxy_request_with_response,
-    detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
-    error::HookError,
-    file::{self, OPEN_FILES},
-    mutex::Mutex,
-};
-
-/// Holds the pair of [`IpAddr`] with their hostnames, resolved remotely through
-/// [`remote_getaddrinfo`].
-///
-/// Used by [`connect_outgoing`] to retrieve the hostname from the address that the user called
-/// [`connect`] with, so we can resolve it locally when necessary.
-pub(crate) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<Mutex<HashMap<IpAddr, String>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+use crate::file::{self, OPEN_FILES};
 
 /// Hostname initialized from the agent with [`gethostname`].
 pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
@@ -82,43 +79,6 @@ static mut GETHOSTBYNAME_HOSTENT: hostent = hostent {
     h_length: 0,
     h_addr_list: ptr::null_mut(),
 };
-
-/// Helper struct for connect results where we want to hold the original errno
-/// when result is -1 (error) because sometimes it's not a real error (EINPROGRESS/EINTR)
-/// and the caller should have the original value.
-/// In order to use this struct correctly, after calling connect convert the return value using
-/// this `.into/.from` then the detour would call `.into` on the struct to convert to i32
-/// and would set the according errno.
-#[derive(Debug)]
-pub(super) struct ConnectResult {
-    result: i32,
-    error: Option<i32>,
-}
-
-impl From<i32> for ConnectResult {
-    fn from(result: i32) -> Self {
-        if result == -1 {
-            ConnectResult {
-                result,
-                error: Some(Errno::last_raw()),
-            }
-        } else {
-            ConnectResult {
-                result,
-                error: None,
-            }
-        }
-    }
-}
-
-impl From<ConnectResult> for i32 {
-    fn from(connect_result: ConnectResult) -> Self {
-        if let Some(error) = connect_result.error {
-            Errno::set_raw(error);
-        }
-        connect_result.result
-    }
-}
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
 #[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
@@ -427,7 +387,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
                 .copied()
                 .unwrap_or_else(|| requested_address.port());
 
-            common::make_proxy_request_with_response(PortSubscribe {
+            make_proxy_request_with_response(PortSubscribe {
                 listening_on: address,
                 subscription: setup.incoming_mode().subscription(mapped_port),
             })??;
@@ -536,191 +496,25 @@ pub(super) fn connectx(
 fn connect_outgoing<const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
-    mut user_socket_info: Arc<UserSocket>,
+    user_socket_info: Arc<UserSocket>,
     protocol: NetProtocol,
 ) -> Detour<ConnectResult> {
-    // Closure that performs the connection with mirrord messaging.
-    let remote_connection = |remote_address: SockAddr| {
-        // Prepare this socket to be intercepted.
-        let remote_address = SocketAddress::try_from(remote_address).unwrap();
-
-        let request = OutgoingConnectRequest {
-            remote_address: remote_address.clone(),
-            protocol,
-        };
-        let response = common::make_proxy_request_with_response(request)??;
-
-        let OutgoingConnectResponse {
-            connection_id,
-            mut layer_address,
-            in_cluster_address,
-        } = response;
-
-        if let SocketAddress::Ip(interceptor_addr) = &mut layer_address {
-            // Our socket can be bound to any local interface,
-            // so the interceptor listens on an unspecified IP address, e.g. 0.0.0.0
-            // We need to fill the exact IP here.
-            match &user_socket_info.state {
-                SocketState::Bound {
-                    bound: Bound { address, .. },
-                    ..
-                } => {
-                    if interceptor_addr.ip().is_unspecified() {
-                        if interceptor_addr.is_ipv4() {
-                            interceptor_addr.set_ip(Ipv4Addr::LOCALHOST.into())
-                        } else {
-                            interceptor_addr.set_ip(Ipv6Addr::LOCALHOST.into())
-                        }
-                    } else {
-                        interceptor_addr.set_ip(address.ip());
-                    }
-                }
-                _ if interceptor_addr.is_ipv4() => {
-                    interceptor_addr.set_ip(Ipv4Addr::LOCALHOST.into())
-                }
-                _ => interceptor_addr.set_ip(Ipv6Addr::LOCALHOST.into()),
-            }
-        }
-
-        // Connect to the socket prepared by the internal proxy.
-        let connect_result: ConnectResult = if CALL_CONNECT {
-            let layer_address = SockAddr::try_from(layer_address.clone())?;
-
+    let connect_fn = |layer_address: SockAddr| -> ConnectResult {
+        if CALL_CONNECT {
             unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
         } else {
-            ConnectResult {
-                result: 0,
-                error: None,
-            }
-        };
-
-        if let Some(raw_error) = connect_result.error
-            && raw_error != libc::EINTR
-            && raw_error != libc::EINPROGRESS
-        {
-            // We failed to connect to the internal proxy socket.
-            // This is most likely a bug,
-            // so let's try and include here as much info as possible.
-
-            let error = io::Error::from_raw_os_error(raw_error);
-            let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
-            let socket_name =
-                nix::sys::socket::getsockname::<SockaddrStorage>(sockfd).map(|sockaddr| {
-                    // `Debug` implementation is not very helpful, `ToString` produces a nice
-                    // address.
-                    sockaddr.to_string()
-                });
-            let socket_type = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType);
-            error!(
-                sockfd,
-                ?user_socket_info,
-                ?socket_type,
-                socket_addr = ?socket_name,
-
-                outgoing_connect_request_id = connection_id,
-                internal_proxy_socket_address = %layer_address,
-                agent_peer_address = %remote_address,
-                agent_local_address = in_cluster_address.as_ref().map(ToString::to_string),
-
-                raw_error,
-                %error,
-
-                ?SOCKETS,
-
-                "Failed to connect to an internal proxy socket. \
-                This is most likely a bug, please report it.",
-            );
-            return Detour::Error(error.into());
+            nop_connect_fn(layer_address)
         }
-
-        let connected = Connected {
-            connection_id: Some(connection_id),
-            remote_address,
-            local_address: in_cluster_address,
-            layer_address: Some(layer_address),
-        };
-
-        trace!("we are connected {connected:#?}");
-
-        Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
-        SOCKETS.lock()?.insert(sockfd, user_socket_info);
-
-        Detour::Success(connect_result)
     };
 
-    if remote_address.is_unix() {
-        let connect_result = remote_connection(remote_address)?;
-        Detour::Success(connect_result)
-    } else {
-        // Can't just connect to whatever `remote_address` is, as it might be a remotely resolved
-        // address, in a local connection context (or vice versa), so we let `remote_connection`
-        // handle this address trickery.
-        match crate::setup()
-            .outgoing_selector()
-            .get_connection_through(remote_address.as_socket()?, protocol)?
-        {
-            ConnectionThrough::Remote(addr) => {
-                let connect_result = remote_connection(SockAddr::from(addr))?;
-                Detour::Success(connect_result)
-            }
-            ConnectionThrough::Local(addr) => {
-                let rawish_local_addr = SockAddr::from(addr);
-
-                let connect_result = ConnectResult::from(unsafe {
-                    FN_CONNECT(sockfd, rawish_local_addr.as_ptr(), rawish_local_addr.len())
-                });
-
-                Detour::Success(connect_result)
-            }
-        }
-    }
-}
-
-/// Iterate through sockets, if any of them has the requested port that the application is now
-/// trying to connect to - then don't forward this connection to the agent, and instead of
-/// connecting to the requested address, connect to the actual address where the application
-/// is locally listening.
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-fn connect_to_local_address(
-    sockfd: RawFd,
-    user_socket_info: &UserSocket,
-    ip_address: SocketAddr,
-) -> Detour<Option<ConnectResult>> {
-    if crate::setup().outgoing_config().ignore_localhost {
-        Detour::Bypass(Bypass::IgnoredInIncoming(ip_address))
-    } else {
-        Detour::Success(
-            SOCKETS
-                .lock()?
-                .iter()
-                .find_map(|(_, socket)| match socket.state {
-                    SocketState::Listening(Bound {
-                        requested_address,
-                        address,
-                    }) => (requested_address.port() == ip_address.port()
-                        && socket.protocol == user_socket_info.protocol)
-                        .then(|| SockAddr::from(address)),
-                    SocketState::Bound { .. }
-                    | SocketState::Initialized
-                    | SocketState::Connected(_) => None,
-                })
-                .map(|rawish_remote_address| unsafe {
-                    FN_CONNECT(
-                        sockfd,
-                        rawish_remote_address.as_ptr(),
-                        rawish_remote_address.len(),
-                    )
-                })
-                .map(|connect_result| {
-                    if connect_result != 0 {
-                        Detour::Error::<ConnectResult>(io::Error::last_os_error().into())
-                    } else {
-                        Detour::Success(connect_result.into())
-                    }
-                })
-                .transpose()?,
-        )
-    }
+    connect_outgoing_common(
+        sockfd,
+        remote_address,
+        user_socket_info,
+        protocol,
+        connect_fn,
+    )
+    .into()
 }
 
 /// Handles 3 different cases, depending on if the outgoing traffic feature is enabled or not:
@@ -739,117 +533,12 @@ pub(super) fn connect(
     address_length: socklen_t,
 ) -> Detour<ConnectResult> {
     let remote_address = SockAddr::try_from_raw(raw_address, address_length)?;
-    let optional_ip_address = remote_address.as_socket();
-
-    let unix_streams = crate::setup().remote_unix_streams();
-
+    let connect_fn = |layer_address: SockAddr| -> ConnectResult {
+        unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
+    };
     trace!("in connect {:#?}", SOCKETS);
 
-    let user_socket_info = match SOCKETS.lock()?.remove(&sockfd) {
-        Some(socket) => socket,
-        None => {
-            // Socket was probably removed from `SOCKETS` in `bind` detour (as not interesting in
-            // terms of `incoming` feature).
-            // Here we just recreate `UserSocket` using domain and type fetched from the descriptor
-            // we have.
-            let domain = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd)
-                .map_err(io::Error::from)?
-                .family()
-                .map(|family| family as i32)
-                .unwrap_or(-1);
-            if domain != libc::AF_INET && domain != libc::AF_UNIX {
-                return Detour::Bypass(Bypass::Domain(domain));
-            }
-            // I really hate it, but nix seems to really make this API bad :(
-            let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
-            let type_ = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType)
-                .map_err(io::Error::from)? as i32;
-            let kind = SocketKind::try_from(type_)?;
-
-            Arc::new(UserSocket::new(domain, type_, 0, Default::default(), kind))
-        }
-    };
-
-    if let Some(ip_address) = optional_ip_address {
-        if crate::setup().experimental().tcp_ping4_mock && ip_address.port() == 7 {
-            let connect_result = ConnectResult {
-                result: 0,
-                error: None,
-            };
-            return Detour::Success(connect_result);
-        }
-
-        let ip = ip_address.ip();
-        if (ip.is_loopback() || ip.is_unspecified())
-            && let Some(result) = connect_to_local_address(sockfd, &user_socket_info, ip_address)?
-        {
-            // `result` here is always a success, as error and bypass are returned on the `?`
-            // above.
-            return Detour::Success(result);
-        }
-
-        if is_ignored_port(&ip_address) {
-            return Detour::Bypass(Bypass::IgnoredInIncoming(ip_address));
-        }
-
-        // Ports 50000 and 50001 are commonly used to communicate with sidecar containers.
-        let bypass_debugger_check = ip_address.port() == 50000 || ip_address.port() == 50001;
-        if bypass_debugger_check.not() && crate::setup().is_debugger_port(&ip_address) {
-            return Detour::Bypass(Bypass::IgnoredInIncoming(ip_address));
-        }
-    } else if remote_address.is_unix() {
-        let address = remote_address
-            .as_pathname()
-            .map(|path| path.to_string_lossy())
-            .or(remote_address
-                .as_abstract_namespace()
-                .map(String::from_utf8_lossy))
-            .map(String::from);
-
-        let handle_remotely = address
-            .as_ref()
-            .map(|addr| unix_streams.is_match(addr))
-            .unwrap_or(false);
-        if !handle_remotely {
-            return Detour::Bypass(Bypass::UnixSocket(address));
-        }
-    } else {
-        // We do not hijack connections of this address type - Bypass!
-        return Detour::Bypass(Bypass::Domain(remote_address.domain().into()));
-    }
-
-    let enabled_tcp_outgoing = crate::setup().outgoing_config().tcp;
-    let enabled_udp_outgoing = crate::setup().outgoing_config().udp;
-
-    match NetProtocol::from(user_socket_info.kind) {
-        NetProtocol::Datagrams if enabled_udp_outgoing => connect_outgoing::<true>(
-            sockfd,
-            remote_address,
-            user_socket_info,
-            NetProtocol::Datagrams,
-        ),
-
-        NetProtocol::Stream => match user_socket_info.state {
-            SocketState::Initialized | SocketState::Bound { .. }
-                if (optional_ip_address.is_some() && enabled_tcp_outgoing)
-                    || (remote_address.is_unix() && !unix_streams.is_empty()) =>
-            {
-                connect_outgoing::<true>(
-                    sockfd,
-                    remote_address,
-                    user_socket_info,
-                    NetProtocol::Stream,
-                )
-            }
-
-            SocketState::Initialized
-            | SocketState::Bound { .. }
-            | SocketState::Listening(_)
-            | SocketState::Connected(_) => Detour::Bypass(Bypass::DisabledOutgoing),
-        },
-
-        _ => Detour::Bypass(Bypass::DisabledOutgoing),
-    }
+    connect_common(sockfd, remote_address, connect_fn).into()
 }
 
 /// For IPv6 server / IPv4 client connections, translate IPv4
@@ -1015,7 +704,7 @@ pub(super) fn accept(
     let ConnMetadataResponse {
         remote_source,
         local_address,
-    } = common::make_proxy_request_with_response(ConnMetadataRequest {
+    } = make_proxy_request_with_response(ConnMetadataRequest {
         listener_address,
         peer_address,
     })?;
@@ -1079,52 +768,6 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
     Ok(())
 }
 
-/// Handles the remote communication part of [`getaddrinfo`], call this if you want to resolve a DNS
-/// through the agent, but don't need to deal with all the [`libc::getaddrinfo`] stuff.
-///
-/// # Note
-///
-/// This function updates the mapping in [`REMOTE_DNS_REVERSE_MAPPING`].
-#[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err)]
-pub(super) fn remote_getaddrinfo(
-    node: String,
-    service_port: u16,
-    flags: c_int,
-    family: c_int,
-    socktype: c_int,
-    protocol: c_int,
-) -> HookResult<Vec<(String, IpAddr)>> {
-    let family = match family {
-        libc::AF_INET => AddressFamily::Ipv4Only,
-        libc::AF_INET6 => AddressFamily::Ipv6Only,
-        _ => AddressFamily::Both,
-    };
-    let socktype = match socktype {
-        libc::SOCK_STREAM => SockType::Stream,
-        libc::SOCK_DGRAM => SockType::Dgram,
-        _ => SockType::Any,
-    };
-    let addr_info_list = common::make_proxy_request_with_response(GetAddrInfoRequestV2 {
-        node,
-        service_port,
-        flags,
-        family,
-        socktype,
-        protocol,
-    })?
-    .0?;
-
-    let mut remote_dns_reverse_mapping = REMOTE_DNS_REVERSE_MAPPING.lock()?;
-    addr_info_list.iter().for_each(|lookup| {
-        remote_dns_reverse_mapping.insert(lookup.ip, lookup.name.clone());
-    });
-
-    Ok(addr_info_list
-        .into_iter()
-        .map(|LookupRecord { name, ip }| (name, ip))
-        .collect())
-}
-
 /// Retrieves the result of calling `getaddrinfo` from a remote host (resolves remote DNS),
 /// converting the result into a `Box` allocated raw pointer of `libc::addrinfo` (which is basically
 /// a linked list of such type).
@@ -1142,110 +785,7 @@ pub(super) fn getaddrinfo(
     rawish_service: Option<&CStr>,
     raw_hints: Option<&libc::addrinfo>,
 ) -> Detour<*mut libc::addrinfo> {
-    let node: String = rawish_node
-        .bypass(Bypass::NullNode)?
-        .to_str()
-        .map_err(|fail| {
-            warn!(
-                "Failed converting `rawish_node` from `CStr` with {:#?}",
-                fail
-            );
-
-            Bypass::CStrConversion
-        })?
-        .into();
-
-    // Convert `service` to port
-    let service = rawish_service
-        .map(CStr::to_str)
-        .transpose()
-        .map_err(|fail| {
-            warn!(
-                "Failed converting `raw_service` from `CStr` with {:#?}",
-                fail
-            );
-
-            Bypass::CStrConversion
-        })?
-        // TODO: according to the man page, service could also be a service name, it doesn't have to
-        //   be a port number.
-        .and_then(|service| service.parse::<u16>().ok())
-        .unwrap_or(0);
-
-    let setup = crate::setup();
-    setup.dns_selector().check_query(&node, service)?;
-    let ipv6_enabled = setup.layer_config().feature.network.ipv6;
-
-    let raw_hints = raw_hints
-        .cloned()
-        .unwrap_or_else(|| unsafe { mem::zeroed() });
-
-    let libc::addrinfo {
-        ai_family,
-        ai_socktype,
-        ai_protocol,
-        ai_flags,
-        ..
-    } = raw_hints;
-
-    // Some apps (gRPC on Python) use `::` to listen on all interfaces, and usually that just means
-    // resolve on unspecified. So we just return that in IPv4, if IPv6 support is disabled.
-    let resolved_addr = if ipv6_enabled.not() && (node == "::") {
-        // name is "" because that's what happens in real flow.
-        vec![("".to_string(), IpAddr::V4(Ipv4Addr::UNSPECIFIED))]
-    } else {
-        remote_getaddrinfo(
-            node.clone(),
-            service,
-            ai_flags,
-            ai_family,
-            ai_socktype,
-            ai_protocol,
-        )?
-    };
-
-    let mut managed_addr_info = MANAGED_ADDRINFO.lock()?;
-    // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
-    let result = resolved_addr
-        .into_iter()
-        .map(|(name, address)| {
-            let rawish_sock_addr = SockAddr::from(SocketAddr::new(address, service));
-            let ai_addrlen = rawish_sock_addr.len();
-            let ai_family = rawish_sock_addr.family() as _;
-
-            // Must outlive this function, as it is stored as a pointer in `libc::addrinfo`.
-            let ai_addr = Box::into_raw(Box::new(unsafe { *rawish_sock_addr.as_ptr() }));
-            let ai_canonname = CString::new(name).unwrap().into_raw();
-
-            libc::addrinfo {
-                ai_flags: 0,
-                ai_family,
-                ai_socktype,
-                // TODO(alex): Don't just reuse whatever the user passed to us.
-                ai_protocol,
-                ai_addrlen,
-                ai_addr,
-                ai_canonname,
-                ai_next: ptr::null_mut(),
-            }
-        })
-        .rev()
-        .map(Box::new)
-        .map(Box::into_raw)
-        .inspect(|&raw| {
-            managed_addr_info.insert(raw as usize);
-        })
-        .reduce(|current, previous| {
-            // Safety: These pointers were just allocated using `Box::new`, so they should be
-            // fine regarding memory layout, and are not dangling.
-            unsafe { (*previous).ai_next = current };
-            previous
-        })
-        .ok_or(HookError::DNSNoName)?;
-
-    trace!("getaddrinfo -> result {:#?}", result);
-
-    Detour::Success(result)
+    getaddrinfo_lib(rawish_node, rawish_service, raw_hints)
 }
 
 /// Retrieves the `hostname` from the agent's `/etc/hostname` to be used by [`gethostname`]
