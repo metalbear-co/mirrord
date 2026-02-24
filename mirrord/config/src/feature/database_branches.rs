@@ -194,7 +194,7 @@ pub struct DatabaseBranchBaseConfig {
 ///
 /// Individual connection params with password from a Kubernetes Secret:
 /// ```json
-/// { "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
+/// { "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password", "env": "DB_PASSWORD" }, "database": "DB_NAME" } }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema)]
 #[schemars(rename = "DbBranchingConnectionSource")]
@@ -324,8 +324,9 @@ pub struct ConnectionParamsConfig {
 ///
 /// As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
 ///
-/// As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-/// Kubernetes Secret.
+/// As an object: `{ "secret": "my-secret", "key": "password", "env": "DB_PASSWORD" }` — read
+/// directly from a Kubernetes Secret. The `env` field specifies which environment variable
+/// mirrord should override with the branch value.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ParamSource {
@@ -334,6 +335,7 @@ pub enum ParamSource {
         #[serde(rename = "secret")]
         name: String,
         key: String,
+        env: String,
     },
 }
 
@@ -385,6 +387,7 @@ pub enum TargetEnviromentVariableSource {
     Secret {
         name: String,
         key: String,
+        env: String,
     },
 }
 
@@ -607,7 +610,7 @@ mod tests {
                 "host": "DB_HOST",
                 "port": "DB_PORT",
                 "user": "DB_USER",
-                "password": { "secret": "rds-credentials", "key": "password" },
+                "password": { "secret": "rds-credentials", "key": "password", "env": "DB_PASSWORD" },
                 "database": "DB_NAME"
             }
         }"#;
@@ -623,7 +626,8 @@ mod tests {
                     config.params.password,
                     Some(ParamSource::Secret {
                         name: "rds-credentials".to_string(),
-                        key: "password".to_string()
+                        key: "password".to_string(),
+                        env: "DB_PASSWORD".to_string(),
                     })
                 );
                 assert_eq!(
@@ -646,6 +650,7 @@ mod tests {
                 password: Some(ParamSource::Secret {
                     name: "my-secret".to_string(),
                     key: "pass".to_string(),
+                    env: "DB_PASSWORD".to_string(),
                 }),
                 database: Some(ParamSource::Variable("DB_NAME".to_string())),
             },
