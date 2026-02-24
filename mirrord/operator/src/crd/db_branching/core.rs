@@ -11,6 +11,7 @@ use crate::crd::session::SessionOwner;
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::large_enum_variant)]
 pub enum ConnectionSource {
     /// A complete connection URL.
     Url(ConnectionSourceKind),

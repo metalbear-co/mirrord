@@ -744,6 +744,66 @@
         }
       ]
     },
+    "ConnectionParamsConfig": {
+      "description": "Connection parameters specified as individual environment variable names.",
+      "type": "object",
+      "required": [
+        "params",
+        "type"
+      ],
+      "properties": {
+        "params": {
+          "$ref": "#/definitions/ConnectionParamsVars"
+        },
+        "type": {
+          "$ref": "#/definitions/ConnectionSourceType"
+        }
+      }
+    },
+    "ConnectionParamsVars": {
+      "description": "Individual database connection parameter variable names. At least one parameter must be specified.",
+      "type": "object",
+      "properties": {
+        "database": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "host": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ConnectionSourceType": {
+      "description": "The type of environment variable source for connection params.",
+      "type": "string",
+      "enum": [
+        "env",
+        "env_from"
+      ]
+    },
     "ContainerFileConfig": {
       "description": "Unstable: `mirrord container` command specific config.",
       "type": "object",
@@ -1224,23 +1284,35 @@
       ]
     },
     "DatabaseBranchesConfig": {
-      "description": "A list of configurations for database branches.\n\n```json { \"feature\": { \"db_branches\": [ { \"name\": \"my-database-name\", \"ttl_secs\": 120, \"type\": \"mysql\", \"version\": \"8.0\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ] } } ```",
+      "description": "A list of configurations for database branches.\n\nUsing a connection URL: ```json { \"feature\": { \"db_branches\": [ { \"type\": \"mysql\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ] } } ```\n\nUsing individual connection params: ```json { \"feature\": { \"db_branches\": [ { \"type\": \"mysql\", \"connection\": { \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"database\": \"DB_NAME\" } } } ] } } ```",
       "type": "array",
       "items": {
         "$ref": "#/definitions/DatabaseBranchConfig"
       }
     },
     "DbBranchingConnectionSource": {
-      "description": "Different ways of connecting to the source database.\n\nExample:\n\nA single complete connection URL stored in an environment variable accessible from the target pod template.\n\n```json { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } ```",
+      "description": "Different ways of connecting to the source database.\n\nAccepts three formats:\n\nLegacy URL (backward compatible): ```json { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } ```\n\nFlat URL: ```json { \"type\": \"env\", \"url\": \"DB_CONNECTION_URL\" } ```\n\nIndividual connection params: ```json { \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"user\": \"DB_USER\", \"password\": \"DB_PASSWORD\", \"database\": \"DB_NAME\" } } ```",
       "oneOf": [
         {
           "type": "object",
           "required": [
-            "url"
+            "Url"
           ],
           "properties": {
-            "url": {
+            "Url": {
               "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "Params"
+          ],
+          "properties": {
+            "Params": {
+              "$ref": "#/definitions/ConnectionParamsConfig"
             }
           },
           "additionalProperties": false
