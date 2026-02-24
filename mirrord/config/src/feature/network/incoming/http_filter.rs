@@ -140,7 +140,7 @@ pub struct HttpFilterConfig {
     /// (see {#agent-jaq_memory_limit}, {#agent-jaq_time_limit}). The
     /// evaluation is aborted if those limits are exceeded and the
     /// filter does not match.
-    #[config(env = "MIRRORD_HTTP_HEADER_FILTER")]
+    #[config(env = "MIRRORD_HTTP_HEADER_FILTER_JQ")]
     pub header_filter_jq: Option<String>,
 
     /// ##### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
