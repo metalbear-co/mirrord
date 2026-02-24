@@ -13,6 +13,7 @@ use std::{
 };
 
 use futures::StreamExt;
+use k8s_openapi::chrono::Utc;
 use kube::{
     Api, ResourceExt,
     api::{DeleteParams, ListParams, ObjectMeta, PostParams},
@@ -370,14 +371,25 @@ async fn preview_status(args: PreviewStatusArgs) -> CliResult<()> {
             let status = match session.status.as_ref().map(|s| &s.phase) {
                 Some(PreviewSessionPhase::Initializing) => "initializing".to_owned(),
                 Some(PreviewSessionPhase::Waiting) => "waiting".to_owned(),
-                Some(PreviewSessionPhase::Ready) => "running".to_owned(),
+                Some(PreviewSessionPhase::Ready) => {
+                    let remaining = session
+                        .status
+                        .as_ref()
+                        .and_then(|s| s.expires_at.as_ref())
+                        .and_then(|expires_at| (expires_at.0 - Utc::now()).to_std().ok())
+                        .map(|d| Duration::from_secs(d.as_secs()));
+                    match remaining {
+                        Some(d) => format!("running ({} remaining)", humantime::format_duration(d)),
+                        None => "running".to_owned(),
+                    }
+                }
                 Some(PreviewSessionPhase::Failed) => {
                     let msg = session
                         .status
                         .as_ref()
                         .and_then(|s| s.failure_message.as_deref())
                         .unwrap_or("unknown");
-                    format!("failed ({msg})")
+                    format!("stopped ({msg})")
                 }
                 Some(PreviewSessionPhase::Unknown) => "unknown".to_owned(),
                 None => "pending".to_owned(),

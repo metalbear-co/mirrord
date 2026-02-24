@@ -8,23 +8,38 @@ pub(crate) mod hostname;
 pub(crate) mod ops;
 pub(crate) mod utils;
 
-use std::{net::SocketAddr, sync::OnceLock};
+use std::{
+    net::SocketAddr,
+    ops::Not,
+    ptr,
+    sync::{Arc, OnceLock},
+};
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_intproxy_protocol::{ConnMetadataRequest, ConnMetadataResponse, PortSubscribe};
+use mirrord_intproxy_protocol::{
+    ConnMetadataRequest, ConnMetadataResponse, OutgoingConnMetadataRequest, PortSubscribe,
+};
 use mirrord_layer_lib::{
+    detour::{Bypass, OptionExt},
     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
-    setup::{layer_setup, windows::NetworkHookConfig},
+    setup::{LayerSetup, NetworkHookConfig, setup},
     socket::{
-        Bound, ConnectResult, Connected, SocketDescriptor, SocketKind, SocketState,
-        get_bound_address, get_connected_addresses, get_socket, get_socket_state,
-        hostname::{get_remote_hostname, remote_dns_resolve_via_proxy},
-        is_socket_in_state, is_socket_managed, register_socket, remove_socket, send_to,
-        set_socket_state,
+        Bound, Connected, SOCKETS, SocketAddrExt, SocketState, UserSocket,
+        dns::{
+            remote_dns_resolve_via_proxy,
+            windows::{
+                MANAGED_ADDRINFO, free_managed_addrinfo, getaddrinfo, utils::ManagedAddrInfoAny,
+            },
+        },
+        get_connected_addresses, get_socket,
+        hostname::remote_hostname_string,
+        is_socket_managed,
+        ops::{ConnectResult, send_to},
+        register_socket, remove_socket,
+        sockets::socket_kind_from_type,
     },
 };
-use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
 use winapi::{
     ctypes::c_void,
@@ -32,7 +47,8 @@ use winapi::{
         minwindef::{BOOL, FALSE, INT, TRUE},
         winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA},
         ws2def::{
-            ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SIO_GET_EXTENSION_FUNCTION_POINTER, SOCKADDR,
+            ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, LPWSABUF, SIO_GET_EXTENSION_FUNCTION_POINTER,
+            SOCKADDR,
         },
     },
     um::{
@@ -41,21 +57,18 @@ use winapi::{
         winsock2::{
             HOSTENT, INVALID_SOCKET, IPPORT_RESERVED, LPWSAOVERLAPPED_COMPLETION_ROUTINE, SOCKET,
             SOCKET_ERROR, WSA_IO_PENDING, WSAEACCES, WSAECONNABORTED, WSAECONNREFUSED, WSAEFAULT,
-            WSAGetLastError, WSAOVERLAPPED, WSASetLastError, fd_set, timeval,
+            WSAGetLastError, WSAOVERLAPPED, WSASend, WSASetLastError,
         },
     },
 };
 use windows_strings::{PCSTR, PCWSTR};
 
 use self::{
-    hostname::{
-        MANAGED_ADDRINFO, free_managed_addrinfo, handle_hostname_ansi, handle_hostname_unicode,
-        is_remote_hostname, windows_getaddrinfo,
-    },
+    hostname::{handle_hostname_ansi, handle_hostname_unicode, is_remote_hostname},
     ops::{WSABufferData, get_connectex_original, hook_connectex_extension, log_connection_result},
     utils::{
-        AutoCloseSocket, ERROR_SUCCESS_I32, ManagedAddrInfoAny, SocketAddrExtWin,
-        create_thread_local_hostent, determine_local_address, get_actual_bound_address,
+        AutoCloseSocket, ERROR_SUCCESS_I32, create_thread_local_hostent, determine_local_address,
+        get_actual_bound_address,
     },
 };
 use crate::{apply_hook, process::elevation::require_elevation};
@@ -130,27 +143,6 @@ type GetComputerNameExWType =
     unsafe extern "system" fn(name_type: u32, lpBuffer: *mut u16, nSize: *mut u32) -> BOOL;
 static GET_COMPUTER_NAME_EX_W_ORIGINAL: OnceLock<&GetComputerNameExWType> = OnceLock::new();
 
-type WSAStartupType = unsafe extern "system" fn(wVersionRequested: u16, lpWSAData: *mut u8) -> i32;
-static WSA_STARTUP_ORIGINAL: OnceLock<&WSAStartupType> = OnceLock::new();
-
-// Add WSACleanup hook to complete Winsock lifecycle management
-type WSACleanupType = unsafe extern "system" fn() -> i32;
-static WSA_CLEANUP_ORIGINAL: OnceLock<&WSACleanupType> = OnceLock::new();
-
-// ioctlsocket for socket I/O control (used for non-blocking mode)
-type IoCtlSocketType = unsafe extern "system" fn(s: SOCKET, cmd: i32, argp: *mut u32) -> i32;
-static IOCTL_SOCKET_ORIGINAL: OnceLock<&IoCtlSocketType> = OnceLock::new();
-
-// select for socket readiness monitoring
-type SelectType = unsafe extern "system" fn(
-    nfds: i32,
-    readfds: *mut fd_set,
-    writefds: *mut fd_set,
-    exceptfds: *mut fd_set,
-    timeout: *const timeval,
-) -> i32;
-static SELECT_ORIGINAL: OnceLock<&SelectType> = OnceLock::new();
-
 type WSAIoctlType = unsafe extern "system" fn(
     s: SOCKET,
     dwIoControlCode: u32,
@@ -163,10 +155,6 @@ type WSAIoctlType = unsafe extern "system" fn(
     lpCompletionRoutine: LPWSAOVERLAPPED_COMPLETION_ROUTINE,
 ) -> INT;
 static WSA_IOCTL_ORIGINAL: OnceLock<&WSAIoctlType> = OnceLock::new();
-
-// WSAGetLastError for getting detailed error information
-type WSAGetLastErrorType = unsafe extern "system" fn() -> i32;
-static WSA_GET_LAST_ERROR_ORIGINAL: OnceLock<&WSAGetLastErrorType> = OnceLock::new();
 
 // WSASocket for advanced socket creation (used by Node.js internally)
 type WSASocketType = unsafe extern "system" fn(
@@ -202,37 +190,6 @@ type WSAConnectType = unsafe extern "system" fn(
 ) -> INT;
 static WSA_CONNECT_ORIGINAL: OnceLock<&WSAConnectType> = OnceLock::new();
 
-type WSAAcceptType = unsafe extern "system" fn(
-    s: SOCKET,
-    addr: *mut SOCKADDR,
-    addrlen: *mut INT,
-    lpfnCondition: *mut u8,
-    dwCallbackData: usize,
-) -> SOCKET;
-static WSA_ACCEPT_ORIGINAL: OnceLock<&WSAAcceptType> = OnceLock::new();
-
-type WSASendType = unsafe extern "system" fn(
-    s: SOCKET,
-    lpBuffers: *mut u8,
-    dwBufferCount: u32,
-    lpNumberOfBytesSent: *mut u32,
-    dwFlags: u32,
-    lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8,
-) -> INT;
-static WSA_SEND_ORIGINAL: OnceLock<&WSASendType> = OnceLock::new();
-
-type WSARecvType = unsafe extern "system" fn(
-    s: SOCKET,
-    lpBuffers: *mut u8,
-    dwBufferCount: u32,
-    lpNumberOfBytesRecvd: *mut u32,
-    lpFlags: *mut u32,
-    lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8,
-) -> INT;
-static WSA_RECV_ORIGINAL: OnceLock<&WSARecvType> = OnceLock::new();
-
 type WSASendToType = unsafe extern "system" fn(
     s: SOCKET,
     lpBuffers: *mut u8,
@@ -245,36 +202,6 @@ type WSASendToType = unsafe extern "system" fn(
     lpCompletionRoutine: *mut u8,
 ) -> INT;
 static WSA_SEND_TO_ORIGINAL: OnceLock<&WSASendToType> = OnceLock::new();
-
-type WSARecvFromType = unsafe extern "system" fn(
-    s: SOCKET,
-    lpBuffers: *mut u8,
-    dwBufferCount: u32,
-    lpNumberOfBytesRecvd: *mut u32,
-    lpFlags: *mut u32,
-    lpFrom: *mut SOCKADDR,
-    lpFromlen: *mut INT,
-    lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8,
-) -> INT;
-static WSA_RECV_FROM_ORIGINAL: OnceLock<&WSARecvFromType> = OnceLock::new();
-
-// Data transfer function types
-type RecvType = unsafe extern "system" fn(s: SOCKET, buf: *mut i8, len: INT, flags: INT) -> INT;
-static RECV_ORIGINAL: OnceLock<&RecvType> = OnceLock::new();
-
-type SendType = unsafe extern "system" fn(s: SOCKET, buf: *const i8, len: INT, flags: INT) -> INT;
-static SEND_ORIGINAL: OnceLock<&SendType> = OnceLock::new();
-
-type RecvFromType = unsafe extern "system" fn(
-    s: SOCKET,
-    buf: *mut i8,
-    len: INT,
-    flags: INT,
-    from: *mut SOCKADDR,
-    fromlen: *mut INT,
-) -> INT;
-static RECV_FROM_ORIGINAL: OnceLock<&RecvFromType> = OnceLock::new();
 
 type SendToType = unsafe extern "system" fn(
     s: SOCKET,
@@ -289,28 +216,6 @@ static SEND_TO_ORIGINAL: OnceLock<&SendToType> = OnceLock::new();
 // Socket management function types
 type CloseSocketType = unsafe extern "system" fn(s: SOCKET) -> INT;
 static CLOSE_SOCKET_ORIGINAL: OnceLock<&CloseSocketType> = OnceLock::new();
-
-type ShutdownType = unsafe extern "system" fn(s: SOCKET, how: INT) -> INT;
-static SHUTDOWN_ORIGINAL: OnceLock<&ShutdownType> = OnceLock::new();
-
-// Socket option function types
-type SetSockOptType = unsafe extern "system" fn(
-    s: SOCKET,
-    level: INT,
-    optname: INT,
-    optval: *const i8,
-    optlen: INT,
-) -> INT;
-static SET_SOCK_OPT_ORIGINAL: OnceLock<&SetSockOptType> = OnceLock::new();
-
-type GetSockOptType = unsafe extern "system" fn(
-    s: SOCKET,
-    level: INT,
-    optname: INT,
-    optval: *mut i8,
-    optlen: *mut INT,
-) -> INT;
-static GET_SOCK_OPT_ORIGINAL: OnceLock<&GetSockOptType> = OnceLock::new();
 
 /// Windows socket hook for socket creation
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
@@ -345,640 +250,6 @@ unsafe extern "system" fn socket_detour(af: INT, r#type: INT, protocol: INT) -> 
     }
 
     socket
-}
-
-/// Windows socket hook for bind
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT {
-    tracing::trace!("bind_detour -> socket: {}, namelen: {}", s, namelen);
-
-    let original = BIND_ORIGINAL.get().unwrap();
-
-    // Define bind function before early returns so it can be reused
-    let bind_fn = |socket: SOCKET, addr: *const SOCKADDR, addr_len: INT, reason: &str| -> INT {
-        let res = unsafe { original(socket, addr, addr_len) };
-
-        if res != ERROR_SUCCESS_I32 {
-            tracing::error!("bind_detour -> {} failed", reason);
-        } else {
-            tracing::debug!("bind_detour -> {} succeeded", reason);
-        }
-
-        res
-    };
-
-    let raw_addr_opt = SocketAddr::try_from_raw(name, namelen);
-
-    // Early return for non-managed sockets
-    if !is_socket_managed(s) {
-        return bind_fn(s, name, namelen, "non-managed socket");
-    }
-
-    // Parse the requested address
-    let requested_addr = match raw_addr_opt {
-        Some(addr) => addr,
-        None => {
-            tracing::error!("bind_detour -> failed to convert address");
-            return bind_fn(s, name, namelen, "address parse error");
-        }
-    };
-
-    tracing::info!(
-        "bind_detour -> mirrord binding socket to {}",
-        requested_addr
-    );
-
-    // Check configuration-based early returns
-    let setup = layer_setup();
-    let incoming_config = setup.incoming_config();
-
-    if incoming_config.ignore_localhost && requested_addr.ip().is_loopback() {
-        tracing::debug!("bind_detour -> ignoring localhost bind");
-        return bind_fn(s, name, namelen, "localhost ignored");
-    }
-
-    // Determine the appropriate local binding address
-    let local_addr = determine_local_address(requested_addr);
-
-    // Convert to Windows sockaddr for actual binding
-    let (local_addr_storage, local_addr_len) = match local_addr.to_sockaddr() {
-        Ok((storage, len)) => (storage, len),
-        Err(e) => {
-            tracing::error!("bind_detour -> failed to convert local address: {}", e);
-            return unsafe { original(s, name, namelen) };
-        }
-    };
-
-    // Attempt primary bind
-    let bind_result = bind_fn(
-        s,
-        &local_addr_storage as *const _ as *const SOCKADDR,
-        local_addr_len,
-        "primary bind",
-    );
-
-    // Handle bind failures
-    if bind_result != ERROR_SUCCESS_I32 {
-        // Check for access denied error which may indicate UAC privilege issues
-        // Check if this is a privileged port that requires elevation
-        if WindowsError::wsa_last_error() == WSAEACCES && local_addr.port() < IPPORT_RESERVED as u16
-        {
-            // graceful_exit if process is not elevated.
-            require_elevation(&format!(
-                "mirrord failed to bind to privileged port {} - insufficient UAC privileges. On Windows, binding to privileged ports (< {}) requires running as Administrator or with elevated UAC privileges. Please restart your application with elevated privileges.",
-                local_addr.port(),
-                IPPORT_RESERVED
-            ));
-            // if we are not elevated, this line will not be reachable as require_elevation calls
-            // graceful_exit!()
-        }
-
-        // return other errors for caller handling
-        return bind_result;
-    }
-
-    // Get the actual bound address and update socket state
-    let actual_bound_addr = unsafe { get_actual_bound_address(s, requested_addr) };
-
-    let bound = Bound {
-        requested_address: requested_addr,
-        address: actual_bound_addr,
-    };
-    set_socket_state(s, SocketState::Bound(bound));
-
-    tracing::debug!(
-        "bind_detour -> socket {} bound locally to {} for requested {}",
-        s,
-        actual_bound_addr,
-        requested_addr
-    );
-
-    ERROR_SUCCESS_I32
-}
-
-/// Windows socket hook for listen
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
-    tracing::trace!("listen_detour -> socket: {}, backlog: {}", s, backlog);
-
-    // Start listening on the local socket first (like Unix layer)
-    let original = LISTEN_ORIGINAL.get().unwrap();
-    let listen_result = unsafe { original(s, backlog) };
-
-    // Check if this socket is managed by mirrord and get bound state
-    let bound_state = match get_socket_state(s) {
-        Some(SocketState::Bound(bound)) => bound,
-        _ => {
-            tracing::debug!(
-                "listen_detour -> socket {} is not in Bound state, using original listen",
-                s
-            );
-            return listen_result;
-        }
-    };
-
-    tracing::info!(
-        "listen_detour -> mirrord socket {} transitioning to listening on {} (requested: {})",
-        s,
-        bound_state.address,
-        bound_state.requested_address
-    );
-
-    // Check if incoming traffic is enabled
-    let setup = layer_setup();
-    if matches!(
-        setup.incoming_config().mode,
-        mirrord_config::feature::network::incoming::IncomingMode::Off
-    ) {
-        tracing::debug!("listen_detour -> incoming traffic is disabled");
-        return listen_result;
-    }
-
-    if setup.targetless() {
-        tracing::warn!("listen_detour -> running targetless, binding locally instead");
-        return listen_result;
-    }
-
-    if listen_result != ERROR_SUCCESS_I32 {
-        tracing::error!("listen_detour -> listen() failed");
-        return listen_result;
-    }
-
-    // Register with the agent for incoming traffic (like Unix layer PortSubscribe)
-    let mapped_port = setup
-        .incoming_config()
-        .port_mapping
-        .get_by_left(&bound_state.requested_address.port())
-        .copied()
-        .unwrap_or_else(|| bound_state.requested_address.port());
-
-    let subscription = setup.incoming_mode().subscription(mapped_port);
-
-    let port_subscribe = PortSubscribe {
-        listening_on: bound_state.address,
-        subscription,
-    };
-
-    // Make the request to the agent
-    match make_proxy_request_with_response(port_subscribe) {
-        Ok(Ok(_)) => {
-            // Success - update socket state to listening
-            set_socket_state(s, SocketState::Listening(bound_state));
-
-            // this log message is expected by some E2E tests
-            tracing::debug!("daemon subscribed port {}", bound_state.address.port());
-
-            tracing::info!(
-                "listen_detour -> socket {} now listening through mirrord agent on port {}",
-                s,
-                mapped_port
-            );
-
-            listen_result
-        }
-        Ok(Err(e)) => {
-            tracing::error!("listen_detour -> agent subscription failed: {}", e);
-
-            // Set WSA error and return failure
-            unsafe { WSASetLastError(WSAECONNREFUSED) };
-            SOCKET_ERROR
-        }
-        Err(e) => {
-            tracing::error!("listen_detour -> failed to make proxy request: {}", e);
-
-            // Set WSA error and return failure
-            unsafe { WSASetLastError(WSAECONNREFUSED) };
-            SOCKET_ERROR
-        }
-    }
-}
-
-/// Windows socket hook for connect
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT {
-    tracing::trace!("connect_detour -> socket: {}, namelen: {}", s, namelen);
-
-    // Log whether this socket is managed and what kind
-    if let Some(user_socket) = get_socket(s) {
-        tracing::debug!(
-            "connect_detour -> socket {} is managed, kind: {:?}",
-            s,
-            user_socket.kind
-        );
-    } else {
-        tracing::debug!("connect_detour -> socket {} is not managed", s);
-    }
-
-    let socket_addr = match SocketAddr::try_from_raw(name, namelen) {
-        Some(addr) => addr,
-        None => {
-            tracing::error!(
-                "connect_detour -> failed to convert raw sockaddr for socket {}",
-                s
-            );
-            return SOCKET_ERROR;
-        }
-    };
-    let raw_addr = SockAddr::from(socket_addr);
-
-    let connect_fn = |s: SocketDescriptor, addr: SockAddr| {
-        let original = CONNECT_ORIGINAL.get().unwrap();
-        let result = unsafe { original(s, addr.as_ptr() as *const _, addr.len()) };
-        log_connection_result(result, "connect_detour", addr);
-        ConnectResult::from(result)
-    };
-
-    match ops::attempt_proxy_connection(s, name, namelen, "connect_detour", connect_fn) {
-        Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
-            tracing::error!(
-                "connect_detour -> socket {} connect target {:?} is unreachable: {}",
-                s,
-                raw_addr,
-                e
-            );
-            return SOCKET_ERROR;
-        }
-        Err(e) => {
-            tracing::debug!(
-                "connect_detour -> socket {} not managed, using original. err: {}",
-                s,
-                e
-            );
-        }
-        Ok(connect_result) => {
-            return connect_result.result();
-        }
-    }
-
-    // fallback to original
-    let original = CONNECT_ORIGINAL.get().unwrap();
-    unsafe { original(s, name, namelen) }
-}
-
-/// Windows socket hook for accept
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn accept_detour(
-    s: SOCKET,
-    addr: *mut SOCKADDR,
-    addrlen: *mut INT,
-) -> SOCKET {
-    tracing::trace!("accept_detour -> socket: {}", s);
-
-    // Call original accept first
-    let original = ACCEPT_ORIGINAL.get().unwrap();
-    let accepted_socket = unsafe { original(s, addr, addrlen) };
-
-    if accepted_socket == INVALID_SOCKET {
-        return accepted_socket;
-    }
-
-    // Wrap the accepted socket in RAII wrapper for automatic cleanup on error
-    let auto_close_socket = AutoCloseSocket::new(accepted_socket);
-
-    // Check if the listening socket is managed by mirrord
-    let bound_addr = match get_bound_address(s) {
-        Some(addr) => addr,
-        None => {
-            tracing::trace!("accept_detour -> socket {} not managed by mirrord", s);
-            return auto_close_socket.release();
-        }
-    };
-
-    // Check if listening socket is in listening state
-    if !is_socket_in_state(s, |state| matches!(state, SocketState::Listening(_))) {
-        tracing::trace!("accept_detour -> socket {} not in listening state", s);
-        return auto_close_socket.release();
-    }
-
-    tracing::info!(
-        "accept_detour -> accepted socket {} from mirrord-managed listener",
-        accepted_socket
-    );
-
-    // Get peer address from the accepted connection (this will be intproxy's address)
-    let peer_address = match utils::get_peer_address_from_socket(auto_close_socket.get()) {
-        Ok(addr) => addr,
-        Err(e) => {
-            tracing::error!("accept_detour -> failed to get peer address: {}", e);
-            // Socket will be automatically closed by AutoCloseSocket::drop
-            unsafe { WSASetLastError(WSAECONNABORTED) };
-            return INVALID_SOCKET;
-        }
-    };
-
-    // Make ConnMetadataRequest to get the real remote source address
-    let metadata_response = match make_proxy_request_with_response(ConnMetadataRequest {
-        listener_address: bound_addr,
-        peer_address,
-    }) {
-        Ok(ConnMetadataResponse {
-            remote_source,
-            local_address,
-        }) => {
-            tracing::info!(
-                "accept_detour -> got metadata: remote_source={}, local_address={}",
-                remote_source,
-                local_address
-            );
-            (remote_source, local_address)
-        }
-        Err(e) => {
-            tracing::error!("accept_detour -> failed to get connection metadata: {}", e);
-            // Like Unix layer, fail the accept if we can't get metadata
-            unsafe { WSASetLastError(WSAECONNABORTED) };
-            return INVALID_SOCKET;
-        }
-    };
-
-    let (remote_source, _local_address) = metadata_response;
-
-    // Get socket information from the listening socket
-    if let Some(listening_socket) = get_socket(s) {
-        let socket_type = match listening_socket.kind {
-            SocketKind::Tcp(t) => t,
-            SocketKind::Udp(t) => t,
-        };
-
-        // Register the accepted socket with mirrord
-        let connected = Connected {
-            remote_address: SocketAddress::Ip(remote_source),
-            local_address: SocketAddress::Ip(bound_addr),
-            layer_address: None,
-        };
-
-        register_socket(
-            auto_close_socket.get(),
-            listening_socket.domain,
-            socket_type,
-            0,
-        );
-        set_socket_state(auto_close_socket.get(), SocketState::Connected(connected));
-
-        tracing::info!(
-            "accept_detour -> registered accepted socket {} with mirrord (peer: {}, local: {})",
-            auto_close_socket.get(),
-            remote_source,
-            bound_addr
-        );
-    }
-
-    // Fill in the address structure with the real remote address (not intproxy's address)
-    if !addr.is_null() && !addrlen.is_null() {
-        match remote_source.copy_to(addr, addrlen) {
-            Ok(()) => {
-                tracing::trace!(
-                    "accept_detour -> filled address with real remote source: {}",
-                    remote_source
-                );
-            }
-            Err(e) => {
-                tracing::warn!("accept_detour -> failed to fill address: {}", e);
-            }
-        }
-    }
-
-    // Success! Release the socket from automatic cleanup and return it
-    auto_close_socket.release()
-}
-
-/// Windows socket hook for getsockname
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn getsockname_detour(
-    s: SOCKET,
-    name: *mut SOCKADDR,
-    namelen: *mut INT,
-) -> INT {
-    tracing::trace!("getsockname_detour -> socket: {}", s);
-
-    // Check if this socket is managed by mirrord and get its bound address
-    if let Some(bound_addr) = get_bound_address(s) {
-        match bound_addr.copy_to(name, namelen) {
-            Ok(()) => {
-                tracing::trace!(
-                    "getsockname_detour -> returned mirrord bound address: {}",
-                    bound_addr
-                );
-
-                return ERROR_SUCCESS_I32;
-            }
-
-            Err(err) => {
-                tracing::debug!(
-                    "getsockname_detour -> failed to convert bound address, error: {}",
-                    err
-                );
-
-                match err {
-                    WindowsError::WinSock(error_code) => unsafe {
-                        WSASetLastError(error_code);
-                    },
-
-                    WindowsError::Windows(error_code) => {
-                        tracing::warn!(
-                            "getsockname_detour -> unexpected windows error converting bound address: error {}",
-                            error_code
-                        );
-                    }
-                };
-
-                return SOCKET_ERROR;
-            }
-        }
-    } else if let Some((_, local_addr, layer_addr)) = get_connected_addresses(s) {
-        // Return the layer address for connected sockets if available, otherwise local address
-        let addr_to_return = layer_addr.as_ref().unwrap_or(&local_addr);
-        match addr_to_return.copy_to(name, namelen) {
-            Ok(()) => {
-                tracing::trace!("getsockname_detour -> returned mirrord local address");
-                // Success
-                return ERROR_SUCCESS_I32;
-            }
-
-            Err(err) => {
-                tracing::debug!(
-                    "getsockname_detour -> failed to convert layer address: {}",
-                    err
-                );
-
-                match err {
-                    WindowsError::WinSock(error_code) => unsafe {
-                        WSASetLastError(error_code);
-                    },
-
-                    WindowsError::Windows(error_code) => {
-                        tracing::warn!(
-                            "getsockname_detour -> unexpected windows error converting layer address: error {}",
-                            error_code
-                        );
-                    }
-                };
-
-                return SOCKET_ERROR;
-            }
-        }
-    } else if is_socket_managed(s) {
-        // For other managed socket states, fall back to original
-        tracing::trace!(
-            "getsockname_detour -> managed socket not in bound/connected state, using original"
-        );
-    }
-
-    // Fall back to original function for non-managed sockets or errors
-    let original = GET_SOCK_NAME_ORIGINAL.get().unwrap();
-
-    unsafe { original(s, name, namelen) }
-}
-
-/// Windows socket hook for getpeername
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn getpeername_detour(
-    s: SOCKET,
-    name: *mut SOCKADDR,
-    namelen: *mut INT,
-) -> INT {
-    tracing::trace!("getpeername_detour -> socket: {}", s);
-
-    // Check if this socket is managed and get connected addresses
-    if let Some((remote_addr, _, _)) = get_connected_addresses(s) {
-        // Return the remote address for connected sockets
-
-        match remote_addr.copy_to(name, namelen) {
-            Ok(()) => {
-                tracing::trace!("getpeername_detour -> returned mirrord remote address");
-                // Success
-                return ERROR_SUCCESS_I32;
-            }
-
-            Err(err) => {
-                tracing::debug!(
-                    "getpeername_detour -> failed to convert remote address: {}",
-                    err
-                );
-
-                match err {
-                    WindowsError::WinSock(error_code) => unsafe {
-                        WSASetLastError(error_code);
-                    },
-
-                    WindowsError::Windows(error_code) => {
-                        tracing::warn!(
-                            "getpeername_detour -> unexpected windows error converting remote address: error {}",
-                            error_code
-                        );
-                    }
-                };
-
-                return SOCKET_ERROR;
-            }
-        }
-    } else if is_socket_managed(s) {
-        tracing::trace!(
-            "getpeername_detour -> managed socket not in connected state, using original"
-        );
-    }
-
-    // Fall back to original function for non-managed sockets or errors
-    let original = GET_PEER_NAME_ORIGINAL.get().unwrap();
-    unsafe { original(s, name, namelen) }
-}
-
-/// Pass-through hook for WSAStartup
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_startup_detour(wVersionRequested: u16, lpWSAData: *mut u8) -> i32 {
-    tracing::debug!("WSAStartup called with version: {}", wVersionRequested);
-
-    let original = WSA_STARTUP_ORIGINAL.get().unwrap();
-    let result = unsafe { original(wVersionRequested, lpWSAData) };
-
-    if result != ERROR_SUCCESS_I32 {
-        tracing::warn!("WSAStartup failed with error: {}", result);
-    }
-
-    result
-}
-
-/// Pass-through hook for WSACleanup
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_cleanup_detour() -> i32 {
-    // Pass through to original - let Windows Sockets handle cleanup
-    let original = WSA_CLEANUP_ORIGINAL.get().unwrap();
-    unsafe { original() }
-}
-
-/// Socket management detour for ioctlsocket() - controls I/O mode of socket
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn ioctlsocket_detour(s: SOCKET, cmd: i32, argp: *mut u32) -> i32 {
-    // Pass through to original - interceptor handles I/O control for managed sockets
-    let original = IOCTL_SOCKET_ORIGINAL.get().unwrap();
-    unsafe { original(s, cmd, argp) }
-}
-
-/// Socket management detour for WSAIoctl - intercepts extension lookups
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_ioctl_detour(
-    s: SOCKET,
-    dwIoControlCode: u32,
-    lpvInBuffer: *mut c_void,
-    cbInBuffer: u32,
-    lpvOutBuffer: *mut c_void,
-    cbOutBuffer: u32,
-    lpcbBytesReturned: *mut u32,
-    lpOverlapped: *mut WSAOVERLAPPED,
-    lpCompletionRoutine: LPWSAOVERLAPPED_COMPLETION_ROUTINE,
-) -> INT {
-    let original = WSA_IOCTL_ORIGINAL.get().unwrap();
-    let result = unsafe {
-        original(
-            s,
-            dwIoControlCode,
-            lpvInBuffer,
-            cbInBuffer,
-            lpvOutBuffer,
-            cbOutBuffer,
-            lpcbBytesReturned,
-            lpOverlapped,
-            lpCompletionRoutine,
-        )
-    };
-
-    if result == ERROR_SUCCESS_I32 && dwIoControlCode == SIO_GET_EXTENSION_FUNCTION_POINTER {
-        unsafe {
-            hook_connectex_extension(
-                lpvInBuffer,
-                cbInBuffer,
-                lpvOutBuffer,
-                cbOutBuffer,
-                Some(connectex_detour),
-            );
-        }
-    }
-
-    result
-}
-
-/// Socket management detour for select() - monitors socket readiness
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn select_detour(
-    nfds: i32,
-    readfds: *mut fd_set,
-    writefds: *mut fd_set,
-    exceptfds: *mut fd_set,
-    timeout: *const timeval,
-) -> i32 {
-    // Pass through to original - interceptor handles I/O readiness for managed sockets
-    let original = SELECT_ORIGINAL.get().unwrap();
-    unsafe { original(nfds, readfds, writefds, exceptfds, timeout) }
-}
-
-/// Windows socket hook for WSAGetLastError (error information)
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_get_last_error_detour() -> i32 {
-    let original = WSA_GET_LAST_ERROR_ORIGINAL.get().unwrap();
-    let result = unsafe { original() };
-
-    tracing::trace!("wsa_get_last_error_detour -> error: {}", result);
-
-    result
 }
 
 /// Windows socket hook for WSASocket (advanced socket creation)
@@ -1038,6 +309,624 @@ unsafe extern "system" fn wsa_socket_w_detour(
     socket
 }
 
+/// Windows socket hook for bind
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT {
+    tracing::trace!("bind_detour -> socket: {}, namelen: {}", s, namelen);
+
+    let original = BIND_ORIGINAL.get().unwrap();
+
+    // Define bind function before early returns so it can be reused
+    let bind_fn = |addr: *const SOCKADDR, addr_len: INT, reason: &str| -> INT {
+        let res = unsafe { original(s, addr, addr_len) };
+
+        if res != ERROR_SUCCESS_I32 {
+            tracing::error!("bind_detour -> {} failed", reason);
+        } else {
+            tracing::debug!("bind_detour -> {} succeeded", reason);
+        }
+
+        res
+    };
+    let requested_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
+        Some(addr) => addr,
+        None => {
+            tracing::error!("bind_detour -> failed to convert address");
+            return bind_fn(name, namelen, "address parse error");
+        }
+    };
+
+    tracing::info!(
+        "bind_detour -> mirrord binding socket to {}",
+        requested_addr
+    );
+
+    let mut socket = {
+        let mut sockets = SOCKETS
+            .lock()
+            .expect("bind_detour -> failed to lock sockets for socket retrieval");
+
+        let Some(entry) = sockets.remove(&s) else {
+            // fallback / early return when the socket isn’t tracked
+            return bind_fn(name, namelen, "non-managed socket");
+        };
+
+        entry
+    };
+    if !matches!(socket.state, SocketState::Initialized) {
+        tracing::warn!(
+            "bind_detour -> socket {} is not in Initialized state, using original bind",
+            s
+        );
+        return bind_fn(name, namelen, "invalid socket state");
+    }
+
+    // Check configuration-based early returns
+    let incoming_config = setup().incoming_config();
+    if incoming_config.ignore_localhost && requested_addr.ip().is_loopback() {
+        tracing::debug!("bind_detour -> ignoring localhost bind");
+        return bind_fn(name, namelen, "localhost ignored");
+    }
+
+    // Determine the appropriate local binding address
+    let local_addr = determine_local_address(requested_addr);
+
+    // Convert to Windows sockaddr for actual binding
+    let (local_addr_storage, local_addr_len) = match local_addr.to_sockaddr() {
+        Ok((storage, len)) => (storage, len),
+        Err(e) => {
+            tracing::error!("bind_detour -> failed to convert local address: {}", e);
+            return bind_fn(name, namelen, "address conversion error");
+        }
+    };
+
+    // Attempt primary bind
+    let bind_result = bind_fn(
+        &local_addr_storage as *const _ as *const SOCKADDR,
+        local_addr_len,
+        "primary bind",
+    );
+
+    // Handle bind failures
+    if bind_result != ERROR_SUCCESS_I32 {
+        // Check for access denied error which may indicate UAC privilege issues
+        // Check if this is a privileged port that requires elevation
+        if WindowsError::wsa_last_error() == WSAEACCES && local_addr.port() < IPPORT_RESERVED as u16
+        {
+            // graceful_exit if process is not elevated.
+            require_elevation(&format!(
+                "mirrord failed to bind to privileged port {} - insufficient UAC privileges. On Windows, binding to privileged ports (< {}) requires running as Administrator or with elevated UAC privileges. Please restart your application with elevated privileges.",
+                local_addr.port(),
+                IPPORT_RESERVED
+            ));
+            // if we are not elevated, this line will not be reachable as require_elevation calls
+            // graceful_exit!()
+        }
+
+        // return other errors for caller handling
+        return bind_result;
+    }
+
+    // Get the actual bound address and update socket state
+    let actual_bound_addr = unsafe { get_actual_bound_address(s, requested_addr) };
+    Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound {
+        bound: Bound {
+            requested_address: requested_addr,
+            address: actual_bound_addr,
+        },
+        // Note(Daniel): not yet migrated "will_not_trigger_subscription" from unix layer bind
+        is_only_bound: false,
+    };
+    SOCKETS
+        .lock()
+        .expect("bind_detour -> failed to lock sockets for state update")
+        .insert(s, socket);
+
+    tracing::debug!(
+        "bind_detour -> socket {} bound locally to {} for requested {}",
+        s,
+        actual_bound_addr,
+        requested_addr
+    );
+
+    ERROR_SUCCESS_I32
+}
+
+/// Windows socket hook for listen
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
+    tracing::trace!("listen_detour -> socket: {}, backlog: {}", s, backlog);
+
+    // Start listening on the local socket first (like Unix layer)
+    let original = LISTEN_ORIGINAL.get().unwrap();
+    let listen_fn = |reason: &str| -> INT {
+        let res = unsafe { original(s, backlog) };
+
+        if res != ERROR_SUCCESS_I32 {
+            tracing::error!("listen_detour -> {} failed", reason);
+        } else {
+            tracing::debug!("listen_detour -> {} succeeded", reason);
+        }
+
+        res
+    };
+    let mut socket = {
+        let mut sockets = SOCKETS
+            .lock()
+            .expect("listen_detour -> failed to lock sockets for socket retrieval");
+
+        let Some(entry) = sockets.remove(&s) else {
+            // fallback / early return when the socket isn’t tracked
+            return listen_fn("non-managed socket");
+        };
+
+        entry
+    };
+
+    // Check if this socket is managed by mirrord and get bound state
+    let bound_state = match socket.state {
+        SocketState::Bound {
+            bound,
+            is_only_bound,
+        } if is_only_bound.not() => bound,
+        _ => {
+            tracing::debug!(
+                "listen_detour -> socket {} is not in Bound state, using original listen",
+                s
+            );
+            return listen_fn("invalid socket state");
+        }
+    };
+
+    let listen_result = listen_fn("expected listen");
+    if listen_result != ERROR_SUCCESS_I32 {
+        tracing::error!("listen_detour -> listen() failed");
+        return listen_result;
+    }
+
+    // Check if incoming traffic is enabled
+    if matches!(
+        setup().incoming_config().mode,
+        mirrord_config::feature::network::incoming::IncomingMode::Off
+    ) {
+        tracing::debug!("listen_detour -> incoming traffic is disabled");
+        return listen_result;
+    }
+
+    if setup().targetless() {
+        tracing::warn!("listen_detour -> running targetless, binding locally instead");
+        return listen_result;
+    }
+
+    // For Windows socketpair emulation (loopback-bound listener paired with loopback connects),
+    // mirrord should leave the socket untouched so the runtime, e.g. python, can manage it locally.
+    // Use the requested address to identify synthetic socketpair listeners:
+    // they bind to loopback with port 0. Allow normal loopback services on
+    // explicit ports to remain managed.
+    // On Unix it doesn't matter since socketpair uses AF_UNIX sockets.
+    if bound_state.requested_address.ip().is_loopback() && bound_state.requested_address.port() == 0
+    {
+        tracing::debug!(
+            "listen_detour -> skipping subscription for local listener {} -> {}",
+            bound_state.requested_address,
+            bound_state.address
+        );
+        return listen_result;
+    }
+
+    // Register with the agent for incoming traffic (like Unix layer PortSubscribe)
+    let mapped_port = setup()
+        .incoming_config()
+        .port_mapping
+        .get_by_left(&bound_state.requested_address.port())
+        .copied()
+        .unwrap_or_else(|| bound_state.requested_address.port());
+
+    // Make the request to the agent
+    match make_proxy_request_with_response(PortSubscribe {
+        listening_on: bound_state.address,
+        subscription: setup().incoming_mode().subscription(mapped_port),
+    }) {
+        Ok(Ok(_)) => {
+            // this log message is expected by some E2E tests
+            tracing::debug!(
+                "daemon subscribed port {}",
+                bound_state.requested_address.port()
+            );
+
+            Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(bound_state);
+            SOCKETS
+                .lock()
+                .expect("listen_detour -> failed to lock sockets for state update")
+                .insert(s, socket);
+            listen_result
+        }
+        Ok(Err(e)) => {
+            tracing::error!("listen_detour -> agent subscription failed: {}", e);
+
+            // Set WSA error and return failure
+            unsafe { WSASetLastError(WSAECONNREFUSED) };
+            SOCKET_ERROR
+        }
+        Err(e) => {
+            tracing::error!("listen_detour -> failed to make proxy request: {}", e);
+
+            // Set WSA error and return failure
+            unsafe { WSASetLastError(WSAECONNREFUSED) };
+            SOCKET_ERROR
+        }
+    }
+}
+
+/// Windows socket hook for connect
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT {
+    tracing::trace!("connect_detour -> socket: {}, namelen: {}", s, namelen);
+
+    let connect_fn = |addr: SockAddr| {
+        let original = CONNECT_ORIGINAL.get().unwrap();
+        let result = unsafe { original(s, addr.as_ptr() as *const _, addr.len()) };
+        log_connection_result(result, "connect_detour", addr);
+        ConnectResult::from(result)
+    };
+
+    match ops::connect(s, name, namelen, "connect_detour", connect_fn) {
+        Err(HookError::ConnectError(ConnectError::AddressUnreachable(_))) => {
+            return SOCKET_ERROR;
+        }
+        Err(e) => {
+            tracing::debug!(
+                "connect_detour -> socket {} not managed, using original. err: {}",
+                s,
+                e
+            );
+        }
+        Ok(connect_result) => {
+            return connect_result.result();
+        }
+    }
+
+    // fallback to original
+    let original = CONNECT_ORIGINAL.get().unwrap();
+    unsafe { original(s, name, namelen) }
+}
+
+/// Windows socket hook for accept
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn accept_detour(
+    s: SOCKET,
+    addr: *mut SOCKADDR,
+    addrlen: *mut INT,
+) -> SOCKET {
+    tracing::trace!("accept_detour -> socket: {}", s);
+
+    // Call original accept first
+    let original = ACCEPT_ORIGINAL.get().unwrap();
+    let accepted_socket = unsafe { original(s, addr, addrlen) };
+    if accepted_socket == INVALID_SOCKET {
+        tracing::error!("accept_detour -> original accept failed");
+        return accepted_socket;
+    }
+    tracing::info!(
+        "accept_detour -> accepted socket {} from mirrord-managed listener",
+        accepted_socket
+    );
+
+    // Wrap the accepted socket in RAII wrapper for automatic cleanup on error
+    let auto_close_socket = AutoCloseSocket::new(accepted_socket);
+    let (domain, protocol, type_, port, listener_address) = {
+        let sockets = SOCKETS
+            .lock()
+            .expect("accept_detour -> failed to lock sockets for socket retrieval");
+
+        let Some(socket) = sockets.get(&s) else {
+            tracing::warn!(
+                "accept_detour -> socket {} is not tracked, using original accept",
+                s
+            );
+            // fallback / early return when the socket isn’t tracked
+            return auto_close_socket.release();
+        };
+
+        match &socket.state {
+            SocketState::Listening(Bound {
+                requested_address,
+                address,
+            }) => (
+                socket.domain,
+                socket.protocol,
+                socket.type_,
+                requested_address.port(),
+                *address,
+            ),
+            _ => {
+                tracing::debug!(
+                    "accept_detour -> socket {} is not in Bound state, using original accept",
+                    s
+                );
+                return auto_close_socket.release();
+            }
+        }
+    };
+
+    // Get peer address from the accepted connection (this will be intproxy's address)
+    let peer_address = match utils::get_peer_address_from_socket(auto_close_socket.get()) {
+        Ok(addr) => addr,
+        Err(e) => {
+            tracing::error!("accept_detour -> failed to get peer address: {}", e);
+            // Socket will be automatically closed by AutoCloseSocket::drop
+            unsafe { WSASetLastError(WSAECONNABORTED) };
+            return INVALID_SOCKET;
+        }
+    };
+
+    // Make ConnMetadataRequest to get the real remote source address
+    let ConnMetadataResponse {
+        remote_source,
+        local_address,
+    } = match make_proxy_request_with_response(ConnMetadataRequest {
+        listener_address,
+        peer_address,
+    }) {
+        Ok(res) => {
+            tracing::info!(
+                "accept_detour -> got metadata: remote_source={}, local_address={}",
+                res.remote_source,
+                res.local_address
+            );
+            res
+        }
+        Err(e) => {
+            tracing::error!("accept_detour -> failed to get connection metadata: {}", e);
+            // Like Unix layer, fail the accept if we can't get metadata
+            unsafe { WSASetLastError(WSAECONNABORTED) };
+            return INVALID_SOCKET;
+        }
+    };
+
+    // Register the accepted socket with mirrord
+    let Ok(socket_kind) = socket_kind_from_type(type_) else {
+        tracing::warn!("Failed to create socket kind");
+        return auto_close_socket.release();
+    };
+    let state = SocketState::Connected(Connected {
+        connection_id: None,
+        remote_address: remote_source.into(),
+        local_address: Some(SocketAddr::new(local_address, port).into()),
+        layer_address: None,
+    });
+    let new_socket = UserSocket::new(domain, type_, protocol, state, socket_kind);
+
+    // fill_address - Fill in the address structure with the real remote address (not intproxy's
+    // address)
+    if !addr.is_null() && !addrlen.is_null() {
+        match unsafe { remote_source.copy_to(addr, addrlen) } {
+            Ok(()) => {
+                tracing::trace!(
+                    "accept_detour -> filled address with real remote source: {}",
+                    remote_source
+                );
+            }
+            Err(e) => {
+                tracing::warn!("accept_detour -> failed to fill address: {}", e);
+            }
+        }
+    }
+
+    SOCKETS
+        .lock()
+        .expect("accept_detour -> failed to lock sockets for state update")
+        .insert(accepted_socket, Arc::new(new_socket));
+
+    // Success! Release the socket from automatic cleanup and return it
+    auto_close_socket.release()
+}
+
+/// Windows socket hook for getsockname
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn getsockname_detour(
+    s: SOCKET,
+    name: *mut SOCKADDR,
+    namelen: *mut INT,
+) -> INT {
+    tracing::trace!("getsockname_detour -> socket: {}", s);
+    let getsockname_fn = || {
+        let original = GET_SOCK_NAME_ORIGINAL.get().unwrap();
+        unsafe { original(s, name, namelen) }
+    };
+
+    let socket = match SOCKETS
+        .lock()
+        .expect("getsockname_detour -> failed to lock sockets for socket retrieval")
+        .get(&s)
+        .bypass(Bypass::LocalFdNotFound(s))
+    {
+        Ok(sock) => sock.clone(),
+        Err(err) => {
+            tracing::warn!("getsockname_detour -> failed to get socket: {}", err);
+            return getsockname_fn();
+        }
+    };
+
+    let local_address: Option<SocketAddr> = match &socket.state {
+        SocketState::Connected(Connected {
+            local_address: Some(addr),
+            ..
+        }) => Some(addr.clone().try_into().unwrap()),
+        SocketState::Connected(Connected {
+            connection_id: Some(id),
+            ..
+        }) => {
+            match make_proxy_request_with_response(OutgoingConnMetadataRequest { conn_id: *id }) {
+                Ok(Some(res)) => Some(res.in_cluster_address),
+                Ok(None) => {
+                    tracing::error!(id, "Protocol: could not locate outgoing metadata");
+                    None
+                }
+                Err(e) => {
+                    tracing::error!(?e, id, "Proxy: Error getting outgoing metadata");
+                    None
+                }
+            }
+        }
+        SocketState::Bound {
+            bound: Bound {
+                requested_address,
+                address,
+            },
+            ..
+        }
+        | SocketState::Listening(Bound {
+            requested_address,
+            address,
+        }) => Some(if requested_address.port() == 0 {
+            SocketAddr::new(requested_address.ip(), address.port())
+        } else {
+            *requested_address
+        }),
+
+        SocketState::Initialized | SocketState::Connected(_) => {
+            // For other managed socket states, fall back to original
+            tracing::trace!(
+                "getsockname_detour -> managed socket not in bound/connected state, using original"
+            );
+            None
+        }
+    };
+
+    // fill_address - Fill in the address structure with the mirrord local address
+    if let Some(local_address) = local_address {
+        match unsafe { local_address.copy_to(name, namelen) } {
+            Ok(()) => {
+                tracing::trace!("getsockname_detour -> returned mirrord local address");
+                // Success
+                return ERROR_SUCCESS_I32;
+            }
+
+            Err(err) => {
+                tracing::debug!(
+                    "getsockname_detour -> failed to convert layer address: {}",
+                    err
+                );
+
+                match err {
+                    WindowsError::WinSock(error_code) => unsafe {
+                        WSASetLastError(error_code);
+                    },
+
+                    WindowsError::Windows(error_code) => {
+                        tracing::warn!(
+                            "getsockname_detour -> unexpected windows error converting layer address: error {}",
+                            error_code
+                        );
+                    }
+                };
+
+                return SOCKET_ERROR;
+            }
+        }
+    }
+
+    // Fall back to original function for non-managed sockets or errors
+    getsockname_fn()
+}
+
+/// Windows socket hook for getpeername
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn getpeername_detour(
+    s: SOCKET,
+    name: *mut SOCKADDR,
+    namelen: *mut INT,
+) -> INT {
+    tracing::trace!("getpeername_detour -> socket: {}", s);
+
+    // Check if this socket is managed and get connected addresses
+    if let Some((remote_addr, _, _)) = get_connected_addresses(s) {
+        // Return the remote address for connected sockets
+
+        match unsafe { remote_addr.copy_to(name, namelen) } {
+            Ok(()) => {
+                tracing::trace!("getpeername_detour -> returned mirrord remote address");
+                // Success
+                return ERROR_SUCCESS_I32;
+            }
+
+            Err(err) => {
+                tracing::debug!(
+                    "getpeername_detour -> failed to convert remote address: {}",
+                    err
+                );
+
+                match err {
+                    WindowsError::WinSock(error_code) => unsafe {
+                        WSASetLastError(error_code);
+                    },
+
+                    WindowsError::Windows(error_code) => {
+                        tracing::warn!(
+                            "getpeername_detour -> unexpected windows error converting remote address: error {}",
+                            error_code
+                        );
+                    }
+                };
+
+                return SOCKET_ERROR;
+            }
+        }
+    } else if is_socket_managed(s) {
+        tracing::trace!(
+            "getpeername_detour -> managed socket not in connected state, using original"
+        );
+    }
+
+    // Fall back to original function for non-managed sockets or errors
+    let original = GET_PEER_NAME_ORIGINAL.get().unwrap();
+    unsafe { original(s, name, namelen) }
+}
+
+/// Socket management detour for WSAIoctl - intercepts extension lookups
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn wsa_ioctl_detour(
+    s: SOCKET,
+    dwIoControlCode: u32,
+    lpvInBuffer: *mut c_void,
+    cbInBuffer: u32,
+    lpvOutBuffer: *mut c_void,
+    cbOutBuffer: u32,
+    lpcbBytesReturned: *mut u32,
+    lpOverlapped: *mut WSAOVERLAPPED,
+    lpCompletionRoutine: LPWSAOVERLAPPED_COMPLETION_ROUTINE,
+) -> INT {
+    let original = WSA_IOCTL_ORIGINAL.get().unwrap();
+    let result = unsafe {
+        original(
+            s,
+            dwIoControlCode,
+            lpvInBuffer,
+            cbInBuffer,
+            lpvOutBuffer,
+            cbOutBuffer,
+            lpcbBytesReturned,
+            lpOverlapped,
+            lpCompletionRoutine,
+        )
+    };
+
+    if result == ERROR_SUCCESS_I32 && dwIoControlCode == SIO_GET_EXTENSION_FUNCTION_POINTER {
+        unsafe {
+            hook_connectex_extension(
+                lpvInBuffer,
+                cbInBuffer,
+                lpvOutBuffer,
+                cbOutBuffer,
+                Some(connectex_detour),
+            );
+        }
+    }
+
+    result
+}
+
 /// Windows socket hook for ConnectEx (overlapped connect)
 /// This function properly handles libuv's expectations for overlapped I/O completion
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
@@ -1067,7 +956,7 @@ unsafe extern "system" fn connectex_detour(
         }
     };
 
-    let socket_addr = match SocketAddr::try_from_raw(name, namelen) {
+    let socket_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
         None => {
             tracing::error!(
@@ -1084,7 +973,7 @@ unsafe extern "system" fn connectex_detour(
     let is_managed = is_socket_managed(s);
 
     // Unified connect function for both managed and unmanaged sockets
-    let connect_fn = |socket_descriptor: SocketDescriptor, addr: SockAddr| {
+    let connect_fn = |addr: SockAddr| {
         let addr_description = if is_managed {
             format!("proxy at {:?}", addr)
         } else {
@@ -1093,7 +982,7 @@ unsafe extern "system" fn connectex_detour(
 
         tracing::debug!(
             "connectex_detour connect_fn -> establishing connection for socket {} to {}",
-            socket_descriptor,
+            s,
             addr_description
         );
 
@@ -1127,10 +1016,10 @@ unsafe extern "system" fn connectex_detour(
         }
     };
 
-    // For managed sockets, use attempt_proxy_connection which will call connect_fn with proxy
+    // For managed sockets, use connect which will call connect_fn with proxy
     // address
     if is_managed {
-        match ops::attempt_proxy_connection(s, name, namelen, "connectex_detour", connect_fn) {
+        match ops::connect(s, name, namelen, "connectex_detour", connect_fn) {
             Ok(connect_result) => {
                 tracing::debug!(
                     "connectex_detour -> proxy connection result: {:?}",
@@ -1195,7 +1084,7 @@ unsafe extern "system" fn connectex_detour(
     }
 
     tracing::debug!("connectex_detour -> using original for socket {}", s);
-    let connect_result = connect_fn(s, raw_addr);
+    let connect_result = connect_fn(raw_addr);
     let error_opt = connect_result.error();
     let result_code: i32 = connect_result.into();
 
@@ -1226,7 +1115,7 @@ unsafe extern "system" fn wsa_connect_detour(
 ) -> INT {
     tracing::trace!("wsa_connect_detour -> socket: {}, namelen: {}", s, namelen);
 
-    let connect_fn = |s: SocketDescriptor, addr: SockAddr| {
+    let connect_fn = |addr: SockAddr| {
         // Call the original function with the prepared sockaddr
         let original = WSA_CONNECT_ORIGINAL.get().unwrap();
         let result = unsafe {
@@ -1244,7 +1133,7 @@ unsafe extern "system" fn wsa_connect_detour(
         ConnectResult::from(result)
     };
 
-    let socket_addr = match SocketAddr::try_from_raw(name, namelen) {
+    let socket_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
         None => {
             tracing::error!(
@@ -1256,7 +1145,7 @@ unsafe extern "system" fn wsa_connect_detour(
     };
     let raw_addr = SockAddr::from(socket_addr);
 
-    match ops::attempt_proxy_connection(s, name, namelen, "wsa_connect_detour", connect_fn) {
+    match ops::connect(s, name, namelen, "wsa_connect_detour", connect_fn) {
         Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
             tracing::error!(
                 "wsa_connect_detour -> socket {} connect target {:?} is unreachable: {}",
@@ -1278,157 +1167,8 @@ unsafe extern "system" fn wsa_connect_detour(
     }
 
     // Fallback to original function
-    let connect_res = connect_fn(s, raw_addr);
+    let connect_res = connect_fn(raw_addr);
     connect_res.result()
-}
-
-/// Windows socket hook for WSAAccept (asynchronous accept)
-/// Node.js uses this for non-blocking accept operations
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_accept_detour(
-    s: SOCKET,
-    addr: *mut SOCKADDR,
-    addrlen: *mut INT,
-    lpfnCondition: *mut u8,
-    dwCallbackData: usize,
-) -> SOCKET {
-    tracing::trace!("wsa_accept_detour -> socket: {}", s);
-
-    // Pass through to original - interceptor handles data for managed sockets
-    let original = WSA_ACCEPT_ORIGINAL.get().unwrap();
-    unsafe { original(s, addr, addrlen, lpfnCondition, dwCallbackData) }
-}
-
-/// Windows socket hook for WSASend (asynchronous send)
-/// Node.js uses this extensively for overlapped I/O operations
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_send_detour(
-    s: SOCKET,
-    lpBuffers: *mut u8,
-    dwBufferCount: u32,
-    lpNumberOfBytesSent: *mut u32,
-    dwFlags: u32,
-    lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8,
-) -> INT {
-    tracing::trace!(
-        "wsa_send_detour -> socket: {}, buffer_count: {}",
-        s,
-        dwBufferCount,
-    );
-
-    // Helper function to consolidate all fallback calls to original WSASend
-    let fallback_to_original = |reason: &str| {
-        tracing::debug!("wsa_send_detour -> falling back to original: {}", reason);
-        let original = WSA_SEND_ORIGINAL.get().unwrap();
-        let res = unsafe {
-            original(
-                s,
-                lpBuffers,
-                dwBufferCount,
-                lpNumberOfBytesSent,
-                dwFlags,
-                lpOverlapped,
-                lpCompletionRoutine,
-            )
-        };
-        tracing::debug!(
-            "wsa_send_detour -> socket: {}, sentBytes: {}, result: {}, getlasterror: {}",
-            s,
-            unsafe { *lpNumberOfBytesSent },
-            res,
-            unsafe { WSAGetLastError() }
-        );
-        res
-    };
-
-    // Check if this socket is managed by mirrord
-    let managed_socket = get_socket(s);
-
-    if let Some(user_socket) = managed_socket {
-        tracing::debug!(
-            "wsa_send_detour -> socket {} is managed, kind: {:?}",
-            s,
-            user_socket.kind
-        );
-
-        // Check if outgoing traffic is enabled for this socket type
-        let should_intercept = match user_socket.kind {
-            SocketKind::Tcp(_) => {
-                let tcp_outgoing = layer_setup().outgoing_config().tcp;
-                tracing::debug!("wsa_send_detour -> TCP outgoing enabled: {}", tcp_outgoing);
-                tcp_outgoing
-            }
-            SocketKind::Udp(_) => {
-                let udp_outgoing = layer_setup().outgoing_config().udp;
-                tracing::debug!("wsa_send_detour -> UDP outgoing enabled: {}", udp_outgoing);
-                udp_outgoing
-            }
-        };
-
-        if should_intercept {
-            let socket_state =
-                get_socket_state(s).map_or("Unknown".to_string(), |state| format!("{:?}", state));
-            // Check if this socket is in connected state (proxy connection established)
-            if is_socket_in_state(s, |state| matches!(state, SocketState::Connected(_))) {
-                tracing::debug!(
-                    "wsa_send_detour -> socket {} is connected via proxy, data will be routed through proxy",
-                    s
-                );
-
-                // For proxy-connected sockets, the data routing happens automatically
-                // through the proxy connection established in connect_detour/wsa_connect_detour
-            } else {
-                tracing::debug!(
-                    "wsa_send_detour -> socket {} is managed but not connected ({}) via proxy, using original",
-                    s,
-                    socket_state
-                );
-            }
-        } else {
-            tracing::debug!(
-                "wsa_send_detour -> outgoing traffic disabled for {:?}, using original",
-                user_socket.kind
-            );
-        }
-    }
-
-    // Pass through to original - the proxy connection handles the routing if established
-    fallback_to_original("expected - passing through to original")
-}
-
-/// Windows socket hook for WSARecv (asynchronous receive)
-/// With the new architecture, incoming mirrored traffic flows through normal TCP connections
-/// created by intproxy, so we just pass through to the original function.
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_recv_detour(
-    s: SOCKET,
-    lpBuffers: *mut u8,
-    dwBufferCount: u32,
-    lpNumberOfBytesRecvd: *mut u32,
-    lpFlags: *mut u32,
-    lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8,
-) -> INT {
-    tracing::trace!(
-        "wsa_recv_detour -> socket: {}, buffer_count: {}",
-        s,
-        dwBufferCount
-    );
-
-    // Pass through to original - mirrored traffic flows through normal TCP connections
-    let original = WSA_RECV_ORIGINAL.get().unwrap();
-    unsafe {
-        original(
-            s,
-            lpBuffers,
-            dwBufferCount,
-            lpNumberOfBytesRecvd,
-            lpFlags,
-            lpOverlapped,
-            lpCompletionRoutine,
-        )
-    }
 }
 
 /// Windows socket hook for WSASendTo (asynchronous UDP send)
@@ -1444,8 +1184,8 @@ unsafe extern "system" fn wsa_send_to_detour(
     dwFlags: u32,
     lpTo: *const SOCKADDR,
     iTolen: INT,
-    lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8,
+    lpOverlapped: *mut OVERLAPPED,
+    lpCompletionRoutine: LPWSAOVERLAPPED_COMPLETION_ROUTINE,
 ) -> INT {
     tracing::debug!(
         "wsa_send_to_detour -> socket: {}, buffer_count: {}, to_len: {}",
@@ -1454,18 +1194,13 @@ unsafe extern "system" fn wsa_send_to_detour(
         iTolen
     );
 
-    let proxy_request_fn = |request| -> HookResult<_> {
-        match make_proxy_request_with_response(request) {
-            Ok(Ok(response)) => Ok(response),
-            Ok(Err(e)) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-            Err(e) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-        }
-    };
-
     // Helper function to consolidate all fallback calls to original WSASendTo
     let fallback_to_original = |reason: &str| {
         tracing::debug!("wsa_send_to_detour -> falling back to original: {}", reason);
         let original = WSA_SEND_TO_ORIGINAL.get().unwrap();
+        let completion_ptr = lpCompletionRoutine
+            .map(|routine| routine as *const () as *mut u8)
+            .unwrap_or(ptr::null_mut());
         unsafe {
             original(
                 s,
@@ -1475,14 +1210,14 @@ unsafe extern "system" fn wsa_send_to_detour(
                 dwFlags,
                 lpTo,
                 iTolen,
-                lpOverlapped,
-                lpCompletionRoutine,
+                lpOverlapped.cast::<u8>(),
+                completion_ptr,
             )
         }
     };
 
     // Handle overlapped I/O operations by falling back to original for async operations
-    if !lpOverlapped.is_null() || !lpCompletionRoutine.is_null() {
+    if !lpOverlapped.is_null() || lpCompletionRoutine.is_some() {
         return fallback_to_original("overlapped I/O detected");
     }
 
@@ -1515,9 +1250,9 @@ unsafe extern "system" fn wsa_send_to_detour(
         // For connection-oriented sockets or when no destination is specified,
         // WSASendTo is equivalent to WSASend
         return unsafe {
-            wsa_send_detour(
+            WSASend(
                 s,
-                lpBuffers,
+                lpBuffers as LPWSABUF,
                 dwBufferCount,
                 lpNumberOfBytesSent,
                 dwFlags,
@@ -1528,7 +1263,7 @@ unsafe extern "system" fn wsa_send_to_detour(
     }
 
     // Convert Windows destination address to cross-platform format
-    let raw_destination = match SocketAddr::try_from_raw(lpTo as *const _, iTolen as _) {
+    let raw_destination = match unsafe { SocketAddr::try_from_raw(lpTo as *const _, iTolen as _) } {
         Some(addr) => addr,
         None => unreachable!(),
     };
@@ -1585,7 +1320,6 @@ unsafe extern "system" fn wsa_send_to_detour(
             dwFlags as i32,
             raw_destination,
             wsa_sendto_fn,
-            proxy_request_fn,
         ) {
             Ok(sendto_result) => {
                 tracing::debug!(
@@ -1609,43 +1343,6 @@ unsafe extern "system" fn wsa_send_to_detour(
     }
 }
 
-/// Windows socket hook for WSARecvFrom (asynchronous UDP receive)
-/// Node.js uses this for overlapped UDP operations
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn wsa_recv_from_detour(
-    s: SOCKET,
-    lpBuffers: *mut u8,
-    dwBufferCount: u32,
-    lpNumberOfBytesRecvd: *mut u32,
-    lpFlags: *mut u32,
-    lpFrom: *mut SOCKADDR,
-    lpFromlen: *mut INT,
-    lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8,
-) -> INT {
-    tracing::trace!(
-        "wsa_recv_from_detour -> socket: {}, buffer_count: {}",
-        s,
-        dwBufferCount
-    );
-
-    // Pass through to original - interceptor handles data routing for managed sockets
-    let original = WSA_RECV_FROM_ORIGINAL.get().unwrap();
-    unsafe {
-        original(
-            s,
-            lpBuffers,
-            dwBufferCount,
-            lpNumberOfBytesRecvd,
-            lpFlags,
-            lpFrom,
-            lpFromlen,
-            lpOverlapped,
-            lpCompletionRoutine,
-        )
-    }
-}
-
 /// Windows winsock hook for gethostname
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn gethostname_detour(name: *mut i8, namelen: INT) -> INT {
@@ -1663,7 +1360,7 @@ unsafe extern "system" fn gethostname_detour(name: *mut i8, namelen: INT) -> INT
             name,
             namelen_ptr,
             || original(name, namelen),
-            || get_remote_hostname(true),
+            || remote_hostname_string(true),
             "gethostname",
             ERROR_BUFFER_OVERFLOW,
             // If no error occurs, gethostname returns zero. Otherwise, it returns SOCKET_ERROR
@@ -1683,7 +1380,7 @@ unsafe extern "system" fn get_computer_name_a_detour(lpBuffer: *mut i8, nSize: *
             lpBuffer,
             nSize,
             || original(lpBuffer, nSize),
-            || get_remote_hostname(true),
+            || remote_hostname_string(true),
             "GetComputerNameA",
             ERROR_BUFFER_OVERFLOW,
             // If the function succeeds, the return value is a nonzero value.
@@ -1702,7 +1399,7 @@ unsafe extern "system" fn get_computer_name_w_detour(lpBuffer: *mut u16, nSize: 
             lpBuffer,
             nSize,
             || original(lpBuffer, nSize),
-            || get_remote_hostname(true),
+            || remote_hostname_string(true),
             "GetComputerNameW",
             ERROR_BUFFER_OVERFLOW,
         )
@@ -1824,27 +1521,15 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
     }
 
     // Check if we should resolve this hostname remotely using the DNS selector
-    let should_resolve_remotely = {
-        let result = layer_setup()
-            .dns_selector()
-            .should_resolve_remotely(hostname_cstr, 0);
-        tracing::debug!(
-            "is_remote_hostname DNS selector check for '{}': {}",
-            hostname_cstr,
-            result
-        );
-        result
-    };
-
-    tracing::warn!(
-        "DNS selector decision for {}: resolve_remotely={}",
-        hostname_cstr,
-        should_resolve_remotely
-    );
-
-    if !should_resolve_remotely {
+    if setup()
+        .dns_selector()
+        .check_query(hostname_cstr.as_ref(), 0)
+        .is_err()
+    {
+        tracing::debug!("DNS selector check returned local for '{}'", hostname_cstr,);
         return fallback_to_original();
     }
+
     // Try to resolve the hostname using mirrord's remote DNS resolution
     match remote_dns_resolve_via_proxy(hostname_cstr) {
         Ok(results) => {
@@ -1924,7 +1609,7 @@ unsafe extern "system" fn getaddrinfo_detour(
     let hints_ref = unsafe { raw_hints.as_ref() };
 
     unsafe {
-        match windows_getaddrinfo::<ADDRINFOA>(node_opt, service_opt, hints_ref) {
+        match getaddrinfo::<ADDRINFOA>(node_opt, service_opt, hints_ref) {
             Ok(managed_addr_info) => {
                 // Store the managed result pointer and move the object to MANAGED_ADDRINFO
                 let addr_ptr = managed_addr_info.as_ptr();
@@ -1984,7 +1669,7 @@ unsafe extern "system" fn getaddrinfow_detour(
     let hints_ref = unsafe { hints.as_ref() };
 
     // Use full windows_getaddrinfo approach with DNS selector logic and service/hints support
-    match windows_getaddrinfo::<ADDRINFOW>(node_opt.clone(), service_opt, hints_ref) {
+    match getaddrinfo::<ADDRINFOW>(node_opt.clone(), service_opt, hints_ref) {
         Ok(managed_result) => {
             tracing::debug!("GetAddrInfoW: full resolution succeeded");
             // Store the managed result pointer and move the object to MANAGED_ADDRINFO
@@ -2036,93 +1721,6 @@ unsafe extern "system" fn freeaddrinfo_t_detour(addrinfo: *mut ADDRINFOW) {
     }
 }
 
-/// Data transfer detour for recv() - receives data from a socket
-///
-/// With the new architecture, incoming mirrored traffic flows through normal TCP connections
-/// created by intproxy, so we just pass through to the original function.
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn recv_detour(s: SOCKET, buf: *mut i8, len: INT, flags: INT) -> INT {
-    // Pass through to original - interceptor handles data routing for managed sockets
-    let original = RECV_ORIGINAL.get().unwrap();
-    unsafe { original(s, buf, len, flags) }
-}
-
-/// Data transfer detour for send() - sends data to a socket
-///
-/// For mirrord-managed outgoing connections, this checks if the socket should be intercepted
-/// and routes data through the proxy if outgoing traffic is enabled.
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn send_detour(s: SOCKET, buf: *const i8, len: INT, flags: INT) -> INT {
-    tracing::trace!("send_detour -> socket: {}, len: {}", s, len);
-
-    // Check if this socket is managed by mirrord
-    if let Some(user_socket) = get_socket(s) {
-        tracing::debug!(
-            "send_detour -> socket {} is managed, kind: {:?}",
-            s,
-            user_socket.kind
-        );
-
-        // Check if outgoing traffic is enabled for this socket type
-        let should_intercept = match user_socket.kind {
-            SocketKind::Tcp(_) => {
-                let tcp_outgoing = layer_setup().outgoing_config().tcp;
-                tracing::debug!("send_detour -> TCP outgoing enabled: {}", tcp_outgoing);
-                tcp_outgoing
-            }
-            SocketKind::Udp(_) => {
-                let udp_outgoing = layer_setup().outgoing_config().udp;
-                tracing::debug!("send_detour -> UDP outgoing enabled: {}", udp_outgoing);
-                udp_outgoing
-            }
-        };
-
-        if should_intercept {
-            // Check if this socket is in connected state (proxy connection established)
-            if is_socket_in_state(s, |state| matches!(state, SocketState::Connected(_))) {
-                tracing::debug!(
-                    "send_detour -> socket {} is connected via proxy, data will be routed through proxy",
-                    s
-                );
-                // For proxy-connected sockets, the data routing happens automatically
-                // through the proxy connection established in connect_detour
-            } else {
-                tracing::debug!(
-                    "send_detour -> socket {} is managed but not connected via proxy, using original",
-                    s
-                );
-            }
-        } else {
-            tracing::debug!(
-                "send_detour -> outgoing traffic disabled for {:?}, using original",
-                user_socket.kind
-            );
-        }
-    }
-
-    // Pass through to original - the proxy connection handles the routing if established
-    let original = SEND_ORIGINAL.get().unwrap();
-    unsafe { original(s, buf, len, flags) }
-}
-
-/// Data transfer detour for recvfrom() - receives data from a socket with source address
-///
-/// Note: UDP/datagram sockets typically aren't managed by mirrord outgoing connections,
-/// so this is primarily a pass-through for compatibility.
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn recvfrom_detour(
-    s: SOCKET,
-    buf: *mut i8,
-    len: INT,
-    flags: INT,
-    from: *mut SOCKADDR,
-    fromlen: *mut INT,
-) -> INT {
-    // Pass through to original
-    let original = RECV_FROM_ORIGINAL.get().unwrap();
-    unsafe { original(s, buf, len, flags, from, fromlen) }
-}
-
 /// Data transfer detour for sendto() - sends data to a socket with destination address
 ///
 /// This implementation uses the shared layer-lib sendto functionality to handle DNS resolution
@@ -2143,12 +1741,6 @@ unsafe extern "system" fn sendto_detour(
         tolen
     );
 
-    let proxy_request_fn = |request| match make_proxy_request_with_response(request) {
-        Ok(Ok(response)) => Ok(response),
-        Ok(Err(e)) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-        Err(e) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-    };
-
     // Helper function to consolidate all fallback calls to original sendto
     let fallback_to_original = |reason: &str| -> INT {
         tracing::debug!("sendto_detour -> falling back to original: {}", reason);
@@ -2157,7 +1749,7 @@ unsafe extern "system" fn sendto_detour(
     };
 
     // Convert Windows parameters to cross-platform format
-    let raw_destination = match SocketAddr::try_from_raw(to as *const _, tolen as _) {
+    let raw_destination = match unsafe { SocketAddr::try_from_raw(to as *const _, tolen as _) } {
         Some(addr) => addr,
         None => {
             return fallback_to_original("failed to parse destination address");
@@ -2193,7 +1785,6 @@ unsafe extern "system" fn sendto_detour(
         flags,
         raw_destination,
         sendto_fn,
-        proxy_request_fn,
     ) {
         Ok(result) => {
             tracing::debug!(
@@ -2224,7 +1815,7 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
 
         // Call close() method to send PortUnsubscribe if socket was listening
         if let Some(socket) = &socket_info
-            && socket.is_listening()
+            && matches!(socket.state, SocketState::Listening(_))
         {
             socket.close();
         }
@@ -2239,47 +1830,8 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     res
 }
 
-/// Socket management detour for shutdown() - shuts down part or all of a socket connection
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn shutdown_detour(s: SOCKET, how: INT) -> INT {
-    // Pass through to original - interceptor handles connection shutdown for managed sockets
-    let original = SHUTDOWN_ORIGINAL.get().unwrap();
-    unsafe { original(s, how) }
-}
-
-/// Socket option detour for setsockopt() - sets socket options
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn setsockopt_detour(
-    s: SOCKET,
-    level: INT,
-    optname: INT,
-    optval: *const i8,
-    optlen: INT,
-) -> INT {
-    // Pass through to original - interceptor handles socket option management for managed sockets
-    let original = SET_SOCK_OPT_ORIGINAL.get().unwrap();
-    unsafe { original(s, level, optname, optval, optlen) }
-}
-
-/// Socket option detour for getsockopt() - gets socket options
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn getsockopt_detour(
-    s: SOCKET,
-    level: INT,
-    optname: INT,
-    optval: *mut i8,
-    optlen: *mut INT,
-) -> INT {
-    // Pass through to original - interceptor handles socket option queries for managed sockets
-    let original = GET_SOCK_OPT_ORIGINAL.get().unwrap();
-    unsafe { original(s, level, optname, optval, optlen) }
-}
-
 /// Initialize socket hooks by setting up detours for Windows socket functions
-pub fn initialize_hooks(
-    guard: &mut DetourGuard<'static>,
-    setup: &mirrord_layer_lib::setup::windows::LayerSetup,
-) -> LayerResult<()> {
+pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) -> LayerResult<()> {
     // Ensure winsock libraries are loaded before attempting to hook them
     // This prevents issues with Python's _socket.pyd or other dynamic loaders
     // ensure_winsock_libraries_loaded()?;
@@ -2331,6 +1883,7 @@ pub fn initialize_hooks(
             GET_ADDR_INFO_W_ORIGINAL
         )?;
 
+        // Note: FreeAddrInfoW is used for both ADDRINFOA and ADDRINFOW deallocation
         apply_hook!(
             guard,
             "ws2_32",
@@ -2431,34 +1984,6 @@ pub fn initialize_hooks(
             CLOSE_SOCKET_ORIGINAL
         )?;
 
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "shutdown",
-            shutdown_detour,
-            ShutdownType,
-            SHUTDOWN_ORIGINAL
-        )?;
-
-        // Winsock startup/cleanup
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "WSAStartup",
-            wsa_startup_detour,
-            WSAStartupType,
-            WSA_STARTUP_ORIGINAL
-        )?;
-
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "WSACleanup",
-            wsa_cleanup_detour,
-            WSACleanupType,
-            WSA_CLEANUP_ORIGINAL
-        )?;
-
         // Socket information hooks
         apply_hook!(
             guard,
@@ -2478,25 +2003,6 @@ pub fn initialize_hooks(
             GET_PEER_NAME_ORIGINAL
         )?;
 
-        // Socket options
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "setsockopt",
-            setsockopt_detour,
-            SetSockOptType,
-            SET_SOCK_OPT_ORIGINAL
-        )?;
-
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "getsockopt",
-            getsockopt_detour,
-            GetSockOptType,
-            GET_SOCK_OPT_ORIGINAL
-        )?;
-
         // I/O control
         apply_hook!(
             guard,
@@ -2505,33 +2011,6 @@ pub fn initialize_hooks(
             wsa_ioctl_detour,
             WSAIoctlType,
             WSA_IOCTL_ORIGINAL
-        )?;
-
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "ioctlsocket",
-            ioctlsocket_detour,
-            IoCtlSocketType,
-            IOCTL_SOCKET_ORIGINAL
-        )?;
-
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "select",
-            select_detour,
-            SelectType,
-            SELECT_ORIGINAL
-        )?;
-
-        apply_hook!(
-            guard,
-            "ws2_32",
-            "WSAGetLastError",
-            wsa_get_last_error_detour,
-            WSAGetLastErrorType,
-            WSA_GET_LAST_ERROR_ORIGINAL
         )?;
 
         // Incoming connection hooks (if incoming mode is not Off)
@@ -2563,15 +2042,6 @@ pub fn initialize_hooks(
                 accept_detour,
                 AcceptType,
                 ACCEPT_ORIGINAL
-            )?;
-
-            apply_hook!(
-                guard,
-                "ws2_32",
-                "WSAAccept",
-                wsa_accept_detour,
-                WSAAcceptType,
-                WSA_ACCEPT_ORIGINAL
             )?;
         } else {
             tracing::info!("Incoming connection hooks disabled (incoming mode = Off)");
@@ -2606,49 +2076,6 @@ pub fn initialize_hooks(
             tracing::info!("Outgoing connection hooks disabled (no outgoing features enabled)");
         }
 
-        // Data transfer hooks (conditional based on TCP/UDP settings)
-        if network_config.requires_tcp_hooks() {
-            tracing::info!("Enabling TCP data transfer hooks");
-
-            apply_hook!(
-                guard,
-                "ws2_32",
-                "send",
-                send_detour,
-                SendType,
-                SEND_ORIGINAL
-            )?;
-
-            apply_hook!(
-                guard,
-                "ws2_32",
-                "recv",
-                recv_detour,
-                RecvType,
-                RECV_ORIGINAL
-            )?;
-
-            apply_hook!(
-                guard,
-                "ws2_32",
-                "WSASend",
-                wsa_send_detour,
-                WSASendType,
-                WSA_SEND_ORIGINAL
-            )?;
-
-            apply_hook!(
-                guard,
-                "ws2_32",
-                "WSARecv",
-                wsa_recv_detour,
-                WSARecvType,
-                WSA_RECV_ORIGINAL
-            )?;
-        } else {
-            tracing::info!("TCP data transfer hooks disabled (TCP outgoing disabled)");
-        }
-
         if network_config.requires_udp_hooks() {
             tracing::info!("Enabling UDP data transfer hooks");
 
@@ -2664,28 +2091,10 @@ pub fn initialize_hooks(
             apply_hook!(
                 guard,
                 "ws2_32",
-                "recvfrom",
-                recvfrom_detour,
-                RecvFromType,
-                RECV_FROM_ORIGINAL
-            )?;
-
-            apply_hook!(
-                guard,
-                "ws2_32",
                 "WSASendTo",
                 wsa_send_to_detour,
                 WSASendToType,
                 WSA_SEND_TO_ORIGINAL
-            )?;
-
-            apply_hook!(
-                guard,
-                "ws2_32",
-                "WSARecvFrom",
-                wsa_recv_from_detour,
-                WSARecvFromType,
-                WSA_RECV_FROM_ORIGINAL
             )?;
         } else {
             tracing::info!("UDP data transfer hooks disabled (UDP outgoing disabled)");
