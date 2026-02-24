@@ -8,7 +8,7 @@ fn recheck_and_setup_layer_file() {
 
     if std::env::var("MIRRORD_LAYER_FILE").is_err() {
         let layer_path = if cfg!(windows) {
-        std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER_WIN").unwrap()
+            std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER_WIN").unwrap()
         } else {
             std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER").unwrap()
         };

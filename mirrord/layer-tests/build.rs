@@ -1,4 +1,3 @@
-
 fn recheck_and_setup_layer_file() {
     println!("cargo::rerun-if-env-changed=MIRRORD_LAYER_FILE");
 
@@ -20,7 +19,7 @@ fn recheck_and_setup_layer_file() {
 /// pulls in the build-dependencies for `mirrord` and the layer crates, and uses
 /// `CARGO_CDYLIB_FILE_*` to populate `MIRRORD_TEST_USE_EXISTING_LIB` and
 /// `MIRRORD_TESTS_USE_BINARY` from the artifacts' computed path.
-/// In CI you can disable `local-test-artifacts` and 
+/// In CI you can disable `local-test-artifacts` and
 /// provide the env vars to avoid costly redundant rebuilds.
 fn main() {
     recheck_and_setup_layer_file();
