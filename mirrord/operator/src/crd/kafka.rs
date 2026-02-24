@@ -21,9 +21,10 @@ pub struct MirrordKafkaClientConfigSpec {
 
     /// Properties to set.
     ///
-    /// When performing Kafka splitting, the operator will override `group.id` property.
+    /// When performing Kafka splitting, the operator will override `group.id`/`application.id` property.
     ///
-    /// The list of all available properties can be found [here](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md).
+    /// The list of all available properties can be found [here](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md)
+    /// for librdkafka clients, and [here](https://docs.confluent.io/platform/current/installation/configuration/index.html#ak-configuration-reference-for-cp) for Java clients.
     pub properties: Vec<MirrordKafkaClientProperty>,
 
     /// Namespace and name of a `Secret` to use as another source of properties.
@@ -37,6 +38,20 @@ pub struct MirrordKafkaClientConfigSpec {
 
     /// Additional authentication configuration.
     pub authentication_extra: Option<MirrordKafkaClientAuthExtra>,
+
+    /// Kafka client implementation to use.
+    /// 
+    /// One of: `librdkafka`, `java`.
+    /// 
+    /// Defaults to `librdkafka`.
+    pub client_implementation: Option<String>,
+}
+
+impl MirrordKafkaClientConfigSpec {
+    /// Value for [`Self::client_implementation`].
+    pub const LIBRDKAFKA: &'static str = "librdkafka";
+    /// Value for [`Self::client_implementation`].
+    pub const JAVA: &'static str = "java";
 }
 
 /// Property to use when creating operator's Kafka client.
@@ -59,10 +74,6 @@ pub struct MirrordKafkaClientAuthExtra {
     ///
     /// Right now the only supported value is `MSK_IAM`, which enables IAM/OAUTHBEARER
     /// authentication with Amazon Managed Streaming for Apache Kafka.
-    ///
-    /// When this is set to `MSK_IAM`, additional properties are merged into the configuration:
-    /// 1. `sasl.mechanism=OAUTHBEARER`
-    /// 2. `security.protocol=SASL_SSL`
     pub kind: String,
     /// AWS region of the MSK cluster.
     ///

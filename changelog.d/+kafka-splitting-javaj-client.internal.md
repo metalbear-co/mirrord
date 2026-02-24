@@ -1,0 +1,1 @@
+Added client implementation config to `MirrordKafkaClientConfig`.
