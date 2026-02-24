@@ -466,9 +466,16 @@ pub enum InnerFilter {
     /// ##### feature.network.incoming.inner_filter.header_filter_jq
     /// ##### {#feature-network-incoming-inner-header-filter-jq}
     ///
-    /// Supports JQ expressions, matches when the expression returns
+    /// Supports jq expressions, matches when the expression returns
     /// `true`. The expression is evaluated on each present header in
     /// the request, in `HeaderKey: HeaderValue` format.
+    ///
+    /// Since jq is a turing-complete language, to prevent lockup or
+    /// excessive memory usage, the expressions are evaluated in a
+    /// special sandboxed environment with CPU time and memory limits
+    /// (see {#agent-jaq_memory_limit}, {#agent-jaq_time_limit}). The
+    /// evaluation is aborted if those limits are exceeded and the
+    /// filter does not match.
     HeaderJq {
         query: String,
     },
