@@ -196,7 +196,21 @@ pub struct KafkaTopicDetails {
     pub name_sources: Vec<TopicPropertySource>,
 
     /// All occurrences of this topic's group id in the workload's pod template.
+    ///
+    /// Relevant only for standard Kafka consumers.
+    /// Must be empty if `applicationIfSources` is not empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub group_id_sources: Vec<TopicPropertySource>,
+
+    /// All occurences of this topic's application id in the workload's pod template.
+    ///
+    /// Relevant only for Kafka Streams consumers.
+    /// Must be empty if `groupIdSources` is not empty.
+    ///
+    /// Note that Kafka Streams consumers are supported only when `MirrordKafkaClientConfig` is
+    /// configured to use the Java Kafka client implementation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub application_id_sources: Vec<TopicPropertySource>,
 
     /// Links to [`MirrordKafkaClientConfig`] in the operator's namespace.
     /// This config will be used to manage ephemeral Kafka topics and consume/produce messages.
