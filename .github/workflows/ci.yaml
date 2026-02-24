@@ -319,7 +319,7 @@ jobs:
       (needs.build_base_images.result == 'success' || needs.build_base_images.result == 'skipped') &&
       (needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true')
     container:
-      image: ghcr.io/metalbear-co/ci-agent-build:${{ needs.build_base_images.outputs.agent_tag || 'latest' }}
+      image: ttl.sh/metalbear-co/ci-agent-build:${{ needs.build_base_images.outputs.agent_tag || 'latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
@@ -386,8 +386,10 @@ jobs:
 
   integration_tests:
     runs-on: ubuntu-24.04
-    needs: [changed_files]
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    needs: [changed_files, build_layer_images]
+    if: always() && (needs.build_layer_images.result == 'success' || needs.build_layer_images.result == 'skipped') && (needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true')
+    env:
+      MIRRORD_LAYER_IMAGE_TAG: ${{ needs.build_layer_images.outputs.layer_tag || 'latest' }}
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
@@ -527,9 +529,10 @@ jobs:
 
   macos_tests:
     runs-on: macos-latest
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    needs: [changed_files, build_layer_images]
+    if: always() && (needs.build_layer_images.result == 'success' || needs.build_layer_images.result == 'skipped') && (needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true')
     env:
+      MIRRORD_LAYER_IMAGE_TAG: ${{ needs.build_layer_images.outputs.layer_tag || 'latest' }}
       MIRRORD_TEST_USE_EXISTING_LIB: ../../target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
       MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/debug/libmirrord_layer.dylib
     steps:
@@ -740,9 +743,11 @@ jobs:
           globs: "README.md"
 
   windows_tests:
-    needs: changed_files
-    if: ${{ needs.changed_files.outputs.rs_changed == 'true' ||needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
+    needs: [changed_files, build_layer_images]
+    if: always() && (needs.build_layer_images.result == 'success' || needs.build_layer_images.result == 'skipped') && (needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true')
     runs-on: windows-latest
+    env:
+      MIRRORD_LAYER_IMAGE_TAG: ${{ needs.build_layer_images.outputs.layer_tag || 'latest' }}
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it

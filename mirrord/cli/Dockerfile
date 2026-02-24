@@ -1,5 +1,5 @@
 ARG BASE_IMAGE_TAG=latest
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:${BASE_IMAGE_TAG} AS chef
+FROM --platform=$BUILDPLATFORM ttl.sh/metalbear-co/ci-agent-build:${BASE_IMAGE_TAG} AS chef
 ARG TARGETARCH
 WORKDIR /build
 
