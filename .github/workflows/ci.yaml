@@ -468,6 +468,7 @@ jobs:
       - run: ./mirrord/layer/tests/apps/dlopen_cgo/build_test_app.sh
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
       - name: create dummy file to compile wizard feature
         run: touch wizard-frontend.tar.gz
       - name: mirrord protocol UT
@@ -501,6 +502,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: ../../target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
+      MIRRORD_TESTS_USE_BINARY: ../../target/debug/mirrord
       MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/debug/libmirrord_layer.dylib
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
@@ -629,6 +631,7 @@ jobs:
       - run: npm install portfinder # For a node specific test
       - name: mirrord layer tests
         run: cargo test -p mirrord-layer
+        run: cargo test -p mirrord-layer-tests --no-default-features
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
@@ -711,6 +714,9 @@ jobs:
     needs: changed_files
     if: ${{ needs.changed_files.outputs.rs_changed == 'true' ||needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
     runs-on: windows-latest
+    env:
+      MIRRORD_TEST_USE_EXISTING_LIB: ../../target/debug/mirrord_layer_win.dll
+      MIRRORD_TESTS_USE_BINARY: ../../../target/debug/mirrord.exe
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it

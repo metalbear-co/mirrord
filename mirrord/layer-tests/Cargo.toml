@@ -27,20 +27,13 @@ tokio = { workspace = true, features = ["rt", "net", "macros", "fs", "rt-multi-t
 
 [features]
 default = ["build-artifacts"]
-build-artifacts = [
-  "mirrord",
-  "mirrord-layer",
-  "mirrord-layer-win",
-]
+build-artifacts = ["mirrord"]
 
 [build-dependencies]
+# exec-based test-harness requires mirrord binary, to skip compilation do both: 
+# - run with `--no-default-features` cargo flag 
+# - define `MIRRORD_TESTS_USE_BINARY` env var
 mirrord = { artifact = "bin", path = "../cli", optional = true }
-
-[target.'cfg(unix)'.build-dependencies]
-mirrord-layer = { artifact = "cdylib", path = "../layer", optional = true }
-
-[target.'cfg(windows)'.build-dependencies]
-mirrord-layer-win = { artifact = "cdylib", path = "../layer-win", optional = true }
 
 [dev-dependencies]
 mirrord-tests = { path = "../../tests" }
