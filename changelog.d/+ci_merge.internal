@@ -1,0 +1,1 @@
+Merged the separate `ci` repository workflows and image building into the main repository for faster and more atomic PR checks.
