@@ -4665,6 +4665,7 @@ dependencies = [
  "reqwest 0.13.2",
  "rstest",
  "rustls 0.23.36",
+ "safejaq",
  "semver 1.0.27",
  "serde",
  "serde_json",
@@ -7024,6 +7025,22 @@ name = "ryu"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a50f4cf475b65d88e057964e0e9bb1f0aa9bbb2036dc65c64596b42932536984"
+
+[[package]]
+name = "safejaq"
+version = "0.1.0"
+dependencies = [
+ "jaq-core",
+ "jaq-json",
+ "jaq-std",
+ "nix 0.29.0",
+ "rstest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "same-file"

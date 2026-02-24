@@ -34,6 +34,7 @@ members = [
     "tests/rust-websockets",
     "tests/rust-sqs-printer",
     "xtask",
+	"safejaq",
 ]
 resolver = "2"
 
