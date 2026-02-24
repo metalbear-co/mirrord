@@ -233,12 +233,9 @@ impl<'de> Deserialize<'de> for ConnectionSource {
                 return Ok(ConnectionSource::Url(source));
             }
             if let Some(url_str) = url_val.as_str() {
-                let source_type = value
-                    .get("type")
-                    .and_then(|t| t.as_str())
-                    .ok_or_else(|| {
-                        serde::de::Error::custom("'type' is required for flat URL format")
-                    })?;
+                let source_type = value.get("type").and_then(|t| t.as_str()).ok_or_else(|| {
+                    serde::de::Error::custom("'type' is required for flat URL format")
+                })?;
                 let variable = url_str.to_string();
                 let source = match source_type {
                     "env" => TargetEnviromentVariableSource::Env {
@@ -266,9 +263,7 @@ impl<'de> Deserialize<'de> for ConnectionSource {
             let source_type = value
                 .get("type")
                 .and_then(|t| t.as_str())
-                .ok_or_else(|| {
-                    serde::de::Error::custom("'type' is required for params format")
-                })?;
+                .ok_or_else(|| serde::de::Error::custom("'type' is required for params format"))?;
             let source_type = match source_type {
                 "env" => ConnectionSourceType::Env,
                 "env_from" => ConnectionSourceType::EnvFrom,
@@ -418,8 +413,7 @@ mod tests {
 
     #[test]
     fn deserialize_legacy_url_with_container() {
-        let json =
-            r#"{ "url": { "type": "env", "variable": "DB_URL", "container": "my-app" } }"#;
+        let json = r#"{ "url": { "type": "env", "variable": "DB_URL", "container": "my-app" } }"#;
         let source: ConnectionSource = serde_json::from_str(json).unwrap();
         assert_eq!(
             source,
