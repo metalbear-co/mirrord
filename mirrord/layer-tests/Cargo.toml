@@ -1,0 +1,57 @@
+[package]
+name = "mirrord-layer-tests"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+mirrord-config = { path = "../config" }
+mirrord-intproxy = { path = "../intproxy" }
+mirrord-protocol = { path = "../protocol" }
+
+actix-codec.workspace = true
+futures.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "macros", "fs", "rt-multi-thread"] }
+
+[features]
+default = ["build-artifacts"]
+build-artifacts = [
+  "mirrord",
+  "mirrord-layer",
+  "mirrord-layer-win",
+]
+
+[build-dependencies]
+mirrord = { artifact = "bin", path = "../cli", optional = true }
+
+[target.'cfg(unix)'.build-dependencies]
+mirrord-layer = { artifact = "cdylib", path = "../layer", optional = true }
+
+[target.'cfg(windows)'.build-dependencies]
+mirrord-layer-win = { artifact = "cdylib", path = "../layer-win", optional = true }
+
+[dev-dependencies]
+mirrord-tests = { path = "../../tests" }
+mirrord-intproxy = { path = "../intproxy" }
+mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
+mirrord-test-utils = { path = "../../test-utils" }
+actix-codec.workspace = true
+futures.workspace = true
+serde_json.workspace = true
+rstest.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "fs"] }
+tempfile.workspace = true
+rand.workspace = true
+tracing-subscriber.workspace = true
