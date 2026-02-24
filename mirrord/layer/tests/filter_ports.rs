@@ -1,6 +1,5 @@
 #![cfg(target_family = "unix")]
 #![cfg(target_os = "linux")]
-#![feature(assert_matches)]
 
 mod common;
 

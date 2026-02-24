@@ -1,6 +1,5 @@
 #![cfg(target_family = "unix")]
 #![cfg(target_os = "macos")]
-#![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
 use std::{io::Write, os::unix::fs::PermissionsExt, path::Path, time::Duration};

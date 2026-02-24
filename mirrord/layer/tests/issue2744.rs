@@ -1,5 +1,4 @@
 #![cfg(target_family = "unix")]
-#![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
 mod common;

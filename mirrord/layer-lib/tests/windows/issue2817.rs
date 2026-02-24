@@ -1,4 +1,4 @@
-#![feature(assert_matches)]
+
 #![warn(clippy::indexing_slicing)]
 
 use std::{path::Path, str::FromStr, time::Duration};
