@@ -110,9 +110,9 @@ pub async fn dump_command(
     };
 
     if ports.is_empty() {
-        Err(DumpSessionError::PortDetectionFailed(
-            "no ports found in the target's resource spec".to_string(),
-        ))?;
+        Err(DumpSessionError::PortDetectionFailed(format!(
+            "no ports found in the resource spec for target {path}"
+        )))?;
     }
 
     // Start the dump session
