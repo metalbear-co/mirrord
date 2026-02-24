@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use std::{borrow::Cow, io::Read, ops::Deref, process::Stdio, time::Duration};
 
 use jaq_core::{
