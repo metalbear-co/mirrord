@@ -141,6 +141,7 @@ mod tests {
         let prev_log_level = std::env::var("RUST_LOG").ok();
         let prev_log_path = std::env::var(MIRRORD_LAYER_LOG_PATH).ok();
         let prev_console_addr = std::env::var("MIRRORD_CONSOLE_ADDR").ok();
+        let prev_log_level = std::env::var("RUST_LOG").ok();
 
         unsafe {
             std::env::remove_var("MIRRORD_CONSOLE_ADDR");

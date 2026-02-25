@@ -385,6 +385,21 @@ impl Target {
         matches!(self, Target::Job(_) | Target::CronJob(_))
     }
 
+    /// Set the container on this target. No-op for [`Target::Targetless`].
+    pub fn set_container(&mut self, container: String) {
+        match self {
+            Target::Deployment(t) => t.container = Some(container),
+            Target::Pod(t) => t.container = Some(container),
+            Target::Rollout(t) => t.container = Some(container),
+            Target::StatefulSet(t) => t.container = Some(container),
+            Target::Service(t) => t.container = Some(container),
+            Target::ReplicaSet(t) => t.container = Some(container),
+            Target::Job(t) => t.container = Some(container),
+            Target::CronJob(t) => t.container = Some(container),
+            Target::Targetless => {}
+        }
+    }
+
     /// `true` if this [`Target`] is only supported when the operator is enabled.
     pub fn requires_operator(&self) -> bool {
         matches!(

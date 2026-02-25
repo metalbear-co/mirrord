@@ -106,7 +106,12 @@ The basic command to run the E2E tests is:
 cargo test --package mirrord-tests
 ```
 
-However, when running on macOS a universal binary has to be created first:
+However, when running on macOS a universal binary has to be created first. You can use xtask:
+```bash
+cargo xtask build-cli
+```
+
+Or the build script:
 ```bash
 scripts/build_fat_mac.sh
 ```
@@ -192,7 +197,12 @@ The basic command to run the integration tests is:
 cargo test --package mirrord-layer
 ```
 
-However, when running on macOS a dylib has to be created first:
+However, when running on macOS a dylib has to be created first. You can use xtask:
+```bash
+cargo xtask build-layer
+```
+
+Or the build script:
 ```bash
 scripts/build_fat_mac.sh
 ```
@@ -298,6 +308,24 @@ py-serv-deployment-ff89b5974-x9tjx   1/1     Running   0          3h8m
 ### Build and run mirrord
 
 To build this project, you will first need a [Protocol Buffer Compiler](https://grpc.io/docs/protoc-installation/) installed.
+
+We recommend using `xtask` for building mirrord, which handles all platform-specific requirements:
+
+```bash
+# Debug build for your platform (auto-detected)
+cargo xtask build-cli
+
+# Release build
+cargo xtask build-cli --release
+
+# Build for specific platform
+cargo xtask build-cli --release --platform macos-universal
+cargo xtask build-cli --release --platform linux-x86_64
+```
+
+See [xtask/README.md](xtask/README.md) for complete documentation.
+
+**Alternative (platform-specific methods):**
 
 #### macOS
 ```bash
@@ -617,7 +645,11 @@ You can check the run as it progresses and download the completed artifacts from
 
 ## Changing the release on MacOS
 
-If you're making changes to the release and/or CI workflows for MacOS specifically - for example changing how the universal binary is created, you need to ensure that [the script for building the universal binary](/scripts/build_fat_mac.sh) that is run manually when developing has also been updated if necessary.
+If you're making changes to the release and/or CI workflows for MacOS specifically - for example changing how the universal binary is created, you need to update the build logic in both:
+- [xtask/](/xtask/) - the recommended build automation tool
+- [scripts/build_fat_mac.sh](/scripts/build_fat_mac.sh) - the legacy build script (still supported)
+
+The xtask approach is preferred for new development as it provides better error messages, type safety, and consistency across platforms. See [xtask/README.md](xtask/README.md) for details.
 
 # Submitting a Pull Request
 

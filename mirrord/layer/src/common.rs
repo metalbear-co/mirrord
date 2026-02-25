@@ -1,8 +1,11 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{ffi::CStr, fmt::Debug, ops::Not, path::PathBuf};
+use std::{ffi::CStr, ops::Not, path::PathBuf};
 
 use libc::c_char;
-use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
+pub use mirrord_layer_lib::{
+    detour::{Bypass, Detour},
+    proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
+};
 use mirrord_protocol::file::OpenOptionsInternal;
 use null_terminated::Nul;
 use tracing::warn;
@@ -11,48 +14,7 @@ use tracing::warn;
 #[cfg(target_os = "macos")]
 const ROOT_DIR: &str = "/\0";
 
-use crate::{
-    PROXY_CONNECTION,
-    detour::{Bypass, Detour},
-    error::{HookError, HookResult},
-    exec_hooks::Argv,
-    file::OpenOptionsInternalExt,
-    socket::SHARED_SOCKETS_ENV_VAR,
-};
-
-/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
-/// Blocks until the proxy responds.
-pub fn make_proxy_request_with_response<T>(request: T) -> HookResult<T::Response>
-where
-    T: IsLayerRequestWithResponse + Debug,
-    T::Response: Debug,
-{
-    // SAFETY: mutation happens only on initialization.
-    #[allow(static_mut_refs)]
-    unsafe {
-        PROXY_CONNECTION
-            .get()
-            .ok_or(HookError::CannotGetProxyConnection)?
-            .make_request_with_response(request)
-            .map_err(Into::into)
-    }
-}
-
-/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
-/// Blocks until the request is sent.
-pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
-    request: T,
-) -> HookResult<MessageId> {
-    // SAFETY: mutation happens only on initialization.
-    #[allow(static_mut_refs)]
-    unsafe {
-        PROXY_CONNECTION
-            .get()
-            .ok_or(HookError::CannotGetProxyConnection)?
-            .make_request_no_response(request)
-            .map_err(Into::into)
-    }
-}
+use crate::{exec_hooks::Argv, file::OpenOptionsInternalExt, socket::SHARED_SOCKETS_ENV_VAR};
 
 /// Converts raw pointer values `P` to some other type.
 ///

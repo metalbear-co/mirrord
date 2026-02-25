@@ -1,36 +1,75 @@
-use std::{collections::HashSet, net::SocketAddr, ops::Not, str::FromStr};
+use std::{collections::HashSet, net::SocketAddr, ops::Not, sync::OnceLock};
 
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
     experimental::ExperimentalConfig,
     feature::{
         env::EnvConfig,
-        fs::FsConfig,
+        fs::{FsConfig, FsModeConfig, READONLY_FILE_BUFFER_DEFAULT},
         network::{
-            incoming::{
-                IncomingConfig,
-                http_filter::{BodyFilter, HttpFilterConfig, InnerFilter},
-            },
+            NetworkConfig,
+            incoming::{IncomingConfig, IncomingMode as ConfigIncomingMode},
             outgoing::OutgoingConfig,
         },
     },
     target::Target,
 };
 use mirrord_intproxy_protocol::PortSubscription;
-use mirrord_layer_lib::file::{filter::FileFilter, mapper::FileRemapper};
 use mirrord_protocol::{
     Port,
-    tcp::{
-        Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, JsonPathQuery, MirrorType, StealType,
-    },
+    tcp::{HttpFilter, MirrorType, StealType},
 };
 use regex::RegexSet;
 
 use crate::{
     debugger_ports::DebuggerPorts,
+    file::{filter::FileFilter, mapper::FileRemapper},
     socket::{OutgoingSelector, dns_selector::DnsSelector},
+    trace_only::{is_trace_only_mode, modify_config_for_trace_only},
 };
 
+// note: pub only for doc purposes, please use setup() in code
+pub static SETUP: OnceLock<LayerSetup> = OnceLock::new();
+
+pub fn setup() -> &'static LayerSetup {
+    SETUP.get().expect("layer is not initialized")
+}
+
+/// Initialized LayerSetup from LayerConfig
+pub fn init_layer_setup(mut config: LayerConfig, sip_only: bool) {
+    // Check if we're in trace only mode (no agent)
+    let trace_only = is_trace_only_mode();
+
+    if sip_only {
+        // we need to hook file access to patch path to our temp bin.
+        config.feature.fs = FsConfig {
+            mode: FsModeConfig::Local,
+            read_write: None,
+            read_only: None,
+            local: None,
+            not_found: None,
+            mapping: None,
+            readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
+        };
+    } else {
+        if config.target.path.is_none() && config.feature.fs.mode.ne(&FsModeConfig::Local) {
+            // Use localwithoverrides on targetless regardless of user config, unless fs-mode is
+            // already set to local.
+            config.feature.fs.mode = FsModeConfig::LocalWithOverrides;
+        }
+
+        // Disable all features that require the agent
+        if trace_only {
+            modify_config_for_trace_only(&mut config);
+        }
+    }
+
+    // init setup
+    let debugger_ports = DebuggerPorts::from_env();
+    let local_hostname = sip_only || trace_only || !config.feature.hostname;
+    let state = LayerSetup::new(config, debugger_ports, local_hostname);
+    SETUP.set(state).unwrap();
+}
 /// Complete layer setup.
 /// Contains [`LayerConfig`] and derived from it structs, which are used in multiple places across
 /// the layer.
@@ -124,12 +163,16 @@ impl LayerSetup {
         &self.file_remapper
     }
 
+    pub fn network_config(&self) -> &NetworkConfig {
+        &self.config.feature.network
+    }
+
     pub fn incoming_config(&self) -> &IncomingConfig {
-        &self.config.feature.network.incoming
+        &self.network_config().incoming
     }
 
     pub fn outgoing_config(&self) -> &OutgoingConfig {
-        &self.config.feature.network.outgoing
+        &self.network_config().outgoing
     }
 
     pub fn experimental(&self) -> &ExperimentalConfig {
@@ -195,6 +238,32 @@ impl LayerSetup {
     pub fn env_backup(&self) -> &Vec<(String, String)> {
         &self.env_backup
     }
+
+    // Hook control methods for configuration-based hook enablement
+
+    /// Check if file system hooks should be enabled based on configuration
+    pub fn fs_hooks_enabled(&self) -> bool {
+        !matches!(self.config.feature.fs.mode, FsModeConfig::Local)
+    }
+
+    /// Check if socket hooks should be enabled based on configuration
+    pub fn socket_hooks_enabled(&self) -> bool {
+        self.config.feature.network.incoming.mode != ConfigIncomingMode::Off
+            || self.outgoing_config().tcp
+            || self.outgoing_config().udp
+    }
+
+    /// Check if DNS hooks should be enabled based on configuration
+    pub fn dns_hooks_enabled(&self) -> bool {
+        self.remote_dns_enabled()
+    }
+
+    /// Check if process hooks should be enabled (always true for Windows)
+    #[cfg(windows)]
+    pub fn process_hooks_enabled(&self) -> bool {
+        // Process hooks always needed for Windows DLL injection
+        true
+    }
 }
 
 /// Settings for handling HTTP feature.
@@ -217,7 +286,7 @@ impl IncomingMode {
     /// # Params
     ///
     /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
-    fn new(config: &mut IncomingConfig) -> Self {
+    pub fn new(config: &mut IncomingConfig) -> Self {
         let http_settings = config.http_filter.is_filter_set().then(|| {
             let ports = config
                 .http_filter
@@ -226,7 +295,10 @@ impl IncomingMode {
                 .cloned()
                 .map(HashSet::from);
 
-            let filter = Self::parse_http_filter(&config.http_filter);
+            let filter = config
+                .http_filter
+                .as_protocol_http_filter()
+                .expect("invalid HTTP filter expression");
 
             HttpSettings { filter, ports }
         });
@@ -235,106 +307,6 @@ impl IncomingMode {
             steal: config.is_steal(),
             http_settings,
         }
-    }
-
-    fn parse_body_filter(filter: &BodyFilter) -> HttpBodyFilter {
-        match filter {
-            BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
-                query: JsonPathQuery::new_unchecked(query.clone()),
-                matches: Filter::new(matches.clone())
-                    .expect("invalid json body filter `matches` string"),
-            },
-        }
-    }
-
-    fn parse_http_filter(http_filter_config: &HttpFilterConfig) -> HttpFilter {
-        match http_filter_config {
-            HttpFilterConfig {
-                path_filter: Some(path),
-                header_filter: None,
-                method_filter: None,
-                body_filter: None,
-                all_of: None,
-                any_of: None,
-                ports: _ports,
-            } => HttpFilter::Path(Filter::new(path.into()).expect("invalid filter expression")),
-
-            HttpFilterConfig {
-                path_filter: None,
-                header_filter: Some(header),
-                method_filter: None,
-                body_filter: None,
-                all_of: None,
-                any_of: None,
-                ports: _ports,
-            } => HttpFilter::Header(Filter::new(header.into()).expect("invalid filter expression")),
-
-            HttpFilterConfig {
-                path_filter: None,
-                header_filter: None,
-                method_filter: Some(method),
-                body_filter: None,
-                all_of: None,
-                any_of: None,
-                ports: _ports,
-            } => HttpFilter::Method(
-                HttpMethodFilter::from_str(method).expect("invalid method filter string"),
-            ),
-
-            HttpFilterConfig {
-                path_filter: None,
-                header_filter: None,
-                method_filter: None,
-                body_filter: Some(filter),
-                all_of: None,
-                any_of: None,
-                ports: _ports,
-            } => HttpFilter::Body(Self::parse_body_filter(filter)),
-
-            HttpFilterConfig {
-                path_filter: None,
-                header_filter: None,
-                method_filter: None,
-                body_filter: None,
-                all_of: Some(filters),
-                any_of: None,
-                ports: _ports,
-            } => Self::make_composite_filter(true, filters),
-
-            HttpFilterConfig {
-                path_filter: None,
-                header_filter: None,
-                method_filter: None,
-                body_filter: None,
-                all_of: None,
-                any_of: Some(filters),
-                ports: _ports,
-            } => Self::make_composite_filter(false, filters),
-
-            _ => panic!("No HTTP filters specified, this should have been caught earlier"),
-        }
-    }
-
-    fn make_composite_filter(all: bool, filters: &[InnerFilter]) -> HttpFilter {
-        let filters = filters
-            .iter()
-            .map(|filter| match filter {
-                InnerFilter::Path { path } => {
-                    HttpFilter::Path(Filter::new(path.clone()).expect("invalid filter expression"))
-                }
-                InnerFilter::Header { header } => HttpFilter::Header(
-                    Filter::new(header.clone()).expect("invalid filter expression"),
-                ),
-                InnerFilter::Method { method } => HttpFilter::Method(
-                    HttpMethodFilter::from_str(method).expect("invalid method filter string"),
-                ),
-                InnerFilter::Body(body_filter) => {
-                    HttpFilter::Body(Self::parse_body_filter(body_filter))
-                }
-            })
-            .collect();
-
-        HttpFilter::Composite { all, filters }
     }
 
     /// Returns [`PortSubscription`] request to be used for the given port.
@@ -372,5 +344,33 @@ impl IncomingMode {
             };
             PortSubscription::Mirror(mirror_type)
         }
+    }
+}
+
+/// Helper trait for network hook decisions
+#[cfg(windows)]
+pub trait NetworkHookConfig {
+    fn requires_incoming_hooks(&self) -> bool;
+    fn requires_outgoing_hooks(&self) -> bool;
+    fn requires_tcp_hooks(&self) -> bool;
+    fn requires_udp_hooks(&self) -> bool;
+}
+
+#[cfg(windows)]
+impl NetworkHookConfig for NetworkConfig {
+    fn requires_incoming_hooks(&self) -> bool {
+        self.incoming.mode != ConfigIncomingMode::Off
+    }
+
+    fn requires_outgoing_hooks(&self) -> bool {
+        self.outgoing.tcp || self.outgoing.udp
+    }
+
+    fn requires_tcp_hooks(&self) -> bool {
+        self.outgoing.tcp
+    }
+
+    fn requires_udp_hooks(&self) -> bool {
+        self.outgoing.udp
     }
 }

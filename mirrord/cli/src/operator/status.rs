@@ -367,6 +367,37 @@ Operator License
         sessions.printstd();
         println!();
 
+        // Multi-cluster sessions are only on Primary cluster.
+        if let Some(mc_sessions) = status.multi_cluster_sessions.as_ref() {
+            println!("Multi-Cluster Sessions:");
+            let mut mc_table = Table::new();
+
+            mc_table.add_row(row![
+                "Session ID",
+                "Target",
+                "Namespace",
+                "User",
+                "Clusters",
+                "Phase",
+                "Session Duration"
+            ]);
+
+            for mc_session in mc_sessions {
+                mc_table.add_row(row![
+                    &mc_session.id,
+                    &mc_session.target,
+                    &mc_session.namespace,
+                    &mc_session.user,
+                    mc_session.clusters.join(", "),
+                    &mc_session.phase,
+                    humantime::format_duration(Duration::from_secs(mc_session.duration_secs)),
+                ]);
+            }
+
+            mc_table.printstd();
+            println!();
+        }
+
         // The SQS queue statuses are grouped by queue consumer.
         for (sqs_consumer, sqs_row) in sqs_rows {
             let mut sqs_table = Table::new();

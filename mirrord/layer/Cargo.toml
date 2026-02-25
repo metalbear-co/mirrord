@@ -32,15 +32,12 @@ bincode.workspace = true
 ctor = "0.2"
 dotenvy.workspace = true
 frida-gum = { version = "0.17", features = ["auto-download", "std"] }
-http.workspace = true
 libc.workspace = true
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
 null-terminated = { version = "0.3", default-features = false }
 num-traits = "0.2"
 rand.workspace = true
-regex.workspace = true
 socket2.workspace = true
-thiserror.workspace = true
 tracing.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
