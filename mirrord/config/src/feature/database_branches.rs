@@ -200,15 +200,14 @@ pub struct DatabaseBranchBaseConfig {
 #[schemars(rename = "DbBranchingConnectionSource")]
 #[serde(untagged)]
 pub enum ConnectionSource {
-    /// `{"url": {"type": "env", "variable": "DB_URL"}}`
-    Url { url: TargetEnviromentVariableSource },
-    /// `{"type": "env", "url": "DB_URL"}`
+    Url {
+        url: TargetEnviromentVariableSource,
+    },
     FlatUrl {
         #[serde(rename = "type")]
         source_type: ConnectionSourceType,
         url: String,
     },
-    /// `{"type": "env", "params": {...}}`
     Params(ConnectionParamsConfig),
 }
 

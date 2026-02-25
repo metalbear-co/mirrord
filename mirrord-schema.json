@@ -1312,30 +1312,35 @@
     },
     "DbBranchingConnectionSource": {
       "description": "Different ways of connecting to the source database.\n\nAccepts three formats:\n\nLegacy URL (backward compatible): ```json { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } ```\n\nFlat URL: ```json { \"type\": \"env\", \"url\": \"DB_CONNECTION_URL\" } ```\n\nIndividual connection params: ```json { \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"user\": \"DB_USER\", \"password\": \"DB_PASSWORD\", \"database\": \"DB_NAME\" } } ```\n\nIndividual connection params with password from a Kubernetes Secret: ```json { \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"password\": { \"secret\": \"my-secret\", \"key\": \"password\" }, \"database\": \"DB_NAME\" } } ```",
-      "oneOf": [
+      "anyOf": [
         {
           "type": "object",
           "required": [
-            "Url"
+            "url"
           ],
           "properties": {
-            "Url": {
+            "url": {
               "$ref": "#/definitions/DbBranchingConnectionSourceKind"
             }
-          },
-          "additionalProperties": false
+          }
         },
         {
           "type": "object",
           "required": [
-            "Params"
+            "type",
+            "url"
           ],
           "properties": {
-            "Params": {
-              "$ref": "#/definitions/ConnectionParamsConfig"
+            "type": {
+              "$ref": "#/definitions/ConnectionSourceType"
+            },
+            "url": {
+              "type": "string"
             }
-          },
-          "additionalProperties": false
+          }
+        },
+        {
+          "$ref": "#/definitions/ConnectionParamsConfig"
         }
       ]
     },

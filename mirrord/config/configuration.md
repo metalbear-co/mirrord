@@ -1020,6 +1020,8 @@ Individual connection params with password from a Kubernetes Secret:
 { "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
 ```
 
+The type of environment variable source for connection params.
+
 Connection parameters specified as individual environment variable names.
 
 Individual database connection parameter sources.
@@ -1144,6 +1146,8 @@ Individual connection params with password from a Kubernetes Secret:
 ```json
 { "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
 ```
+
+The type of environment variable source for connection params.
 
 Connection parameters specified as individual environment variable names.
 
@@ -1271,6 +1275,8 @@ Individual connection params with password from a Kubernetes Secret:
 ```json
 { "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
 ```
+
+The type of environment variable source for connection params.
 
 Connection parameters specified as individual environment variable names.
 

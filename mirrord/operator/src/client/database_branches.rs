@@ -11,8 +11,7 @@ use kube::{
 use mirrord_config::{
     feature::database_branches::{
         ConnectionSource, ConnectionSourceType, DatabaseBranchConfig, DatabaseBranchesConfig,
-        MongodbBranchConfig, MysqlBranchConfig, PgBranchConfig,
-        TargetEnviromentVariableSource,
+        MongodbBranchConfig, MysqlBranchConfig, PgBranchConfig, TargetEnviromentVariableSource,
     },
     target::{Target, TargetDisplay},
 };
