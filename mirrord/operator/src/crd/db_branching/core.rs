@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Formatter};
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use mirrord_config::feature::database_branches::{
-    ConnectionParamsConfig, ConnectionSourceType, TargetEnviromentVariableSource,
+    ConnectionParamsConfig, ConnectionSourceType, ParamSource, TargetEnviromentVariableSource,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -49,6 +49,9 @@ pub enum ConnectionSourceKind {
         container: Option<String>,
         variable: String,
     },
+
+    /// Value read directly from a Kubernetes Secret at resolution time.
+    Secret { name: String, key: String },
 }
 
 impl From<TargetEnviromentVariableSource> for ConnectionSourceKind {
@@ -68,6 +71,9 @@ impl From<TargetEnviromentVariableSource> for ConnectionSourceKind {
                 container,
                 variable,
             },
+            TargetEnviromentVariableSource::Secret { name, key } => {
+                ConnectionSourceKind::Secret { name, key }
+            }
         }
     }
 }
@@ -89,21 +95,33 @@ impl From<&TargetEnviromentVariableSource> for ConnectionSourceKind {
                 container: container.clone(),
                 variable: variable.clone(),
             },
+            TargetEnviromentVariableSource::Secret { name, key } => {
+                ConnectionSourceKind::Secret {
+                    name: name.clone(),
+                    key: key.clone(),
+                }
+            }
         }
     }
 }
 
 impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
     fn from(config: &ConnectionParamsConfig) -> Self {
-        let wrap = |var: &Option<String>| -> Option<ConnectionSourceKind> {
-            var.as_ref().map(|v| match &config.source_type {
-                ConnectionSourceType::Env => ConnectionSourceKind::Env {
-                    container: None,
-                    variable: v.clone(),
+        let wrap = |param: &Option<ParamSource>| -> Option<ConnectionSourceKind> {
+            param.as_ref().map(|p| match p {
+                ParamSource::Variable(v) => match &config.source_type {
+                    ConnectionSourceType::Env => ConnectionSourceKind::Env {
+                        container: None,
+                        variable: v.clone(),
+                    },
+                    ConnectionSourceType::EnvFrom => ConnectionSourceKind::EnvFrom {
+                        container: None,
+                        variable: v.clone(),
+                    },
                 },
-                ConnectionSourceType::EnvFrom => ConnectionSourceKind::EnvFrom {
-                    container: None,
-                    variable: v.clone(),
+                ParamSource::Secret { name, key } => ConnectionSourceKind::Secret {
+                    name: name.clone(),
+                    key: key.clone(),
                 },
             })
         };

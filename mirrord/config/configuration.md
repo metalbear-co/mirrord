@@ -1015,10 +1015,16 @@ Individual connection params:
 { "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
 ```
 
+Individual connection params with password from a Kubernetes Secret:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
+```
+
 Connection parameters specified as individual environment variable names.
 
-Individual database connection parameter variable names.
+Individual database connection parameter sources.
 At least one parameter must be specified.
+Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
 
 The type of environment variable source for connection params.
 
@@ -1134,10 +1140,16 @@ Individual connection params:
 { "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
 ```
 
+Individual connection params with password from a Kubernetes Secret:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
+```
+
 Connection parameters specified as individual environment variable names.
 
-Individual database connection parameter variable names.
+Individual database connection parameter sources.
 At least one parameter must be specified.
+Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
 
 The type of environment variable source for connection params.
 
@@ -1255,10 +1267,16 @@ Individual connection params:
 { "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
 ```
 
+Individual connection params with password from a Kubernetes Secret:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
+```
+
 Connection parameters specified as individual environment variable names.
 
-Individual database connection parameter variable names.
+Individual database connection parameter sources.
 At least one parameter must be specified.
+Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
 
 The type of environment variable source for connection params.
 
