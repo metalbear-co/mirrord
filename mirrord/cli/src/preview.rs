@@ -17,7 +17,10 @@ use k8s_openapi::chrono::Utc;
 use kube::{
     Api, ResourceExt,
     api::{DeleteParams, ListParams, ObjectMeta, PostParams},
-    runtime::watcher::{self, Event, watcher},
+    runtime::{
+        wait::delete,
+        watcher::{self, Event, watcher},
+    },
 };
 use mirrord_analytics::NullReporter;
 use mirrord_config::{
@@ -126,11 +129,7 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
             // Delete and wait for the existing session to be fully removed.
             match tokio::time::timeout(
                 Duration::from_secs(60),
-                kube::runtime::wait::delete::delete_and_finalize(
-                    api.clone(),
-                    &name,
-                    &DeleteParams::default(),
-                ),
+                delete::delete_and_finalize(api.clone(), &name, &DeleteParams::default()),
             )
             .await
             {
@@ -236,7 +235,7 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
     let pod_name = loop {
         tokio::select! {
             _ = &mut timeout => {
-                if let Err(err) = api.delete(&session.name_any(), &DeleteParams::default()).await {
+                if let Err(err) = delete::delete_and_finalize(api, &session.name_any(), &DeleteParams::default()).await {
                     subtask.warning(&format!(
                         "failed to delete timed out session '{}': {err}, \
                          you may need to delete it manually or with `mirrord preview stop`",
@@ -274,7 +273,7 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
                                     // Sessions that fail to spawn should not be retained —
                                     // delete the CRD so the operator can clean up and the
                                     // user can retry without stale resources blocking them.
-                                    if let Err(err) = api.delete(&session.name_any(), &DeleteParams::default()).await {
+                                    if let Err(err) = delete::delete_and_finalize(api, &session.name_any(), &DeleteParams::default()).await {
                                         subtask.warning(&format!(
                                             "failed to delete failed session '{}': {err}, \
                                              you may need to delete it manually or with `mirrord preview stop`",
@@ -533,7 +532,10 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
 
         let namespaced_api = Api::<PreviewSession>::namespaced(client.clone(), namespace);
 
-        if let Err(e) = namespaced_api.delete(name, &DeleteParams::default()).await {
+        if let Err(e) =
+            delete::delete_and_finalize(namespaced_api.clone(), name, &DeleteParams::default())
+                .await
+        {
             result = Err(CliError::PreviewDeleteFailed {
                 name: name.to_owned(),
                 reason: e.to_string(),
