@@ -716,7 +716,6 @@ jobs:
     if: ${{ needs.changed_files.outputs.rs_changed == 'true' ||needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
     runs-on: windows-latest
     env:
-      MIRRORD_TEST_USE_EXISTING_LIB: ../../target/debug/mirrord_layer_win.dll
       MIRRORD_TESTS_USE_BINARY: ../../../target/debug/mirrord.exe
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
@@ -727,12 +726,23 @@ jobs:
           components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
           toolchain: nightly-2025-08-01
-
+      - name: build layer
+        run: cargo build -p mirrord
+      - run: |
+          cd mirrord/layer/tests/apps/outgoing
+          cargo build
+      - name: mirrord layer unified tests
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test -p mirrord-layer-tests --no-default-features
+      - name: mirrord layer tests
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test -p mirrord-layer-win
       - name: run UT
         run: |
           $ErrorActionPreference = "Stop"
-          New-Item -Path target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll -ItemType File -Force
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
+          cargo test -p mirrord
 
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
   # building concurrently can run faster the release ide tests
