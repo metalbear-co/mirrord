@@ -3031,13 +3031,22 @@
         {
           "type": "object",
           "required": [
-            "message_filter",
             "queue_type"
           ],
           "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each SQS message, the jq filter runs on a JSON representation of the SQS `Message` object.\n\nSee [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "message_filter": {
               "description": "A filter is a mapping between message attribute names and regexes they should match. The local application will only receive messages that match **all** of the given patterns. This means, only messages that have **all** of the attributes in the filter, with values of those attributes matching the respective patterns.",
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "additionalProperties": {
                 "type": "string"
               }
