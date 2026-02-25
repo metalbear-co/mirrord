@@ -94,7 +94,7 @@ pub struct PreviewSessionStatus {
 ///
 /// Progresses through `Initializing` → `Waiting` → `Ready`. Any phase may transition to
 /// `Failed` on error.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
 pub enum PreviewSessionPhase {
     /// Operator is setting up — the preview pod has not been created yet.
     Initializing,

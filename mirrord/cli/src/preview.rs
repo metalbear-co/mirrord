@@ -85,49 +85,44 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
         CliError::PreviewImageRequired
     })?;
 
-    let mut target = config_target.clone();
-    if target.container().is_none() {
-        let runtime_data = target
-            .runtime_data(&client, layer_config.target.namespace.as_deref())
-            .await
-            .map_err(CliError::RuntimeDataResolution)?;
+    let session_target = {
+        let mut config_target_with_container = config_target.clone();
+        if config_target_with_container.container().is_none() {
+            let runtime_data = config_target_with_container
+                .runtime_data(&client, layer_config.target.namespace.as_deref())
+                .await
+                .map_err(CliError::RuntimeDataResolution)?;
 
-        if runtime_data.guessed_container {
-            subtask.warning(&format!(
-                "Target has multiple containers, mirrord picked \"{}\". \
+            if runtime_data.guessed_container {
+                subtask.warning(&format!(
+                    "Target has multiple containers, mirrord picked \"{}\". \
                  To target a different one, include it in the target path.",
-                runtime_data.container_name
-            ));
+                    runtime_data.container_name
+                ));
+            }
+
+            config_target_with_container.set_container(runtime_data.container_name);
         }
 
-        target.set_container(runtime_data.container_name);
-    }
-
-    let target = SessionTarget::from_config(target).ok_or_else(|| {
-        subtask.failure(None);
-        CliError::PreviewTargetResolutionFailed(config_target.to_string())
-    })?;
-
-    let spec = PreviewSessionSpec {
-        image: image.clone(),
-        key: layer_config.key.as_str().to_owned(),
-        target,
-        incoming: PreviewIncomingConfig::from_config(&layer_config.feature.network.incoming),
-        ttl_secs: layer_config.feature.preview.ttl_mins * 60,
+        SessionTarget::from_config(config_target_with_container).ok_or_else(|| {
+            subtask.failure(None);
+            CliError::PreviewTargetResolutionFailed(config_target.to_string())
+        })?
     };
 
     // Check for an existing session with the same key+target.
     let key = layer_config.key.as_str();
     let list_params = ListParams::default().labels(&format!("{PREVIEW_SESSION_KEY_LABEL}={key}"));
-    let existing = api.list(&list_params).await.map_err(|e| {
+    let existing_sessions = api.list(&list_params).await.map_err(|e| {
         subtask.failure(None);
         CliError::PreviewListFailed(e.to_string())
     })?;
 
-    for session in existing.items {
-        if session.spec.target != spec.target {
-            continue;
-        }
+    for session in existing_sessions
+        .items
+        .into_iter()
+        .filter(|session| session.spec.target == session_target)
+    {
         match session.status.as_ref().map(|s| &s.phase) {
             // Failed session — delete it so we can take its place.
             Some(PreviewSessionPhase::Failed) => {
@@ -144,39 +139,53 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
                 subtask.failure(None);
                 return Err(CliError::PreviewDuplicateSession {
                     key: key.to_owned(),
-                    target: spec.target.to_string(),
+                    target: config_target.to_string(),
                 });
             }
         }
     }
 
-    let sanitized_target = config_target.to_string().replace('/', "-");
-    let uuid_short = Uuid::new_v4().simple().to_string();
-    let uuid_short = &uuid_short[..8];
+    let session_name = {
+        let sanitized_target = config_target.to_string().replace('/', "-");
+        let uuid_short = &Uuid::new_v4().simple().to_string()[..8];
+        format!("preview-session-{sanitized_target}-{uuid_short}")
+    };
+
     // Operators compiled with a custom OPERATOR_ISOLATION_MARKER only reconcile preview
     // sessions labeled with their marker (see the label selector in the preview-env
     // controller). The runtime env var check here allows developers to label the session
     // so it gets picked up by an isolated operator instead of the production one.
-    let mut labels = BTreeMap::from([(
-        PREVIEW_SESSION_KEY_LABEL.to_owned(),
-        layer_config.key.as_str().to_owned(),
-    )]);
-    if let Ok(marker) = std::env::var("OPERATOR_ISOLATION_MARKER") {
-        labels.insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker);
-    }
+    let session_labels = {
+        let mut labels = BTreeMap::from([(
+            PREVIEW_SESSION_KEY_LABEL.to_owned(),
+            layer_config.key.as_str().to_owned(),
+        )]);
+        if let Ok(marker) = std::env::var("OPERATOR_ISOLATION_MARKER") {
+            labels.insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker);
+        }
+        labels
+    };
 
-    let preview = PreviewSession {
+    let session_spec = PreviewSessionSpec {
+        image: image.clone(),
+        key: layer_config.key.as_str().to_owned(),
+        target: session_target,
+        incoming: PreviewIncomingConfig::from_config(&layer_config.feature.network.incoming),
+        ttl_secs: layer_config.feature.preview.ttl_mins * 60,
+    };
+
+    let session = PreviewSession {
         metadata: ObjectMeta {
-            name: Some(format!("preview-session-{sanitized_target}-{uuid_short}")),
-            labels: Some(labels),
+            name: Some(session_name),
+            labels: Some(session_labels),
             ..Default::default()
         },
-        spec,
+        spec: session_spec,
         status: None,
     };
 
     let session = api
-        .create(&PostParams::default(), &preview)
+        .create(&PostParams::default(), &session)
         .await
         .map_err(|e| {
             subtask.failure(None);
@@ -192,21 +201,19 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
 
     let mut subtask = progress.subtask("waiting for preview to be ready");
 
-    let stream = watcher(
+    let mut stream = std::pin::pin!(watcher(
         api.clone(),
         watcher::Config::default().fields(&format!("metadata.name={}", session.name_any())),
-    );
-    tokio::pin!(stream);
+    ));
 
     let initialization_start = Instant::now();
-    let mut long_initialization_timer = tokio::time::interval(Duration::from_secs(20));
+    let mut long_initialization_timer = tokio::time::interval(Duration::from_secs(60));
     // First tick is instant
     long_initialization_timer.tick().await;
 
-    let timeout = tokio::time::sleep(Duration::from_secs(
+    let mut timeout = std::pin::pin!(tokio::time::sleep(Duration::from_secs(
         layer_config.feature.preview.creation_timeout_secs,
-    ));
-    tokio::pin!(timeout);
+    )));
 
     let mut last_known_phase: &str = "unknown";
 
@@ -428,7 +435,6 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
 
     let layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
 
-    // env-key is required for stop command.
     let key = layer_config
         .key
         .provided()
