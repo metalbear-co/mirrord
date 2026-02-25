@@ -8,6 +8,9 @@ on:
   workflow_dispatch:
     inputs:
 
+env:
+  PINNED_NIGHTLY: nightly-2026-02-24
+
 jobs:
   build_binaries_aarch64-unknown-linux-gnu:
     runs-on: ubuntu-24.04
@@ -277,7 +280,7 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           target: x86_64-apple-darwin
-          toolchain: nightly-2026-02-24
+          toolchain: ${{ env.PINNED_NIGHTLY }}
           rustflags: ""
           cache: false
       - name: Import Code-Signing Certificates
@@ -293,7 +296,7 @@ jobs:
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: cargo +nightly-2026-02-24 xtask build-layer --platform macos-x86_64 --release
+        run: cargo +${{ env.PINNED_NIGHTLY }} xtask build-layer --platform macos-x86_64 --release
       - uses: actions/upload-artifact@v4
         with:
           name: layer-x86_64-apple-darwin
@@ -309,7 +312,7 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           target: aarch64-apple-darwin
-          toolchain: nightly-2026-02-24
+          toolchain: ${{ env.PINNED_NIGHTLY }}
           rustflags: ""
           cache: false
       - name: Import Code-Signing Certificates
