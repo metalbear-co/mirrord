@@ -224,81 +224,72 @@ impl Serialize for ConnectionSource {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RawConnectionSource {
+    /// `{"url": {"type": "env", "variable": "DB_URL"}}`
+    StructuredUrl {
+        url: Box<TargetEnviromentVariableSource>,
+    },
+    /// `{"type": "env", "url": "DB_URL"}` or `{"type": "env", "params": {...}}`
+    Flat {
+        #[serde(rename = "type")]
+        source_type: ConnectionSourceType,
+        #[serde(default)]
+        url: Option<String>,
+        #[serde(default)]
+        params: Option<Box<ConnectionParamsVars>>,
+    },
+}
+
 impl<'de> Deserialize<'de> for ConnectionSource {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = serde_json::Value::deserialize(deserializer)?;
-
-        if let Some(url_val) = value.get("url") {
-            if url_val.is_object() {
-                let source: TargetEnviromentVariableSource =
-                    serde_json::from_value(url_val.clone()).map_err(serde::de::Error::custom)?;
-                return Ok(ConnectionSource::Url(source));
-            }
-            if let Some(url_str) = url_val.as_str() {
-                let source_type = value.get("type").and_then(|t| t.as_str()).ok_or_else(|| {
-                    serde::de::Error::custom("'type' is required for flat URL format")
-                })?;
-                let variable = url_str.to_string();
-                let source = match source_type {
-                    "env" => TargetEnviromentVariableSource::Env {
-                        container: None,
-                        variable,
-                    },
-                    "env_from" => TargetEnviromentVariableSource::EnvFrom {
-                        container: None,
-                        variable,
-                    },
-                    other => {
-                        return Err(serde::de::Error::custom(format!(
-                            "unknown connection type: {other}"
-                        )));
-                    }
-                };
-                return Ok(ConnectionSource::Url(source));
-            }
-            return Err(serde::de::Error::custom(
-                "'url' must be a string or an object",
-            ));
-        }
-
-        if let Some(params_val) = value.get("params") {
-            let source_type = value
-                .get("type")
-                .and_then(|t| t.as_str())
-                .ok_or_else(|| serde::de::Error::custom("'type' is required for params format"))?;
-            let source_type = match source_type {
-                "env" => ConnectionSourceType::Env,
-                "env_from" => ConnectionSourceType::EnvFrom,
-                other => {
-                    return Err(serde::de::Error::custom(format!(
-                        "unknown connection type: {other}"
-                    )));
-                }
-            };
-            let params: ConnectionParamsVars =
-                serde_json::from_value(params_val.clone()).map_err(serde::de::Error::custom)?;
-            if params.host.is_none()
-                && params.port.is_none()
-                && params.user.is_none()
-                && params.password.is_none()
-                && params.database.is_none()
-            {
-                return Err(serde::de::Error::custom(
-                    "params must include at least one parameter",
-                ));
-            }
-            return Ok(ConnectionSource::Params(ConnectionParamsConfig {
+        let raw = RawConnectionSource::deserialize(deserializer)?;
+        match raw {
+            RawConnectionSource::StructuredUrl { url } => Ok(ConnectionSource::Url(*url)),
+            RawConnectionSource::Flat {
                 source_type,
-                params,
-            }));
+                url: Some(var),
+                params: None,
+            } => {
+                let source = match source_type {
+                    ConnectionSourceType::Env => TargetEnviromentVariableSource::Env {
+                        container: None,
+                        variable: var,
+                    },
+                    ConnectionSourceType::EnvFrom => TargetEnviromentVariableSource::EnvFrom {
+                        container: None,
+                        variable: var,
+                    },
+                };
+                Ok(ConnectionSource::Url(source))
+            }
+            RawConnectionSource::Flat {
+                source_type,
+                url: None,
+                params: Some(params),
+            } => Ok(ConnectionSource::Params(ConnectionParamsConfig {
+                source_type,
+                params: *params,
+            })),
+            RawConnectionSource::Flat {
+                url: Some(_),
+                params: Some(_),
+                ..
+            } => Err(serde::de::Error::custom(
+                "cannot specify both 'url' and 'params'",
+            )),
+            RawConnectionSource::Flat {
+                url: None,
+                params: None,
+                ..
+            } => Err(serde::de::Error::custom(
+                "must specify either 'url' or 'params'",
+            )),
         }
-
-        Err(serde::de::Error::custom(
-            "connection must have either 'url' or 'params'",
-        ))
     }
 }
 
@@ -553,14 +544,21 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_params_empty_fails() {
+    fn deserialize_params_empty_accepts_defaults() {
         let json = r#"{ "type": "env", "params": {} }"#;
-        let result = serde_json::from_str::<ConnectionSource>(json);
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("at least one parameter"),
-            "unexpected error: {err}"
+        let result = serde_json::from_str::<ConnectionSource>(json).unwrap();
+        assert_eq!(
+            result,
+            ConnectionSource::Params(ConnectionParamsConfig {
+                source_type: ConnectionSourceType::Env,
+                params: ConnectionParamsVars {
+                    host: None,
+                    port: None,
+                    user: None,
+                    password: None,
+                    database: None,
+                },
+            })
         );
     }
 
