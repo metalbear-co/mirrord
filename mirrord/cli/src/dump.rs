@@ -83,7 +83,6 @@ pub async fn dump_command(
 
     // If the user didn't specify ports, detect them on the target
     let ports = if args.ports.is_empty() {
-        progress.info("Using auto-detected ports on target");
         let client = kube_client_from_layer_config(&config).await?;
 
         let resolved = ResolvedTarget::new(&client, &path, namespace.as_deref())
@@ -96,7 +95,7 @@ pub async fn dump_command(
                 "failed to resolve target pod spec: {error}"
             ))
         })?;
-        pod_spec
+        let ports: Vec<_> = pod_spec
             .map(|spec| {
                 spec.containers
                     .iter()
@@ -104,16 +103,20 @@ pub async fn dump_command(
                     .map(|port| port.container_port.unsigned_abs() as u16)
                     .collect()
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if ports.is_empty() {
+            Err(DumpSessionError::PortDetectionFailed(format!(
+                "no ports found in the resource spec for target {path}"
+            )))?;
+        }
+
+        progress.info(
+            format!("No ports were specified, attaching to all detected ports: {ports:?}").as_str(),
+        );
+        ports
     } else {
         args.ports.clone()
     };
-
-    if ports.is_empty() {
-        Err(DumpSessionError::PortDetectionFailed(format!(
-            "no ports found in the resource spec for target {path}"
-        )))?;
-    }
 
     // Start the dump session
     let session = DumpSession::new(connection, ports);
