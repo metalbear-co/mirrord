@@ -907,8 +907,7 @@ mod tests {
 
     use crate::crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
-        MirrordWorkloadQueueRegistry, SessionCrd, TargetCrd,
-        copy_target::CopyTargetCrd,
+        MirrordWorkloadQueueRegistry, SessionCrd,
         external::MirrordClusterExternalResource,
         kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
         mongodb_branching::MongodbBranchDatabase,
