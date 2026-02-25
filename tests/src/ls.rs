@@ -27,7 +27,7 @@ pub async fn mirrord_ls() {
     )
     .await;
 
-    let mut process = run_ls(&namespace).await;
+    let mut process = run_ls(&namespace, cfg!(feature = "operator")).await;
     let res = process.wait().await;
     assert!(res.success(), "mirrord ls command failed");
 
