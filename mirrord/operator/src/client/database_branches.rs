@@ -594,9 +594,9 @@ impl AsRef<str> for BranchDatabaseId {
 
 fn convert_connection_source(source: &ConnectionSource) -> CrdConnectionSource {
     match source {
-        ConnectionSource::Url(kind) => CrdConnectionSource::Url(kind.into()),
+        ConnectionSource::Url(kind) => CrdConnectionSource::Url(Box::new(kind.into())),
         ConnectionSource::Params(config) => {
-            CrdConnectionSource::Params(ConnectionParamsSpec::from(config))
+            CrdConnectionSource::Params(Box::new(ConnectionParamsSpec::from(config)))
         }
     }
 }

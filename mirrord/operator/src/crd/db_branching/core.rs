@@ -11,12 +11,11 @@ use crate::crd::session::SessionOwner;
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-#[allow(clippy::large_enum_variant)]
 pub enum ConnectionSource {
     /// A complete connection URL.
-    Url(ConnectionSourceKind),
+    Url(Box<ConnectionSourceKind>),
     /// Individual connection parameters (host, port, user, password, database).
-    Params(ConnectionParamsSpec),
+    Params(Box<ConnectionParamsSpec>),
 }
 
 /// Individual connection parameters, each resolved from a separate environment variable.
