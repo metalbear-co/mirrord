@@ -114,7 +114,7 @@ pub async fn run_mirrord(args: Vec<&str>, env: HashMap<&str, &str>) -> TestProce
         "Either set the MIRRORD_TESTS_USE_BINARY environment variable or enable mirrord build-dependancy via `build-cli` feature"
     );
 
-    // Note: env! above ensures in compile time that either of them will exists, 
+    // Note: env! above ensures in compile time that either of them will exists,
     //  unwrap cannot panic in runtime
     let path = option_env!("CARGO_BIN_FILE_MIRRORD")
         .or(option_env!("MIRRORD_TESTS_USE_BINARY"))
