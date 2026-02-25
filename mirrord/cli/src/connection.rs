@@ -294,10 +294,6 @@ where
                 link: "https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=plugin"
                     .to_string(),
             });
-            actions.insert(IdeAction::Link {
-                label: "Try it now".to_string(),
-                link: "https://app.metalbear.com/".to_string(),
-            });
 
             actions
         },
@@ -324,10 +320,6 @@ where
                 label: "Try mirrord for Teams".to_string(),
                 link: "https://app.metalbear.com/?utm_source=httpfilter&utm_medium=plugin"
                     .to_string(),
-            });
-            actions.insert(IdeAction::Link {
-                label: "Try it now".to_string(),
-                link: "https://app.metalbear.com/".to_string(),
             });
 
             actions
