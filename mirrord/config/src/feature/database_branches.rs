@@ -119,10 +119,10 @@ impl DatabaseBranchesConfig {
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum DatabaseBranchConfig {
-    Mongodb(MongodbBranchConfig),
-    Mysql(MysqlBranchConfig),
-    Pg(PgBranchConfig),
-    Redis(RedisBranchConfig),
+    Mongodb(Box<MongodbBranchConfig>),
+    Mysql(Box<MysqlBranchConfig>),
+    Pg(Box<PgBranchConfig>),
+    Redis(Box<RedisBranchConfig>),
 }
 
 /// MySQL and Postgres database branch config objects share the following fields.
