@@ -1,13 +1,14 @@
 #![cfg(test)]
 
 use fancy_regex::Regex;
+use mirrord_test_utils::run_command::run_ls;
 use rstest::rstest;
 
+use crate::utils::kube_client;
 #[cfg(feature = "operator")]
 use crate::utils::services::operator::service_for_mirrord_ls;
 #[cfg(not(feature = "operator"))]
 use crate::utils::services::service_for_mirrord_ls;
-use crate::utils::{kube_client, run_command::run_ls};
 
 /// Test for the `mirrord ls` command.
 #[cfg_attr(target_os = "windows", ignore)]
