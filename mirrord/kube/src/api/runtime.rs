@@ -83,6 +83,7 @@ pub struct RuntimeData {
     pub pod_ips: Vec<IpAddr>,
     pub pod_namespace: String,
     pub node_name: String,
+    pub node_hostname: Option<String>,
     pub container_id: String,
     pub container_runtime: ContainerRuntime,
     pub container_name: String,
@@ -227,6 +228,7 @@ impl RuntimeData {
             pod_name: pod_name.to_owned(),
             pod_namespace: pod_namespace.to_owned(),
             node_name,
+            node_hostname: None,
             container_id,
             container_runtime,
             container_name,
@@ -239,6 +241,28 @@ impl RuntimeData {
                 .unwrap_or_default(),
             containers_probe_ports,
         })
+    }
+
+    /// Resolves and stores `kubernetes.io/hostname` label from the target node when available.
+    /// This is best-effort and intentionally non-fatal.
+    #[tracing::instrument(level = Level::TRACE, skip(client))]
+    pub async fn try_resolve_node_hostname(&mut self, client: &Client) {
+        const NODE_HOSTNAME_LABEL: &str = "kubernetes.io/hostname";
+
+        if self.node_hostname.is_some() {
+            return;
+        }
+
+        let node_api: Api<Node> = Api::all(client.clone());
+
+        let resolved = node_api
+            .get_metadata(&self.node_name)
+            .await
+            .ok()
+            .and_then(|node| node.metadata.labels)
+            .and_then(|mut labels| labels.remove(NODE_HOSTNAME_LABEL));
+
+        self.node_hostname = resolved;
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(client), ret)]
