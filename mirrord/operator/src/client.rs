@@ -51,9 +51,9 @@ use crate::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
         OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
-        mongodb_branching::MongodbBranchDatabase,
-        mysql_branching::MysqlBranchDatabase,
-        pg_branching::PgBranchDatabase,
+        db_branching::{
+            mongodb::MongodbBranchDatabase, mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
+        },
         session::SessionCiInfo,
     },
     types::{

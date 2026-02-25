@@ -744,6 +744,86 @@
         }
       ]
     },
+    "ConnectionParamsConfig": {
+      "description": "Connection parameters specified as individual environment variable names.",
+      "type": "object",
+      "required": [
+        "params",
+        "type"
+      ],
+      "properties": {
+        "params": {
+          "$ref": "#/definitions/ConnectionParamsVars"
+        },
+        "type": {
+          "$ref": "#/definitions/ConnectionSourceType"
+        }
+      }
+    },
+    "ConnectionParamsVars": {
+      "description": "Individual database connection parameter sources. At least one parameter must be specified. Each parameter is either a plain string (env var name) or an object with `secret` and `key`.",
+      "type": "object",
+      "properties": {
+        "database": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ParamSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "host": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ParamSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "password": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ParamSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "port": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ParamSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "user": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ParamSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ConnectionSourceType": {
+      "description": "The type of environment variable source for connection params.",
+      "type": "string",
+      "enum": [
+        "env",
+        "env_from"
+      ]
+    },
     "ContainerFileConfig": {
       "description": "Unstable: `mirrord container` command specific config.",
       "type": "object",
@@ -1224,15 +1304,15 @@
       ]
     },
     "DatabaseBranchesConfig": {
-      "description": "A list of configurations for database branches.\n\n```json { \"feature\": { \"db_branches\": [ { \"name\": \"my-database-name\", \"ttl_secs\": 120, \"type\": \"mysql\", \"version\": \"8.0\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ] } } ```",
+      "description": "A list of configurations for database branches.\n\nUsing a connection URL: ```json { \"feature\": { \"db_branches\": [ { \"type\": \"mysql\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ] } } ```\n\nUsing individual connection params: ```json { \"feature\": { \"db_branches\": [ { \"type\": \"mysql\", \"connection\": { \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"database\": \"DB_NAME\" } } } ] } } ```",
       "type": "array",
       "items": {
         "$ref": "#/definitions/DatabaseBranchConfig"
       }
     },
     "DbBranchingConnectionSource": {
-      "description": "Different ways of connecting to the source database.\n\nExample:\n\nA single complete connection URL stored in an environment variable accessible from the target pod template.\n\n```json { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } ```",
-      "oneOf": [
+      "description": "Different ways of connecting to the source database.\n\nAccepts three formats:\n\nLegacy URL (backward compatible): ```json { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } ```\n\nFlat URL: ```json { \"type\": \"env\", \"url\": \"DB_CONNECTION_URL\" } ```\n\nIndividual connection params: ```json { \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"user\": \"DB_USER\", \"password\": \"DB_PASSWORD\", \"database\": \"DB_NAME\" } } ```\n\nIndividual connection params with password from a Kubernetes Secret: ```json { \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"password\": { \"secret\": \"my-secret\", \"key\": \"password\" }, \"database\": \"DB_NAME\" } } ```",
+      "anyOf": [
         {
           "type": "object",
           "required": [
@@ -1242,13 +1322,30 @@
             "url": {
               "$ref": "#/definitions/DbBranchingConnectionSourceKind"
             }
-          },
-          "additionalProperties": false
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "url"
+          ],
+          "properties": {
+            "type": {
+              "$ref": "#/definitions/ConnectionSourceType"
+            },
+            "url": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "$ref": "#/definitions/ConnectionParamsConfig"
         }
       ]
     },
     "DbBranchingConnectionSourceKind": {
-      "description": "<!--${internal}--> Different ways to source the connection options.\n\nSupport: - `env` in the target's pod spec. - `envFrom` in the target's pod spec.",
+      "description": "<!--${internal}--> Different ways to source the connection options.\n\nSupport: - `env` in the target's pod spec. - `envFrom` in the target's pod spec. - `secret` read directly from a Kubernetes Secret.",
       "oneOf": [
         {
           "type": "object",
@@ -1295,6 +1392,28 @@
             },
             "variable": {
               "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "key",
+            "name",
+            "type"
+          ],
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "secret"
+              ]
             }
           }
         }
@@ -2643,6 +2762,29 @@
             }
           },
           "additionalProperties": false
+        }
+      ]
+    },
+    "ParamSource": {
+      "description": "<!--${internal}--> A connection parameter source: either a plain env var name (string) or a Kubernetes Secret reference (object).\n\nAs a string: `\"DB_HOST\"` — resolved using the parent `type` field (env or env_from).\n\nAs an object: `{ \"secret\": \"my-secret\", \"key\": \"password\" }` — read directly from a Kubernetes Secret.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "required": [
+            "key",
+            "secret"
+          ],
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "secret": {
+              "type": "string"
+            }
+          }
         }
       ]
     },

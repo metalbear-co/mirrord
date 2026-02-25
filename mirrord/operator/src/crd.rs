@@ -23,15 +23,13 @@ use crate::{
 };
 
 pub mod copy_target;
+pub mod db_branching;
 pub mod external;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
-pub mod mongodb_branching;
 pub mod multi_cluster;
-pub mod mysql_branching;
 pub mod patch;
-pub mod pg_branching;
 pub mod policy;
 pub mod preview;
 pub mod profile;

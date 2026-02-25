@@ -933,20 +933,32 @@ Configuration for the database branching feature.
 
 A list of configurations for database branches.
 
+Using a connection URL:
 ```json
 {
   "feature": {
     "db_branches": [
       {
-        "name": "my-database-name",
-        "ttl_secs": 120,
         "type": "mysql",
-        "version": "8.0",
         "connection": {
-          "url": {
-            "type": "env",
-            "variable": "DB_CONNECTION_URL"
-          }
+          "url": { "type": "env", "variable": "DB_CONNECTION_URL" }
+        }
+      }
+    ]
+  }
+}
+```
+
+Using individual connection params:
+```json
+{
+  "feature": {
+    "db_branches": [
+      {
+        "type": "mysql",
+        "connection": {
+          "type": "env",
+          "params": { "host": "DB_HOST", "port": "DB_PORT", "database": "DB_NAME" }
         }
       }
     ]
@@ -986,19 +998,37 @@ information with the branch database's.
 
 Different ways of connecting to the source database.
 
-Example:
+Accepts three formats:
 
-A single complete connection URL stored in an environment variable accessible from
-the target pod template.
-
+Legacy URL (backward compatible):
 ```json
-{
-  "url": {
-    "type": "env",
-    "variable": "DB_CONNECTION_URL"
-  }
-}
+{ "url": { "type": "env", "variable": "DB_CONNECTION_URL" } }
 ```
+
+Flat URL:
+```json
+{ "type": "env", "url": "DB_CONNECTION_URL" }
+```
+
+Individual connection params:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
+```
+
+Individual connection params with password from a Kubernetes Secret:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
+```
+
+The type of environment variable source for connection params.
+
+Connection parameters specified as individual environment variable names.
+
+Individual database connection parameter sources.
+At least one parameter must be specified.
+Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
+
+The type of environment variable source for connection params.
 
 #### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
 
@@ -1095,19 +1125,37 @@ information with the branch database's.
 
 Different ways of connecting to the source database.
 
-Example:
+Accepts three formats:
 
-A single complete connection URL stored in an environment variable accessible from
-the target pod template.
-
+Legacy URL (backward compatible):
 ```json
-{
-  "url": {
-    "type": "env",
-    "variable": "DB_CONNECTION_URL"
-  }
-}
+{ "url": { "type": "env", "variable": "DB_CONNECTION_URL" } }
 ```
+
+Flat URL:
+```json
+{ "type": "env", "url": "DB_CONNECTION_URL" }
+```
+
+Individual connection params:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
+```
+
+Individual connection params with password from a Kubernetes Secret:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
+```
+
+The type of environment variable source for connection params.
+
+Connection parameters specified as individual environment variable names.
+
+Individual database connection parameter sources.
+At least one parameter must be specified.
+Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
+
+The type of environment variable source for connection params.
 
 #### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
 
@@ -1206,19 +1254,37 @@ information with the branch database's.
 
 Different ways of connecting to the source database.
 
-Example:
+Accepts three formats:
 
-A single complete connection URL stored in an environment variable accessible from
-the target pod template.
-
+Legacy URL (backward compatible):
 ```json
-{
-  "url": {
-    "type": "env",
-    "variable": "DB_CONNECTION_URL"
-  }
-}
+{ "url": { "type": "env", "variable": "DB_CONNECTION_URL" } }
 ```
+
+Flat URL:
+```json
+{ "type": "env", "url": "DB_CONNECTION_URL" }
+```
+
+Individual connection params:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
+```
+
+Individual connection params with password from a Kubernetes Secret:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
+```
+
+The type of environment variable source for connection params.
+
+Connection parameters specified as individual environment variable names.
+
+Individual database connection parameter sources.
+At least one parameter must be specified.
+Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
+
+The type of environment variable source for connection params.
 
 #### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
 
@@ -1803,7 +1869,7 @@ with your setup.
 }
 ```
 
-#### feature.magic.aws {#feature-magic-aws}
+### feature.magic.aws {#feature-magic-aws}
 
 The AWS CLI prefers local credentials (e.g. `~/.aws`, `AWS_PROFILE`) over the remote pod's
 identity (IAM role, instance profile, IRSA). When those local credentials are present, the
