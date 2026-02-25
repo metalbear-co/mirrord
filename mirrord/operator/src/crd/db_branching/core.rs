@@ -95,12 +95,10 @@ impl From<&TargetEnviromentVariableSource> for ConnectionSourceKind {
                 container: container.clone(),
                 variable: variable.clone(),
             },
-            TargetEnviromentVariableSource::Secret { name, key } => {
-                ConnectionSourceKind::Secret {
-                    name: name.clone(),
-                    key: key.clone(),
-                }
-            }
+            TargetEnviromentVariableSource::Secret { name, key } => ConnectionSourceKind::Secret {
+                name: name.clone(),
+                key: key.clone(),
+            },
         }
     }
 }
