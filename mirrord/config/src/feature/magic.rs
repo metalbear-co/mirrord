@@ -21,7 +21,7 @@ use crate::config::source::MirrordConfigSource;
 #[config(map_to = "MagicFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct MagicConfig {
-    /// ### feature.magic.aws {#feature-magic-aws}
+    /// #### feature.magic.aws {#feature-magic-aws}
     ///
     /// The AWS CLI prefers local credentials (e.g. `~/.aws`, `AWS_PROFILE`) over the remote pod's
     /// identity (IAM role, instance profile, IRSA). When those local credentials are present, the

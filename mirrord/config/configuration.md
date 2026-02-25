@@ -2650,17 +2650,17 @@ Controls the lifetime and creation behavior of preview sessions.
 }
 ```
 
-### feature.preview.creation_timeout_secs {#feature-preview-creation_timeout_secs}
+#### feature.preview.creation_timeout_secs {#feature-preview-creation_timeout_secs}
 
 How long (in seconds) the CLI waits for the preview session to become ready.
 If the session hasn't reached `Ready` within this time, the CLI deletes it.
 
-### feature.preview.image {#feature-preview-image}
+#### feature.preview.image {#feature-preview-image}
 
 Container image to run in the preview pod.
 The image must be pre-built and pushed to a registry accessible by the cluster.
 
-### feature.preview.ttl_mins {#feature-preview-ttl_mins}
+#### feature.preview.ttl_mins {#feature-preview-ttl_mins}
 
 How long (in minutes) the preview session is allowed to live after creation.
 The operator will terminate the session when this time elapses.
@@ -3132,3 +3132,4 @@ doing any network requests. This is useful when the system sets a proxy
 but you don't want mirrord to use it.
 This also applies to the mirrord process (as it just removes the env).
 If the remote pod sets this env, the mirrord process will still use it.
+
