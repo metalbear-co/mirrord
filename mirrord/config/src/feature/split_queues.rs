@@ -193,21 +193,12 @@ pub enum QueueFilter {
 
         /// A jq filter.
         ///
-        /// When this is specified, for each SQS message, a JSON will be constructed with this
-        /// form:
+        /// When this is specified, for each SQS message, the jq filter runs on a JSON
+        /// representation of the SQS `Message` object.
         ///
-        /// ```json
-        /// {
-        ///   "message_attributes": {
-        ///     "attribute1": "value1",
-        ///     "attribute2": "value2"
-        ///   }
-        ///   "message_body": "whatever is in the body, could be a JSON"
-        /// }
-        /// ```
+        /// See [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).
         ///
-        /// The js filter will run with that JSON as an input, and if it outputs `true`, that
-        /// message will be considered as matching the filter.
+        /// If the jq program outputs `true`, that message is considered as matching the filter.
         #[serde(skip_serializing_if = "Option::is_none")]
         jq_filter: Option<String>,
     },

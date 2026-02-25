@@ -842,19 +842,10 @@ pub struct MirrordSqsSessionSpec {
     pub queue_filters: HashMap<QueueId, QueueMessageFilter>,
 
     /// Specify jq programs that will be used to filter messages from queues.
-    /// For queues with a specified jq program - for every message, a JSON will be constructed as:
-    /// ```json
-    /// {
-    ///   "message_attributes": {
-    ///     "attribute1": "value1",
-    ///     "attribute2": "value2"
-    ///   }
-    ///   "message_body": "whatever is in the message body. could be a JSON"
-    /// }
-    /// ```
+    /// For queues with a specified jq program, for every message the jq filter runs on a JSON
+    /// representation of the SQS `Message` object.
     ///
-    /// The js program will run with that JSON as an input, and if it outputs `true`, that
-    /// message will be considered as matching the filter.
+    /// If the jq program outputs `true`, that message is considered as matching the filter.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub queue_jq_filters: HashMap<QueueId, String>,
 
