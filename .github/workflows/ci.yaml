@@ -632,6 +632,7 @@ jobs:
       - run: npm install portfinder # For a node specific test
       - name: mirrord layer tests
         run: cargo test -p mirrord-layer
+      - name: mirrord layer unified tests
         run: cargo test -p mirrord-layer-tests --no-default-features
       - name: save intproxy logs
         continue-on-error: true
