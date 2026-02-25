@@ -29,6 +29,7 @@ use mirrord_operator::{
         preview::{PreviewIncomingConfig, PreviewSession, PreviewSessionPhase, PreviewSessionSpec},
         session::SessionTarget,
     },
+    types::OPERATOR_OWNERSHIP_LABEL,
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
@@ -152,13 +153,22 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
     let sanitized_target = config_target.to_string().replace('/', "-");
     let uuid_short = Uuid::new_v4().simple().to_string();
     let uuid_short = &uuid_short[..8];
+    // Operators compiled with a custom OPERATOR_ISOLATION_MARKER only reconcile preview
+    // sessions labeled with their marker (see the label selector in the preview-env
+    // controller). The runtime env var check here allows developers to label the session
+    // so it gets picked up by an isolated operator instead of the production one.
+    let mut labels = BTreeMap::from([(
+        PREVIEW_SESSION_KEY_LABEL.to_owned(),
+        layer_config.key.as_str().to_owned(),
+    )]);
+    if let Ok(marker) = std::env::var("OPERATOR_ISOLATION_MARKER") {
+        labels.insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker);
+    }
+
     let preview = PreviewSession {
         metadata: ObjectMeta {
             name: Some(format!("preview-session-{sanitized_target}-{uuid_short}")),
-            labels: Some(BTreeMap::from([(
-                PREVIEW_SESSION_KEY_LABEL.to_owned(),
-                layer_config.key.as_str().to_owned(),
-            )])),
+            labels: Some(labels),
             ..Default::default()
         },
         spec,
