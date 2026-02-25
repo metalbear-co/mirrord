@@ -2731,6 +2731,8 @@ The image must be pre-built and pushed to a registry accessible by the cluster.
 How long (in minutes) the preview session is allowed to live after creation.
 The operator will terminate the session when this time elapses.
 
+Set to `"infinite"` to disable TTL.
+
 ### feature.split_queues {#feature-split_queues}
 
 Define filters to split queues by, and make your local application consume only messages
