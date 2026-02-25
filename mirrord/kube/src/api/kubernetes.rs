@@ -190,12 +190,16 @@ impl KubernetesAPI {
         target: &TargetConfig,
         mut config: ContainerConfig,
     ) -> Result<(ContainerParams, Option<RuntimeData>), KubeApiError> {
-        let runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
+        let mut runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
             Target::Targetless => None,
             path => path
                 .runtime_data(&self.client, target.namespace.as_deref())
                 .await?
                 .into(),
+        };
+
+        if let Some(runtime_data) = runtime_data.as_mut() {
+            runtime_data.try_resolve_node_hostname(&self.client).await;
         };
 
         let pod_ips = runtime_data

@@ -553,6 +553,16 @@ kubectl logs <YOUR_POD_NAME> | less -R
 
 where you would replace `<YOUR_POD_NAME>` with the name of the pod.
 
+## Operator Isolation Marker
+
+When multiple operator instances share the same cluster, each uses an isolation marker to avoid
+reconciling resources created by the other. The marker is set via the `OPERATOR_ISOLATION_MARKER`
+environment variable and defaults to `mirrord-operator`. Its value is used as a special label on
+operator-managed resources (agents, copy-targets, preview sessions, etc.).
+
+The operator reads this env var at **compile time** (via `option_env!`), while the CLI reads it at
+**runtime** (via `std::env::var`).
+
 # New Hook Guidelines
 
 Adding a feature to mirrord that introduces a new hook (file system, network) can be tricky and there are a lot of edge cases we might need to cover.

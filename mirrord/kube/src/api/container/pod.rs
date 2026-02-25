@@ -208,7 +208,6 @@ impl ContainerVariant for PodTargetedVariant<'_> {
                 restart_policy: Some("Never".to_string()),
                 tolerations: Some(tolerations.clone()),
                 host_pid: Some(true),
-                node_name: Some(runtime_data.node_name.clone()),
                 volumes: Some(vec![
                     Volume {
                         name: "hostrun".to_string(),
@@ -266,6 +265,17 @@ impl ContainerVariant for PodTargetedVariant<'_> {
         let mut pod = self.inner.as_update();
         pod.merge_from(update);
 
+        if let Some(spec) = pod.spec.as_mut() {
+            if let Some(node_hostname) = runtime_data.node_hostname.as_ref() {
+                spec.node_name = None;
+                spec.node_selector
+                    .get_or_insert_with(BTreeMap::new)
+                    .insert("kubernetes.io/hostname".to_string(), node_hostname.clone());
+            } else {
+                spec.node_name = Some(runtime_data.node_name.clone());
+            }
+        }
+
         pod
     }
 }
@@ -316,6 +326,7 @@ mod test {
                 pod_ips: vec![],
                 pod_namespace: "default".to_string(),
                 node_name: "some-node".to_string(),
+                node_hostname: None,
                 container_id: "container".to_string(),
                 container_runtime: ContainerRuntime::Docker,
                 container_name: "some-container".to_string(),
@@ -329,6 +340,55 @@ mod test {
             update.spec.unwrap().priority_class_name.unwrap(),
             "test-priority-profile"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn targeted_uses_node_hostname_selector_when_resolved() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut config_context = ConfigContext::default();
+        let agent = AgentFileConfig::default().generate_config(&mut config_context)?;
+        let params = ContainerParams {
+            name: "foobar".to_string(),
+            port: 3000,
+            gid: 13,
+            tls_cert: None,
+            pod_ips: None,
+            support_ipv6: false,
+            steal_tls_config: Default::default(),
+            idle_ttl: Default::default(),
+        };
+
+        let update = PodTargetedVariant::new(
+            &agent,
+            &params,
+            &RuntimeData {
+                mesh: None,
+                pod_name: "some-pod".to_string(),
+                pod_ips: vec![],
+                pod_namespace: "default".to_string(),
+                node_name: "some-node-name".to_string(),
+                node_hostname: Some("some-node-hostname".to_string()),
+                container_id: "container".to_string(),
+                container_runtime: ContainerRuntime::Docker,
+                container_name: "some-container".to_string(),
+                guessed_container: false,
+                share_process_namespace: false,
+                containers_probe_ports: vec![],
+            },
+        )
+        .as_update();
+
+        let spec = update.spec.expect("targeted pod should include spec");
+        assert_eq!(spec.node_name, None);
+        assert_eq!(
+            spec.node_selector
+                .as_ref()
+                .and_then(|labels| labels.get("kubernetes.io/hostname"))
+                .map(String::as_str),
+            Some("some-node-hostname")
+        );
+
         Ok(())
     }
 }

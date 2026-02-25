@@ -46,3 +46,13 @@ pub const RECONNECT_NOT_POSSIBLE_CODE: u16 = 410;
 /// Reason returned in error responses from the operator, when reconnecting to a session is no
 /// longer possible.
 pub const RECONNECT_NOT_POSSIBLE_REASON: &str = "ReconnectNotPossible";
+
+/// Kubernetes label key identifying resources owned by the mirrord operator.
+pub const OPERATOR_OWNERSHIP_LABEL: &str = "operator.metalbear.co/owner";
+
+/// Name of the environment variable that overrides the default operator isolation marker.
+pub const OPERATOR_ISOLATION_MARKER_ENV: &str = "OPERATOR_ISOLATION_MARKER";
+
+/// Default value for the [`OPERATOR_OWNERSHIP_LABEL`] when
+/// [`OPERATOR_ISOLATION_MARKER_ENV`] is not set.
+pub const DEFAULT_OPERATOR_ISOLATION_MARKER: &str = "mirrord-operator";
