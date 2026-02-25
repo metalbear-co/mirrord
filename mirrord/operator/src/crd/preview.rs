@@ -80,6 +80,14 @@ pub struct PreviewSessionStatus {
     /// Only set when `phase` is `Failed`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_message: Option<String>,
+
+    /// Timestamp when the session's TTL expires.
+    ///
+    /// Set when the session enters the `Ready` phase. Computed as `now + ttl_secs` at the
+    /// moment the operator starts the TTL countdown. `None` during earlier phases or when
+    /// running against an older operator that does not set this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<MicroTime>,
 }
 
 /// Phase of a preview session's lifecycle.

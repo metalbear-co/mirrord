@@ -8,6 +8,35 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.190.0](https://github.com/metalbear-co/mirrord/tree/3.190.0) - 2026-02-23
+
+
+### Added
+
+- Add multi cluster session to the CLI status.
+- The `mirrord preview status` command will now show the remaining TTL of each
+  preview environment session.
+
+
+### Changed
+
+- Update reqwest dependency
+
+
+### Fixed
+
+- Fixed a Windows file-read regression where remote reads could return EOF too
+  early when reading beyond the first chunk of data.
+
+
+### Internal
+
+- Add xtask, change release to use it + improve macOS release time
+- Refactor and fix connect param tests.
+- Unify Layer crates - LayerSetup and some socket operations unified in
+  `layer-lib`
+- fix go26 windows e2e
+
 ## [3.189.0](https://github.com/metalbear-co/mirrord/tree/3.189.0) - 2026-02-19
 
 
