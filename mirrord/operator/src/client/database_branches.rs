@@ -10,8 +10,9 @@ use kube::{
 };
 use mirrord_config::{
     feature::database_branches::{
-        ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig, MongodbBranchConfig,
-        MysqlBranchConfig, PgBranchConfig,
+        ConnectionSource, ConnectionSourceType, DatabaseBranchConfig, DatabaseBranchesConfig,
+        MongodbBranchConfig, MysqlBranchConfig, PgBranchConfig,
+        TargetEnviromentVariableSource,
     },
     target::{Target, TargetDisplay},
 };
@@ -594,7 +595,20 @@ impl AsRef<str> for BranchDatabaseId {
 
 fn convert_connection_source(source: &ConnectionSource) -> CrdConnectionSource {
     match source {
-        ConnectionSource::Url(kind) => CrdConnectionSource::Url(Box::new(kind.into())),
+        ConnectionSource::Url { url } => CrdConnectionSource::Url(Box::new(url.into())),
+        ConnectionSource::FlatUrl { source_type, url } => {
+            let kind = match source_type {
+                ConnectionSourceType::Env => TargetEnviromentVariableSource::Env {
+                    container: None,
+                    variable: url.clone(),
+                },
+                ConnectionSourceType::EnvFrom => TargetEnviromentVariableSource::EnvFrom {
+                    container: None,
+                    variable: url.clone(),
+                },
+            };
+            CrdConnectionSource::Url(Box::new((&kind).into()))
+        }
         ConnectionSource::Params(config) => {
             CrdConnectionSource::Params(Box::new(ConnectionParamsSpec::from(config)))
         }

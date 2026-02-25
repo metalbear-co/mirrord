@@ -196,10 +196,19 @@ pub struct DatabaseBranchBaseConfig {
 /// ```json
 /// { "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema)]
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSource")]
+#[serde(untagged)]
 pub enum ConnectionSource {
-    Url(TargetEnviromentVariableSource),
+    /// `{"url": {"type": "env", "variable": "DB_URL"}}`
+    Url { url: TargetEnviromentVariableSource },
+    /// `{"type": "env", "url": "DB_URL"}`
+    FlatUrl {
+        #[serde(rename = "type")]
+        source_type: ConnectionSourceType,
+        url: String,
+    },
+    /// `{"type": "env", "params": {...}}`
     Params(ConnectionParamsConfig),
 }
 
@@ -209,9 +218,15 @@ impl Serialize for ConnectionSource {
         S: serde::Serializer,
     {
         match self {
-            Self::Url(source) => {
+            Self::Url { url: source } => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 map.serialize_entry("url", source)?;
+                map.end()
+            }
+            Self::FlatUrl { source_type, url } => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("type", source_type)?;
+                map.serialize_entry("url", url)?;
                 map.end()
             }
             Self::Params(config) => {
@@ -220,75 +235,6 @@ impl Serialize for ConnectionSource {
                 map.serialize_entry("params", &config.params)?;
                 map.end()
             }
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum RawConnectionSource {
-    /// `{"url": {"type": "env", "variable": "DB_URL"}}`
-    StructuredUrl {
-        url: Box<TargetEnviromentVariableSource>,
-    },
-    /// `{"type": "env", "url": "DB_URL"}` or `{"type": "env", "params": {...}}`
-    Flat {
-        #[serde(rename = "type")]
-        source_type: ConnectionSourceType,
-        #[serde(default)]
-        url: Option<String>,
-        #[serde(default)]
-        params: Option<Box<ConnectionParamsVars>>,
-    },
-}
-
-impl<'de> Deserialize<'de> for ConnectionSource {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let raw = RawConnectionSource::deserialize(deserializer)?;
-        match raw {
-            RawConnectionSource::StructuredUrl { url } => Ok(ConnectionSource::Url(*url)),
-            RawConnectionSource::Flat {
-                source_type,
-                url: Some(var),
-                params: None,
-            } => {
-                let source = match source_type {
-                    ConnectionSourceType::Env => TargetEnviromentVariableSource::Env {
-                        container: None,
-                        variable: var,
-                    },
-                    ConnectionSourceType::EnvFrom => TargetEnviromentVariableSource::EnvFrom {
-                        container: None,
-                        variable: var,
-                    },
-                };
-                Ok(ConnectionSource::Url(source))
-            }
-            RawConnectionSource::Flat {
-                source_type,
-                url: None,
-                params: Some(params),
-            } => Ok(ConnectionSource::Params(ConnectionParamsConfig {
-                source_type,
-                params: *params,
-            })),
-            RawConnectionSource::Flat {
-                url: Some(_),
-                params: Some(_),
-                ..
-            } => Err(serde::de::Error::custom(
-                "cannot specify both 'url' and 'params'",
-            )),
-            RawConnectionSource::Flat {
-                url: None,
-                params: None,
-                ..
-            } => Err(serde::de::Error::custom(
-                "must specify either 'url' or 'params'",
-            )),
         }
     }
 }
@@ -421,10 +367,12 @@ mod tests {
         let source: ConnectionSource = serde_json::from_str(json).unwrap();
         assert_eq!(
             source,
-            ConnectionSource::Url(TargetEnviromentVariableSource::Env {
-                container: None,
-                variable: "DB_URL".to_string(),
-            })
+            ConnectionSource::Url {
+                url: TargetEnviromentVariableSource::Env {
+                    container: None,
+                    variable: "DB_URL".to_string(),
+                }
+            }
         );
     }
 
@@ -434,10 +382,12 @@ mod tests {
         let source: ConnectionSource = serde_json::from_str(json).unwrap();
         assert_eq!(
             source,
-            ConnectionSource::Url(TargetEnviromentVariableSource::EnvFrom {
-                container: None,
-                variable: "DB_URL".to_string(),
-            })
+            ConnectionSource::Url {
+                url: TargetEnviromentVariableSource::EnvFrom {
+                    container: None,
+                    variable: "DB_URL".to_string(),
+                }
+            }
         );
     }
 
@@ -447,10 +397,12 @@ mod tests {
         let source: ConnectionSource = serde_json::from_str(json).unwrap();
         assert_eq!(
             source,
-            ConnectionSource::Url(TargetEnviromentVariableSource::Env {
-                container: Some("my-app".to_string()),
-                variable: "DB_URL".to_string(),
-            })
+            ConnectionSource::Url {
+                url: TargetEnviromentVariableSource::Env {
+                    container: Some("my-app".to_string()),
+                    variable: "DB_URL".to_string(),
+                }
+            }
         );
     }
 
@@ -460,10 +412,10 @@ mod tests {
         let source: ConnectionSource = serde_json::from_str(json).unwrap();
         assert_eq!(
             source,
-            ConnectionSource::Url(TargetEnviromentVariableSource::Env {
-                container: None,
-                variable: "DB_URL".to_string(),
-            })
+            ConnectionSource::FlatUrl {
+                source_type: ConnectionSourceType::Env,
+                url: "DB_URL".to_string(),
+            }
         );
     }
 
@@ -473,10 +425,10 @@ mod tests {
         let source: ConnectionSource = serde_json::from_str(json).unwrap();
         assert_eq!(
             source,
-            ConnectionSource::Url(TargetEnviromentVariableSource::EnvFrom {
-                container: None,
-                variable: "DB_URL".to_string(),
-            })
+            ConnectionSource::FlatUrl {
+                source_type: ConnectionSourceType::EnvFrom,
+                url: "DB_URL".to_string(),
+            }
         );
     }
 
@@ -571,10 +523,12 @@ mod tests {
 
     #[test]
     fn serialize_roundtrip_url() {
-        let source = ConnectionSource::Url(TargetEnviromentVariableSource::Env {
-            container: None,
-            variable: "DB_URL".to_string(),
-        });
+        let source = ConnectionSource::Url {
+            url: TargetEnviromentVariableSource::Env {
+                container: None,
+                variable: "DB_URL".to_string(),
+            },
+        };
         let json = serde_json::to_string(&source).unwrap();
         let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
         assert_eq!(source, deserialized);
