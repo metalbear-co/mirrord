@@ -10,9 +10,10 @@
 mod cli {
     use std::{path::Path, time::Duration};
 
+    use mirrord_test_utils::run_command::run_verify_config;
     use rstest::rstest;
 
-    use crate::utils::{config_dir, run_command::run_verify_config};
+    use crate::utils::config_dir;
 
     /// Tests `verify-config` with `path` and `--ide` args, which should be:
     ///

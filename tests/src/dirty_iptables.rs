@@ -6,13 +6,13 @@ use std::time::Duration;
 
 use k8s_openapi::api::core::v1::{Namespace, Pod};
 use kube::{api::PostParams, Api, Client};
+use mirrord_test_utils::run_command::run_exec_with_target;
 use rstest::*;
 use serde_json::json;
 
 use crate::utils::{
     application::env::EnvApp, kube_client, operator_installed, random_string,
-    resource_guard::ResourceGuard, run_command::run_exec_with_target, watch,
-    PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
+    resource_guard::ResourceGuard, watch, PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
 };
 
 struct DirtyIptablesTest {

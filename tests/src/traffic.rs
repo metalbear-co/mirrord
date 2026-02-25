@@ -9,6 +9,7 @@ mod traffic_tests {
     use futures_util::{stream::TryStreamExt, AsyncBufReadExt};
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
+    use mirrord_test_utils::run_command::run_exec_with_target;
     use rstest::*;
 
     #[cfg(target_os = "windows")]
@@ -18,7 +19,6 @@ mod traffic_tests {
         ipv6::ipv6_service,
         kube_client,
         kube_service::KubeService,
-        run_command::run_exec_with_target,
         services::{basic_service, hostname_service, udp_logger_service},
         CONTAINER_NAME,
     };

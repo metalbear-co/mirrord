@@ -1,9 +1,10 @@
 #![allow(dead_code)]
 use std::{collections::HashMap, process::Stdio};
 
-use mirrord_test_utils::TestProcess;
 use tempfile::tempdir;
 use tokio::process::Command;
+
+use crate::TestProcess;
 
 /// See [`run_exec`].
 pub async fn run_exec_with_target(
@@ -78,12 +79,12 @@ pub async fn run_exec(
 }
 
 /// Runs `mirrord ls` command.
-pub async fn run_ls(namespace: &str) -> TestProcess {
+pub async fn run_ls(namespace: &str, use_operator: bool) -> TestProcess {
     let mut mirrord_args = vec!["ls"];
     mirrord_args.extend(vec!["--namespace", namespace]);
 
     let mut env = HashMap::new();
-    let use_operator = cfg!(feature = "operator").to_string();
+    let use_operator = use_operator.to_string();
     env.insert("MIRRORD_OPERATOR_ENABLE", use_operator.as_str());
 
     run_mirrord(mirrord_args, env).await
@@ -106,10 +107,18 @@ pub async fn run_verify_config(args: Option<Vec<&str>>) -> TestProcess {
 }
 
 pub async fn run_mirrord(args: Vec<&str>, env: HashMap<&str, &str>) -> TestProcess {
-    let path = match option_env!("MIRRORD_TESTS_USE_BINARY") {
-        None => env!("CARGO_BIN_FILE_MIRRORD"),
-        Some(binary_path) => binary_path,
-    };
+    // compile-time assertion for cfg(feature="build-cli") || env(MIRRORD_TESTS_USE_BINARY)
+    #[cfg(not(feature = "build-cli"))]
+    const _: &str = env!(
+        "MIRRORD_TESTS_USE_BINARY",
+        "Either set the MIRRORD_TESTS_USE_BINARY environment variable or enable mirrord build-dependancy via `build-cli` feature"
+    );
+
+    // Note: env! above ensures in compile time that either of them will exists,
+    //  unwrap cannot panic in runtime
+    let path = option_env!("CARGO_BIN_FILE_MIRRORD")
+        .or(option_env!("MIRRORD_TESTS_USE_BINARY"))
+        .unwrap();
     let temp_dir = tempdir().unwrap();
 
     // Used for debugging with breakpoint on `let server` to debug mirrord execution
