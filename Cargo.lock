@@ -5082,6 +5082,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
+ "serde_yaml",
  "strum_macros 0.27.2",
  "thiserror 2.0.18",
  "tokio",
@@ -5165,7 +5166,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-test-utils"
-version = "3.189.0"
+version = "3.190.0"
 dependencies = [
  "chrono",
  "fancy-regex",
