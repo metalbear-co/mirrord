@@ -37,7 +37,8 @@ impl Application {
 
     pub fn get_args(&self) -> Vec<String> {
         let mut app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        app_path.push("tests/apps/");
+        // Note: until we move layer IT tests to this crate, we piggy-back layer's apps
+        app_path.push("../layer/tests/apps/");
         match self {
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
@@ -138,7 +139,8 @@ impl Application {
 #[once]
 pub fn config_dir() -> PathBuf {
     let mut config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    config_path.push("tests/configs");
+    // Note: until we move layer IT tests to this crate, we piggy-back layer's configs
+    config_path.push("../layer/tests/configs");
     config_path
 }
 
