@@ -256,7 +256,13 @@ async fn eval_jaq(q: &JqQuery, pl: &str) -> Result<bool, String> {
 
     tokio::select! {
         result = &mut handle => {
-            result.expect("panic in jq evaluation thread")
+            match result {
+                Ok(r) => r,
+                Err(join) => {
+                    tracing::error!(?join, "panic in jaq evaluation task");
+                    Ok(false)
+                }
+            }
         }
         _ = tokio::time::sleep(*TIME_LIMIT) => {
             tracing::warn!("jq expr evaluation took longer than max allowed time");
