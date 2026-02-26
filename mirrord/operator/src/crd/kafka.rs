@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
     namespaced,
     printcolumn = r#"{"name":"PARENT", "type":"string", "description":"Name of parent configuration.", "jsonPath":".spec.parent"}"#,
     printcolumn = r#"{"name":"SECRET", "type":"string", "description":"Name of Secret to load from.", "jsonPath":".spec.loadFromSecret"}"#,
+    printcolumn = r#"{"name":"CLIENT", "type":"string", "description":"Implementation of Kafka client to use.", "jsonPath":".spec.clientImplementation"}"#,
     printcolumn = r#"{"name":"AUTHENTICATION_EXTRA", "type":"string", "description":"Additional authentication config.", "jsonPath":".spec.authenticationExtra"}"#
 )]
 #[serde(rename_all = "camelCase")]
@@ -21,9 +22,11 @@ pub struct MirrordKafkaClientConfigSpec {
 
     /// Properties to set.
     ///
-    /// When performing Kafka splitting, the operator will override `group.id` property.
+    /// When performing Kafka splitting, the operator will override `group.id`/`application.id`
+    /// property.
     ///
-    /// The list of all available properties can be found [here](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md).
+    /// The list of all available properties can be found [here](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md)
+    /// for librdkafka clients, and [here](https://docs.confluent.io/platform/current/installation/configuration/index.html#ak-configuration-reference-for-cp) for Java clients.
     pub properties: Vec<MirrordKafkaClientProperty>,
 
     /// Namespace and name of a `Secret` to use as another source of properties.
@@ -37,6 +40,25 @@ pub struct MirrordKafkaClientConfigSpec {
 
     /// Additional authentication configuration.
     pub authentication_extra: Option<MirrordKafkaClientAuthExtra>,
+
+    /// Kafka client implementation to use.
+    ///
+    /// One of: `librdkafka`, `java`.
+    ///
+    /// Note that Java client support is configured in the operator.
+    ///
+    /// Defaults to `librdkafka`.
+    #[schemars(with = "Option<String>")]
+    pub client_implementation: Option<KafkaClientImplementation>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum KafkaClientImplementation {
+    Librdkafka,
+    Java,
+    #[serde(other)]
+    Unknown,
 }
 
 /// Property to use when creating operator's Kafka client.
@@ -59,10 +81,6 @@ pub struct MirrordKafkaClientAuthExtra {
     ///
     /// Right now the only supported value is `MSK_IAM`, which enables IAM/OAUTHBEARER
     /// authentication with Amazon Managed Streaming for Apache Kafka.
-    ///
-    /// When this is set to `MSK_IAM`, additional properties are merged into the configuration:
-    /// 1. `sasl.mechanism=OAUTHBEARER`
-    /// 2. `security.protocol=SASL_SSL`
     pub kind: String,
     /// AWS region of the MSK cluster.
     ///
@@ -183,7 +201,21 @@ pub struct KafkaTopicDetails {
     pub name_sources: Vec<TopicPropertySource>,
 
     /// All occurrences of this topic's group id in the workload's pod template.
+    ///
+    /// Relevant only for standard Kafka consumers.
+    /// Must be empty if `applicationIdSources` is not empty.
+    #[serde(default)] // no `skip_serializing_if` to preseve backwards compatibility
     pub group_id_sources: Vec<TopicPropertySource>,
+
+    /// All occurences of this topic's application id in the workload's pod template.
+    ///
+    /// Relevant only for Kafka Streams consumers.
+    /// Must be empty if `groupIdSources` is not empty.
+    ///
+    /// Note that Kafka Streams consumers are supported only when the [`MirrordKafkaClientConfig`]
+    /// is configured to use the Java Kafka client implementation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub application_id_sources: Vec<TopicPropertySource>,
 
     /// Links to [`MirrordKafkaClientConfig`] in the operator's namespace.
     /// This config will be used to manage ephemeral Kafka topics and consume/produce messages.
@@ -227,6 +259,6 @@ pub struct EnvVarLocation {
 pub struct MirrordKafkaEphemeralTopicSpec {
     /// Name of the topic.
     pub name: String,
-    /// Links to [`MirrordKafkaClientConfigSpec`] resource living in the same namespace.
+    /// Links to [`MirrordKafkaClientConfig`] resource living in the same namespace.
     pub client_config: String,
 }

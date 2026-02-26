@@ -17,7 +17,6 @@ pub mod ipv6;
 pub mod kube_service;
 pub mod port_forwarder;
 pub mod resource_guard;
-pub mod run_command;
 pub mod services;
 
 #[cfg(target_os = "windows")]

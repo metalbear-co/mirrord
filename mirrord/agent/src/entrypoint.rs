@@ -69,13 +69,13 @@ const CHILD_PROCESS_ENV: &str = "MIRRORD_AGENT_CHILD_PROCESS";
 const DIRTY_IPTABLES_ERROR_MESSAGE: &str = "Detected dirty iptables. Either some other mirrord agent is running \
 or the previous agent failed to clean up before exit. \
 If no other mirrord agent is targeting this pod, please delete the pod. \
-To allow concurrent sessions, consider using the operator available in mirrord for Teams.";
+To allow concurrent sessions, consider using the operator available in mirrord for Teams: https://app.metalbear.com/?utm_source=dirtyiptables&utm_medium=agent";
 
 /// Warning when dirty IP tables were detected and cleaned.
 const DIRTY_IPTABLES_CLEANUP_WARNING_MESSAGE: &str = "Detected dirty iptables. Either some other mirrord agent is running \
 or the previous agent failed to clean up before exit. \
 The leftover rules were cleaned and the agent is starting. \
-To allow concurrent sessions, consider using the operator available in mirrord for Teams.";
+To allow concurrent sessions, consider using the operator available in mirrord for Teams: https://app.metalbear.com/?utm_source=dirtyiptables&utm_medium=agent";
 
 /// Keeps track of next client id.
 /// Stores common data used when serving client connections.

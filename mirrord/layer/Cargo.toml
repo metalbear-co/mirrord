@@ -34,7 +34,7 @@ dotenvy.workspace = true
 frida-gum = { version = "0.17", features = ["auto-download", "std"] }
 libc.workspace = true
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
-null-terminated = { version = "0.3", default-features = false }
+null-terminated = { git = "https://github.com/metalbear-co/null-terminated.rs", default-features = false }
 num-traits = "0.2"
 rand.workspace = true
 socket2.workspace = true

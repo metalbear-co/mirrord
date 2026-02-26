@@ -3,12 +3,12 @@
 mod env_tests {
     use std::time::Duration;
 
+    use mirrord_test_utils::run_command::run_exec_with_target;
     use rstest::*;
 
     use crate::utils::{
         application::{env::EnvApp, GoVersion},
         kube_service::KubeService,
-        run_command::run_exec_with_target,
         services::basic_service,
     };
 

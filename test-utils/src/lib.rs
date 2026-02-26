@@ -22,6 +22,8 @@ use tokio::{
     task::JoinHandle,
 };
 
+pub mod run_command;
+
 /// Returns string with time format of hh:mm:ss
 pub fn format_time() -> String {
     let now = Utc::now();
