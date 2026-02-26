@@ -45,6 +45,8 @@ pub struct MirrordKafkaClientConfigSpec {
     ///
     /// One of: `librdkafka`, `java`.
     ///
+    /// Note that Java client support is configured in the operator.
+    ///
     /// Defaults to `librdkafka`.
     pub client_implementation: Option<String>,
 }
@@ -199,7 +201,7 @@ pub struct KafkaTopicDetails {
     ///
     /// Relevant only for standard Kafka consumers.
     /// Must be empty if `applicationIfSources` is not empty.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)] // no `skip_serializing_if` to preseve backwards compatibility
     pub group_id_sources: Vec<TopicPropertySource>,
 
     /// All occurences of this topic's application id in the workload's pod template.
@@ -207,8 +209,8 @@ pub struct KafkaTopicDetails {
     /// Relevant only for Kafka Streams consumers.
     /// Must be empty if `groupIdSources` is not empty.
     ///
-    /// Note that Kafka Streams consumers are supported only when `MirrordKafkaClientConfig` is
-    /// configured to use the Java Kafka client implementation.
+    /// Note that Kafka Streams consumers are supported only when the [`MirrordKafkaClientConfig`]
+    /// is configured to use the Java Kafka client implementation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub application_id_sources: Vec<TopicPropertySource>,
 
@@ -254,6 +256,6 @@ pub struct EnvVarLocation {
 pub struct MirrordKafkaEphemeralTopicSpec {
     /// Name of the topic.
     pub name: String,
-    /// Links to [`MirrordKafkaClientConfigSpec`] resource living in the same namespace.
+    /// Links to [`MirrordKafkaClientConfig`] resource living in the same namespace.
     pub client_config: String,
 }
