@@ -32,11 +32,10 @@ use mirrord_layer_lib::{
                 MANAGED_ADDRINFO, free_managed_addrinfo, getaddrinfo, utils::ManagedAddrInfoAny,
             },
         },
-        get_connected_addresses, get_socket,
+        get_connected_addresses,
         hostname::remote_hostname_string,
         is_socket_managed,
         ops::{ConnectResult, get_last_error, send_to, socket},
-        remove_socket,
         sockets::socket_kind_from_type,
     },
 };
@@ -1771,33 +1770,16 @@ unsafe extern "system" fn sendto_detour(
 /// Socket management detour for closesocket() - closes a socket
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
-    // Get socket info BEFORE closing to send PortUnsubscribe if needed
-    let socket_info = get_socket(s);
-
     let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();
     let res = unsafe { original(s) };
 
-    // Only clean up mirrord state if the close was successful
-    if res == ERROR_SUCCESS_I32 {
-        tracing::debug!(
-            "closesocket_detour -> successfully closed socket {}, removing from mirrord tracking",
-            s
-        );
-
+    if let Some(socket) = SOCKETS.lock().expect("SOCKETS lock failed").remove(&s)
+        && matches!(socket.state, SocketState::Listening(_))
+    {
         // Call close() method to send PortUnsubscribe if socket was listening
-        if let Some(socket) = &socket_info
-            && matches!(socket.state, SocketState::Listening(_))
-        {
-            socket.close();
-        }
-
-        remove_socket(s);
-    } else {
-        tracing::warn!(
-            "closesocket_detour -> failed to close socket {}, not removing from mirrord tracking",
-            s
-        );
+        socket.close();
     }
+
     res
 }
 

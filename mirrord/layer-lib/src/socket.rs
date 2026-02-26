@@ -34,8 +34,7 @@ use socket2::SockAddr;
 // Re-export sockets module items
 pub use sockets::{
     SHARED_SOCKETS_ENV_VAR, SOCKETS, SocketDescriptor, get_bound_address, get_connected_addresses,
-    get_socket, get_socket_state, is_socket_in_state, is_socket_managed, register_socket,
-    remove_socket,
+    get_socket_state, is_socket_in_state, is_socket_managed, register_socket,
 };
 #[cfg(windows)]
 pub use winapi::{
