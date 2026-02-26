@@ -1,5 +1,4 @@
 use std::{
-    assert_matches::assert_matches,
     net::SocketAddr,
     path::{Path, PathBuf},
     str::FromStr,
