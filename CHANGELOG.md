@@ -22,7 +22,6 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Changed
 
-- Update rust to nightly 2026-02-24.
 - Updated mirrord for Teams links across CLI, error messages, and agent to
   point directly to app.metalbear.com instead of docs pages, providing a
   shorter path to trial signup.
@@ -40,6 +39,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Internal
 
+- Update rust to nightly 2026-02-24.
 - Added safejaq crate
 - Fixed header levels in `feature.preview.env` and `feature.magic` docs.
 - Fixed the progress message for `mirrord dump` to show detected ports.
