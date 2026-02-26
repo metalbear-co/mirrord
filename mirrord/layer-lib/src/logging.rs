@@ -138,7 +138,6 @@ mod tests {
     fn init_tracing_creates_log_file() {
         let temp_dir = tempdir().expect("temp dir");
 
-        let prev_log_level = std::env::var("RUST_LOG").ok();
         let prev_log_path = std::env::var(MIRRORD_LAYER_LOG_PATH).ok();
         let prev_console_addr = std::env::var("MIRRORD_CONSOLE_ADDR").ok();
         let prev_log_level = std::env::var("RUST_LOG").ok();

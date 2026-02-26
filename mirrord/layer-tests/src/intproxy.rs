@@ -14,6 +14,8 @@ use mirrord_config::{
     experimental::ExperimentalFileConfig,
 };
 use mirrord_intproxy::{IntProxy, agent_conn::AgentConnection};
+#[cfg(doc)]
+use mirrord_intproxy::LayerConnection;
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
     file::{
@@ -537,7 +539,7 @@ impl TestIntProxy {
             .unwrap();
     }
 
-    /// Makes a [`FileRequest::Statefs`] and answers it.
+    /// Makes a [`FileRequest::StatFsV2`] and answers it.
     pub async fn expect_statfs(&mut self, expected_path: &str) {
         // Expecting `statfs` call with path.
         assert_matches!(
@@ -558,7 +560,7 @@ impl TestIntProxy {
             .unwrap();
     }
 
-    /// Makes a [`FileRequest::Xstatefs`] and answers it.
+    /// Makes a [`FileRequest::XstatFsV2`] and answers it.
     pub async fn expect_fstatfs(&mut self, expected_fd: u64) {
         // Expecting `fstatfs` call with path.
         assert_matches!(
