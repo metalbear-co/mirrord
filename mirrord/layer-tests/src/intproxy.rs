@@ -14,7 +14,7 @@ use mirrord_config::{
     experimental::ExperimentalFileConfig,
 };
 #[cfg(doc)]
-use mirrord_intproxy::LayerConnection;
+use mirrord_intproxy::layer_conn::LayerConnection;
 use mirrord_intproxy::{IntProxy, agent_conn::AgentConnection};
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
