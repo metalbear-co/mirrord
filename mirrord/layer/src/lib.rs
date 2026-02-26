@@ -7,14 +7,13 @@
 #![feature(try_trait_v2_residual)]
 #![feature(c_size_t)]
 #![feature(once_cell_try)]
-#![feature(vec_into_raw_parts)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
 //! Loaded dynamically with your local process.
 //!
-//! Paired with [`mirrord-agent`], it makes your local process behave as if it was running in a
+//! Paired with `mirrord-agent`, it makes your local process behave as if it was running in a
 //! remote context.
 //!
 //! Check out the [Introduction](https://metalbear.com/mirrord/docs/overview/introduction/) guide to learn
