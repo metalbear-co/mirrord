@@ -8,6 +8,47 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.191.0](https://github.com/metalbear-co/mirrord/tree/3.191.0) - 2026-02-26
+
+
+### Added
+
+- SQS splitting now supports filtering by jq programs. A jq program runs
+  against a json of each message and if it returns true, the messaged is
+  filtered.
+- `mirrord dump` no longer requires `--ports` to be specified manually - they
+  will be auto-detected if absent.
+
+
+### Changed
+
+- Update rust to nightly 2026-02-24.
+- Updated mirrord for Teams links across CLI, error messages, and agent to
+  point directly to app.metalbear.com instead of docs pages, providing a
+  shorter path to trial signup.
+- Use nodeSelector when possible for agent creation. Improve
+  capacity/scheduling issues.
+
+  When using nodeName directly (old, fallback way) we bypass kube scheduler,
+  meaning we can't preempt existing pods.
+  By using nodeSelector, we still use kube scheduler and with the right
+  priority class for the agent (default in operator chart now) we always get
+  scheduled.
+  User might not have "get" access on node, but operator always has so that's
+  why we have a fallback.
+
+
+### Internal
+
+- Added safejaq crate
+- Fixed header levels in `feature.preview.env` and `feature.magic` docs.
+- Fixed the progress message for `mirrord dump` to show detected ports.
+- Preview sessions are now marked with the operator's ownership label, allowing
+  developers to create preview sessions when multiple operators are running
+  concurrently.
+- Update db branching so we have all the common logic between different
+  databases reusable instead of having it everywhere duplicated.
+
 ## [3.190.0](https://github.com/metalbear-co/mirrord/tree/3.190.0) - 2026-02-23
 
 
