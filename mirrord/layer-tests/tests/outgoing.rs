@@ -1,4 +1,3 @@
-#![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
 use std::{net::SocketAddr, path::Path, time::Duration};

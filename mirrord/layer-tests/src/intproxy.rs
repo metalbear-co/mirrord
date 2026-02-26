@@ -1,3 +1,4 @@
+use core::assert_matches;
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
