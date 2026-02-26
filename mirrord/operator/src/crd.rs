@@ -23,15 +23,13 @@ use crate::{
 };
 
 pub mod copy_target;
+pub mod db_branching;
 pub mod external;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
-pub mod mongodb_branching;
 pub mod multi_cluster;
-pub mod mysql_branching;
 pub mod patch;
-pub mod pg_branching;
 pub mod policy;
 pub mod preview;
 pub mod profile;
@@ -487,6 +485,8 @@ pub enum NewOperatorFeature {
     MultiClusterPrimary,
     /// This operator can be connected to by a primary.
     MultiClusterRemote,
+    /// This operator can accept jq filters for SQS queue splitting.
+    SqsQueueSplittingWithJqFilter,
 
     PreviewEnv,
 
@@ -523,6 +523,9 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::MultiClusterPrimary => "multi-cluster primary",
             NewOperatorFeature::MultiClusterRemote => "multi-cluster remote",
+            NewOperatorFeature::SqsQueueSplittingWithJqFilter => {
+                "Splitting SQS queues with a jq filter"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -838,6 +841,14 @@ pub struct MirrordSqsSessionSpec {
     /// The name of the queue on AWS.
     pub queue_filters: HashMap<QueueId, QueueMessageFilter>,
 
+    /// Specify jq programs that will be used to filter messages from queues.
+    /// For queues with a specified jq program, for every message the jq filter runs on a JSON
+    /// representation of the SQS `Message` object.
+    ///
+    /// If the jq program outputs `true`, that message is considered as matching the filter.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub queue_jq_filters: HashMap<QueueId, String>,
+
     /// The target of this session.
     pub queue_consumer: QueueConsumer,
 
@@ -886,4 +897,214 @@ pub enum UserCredentialKind {
     #[schemars(skip)]
     #[serde(other)]
     Unknown,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::PathBuf};
+
+    use kube::CustomResourceExt;
+
+    use crate::crd::{
+        MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
+        MirrordWorkloadQueueRegistry, SessionCrd,
+        db_branching::{
+            mongodb::MongodbBranchDatabase, mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
+        },
+        external::MirrordClusterExternalResource,
+        kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
+        multi_cluster::MirrordMultiClusterSession,
+        patch::{MirrordClusterWorkloadPatch, MirrordClusterWorkloadPatchRequest},
+        policy::{MirrordClusterPolicy, MirrordPolicy},
+        preview::PreviewSession,
+        profile::{MirrordClusterProfile, MirrordProfile},
+        session::MirrordClusterSession,
+        steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig},
+    };
+
+    fn write_crd_yaml<T: CustomResourceExt>() {
+        let crd = T::crd();
+        let file_name = crd
+            .metadata
+            .name
+            .clone()
+            .unwrap_or_else(|| "crd".to_owned());
+
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("crds");
+        path.push(format!("{file_name}.yaml"));
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+
+        let yaml = serde_yaml::to_string(&crd).unwrap();
+        fs::write(path, yaml).unwrap();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_operator_crd_yaml() {
+        write_crd_yaml::<MirrordOperatorCrd>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_session_crd_yaml() {
+        write_crd_yaml::<SessionCrd>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_workload_queue_registry_crd_yaml() {
+        write_crd_yaml::<MirrordWorkloadQueueRegistry>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_sqs_session_crd_yaml() {
+        write_crd_yaml::<MirrordSqsSession>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_cluster_operator_user_credential_crd_yaml() {
+        write_crd_yaml::<MirrordClusterOperatorUserCredential>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_preview_session_crd_yaml() {
+        write_crd_yaml::<PreviewSession>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_cluster_session_crd_yaml() {
+        write_crd_yaml::<MirrordClusterSession>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_multi_cluster_session_crd_yaml() {
+        write_crd_yaml::<MirrordMultiClusterSession>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_pg_branch_database_crd_yaml() {
+        write_crd_yaml::<PgBranchDatabase>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mysql_branch_database_crd_yaml() {
+        write_crd_yaml::<MysqlBranchDatabase>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mongodb_branch_database_crd_yaml() {
+        write_crd_yaml::<MongodbBranchDatabase>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_policy_crd_yaml() {
+        write_crd_yaml::<MirrordPolicy>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_cluster_policy_crd_yaml() {
+        write_crd_yaml::<MirrordClusterPolicy>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_cluster_external_resource_crd_yaml() {
+        write_crd_yaml::<MirrordClusterExternalResource>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_cluster_workload_patch_crd_yaml() {
+        write_crd_yaml::<MirrordClusterWorkloadPatch>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_cluster_workload_patch_request_crd_yaml() {
+        write_crd_yaml::<MirrordClusterWorkloadPatchRequest>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_kafka_client_config_crd_yaml() {
+        write_crd_yaml::<MirrordKafkaClientConfig>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_kafka_topics_consumer_crd_yaml() {
+        write_crd_yaml::<MirrordKafkaTopicsConsumer>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_kafka_ephemeral_topic_crd_yaml() {
+        write_crd_yaml::<MirrordKafkaEphemeralTopic>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_cluster_profile_crd_yaml() {
+        write_crd_yaml::<MirrordClusterProfile>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_profile_crd_yaml() {
+        write_crd_yaml::<MirrordProfile>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_tls_steal_config_crd_yaml() {
+        write_crd_yaml::<MirrordTlsStealConfig>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_cluster_tls_steal_config_crd_yaml() {
+        write_crd_yaml::<MirrordClusterTlsStealConfig>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_all_crd_yamls() {
+        write_crd_yaml::<MirrordOperatorCrd>();
+        write_crd_yaml::<SessionCrd>();
+        write_crd_yaml::<MirrordWorkloadQueueRegistry>();
+        write_crd_yaml::<MirrordSqsSession>();
+        write_crd_yaml::<MirrordClusterOperatorUserCredential>();
+        write_crd_yaml::<PreviewSession>();
+        write_crd_yaml::<MirrordClusterSession>();
+        write_crd_yaml::<MirrordMultiClusterSession>();
+        write_crd_yaml::<PgBranchDatabase>();
+        write_crd_yaml::<MysqlBranchDatabase>();
+        write_crd_yaml::<MongodbBranchDatabase>();
+        write_crd_yaml::<MirrordPolicy>();
+        write_crd_yaml::<MirrordClusterPolicy>();
+        write_crd_yaml::<MirrordClusterExternalResource>();
+        write_crd_yaml::<MirrordClusterWorkloadPatch>();
+        write_crd_yaml::<MirrordClusterWorkloadPatchRequest>();
+        write_crd_yaml::<MirrordKafkaClientConfig>();
+        write_crd_yaml::<MirrordKafkaTopicsConsumer>();
+        write_crd_yaml::<MirrordKafkaEphemeralTopic>();
+        write_crd_yaml::<MirrordClusterProfile>();
+        write_crd_yaml::<MirrordProfile>();
+        write_crd_yaml::<MirrordTlsStealConfig>();
+        write_crd_yaml::<MirrordClusterTlsStealConfig>();
+    }
 }
