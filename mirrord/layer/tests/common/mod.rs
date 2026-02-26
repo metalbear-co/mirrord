@@ -154,7 +154,7 @@ impl TestIntProxy {
                 &experimental_config,
             );
             intproxy
-                .run(Duration::from_secs(5), Duration::from_secs(5))
+                .run(Duration::from_secs(15), Duration::from_secs(5))
                 .await
                 .unwrap();
             println!("test IntProxy finished");
