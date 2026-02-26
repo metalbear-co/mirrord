@@ -5138,6 +5138,7 @@ dependencies = [
  "mirrord-intproxy-protocol",
  "mirrord-layer-lib",
  "mirrord-layer-macro",
+ "mirrord-layer-tests",
  "mirrord-protocol",
  "mirrord-sip",
  "mirrord-test-utils",
@@ -5205,7 +5206,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-tests"
-version = "3.190.0"
+version = "3.191.0"
 dependencies = [
  "actix-codec",
  "futures",
