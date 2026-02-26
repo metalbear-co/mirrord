@@ -1,10 +1,9 @@
 #![cfg(target_family = "unix")]
 #![cfg(target_os = "linux")]
-#![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
+use core::assert_matches;
 use std::{
-    assert_matches::assert_matches,
     io::Write,
     net::{Ipv4Addr, SocketAddr},
     path::Path,

@@ -1,10 +1,10 @@
 #![cfg(target_family = "unix")]
 #![cfg(target_os = "linux")]
-#![feature(assert_matches)]
 
 mod common;
 
-use std::{assert_matches::assert_matches, io::Write, ops::Not, path::Path, time::Duration};
+use core::assert_matches;
+use std::{io::Write, ops::Not, path::Path, time::Duration};
 
 pub use common::*;
 use mirrord_config::{
