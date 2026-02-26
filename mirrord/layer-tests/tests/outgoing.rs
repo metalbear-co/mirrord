@@ -7,7 +7,6 @@ use mirrord_protocol::{
     outgoing::{
         DaemonRead, LayerWrite,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
-        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
 };
 use rstest::rstest;
