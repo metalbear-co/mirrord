@@ -10,6 +10,7 @@ use str_win::path_to_unix_path;
 pub fn regex_set_builder() -> RegexSetBuilder {
     let mut patterns: Vec<String> = [
         r".\.dll$",
+        r".\.pdb$",
         r".\.so$",
         r".\.d$",
         r".\.pyc$",
