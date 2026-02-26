@@ -88,6 +88,10 @@ pub struct MirrordKafkaClientAuthExtra {
     pub aws_region: Option<String>,
 }
 
+impl MirrordKafkaClientAuthExtra {
+    pub const MSK_IAM: &'static str = "MSK_IAM";
+}
+
 /// Defines splittable Kafka topics consumed by some workload living in the same namespace.
 ///
 /// # Concurrent splitting
