@@ -1,4 +1,4 @@
-use kube::CustomResource;
+use kube::{CustomResource, CustomResourceExt};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -48,14 +48,17 @@ pub struct MirrordKafkaClientConfigSpec {
     /// Note that Java client support is configured in the operator.
     ///
     /// Defaults to `librdkafka`.
-    pub client_implementation: Option<String>,
+    #[schemars(with = "Option<String>")]
+    pub client_implementation: Option<KafkaClientImplementation>,
 }
 
-impl MirrordKafkaClientConfigSpec {
-    /// Value for [`Self::client_implementation`].
-    pub const LIBRDKAFKA: &'static str = "librdkafka";
-    /// Value for [`Self::client_implementation`].
-    pub const JAVA: &'static str = "java";
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum KafkaClientImplementation {
+    Librdkafka,
+    Java,
+    #[serde(other)]
+    Unknown,
 }
 
 /// Property to use when creating operator's Kafka client.
@@ -83,10 +86,6 @@ pub struct MirrordKafkaClientAuthExtra {
     ///
     /// Required when `kind` is `MSK_IAM`.
     pub aws_region: Option<String>,
-}
-
-impl MirrordKafkaClientAuthExtra {
-    pub const MSK_IAM: &'static str = "MSK_IAM";
 }
 
 /// Defines splittable Kafka topics consumed by some workload living in the same namespace.
