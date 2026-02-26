@@ -1,6 +1,5 @@
 #![cfg(target_family = "unix")]
 #![cfg(target_os = "macos")]
-#![feature(assert_matches)]
 
 use rstest::rstest;
 

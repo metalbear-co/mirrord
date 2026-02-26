@@ -3,7 +3,7 @@ use std::{collections::HashSet, fmt::Debug};
 use k8s_openapi::NamespaceResourceScope;
 use kube::{Api, Resource, api::DeleteParams};
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_operator::crd::{mysql_branching::MysqlBranchDatabase, pg_branching::PgBranchDatabase};
+use mirrord_operator::crd::db_branching::{mysql::MysqlBranchDatabase, pg::PgBranchDatabase};
 use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{Table, row};
 use serde::de::DeserializeOwned;

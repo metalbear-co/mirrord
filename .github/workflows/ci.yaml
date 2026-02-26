@@ -50,6 +50,7 @@ permissions:
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
+  PINNED_NIGHTLY: nightly-2026-02-24
 
 jobs:
   towncrier_check:
@@ -215,7 +216,7 @@ jobs:
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
-          toolchain: nightly-2025-08-01
+          toolchain: ${{ env.PINNED_NIGHTLY }}
           components: rustfmt, clippy
           target: ${{matrix.target}}
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
@@ -250,7 +251,6 @@ jobs:
       - run: npm run lint
         working-directory: ./wizard-frontend
 
-
   # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
   # the output of this test is a boolean indicating if it's a release branch
   # which is then used by `build_mirrord_on_release_branch`
@@ -274,7 +274,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: metalbear-co/cargo-deny-action@76cd80eb775d7bbbd2d80292136d74d39e1b4918
         with:
-          rust-version: nightly-2025-08-01
+          rust-version: ${{ env.PINNED_NIGHTLY }}
 
   check-rust-docs:
     runs-on: ubuntu-24.04
@@ -290,7 +290,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
-          toolchain: nightly-2025-08-01
+          toolchain: ${{ env.PINNED_NIGHTLY }}
           cache: false
       # TODO(alex): `no-deps` here due to an issue in `futures-util`.
       - run: cargo doc --document-private-items --no-deps
@@ -300,7 +300,7 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     container:
-      image: ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9
+      image: ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21
     steps:
       - uses: actions/checkout@v4
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
@@ -308,7 +308,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       # the setup rust toolchain action ignores the input if file exists.. so remove it
       - run: rm rust-toolchain.toml
-      - run: rustup default nightly-2025-08-01
+      - run: rustup default ${{ env.PINNED_NIGHTLY }}
       - name: mirrord-agent UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent
       - name: mirrord-agent-env UT
@@ -511,7 +511,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: x86_64-apple-darwin, aarch64-apple-darwin
-          toolchain: nightly-2025-08-01
+          toolchain: ${{ env.PINNED_NIGHTLY }}
       - name: Install Protoc
         uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
@@ -722,7 +722,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
-          toolchain: nightly-2025-08-01
+          toolchain: ${{ env.PINNED_NIGHTLY }}
 
       - name: run UT
         run: |

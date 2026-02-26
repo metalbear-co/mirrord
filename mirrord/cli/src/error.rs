@@ -322,7 +322,7 @@ pub(crate) enum CliError {
     #[error("Feature `{0}` requires using mirrord operator")]
     #[diagnostic(help(
         "The mirrord operator is part of mirrord for Teams. \
-        You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=errreqop&utm_medium=cli"
+        You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=requiresoperator&utm_medium=cli"
     ))]
     FeatureRequiresOperatorError(String),
 
@@ -468,7 +468,7 @@ pub(crate) enum CliError {
     #[diagnostic(help(
         "This likely means that you don't have the required permissions to spawn it.
         Look into your namespace's Pod Security admission controllers and try mirrord for Teams if the issue persists.
-        You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=errreqop&utm_medium=cli"
+        You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=noperm&utm_medium=cli"
     ))]
     AgentPodDeleted,
 

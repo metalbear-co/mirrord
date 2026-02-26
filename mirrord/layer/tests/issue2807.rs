@@ -1,6 +1,5 @@
 #![cfg(target_family = "unix")]
 #![cfg(target_os = "macos")] // linux github runners don't have ipv6, which we require for these tests
-#![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
 use std::{
