@@ -114,7 +114,9 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 ///
 ///  Don't use this example as a starting point, it's just here to show you all the available
 ///  options.
-/// ```json
+/// ```
+/// # use mirrord_config::LayerFileConfig;
+/// # let config_str = r########"
 /// {
 ///   "accept_invalid_certificates": false,
 ///   "skip_processes": "ide-debugger",
@@ -122,7 +124,6 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 ///     "path": "pod/bear-pod",
 ///     "namespace": "default"
 ///   },
-///   "connect_tcp": null,
 ///   "agent": {
 ///     "log_level": "info",
 ///     "json_log": false,
@@ -131,13 +132,13 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 ///     "namespace": "default",
 ///     "image": "ghcr.io/metalbear-co/mirrord:latest",
 ///     "image_pull_policy": "IfNotPresent",
-///     "image_pull_secrets": [ { "secret-key": "secret" } ],
+///     "image_pull_secrets": [ { "name": "secret" } ],
 ///     "ttl": 30,
 ///     "ephemeral": false,
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
 ///     "flush_connections": true,
-///     "metrics": "0.0.0.0:9000",
+///     "metrics": "0.0.0.0:9000"
 ///   },
 ///   "feature": {
 ///     "env": {
@@ -193,6 +194,8 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 ///   "telemetry": true,
 ///   "kube_context": "my-cluster"
 /// }
+/// # "########;
+/// # serde_json::from_str::<LayerFileConfig>(config_str).unwrap();
 /// ```
 ///
 /// # Options {#root-options}
