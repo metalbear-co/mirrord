@@ -1,13 +1,14 @@
-use std::{fmt::Debug, io::Read, ops::Not, sync::LazyLock, time::Duration};
+use std::{borrow::Cow, fmt::Debug, io::Read, ops::Not, sync::LazyLock, time::Duration};
 
 use fancy_regex::Regex;
 use hyper::http::request::Parts;
-use mirrord_agent_env::envs::{JAQ_MEM_LIMIT, JAQ_TIME_LIMIT};
+use mirrord_agent_env::envs::JAQ_TIME_LIMIT;
 use mirrord_protocol::tcp::{HttpMethodFilter, JqQuery};
-use safejaq::SafeJaq;
+use safejaq::EvaluationRequest;
 use serde_json::Value;
 use serde_json_path::JsonPath;
-use tracing::Level;
+use tokio_retry::strategy::ExponentialBackoff;
+use tracing::{Instrument, Level};
 
 /// Currently supported filtering criterias.
 #[derive(Debug, Clone)]
@@ -197,14 +198,6 @@ impl HttpFilter {
                 }
             }
             Self::HeaderJq(filter) => {
-                static MEM_LIMIT: LazyLock<u64> =
-                    LazyLock::new(|| JAQ_MEM_LIMIT.from_env_or_default());
-
-                static TIME_LIMIT: LazyLock<Duration> =
-                    LazyLock::new(|| Duration::from_secs(JAQ_TIME_LIMIT.from_env_or_default()));
-
-                let safejaq = SafeJaq::new(*TIME_LIMIT, *MEM_LIMIT);
-
                 let headers = parts.extensions.get_or_insert_with(|| {
                     let normalized = parts
                         .headers
@@ -221,7 +214,7 @@ impl HttpFilter {
                 });
 
                 for header in headers.0.iter() {
-                    match safejaq.evaluate(filter, &header.clone().into()).await {
+                    match eval_jaq(filter, &header.clone()).await {
                         Ok(true) => return true,
                         Ok(false) => (),
                         Err(err) => {
@@ -240,6 +233,46 @@ impl HttpFilter {
             HttpFilter::Composite { filters, .. } => filters.iter().any(HttpFilter::needs_body),
             HttpFilter::Body(_) => true,
             _ => false,
+        }
+    }
+}
+
+async fn eval_jaq(q: &JqQuery, pl: &str) -> Result<bool, String> {
+    static TIME_LIMIT: LazyLock<Duration> = LazyLock::new(|| {
+        Duration::from_secs(JAQ_TIME_LIMIT.try_from_env().ok().flatten().unwrap_or(500))
+    });
+
+    let value = pl.into();
+    let query = q.clone().into_inner();
+
+    let mut handle = tokio::task::spawn_blocking(move || {
+        safejaq::evaluate(EvaluationRequest {
+            filter: Cow::Owned(query),
+            payload: Cow::Owned(value),
+        })
+    });
+
+    let span = tracing::warn_span!("jaq eval", ?q);
+
+    tokio::select! {
+        result = &mut handle => {
+            result.expect("panic in jq evaluation thread")
+        }
+        _ = tokio::time::sleep(*TIME_LIMIT) => {
+            tracing::warn!("jq expr evaluation took longer than max allowed time");
+
+            tokio::spawn(async move {
+                let backoff = ExponentialBackoff::from_millis(5)
+                    .factor(200)
+                    .max_delay(Duration::from_secs(25));
+
+                for delay in backoff {
+                    tokio::time::sleep(delay).await;
+                    tracing::warn!("jq evaluation has not completed");
+                }
+            }.instrument(span));
+
+            Ok(false)
         }
     }
 }

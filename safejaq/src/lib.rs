@@ -225,7 +225,7 @@ fn set_limits(memory_limit: rlim_t, time_limit: rlim_t) {
     );
 }
 
-fn evaluate(request: EvaluationRequest) -> Result<bool, String> {
+pub fn evaluate(request: EvaluationRequest) -> Result<bool, String> {
     let program = File {
         code: request.filter.deref(),
         path: (),

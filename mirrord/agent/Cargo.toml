@@ -76,6 +76,7 @@ procfs = "0.17.0"
 rcgen.workspace = true
 serde_json_path.workspace = true
 dns-lookup = "3"
+tokio-retry.workspace = true
 
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]

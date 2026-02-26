@@ -477,15 +477,9 @@ pub struct AgentConfig {
     #[config(default = true)]
     pub disable_mesh_sidecar_injection: bool,
 
-    /// ### agent.jaq_memory_limit {#agent-jaq_memory_limit}
-    ///
-    /// Memory limit for running Jaq queries, in bytes. Defaults to 32MB.
-    #[config(default = 33554432)]
-    pub jaq_memory_limit: u64,
-
     /// ### agent.jaq_time_limit {#agent-jaq_time_limit}
     ///
-    /// CPU time limit for running jaq queries, in seconds. Defaults to 1s.
+    /// Time limit for running jaq queries, in milliseconds. Defaults to 500ms.
     #[config(default = 1)]
     pub jaq_time_limit: u64,
 
