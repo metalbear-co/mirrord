@@ -269,6 +269,7 @@ ci_info = "0.14"
 # Used by `cli`
 yamlpatch = "0.9.0"
 yamlpath = "0.32.0"
+oci-spec = { version = "0.9", default-features = false, features = ["distribution"] }
 
 # Used by `safejaq`, `protocol`
 jaq-core = "2.2.1"

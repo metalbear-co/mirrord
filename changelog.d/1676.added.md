@@ -1,0 +1,1 @@
+`mirrord preview stop` now resolves the given target's container before comparing it to the preview sessions, allowing you to specify, for example, `deployment/foo`, instead of having to spell out the full target, including container.

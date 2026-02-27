@@ -1,9 +1,10 @@
 #![allow(dead_code)]
 use std::{fmt, time::Duration};
 
-use mirrord_test_utils::TestProcess;
-
-use crate::utils::run_command::{run_exec_targetless, run_exec_with_target};
+use mirrord_test_utils::{
+    run_command::{run_exec_targetless, run_exec_with_target},
+    TestProcess,
+};
 
 pub mod env;
 pub(crate) mod file_ops;

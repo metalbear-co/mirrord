@@ -12,3 +12,11 @@ chrono.workspace = true
 fancy-regex.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "process", "time", "io-util", "sync"] }
+
+# In CI we don't necessarily want to compile mirrord every time, in that case,
+#   use --no-default-features and set MIRRORD_TESTS_USE_BINARY
+mirrord = { artifact = "bin", path = "../mirrord/cli", optional = true }
+
+[features]
+default = ["build-cli"]
+build-cli = ["dep:mirrord"]
