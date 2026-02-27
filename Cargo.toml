@@ -34,7 +34,6 @@ members = [
     "tests/rust-websockets",
     "tests/rust-sqs-printer",
     "xtask",
-	"safejaq",
 ]
 resolver = "2"
 
@@ -270,7 +269,7 @@ ci_info = "0.14"
 yamlpatch = "0.9.0"
 yamlpath = "0.32.0"
 
-# Used by `safejaq`, `protocol`
+# Used by `agent`, `protocol`
 jaq-core = "2.2.1"
 jaq-parse = "1.0.3"
 jaq-std = "2.1.2"

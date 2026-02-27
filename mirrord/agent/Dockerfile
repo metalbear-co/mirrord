@@ -36,7 +36,6 @@ COPY mirrord/macros /app/mirrord/macros
 COPY mirrord/tls-util /app/mirrord/tls-util
 COPY mirrord/protocol /app/mirrord/protocol
 COPY mirrord/agent /app/mirrord/agent
-COPY safejaq /app/safejaq
 
 COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/
 
