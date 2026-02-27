@@ -329,13 +329,9 @@ Possible values for the header:
 
 - `forwarded-to-client`: set when the request was sent to the local app
 
-### agent.jaq_memory_limit {#agent-jaq_memory_limit}
-
-Memory limit for running Jaq queries, in bytes. Defaults to 32MB.
-
 ### agent.jaq_time_limit {#agent-jaq_time_limit}
 
-CPU time limit for running jaq queries, in seconds. Defaults to 1s.
+Time limit for running jaq queries, in milliseconds. Defaults to 500ms.
 
 ### agent.json_log {#agent-json_log}
 
@@ -1877,7 +1873,7 @@ with your setup.
 }
 ```
 
-### feature.magic.aws {#feature-magic-aws}
+#### feature.magic.aws {#feature-magic-aws}
 
 The AWS CLI prefers local credentials (e.g. `~/.aws`, `AWS_PROFILE`) over the remote pod's
 identity (IAM role, instance profile, IRSA). When those local credentials are present, the
@@ -2312,13 +2308,6 @@ case-insensitive.
 Supports jq expressions, matches when the expression returns
 `true`. The expression is evaluated on each present header in
 the request, in `HeaderKey: HeaderValue` format.
-
-Since jq is a turing-complete language, to prevent lockup or
-excessive memory usage, the expressions are evaluated in a
-special sandboxed environment with CPU time and memory limits
-(see {#agent-jaq_memory_limit}, {#agent-jaq_time_limit}). The
-evaluation is aborted if those limits are exceeded and the
-filter does not match.
 
 ##### feature.network.incoming.http_filter.method_filter {#feature-network-incoming-http-method-filter}
 

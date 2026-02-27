@@ -2049,7 +2049,7 @@
         },
         "header_filter_jq": {
           "title": "feature.network.incoming.http_filter.header_filter_jq {#feature-network-incoming-http-header-filter-jq}",
-          "description": "Supports jq expressions, matches when the expression returns `true`. The expression is evaluated on each present header in the request, in `HeaderKey: HeaderValue` format.\n\nSince jq is a turing-complete language, to prevent lockup or excessive memory usage, the expressions are evaluated in a special sandboxed environment with CPU time and memory limits (see {#agent-jaq_memory_limit}, {#agent-jaq_time_limit}). The evaluation is aborted if those limits are exceeded and the filter does not match.",
+          "description": "Supports jq expressions, matches when the expression returns `true`. The expression is evaluated on each present header in the request, in `HeaderKey: HeaderValue` format.",
           "type": [
             "string",
             "null"
@@ -2333,7 +2333,7 @@
         },
         {
           "title": "feature.network.incoming.inner_filter.header_filter_jq",
-          "description": "##### {#feature-network-incoming-inner-header-filter-jq}\n\nSupports jq expressions, matches when the expression returns `true`. The expression is evaluated on each present header in the request, in `HeaderKey: HeaderValue` format.\n\nSince jq is a turing-complete language, to prevent lockup or excessive memory usage, the expressions are evaluated in a special sandboxed environment with CPU time and memory limits (see {#agent-jaq_memory_limit}, {#agent-jaq_time_limit}). The evaluation is aborted if those limits are exceeded and the filter does not match.",
+          "description": "##### {#feature-network-incoming-inner-header-filter-jq}\n\nSupports jq expressions, matches when the expression returns `true`. The expression is evaluated on each present header in the request, in `HeaderKey: HeaderValue` format.",
           "type": "object",
           "required": [
             "query"
