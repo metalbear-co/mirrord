@@ -163,19 +163,6 @@ jobs:
         with:
           files: |
             mirrord-schema.json
-      # - name: get configuration.md changes
-      #   id: changed-configuration-md
-      #   uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
-      #   with:
-      #     files: |
-      #       mirrord/config/configuration.md
-      # - name: verify configuration.md is up-to-date
-      #   run: |
-      #     if [ "${{ steps.changed-config-schema.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-configuration-md.outputs.any_changed }}" != "true" ]; then
-      #       echo "Error: mirrord configuration has changed but `configuration.md` documentation has not."
-      #       echo "Try running medschool (see `./medschool/readme.md`) and updating `configuration.md`."
-      #       exit 1
-      #     fi
       - name: output test
         run: |
           echo ${{ steps.changed-rs.outputs.any_changed }};
@@ -189,7 +176,6 @@ jobs:
           echo ${{ steps.changed-windows.outputs.any_changed }};
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-config-schema.outputs.any_changed }};
-          echo ${{ steps.changed-configuration-md.outputs.any_changed }};
 
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
 
@@ -770,6 +756,44 @@ jobs:
     uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
+
+  update_config_docs_on_release_branch:
+    runs-on: ubuntu-24.04
+    # TODO: uncomment the release requirement!
+    # needs: [build_mirrord_on_release_branch]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          toolchain: ${{ env.PINNED_NIGHTLY }}
+          cache: false
+      - name: Generate new GitBook files from our config
+        run: ./scripts/residency.sh
+        shell: bash
+      - name: Commit to docs branch (syncs with GitBook)
+        # TODO: uncomment the git push!
+        run: |
+          git config --local user.email eyal@metalbear.co
+          git config --local user.name Eyal Bukchin
+          git add docs-configuration/.
+          git diff --staged
+          git commit -m "Update configuration docs"
+          # git push origin docs
+          sleep 1
+        shell: bash
+      - name: Cleanup temp files from script
+        continue-on-error: true
+        if: ${{ always() }}
+        run: |
+          rm docs-configuration/configuration/temp.md
+          rm docs_0
+          rm docs_1
+        shell: bash
+    # TODO: uncomment the release requirement!
+    # with:
+    #   mirrord_release_branch: true
 
   # We need some "accummulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
