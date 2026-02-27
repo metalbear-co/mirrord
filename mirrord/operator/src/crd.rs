@@ -908,9 +908,7 @@ mod tests {
     use crate::crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
         MirrordWorkloadQueueRegistry, SessionCrd,
-        db_branching::{
-            mongodb::MongodbBranchDatabase, mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
-        },
+        db_branching::branch_database::BranchDatabase,
         external::MirrordClusterExternalResource,
         kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
         multi_cluster::MirrordMultiClusterSession,
@@ -992,20 +990,8 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn write_pg_branch_database_crd_yaml() {
-        write_crd_yaml::<PgBranchDatabase>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mysql_branch_database_crd_yaml() {
-        write_crd_yaml::<MysqlBranchDatabase>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mongodb_branch_database_crd_yaml() {
-        write_crd_yaml::<MongodbBranchDatabase>();
+    fn write_branch_database_crd_yaml() {
+        write_crd_yaml::<BranchDatabase>();
     }
 
     #[test]
@@ -1091,9 +1077,7 @@ mod tests {
         write_crd_yaml::<PreviewSession>();
         write_crd_yaml::<MirrordClusterSession>();
         write_crd_yaml::<MirrordMultiClusterSession>();
-        write_crd_yaml::<PgBranchDatabase>();
-        write_crd_yaml::<MysqlBranchDatabase>();
-        write_crd_yaml::<MongodbBranchDatabase>();
+        write_crd_yaml::<BranchDatabase>();
         write_crd_yaml::<MirrordPolicy>();
         write_crd_yaml::<MirrordClusterPolicy>();
         write_crd_yaml::<MirrordClusterExternalResource>();

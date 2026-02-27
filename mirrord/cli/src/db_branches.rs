@@ -3,7 +3,7 @@ use std::{collections::HashSet, fmt::Debug};
 use k8s_openapi::NamespaceResourceScope;
 use kube::{Api, Resource, api::DeleteParams};
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_operator::crd::db_branching::{mysql::MysqlBranchDatabase, pg::PgBranchDatabase};
+use mirrord_operator::crd::db_branching::branch_database::BranchDatabase;
 use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{Table, row};
 use serde::de::DeserializeOwned;
@@ -17,7 +17,7 @@ use crate::{
 #[derive(Debug)]
 struct BranchInfo {
     name: String,
-    db_type: &'static str,
+    db_type: String,
     phase: Option<String>,
     ttl: u64,
     database: Option<String>,
@@ -25,100 +25,17 @@ struct BranchInfo {
     expire_time: Option<String>,
 }
 
-impl From<&MysqlBranchDatabase> for BranchInfo {
-    fn from(branch: &MysqlBranchDatabase) -> Self {
-        Self {
-            name: branch.metadata.name.clone().unwrap_or_default(),
-            db_type: "MySQL",
-            phase: branch.status.as_ref().map(|s| s.phase.to_string()),
-            ttl: branch.spec.ttl_secs,
-            database: branch.spec.database_name.clone(),
-            users: branch.status.as_ref().and_then(|s| {
-                if s.session_info.is_empty() {
-                    None
-                } else {
-                    let mut user_list: Vec<_> = s
-                        .session_info
-                        .values()
-                        .map(|session| session.owner.k8s_username.clone())
-                        .collect();
-                    user_list.sort();
-                    Some(user_list.join("\n"))
-                }
-            }),
-            expire_time: branch.status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
-        }
-    }
-}
-
-impl From<MysqlBranchDatabase> for BranchInfo {
+impl From<BranchDatabase> for BranchInfo {
     fn from(
-        MysqlBranchDatabase {
+        BranchDatabase {
             metadata,
             spec,
             mut status,
-        }: MysqlBranchDatabase,
+        }: BranchDatabase,
     ) -> Self {
         Self {
             name: metadata.name.unwrap_or_default(),
-            db_type: "MySQL",
-            phase: status.as_ref().map(|s| s.phase.to_string()),
-            ttl: spec.ttl_secs,
-            database: spec.database_name,
-            users: status.as_mut().and_then(|s| {
-                if s.session_info.is_empty() {
-                    None
-                } else {
-                    let mut user_list: Vec<_> = std::mem::take(&mut s.session_info)
-                        .into_values()
-                        .map(|session| session.owner.k8s_username)
-                        .collect();
-                    user_list.sort();
-                    Some(user_list.join("\n"))
-                }
-            }),
-            expire_time: status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
-        }
-    }
-}
-
-impl From<&PgBranchDatabase> for BranchInfo {
-    fn from(branch: &PgBranchDatabase) -> Self {
-        Self {
-            name: branch.metadata.name.clone().unwrap_or_default(),
-            db_type: "PostgreSQL",
-            phase: branch.status.as_ref().map(|s| s.phase.to_string()),
-            ttl: branch.spec.ttl_secs,
-            database: branch.spec.database_name.clone(),
-            users: branch.status.as_ref().and_then(|s| {
-                if s.session_info.is_empty() {
-                    None
-                } else {
-                    let mut user_list: Vec<_> = s
-                        .session_info
-                        .values()
-                        .map(|session| session.owner.k8s_username.clone())
-                        .collect();
-                    user_list.sort();
-                    Some(user_list.join("\n"))
-                }
-            }),
-            expire_time: branch.status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
-        }
-    }
-}
-
-impl From<PgBranchDatabase> for BranchInfo {
-    fn from(
-        PgBranchDatabase {
-            metadata,
-            spec,
-            mut status,
-        }: PgBranchDatabase,
-    ) -> Self {
-        Self {
-            name: metadata.name.unwrap_or_default(),
-            db_type: "PostgreSQL",
+            db_type: spec.dialect.to_string(),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
             database: spec.database_name,
@@ -176,19 +93,13 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
 
     let client = kube_client_from_layer_config(&layer_config).await?;
 
-    let mysql_api: Api<MysqlBranchDatabase> = get_api(args, &client, &layer_config);
+    let branch_api: Api<BranchDatabase> = get_api(args, &client, &layer_config);
 
-    let pg_api: Api<PgBranchDatabase> = get_api(args, &client, &layer_config);
-
-    let mysql_branches = list_resource_if_defined(&mysql_api, &mut status_progress)
+    let branches = list_resource_if_defined(&branch_api, &mut status_progress)
         .await?
         .unwrap_or_default();
 
-    let pg_branches = list_resource_if_defined(&pg_api, &mut status_progress)
-        .await?
-        .unwrap_or_default();
-
-    if mysql_branches.is_empty() && pg_branches.is_empty() {
+    if branches.is_empty() {
         progress.success(Some("No active DB branch found"));
         return Ok(());
     }
@@ -207,41 +118,28 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
         "Expires At"
     ]);
 
-    // When names are provided, only show matching branches.
-    // When no names are given, show all branches (empty set means no filter).
-    fn get_iter<T: Resource + Into<BranchInfo>>(
-        vec: Vec<T>,
-        names: &HashSet<&String>,
-    ) -> impl Iterator<Item = BranchInfo> {
-        vec.into_iter()
-            .filter(|branch| {
-                if names.is_empty() {
-                    return true;
-                }
-
-                branch
-                    .meta()
-                    .name
-                    .as_ref()
-                    .map(|name| names.contains(name))
-                    .unwrap_or_default()
-            })
-            .map(Into::into)
-    }
-
-    let mysql_iter = get_iter(mysql_branches, &names);
-    let pg_iter = get_iter(pg_branches, &names);
-    let branch_iter = mysql_iter.chain(pg_iter);
+    let branch_iter = branches.into_iter().filter(|branch| {
+        if names.is_empty() {
+            return true;
+        }
+        branch
+            .meta()
+            .name
+            .as_ref()
+            .map(|name| names.contains(name))
+            .unwrap_or_default()
+    });
 
     for branch in branch_iter {
+        let info = BranchInfo::from(branch);
         table.add_row(row![
-            branch.name,
-            branch.db_type,
-            branch.phase.unwrap_or_else(|| "Unknown".to_string()),
-            branch.ttl,
-            branch.database.unwrap_or_else(|| "<none>".to_string()),
-            branch.users.unwrap_or_else(|| "none".to_string()),
-            branch.expire_time.unwrap_or_else(|| "Unknown".to_string())
+            info.name,
+            info.db_type,
+            info.phase.unwrap_or_else(|| "Unknown".to_string()),
+            info.ttl,
+            info.database.unwrap_or_else(|| "<none>".to_string()),
+            info.users.unwrap_or_else(|| "none".to_string()),
+            info.expire_time.unwrap_or_else(|| "Unknown".to_string())
         ]);
     }
 
@@ -282,61 +180,35 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &[String]) -> 
 
     let client = kube_client_from_layer_config(&layer_config).await?;
 
-    let mysql_api: Api<MysqlBranchDatabase> = get_api(args, &client, &layer_config);
-
-    let pg_api: Api<PgBranchDatabase> = get_api(args, &client, &layer_config);
+    let branch_api: Api<BranchDatabase> = get_api(args, &client, &layer_config);
 
     if all {
-        // List all branches first to check if any exist
+        let branches = list_resource_if_defined(&branch_api, &mut destroy_progress).await?;
 
-        let mysql_branches = list_resource_if_defined(&mysql_api, &mut destroy_progress).await?;
-
-        let pg_branches = list_resource_if_defined(&pg_api, &mut destroy_progress).await?;
-
-        if mysql_branches.as_ref().is_none_or(|vec| vec.is_empty())
-            && pg_branches.as_ref().is_none_or(|vec| vec.is_empty())
-        {
+        if branches.as_ref().is_none_or(|vec| vec.is_empty()) {
             destroy_progress.success(Some("No active DB branch found."));
         } else {
-            // Delete all MySQL branches
             let d_params = DeleteParams::default();
-            let my_branch_names = mysql_branches
+            let branch_names = branches
                 .into_iter()
                 .flatten()
                 .filter_map(|b| b.metadata.name);
-            delete_branches(my_branch_names, &mysql_api, &destroy_progress, &d_params).await;
-
-            // Delete all Postgres branches
-            let pg_branch_names = pg_branches
-                .into_iter()
-                .flatten()
-                .filter_map(|b| b.metadata.name);
-            delete_branches(pg_branch_names, &pg_api, &destroy_progress, &d_params).await;
+            delete_branches(branch_names, &branch_api, &destroy_progress, &d_params).await;
 
             destroy_progress.success(None);
         }
     } else {
-        // First, list all branches to determine their types
-        let mysql_branches = list_resource_if_defined(&mysql_api, &mut destroy_progress).await?;
-
-        let pg_branches = list_resource_if_defined(&pg_api, &mut destroy_progress).await?;
+        let branches = list_resource_if_defined(&branch_api, &mut destroy_progress).await?;
 
         let mut names: HashSet<_> = names.iter().collect();
         let d_params = DeleteParams::default();
 
-        let mysql_names = mysql_branches
+        let matching_names = branches
             .into_iter()
             .flatten()
             .filter_map(|b| b.metadata.name)
             .filter(|name| names.remove(name));
-        delete_branches(mysql_names, &mysql_api, &destroy_progress, &d_params).await;
-
-        let pg_names = pg_branches
-            .into_iter()
-            .flatten()
-            .filter_map(|b| b.metadata.name)
-            .filter(|name| names.remove(name));
-        delete_branches(pg_names, &pg_api, &destroy_progress, &d_params).await;
+        delete_branches(matching_names, &branch_api, &destroy_progress, &d_params).await;
 
         for name in names {
             destroy_progress.failure(Some(&format!("branch not found: {name}")));

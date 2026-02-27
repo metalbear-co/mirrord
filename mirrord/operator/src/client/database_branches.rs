@@ -11,7 +11,7 @@ use kube::{
 use mirrord_config::{
     feature::database_branches::{
         ConnectionSource, ConnectionSourceType, DatabaseBranchConfig, DatabaseBranchesConfig,
-        MongodbBranchConfig, MysqlBranchConfig, PgBranchConfig, TargetEnviromentVariableSource,
+        TargetEnviromentVariableSource,
     },
     target::{Target, TargetDisplay},
 };
@@ -23,31 +23,31 @@ use uuid::Uuid;
 use crate::{
     client::error::{OperatorApiError, OperatorOperation},
     crd::db_branching::{
+        branch_database::{
+            BranchCopyConfig, BranchDatabase, BranchDatabaseSpec, DatabaseDialect, DialectOptions,
+        },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
             IamAuthConfig as CrdIamAuthConfig,
         },
-        mongodb::{MongodbBranchDatabase, MongodbBranchDatabaseSpec},
-        mysql::{MysqlBranchDatabase, MysqlBranchDatabaseSpec},
-        pg::{PgBranchDatabase, PgBranchDatabaseSpec},
     },
 };
 
-/// Create MySQL branch databases and wait for their readiness.
+/// Create branch databases and wait for their readiness.
 ///
 /// Timeout after the duration specified by `timeout`.
 #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
-pub async fn create_mysql_branches<P: Progress>(
-    api: &Api<MysqlBranchDatabase>,
-    params: HashMap<BranchDatabaseId, MysqlBranchParams>,
+pub async fn create_branches<P: Progress>(
+    api: &Api<BranchDatabase>,
+    params: HashMap<BranchDatabaseId, BranchParams>,
     timeout: Duration,
     progress: &P,
-) -> Result<HashMap<BranchDatabaseId, MysqlBranchDatabase>, OperatorApiError> {
+) -> Result<HashMap<BranchDatabaseId, BranchDatabase>, OperatorApiError> {
     if params.is_empty() {
         return Ok(HashMap::new());
     }
 
-    let mut subtask = progress.subtask("creating new MySQL branch databases");
+    let mut subtask = progress.subtask("creating new branch databases");
     let mut created_branches = HashMap::new();
 
     for (id, params) in params {
@@ -57,7 +57,7 @@ pub async fn create_mysql_branches<P: Progress>(
         } else {
             Some(params.annotations)
         };
-        let branch = MysqlBranchDatabase {
+        let branch = BranchDatabase {
             metadata: ObjectMeta {
                 generate_name: Some(name_prefix),
                 labels: Some(params.labels),
@@ -73,7 +73,7 @@ pub async fn create_mysql_branches<P: Progress>(
             Err(e) => {
                 return Err(OperatorApiError::KubeError {
                     error: e,
-                    operation: OperatorOperation::MysqlBranching,
+                    operation: OperatorOperation::DbBranching,
                 });
             }
         };
@@ -91,11 +91,10 @@ pub async fn create_mysql_branches<P: Progress>(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    // Wait for either Ready or Failed phase
     let ready_or_failed = branch_names
         .iter()
         .map(|name| {
-            await_condition(api.clone(), name, |db: Option<&MysqlBranchDatabase>| {
+            await_condition(api.clone(), name, |db: Option<&BranchDatabase>| {
                 db.and_then(|db| {
                     db.status.as_ref().map(|status| {
                         status.phase == BranchDatabasePhase::Ready
@@ -111,10 +110,9 @@ pub async fn create_mysql_branches<P: Progress>(
     let results = tokio::time::timeout(timeout, futures::future::join_all(ready_or_failed))
         .await
         .map_err(|_| OperatorApiError::OperationTimeout {
-            operation: OperatorOperation::MysqlBranching,
+            operation: OperatorOperation::DbBranching,
         })?;
 
-    // Check if any branch failed
     for result in results {
         let Ok(Some(db)) = result else {
             continue;
@@ -127,55 +125,53 @@ pub async fn create_mysql_branches<P: Progress>(
                 .clone()
                 .unwrap_or_else(|| "Branch database creation failed".to_string());
             return Err(OperatorApiError::BranchCreationFailed {
-                operation: OperatorOperation::MysqlBranching,
+                operation: OperatorOperation::DbBranching,
                 message: error_msg,
             });
         }
     }
 
-    subtask.success(Some("new MySQL branch databases ready"));
+    subtask.success(Some("new branch databases ready"));
 
     Ok(created_branches)
 }
 
-/// Given parameters of all MySQL branch databases needed for a session, list reusable ones.
+/// List reusable branch databases.
 ///
-/// A MySQL branch is considered reusable if
-/// 1. it has a user specified unique ID, and
-/// 2. it is in the "Ready" phase.
-pub async fn list_reusable_mysql_branches<P: Progress>(
-    api: &Api<MysqlBranchDatabase>,
-    params: &HashMap<BranchDatabaseId, MysqlBranchParams>,
+/// A branch is considered reusable if it has a user-specified unique ID and is in the "Ready"
+/// phase.
+pub async fn list_reusable_branches<P: Progress>(
+    api: &Api<BranchDatabase>,
+    params: &HashMap<BranchDatabaseId, BranchParams>,
     progress: &P,
-) -> Result<HashMap<BranchDatabaseId, MysqlBranchDatabase>, OperatorApiError> {
+) -> Result<HashMap<BranchDatabaseId, BranchDatabase>, OperatorApiError> {
     let specified_ids = params
         .iter()
         .filter(|&(id, _)| matches!(id, BranchDatabaseId::Specified(_)))
         .map(|(id, _)| id.as_ref())
         .collect::<Vec<_>>();
     let label_selector = if specified_ids.is_empty() {
-        // no branch is reusable as there is no user specified ID.
         return Ok(HashMap::new());
     } else {
         Some(format!(
             "{} in ({})",
-            labels::MIRRORD_MYSQL_BRANCH_ID_LABEL,
+            labels::MIRRORD_BRANCH_ID_LABEL,
             specified_ids.join(",")
         ))
     };
 
-    let mut subtask = progress.subtask("listing reusable MySQL branch databases");
+    let mut subtask = progress.subtask("listing reusable branch databases");
 
     let list_params = ListParams {
         label_selector,
         ..Default::default()
     };
-    let reusable_mysql_branches = api
+    let reusable_branches = api
         .list(&list_params)
         .await
         .map_err(|e| OperatorApiError::KubeError {
             error: e,
-            operation: OperatorOperation::MysqlBranching,
+            operation: OperatorOperation::DbBranching,
         })?
         .into_iter()
         .filter(|db| {
@@ -189,360 +185,52 @@ pub async fn list_reusable_mysql_branches<P: Progress>(
         .collect::<HashMap<_, _>>();
 
     subtask.success(Some(&format!(
-        "{} reusable MySQL branches found",
-        reusable_mysql_branches.len()
+        "{} reusable branches found",
+        reusable_branches.len()
     )));
-    Ok(reusable_mysql_branches)
-}
-
-/// Create PostgreSQL branch databases and wait for their readiness.
-///
-/// Timeout after the duration specified by `timeout`.
-#[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
-pub async fn create_pg_branches<P: Progress>(
-    api: &Api<PgBranchDatabase>,
-    params: HashMap<BranchDatabaseId, PgBranchParams>,
-    timeout: Duration,
-    progress: &P,
-) -> Result<HashMap<BranchDatabaseId, PgBranchDatabase>, OperatorApiError> {
-    if params.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let mut subtask = progress.subtask("creating new PostgreSQL branch databases");
-    let mut created_branches = HashMap::new();
-
-    for (id, params) in params {
-        let name_prefix = params.name_prefix;
-        let annotations = if params.annotations.is_empty() {
-            None
-        } else {
-            Some(params.annotations)
-        };
-        let branch = PgBranchDatabase {
-            metadata: ObjectMeta {
-                generate_name: Some(name_prefix),
-                labels: Some(params.labels),
-                annotations,
-                ..Default::default()
-            },
-            spec: params.spec,
-            status: None,
-        };
-
-        match api.create(&kube::api::PostParams::default(), &branch).await {
-            Ok(branch) => created_branches.insert(id, branch),
-            Err(e) => {
-                return Err(OperatorApiError::KubeError {
-                    error: e,
-                    operation: OperatorOperation::PgBranching,
-                });
-            }
-        };
-    }
-    subtask.info("databases created");
-
-    let branch_names = created_branches
-        .values()
-        .map(|branch| {
-            branch
-                .meta()
-                .name
-                .clone()
-                .ok_or(KubeApiError::missing_field(branch, ".metadata.name"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    // Wait for either Ready or Failed phase
-    let ready_or_failed = branch_names
-        .iter()
-        .map(|name| {
-            await_condition(api.clone(), name, |db: Option<&PgBranchDatabase>| {
-                db.and_then(|db| {
-                    db.status.as_ref().map(|status| {
-                        status.phase == BranchDatabasePhase::Ready
-                            || status.phase == BranchDatabasePhase::Failed
-                    })
-                })
-                .unwrap_or(false)
-            })
-        })
-        .collect::<Vec<_>>();
-
-    subtask.info("waiting for readiness");
-    let results = tokio::time::timeout(timeout, futures::future::join_all(ready_or_failed))
-        .await
-        .map_err(|_| OperatorApiError::OperationTimeout {
-            operation: OperatorOperation::PgBranching,
-        })?;
-
-    // Check if any branch failed
-    for result in results {
-        let Ok(Some(db)) = result else {
-            continue;
-        };
-        if let Some(status) = &db.status
-            && status.phase == BranchDatabasePhase::Failed
-        {
-            let error_msg = status
-                .error
-                .clone()
-                .unwrap_or_else(|| "Branch database creation failed".to_string());
-            return Err(OperatorApiError::BranchCreationFailed {
-                operation: OperatorOperation::PgBranching,
-                message: error_msg,
-            });
-        }
-    }
-
-    subtask.success(Some("new PostgreSQL branch databases ready"));
-
-    Ok(created_branches)
-}
-/// Given parameters of all PostgreSQL branch databases needed for a session, list reusable ones.
-///
-/// A PostgreSQL branch is considered reusable if
-/// 1. it has a user specified unique ID, and
-/// 2. it is in the "Ready" phase.
-pub async fn list_reusable_pg_branches<P: Progress>(
-    api: &Api<PgBranchDatabase>,
-    params: &HashMap<BranchDatabaseId, PgBranchParams>,
-    progress: &P,
-) -> Result<HashMap<BranchDatabaseId, PgBranchDatabase>, OperatorApiError> {
-    let specified_ids = params
-        .iter()
-        .filter(|&(id, _)| matches!(id, BranchDatabaseId::Specified(_)))
-        .map(|(id, _)| id.as_ref())
-        .collect::<Vec<_>>();
-    let label_selector = if specified_ids.is_empty() {
-        // no branch is reusable as there is no user specified ID.
-        return Ok(HashMap::new());
-    } else {
-        Some(format!(
-            "{} in ({})",
-            labels::MIRRORD_PG_BRANCH_ID_LABEL,
-            specified_ids.join(",")
-        ))
-    };
-
-    let mut subtask = progress.subtask("listing reusable PostgreSQL branch databases");
-
-    let list_params = ListParams {
-        label_selector,
-        ..Default::default()
-    };
-    let reusable_pg_branches = api
-        .list(&list_params)
-        .await
-        .map_err(|e| OperatorApiError::KubeError {
-            error: e,
-            operation: OperatorOperation::PgBranching,
-        })?
-        .into_iter()
-        .filter(|db| {
-            if let Some(status) = &db.status {
-                status.phase == BranchDatabasePhase::Ready
-            } else {
-                false
-            }
-        })
-        .map(|db| (db.spec.id.clone().into(), db))
-        .collect::<HashMap<_, _>>();
-
-    subtask.success(Some(&format!(
-        "{} reusable PostgreSQL branches found",
-        reusable_pg_branches.len()
-    )));
-    Ok(reusable_pg_branches)
-}
-
-/// Create MongoDB branch databases and wait for their readiness.
-///
-/// Timeout after the duration specified by `timeout`.
-#[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
-pub async fn create_mongodb_branches<P: Progress>(
-    api: &Api<MongodbBranchDatabase>,
-    params: HashMap<BranchDatabaseId, MongodbBranchParams>,
-    timeout: Duration,
-    progress: &P,
-) -> Result<HashMap<BranchDatabaseId, MongodbBranchDatabase>, OperatorApiError> {
-    if params.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let mut subtask = progress.subtask("creating new MongoDB branch databases");
-    let mut created_branches = HashMap::new();
-
-    for (id, params) in params {
-        let name_prefix = params.name_prefix;
-        let annotations = if params.annotations.is_empty() {
-            None
-        } else {
-            Some(params.annotations)
-        };
-        let branch = MongodbBranchDatabase {
-            metadata: ObjectMeta {
-                generate_name: Some(name_prefix),
-                labels: Some(params.labels),
-                annotations,
-                ..Default::default()
-            },
-            spec: params.spec,
-            status: None,
-        };
-
-        match api.create(&kube::api::PostParams::default(), &branch).await {
-            Ok(branch) => created_branches.insert(id, branch),
-            Err(e) => {
-                return Err(OperatorApiError::KubeError {
-                    error: e,
-                    operation: OperatorOperation::MongodbBranching,
-                });
-            }
-        };
-    }
-    subtask.info("databases created");
-
-    let branch_names = created_branches
-        .values()
-        .map(|branch| {
-            branch
-                .meta()
-                .name
-                .clone()
-                .ok_or(KubeApiError::missing_field(branch, ".metadata.name"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let ready = branch_names
-        .iter()
-        .map(|name| {
-            await_condition(api.clone(), name, |db: Option<&MongodbBranchDatabase>| {
-                db.and_then(|db| {
-                    db.status
-                        .as_ref()
-                        .map(|status| status.phase == BranchDatabasePhase::Ready)
-                })
-                .unwrap_or(false)
-            })
-        })
-        .collect::<Vec<_>>();
-
-    subtask.info("waiting for readiness");
-    tokio::time::timeout(timeout, futures::future::join_all(ready))
-        .await
-        .map_err(|_| OperatorApiError::OperationTimeout {
-            operation: OperatorOperation::MongodbBranching,
-        })?;
-    subtask.success(Some("new MongoDB branch databases ready"));
-
-    Ok(created_branches)
-}
-
-/// Given parameters of all MongoDB branch databases needed for a session, list reusable ones.
-///
-/// A MongoDB branch is considered reusable if
-/// 1. it has a user specified unique ID, and
-/// 2. it is in the "Ready" phase.
-pub async fn list_reusable_mongodb_branches<P: Progress>(
-    api: &Api<MongodbBranchDatabase>,
-    params: &HashMap<BranchDatabaseId, MongodbBranchParams>,
-    progress: &P,
-) -> Result<HashMap<BranchDatabaseId, MongodbBranchDatabase>, OperatorApiError> {
-    let specified_ids = params
-        .iter()
-        .filter(|&(id, _)| matches!(id, BranchDatabaseId::Specified(_)))
-        .map(|(id, _)| id.as_ref())
-        .collect::<Vec<_>>();
-    let label_selector = if specified_ids.is_empty() {
-        // no branch is reusable as there is no user specified ID.
-        return Ok(HashMap::new());
-    } else {
-        Some(format!(
-            "{} in ({})",
-            labels::MIRRORD_MONGODB_BRANCH_ID_LABEL,
-            specified_ids.join(",")
-        ))
-    };
-
-    let mut subtask = progress.subtask("listing reusable MongoDB branch databases");
-
-    let list_params = ListParams {
-        label_selector,
-        ..Default::default()
-    };
-    let reusable_mongodb_branches = api
-        .list(&list_params)
-        .await
-        .map_err(|e| OperatorApiError::KubeError {
-            error: e,
-            operation: OperatorOperation::MongodbBranching,
-        })?
-        .into_iter()
-        .filter(|db| {
-            if let Some(status) = &db.status {
-                status.phase == BranchDatabasePhase::Ready
-            } else {
-                false
-            }
-        })
-        .map(|db| (db.spec.id.clone().into(), db))
-        .collect::<HashMap<_, _>>();
-
-    subtask.success(Some(&format!(
-        "{} reusable MongoDB branches found",
-        reusable_mongodb_branches.len()
-    )));
-    Ok(reusable_mongodb_branches)
+    Ok(reusable_branches)
 }
 
 pub struct DatabaseBranchParams {
-    pub mongodb: HashMap<BranchDatabaseId, MongodbBranchParams>,
-    pub mysql: HashMap<BranchDatabaseId, MysqlBranchParams>,
-    pub pg: HashMap<BranchDatabaseId, PgBranchParams>,
+    pub branches: HashMap<BranchDatabaseId, BranchParams>,
 }
 
 impl DatabaseBranchParams {
-    /// Create branch database parameters.
+    /// Create branch database parameters from user config.
     ///
     /// We generate unique database IDs unless the user explicitly specifies them.
     pub fn new(config: &DatabaseBranchesConfig, target: &Target) -> Self {
-        let mut mongodb = HashMap::new();
-        let mut mysql = HashMap::new();
-        let mut pg = HashMap::new();
+        let mut branches = HashMap::new();
         for branch_db_config in config.0.iter() {
             match branch_db_config {
                 DatabaseBranchConfig::Mongodb(mongodb_config) => {
-                    let id = if let Some(id) = mongodb_config.base.id.clone() {
-                        BranchDatabaseId::specified(id)
-                    } else {
-                        BranchDatabaseId::generate_new()
+                    let id = match mongodb_config.base.id.clone() {
+                        Some(id) => BranchDatabaseId::specified(id),
+                        None => BranchDatabaseId::generate_new(),
                     };
-                    let params = MongodbBranchParams::new(id.as_ref(), mongodb_config, target);
-                    mongodb.insert(id, params);
+                    let params = BranchParams::from_mongodb(id.as_ref(), mongodb_config, target);
+                    branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Mysql(mysql_config) => {
-                    let id = if let Some(id) = mysql_config.base.id.clone() {
-                        BranchDatabaseId::specified(id)
-                    } else {
-                        BranchDatabaseId::generate_new()
+                    let id = match mysql_config.base.id.clone() {
+                        Some(id) => BranchDatabaseId::specified(id),
+                        None => BranchDatabaseId::generate_new(),
                     };
-                    let params = MysqlBranchParams::new(id.as_ref(), mysql_config, target);
-                    mysql.insert(id, params);
+                    let params = BranchParams::from_mysql(id.as_ref(), mysql_config, target);
+                    branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Pg(pg_config) => {
-                    let id = if let Some(id) = pg_config.base.id.clone() {
-                        BranchDatabaseId::specified(id)
-                    } else {
-                        BranchDatabaseId::generate_new()
+                    let id = match pg_config.base.id.clone() {
+                        Some(id) => BranchDatabaseId::specified(id),
+                        None => BranchDatabaseId::generate_new(),
                     };
-                    let params = PgBranchParams::new(id.as_ref(), pg_config, target);
-                    pg.insert(id, params);
+                    let params = BranchParams::from_pg(id.as_ref(), pg_config, target);
+                    branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Redis(_) => {}
             };
         }
-        Self { mongodb, mysql, pg }
+        Self { branches }
     }
 }
 
@@ -557,12 +245,10 @@ pub enum BranchDatabaseId {
 }
 
 impl BranchDatabaseId {
-    /// Use a specified ID directly.
     pub fn specified(value: String) -> Self {
         Self::Specified(value)
     }
 
-    /// Generate a new UUID.
     pub fn generate_new() -> Self {
         Self::Generated(Uuid::new_v4().to_string())
     }
@@ -615,69 +301,42 @@ fn convert_connection_source(source: &ConnectionSource) -> CrdConnectionSource {
 }
 
 #[derive(Debug, Clone)]
-pub struct MysqlBranchParams {
+pub struct BranchParams {
     pub name_prefix: String,
     pub labels: BTreeMap<String, String>,
     pub annotations: BTreeMap<String, String>,
-    pub spec: MysqlBranchDatabaseSpec,
+    pub spec: BranchDatabaseSpec,
 }
 
-impl MysqlBranchParams {
-    pub fn new(id: &str, config: &MysqlBranchConfig, target: &Target) -> Self {
-        let name_prefix = format!("{}-mysql-branch-", target.name());
-        let connection_source = convert_connection_source(&config.base.connection);
-        let spec = MysqlBranchDatabaseSpec {
-            id: id.to_string(),
-            database_name: config.base.name.clone(),
-            connection_source,
-            target: target.clone(),
-            ttl_secs: config.base.ttl_secs,
-            mysql_version: config.base.version.clone(),
-            copy: config.copy.clone().into(),
-        };
-        let labels = BTreeMap::from([(
-            labels::MIRRORD_MYSQL_BRANCH_ID_LABEL.to_string(),
-            id.to_string(),
-        )]);
-        Self {
-            name_prefix,
-            labels,
-            annotations: BTreeMap::new(),
-            spec,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PgBranchParams {
-    pub name_prefix: String,
-    pub labels: BTreeMap<String, String>,
-    pub annotations: BTreeMap<String, String>,
-    pub spec: PgBranchDatabaseSpec,
-}
-
-impl PgBranchParams {
-    pub fn new(id: &str, config: &PgBranchConfig, target: &Target) -> Self {
+impl BranchParams {
+    pub fn from_pg(
+        id: &str,
+        config: &mirrord_config::feature::database_branches::PgBranchConfig,
+        target: &Target,
+    ) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
 
-        // Convert IAM auth config if present
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
-        let spec = PgBranchDatabaseSpec {
+
+        let dialect_options = iam_auth.map(|auth| DialectOptions {
+            iam_auth: Some(auth),
+        });
+
+        let spec = BranchDatabaseSpec {
             id: id.to_string(),
+            dialect: DatabaseDialect::Postgres,
             database_name: config.base.name.clone(),
             connection_source,
             target: target.clone(),
             ttl_secs: config.base.ttl_secs,
-            postgres_version: config.base.version.clone(),
-            copy: config.copy.clone().into(),
-            iam_auth,
+            version: config.base.version.clone(),
+            copy: BranchCopyConfig::from(config.copy.clone()),
+            dialect_options,
         };
-        let labels = BTreeMap::from([(
-            labels::MIRRORD_PG_BRANCH_ID_LABEL.to_string(),
-            id.to_string(),
-        )]);
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
         Self {
             name_prefix,
             labels,
@@ -685,33 +344,55 @@ impl PgBranchParams {
             spec,
         }
     }
-}
 
-#[derive(Debug, Clone)]
-pub struct MongodbBranchParams {
-    pub name_prefix: String,
-    pub labels: BTreeMap<String, String>,
-    pub annotations: BTreeMap<String, String>,
-    pub spec: MongodbBranchDatabaseSpec,
-}
-
-impl MongodbBranchParams {
-    pub(crate) fn new(id: &str, config: &MongodbBranchConfig, target: &Target) -> Self {
-        let name_prefix = format!("{}-mongodb-branch-", target.name());
+    pub fn from_mysql(
+        id: &str,
+        config: &mirrord_config::feature::database_branches::MysqlBranchConfig,
+        target: &Target,
+    ) -> Self {
+        let name_prefix = format!("{}-mysql-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
-        let spec = MongodbBranchDatabaseSpec {
+        let spec = BranchDatabaseSpec {
             id: id.to_string(),
+            dialect: DatabaseDialect::Mysql,
             database_name: config.base.name.clone(),
             connection_source,
             target: target.clone(),
             ttl_secs: config.base.ttl_secs,
-            mongodb_version: config.base.version.clone(),
-            copy: config.copy.clone().into(),
+            version: config.base.version.clone(),
+            copy: BranchCopyConfig::from(config.copy.clone()),
+            dialect_options: None,
         };
-        let labels = BTreeMap::from([(
-            labels::MIRRORD_MONGODB_BRANCH_ID_LABEL.to_string(),
-            id.to_string(),
-        )]);
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        Self {
+            name_prefix,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+        }
+    }
+
+    pub fn from_mongodb(
+        id: &str,
+        config: &mirrord_config::feature::database_branches::MongodbBranchConfig,
+        target: &Target,
+    ) -> Self {
+        let name_prefix = format!("{}-mongodb-branch-", target.name());
+        let connection_source = convert_connection_source(&config.base.connection);
+        let spec = BranchDatabaseSpec {
+            id: id.to_string(),
+            dialect: DatabaseDialect::Mongodb,
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: target.clone(),
+            ttl_secs: config.base.ttl_secs,
+            version: config.base.version.clone(),
+            copy: BranchCopyConfig::from(config.copy.clone()),
+            dialect_options: None,
+        };
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
         Self {
             name_prefix,
             labels,
@@ -722,10 +403,7 @@ impl MongodbBranchParams {
 }
 
 pub mod labels {
-    pub(crate) const MIRRORD_MONGODB_BRANCH_ID_LABEL: &str = "mirrord-mongodb-branch-id";
-    pub(crate) const MIRRORD_MYSQL_BRANCH_ID_LABEL: &str = "mirrord-mysql-branch-id";
-    pub(crate) const MIRRORD_PG_BRANCH_ID_LABEL: &str = "mirrord-pg-branch-id";
+    pub const MIRRORD_BRANCH_ID_LABEL: &str = "mirrord-branch-id";
 }
 
-// Re-export for convenience
 pub use crate::crd::TARGET_NAMESPACE_ANNOTATION;

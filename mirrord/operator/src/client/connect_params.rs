@@ -40,17 +40,9 @@ pub struct ConnectParams<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch_name: Option<String>,
 
-    /// Resource names of the MongoDB branch databases to use for the connection.
+    /// Resource names of the branch databases to use for the connection.
     #[serde(with = "force_json_ser", skip_serializing_if = "Vec::is_empty")]
-    pub mongodb_branch_names: Vec<String>,
-
-    /// Resource names of the database branches to use for the connection.
-    #[serde(with = "force_json_ser", skip_serializing_if = "Vec::is_empty")]
-    pub mysql_branch_names: Vec<String>,
-
-    /// Resource names of the PostgreSQL branch databases to use for the connection.
-    #[serde(with = "force_json_ser", skip_serializing_if = "Vec::is_empty")]
-    pub pg_branch_names: Vec<String>,
+    pub branch_db_names: Vec<String>,
 
     #[serde(with = "force_json_ser", skip_serializing_if = "Option::is_none")]
     pub session_ci_info: Option<SessionCiInfo>,
@@ -78,9 +70,7 @@ impl<'a> ConnectParams<'a> {
     pub fn new(
         config: &'a LayerConfig,
         branch_name: Option<String>,
-        mongodb_branch_names: Vec<String>,
-        mysql_branch_names: Vec<String>,
-        pg_branch_names: Vec<String>,
+        branch_db_names: Vec<String>,
         session_ci_info: Option<SessionCiInfo>,
         key: &'a str,
     ) -> Self {
@@ -92,12 +82,10 @@ impl<'a> ConnectParams<'a> {
             sqs_splits: config.feature.split_queues.sqs().collect(),
             sqs_jq_filters: config.feature.split_queues.sqs_jq_filters().collect(),
             branch_name,
-            mongodb_branch_names,
-            mysql_branch_names,
-            pg_branch_names,
+            branch_db_names,
             session_ci_info,
-            is_default_cluster: None,          // Only used in multi-cluster
-            sqs_output_queues: HashMap::new(), // Only used in multi-cluster
+            is_default_cluster: None,
+            sqs_output_queues: HashMap::new(),
             key: Some(key),
         }
     }
@@ -111,10 +99,10 @@ impl<'a> ConnectParams<'a> {
 /// ### Concrete example
 ///
 /// Without the custom serializer, a `Vec<String>` would typically serialize into repeated params
-/// like: `mongodb_branch_names=branch-1&mongodb_branch_names=branch-2`
+/// like: `branch_db_names=branch-1&branch_db_names=branch-2`
 ///
 /// But the operator expects a single JSON value, so the custom module emits:
-/// `mongodb_branch_names = ["branch-1", "branch-2"]`
+/// `branch_db_names = ["branch-1", "branch-2"]`
 ///
 /// Which then gets URL-encoded by serde_urlencoded.
 mod force_json_ser {
