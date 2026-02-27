@@ -634,10 +634,10 @@ jobs:
           node-version: 24
       - run: npm install express # For http mirroring test with node.
       - run: npm install portfinder # For a node specific test
-      - name: mirrord layer tests
-        run: cargo test -p mirrord-layer
       - name: mirrord layer unified tests
         run: cargo test -p mirrord-layer-tests --no-default-features
+      - name: mirrord layer tests
+        run: cargo test -p mirrord-layer
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
