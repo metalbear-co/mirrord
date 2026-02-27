@@ -13,8 +13,6 @@ use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     experimental::ExperimentalFileConfig,
 };
-#[cfg(doc)]
-use mirrord_intproxy::layer_conn::LayerConnection;
 use mirrord_intproxy::{IntProxy, agent_conn::AgentConnection};
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
@@ -229,7 +227,7 @@ impl TestIntProxy {
     ///
     /// - `FIRST_CALL`: some tests will consume the first message from [`Self::codec`], so we use
     ///   this `const` to check if we should call `codec.next` or if it was already called for us.
-    ///   If you're using [`LayerConnection::get_initialized_connection_with_port`], you should set
+    ///   If you're using `LayerConnection::get_initialized_connection_with_port`, you should set
     ///   this to `false`.
     pub async fn handle_gethostname<const FIRST_CALL: bool>(
         &mut self,
