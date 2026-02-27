@@ -761,6 +761,8 @@ jobs:
     runs-on: ubuntu-24.04
     # TODO: uncomment the release requirement!
     # needs: [build_mirrord_on_release_branch]
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -773,16 +775,15 @@ jobs:
         run: ./scripts/residency.sh
         shell: bash
       - name: Commit to docs branch (syncs with GitBook)
-        # TODO: uncomment the git push!
-        run: |
-          git config --local user.email eyal@metalbear.co
-          git config --local user.name Eyal Bukchin
-          git add docs-configuration/.
-          git diff --staged
-          git commit -m "Update configuration docs"
-          # git push origin docs
-          sleep 1
-        shell: bash
+        uses: metalbear-co/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f
+        with:
+          folder: docs-configuration
+          # folder: docs-configuration/configuration
+          # target-folder: docs-configuration/configuration
+          # clean-exclude: SUMMARY.md # ensure the only files in the dir are generated and the SUMMARY
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: docs
+          dry-run: true
       - name: Cleanup temp files from script
         continue-on-error: true
         if: ${{ always() }}
@@ -791,9 +792,6 @@ jobs:
           rm docs_0
           rm docs_1
         shell: bash
-    # TODO: uncomment the release requirement!
-    # with:
-    #   mirrord_release_branch: true
 
   # We need some "accummulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
