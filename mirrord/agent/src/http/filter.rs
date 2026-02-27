@@ -1,10 +1,14 @@
-use std::{borrow::Cow, fmt::Debug, io::Read, ops::Not, sync::LazyLock, time::Duration};
+use std::{fmt::Debug, io::Read, ops::Not, sync::LazyLock, time::Duration};
 
 use fancy_regex::Regex;
 use hyper::http::request::Parts;
+use jaq_core::{
+    Ctx, RcIter,
+    load::{Arena, File, Loader},
+};
+use jaq_json::Val;
 use mirrord_agent_env::envs::JAQ_TIME_LIMIT;
 use mirrord_protocol::tcp::{HttpMethodFilter, JqQuery};
-use safejaq::EvaluationRequest;
 use serde_json::Value;
 use serde_json_path::JsonPath;
 use tokio_retry::strategy::ExponentialBackoff;
@@ -214,7 +218,7 @@ impl HttpFilter {
                 });
 
                 for header in headers.0.iter() {
-                    match eval_jaq(filter, &header.clone()).await {
+                    match eval_jaq(filter.clone(), header.clone()).await {
                         Ok(true) => return true,
                         Ok(false) => (),
                         Err(err) => {
@@ -237,22 +241,45 @@ impl HttpFilter {
     }
 }
 
-async fn eval_jaq(q: &JqQuery, pl: &str) -> Result<bool, String> {
+async fn eval_jaq(query: JqQuery, payload: String) -> Result<bool, String> {
     static TIME_LIMIT: LazyLock<Duration> = LazyLock::new(|| {
         Duration::from_secs(JAQ_TIME_LIMIT.try_from_env().ok().flatten().unwrap_or(500))
     });
 
-    let value = pl.into();
-    let query = q.clone().into_inner();
+    let span = tracing::warn_span!("jaq eval", ?query);
 
     let mut handle = tokio::task::spawn_blocking(move || {
-        safejaq::evaluate(EvaluationRequest {
-            filter: Cow::Owned(query),
-            payload: Cow::Owned(value),
-        })
-    });
+        let program = File {
+            code: &*query.into_inner(),
+            path: (),
+        };
+        let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
+        let arena = Arena::default();
+        let modules = loader
+            .load(&arena, program)
+            .map_err(|errors| format!("failed to parse the filter: {errors:?}"))?;
 
-    let span = tracing::warn_span!("jaq eval", ?q);
+        let filter =
+            jaq_core::Compiler::default().with_funs(jaq_std::funs().chain(jaq_json::funs()));
+
+        let filter = filter
+            .compile(modules)
+            .map_err(|errors| format!("failed to compile the filter: {errors:?}"))?;
+
+        let inputs = RcIter::new(core::iter::empty());
+        let mut out = filter.run((Ctx::new([], &inputs), Val::from(payload)));
+
+        let found_match = out
+            .find_map(|item| {
+                if let Ok(Val::Bool(value)) = &item {
+                    Some(*value)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(false);
+        Ok(found_match)
+    });
 
     tokio::select! {
         result = &mut handle => {

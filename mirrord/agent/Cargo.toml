@@ -23,7 +23,6 @@ mirrord-protocol = { path = "../protocol" }
 mirrord-agent-env = { path = "./env", default-features = false }
 mirrord-agent-iptables = { path = "./iptables" }
 mirrord-tls-util = { path = "../tls-util" }
-safejaq = { path = "../../safejaq" }
 
 containerd-client = "0.6"
 tokio = { workspace = true, features = [
@@ -77,6 +76,9 @@ rcgen.workspace = true
 serde_json_path.workspace = true
 dns-lookup = "3"
 tokio-retry.workspace = true
+jaq-std.workspace = true
+jaq-core.workspace = true
+jaq-json = { workspace = true, features = ["serde_json"] }
 
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]

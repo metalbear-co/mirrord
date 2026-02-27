@@ -89,14 +89,6 @@ pub enum Mode {
     },
     #[default]
     Targetless,
-
-    JaqEval {
-        #[arg(short)]
-        memory_limit: u64,
-
-        #[arg(short)]
-        time_limit: u64,
-    },
 }
 
 impl Mode {
