@@ -522,12 +522,12 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: verify SIP status
         run: csrutil status
-      - name: build cli
-        run: cargo build -p mirrord
       - name: build layer
         run: cargo build -p mirrord-layer
       - name: build layer x86
         run: cargo build -p mirrord-layer --target=x86_64-apple-darwin
+      - name: build cli
+        run: cargo build -p mirrord
       - name: mirrord-sip UT
         run: cargo test -p mirrord-sip
       - name: mirrord-intproxy UT
