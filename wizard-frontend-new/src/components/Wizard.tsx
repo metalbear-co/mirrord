@@ -23,11 +23,10 @@ const modeDisplayNames: Record<string, string> = {
 };
 
 const modeColors: Record<string, string> = {
-  steal: "bg-secondary/20 text-secondary-foreground border-secondary/30",
+  steal: "bg-primary/10 text-primary border-primary/20",
   mirror: "bg-primary/10 text-primary border-primary/20",
-  replace: "bg-destructive/10 text-destructive border-destructive/20",
-  custom:
-    "bg-[var(--muted)] text-[var(--muted-foreground)] border-[var(--border)]",
+  replace: "bg-primary/10 text-primary border-primary/20",
+  custom: "bg-primary/10 text-primary border-primary/20",
 };
 
 import BoilerplateStep from "./steps/BoilerplateStep";
