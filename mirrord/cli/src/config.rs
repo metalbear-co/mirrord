@@ -1386,6 +1386,12 @@ impl PreviewStopArgs {
     pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
         let mut envs = self.common.as_env_vars();
 
+        if let Some(target) = &self.target {
+            envs.insert(
+                "MIRRORD_IMPERSONATED_TARGET".as_ref(),
+                Cow::Borrowed(target.as_ref()),
+            );
+        }
         if let Some(namespace) = &self.namespace {
             envs.insert(
                 "MIRRORD_TARGET_NAMESPACE".as_ref(),

@@ -582,6 +582,12 @@ pub(crate) enum CliError {
         Please check that the target exists and has running pods.{GENERAL_HELP}"
     ))]
     RuntimeDataResolution(KubeApiError),
+
+    #[error("Invalid image reference: {0}")]
+    #[diagnostic(help(
+        "Image must be a valid OCI image reference (e.g. 'myregistry.io/myimage:tag')."
+    ))]
+    PreviewInvalidImage(String),
 }
 
 impl CliError {

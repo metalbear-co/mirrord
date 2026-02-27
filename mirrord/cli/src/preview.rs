@@ -17,10 +17,17 @@ use k8s_openapi::chrono::Utc;
 use kube::{
     Api, ResourceExt,
     api::{DeleteParams, ListParams, ObjectMeta, PostParams},
-    runtime::watcher::{self, Event, watcher},
+    runtime::{
+        wait::delete,
+        watcher::{self, Event, watcher},
+    },
 };
 use mirrord_analytics::NullReporter;
-use mirrord_config::{LayerConfig, config::ConfigContext, target::TargetDisplay};
+use mirrord_config::{
+    LayerConfig,
+    config::ConfigContext,
+    target::{Target, TargetDisplay},
+};
 use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
     client::OperatorApi,
@@ -32,6 +39,7 @@ use mirrord_operator::{
     types::OPERATOR_OWNERSHIP_LABEL,
 };
 use mirrord_progress::{Progress, ProgressTracker};
+use oci_spec::distribution::Reference;
 use tracing::Level;
 use uuid::Uuid;
 
@@ -85,98 +93,114 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
         CliError::PreviewImageRequired
     })?;
 
-    let mut target = config_target.clone();
-    if target.container().is_none() {
-        let runtime_data = target
-            .runtime_data(&client, layer_config.target.namespace.as_deref())
-            .await
-            .map_err(CliError::RuntimeDataResolution)?;
-
-        if runtime_data.guessed_container {
-            subtask.warning(&format!(
-                "Target has multiple containers, mirrord picked \"{}\". \
-                 To target a different one, include it in the target path.",
-                runtime_data.container_name
-            ));
-        }
-
-        target.set_container(runtime_data.container_name);
-    }
-
-    let target = SessionTarget::from_config(target).ok_or_else(|| {
-        subtask.failure(None);
-        CliError::PreviewTargetResolutionFailed(config_target.to_string())
-    })?;
-
-    let spec = PreviewSessionSpec {
-        image: image.clone(),
-        key: layer_config.key.as_str().to_owned(),
-        target,
-        incoming: PreviewIncomingConfig::from_config(&layer_config.feature.network.incoming),
-        ttl_secs: layer_config.feature.preview.ttl_mins * 60,
-    };
+    let session_target = resolve_config_target(
+        config_target,
+        &client,
+        layer_config.target.namespace.as_deref(),
+    )
+    .await
+    .inspect_err(|_| subtask.failure(None))?;
 
     // Check for an existing session with the same key+target.
     let key = layer_config.key.as_str();
     let list_params = ListParams::default().labels(&format!("{PREVIEW_SESSION_KEY_LABEL}={key}"));
-    let existing = api.list(&list_params).await.map_err(|e| {
+    let existing_sessions = api.list(&list_params).await.map_err(|e| {
         subtask.failure(None);
         CliError::PreviewListFailed(e.to_string())
     })?;
 
-    for session in existing.items {
-        if session.spec.target != spec.target {
-            continue;
-        }
-        match session.status.as_ref().map(|s| &s.phase) {
-            // Failed session — delete it so we can take its place.
-            Some(PreviewSessionPhase::Failed) => {
-                let name = session.name_any();
-                if let Err(e) = api.delete(&name, &DeleteParams::default()).await {
-                    subtask.warning(&format!(
-                        "failed to delete failed session '{name}': {e}, \
-                         you may need to delete it manually or with `mirrord preview stop`",
-                    ));
+    for session in existing_sessions
+        .items
+        .into_iter()
+        .filter(|session| session.spec.target == session_target)
+    {
+        let phase = session.status.as_ref().map(|s| s.phase);
+        // Check if we're replacing a failed/stale session or updating the config/image of an
+        // active session
+        if matches!(phase, None | Some(PreviewSessionPhase::Failed))
+            || images_match(&session.spec.image, image)?
+        {
+            let name = session.name_any();
+
+            subtask.warning(&format!(
+                "replacing existing session '{name}' with updated parameters",
+            ));
+
+            // Delete and wait for the existing session to be fully removed.
+            match tokio::time::timeout(
+                Duration::from_secs(60),
+                delete::delete_and_finalize(api.clone(), &name, &DeleteParams::default()),
+            )
+            .await
+            {
+                Err(_) => {
+                    subtask.failure(None);
+                    return Err(CliError::PreviewDeleteFailed {
+                        name: name.clone(),
+                        reason: "timed out waiting for previous session to be deleted".to_owned(),
+                    });
                 }
-            }
-            // Active session — reject the duplicate.
-            _ => {
-                subtask.failure(None);
-                return Err(CliError::PreviewDuplicateSession {
-                    key: key.to_owned(),
-                    target: spec.target.to_string(),
-                });
-            }
+                Ok(Err(e)) => {
+                    subtask.failure(None);
+                    return Err(CliError::PreviewDeleteFailed {
+                        name,
+                        reason: e.to_string(),
+                    });
+                }
+                _ => continue,
+            };
         }
+
+        // Reaching this point means we're not replacing an existing session, so we're trying to
+        // create a duplicate one.
+        subtask.failure(None);
+        return Err(CliError::PreviewDuplicateSession {
+            key: key.to_owned(),
+            target: config_target.to_string(),
+        });
     }
 
-    let sanitized_target = config_target.to_string().replace('/', "-");
-    let uuid_short = Uuid::new_v4().simple().to_string();
-    let uuid_short = &uuid_short[..8];
+    let session_name = {
+        let sanitized_target = config_target.to_string().replace('/', "-");
+        let uuid_short = &Uuid::new_v4().simple().to_string()[..8];
+        format!("preview-session-{sanitized_target}-{uuid_short}")
+    };
+
     // Operators compiled with a custom OPERATOR_ISOLATION_MARKER only reconcile preview
     // sessions labeled with their marker (see the label selector in the preview-env
     // controller). The runtime env var check here allows developers to label the session
     // so it gets picked up by an isolated operator instead of the production one.
-    let mut labels = BTreeMap::from([(
-        PREVIEW_SESSION_KEY_LABEL.to_owned(),
-        layer_config.key.as_str().to_owned(),
-    )]);
-    if let Ok(marker) = std::env::var("OPERATOR_ISOLATION_MARKER") {
-        labels.insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker);
-    }
+    let session_labels = {
+        let mut labels = BTreeMap::from([(
+            PREVIEW_SESSION_KEY_LABEL.to_owned(),
+            layer_config.key.as_str().to_owned(),
+        )]);
+        if let Ok(marker) = std::env::var("OPERATOR_ISOLATION_MARKER") {
+            labels.insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker);
+        }
+        labels
+    };
 
-    let preview = PreviewSession {
+    let session_spec = PreviewSessionSpec {
+        image: image.clone(),
+        key: layer_config.key.as_str().to_owned(),
+        target: session_target,
+        incoming: PreviewIncomingConfig::from_config(&layer_config.feature.network.incoming),
+        ttl_secs: layer_config.feature.preview.ttl_mins * 60,
+    };
+
+    let session = PreviewSession {
         metadata: ObjectMeta {
-            name: Some(format!("preview-session-{sanitized_target}-{uuid_short}")),
-            labels: Some(labels),
+            name: Some(session_name),
+            labels: Some(session_labels),
             ..Default::default()
         },
-        spec,
+        spec: session_spec,
         status: None,
     };
 
     let session = api
-        .create(&PostParams::default(), &preview)
+        .create(&PostParams::default(), &session)
         .await
         .map_err(|e| {
             subtask.failure(None);
@@ -192,28 +216,26 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
 
     let mut subtask = progress.subtask("waiting for preview to be ready");
 
-    let stream = watcher(
+    let mut stream = std::pin::pin!(watcher(
         api.clone(),
         watcher::Config::default().fields(&format!("metadata.name={}", session.name_any())),
-    );
-    tokio::pin!(stream);
+    ));
 
     let initialization_start = Instant::now();
-    let mut long_initialization_timer = tokio::time::interval(Duration::from_secs(20));
+    let mut long_initialization_timer = tokio::time::interval(Duration::from_secs(60));
     // First tick is instant
     long_initialization_timer.tick().await;
 
-    let timeout = tokio::time::sleep(Duration::from_secs(
+    let mut timeout = std::pin::pin!(tokio::time::sleep(Duration::from_secs(
         layer_config.feature.preview.creation_timeout_secs,
-    ));
-    tokio::pin!(timeout);
+    )));
 
     let mut last_known_phase: &str = "unknown";
 
     let pod_name = loop {
         tokio::select! {
             _ = &mut timeout => {
-                if let Err(err) = api.delete(&session.name_any(), &DeleteParams::default()).await {
+                if let Err(err) = delete::delete_and_finalize(api, &session.name_any(), &DeleteParams::default()).await {
                     subtask.warning(&format!(
                         "failed to delete timed out session '{}': {err}, \
                          you may need to delete it manually or with `mirrord preview stop`",
@@ -251,7 +273,7 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
                                     // Sessions that fail to spawn should not be retained —
                                     // delete the CRD so the operator can clean up and the
                                     // user can retry without stale resources blocking them.
-                                    if let Err(err) = api.delete(&session.name_any(), &DeleteParams::default()).await {
+                                    if let Err(err) = delete::delete_and_finalize(api, &session.name_any(), &DeleteParams::default()).await {
                                         subtask.warning(&format!(
                                             "failed to delete failed session '{}': {err}, \
                                              you may need to delete it manually or with `mirrord preview stop`",
@@ -428,7 +450,6 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
 
     let layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
 
-    // env-key is required for stop command.
     let key = layer_config
         .key
         .provided()
@@ -439,9 +460,25 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
     let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
     let (client, api) = create_preview_api(&layer_config, all_namespaces, &progress).await?;
 
-    // Find sessions matching the key and optional target filter.
-
     let mut subtask = progress.subtask("finding preview sessions");
+
+    // Resolve the config target (if provided) to a full SessionTarget for comparison.
+    // This allows the user to type, for example, "deployment/foo" and have it match a session that
+    // has `spec.target` set to "Deployment/foo/container/foo"
+    let session_target = match &layer_config.target.path {
+        Some(config_target) => {
+            let session_target = resolve_config_target(
+                config_target,
+                &client,
+                layer_config.target.namespace.as_deref(),
+            )
+            .await
+            .inspect_err(|_| subtask.failure(None))?;
+
+            Some(session_target)
+        }
+        None => None,
+    };
 
     let list_params = ListParams::default().labels(&format!("{PREVIEW_SESSION_KEY_LABEL}={key}"));
 
@@ -455,9 +492,9 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
         .items
         .into_iter()
         .filter(|session| {
-            args.target
+            session_target
                 .as_ref()
-                .is_none_or(|target| session.spec.target.to_string() == *target)
+                .is_none_or(|target| session.spec.target == *target)
         })
         .collect();
 
@@ -495,7 +532,10 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
 
         let namespaced_api = Api::<PreviewSession>::namespaced(client.clone(), namespace);
 
-        if let Err(e) = namespaced_api.delete(name, &DeleteParams::default()).await {
+        if let Err(e) =
+            delete::delete_and_finalize(namespaced_api.clone(), name, &DeleteParams::default())
+                .await
+        {
             result = Err(CliError::PreviewDeleteFailed {
                 name: name.to_owned(),
                 reason: e.to_string(),
@@ -512,6 +552,26 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
     progress.success(None);
 
     Ok(())
+}
+
+/// Resolves a [`Target`] to a [`SessionTarget`] by auto-detecting the container if not
+/// specified, then converting to the session representation.
+async fn resolve_config_target(
+    config_target: &Target,
+    client: &kube::Client,
+    namespace: Option<&str>,
+) -> CliResult<SessionTarget> {
+    let mut config_target_with_container = config_target.clone();
+    if config_target_with_container.container().is_none() {
+        let runtime_data = config_target
+            .runtime_data(client, namespace)
+            .await
+            .map_err(CliError::RuntimeDataResolution)?;
+        config_target_with_container.set_container(runtime_data.container_name);
+    }
+
+    SessionTarget::from_config(config_target_with_container)
+        .ok_or_else(|| CliError::PreviewTargetResolutionFailed(config_target.to_string()))
 }
 
 fn load_preview_config(
@@ -570,4 +630,35 @@ async fn create_preview_api(
     };
 
     Ok((client, api))
+}
+
+/// Returns `true` when two OCI image references point at the same repository, ignoring any tag or
+/// digest difference. Used to determine whether we should redeploy/update an existing preview env.
+fn images_match(a: &str, b: &str) -> CliResult<bool> {
+    let a: Reference = a
+        .parse()
+        .map_err(|e| CliError::PreviewInvalidImage(format!("{a}: {e}")))?;
+    let b: Reference = b
+        .parse()
+        .map_err(|e| CliError::PreviewInvalidImage(format!("{b}: {e}")))?;
+    Ok(a.registry() == b.registry() && a.repository() == b.repository())
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::images_match;
+
+    #[rstest]
+    #[case("myapp:v1", "myapp:v2", true)]
+    #[case("myapp:v1", "myapp:v1", true)]
+    #[case("myapp", "myapp:latest", true)]
+    #[case("ghcr.io/org/app:v1", "ghcr.io/org/app:v2", true)]
+    #[case("registry:5000/app:v1", "registry:5000/app:v2", true)]
+    #[case("myapp:v1", "otherapp:v1", false)]
+    #[case("ghcr.io/org/app:v1", "docker.io/org/app:v1", false)]
+    fn test_images_same_name(#[case] a: &str, #[case] b: &str, #[case] expected: bool) {
+        assert_eq!(images_match(a, b).unwrap(), expected);
+    }
 }
