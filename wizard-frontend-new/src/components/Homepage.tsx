@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowRight, Sparkles, BookOpen } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Button, Card, CardContent, MirrordLogo } from "@metalbear/ui";
 import Wizard from "./Wizard";
 
@@ -20,54 +20,59 @@ const Homepage = () => {
   };
 
   return (
-    <div className="w-full max-w-lg mx-auto animate-fade-in">
-      <Card className="shadow-xl border-[var(--border)] overflow-hidden relative">
-        {/* Decorative gradient header */}
-        <div className="h-32 bg-gradient-to-br from-primary via-primary/80 to-primary/60 relative overflow-hidden">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_50%,rgba(255,255,255,0.12),transparent_60%)]" />
-          <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-[var(--card)] to-transparent" />
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="p-4 rounded-2xl bg-white/15 backdrop-blur-sm border border-white/20 shadow-lg">
-              <img
-                src={MirrordLogo}
-                alt="mirrord"
-                className="h-10 brightness-0 invert"
-              />
+    <div className="w-full max-w-md mx-auto animate-fade-in">
+      <Card className="shadow-lg border-[var(--border)] overflow-hidden">
+        {/* Decorative header */}
+        <div className="h-2 bg-primary" />
+
+        <CardContent className="pt-10 pb-8 px-8">
+          {/* Logo */}
+          <div className="flex justify-center mb-8">
+            <div className="p-4 rounded-2xl bg-primary/5 border border-primary/10">
+              <img src={MirrordLogo} alt="mirrord" className="h-12" />
             </div>
           </div>
-        </div>
 
-        <CardContent className="pt-6 pb-8 px-8">
           {/* Header */}
-          <div className="text-center mb-8">
-            <h1 className="text-2xl font-bold text-[var(--foreground)] mb-2 tracking-tight">
+          <div className="text-center mb-10">
+            <h1 className="text-2xl font-semibold text-[var(--foreground)] mb-3">
               Configuration Wizard
             </h1>
-            <p className="text-sm text-[var(--muted-foreground)] leading-relaxed max-w-sm mx-auto">
+            <p className="text-sm text-[var(--muted-foreground)] leading-relaxed max-w-xs mx-auto">
               Generate a{" "}
-              <code className="px-1.5 py-0.5 rounded-md bg-[var(--muted)] text-primary font-semibold text-xs">
+              <code className="px-1.5 py-0.5 rounded bg-[var(--muted)] text-primary font-medium text-xs">
                 mirrord.json
               </code>{" "}
-              config to connect your local environment to a Kubernetes cluster.
+              config file to connect your local environment to Kubernetes.
             </p>
           </div>
 
           {/* Main CTA */}
-          <div className="space-y-3">
+          <div className="space-y-4">
             <Button
               onClick={() => openWizard("config")}
-              className="w-full h-12 text-base font-medium shadow-brand hover:shadow-brand-hover transition-all duration-200 group"
+              className="w-full h-12 text-base font-medium shadow-brand hover:shadow-brand-hover transition-all duration-200"
             >
-              <Sparkles className="h-4 w-4 mr-2 group-hover:scale-110 transition-transform" />
               Get Started
-              <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-0.5 transition-transform" />
+              <ArrowRight className="h-4 w-4 ml-2" />
             </Button>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-[var(--border)]" />
+              </div>
+              <div className="relative flex justify-center">
+                <span className="bg-[var(--card)] px-3 text-xs text-[var(--muted-foreground)]">
+                  or
+                </span>
+              </div>
+            </div>
 
             <button
               onClick={() => openWizard("learn")}
-              className="w-full text-center text-sm text-[var(--muted-foreground)] hover:text-primary transition-all flex items-center justify-center gap-2 py-3 rounded-xl hover:bg-primary/5 border border-transparent hover:border-primary/10"
+              className="w-full text-center text-sm text-[var(--muted-foreground)] hover:text-primary transition-colors flex items-center justify-center gap-2 py-3 rounded-lg hover:bg-primary/5 group"
             >
-              <BookOpen className="h-4 w-4" />
+              <span>📖</span>
               <span>New to mirrord? Learn the basics first</span>
             </button>
           </div>

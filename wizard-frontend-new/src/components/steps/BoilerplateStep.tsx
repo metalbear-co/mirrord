@@ -1,5 +1,5 @@
 import { useContext } from "react";
-import { Copy, Filter, Repeat, Check, Shield, Zap } from "lucide-react";
+import { Copy, Filter, Repeat, Check } from "lucide-react";
 import { Badge } from "@metalbear/ui";
 import { ConfigDataContext } from "../UserDataContext";
 import {
@@ -14,65 +14,36 @@ interface ModeOption {
   id: BoilerplateType;
   icon: React.ReactNode;
   title: string;
-  subtitle: string;
   description: string;
-  features: { label: string; icon: React.ReactNode }[];
+  features: string[];
   recommended?: boolean;
-  accentClass: string;
-  selectedBg: string;
-  iconBg: string;
-  iconBgSelected: string;
 }
 
 const modeOptions: ModeOption[] = [
   {
     id: "mirror",
     icon: <Copy className="h-5 w-5" />,
-    title: "Mirror",
-    subtitle: "Observe without impact",
+    title: "Mirror Mode",
     description:
-      "Copy incoming traffic to your local environment without affecting the remote service.",
-    features: [
-      { label: "Non-disruptive", icon: <Shield className="h-3 w-3" /> },
-      { label: "Safe for production", icon: <Check className="h-3 w-3" /> },
-    ],
+      "Copy incoming traffic to your local environment without affecting the remote service. Perfect for debugging production issues safely.",
+    features: ["Non-disruptive", "Safe for production"],
     recommended: true,
-    accentClass: "border-primary",
-    selectedBg: "bg-primary/5",
-    iconBg: "bg-primary/10 text-primary",
-    iconBgSelected: "bg-primary text-white",
   },
   {
     id: "steal",
     icon: <Filter className="h-5 w-5" />,
-    title: "Filter",
-    subtitle: "Selective interception",
+    title: "Filtering Mode",
     description:
-      "Intercept specific requests based on HTTP headers or paths while others pass through.",
-    features: [
-      { label: "Header-based routing", icon: <Zap className="h-3 w-3" /> },
-      { label: "Selective traffic", icon: <Filter className="h-3 w-3" /> },
-    ],
-    accentClass: "border-secondary",
-    selectedBg: "bg-secondary/5",
-    iconBg: "bg-secondary/15 text-secondary-foreground",
-    iconBgSelected: "bg-secondary text-secondary-foreground",
+      "Selectively intercept traffic based on HTTP headers or paths. Route specific requests to your local environment while others go to remote.",
+    features: ["Selective traffic", "Header-based routing"],
   },
   {
     id: "replace",
     icon: <Repeat className="h-5 w-5" />,
-    title: "Replace",
-    subtitle: "Full takeover",
+    title: "Replace Mode",
     description:
-      "Completely replace the remote service. All traffic is routed to your local process.",
-    features: [
-      { label: "Full replacement", icon: <Repeat className="h-3 w-3" /> },
-      { label: "Scale down remote", icon: <Zap className="h-3 w-3" /> },
-    ],
-    accentClass: "border-destructive",
-    selectedBg: "bg-destructive/5",
-    iconBg: "bg-destructive/10 text-destructive",
-    iconBgSelected: "bg-destructive text-white",
+      "Completely replace the remote service with your local environment. All traffic is routed to your local process.",
+    features: ["Full replacement", "Scale down remote"],
   },
 ];
 
@@ -103,12 +74,12 @@ const BoilerplateStep = () => {
 
   return (
     <div className="space-y-6">
-      <div className="text-center mb-6">
-        <h3 className="text-lg font-semibold text-[var(--foreground)] mb-1">
-          How should mirrord handle traffic?
+      <div className="text-center mb-8">
+        <h3 className="text-lg font-medium text-[var(--foreground)] mb-2">
+          How do you want to interact with remote traffic?
         </h3>
         <p className="text-sm text-[var(--muted-foreground)]">
-          Pick a mode that matches your workflow
+          Choose a mode that fits your development workflow
         </p>
       </div>
 
@@ -121,63 +92,63 @@ const BoilerplateStep = () => {
               key={option.id}
               onClick={() => handleModeSelect(option.id)}
               className={`
-                w-full p-5 rounded-xl border-2 text-left transition-all duration-200 relative
+                w-full p-5 rounded-xl border text-left transition-all duration-200
                 ${
                   isSelected
-                    ? `${option.accentClass} ${option.selectedBg} shadow-md`
-                    : "border-[var(--border)] hover:border-[var(--border)] hover:shadow-md hover:bg-[var(--muted)]/30 active:scale-[0.995]"
+                    ? "border-primary bg-primary/5 shadow-brand ring-1 ring-primary/20"
+                    : "border-[var(--border)] hover:border-primary/40 hover:bg-primary/5 hover:shadow-md active:scale-[0.99]"
                 }
               `}
             >
-              {option.recommended && (
-                <div className="absolute -top-2.5 right-4">
-                  <Badge className="bg-primary text-white text-[10px] font-semibold px-2.5 py-0.5 shadow-brand">
-                    Recommended
-                  </Badge>
-                </div>
-              )}
               <div className="flex items-start gap-4">
                 <div
                   className={`
-                    w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-200
-                    ${isSelected ? option.iconBgSelected : option.iconBg}
+                    w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors duration-200
+                    ${
+                      isSelected
+                        ? "bg-primary text-white shadow-brand"
+                        : "bg-[var(--muted)] text-[var(--muted-foreground)]"
+                    }
                   `}
                 >
                   {option.icon}
                 </div>
                 <div className="flex-grow min-w-0">
-                  <div className="flex items-baseline gap-2 mb-1">
-                    <span className="font-semibold text-[var(--foreground)]">
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                    <span
+                      className={`font-semibold ${isSelected ? "text-primary" : "text-[var(--foreground)]"}`}
+                    >
                       {option.title}
                     </span>
-                    <span className="text-xs text-[var(--muted-foreground)]">
-                      {option.subtitle}
-                    </span>
+                    {option.recommended && (
+                      <Badge
+                        variant="outline"
+                        className="text-xs bg-[var(--muted)] text-[var(--muted-foreground)] border-[var(--border)]"
+                      >
+                        Recommended
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-sm text-[var(--muted-foreground)] mb-3 leading-relaxed">
                     {option.description}
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {option.features.map((feature) => (
-                      <span
-                        key={feature.label}
-                        className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                          isSelected
-                            ? "border-current/20 text-[var(--foreground)] bg-white/50 dark:bg-white/5"
-                            : "border-[var(--border)] text-[var(--muted-foreground)]"
-                        }`}
+                      <Badge
+                        key={feature}
+                        variant="outline"
+                        className={`text-xs font-normal ${isSelected ? "border-primary/30 text-primary" : ""}`}
                       >
-                        {feature.icon}
-                        {feature.label}
-                      </span>
+                        {feature}
+                      </Badge>
                     ))}
                   </div>
                 </div>
                 <div
                   className={`flex-shrink-0 transition-all duration-200 ${isSelected ? "opacity-100 scale-100" : "opacity-0 scale-75"}`}
                 >
-                  <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center shadow-sm">
-                    <Check className="h-3.5 w-3.5 text-white" />
+                  <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center">
+                    <Check className="h-4 w-4 text-white" />
                   </div>
                 </div>
               </div>

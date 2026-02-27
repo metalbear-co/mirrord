@@ -155,27 +155,24 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
                 </Badge>
               )}
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
               {/* Step indicator */}
-              <span className="text-xs font-medium text-[var(--muted-foreground)] tabular-nums">
-                {stepInfo.step}/{stepInfo.total}
-              </span>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-2">
                 {Array.from({ length: stepInfo.total }).map((_, index) => (
                   <div
                     key={index}
-                    className={`h-1.5 rounded-full transition-all duration-300 ${
+                    className={`h-2 rounded-full transition-all duration-300 ${
                       index + 1 === stepInfo.step
                         ? "w-6 bg-primary"
                         : index + 1 < stepInfo.step
-                          ? "w-6 bg-primary/40"
-                          : "w-6 bg-[var(--muted)]"
+                          ? "w-2 bg-primary/50"
+                          : "w-2 bg-[var(--muted)]"
                     }`}
                   />
                 ))}
               </div>
               <DialogClose asChild>
-                <button className="rounded-full p-1.5 hover:bg-[var(--muted)] transition-colors ml-1">
+                <button className="rounded-full p-2 hover:bg-[var(--muted)] transition-colors">
                   <X className="h-4 w-4 text-[var(--muted-foreground)]" />
                 </button>
               </DialogClose>

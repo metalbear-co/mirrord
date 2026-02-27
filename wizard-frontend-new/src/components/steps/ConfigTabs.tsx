@@ -1,21 +1,13 @@
 import { useToast } from "../../hooks/use-toast";
 import { useState, useContext, useEffect } from "react";
-import {
-  Copy,
-  FileJson,
-  Download,
-  Check,
-  Terminal,
-  Code2,
-  FolderOpen,
-} from "lucide-react";
-import { Button, Separator } from "@metalbear/ui";
+import { Copy, Save, Download } from "lucide-react";
+import { Button, Label, Separator, Textarea } from "@metalbear/ui";
 import {
   getConfigString,
   readCurrentTargetDetails,
   readIncoming,
 } from "../JsonUtils";
-import { ConfigDataContext } from "../UserDataContext";
+import { ConfigDataContext, DefaultConfig } from "../UserDataContext";
 import type { ToggleableConfigFor_IncomingFileConfig } from "../../mirrord-schema";
 import NetworkTab from "./NetworkTab";
 import TargetTab from "./TargetTab";
@@ -51,13 +43,9 @@ const ConfigTabs = ({
     onCanAdvanceChange(canAdvance);
   }, [config, portConflicts, onCanAdvanceChange]);
 
-  const [copied, setCopied] = useState(false);
-
   const copyToClipboard = async () => {
     const jsonToCopy = getConfigString(config);
     await navigator.clipboard.writeText(jsonToCopy);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
     toast({
       title: "Copied to clipboard",
       description: "Configuration JSON has been copied to your clipboard.",
@@ -135,10 +123,10 @@ const ConfigTabs = ({
         )}
 
         {currentTab === "export" && (
-          <div className="space-y-5">
+          <div className="space-y-6">
             <div className="flex items-center gap-3 pb-4 border-b border-[var(--border)]">
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                <FileJson className="h-5 w-5 text-primary" />
+                <Save className="h-5 w-5 text-primary" />
               </div>
               <div>
                 <h3 className="text-lg font-semibold">Export Configuration</h3>
@@ -148,58 +136,24 @@ const ConfigTabs = ({
               </div>
             </div>
 
-            {/* Code block */}
-            <div className="rounded-xl border border-[var(--border)] overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-2.5 bg-[var(--muted)]/50 border-b border-[var(--border)]">
-                <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
-                  <FileJson className="h-3.5 w-3.5" />
-                  mirrord.json
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={copyToClipboard}
-                    className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors"
-                  >
-                    {copied ? (
-                      <>
-                        <Check className="h-3.5 w-3.5 text-green-500" />
-                        Copied
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="h-3.5 w-3.5" />
-                        Copy
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-              <pre className="p-4 text-sm font-mono leading-relaxed overflow-x-auto bg-[var(--card)] max-h-[240px] overflow-y-auto">
-                <code>{getConfigString(config)}</code>
-              </pre>
+            <div className="space-y-2">
+              <Label htmlFor="json-editor">Configuration JSON</Label>
+              <Textarea
+                id="json-editor"
+                className="font-code text-sm min-h-[200px] resize-none"
+                value={getConfigString(config)}
+                readOnly
+                placeholder={getConfigString(DefaultConfig)}
+              />
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={copyToClipboard}
-                className="gap-2"
-              >
-                {copied ? (
-                  <Check className="h-4 w-4 text-green-500" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )}
-                {copied ? "Copied!" : "Copy to Clipboard"}
+              <Button variant="outline" size="sm" onClick={copyToClipboard}>
+                <Copy className="h-4 w-4 mr-2" />
+                Copy to Clipboard
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={downloadConfig}
-                className="gap-2"
-              >
-                <Download className="h-4 w-4" />
+              <Button variant="outline" size="sm" onClick={downloadConfig}>
+                <Download className="h-4 w-4 mr-2" />
                 Download File
               </Button>
             </div>
@@ -207,47 +161,36 @@ const ConfigTabs = ({
             <Separator />
 
             <div className="space-y-3">
-              <h4 className="text-sm font-semibold text-[var(--foreground)]">
-                How to use your configuration
+              <h4 className="font-medium text-[var(--foreground)]">
+                How to use your configuration:
               </h4>
-              <div className="grid gap-2">
-                <div className="flex items-start gap-3 p-3 rounded-lg bg-[var(--muted)]/30 border border-[var(--border)]">
-                  <Terminal className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
-                  <div className="text-sm">
-                    <span className="font-medium text-[var(--foreground)]">
-                      CLI:{" "}
-                    </span>
-                    <span className="text-[var(--muted-foreground)]">
-                      Use{" "}
-                      <code className="px-1.5 py-0.5 bg-[var(--muted)] rounded text-xs font-semibold">
-                        mirrord exec -f mirrord.json
-                      </code>
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 p-3 rounded-lg bg-[var(--muted)]/30 border border-[var(--border)]">
-                  <Code2 className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
-                  <div className="text-sm">
-                    <span className="font-medium text-[var(--foreground)]">
-                      IDE:{" "}
-                    </span>
-                    <span className="text-[var(--muted-foreground)]">
-                      Save as{" "}
-                      <code className="px-1.5 py-0.5 bg-[var(--muted)] rounded text-xs font-semibold">
-                        .mirrord/mirrord.json
-                      </code>
-                    </span>
-                  </div>
-                </div>
-                <a
-                  href="https://mirrord.dev/docs/reference/configuration/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-primary/5 border border-transparent hover:border-primary/10 transition-all text-sm text-primary"
-                >
-                  <FolderOpen className="h-4 w-4 flex-shrink-0" />
-                  View full configuration reference
-                </a>
+              <div className="space-y-2 text-sm text-[var(--muted-foreground)]">
+                <p>
+                  <strong>CLI:</strong> Use the{" "}
+                  <code className="px-1 py-0.5 bg-[var(--muted)] rounded text-xs">
+                    -f &lt;CONFIG_PATH&gt;
+                  </code>{" "}
+                  flag
+                </p>
+                <p>
+                  <strong>VSCode / JetBrains:</strong> Create a{" "}
+                  <code className="px-1 py-0.5 bg-[var(--muted)] rounded text-xs">
+                    .mirrord/mirrord.json
+                  </code>{" "}
+                  file
+                </p>
+                <p>
+                  See the{" "}
+                  <a
+                    href="https://mirrord.dev/docs/reference/configuration/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    configuration documentation
+                  </a>{" "}
+                  for more details.
+                </p>
               </div>
             </div>
           </div>

@@ -288,9 +288,9 @@ const TargetTab = ({
           </div>
 
           {!config.target && (
-            <p className="text-xs text-[var(--muted-foreground)] flex items-center gap-1.5 mt-2">
-              <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
-              Select a target to continue
+            <p className="text-sm text-destructive flex items-center gap-2 mt-3 p-3 rounded-lg bg-destructive/10 border-l-2 border-l-destructive border border-destructive/10">
+              <AlertCircle className="h-4 w-4 flex-shrink-0 animate-pulse" />
+              Please select a target to continue
             </p>
           )}
         </div>
