@@ -463,19 +463,9 @@
             "null"
           ]
         },
-        "jaq_memory_limit": {
-          "title": "agent.jaq_memory_limit {#agent-jaq_memory_limit}",
-          "description": "Memory limit for running Jaq queries, in bytes. Defaults to 32MB.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
-        },
         "jaq_time_limit": {
           "title": "agent.jaq_time_limit {#agent-jaq_time_limit}",
-          "description": "CPU time limit for running jaq queries, in seconds. Defaults to 1s.",
+          "description": "Time limit for running jaq queries, in milliseconds. Defaults to 500ms.",
           "type": [
             "integer",
             "null"
