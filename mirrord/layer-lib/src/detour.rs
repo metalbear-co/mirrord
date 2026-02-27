@@ -469,9 +469,11 @@ pub trait OptionDetourExt<T>: OptionExt {
     ///
     /// ```no_run
     /// use mirrord_layer_lib::detour::{Detour, OptionDetourExt};
-    /// let x: Detour<Option<i32>> = Detour::Success(Some(5));
-    /// let y: Option<Detour<i32>> = Some(Detour::Success(5));
-    /// assert_eq!(x, y.transpose());
+    /// let result: Option<Detour<i32>> = Some(Detour::Success(5));
+    /// match result.transpose() {
+    ///     Detour::Success(inner) => assert!(inner, Some(5)),
+    ///     _ => unreachable!(),
+    /// };
     /// ```
     fn transpose(self) -> Detour<Option<T>>;
 }
