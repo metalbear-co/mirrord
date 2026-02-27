@@ -222,7 +222,7 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
                   {currentStep === "boilerplate" && (
                     <Button
                       onClick={goFromBoilerplate}
-                      className="gap-2 shadow-brand hover:shadow-brand-hover"
+                      className="gap-2 text-white shadow-brand hover:shadow-brand-hover"
                     >
                       Continue
                       <ChevronRight className="h-4 w-4" />
@@ -241,7 +241,7 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
                 {currentTab !== "export" && canAdvanceTab && (
                   <Button
                     onClick={goNext}
-                    className="gap-2 shadow-brand hover:shadow-brand-hover"
+                    className="gap-2 text-white shadow-brand hover:shadow-brand-hover"
                   >
                     Next
                     <ChevronRight className="h-4 w-4" />

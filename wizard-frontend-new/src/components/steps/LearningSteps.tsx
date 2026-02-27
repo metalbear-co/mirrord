@@ -242,7 +242,7 @@ const LearningSteps = ({ onComplete, onSkip }: LearningStepsProps) => {
           )}
           <Button
             onClick={next}
-            className="gap-2 shadow-brand hover:shadow-brand-hover"
+            className="gap-2 text-white shadow-brand hover:shadow-brand-hover"
           >
             {isLastStep ? "Start Configuration" : "Next"}
             {!isLastStep && <ChevronRight className="h-4 w-4" />}

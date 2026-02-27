@@ -51,7 +51,7 @@ const Homepage = () => {
           <div className="space-y-4">
             <Button
               onClick={() => openWizard("config")}
-              className="w-full h-12 text-base font-medium shadow-brand hover:shadow-brand-hover transition-all duration-200"
+              className="w-full h-12 text-base font-medium text-white shadow-brand hover:shadow-brand-hover transition-all duration-200"
             >
               Get Started
               <ArrowRight className="h-4 w-4 ml-2" />
