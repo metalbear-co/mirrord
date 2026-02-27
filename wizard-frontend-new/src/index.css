@@ -21,6 +21,7 @@
   --destructive-foreground: #ffffff;
   --accent: #e4e3fd;
   --accent-foreground: #000000;
+  --input: 240 5% 64%;
   --ring: #756df3;
   --radius: 0.75rem;
 }
@@ -41,6 +42,7 @@
   --destructive-foreground: #ffffff;
   --accent: #2f2d4f;
   --accent-foreground: #fafafd;
+  --input: 243 16% 40%;
   --ring: #756df3;
 }
 

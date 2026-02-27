@@ -63,6 +63,7 @@ export default {
         relaxed: LINE_HEIGHT_RELAXED,
       },
       colors: {
+        input: "hsl(var(--input))",
         brand: brandColors,
         primary: {
           DEFAULT: brandColors.purple,
