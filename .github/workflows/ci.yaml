@@ -469,7 +469,7 @@ jobs:
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-lib --lib --bins --tests
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests
       - name: create dummy file to compile wizard feature
         run: touch wizard-frontend.tar.gz
       - name: mirrord protocol UT
