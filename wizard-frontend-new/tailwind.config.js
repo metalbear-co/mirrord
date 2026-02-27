@@ -64,6 +64,8 @@ export default {
       },
       colors: {
         input: "hsl(var(--input))",
+        background: "var(--background)",
+        foreground: "var(--foreground)",
         brand: brandColors,
         primary: {
           DEFAULT: brandColors.purple,
