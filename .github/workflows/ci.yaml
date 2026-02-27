@@ -732,7 +732,7 @@ jobs:
           target: x86_64-pc-windows-msvc
           toolchain: ${{ env.PINNED_NIGHTLY }}
 
-      - name: build layer
+      - name: build mirrord
         run: cargo build -p mirrord
       - run: |
           cd mirrord/layer/tests/apps/outgoing
