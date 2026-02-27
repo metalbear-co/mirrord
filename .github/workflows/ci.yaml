@@ -502,9 +502,11 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
+      # mirrod-layer integration tests (mimic test harness)
       MIRRORD_TEST_USE_EXISTING_LIB: ../../target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
-      MIRRORD_TESTS_USE_BINARY: ../../target/debug/mirrord
       MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/debug/libmirrord_layer.dylib
+      # mirrord-layer-tests (exec test harness)
+      MIRRORD_TESTS_USE_BINARY: ../../target/debug/mirrord
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -520,6 +522,8 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: verify SIP status
         run: csrutil status
+      - name: build cli
+        run: cargo build -p mirrord
       - name: build layer
         run: cargo build -p mirrord-layer
       - name: build layer x86
