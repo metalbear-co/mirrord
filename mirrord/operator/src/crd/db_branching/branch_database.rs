@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use kube::CustomResource;
 use mirrord_config::{
     feature::database_branches::{
-        BranchItemCopyConfig, MongodbBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig,
-        PgIamAuthConfig,
+        BranchItemCopyConfig, MongodbBranchCopyConfig, MssqlBranchCopyConfig,
+        MysqlBranchCopyConfig, PgBranchCopyConfig, PgIamAuthConfig,
     },
     target::Target,
 };
@@ -55,6 +55,7 @@ pub enum DatabaseDialect {
     Postgres,
     Mysql,
     Mongodb,
+    Mssql,
 }
 
 impl std::fmt::Display for DatabaseDialect {
@@ -63,6 +64,7 @@ impl std::fmt::Display for DatabaseDialect {
             DatabaseDialect::Postgres => write!(f, "PostgreSQL"),
             DatabaseDialect::Mysql => write!(f, "MySQL"),
             DatabaseDialect::Mongodb => write!(f, "MongoDB"),
+            DatabaseDialect::Mssql => write!(f, "MSSQL"),
         }
     }
 }
@@ -193,6 +195,25 @@ impl From<MongodbBranchCopyConfig> for BranchCopyConfig {
             MongodbBranchCopyConfig::All { collections } => BranchCopyConfig {
                 mode: BranchCopyMode::All,
                 items: convert_item_copy_configs(collections),
+            },
+        }
+    }
+}
+
+impl From<MssqlBranchCopyConfig> for BranchCopyConfig {
+    fn from(config: MssqlBranchCopyConfig) -> Self {
+        match config {
+            MssqlBranchCopyConfig::Empty { tables } => BranchCopyConfig {
+                mode: BranchCopyMode::Empty,
+                items: convert_item_copy_configs(tables),
+            },
+            MssqlBranchCopyConfig::Schema { tables } => BranchCopyConfig {
+                mode: BranchCopyMode::Schema,
+                items: convert_item_copy_configs(tables),
+            },
+            MssqlBranchCopyConfig::All => BranchCopyConfig {
+                mode: BranchCopyMode::All,
+                items: None,
             },
         }
     }

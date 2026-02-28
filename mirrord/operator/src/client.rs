@@ -1644,6 +1644,9 @@ impl OperatorApi<PreparedClientCert> {
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Mongodb(
                     mongodb_config,
                 ) => Some(mongodb_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mssql(
+                    mssql_config,
+                ) => Some(mssql_config.base.creation_timeout_secs),
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
                     mysql_config,
                 ) => Some(mysql_config.base.creation_timeout_secs),
