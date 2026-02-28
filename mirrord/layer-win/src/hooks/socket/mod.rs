@@ -20,7 +20,7 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, OutgoingConnMetadataRequest, PortSubscribe,
 };
 use mirrord_layer_lib::{
-    detour::{Bypass, OptionExt},
+    detour::{Bypass, Detour, OptionExt},
     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
     setup::{LayerSetup, NetworkHookConfig, setup},
@@ -32,11 +32,10 @@ use mirrord_layer_lib::{
                 MANAGED_ADDRINFO, free_managed_addrinfo, getaddrinfo, utils::ManagedAddrInfoAny,
             },
         },
-        get_connected_addresses, get_socket,
+        get_connected_addresses,
         hostname::remote_hostname_string,
         is_socket_managed,
-        ops::{ConnectResult, send_to},
-        register_socket, remove_socket,
+        ops::{ConnectResult, get_last_error, send_to, socket},
         sockets::socket_kind_from_type,
     },
 };
@@ -46,10 +45,7 @@ use winapi::{
     shared::{
         minwindef::{BOOL, FALSE, INT, TRUE},
         winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA},
-        ws2def::{
-            ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, LPWSABUF, SIO_GET_EXTENSION_FUNCTION_POINTER,
-            SOCKADDR,
-        },
+        ws2def::{ADDRINFOA, ADDRINFOW, LPWSABUF, SIO_GET_EXTENSION_FUNCTION_POINTER, SOCKADDR},
     },
     um::{
         minwinbase::OVERLAPPED,
@@ -219,37 +215,20 @@ static CLOSE_SOCKET_ORIGINAL: OnceLock<&CloseSocketType> = OnceLock::new();
 
 /// Windows socket hook for socket creation
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn socket_detour(af: INT, r#type: INT, protocol: INT) -> SOCKET {
-    tracing::info!(
-        "socket_detour -> af: {}, type: {}, protocol: {}",
-        af,
-        r#type,
-        protocol
-    );
-
+unsafe extern "system" fn socket_detour(af: INT, type_: INT, protocol: INT) -> SOCKET {
     // Call the original function to create the socket
     let original = SOCKET_ORIGINAL.get().unwrap();
-    let socket = unsafe { original(af, r#type, protocol) };
-
-    if socket != INVALID_SOCKET {
-        if af == AF_INET || af == AF_INET6 {
-            register_socket(socket, af, r#type, protocol);
-            tracing::info!(
-                "socket_detour -> registered socket {} with mirrord (af: {}, type: {})",
-                socket,
-                af,
-                r#type
-            );
+    let call_original = || -> Detour<SOCKET> {
+        let socket_result = unsafe { original(af, type_, protocol) };
+        if socket_result == INVALID_SOCKET {
+            Err(std::io::Error::from_raw_os_error(get_last_error()))
         } else {
-            tracing::debug!(
-                "socket_detour -> skipping socket {} registration (unsupported af: {})",
-                socket,
-                af
-            );
+            Ok(socket_result)
         }
-    }
-
-    socket
+        .into()
+    };
+    socket(call_original, af, type_, protocol)
+        .unwrap_or_bypass_with(|_| unsafe { original(af, type_, protocol) })
 }
 
 /// Windows socket hook for WSASocket (advanced socket creation)
@@ -262,23 +241,20 @@ unsafe extern "system" fn wsa_socket_detour(
     g: u32,
     dwFlags: u32,
 ) -> SOCKET {
-    tracing::info!(
-        "wsa_socket_detour -> af: {}, type: {}, protocol: {}, flags: {}",
-        af,
-        socket_type,
-        protocol,
-        dwFlags
-    );
     let original = WSA_SOCKET_ORIGINAL.get().unwrap();
-    let socket = unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
-    if socket != INVALID_SOCKET {
-        if af == AF_INET || af == AF_INET6 {
-            register_socket(socket, af, socket_type, protocol);
+    let call_original = || -> Detour<SOCKET> {
+        let socket_result =
+            unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
+        if socket_result == INVALID_SOCKET {
+            Err(std::io::Error::from_raw_os_error(get_last_error()))
+        } else {
+            Ok(socket_result)
         }
-    } else {
-        tracing::warn!("wsa_socket_detour -> failed to create socket");
-    }
-    socket
+        .into()
+    };
+    socket(call_original, af, socket_type, protocol).unwrap_or_bypass_with(|_| unsafe {
+        original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags)
+    })
 }
 
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
@@ -290,23 +266,20 @@ unsafe extern "system" fn wsa_socket_w_detour(
     g: u32,
     dwFlags: u32,
 ) -> SOCKET {
-    tracing::trace!(
-        "wsa_socket_w_detour -> af: {}, type: {}, protocol: {}, flags: {}",
-        af,
-        socket_type,
-        protocol,
-        dwFlags
-    );
     let original = WSA_SOCKET_W_ORIGINAL.get().unwrap();
-    let socket = unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
-    if socket != INVALID_SOCKET {
-        if af == AF_INET || af == AF_INET6 {
-            register_socket(socket, af, socket_type, protocol);
+    let call_original = || -> Detour<SOCKET> {
+        let socket_result =
+            unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
+        if socket_result == INVALID_SOCKET {
+            Err(std::io::Error::from_raw_os_error(get_last_error()))
+        } else {
+            Ok(socket_result)
         }
-    } else {
-        tracing::warn!("wsa_socket_w_detour -> failed to create socket");
-    }
-    socket
+        .into()
+    };
+    socket(call_original, af, socket_type, protocol).unwrap_or_bypass_with(|_| unsafe {
+        original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags)
+    })
 }
 
 /// Windows socket hook for bind
@@ -1533,11 +1506,8 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
     // Try to resolve the hostname using mirrord's remote DNS resolution
     match remote_dns_resolve_via_proxy(hostname_cstr) {
         Ok(results) => {
-            if !results.is_empty() {
+            if let Some((name, ip)) = results.first() {
                 // Use the first IP address from the results
-                // we already checked it's not empty so this can't error
-                #[allow(clippy::indexing_slicing)]
-                let (name, ip) = &results[0];
                 tracing::debug!(
                     "Remote DNS resolution successful: {} -> {}",
                     hostname_cstr,
@@ -1800,33 +1770,16 @@ unsafe extern "system" fn sendto_detour(
 /// Socket management detour for closesocket() - closes a socket
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
-    // Get socket info BEFORE closing to send PortUnsubscribe if needed
-    let socket_info = get_socket(s);
-
     let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();
     let res = unsafe { original(s) };
 
-    // Only clean up mirrord state if the close was successful
-    if res == ERROR_SUCCESS_I32 {
-        tracing::debug!(
-            "closesocket_detour -> successfully closed socket {}, removing from mirrord tracking",
-            s
-        );
-
+    if let Some(socket) = SOCKETS.lock().expect("SOCKETS lock failed").remove(&s)
+        && matches!(socket.state, SocketState::Listening(_))
+    {
         // Call close() method to send PortUnsubscribe if socket was listening
-        if let Some(socket) = &socket_info
-            && matches!(socket.state, SocketState::Listening(_))
-        {
-            socket.close();
-        }
-
-        remove_socket(s);
-    } else {
-        tracing::warn!(
-            "closesocket_detour -> failed to close socket {}, not removing from mirrord tracking",
-            s
-        );
+        socket.close();
     }
+
     res
 }
 

@@ -34,8 +34,7 @@ use socket2::SockAddr;
 // Re-export sockets module items
 pub use sockets::{
     SHARED_SOCKETS_ENV_VAR, SOCKETS, SocketDescriptor, get_bound_address, get_connected_addresses,
-    get_socket, get_socket_state, is_socket_in_state, is_socket_managed, register_socket,
-    remove_socket,
+    get_socket_state, is_socket_in_state, is_socket_managed, register_socket,
 };
 #[cfg(windows)]
 pub use winapi::{
@@ -162,10 +161,7 @@ impl From<SocketKind> for NetProtocol {
 }
 
 impl TryFrom<c_int> for SocketKind {
-    #[cfg(unix)]
     type Error = Bypass;
-    #[cfg(windows)]
-    type Error = i32;
 
     fn try_from(type_: c_int) -> Result<Self, Self::Error> {
         if (type_ & SOCK_STREAM) > 0 {
@@ -173,10 +169,7 @@ impl TryFrom<c_int> for SocketKind {
         } else if (type_ & SOCK_DGRAM) > 0 {
             Ok(SocketKind::Udp(type_))
         } else {
-            #[cfg(unix)]
-            return Err(Bypass::Type(type_));
-            #[cfg(windows)]
-            return Err(type_);
+            Err(Bypass::Type(type_))
         }
     }
 }
