@@ -79,8 +79,19 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 }
 
 fn layer_start() -> LayerResult<()> {
-    // Create layer initialization event first
-    let init_event = LayerInitEvent::for_child()?;
+    // Try to open the parent's init event. In the normal `mirrord exec` flow, the parent
+    // creates this event and waits on it. In the `mirrord attach` flow (IDE extension),
+    // the env var won't be set because the process was spawned independently — that's fine,
+    // we just skip the synchronization.
+    let init_event = match LayerInitEvent::for_child() {
+        Ok(event) => Some(event),
+        Err(_) => {
+            tracing::debug!(
+                "No layer init event found (attach flow), skipping parent synchronization"
+            );
+            None
+        }
+    };
 
     let config = read_resolved_config().map_err(LayerError::Config)?;
     init_layer_setup(config, false);
@@ -100,8 +111,10 @@ fn layer_start() -> LayerResult<()> {
     initialize_hooks(guard)?;
     tracing::info!("Hooks initialized");
 
-    // Signal that initialization is complete
-    init_event.signal_complete()?;
+    // Signal that initialization is complete (only if parent is waiting)
+    if let Some(event) = init_event {
+        event.signal_complete()?;
+    }
 
     if is_trace_only_mode() {
         tracing::info!("mirrord-layer-win fully initialized in trace-only mode");

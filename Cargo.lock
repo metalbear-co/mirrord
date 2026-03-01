@@ -4814,6 +4814,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "const-random",
+ "dll-syringe",
  "dotenvy",
  "drain",
  "flate2",

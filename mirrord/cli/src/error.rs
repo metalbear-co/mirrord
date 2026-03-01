@@ -487,6 +487,14 @@ pub(crate) enum CliError {
     #[error("The '{0}' command is not currently supported on Windows")]
     UnsupportedOnWindows(String),
 
+    #[cfg(windows)]
+    #[error("Failed to open process {0} for attachment: {1}")]
+    AttachProcessOpenFailed(u32, std::io::Error),
+
+    #[cfg(windows)]
+    #[error("Failed to inject layer into process {0}: {1}")]
+    AttachInjectionFailed(u32, String),
+
     #[error(transparent)]
     ApiKey(#[from] ApiKeyError),
 

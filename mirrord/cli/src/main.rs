@@ -325,6 +325,9 @@ mod wizard;
 
 mod fix;
 
+#[cfg(windows)]
+mod attach;
+
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
 use mirrord_layer_lib::process::windows::{console, execution::LayerManagedProcess};
@@ -995,9 +998,9 @@ fn main() -> miette::Result<()> {
             Commands::Operator(args) => {
                 operator_command(*args).await?;
             }
-            Commands::ExtensionExec(args) => windows_unsupported!(args, "ext", {
+            Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch, &user_data).await?;
-            }),
+            },
             Commands::InternalProxy {
                 port,
                 mirrord_for_ci,
@@ -1061,6 +1064,11 @@ fn main() -> miette::Result<()> {
                 .await?
             }
             Commands::Fix(args) => fix::fix_command(args).await?,
+            #[cfg(windows)]
+            Commands::Attach(args) => {
+                let progress = ProgressTracker::from_env("mirrord attach");
+                attach::attach_command(args, &progress)?;
+            }
         };
 
         Ok(())
