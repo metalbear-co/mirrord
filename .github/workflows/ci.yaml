@@ -742,6 +742,8 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/outgoing
           cargo build
+      - name: build layer
+        run: cargo build -p mirrord-layer-win
       - name: build mirrord
         run: cargo build -p mirrord -p mirrord-layer-win
       - name: mirrord layer unified tests
