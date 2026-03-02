@@ -725,8 +725,6 @@ jobs:
   windows_tests:
     needs: changed_files
     if: ${{ needs.changed_files.outputs.rs_changed == 'true' ||needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
-    env:
-      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord.exe
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
@@ -738,10 +736,6 @@ jobs:
           target: x86_64-pc-windows-msvc
           toolchain: ${{ env.PINNED_NIGHTLY }}
 
-      # - name: build layer-win
-      #   run: cargo build -p mirrord-layer-win
-      - name: build mirrord
-        run: cargo build -p mirrord
       - run: |
           cd mirrord/layer/tests/apps/outgoing
           cargo build
