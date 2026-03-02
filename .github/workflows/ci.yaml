@@ -747,6 +747,7 @@ jobs:
         env:
           MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord.exe
           MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/mirrord_layer_win.dll
+          RUSTFLAGS: "-C link-args=/STACK:16777216"
         run: |
           $ErrorActionPreference = "Stop"
           cargo test -p mirrord-layer-tests --no-default-features
