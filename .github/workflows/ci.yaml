@@ -726,6 +726,9 @@ jobs:
     needs: changed_files
     if: ${{ needs.changed_files.outputs.rs_changed == 'true' ||needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
     runs-on: windows-latest
+    env:
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord.exe
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/mirrord_layer_win.dll
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -739,10 +742,12 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/outgoing
           cargo build
+      - name: build mirrord
+        run: cargo build -p mirrord -p mirrord-layer-win
       - name: mirrord layer unified tests
         run: |
           $ErrorActionPreference = "Stop"
-          cargo test -p mirrord-layer-tests
+          cargo test -p mirrord-layer-tests --no-default-features
       - name: mirrord layer tests
         run: |
           $ErrorActionPreference = "Stop"
