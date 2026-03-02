@@ -31,8 +31,8 @@ impl From<&MysqlBranchDatabase> for BranchInfo {
             name: branch.metadata.name.clone().unwrap_or_default(),
             db_type: "MySQL",
             phase: branch.status.as_ref().map(|s| s.phase.to_string()),
-            ttl: branch.spec.ttl_secs,
-            database: branch.spec.database_name.clone(),
+            ttl: branch.spec.common.ttl_secs,
+            database: branch.spec.common.database_name.clone(),
             users: branch.status.as_ref().and_then(|s| {
                 if s.session_info.is_empty() {
                     None
@@ -63,8 +63,8 @@ impl From<MysqlBranchDatabase> for BranchInfo {
             name: metadata.name.unwrap_or_default(),
             db_type: "MySQL",
             phase: status.as_ref().map(|s| s.phase.to_string()),
-            ttl: spec.ttl_secs,
-            database: spec.database_name,
+            ttl: spec.common.ttl_secs,
+            database: spec.common.database_name,
             users: status.as_mut().and_then(|s| {
                 if s.session_info.is_empty() {
                     None
@@ -88,8 +88,8 @@ impl From<&PgBranchDatabase> for BranchInfo {
             name: branch.metadata.name.clone().unwrap_or_default(),
             db_type: "PostgreSQL",
             phase: branch.status.as_ref().map(|s| s.phase.to_string()),
-            ttl: branch.spec.ttl_secs,
-            database: branch.spec.database_name.clone(),
+            ttl: branch.spec.common.ttl_secs,
+            database: branch.spec.common.database_name.clone(),
             users: branch.status.as_ref().and_then(|s| {
                 if s.session_info.is_empty() {
                     None
@@ -120,7 +120,7 @@ impl From<PgBranchDatabase> for BranchInfo {
             name: metadata.name.unwrap_or_default(),
             db_type: "PostgreSQL",
             phase: status.as_ref().map(|s| s.phase.to_string()),
-            ttl: spec.ttl_secs,
+            ttl: spec.common.ttl_secs,
             database: spec.database_name,
             users: status.as_mut().and_then(|s| {
                 if s.session_info.is_empty() {

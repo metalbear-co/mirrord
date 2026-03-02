@@ -904,12 +904,15 @@ mod tests {
     use std::{fs, path::PathBuf};
 
     use kube::CustomResourceExt;
+    use serde_yaml as _;
+    use strum_macros as _;
 
     use crate::crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
         MirrordWorkloadQueueRegistry, SessionCrd,
         db_branching::{
             mongodb::MongodbBranchDatabase, mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
+            unified::BranchDatabase,
         },
         external::MirrordClusterExternalResource,
         kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
@@ -1006,6 +1009,12 @@ mod tests {
     #[ignore]
     fn write_mongodb_branch_database_crd_yaml() {
         write_crd_yaml::<MongodbBranchDatabase>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_unified_branch_database_crd_yaml() {
+        write_crd_yaml::<BranchDatabase>();
     }
 
     #[test]

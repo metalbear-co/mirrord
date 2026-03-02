@@ -30,6 +30,7 @@ use crate::{
         mongodb::{MongodbBranchDatabase, MongodbBranchDatabaseSpec},
         mysql::{MysqlBranchDatabase, MysqlBranchDatabaseSpec},
         pg::{PgBranchDatabase, PgBranchDatabaseSpec},
+        unified::OldCommonFields,
     },
 };
 
@@ -185,7 +186,7 @@ pub async fn list_reusable_mysql_branches<P: Progress>(
                 false
             }
         })
-        .map(|db| (db.spec.id.clone().into(), db))
+        .map(|db| (db.spec.common.id.clone().into(), db))
         .collect::<HashMap<_, _>>();
 
     subtask.success(Some(&format!(
@@ -346,7 +347,7 @@ pub async fn list_reusable_pg_branches<P: Progress>(
                 false
             }
         })
-        .map(|db| (db.spec.id.clone().into(), db))
+        .map(|db| (db.spec.common.id.clone().into(), db))
         .collect::<HashMap<_, _>>();
 
     subtask.success(Some(&format!(
@@ -486,7 +487,7 @@ pub async fn list_reusable_mongodb_branches<P: Progress>(
                 false
             }
         })
-        .map(|db| (db.spec.id.clone().into(), db))
+        .map(|db| (db.spec.common.id.clone().into(), db))
         .collect::<HashMap<_, _>>();
 
     subtask.success(Some(&format!(
@@ -627,11 +628,13 @@ impl MysqlBranchParams {
         let name_prefix = format!("{}-mysql-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = MysqlBranchDatabaseSpec {
-            id: id.to_string(),
-            database_name: config.base.name.clone(),
-            connection_source,
-            target: target.clone(),
-            ttl_secs: config.base.ttl_secs,
+            common: OldCommonFields {
+                id: id.to_string(),
+                database_name: config.base.name.clone(),
+                connection_source,
+                target: target.clone(),
+                ttl_secs: config.base.ttl_secs,
+            },
             mysql_version: config.base.version.clone(),
             copy: config.copy.clone().into(),
         };
@@ -665,13 +668,15 @@ impl PgBranchParams {
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
         let spec = PgBranchDatabaseSpec {
-            id: id.to_string(),
-            database_name: config.base.name.clone(),
-            connection_source,
-            target: target.clone(),
-            ttl_secs: config.base.ttl_secs,
-            postgres_version: config.base.version.clone(),
+            common: OldCommonFields {
+                id: id.to_string(),
+                database_name: config.base.name.clone(),
+                connection_source,
+                target: target.clone(),
+                ttl_secs: config.base.ttl_secs,
+            },
             copy: config.copy.clone().into(),
+            postgres_version: config.base.version.clone(),
             iam_auth,
         };
         let labels = BTreeMap::from([(
@@ -700,11 +705,13 @@ impl MongodbBranchParams {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = MongodbBranchDatabaseSpec {
-            id: id.to_string(),
-            database_name: config.base.name.clone(),
-            connection_source,
-            target: target.clone(),
-            ttl_secs: config.base.ttl_secs,
+            common: OldCommonFields {
+                id: id.to_string(),
+                database_name: config.base.name.clone(),
+                connection_source,
+                target: target.clone(),
+                ttl_secs: config.base.ttl_secs,
+            },
             mongodb_version: config.base.version.clone(),
             copy: config.copy.clone().into(),
         };
