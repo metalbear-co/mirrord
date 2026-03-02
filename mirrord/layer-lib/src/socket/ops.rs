@@ -10,8 +10,7 @@ use std::{
     os::{fd::BorrowedFd, unix::io::RawFd},
 };
 
-#[cfg(unix)]
-use libc::AF_UNIX;
+use libc::c_int;
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
 use mirrord_protocol::outgoing::SocketAddress;
 #[cfg(unix)]
@@ -19,7 +18,7 @@ use nix::sys::socket::{SockaddrStorage, sockopt};
 use socket2::SockAddr;
 #[cfg(unix)]
 use tracing::error;
-use tracing::{debug, trace};
+use tracing::{Level, debug, trace};
 /// Platform-specific connect function types
 #[cfg(windows)]
 use winapi::um::winsock2::{WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR};
@@ -29,13 +28,13 @@ use super::sockets::socket_descriptor_to_i64;
 use crate::socket::dns::windows::check_address_reachability;
 use crate::{
     HookError, HookResult,
-    detour::Bypass,
+    detour::{Bypass, Detour},
     error::ConnectError,
     proxy_connection::make_proxy_request_with_response,
     setup::setup,
     socket::{
-        Bound, Connected, ConnectionThrough, SOCKETS, SocketDescriptor, SocketState, UserSocket,
-        sockets::reconstruct_user_socket,
+        AF_INET, AF_INET6, AF_UNIX, Bound, Connected, ConnectionThrough, SOCKETS, SocketDescriptor,
+        SocketState, UserSocket, sockets::reconstruct_user_socket,
     },
 };
 #[cfg(windows)]
@@ -115,7 +114,7 @@ fn errno_location() -> *mut libc::c_int {
     }
 }
 
-fn get_last_error() -> i32 {
+pub fn get_last_error() -> i32 {
     #[cfg(unix)]
     unsafe {
         *errno_location()
@@ -138,6 +137,38 @@ fn set_last_error(error: i32) {
     unsafe {
         winapi::um::winsock2::WSASetLastError(error)
     };
+}
+
+/// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
+#[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), skip(call_original), ret)]
+pub fn socket<F>(
+    call_original: F,
+    domain: c_int,
+    type_: c_int,
+    protocol: c_int,
+) -> Detour<SocketDescriptor>
+where
+    F: FnOnce() -> Detour<SocketDescriptor>,
+{
+    let socket_kind = type_.try_into()?;
+
+    if !((domain == AF_INET) || (domain == AF_INET6) || (cfg!(unix) && domain == AF_UNIX)) {
+        Err(Bypass::Domain(domain))
+    } else {
+        Ok(())
+    }?;
+
+    if domain == AF_INET6 && setup().layer_config().feature.network.ipv6.not() {
+        return Detour::Error(HookError::SocketUnsuportedIpv6);
+    }
+
+    let socket_fd = call_original()?;
+
+    let new_socket = UserSocket::new(domain, type_, protocol, Default::default(), socket_kind);
+
+    SOCKETS.lock()?.insert(socket_fd, Arc::new(new_socket));
+
+    Detour::Success(socket_fd)
 }
 
 pub fn nop_connect_fn(_addr: SockAddr) -> ConnectResult {
