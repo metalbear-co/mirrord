@@ -27,10 +27,11 @@ The following guide details the steps to setup a local development environment f
 
 - [GCC](https://gcc.gnu.org/) - only on Linux, GCC is needed for Go dynamic linking
 - [Rust](https://www.rust-lang.org/)
-- [NodeJS](https://nodejs.org/en/), [ExpressJS](https://expressjs.com/)
+- [NodeJS](https://nodejs.org/en/), [ExpressJS](https://expressjs.com/), [portfinder](https://www.npmjs.com/package/portfinder)
 - [Python](https://www.python.org/), [Flask](https://flask.palletsprojects.com/en/2.1.x/), [FastAPI](https://fastapi.tiangolo.com/), [Uvicorn](https://www.uvicorn.org/)
 - [Go](https://go.dev/)
 - Kubernetes Cluster (local/remote)
+- [Argo Rollouts CRD](https://argoproj.github.io/argo-rollouts/) - required for rollout-related E2E tests (`kubectl create namespace argo-rollouts && kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml`)
 
 ### Setup a Kubernetes cluster
 
