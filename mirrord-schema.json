@@ -3014,16 +3014,36 @@
         },
         "ttl_mins": {
           "title": "feature.preview.ttl_mins {#feature-preview-ttl_mins}",
-          "description": "How long (in minutes) the preview session is allowed to live after creation. The operator will terminate the session when this time elapses.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
+          "description": "How long (in minutes) the preview session is allowed to live after creation. The operator will terminate the session when this time elapses.\n\nSet to `\"infinite\"` to disable TTL.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PreviewTtlMins"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
+    },
+    "PreviewTtlKeyword": {
+      "type": "string",
+      "enum": [
+        "infinite"
+      ]
+    },
+    "PreviewTtlMins": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        {
+          "$ref": "#/definitions/PreviewTtlKeyword"
+        }
+      ]
     },
     "QueueFilter": {
       "description": "Amazon Simple Queue Service and Kafka are supported.\n\nMore queue types might be added in the future.",
