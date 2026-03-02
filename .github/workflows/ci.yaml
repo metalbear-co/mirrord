@@ -359,6 +359,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [changed_files]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    env:
+      MIRRORD_TESTS_USE_BINARY: ../../target/x86_64-unknown-linux-gnu/debug/mirrord
+      MIRRORD_LAYER_FILE: ../../target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
@@ -467,8 +470,10 @@ jobs:
           cargo build
       - run: ./mirrord/layer/tests/apps/dlopen_cgo/build_test_app.sh
       - run: ./scripts/build_c_apps.sh
+      - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord-layer
+      - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-lib
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: create dummy file to compile wizard feature
         run: touch wizard-frontend.tar.gz
@@ -722,6 +727,7 @@ jobs:
     runs-on: windows-latest
     env:
       MIRRORD_TESTS_USE_BINARY: ../../target/debug/mirrord.exe
+      MIRRORD_LAYER_FILE: ../../target/debug/mirrord_layer_win.dll
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
