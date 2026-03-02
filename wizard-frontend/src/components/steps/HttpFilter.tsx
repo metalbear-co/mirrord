@@ -1,6 +1,5 @@
 import { Trash2 } from "lucide-react";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
+import { Button, Input } from "@metalbear/ui";
 import { removeSingleFilter } from "../JsonUtils";
 import { useContext } from "react";
 import { ConfigDataContext } from "../UserDataContext";
@@ -16,13 +15,13 @@ export const HttpFilter = ({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 text-muted-foreground">
+      <div className="flex items-center gap-2 text-[var(--muted-foreground)]">
         {"/"}
         <Input
           placeholder="e.g., x-mirrord-test: true"
           value={initValue}
           readOnly={true}
-          className="flex-1 text-black"
+          className="flex-1 text-[var(--foreground)]"
         />
         {"/"}
 
