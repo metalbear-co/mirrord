@@ -20,14 +20,13 @@ pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
 /// Various applications used by integration tests.
 #[derive(Debug)]
 pub enum Application {
-    RustOutgoingUdp,
     RustOutgoingTcp { non_blocking: bool },
 }
 
 impl Application {
     pub async fn get_executable(&self) -> String {
         match self {
-            Application::RustOutgoingUdp | Application::RustOutgoingTcp { .. } => format!(
+            Application::RustOutgoingTcp { .. } => format!(
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
                 "../../target/debug/outgoing",
@@ -40,10 +39,6 @@ impl Application {
         // Note: until we move layer IT tests to this crate, we piggy-back layer's apps
         app_path.push("../layer/tests/apps/");
         match self {
-            Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
-                .into_iter()
-                .map(Into::into)
-                .collect(),
             Application::RustOutgoingTcp {
                 non_blocking: false,
             } => ["--tcp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
@@ -64,7 +59,7 @@ impl Application {
 
     pub fn get_app_port(&self) -> u16 {
         match self {
-            Application::RustOutgoingUdp | Application::RustOutgoingTcp { .. } => {
+            Application::RustOutgoingTcp { .. } => {
                 unimplemented!("shouldn't get here")
             }
         }
@@ -95,7 +90,6 @@ impl Application {
             .collect();
 
         let cmdline: Vec<String> = [executable].into_iter().chain(self.get_args()).collect();
-        eprintln!("{:?}", cmdline);
         run_exec_targetless(cmdline, None, cli_args, Some(env_refs)).await
     }
 
