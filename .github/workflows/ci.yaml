@@ -360,7 +360,7 @@ jobs:
     needs: [changed_files]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
-      MIRRORD_TESTS_USE_BINARY: ../../../target/x86_64-unknown-linux-gnu/debug/mirrord
+      MIRRORD_TESTS_USE_BINARY: ../../target/x86_64-unknown-linux-gnu/debug/mirrord
       MIRRORD_LAYER_FILE: ../../../target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
@@ -727,7 +727,7 @@ jobs:
     runs-on: windows-latest
     env:
       MIRRORD_TESTS_USE_BINARY: ../../target/debug/mirrord.exe
-      MIRRORD_LAYER_FILE: ../../target/debug/mirrord_layer_win.dll
+      MIRRORD_LAYER_FILE: ../../../target/debug/mirrord_layer_win.dll
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
