@@ -1,0 +1,1 @@
+Update `CONTRIBUTING.md` with missing dev dependencies: `portfinder` npm package and Argo Rollouts CRD
