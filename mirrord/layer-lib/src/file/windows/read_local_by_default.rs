@@ -20,6 +20,7 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r".\.js$",
         r".\.pth$",
         r".\.plist$",
+        r".\.nls$",
         r"venv\.cfg$",
         // Python folder on Windows.
         r"^/Users/[^/]+/AppData/Local/Programs/Python/",
