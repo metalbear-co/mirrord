@@ -213,55 +213,16 @@ impl MirrordExecution {
             remove_proxy_env();
         }
 
-        let branch_name = get_user_git_branch().await;
-
-        // if MIRRORD_TEST_INTPROXY_ADDR is set, we skip spawning the internal proxy and use the
-        // provided address instead.
-        let test_intproxy_addr = match std::env::var(MIRRORD_TEST_INTPROXY_ADDR) {
-            Ok(addr) => Some(addr.parse().map_err(|e| {
-                CliError::InternalProxySpawnError(format!(
-                    "invalid {MIRRORD_TEST_INTPROXY_ADDR} value: {e}"
-                ))
-            })?),
-            Err(_) => None,
-        };
-
-        let (mut env_vars, connect_info) = match test_intproxy_addr {
-            Some(..) => (Default::default(), None),
-            None => {
-                let (connect_info, mut connection) =
-                    create_and_connect(config, progress, analytics, branch_name, mirrord_for_ci)
-                        .await
-                        .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
-
-                let agent_protocol_version = match &connect_info {
-                    AgentConnectInfo::Operator(session) => {
-                        session.operator_protocol_version.clone()
-                    }
-                    AgentConnectInfo::DirectKubernetes(_) => {
-                        Some(MirrordExecution::get_agent_version(&mut connection).await?)
-                    }
-                    _ => None,
-                };
-
-                config
-                    .feature
-                    .network
-                    .incoming
-                    .http_filter
-                    .ensure_usable_with(agent_protocol_version)?;
-
-                let env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
-                    Default::default()
-                } else {
-                    Self::fetch_env_vars(config, &mut connection)
-                        .await
-                        .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
-                };
-
-                (env_vars, Some(connect_info))
-            }
-        };
+        // spawn agent and intproxy processes, unless MIRRORD_TEST_INTPROXY_ADDR is set and used
+        // instead.
+        let (mut env_vars, proxy_process, uses_operator) =
+            match std::env::var(MIRRORD_TEST_INTPROXY_ADDR) {
+                Ok(addr) => (Self::setup_existing_intproxy(addr, config)?, None, false),
+                _ => {
+                    Self::spawn_agent_and_intproxy(config, progress, analytics, mirrord_for_ci)
+                        .await?
+                }
+            };
 
         #[cfg(target_os = "macos")]
         {
@@ -291,136 +252,52 @@ impl MirrordExecution {
         }
         #[cfg(windows)]
         {
-            unsafe { std::env::set_var("MIRRORD_LAYER_FILE", lib_path) };
+            env_vars.insert("MIRRORD_LAYER_FILE".to_string(), lib_path);
         }
 
-        let encoded_config = config.encode()?;
-
-        let (intproxy_address, proxy_process) = match test_intproxy_addr {
-            Some(addr) => (addr, None),
-            None => {
-                let mut proxy_command =
-                    Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
-                proxy_command.arg("intproxy");
-
-                if mirrord_for_ci.is_some() {
-                    proxy_command.arg("--mirrord-for-ci");
-                }
-
-                proxy_command
-                    // Start of debug args. Don't add real args after this point,
-                    // `_debug_args` Clap field will swallow them.
-                    .arg("--log-destination")
-                    .arg(config.internal_proxy.log_destination.as_os_str())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .stdin(std::process::Stdio::null())
-                    .kill_on_drop(true)
-                    .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
-
-                if let Some(ref connect_info) = connect_info {
-                    proxy_command.env(
-                        AGENT_CONNECT_INFO_ENV_KEY,
-                        serde_json::to_string(&connect_info)?,
-                    );
-                }
-
-                #[cfg(unix)]
-                unsafe {
-                    proxy_command.pre_exec(|| reparent_to_init().map_err(Into::into));
-                }
-
-                let mut proxy_process = proxy_command.spawn().map_err(|e| {
-                    CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
-                })?;
-
-                let stderr = proxy_process.stderr.take().expect("stderr was piped");
-                let _stderr_guard = watch_stderr(stderr, progress).await;
-
-                let stdout = proxy_process.stdout.take().expect("stdout was piped");
-
-                // Windows-Compatibility: this wait hangs after agent EnvVarsResponse
-                //  Skipping it works around the issue.
-                #[cfg(unix)]
-                {
-                    // The pre_exec(reparent_to_init) causes the process to fork and our immediate
-                    // child promptly exits (which is what we wait for here),
-                    // reparenting our (now former) grandchild to init.
-                    // This should *never* fail, see https://man7.org/linux/man-pages/man2/wait.2.html for
-                    // reference.
-                    proxy_process.wait().await.unwrap();
-                }
-
-                let intproxy_address: SocketAddr = BufReader::new(stdout)
-                    .lines()
-                    .next_line()
-                    .await
-                    .map_err(|e| {
-                        CliError::InternalProxySpawnError(format!(
-                            "failed to read proxy stdout: {e}"
-                        ))
-                    })?
-                    .ok_or_else(|| {
-                        CliError::InternalProxySpawnError(
-                            "proxy did not print port number to stdout".to_string(),
+        let patched_path = {
+            #[cfg(not(target_os = "macos"))]
+            {
+                None
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let log_info =
+                    config
+                        .experimental
+                        .sip_log_destination
+                        .as_ref()
+                        .map(|log_destination| mirrord_sip::SipLogInfo {
+                            log_destination,
+                            args,
+                            load_type: None,
+                        });
+                executable
+                    .and_then(|exe| {
+                        sip_patch(
+                            exe,
+                            SipPatchOptions {
+                                patch: &config
+                                    .sip_binaries
+                                    .clone()
+                                    .map(|x| x.to_vec())
+                                    .unwrap_or_default(),
+                                skip: &config.skip_sip,
+                            },
+                            log_info,
                         )
+                        .transpose() // We transpose twice to propagate a possible error out of this
+                        // closure.
+                    })
+                    .transpose()
+                    .inspect_err(|sip_error| {
+                        // we can't recover from hitting the fd limit, so we have to exit fully
+                        if let SipError::TooManyFilesOpen(..) = sip_error {
+                            panic!("mirrord failed to patch SIP with: {}", sip_error);
+                        }
                     })?
-                    .parse()
-                    .map_err(|e| {
-                        CliError::InternalProxySpawnError(format!(
-                            "failed to parse port number printed by proxy: {e}"
-                        ))
-                    })?;
-
-                (intproxy_address, Some(proxy_process))
             }
         };
-
-        env_vars.insert(LayerConfig::RESOLVED_CONFIG_ENV.into(), encoded_config);
-        env_vars.insert(
-            MIRRORD_LAYER_INTPROXY_ADDR.into(),
-            intproxy_address.to_string(),
-        );
-
-        #[cfg(target_os = "macos")]
-        let log_info = config
-            .experimental
-            .sip_log_destination
-            .as_ref()
-            .map(|log_destination| mirrord_sip::SipLogInfo {
-                log_destination,
-                args,
-                load_type: None,
-            });
-
-        #[cfg(target_os = "macos")]
-        let patched_path = executable
-            .and_then(|exe| {
-                sip_patch(
-                    exe,
-                    SipPatchOptions {
-                        patch: &config
-                            .sip_binaries
-                            .clone()
-                            .map(|x| x.to_vec())
-                            .unwrap_or_default(),
-                        skip: &config.skip_sip,
-                    },
-                    log_info,
-                )
-                .transpose() // We transpose twice to propagate a possible error out of this
-                // closure.
-            })
-            .transpose()
-            .inspect_err(|sip_error| {
-                // we can't recover from hitting the fd limit, so we have to exit fully
-                if let SipError::TooManyFilesOpen(..) = sip_error {
-                    panic!("mirrord failed to patch SIP with: {}", sip_error);
-                }
-            })?;
-
-        #[cfg(not(target_os = "macos"))]
-        let patched_path = None;
 
         Ok(Self {
             environment: env_vars,
@@ -433,7 +310,7 @@ impl MirrordExecution {
                 .clone()
                 .map(|unset| unset.to_vec())
                 .unwrap_or_default(),
-            uses_operator: matches!(connect_info, Some(AgentConnectInfo::Operator(..))),
+            uses_operator,
         })
     }
 
@@ -562,6 +439,147 @@ impl MirrordExecution {
         };
 
         Ok((execution, proxy_addr))
+    }
+
+    fn setup_existing_intproxy(
+        raw_intproxy_addr: String,
+        config: &mut LayerConfig,
+    ) -> CliResult<HashMap<String, String>> {
+        let intproxy_address: SocketAddr = raw_intproxy_addr.parse().map_err(|e| {
+            CliError::InternalProxySpawnError(format!(
+                "invalid {MIRRORD_TEST_INTPROXY_ADDR} value: {e}"
+            ))
+        })?;
+
+        let mut env_vars: HashMap<String, String> = Default::default();
+        env_vars.insert(LayerConfig::RESOLVED_CONFIG_ENV.into(), config.encode()?);
+        env_vars.insert(
+            MIRRORD_LAYER_INTPROXY_ADDR.into(),
+            intproxy_address.to_string(),
+        );
+        Ok(env_vars)
+    }
+
+    async fn spawn_agent_and_intproxy<P>(
+        config: &mut LayerConfig,
+        progress: &mut P,
+        analytics: &mut AnalyticsReporter,
+        mirrord_for_ci: Option<&MirrordCi>,
+    ) -> CliResult<(HashMap<String, String>, Option<Child>, bool)>
+    where
+        P: Progress,
+    {
+        let branch_name = get_user_git_branch().await;
+        let (connect_info, mut connection) =
+            create_and_connect(config, progress, analytics, branch_name, mirrord_for_ci)
+                .await
+                .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+
+        let agent_protocol_version = match &connect_info {
+            AgentConnectInfo::Operator(session) => session.operator_protocol_version.clone(),
+            AgentConnectInfo::DirectKubernetes(_) => {
+                Some(MirrordExecution::get_agent_version(&mut connection).await?)
+            }
+            _ => None,
+        };
+
+        config
+            .feature
+            .network
+            .incoming
+            .http_filter
+            .ensure_usable_with(agent_protocol_version)?;
+
+        let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
+            Default::default()
+        } else {
+            Self::fetch_env_vars(config, &mut connection)
+                .await
+                .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
+        };
+
+        let encoded_config = config.encode()?;
+
+        let mut proxy_command =
+            Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
+        proxy_command.arg("intproxy");
+
+        if mirrord_for_ci.is_some() {
+            proxy_command.arg("--mirrord-for-ci");
+        }
+
+        proxy_command
+            // Start of debug args. Don't add real args after this point,
+            // `_debug_args` Clap field will swallow them.
+            .arg("--log-destination")
+            .arg(config.internal_proxy.log_destination.as_os_str())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
+
+        proxy_command.env(
+            AGENT_CONNECT_INFO_ENV_KEY,
+            serde_json::to_string(&connect_info)?,
+        );
+
+        #[cfg(unix)]
+        unsafe {
+            proxy_command.pre_exec(|| reparent_to_init().map_err(Into::into));
+        }
+
+        let mut proxy_process = proxy_command.spawn().map_err(|e| {
+            CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
+        })?;
+
+        let stderr = proxy_process.stderr.take().expect("stderr was piped");
+        let _stderr_guard = watch_stderr(stderr, progress).await;
+
+        let stdout = proxy_process.stdout.take().expect("stdout was piped");
+
+        // Windows-Compatibility: this wait hangs after agent EnvVarsResponse
+        //  Skipping it works around the issue.
+        #[cfg(unix)]
+        {
+            // The pre_exec(reparent_to_init) causes the process to fork and our immediate
+            // child promptly exits (which is what we wait for here),
+            // reparenting our (now former) grandchild to init.
+            // This should *never* fail, see https://man7.org/linux/man-pages/man2/wait.2.html for
+            // reference.
+            proxy_process.wait().await.unwrap();
+        }
+
+        let intproxy_address: SocketAddr = BufReader::new(stdout)
+            .lines()
+            .next_line()
+            .await
+            .map_err(|e| {
+                CliError::InternalProxySpawnError(format!("failed to read proxy stdout: {e}"))
+            })?
+            .ok_or_else(|| {
+                CliError::InternalProxySpawnError(
+                    "proxy did not print port number to stdout".to_string(),
+                )
+            })?
+            .parse()
+            .map_err(|e| {
+                CliError::InternalProxySpawnError(format!(
+                    "failed to parse port number printed by proxy: {e}"
+                ))
+            })?;
+
+        env_vars.insert(LayerConfig::RESOLVED_CONFIG_ENV.into(), encoded_config);
+        env_vars.insert(
+            MIRRORD_LAYER_INTPROXY_ADDR.into(),
+            intproxy_address.to_string(),
+        );
+
+        Ok((
+            env_vars,
+            Some(proxy_process),
+            matches!(connect_info, AgentConnectInfo::Operator(..)),
+        ))
     }
 
     /// Construct filter and retrieve remote environment from the connected agent using
