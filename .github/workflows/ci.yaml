@@ -360,8 +360,8 @@ jobs:
     needs: [changed_files]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
-      MIRRORD_TESTS_USE_BINARY: ../../target/x86_64-unknown-linux-gnu/debug/mirrord
-      MIRRORD_LAYER_FILE: ../../target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so
+      MIRRORD_TESTS_USE_BINARY: ../../../target/x86_64-unknown-linux-gnu/debug/mirrord
+      MIRRORD_LAYER_FILE: ../../../target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
@@ -738,6 +738,8 @@ jobs:
           target: x86_64-pc-windows-msvc
           toolchain: ${{ env.PINNED_NIGHTLY }}
 
+      - name: build layer-win
+        run: cargo build -p layer-win
       - name: build mirrord
         run: cargo build -p mirrord
       - run: |
