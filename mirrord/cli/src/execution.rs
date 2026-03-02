@@ -219,8 +219,14 @@ impl MirrordExecution {
             match std::env::var(MIRRORD_TEST_INTPROXY_ADDR) {
                 Ok(addr) => (Self::setup_existing_intproxy(addr, config)?, None, false),
                 _ => {
-                    Self::spawn_agent_and_intproxy(config, progress, analytics, mirrord_for_ci)
-                        .await?
+                    // Box the large future to reduce the stack frame of start_internal.
+                    Box::pin(Self::spawn_agent_and_intproxy(
+                        config,
+                        progress,
+                        analytics,
+                        mirrord_for_ci,
+                    ))
+                    .await?
                 }
             };
 
