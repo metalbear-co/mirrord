@@ -8,6 +8,41 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.192.0](https://github.com/metalbear-co/mirrord/tree/3.192.0) - 2026-03-02
+
+
+### Added
+
+- You can now update the configuration and/or image of an existing preview
+  environment session by re-running `preview start` with the same key, target,
+  image registry and image repository.
+  [#1664](https://github.com/metalbear-co/mirrord/issues/1664)
+- `mirrord preview stop` now resolves the given target's container before
+  comparing it to the preview sessions, allowing you to specify, for example,
+  `deployment/foo`, instead of having to spell out the full target, including
+  container. [#1676](https://github.com/metalbear-co/mirrord/issues/1676)
+- The `feature.preview.ttl_mins`/`--ttl` setting for preview environments now
+  accepts the `"infinite"` string value, which makes the session live
+  indefinitely until being manually stopped.
+
+
+### Internal
+
+- Added client implementation config to `MirrordKafkaClientConfig`, and
+  `application.id` sources to `MirrordKafkaTopicsConsumer`.
+- Changed internal proxy first timeout to 15 seconds in layer integration test.
+- Make Detour helper traits and ergonomics fully cross-platform so they work
+  cleanly on Windows, removing Unix/Windows-specific forks.
+
+  Introduce a shared socket helper in layer-lib and unify Unix + Windows socket
+  detours around it as the first real consumer of the cross-platform Detour
+  API.
+- Move `run_command` utility from mirrord-tests to mirrord-test-utils for
+  future exec-based test harness usage
+- Update `CONTRIBUTING.md` with missing dev dependencies: `portfinder` npm
+  package and Argo Rollouts CRD
+- Updated sha256 hash of the manifest retrieved from the new nightly date
+
 ## [3.191.0](https://github.com/metalbear-co/mirrord/tree/3.191.0) - 2026-02-26
 
 
