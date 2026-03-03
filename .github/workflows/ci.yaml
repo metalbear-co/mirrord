@@ -758,11 +758,10 @@ jobs:
       mirrord_release_branch: true
 
   update_config_docs_on_release_branch:
+    # will not prevent ci from passing on failure
     runs-on: ubuntu-24.04
-    # TODO: uncomment the release requirement!
-    # needs: [build_mirrord_on_release_branch]
-    permissions:
-      contents: write
+    env:
+      TEMP_DIR_NAME: temp-docs-dir
     steps:
       - uses: actions/checkout@v4
         with:
@@ -771,26 +770,23 @@ jobs:
         with:
           toolchain: ${{ env.PINNED_NIGHTLY }}
           cache: false
+      - run: mkdir ${{ env.TEMP_DIR_NAME }}
       - name: Generate new GitBook files from our config
-        run: ./scripts/residency.sh
+        run: ./scripts/residency.sh # uses env.TEMP_DIR_NAME
         shell: bash
       - name: Commit to docs branch (syncs with GitBook)
         uses: metalbear-co/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f
         with:
-          folder: docs-configuration
-          # folder: docs-configuration/configuration
-          # target-folder: docs-configuration/configuration
-          # clean-exclude: SUMMARY.md # ensure the only files in the dir are generated and the SUMMARY
+          folder: ${{ env.TEMP_DIR_NAME }}
+          target-folder: configuration
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: docs
+          clean: false # prevent SUMMARY.md in target folder from being removed
           dry-run: true
       - name: Cleanup temp files from script
         continue-on-error: true
         if: ${{ always() }}
-        run: |
-          rm docs-configuration/configuration/temp.md
-          rm docs_0
-          rm docs_1
+        run: rm -rf ${{ env.TEMP_DIR_NAME }}
         shell: bash
 
   # We need some "accummulation" job here because bors fails (timeouts) to
