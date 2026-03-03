@@ -1,15 +1,14 @@
 use std::collections::BTreeMap;
 
 use kube::CustomResource;
-use mirrord_config::{
-    feature::database_branches::{
-        BranchItemCopyConfig, MongodbBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig,
-        PgIamAuthConfig,
-    },
-    target::Target,
+use mirrord_config::feature::database_branches::{
+    BranchItemCopyConfig, MongodbBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig,
+    PgIamAuthConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+use crate::crd::session::SessionTarget;
 
 pub use super::core::{
     BranchDatabasePhase, BranchDatabaseStatus, ConnectionSource, ConnectionSourceKind,
@@ -35,7 +34,7 @@ pub struct BranchDatabaseSpec {
     /// Database name.
     pub database_name: Option<String>,
     /// Target k8s resource to extract connection source info from.
-    pub target: Target,
+    pub target: SessionTarget,
     /// The duration in seconds this branch database will live idling.
     pub ttl_secs: u64,
     /// Database server image version, e.g. "16" for PostgreSQL, "8.0" for MySQL, "7.0" for
