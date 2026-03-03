@@ -910,6 +910,7 @@ mod tests {
         MirrordWorkloadQueueRegistry, SessionCrd,
         db_branching::{
             mongodb::MongodbBranchDatabase, mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
+            unified::BranchDatabase,
         },
         external::MirrordClusterExternalResource,
         kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
@@ -1010,6 +1011,12 @@ mod tests {
 
     #[test]
     #[ignore]
+    fn write_branch_database_crd_yaml() {
+        write_crd_yaml::<BranchDatabase>();
+    }
+
+    #[test]
+    #[ignore]
     fn write_mirrord_policy_crd_yaml() {
         write_crd_yaml::<MirrordPolicy>();
     }
@@ -1094,6 +1101,7 @@ mod tests {
         write_crd_yaml::<PgBranchDatabase>();
         write_crd_yaml::<MysqlBranchDatabase>();
         write_crd_yaml::<MongodbBranchDatabase>();
+        write_crd_yaml::<BranchDatabase>();
         write_crd_yaml::<MirrordPolicy>();
         write_crd_yaml::<MirrordClusterPolicy>();
         write_crd_yaml::<MirrordClusterExternalResource>();

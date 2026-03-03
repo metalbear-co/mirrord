@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use kube::CustomResource;
 use mirrord_config::{
     feature::database_branches::{PgBranchCopyConfig, PgBranchTableCopyConfig, PgIamAuthConfig},
@@ -12,6 +10,7 @@ pub use super::core::{
     BranchDatabasePhase, BranchDatabaseStatus, ConnectionSource, ConnectionSourceKind,
     IamAuthConfig, SessionInfo,
 };
+use super::unified::{ItemCopyConfig, SqlBranchCopyConfig, SqlBranchCopyMode};
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
@@ -37,7 +36,7 @@ pub struct PgBranchDatabaseSpec {
     pub postgres_version: Option<String>,
     /// Options for copying data from source database to the branch.
     #[serde(default)]
-    pub copy: BranchCopyConfig,
+    pub copy: SqlBranchCopyConfig,
     /// IAM authentication configuration for the source database.
     /// Use this when the source database (RDS, Cloud SQL) requires IAM auth instead of passwords.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -71,77 +70,36 @@ impl From<&PgIamAuthConfig> for IamAuthConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct BranchCopyConfig {
-    /// The default copy mode for the branch.
-    pub mode: BranchCopyMode,
-
-    /// An optional list of tables whose schema and data will be copied based on their
-    /// table level copy config. Only compatible with `Empty` and `Schema` copy mode.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tables: Option<BTreeMap<String, TableCopyConfig>>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub enum BranchCopyMode {
-    /// Create an empty database only.
-    Empty,
-    /// Create a database with all tables' schema copied from the source database.
-    Schema,
-    /// Create a database and copy all tables' schema and data from the source database.
-    /// With this copy mode, all table specific copy configs are ignored.
-    All,
-}
-
-impl Default for BranchCopyConfig {
-    fn default() -> Self {
-        BranchCopyConfig {
-            mode: BranchCopyMode::Empty,
-            tables: Default::default(),
-        }
-    }
-}
-
-impl From<PgBranchCopyConfig> for BranchCopyConfig {
+impl From<PgBranchCopyConfig> for SqlBranchCopyConfig {
     fn from(config: PgBranchCopyConfig) -> Self {
         match config {
-            PgBranchCopyConfig::Empty { tables } => BranchCopyConfig {
-                mode: BranchCopyMode::Empty,
-                tables: tables.map(|t| {
+            PgBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Empty,
+                items: tables.map(|t| {
                     t.into_iter()
                         .map(|(name, config)| (name, config.into()))
                         .collect()
                 }),
             },
-            PgBranchCopyConfig::Schema { tables } => BranchCopyConfig {
-                mode: BranchCopyMode::Schema,
-                tables: tables.map(|t| {
+            PgBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Schema,
+                items: tables.map(|t| {
                     t.into_iter()
                         .map(|(name, config)| (name, config.into()))
                         .collect()
                 }),
             },
-            PgBranchCopyConfig::All => BranchCopyConfig {
-                mode: BranchCopyMode::All,
-                tables: None,
+            PgBranchCopyConfig::All => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::All,
+                items: None,
             },
         }
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct TableCopyConfig {
-    /// Data that matches the filter will be copied.
-    /// For PostgreSQL, this filter is a `WHERE` clause that looks like `username = 'alice'`.
-    pub filter: Option<String>,
-}
-
-impl From<PgBranchTableCopyConfig> for TableCopyConfig {
+impl From<PgBranchTableCopyConfig> for ItemCopyConfig {
     fn from(config: PgBranchTableCopyConfig) -> Self {
-        TableCopyConfig {
+        Self {
             filter: config.filter,
         }
     }

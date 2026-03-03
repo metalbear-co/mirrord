@@ -684,6 +684,13 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::ProtocolError(error) => Self::from(error),
             OperatorApiError::ApiKey(fail) => Self::ApiKey(fail),
             OperatorApiError::SerdeJson(fail) => Self::JsonSerializeError(fail),
+            // TODO: this is not a branch specific error need to fix
+            OperatorApiError::TargetResolutionFailed(target) => {
+                Self::OperatorBranchCreationFailed(
+                    OperatorOperation::DbBranching,
+                    format!("failed to resolve target: {target}"),
+                )
+            }
         }
     }
 }
