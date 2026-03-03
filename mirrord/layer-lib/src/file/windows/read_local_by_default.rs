@@ -23,7 +23,8 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r".\.nls$",
         r"venv\.cfg$",
         // Python folder on Windows.
-        r"^/Users/[^/]+/AppData/Local/Programs/Python/",
+        r"^(?i)^\/Users\/[^/]+\/AppData\/Local\/Programs\/Python",
+        r"^(?i)^\/windows\/system32",
     ]
     .iter()
     .map(|s| s.to_string())
