@@ -1,0 +1,4 @@
+root: ./configuration/
+
+structure:
+  summary: SUMMARY.md
