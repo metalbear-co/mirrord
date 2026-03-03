@@ -17,9 +17,13 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-jaq-core = "2.2.1"
-jaq-std = "2.1.2"
-jaq-json = { version = "1.1.3", features = ["serde_json"] }
-serde_json.workspace = true
+jaq-core.workspace = true
+jaq-json = { workspace = true, features = ["serde_json"] }
+jaq-std.workspace = true
+serde_json = {workspace = true, optional = true}
 thiserror = { workspace = true}
-tokio = { workspace = true, features = ["rt"] }
+tokio = { workspace = true, features = ["rt", "time"], optional = true }
+
+[features]
+default = ["eval"]
+eval = ["dep:tokio", "dep:serde_json"]

@@ -1,7 +1,6 @@
 use std::{ops::Deref, time::Duration};
 
 use thiserror::Error;
-use tokio::task::spawn_blocking;
 
 #[derive(Error, Debug)]
 pub enum JqError {
@@ -12,12 +11,14 @@ pub enum JqError {
     },
     #[error("jq filter does not compile. Code: {jq_code}. Compile error: {error}")]
     Compile { jq_code: String, error: String },
+    #[cfg(feature = "eval")]
     #[error("jq filter evaluation failed. Code: {jq_code}. Input: {input}. Error: {error}")]
     Evaluate {
         jq_code: String,
         input: serde_json::Value,
         error: String,
     },
+    #[cfg(feature = "eval")]
     #[error(
         "jq filter evaluation timed out. Code: {jq_code}. Input: {input}. Timeout: {timeout:?}"
     )]
@@ -107,6 +108,7 @@ pub fn compile_jq(code: &str) -> Result<jaq_core::Filter<jaq_core::Native<jaq_js
     })
 }
 
+#[cfg(feature = "eval")]
 pub async fn evaluate_jq(
     jq_code: &str,
     payload: &serde_json::Value,
@@ -115,7 +117,7 @@ pub async fn evaluate_jq(
     let inputs = jaq_core::RcIter::new(core::iter::empty());
     let filter = compile_jq(jq_code)?;
     let owned_json_value = payload.clone();
-    let jaq_run_handle = spawn_blocking(move || {
+    let jaq_run_handle = tokio::task::spawn_blocking(move || {
         let mut out = filter.run((
             jaq_core::Ctx::new([], &inputs),
             jaq_json::Val::from(owned_json_value),
@@ -237,7 +239,9 @@ mod tests {
         ];
 
         let estimated = estimated_string_len(&err);
-        let actual = compiler_error_to_string(err).len();
+        let compile_error_string = compiler_error_to_string(err);
+        println!("{compile_error_string}");
+        let actual = compile_error_string.len();
         assert_eq!(
             estimated, actual,
             "estimated capacity should match actual generated string length"
