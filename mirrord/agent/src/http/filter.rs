@@ -229,7 +229,7 @@ async fn eval_jaq(query: JqQuery, payload: String) -> Result<bool, String> {
 
     let mut handle = tokio::task::spawn_blocking(move || {
         let program = File {
-            code: &*query.into_inner(),
+            code: query.as_str(),
             path: (),
         };
         let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));

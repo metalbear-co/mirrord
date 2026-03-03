@@ -328,10 +328,6 @@ impl JqQuery {
             )
         })
     }
-
-    pub fn into_inner(self) -> String {
-        self.0
-    }
 }
 
 /// HTTP filter for HTTP methods.
