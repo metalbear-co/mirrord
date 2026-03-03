@@ -145,7 +145,6 @@ pub fn config_dir() -> PathBuf {
 /// 2. [`MIRRORD_TEST_INTPROXY_ADDR`] (for `mirrord exec` override)
 /// 3. Optional execution controls (`MIRRORD_CHECK_VERSION`, `MIRRORD_PROGRESS_MODE`)
 /// 4. Given `extra_vars`
-#[allow(unused_variables)]
 pub fn get_env(
     intproxy_addr: SocketAddr,
     extra_vars: Vec<(&str, &str)>,

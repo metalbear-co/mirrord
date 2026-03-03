@@ -213,8 +213,8 @@ impl MirrordExecution {
             remove_proxy_env();
         }
 
-        // spawn agent and intproxy processes, unless MIRRORD_TEST_INTPROXY_ADDR is set and used
-        // instead.
+        // Spawn agent and intproxy processes, unless MIRRORD_TEST_INTPROXY_ADDR is set and used
+        // instead (test-only: skips agent connection and uses an existing intproxy).
         let (mut env_vars, proxy_process, uses_operator) =
             match std::env::var(MIRRORD_TEST_INTPROXY_ADDR) {
                 Ok(addr) => (Self::setup_existing_intproxy(addr, config)?, None, false),
@@ -447,6 +447,12 @@ impl MirrordExecution {
         Ok((execution, proxy_addr))
     }
 
+    /// Sets up environment for using an already-running internal proxy.
+    ///
+    /// Expects `MIRRORD_TEST_INTPROXY_ADDR` to be a valid socket address, encodes the
+    /// resolved config, and returns env vars that point the layer at the given proxy.
+    /// No proxy process is spawned.
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     fn setup_existing_intproxy(
         raw_intproxy_addr: String,
         config: &mut LayerConfig,
@@ -456,6 +462,7 @@ impl MirrordExecution {
                 "invalid {MIRRORD_TEST_INTPROXY_ADDR} value: {e}"
             ))
         })?;
+        warn!("{MIRRORD_TEST_INTPROXY_ADDR} was set, Using existing intproxy {intproxy_address}");
 
         let mut env_vars: HashMap<String, String> = Default::default();
         env_vars.insert(LayerConfig::RESOLVED_CONFIG_ENV.into(), config.encode()?);
@@ -466,6 +473,13 @@ impl MirrordExecution {
         Ok(env_vars)
     }
 
+    /// Spawns the agent and the internal proxy, then returns env vars for the layer.
+    ///
+    /// Establishes the agent connection, validates config against agent capabilities,
+    /// fetches remote env vars (unless configured to load from process), and starts the
+    /// internal proxy as a child process. Returns the environment map, child
+    /// intproxy process handle, and whether the run uses the operator.
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn spawn_agent_and_intproxy<P>(
         config: &mut LayerConfig,
         progress: &mut P,

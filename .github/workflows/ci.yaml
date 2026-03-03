@@ -745,19 +745,15 @@ jobs:
       - name: build layer
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
-        run: cargo build -p mirrord -p mirrord-layer-win
-      - name: mirrord layer unified tests
+        run: cargo build -p mirrord
+      - name: mirrord layer unified integration tests
         run: |
           $ErrorActionPreference = "Stop"
           cargo test -p mirrord-layer-tests --no-default-features
-      - name: mirrord layer tests
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo test -p mirrord-layer-win
       - name: run UT
         run: |
           $ErrorActionPreference = "Stop"
-          cargo test -p mirrord
+          cargo test -p mirrord -p mirrord-layer-win
 
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
   # building concurrently can run faster the release ide tests
