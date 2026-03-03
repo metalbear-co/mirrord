@@ -705,8 +705,27 @@ jobs:
             ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }}
             ghcr.io/metalbear-co/mirrord-cli:latest
 
+  check_for_new_docs:
+    runs-on: ubuntu-24.04
+    outputs:
+      config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+          fetch-depth: 0
+      - name: get config changes since last release
+        id: changed-config-schema
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        with:
+          files: |
+            mirrord-schema.json
+          base_sha: latest
+
   update_config_docs:
     runs-on: ubuntu-24.04
+    needs: check_for_new_docs
+    if: ${{needs.check_for_new_docs.outputs.config_schema_changed == 'true'}}
     permissions:
       contents: write
     env:
