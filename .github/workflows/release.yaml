@@ -705,6 +705,39 @@ jobs:
             ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }}
             ghcr.io/metalbear-co/mirrord-cli:latest
 
+  update_config_docs:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      TEMP_DIR_NAME: temp-docs-dir
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          toolchain: ${{ env.PINNED_NIGHTLY }}
+          cache: false
+      - run: mkdir ${{ env.TEMP_DIR_NAME }}
+      - name: Generate new GitBook files from our config
+        run: ./scripts/residency.sh # uses env.TEMP_DIR_NAME
+        shell: bash
+      - name: Commit to docs branch (syncs with GitBook)
+        uses: metalbear-co/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f
+        with:
+          folder: ${{ env.TEMP_DIR_NAME }}
+          target-folder: configuration
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: docs
+          clean: false # prevent SUMMARY.md in target folder from being removed
+          dry-run: $ {{ github.event_name == 'workflow_dispatch' }} # dry run on manual dispatch
+      - name: Cleanup temp files from script
+        continue-on-error: true
+        if: ${{ always() }}
+        run: rm -rf ${{ env.TEMP_DIR_NAME }}
+        shell: bash
+
   release_gh:
     needs:
       [
