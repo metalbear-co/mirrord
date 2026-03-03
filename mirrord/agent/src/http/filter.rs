@@ -289,7 +289,7 @@ async fn eval_jaq(query: JqQuery, payload: String) -> Result<bool, String> {
     }
 }
 
-/// [`HeaderMap`](hyper::http::header::HeaderMap) entries formatted like `k: v` (format expected by
+/// [`HeaderMap`] entries formatted like `k: v` (format expected by
 /// [`HttpFilter::Header`]). Computed and cached in [`Parts::extensions`] the first time
 /// [`HttpFilter::matches`] is called on [`Parts`].
 #[derive(Clone, Debug)]
