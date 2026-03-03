@@ -237,7 +237,7 @@ mod tests {
         ];
 
         let estimated = estimated_string_len(&err);
-        let actual = compiler_error_to_string(err_for_string).len();
+        let actual = compiler_error_to_string(err).len();
         assert_eq!(
             estimated, actual,
             "estimated capacity should match actual generated string length"
