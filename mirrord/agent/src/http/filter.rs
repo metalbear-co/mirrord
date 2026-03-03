@@ -1,6 +1,7 @@
 use std::{fmt::Debug, io::Read, ops::Not, sync::LazyLock, time::Duration};
 
 use fancy_regex::Regex;
+use http::HeaderMap;
 use hyper::http::request::Parts;
 use jaq_core::{
     Ctx, RcIter,
@@ -108,20 +109,9 @@ impl HttpFilter {
     pub async fn matches<T: Read + Copy>(&self, parts: &mut Parts, body: Option<T>) -> bool {
         match self {
             Self::Header(filter) => {
-                let headers = parts.extensions.get_or_insert_with(|| {
-                    let normalized = parts
-                        .headers
-                        .iter()
-                        .filter_map(|(header_name, header_value)| {
-                            header_value
-                                .to_str()
-                                .ok()
-                                .map(|header_value| format!("{header_name}: {header_value}"))
-                        })
-                        .collect::<Vec<_>>();
-
-                    NormalizedHeaders(normalized)
-                });
+                let headers = parts
+                    .extensions
+                    .get_or_insert_with(|| NormalizedHeaders::from_headers(&parts.headers));
 
                 headers.has_match(filter)
             }
@@ -202,20 +192,9 @@ impl HttpFilter {
                 }
             }
             Self::HeaderJq(filter) => {
-                let headers = parts.extensions.get_or_insert_with(|| {
-                    let normalized = parts
-                        .headers
-                        .iter()
-                        .filter_map(|(header_name, header_value)| {
-                            header_value
-                                .to_str()
-                                .ok()
-                                .map(|header_value| format!("{header_name}: {header_value}"))
-                        })
-                        .collect::<Vec<_>>();
-
-                    NormalizedHeaders(normalized)
-                });
+                let headers = parts
+                    .extensions
+                    .get_or_insert_with(|| NormalizedHeaders::from_headers(&parts.headers));
 
                 for header in headers.0.iter() {
                     match eval_jaq(filter.clone(), header.clone()).await {
@@ -327,6 +306,20 @@ impl NormalizedHeaders {
                 })
                 .unwrap_or_default()
         })
+    }
+
+    fn from_headers(headers: &HeaderMap) -> Self {
+        Self(
+            headers
+                .iter()
+                .filter_map(|(header_name, header_value)| {
+                    header_value
+                        .to_str()
+                        .ok()
+                        .map(|header_value| format!("{header_name}: {header_value}"))
+                })
+                .collect::<Vec<_>>(),
+        )
     }
 }
 
