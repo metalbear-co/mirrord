@@ -1,0 +1,25 @@
+[package]
+name = "mirrord-jaq"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+jaq-core = "2.2.1"
+jaq-std = "2.1.2"
+jaq-json = { version = "1.1.3", features = ["serde_json"] }
+serde_json.workspace = true
+thiserror = { workspace = true}
+tokio = { workspace = true, features = ["rt"] }
