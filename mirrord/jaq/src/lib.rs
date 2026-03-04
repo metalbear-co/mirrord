@@ -1,10 +1,10 @@
-use std::{ops::Deref, time::Duration};
+use std::ops::Deref;
 
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum JqError {
-    #[error("jq filter could not be parsed. Code: {jq_code}.{}", if let Some(error) = error { "Parse error: {error}" } else { "" })]
+    #[error("jq filter could not be parsed. Code: {jq_code}.{}", error.as_ref().map(|e| format!(" Parse error: {e}")).unwrap_or_default())]
     Load {
         jq_code: String,
         error: Option<String>,
@@ -25,7 +25,7 @@ pub enum JqError {
     Timeout {
         jq_code: String,
         input: serde_json::Value,
-        timeout: Duration,
+        timeout: std::time::Duration,
     },
 }
 
@@ -112,7 +112,7 @@ pub fn compile_jq(code: &str) -> Result<jaq_core::Filter<jaq_core::Native<jaq_js
 pub async fn evaluate_jq(
     jq_code: &str,
     payload: &serde_json::Value,
-    timeout_duration: Duration,
+    timeout_duration: std::time::Duration,
 ) -> Result<bool> {
     let inputs = jaq_core::RcIter::new(core::iter::empty());
     let filter = compile_jq(jq_code)?;
