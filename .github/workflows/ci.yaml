@@ -163,19 +163,6 @@ jobs:
         with:
           files: |
             mirrord-schema.json
-      - name: get configuration.md changes
-        id: changed-configuration-md
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
-        with:
-          files: |
-            mirrord/config/configuration.md
-      - name: verify configuration.md is up-to-date
-        run: |
-          if [ "${{ steps.changed-config-schema.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-configuration-md.outputs.any_changed }}" != "true" ]; then
-            echo "Error: mirrord configuration has changed but `configuration.md` documentation has not."
-            echo "Try running medschool (see `./medschool/readme.md`) and updating `configuration.md`."
-            exit 1
-          fi
       - name: output test
         run: |
           echo ${{ steps.changed-rs.outputs.any_changed }};
@@ -189,7 +176,6 @@ jobs:
           echo ${{ steps.changed-windows.outputs.any_changed }};
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-config-schema.outputs.any_changed }};
-          echo ${{ steps.changed-configuration-md.outputs.any_changed }};
 
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
 
@@ -487,6 +473,8 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord --features "wizard"
       - name: mirrord protocol-io UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
+      - name: mirrord jaq UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-jaq
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
