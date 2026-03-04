@@ -20,7 +20,7 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, OutgoingConnMetadataRequest, PortSubscribe,
 };
 use mirrord_layer_lib::{
-    detour::{Bypass, Detour, OptionExt},
+    detour::Detour,
     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
     setup::{LayerSetup, NetworkHookConfig, setup},
@@ -36,7 +36,7 @@ use mirrord_layer_lib::{
         hostname::remote_hostname_string,
         is_socket_managed,
         ops::{ConnectResult, get_last_error, send_to, socket},
-        sockets::socket_kind_from_type,
+        sockets::{SocketDescriptor, socket_kind_from_type},
     },
 };
 use socket2::SockAddr;
@@ -218,14 +218,13 @@ static CLOSE_SOCKET_ORIGINAL: OnceLock<&CloseSocketType> = OnceLock::new();
 unsafe extern "system" fn socket_detour(af: INT, type_: INT, protocol: INT) -> SOCKET {
     // Call the original function to create the socket
     let original = SOCKET_ORIGINAL.get().unwrap();
-    let call_original = || -> Detour<SOCKET> {
+    let call_original = || -> Detour<SocketDescriptor> {
         let socket_result = unsafe { original(af, type_, protocol) };
         if socket_result == INVALID_SOCKET {
-            Err(std::io::Error::from_raw_os_error(get_last_error()))
+            Detour::Error(std::io::Error::from_raw_os_error(get_last_error()).into())
         } else {
-            Ok(socket_result)
+            Detour::Success(socket_result)
         }
-        .into()
     };
     socket(call_original, af, type_, protocol)
         .unwrap_or_bypass_with(|_| unsafe { original(af, type_, protocol) })
@@ -242,15 +241,14 @@ unsafe extern "system" fn wsa_socket_detour(
     dwFlags: u32,
 ) -> SOCKET {
     let original = WSA_SOCKET_ORIGINAL.get().unwrap();
-    let call_original = || -> Detour<SOCKET> {
+    let call_original = || -> Detour<SocketDescriptor> {
         let socket_result =
             unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
         if socket_result == INVALID_SOCKET {
-            Err(std::io::Error::from_raw_os_error(get_last_error()))
+            Detour::Error(std::io::Error::from_raw_os_error(get_last_error()).into())
         } else {
-            Ok(socket_result)
+            Detour::Success(socket_result)
         }
-        .into()
     };
     socket(call_original, af, socket_type, protocol).unwrap_or_bypass_with(|_| unsafe {
         original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags)
@@ -271,11 +269,10 @@ unsafe extern "system" fn wsa_socket_w_detour(
         let socket_result =
             unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
         if socket_result == INVALID_SOCKET {
-            Err(std::io::Error::from_raw_os_error(get_last_error()))
+            Detour::Error(std::io::Error::from_raw_os_error(get_last_error()).into())
         } else {
-            Ok(socket_result)
+            Detour::Success(socket_result)
         }
-        .into()
     };
     socket(call_original, af, socket_type, protocol).unwrap_or_bypass_with(|_| unsafe {
         original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags)
