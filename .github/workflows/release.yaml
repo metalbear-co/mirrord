@@ -1067,7 +1067,7 @@ jobs:
           Write-Host "Successfully updated WinGet manifest"
 
   update_latest:
-    needs: release_homebrew
+    needs: [release_homebrew, check_for_new_docs]
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch'
     permissions:

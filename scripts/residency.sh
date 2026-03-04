@@ -33,11 +33,15 @@ if ! cargo run -p medschool -- --input ./mirrord/config/src --output "$TEMP_FILE
 then
     # flaked once, rerun
     echo "\nresidency: rerunning medschool once (flake)"
-    cargo run -p medschool -- --input ./mirrord/config/src --output "$TEMP_FILE_PATH"
+    cargo run -p medschool -- --input ./mirrord/config/src --output "$TEMP_FILE_PATH" || exit
 fi
 
+# from now on, if any command fails abort the script
+set -e
+
 # now all operations occur from the temp dir
-cd "$TEMP_DIR_NAME" || exit
+cd "$TEMP_DIR_NAME"
+# if csplit fails unexpectedly: read comment above (starting "Thing I learned")
 csplit -s -z -f docs_ -n 1 ./temp.md '/^# /' '{*}'
 rm ./temp.md
 echo "\nresidency: docs split successfully"
