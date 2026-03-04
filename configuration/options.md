@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-02-27T00:00:00.000Z
+lastmod: 2026-03-04T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -2622,6 +2622,8 @@ The image must be pre-built and pushed to a registry accessible by the cluster.
 
 How long (in minutes) the preview session is allowed to live after creation.
 The operator will terminate the session when this time elapses.
+
+Set to `"infinite"` to disable TTL.
 
 ### feature.split_queues {#feature-split_queues}
 
