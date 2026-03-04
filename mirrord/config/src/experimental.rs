@@ -100,6 +100,8 @@ pub struct ExperimentalConfig {
     ///
     /// Useful if you need file remapping and your application uses `rename`, i.e. `php-fpm`,
     /// `twig`, to create and rename temporary files.
+    ///
+    /// DEPRECATED, WILL BE REMOVED
     #[config(default = true)]
     pub hook_rename: bool,
 
@@ -111,6 +113,8 @@ pub struct ExperimentalConfig {
     /// enabled.
     ///
     /// Defaults to `true`
+    ///
+    /// DEPRECATED, WILL BE REMOVED
     #[config(default = true)]
     pub dns_permission_error_fatal: bool,
 
@@ -119,6 +123,10 @@ pub struct ExperimentalConfig {
     /// Forces hooking all instances of the connect function.
     /// In very niche cases the connect function has multiple exports and this flag
     /// makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>
+    ///
+    /// Defaults to `true`
+    ///
+    /// DEPRECATED, WILL BE REMOVED
     #[config(default = true)]
     pub force_hook_connect: bool,
 
