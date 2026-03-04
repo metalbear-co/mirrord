@@ -29,9 +29,9 @@ use crate::{
                 ConnectionSource as CrdConnectionSource, IamAuthConfig as CrdIamAuthConfig,
             },
             unified::{
-                BranchDatabase, BranchDatabaseSpec, ItemCopyConfig,
-                MongodbBranchCopyConfig, MongodbBranchCopyMode, SqlBranchCopyConfig,
-                SqlBranchCopyMode,
+                BranchDatabase, BranchDatabaseSpec, DialectConfig, ItemCopyConfig,
+                MongodbBranchCopyConfig, MongodbBranchCopyMode, MongodbOptions,
+                MysqlOptions, PostgresOptions, SqlBranchCopyConfig, SqlBranchCopyMode,
             },
         },
         session::SessionTarget,
@@ -396,15 +396,14 @@ impl BranchParams {
             }
         };
 
-        let spec = BranchDatabaseSpec::Postgres {
+        let spec = BranchDatabaseSpec {
             id: id.to_string(),
             connection_source,
             database_name: config.base.name.clone(),
             target: session_target.clone(),
             ttl_secs: config.base.ttl_secs,
-            image_version: config.base.version.clone(),
-            copy,
-            iam_auth,
+            version: config.base.version.clone(),
+            dialect: DialectConfig::Postgres(Box::new(PostgresOptions { copy, iam_auth })),
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -446,14 +445,14 @@ impl BranchParams {
             }
         };
 
-        let spec = BranchDatabaseSpec::Mysql {
+        let spec = BranchDatabaseSpec {
             id: id.to_string(),
             connection_source,
             database_name: config.base.name.clone(),
             target: session_target.clone(),
             ttl_secs: config.base.ttl_secs,
-            image_version: config.base.version.clone(),
-            copy,
+            version: config.base.version.clone(),
+            dialect: DialectConfig::Mysql(Box::new(MysqlOptions { copy })),
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -489,14 +488,14 @@ impl BranchParams {
             },
         };
 
-        let spec = BranchDatabaseSpec::Mongodb {
+        let spec = BranchDatabaseSpec {
             id: id.to_string(),
             connection_source,
             database_name: config.base.name.clone(),
             target: session_target.clone(),
             ttl_secs: config.base.ttl_secs,
-            image_version: config.base.version.clone(),
-            copy,
+            version: config.base.version.clone(),
+            dialect: DialectConfig::Mongodb(Box::new(MongodbOptions { copy })),
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
