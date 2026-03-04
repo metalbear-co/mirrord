@@ -210,38 +210,6 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
     )))
 }
 
-/// Register a new socket with the unified SOCKETS collection
-pub fn register_socket(socket: SocketDescriptor, domain: i32, socket_type: i32, protocol: i32) {
-    let kind = match socket_kind_from_type(socket_type) {
-        Ok(kind) => kind,
-        Err(e) => {
-            tracing::warn!("Failed to create socket kind: {}", e);
-            return;
-        }
-    };
-
-    let user_socket = UserSocket::new(
-        domain,
-        socket_type,
-        protocol,
-        SocketState::Initialized,
-        kind,
-    );
-
-    let mut sockets = match SOCKETS.lock() {
-        Ok(sockets) => sockets,
-        Err(poisoned) => {
-            tracing::warn!(
-                "SocketManager: sockets mutex was poisoned during registration, attempting recovery"
-            );
-            poisoned.into_inner()
-        }
-    };
-
-    sockets.insert(socket, Arc::new(user_socket));
-    tracing::info!("SocketManager: Registered socket {} with mirrord", socket);
-}
-
 /// Check if a socket is managed by mirrord
 pub fn is_socket_managed(socket: SocketDescriptor) -> bool {
     SOCKETS
