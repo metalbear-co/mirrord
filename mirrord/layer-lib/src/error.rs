@@ -28,7 +28,9 @@ use tracing::{error, info};
 #[cfg(windows)]
 use winapi::shared::winerror::{WSAHOST_NOT_FOUND, WSANO_RECOVERY, WSATRY_AGAIN};
 
-use crate::{detour::Bypass, graceful_exit, proxy_connection::ProxyError, setup::setup};
+use crate::{
+    graceful_exit, proxy_connection::ProxyError, setup::setup, socket::sockets::SocketDescriptor,
+};
 
 mod ignore_codes {
     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
@@ -66,20 +68,8 @@ mod ignore_codes {
 /// Error types for connect operations
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Address conversion error")]
-    AddressConversion,
-    #[error("Proxy request failed: {0}")]
-    ProxyRequest(String),
     #[error("Fallback to original connection")]
     Fallback,
-    #[error("Disabled outgoing connection")]
-    DisabledOutgoing(i64),
-    #[error("Bypass port: {0}")]
-    BypassPort(u16),
-    #[error("Parameter missing: {0}")]
-    ParameterMissing(String),
     #[error("Address unreachable")]
     AddressUnreachable(String),
 }
@@ -217,7 +207,7 @@ pub enum HookError {
     BincodeEncode(#[from] bincode::error::EncodeError),
 
     #[error("mirrord-layer: Socket not found `{0}`!")]
-    SocketNotFound(i64),
+    SocketNotFound(SocketDescriptor),
 
     #[error("mirrord-layer: Managed Socket not found on address `{0}`!")]
     ManagedSocketNotFound(SocketAddr),
@@ -233,16 +223,6 @@ pub enum HookError {
 
     #[error("mirrord-layer: Hostname resolution failed with `{0}`!")]
     HostnameResolveError(#[from] HostnameResolveError),
-
-    #[error("mirrord-layer: Hook bypassed")]
-    Bypass(Bypass),
-}
-
-// mirrord/layer-lib/src/error.rs
-impl From<Bypass> for HookError {
-    fn from(bypass: Bypass) -> Self {
-        HookError::Bypass(bypass)
-    }
 }
 
 /// Errors internal to mirrord-layer.
@@ -448,8 +428,6 @@ fn get_platform_errno(fail: HookError) -> i32 {
         HookError::LayoutError(_) => libc::EFAULT,
         HookError::SendToError(_) => libc::EFAULT,
         HookError::HostnameResolveError(_) => libc::EFAULT,
-        // Note: temporary mapping, will be removed once Detour is migrated to windows
-        HookError::Bypass(_) => libc::ENOTSUP,
     }
 }
 
@@ -525,8 +503,6 @@ fn get_platform_errno(fail: HookError) -> u32 {
         HookError::LayoutError(_) => WSAEFAULT,
         HookError::SendToError(_) => WSAEFAULT,
         HookError::HostnameResolveError(_) => WSAEFAULT,
-        // Note: temporary mapping, will be removed once Detour is migrated to windows
-        HookError::Bypass(_) => WSAEPROTONOSUPPORT,
     }
 }
 

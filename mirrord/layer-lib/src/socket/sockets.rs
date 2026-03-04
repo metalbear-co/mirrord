@@ -26,8 +26,7 @@ use winapi::{
 
 use super::{SocketKind, SocketState, UserSocket};
 use crate::{
-    detour::Bypass,
-    error::{HookError, HookResult},
+    detour::{Bypass, Detour},
     setup::setup,
 };
 
@@ -113,16 +112,6 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
             .unwrap_or_default()
     });
 
-/// Helper function to safely convert socket descriptors to i64 for error handling and logging
-pub fn socket_descriptor_to_i64(socket: SocketDescriptor) -> i64 {
-    socket as i64
-}
-
-/// Helper function to convert i64 back to SocketDescriptor (for cases where it's needed)
-pub fn i64_to_socket_descriptor(value: i64) -> SocketDescriptor {
-    value as SocketDescriptor
-}
-
 // Helper function to convert socket types to SocketKind
 pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
     if (socket_type & SOCK_STREAM) == SOCK_STREAM {
@@ -144,14 +133,10 @@ pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
 /// ```ignore
 /// let user_socket = match SOCKETS.lock()?.remove(&sockfd) {
 ///     Some(socket) => socket,
-///     None => match reconstruct_user_socket(sockfd) {
-///         Ok(socket) => socket,
-///         Err(HookError::Bypass(bypass)) => return Detour::Bypass(bypass),
-///         Err(error) => return Detour::Error(error),
-///     },
+///     None => reconstruct_user_socket(sockfd)?
 /// };
 /// ```
-pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserSocket>> {
+pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> Detour<Arc<UserSocket>> {
     // Here we just recreate `UserSocket` using domain and type fetched from the descriptor
     // we have.
     let (domain, type_) = {
@@ -163,7 +148,7 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
                 .map(|family| family as i32)
                 .unwrap_or(-1);
             if domain != libc::AF_INET && domain != libc::AF_UNIX {
-                return Err(HookError::Bypass(Bypass::Domain(domain)));
+                return Detour::Bypass(Bypass::Domain(domain));
             }
             // I really hate it, but nix seems to really make this API bad :(
             let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
@@ -186,13 +171,14 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
                 )
             };
             if result == SOCKET_ERROR {
-                return Err(HookError::from(io::Error::last_os_error()));
+                return Detour::Error(io::Error::last_os_error().into());
             }
 
             let proto_info = unsafe { proto_info.assume_init() };
             let domain = proto_info.iAddressFamily;
+            // currently only support reconstruction of AF_INET sockets
             if domain != AF_INET {
-                return Err(HookError::Bypass(Bypass::Domain(domain)));
+                return Detour::Bypass(Bypass::Domain(domain));
             }
 
             let socket_type = proto_info.iSocketType;
@@ -200,8 +186,8 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
         }
     };
 
-    let kind = socket_kind_from_type(type_).map_err(|_| HookError::Bypass(Bypass::Type(type_)))?;
-    Ok(Arc::new(UserSocket::new(
+    let kind = SocketKind::try_from(type_)?;
+    Detour::Success(Arc::new(UserSocket::new(
         domain,
         type_,
         0,
