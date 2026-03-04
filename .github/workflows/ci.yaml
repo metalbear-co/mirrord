@@ -473,6 +473,8 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord --features "wizard"
       - name: mirrord protocol-io UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
+      - name: mirrord jaq UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-jaq
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}

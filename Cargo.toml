@@ -187,6 +187,9 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 # Used by `layer-macro`, `config-derive`.
 quote = "1"
 
+# Used by `jaq` tests.
+mirrord-test-macros = { path = "mirrord/test-macros" }
+
 # Used by `console`, `cli`.
 miette = "7"
 
