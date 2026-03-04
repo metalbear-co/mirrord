@@ -102,7 +102,10 @@ pub struct ExperimentalConfig {
     /// `twig`, to create and rename temporary files.
     ///
     /// DEPRECATED, WILL BE REMOVED
-    #[config(default = true)]
+    #[config(
+        default = true,
+        deprecated = "`hook_rename` is depcrecated and is default to true."
+    )]
     pub hook_rename: bool,
 
     /// ### _experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}
@@ -115,7 +118,10 @@ pub struct ExperimentalConfig {
     /// Defaults to `true`
     ///
     /// DEPRECATED, WILL BE REMOVED
-    #[config(default = true)]
+    #[config(
+        default = true,
+        deprecated = "`dns_permission_error_fatal` is depcrecated and is default to true."
+    )]
     pub dns_permission_error_fatal: bool,
 
     /// ### _experimental_ force_hook_connect {#experimental-force_hook_connect}
@@ -127,7 +133,10 @@ pub struct ExperimentalConfig {
     /// Defaults to `true`
     ///
     /// DEPRECATED, WILL BE REMOVED
-    #[config(default = true)]
+    #[config(
+        default = true,
+        deprecated = "`force_hook_connect` is depcrecated and is default to true."
+    )]
     pub force_hook_connect: bool,
 
     /// ### _experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}

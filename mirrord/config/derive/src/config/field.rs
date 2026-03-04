@@ -102,8 +102,16 @@ impl ConfigField {
             .as_ref()
             .map(|rename| quote! { #[serde(rename = #rename)] });
 
+        let deprecated = flags.deprecated.as_ref().map(|note| {
+            quote! {
+                #[allow(depcrecated)]
+                #[deprecated(note = #note)]
+            }
+        });
+
         quote! {
             #(#docs)*
+            #deprecated
             #rename
             #vis #ident: Option<#target>
         }
