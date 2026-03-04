@@ -1,7 +1,6 @@
 //! Utility functions for Windows socket operations
 use std::{alloc::Layout, convert::TryFrom, mem, net::IpAddr, ptr};
 
-use mirrord_protocol::error::{DnsLookupError, ResolveErrorKindInternal, ResponseError};
 use winapi::{
     shared::{
         minwindef::INT,
@@ -12,7 +11,7 @@ use winapi::{
 };
 
 use crate::{
-    error::{AddrInfoError, HookError, HookResult},
+    error::{HookError, HookResult},
     unsafe_alloc,
 };
 
@@ -33,7 +32,7 @@ pub trait WindowsAddrInfo: Sized {
     /// - Implementations must zero/initialize auxiliary fields (`ai_flags`, `ai_socktype`,
     ///   `ai_protocol`, and `ai_next`) so the caller can rely on deterministic defaults before
     ///   invoking [`WindowsAddrInfo::fill`] or [`WindowsAddrInfo::set_next`].
-    unsafe fn alloc() -> Result<*mut Self, AddrInfoError>;
+    unsafe fn alloc() -> HookResult<*mut Self>;
 
     /// Fill the structure with the given parameters
     ///
@@ -62,7 +61,7 @@ pub trait WindowsAddrInfo: Sized {
     unsafe fn set_next(ptr: *mut Self, next: *mut Self);
 
     /// Convert a string to the appropriate canonical name type
-    fn string_to_canonname(s: String) -> Result<Self::CanonName, AddrInfoError>;
+    fn string_to_canonname(s: String) -> HookResult<Self::CanonName>;
 
     /// Get null canonical name
     fn null_canonname() -> Self::CanonName;
@@ -110,8 +109,8 @@ pub trait WindowsAddrInfo: Sized {
 impl WindowsAddrInfo for ADDRINFOA {
     type CanonName = *mut i8;
 
-    unsafe fn alloc() -> Result<*mut Self, AddrInfoError> {
-        let ptr = unsafe_alloc!(ADDRINFOA, AddrInfoError::AllocationFailed)?;
+    unsafe fn alloc() -> HookResult<*mut Self> {
+        let ptr = unsafe_alloc!(ADDRINFOA, HookError::NullPointer)?;
         unsafe {
             (*ptr).ai_flags = 0;
             (*ptr).ai_socktype = SOCK_STREAM;
@@ -142,12 +141,9 @@ impl WindowsAddrInfo for ADDRINFOA {
         }
     }
 
-    fn string_to_canonname(s: String) -> Result<Self::CanonName, AddrInfoError> {
+    fn string_to_canonname(s: String) -> HookResult<Self::CanonName> {
         use std::ffi::CString;
-        match CString::new(s) {
-            Ok(cstr) => Ok(cstr.into_raw()),
-            Err(_) => Err(AddrInfoError::NullPointer),
-        }
+        Ok(CString::new(s)?.into_raw())
     }
 
     fn null_canonname() -> Self::CanonName {
@@ -190,8 +186,8 @@ impl WindowsAddrInfo for ADDRINFOA {
 impl WindowsAddrInfo for ADDRINFOW {
     type CanonName = *mut u16;
 
-    unsafe fn alloc() -> Result<*mut Self, AddrInfoError> {
-        let ptr = unsafe_alloc!(ADDRINFOW, AddrInfoError::AllocationFailed)?;
+    unsafe fn alloc() -> HookResult<*mut Self> {
+        let ptr = unsafe_alloc!(ADDRINFOW, HookError::NullPointer)?;
         unsafe {
             (*ptr).ai_flags = 0;
             (*ptr).ai_socktype = SOCK_STREAM;
@@ -222,12 +218,12 @@ impl WindowsAddrInfo for ADDRINFOW {
         }
     }
 
-    fn string_to_canonname(s: String) -> Result<Self::CanonName, AddrInfoError> {
+    fn string_to_canonname(s: String) -> HookResult<Self::CanonName> {
         let wide: Vec<u16> = s.encode_utf16().chain(Some(0)).collect();
-        let layout = Layout::array::<u16>(wide.len()).map_err(AddrInfoError::LayoutError)?;
+        let layout = Layout::array::<u16>(wide.len())?;
         let ptr = unsafe { std::alloc::alloc(layout) as *mut u16 };
         if ptr.is_null() {
-            return Err(AddrInfoError::NullPointer);
+            return Err(HookError::NullPointer);
         }
         unsafe {
             std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
@@ -357,10 +353,7 @@ impl<T: WindowsAddrInfo> TryFrom<Vec<(String, IpAddr)>> for ManagedAddrInfo<T> {
 
     fn try_from(records: Vec<(String, IpAddr)>) -> HookResult<Self> {
         if records.is_empty() {
-            return Err(ResponseError::DnsLookup(DnsLookupError {
-                kind: ResolveErrorKindInternal::NoRecordsFound(0),
-            })
-            .into());
+            return Err(HookError::DNSNoName);
         }
 
         let mut first_addrinfo: *mut T = ptr::null_mut();
@@ -373,8 +366,7 @@ impl<T: WindowsAddrInfo> TryFrom<Vec<(String, IpAddr)>> for ManagedAddrInfo<T> {
             // Parse the IP address and create sockaddr
             let (sockaddr_ptr, sockaddr_len, family) = match ip {
                 IpAddr::V4(ipv4) => {
-                    let sockaddr_in_ptr =
-                        unsafe_alloc!(SOCKADDR_IN, AddrInfoError::AllocationFailed)?;
+                    let sockaddr_in_ptr = unsafe_alloc!(SOCKADDR_IN, HookError::NullPointer)?;
 
                     unsafe {
                         (*sockaddr_in_ptr).sin_family = AF_INET as u16;
@@ -391,8 +383,7 @@ impl<T: WindowsAddrInfo> TryFrom<Vec<(String, IpAddr)>> for ManagedAddrInfo<T> {
                     )
                 }
                 IpAddr::V6(ipv6) => {
-                    let sockaddr_in6_ptr =
-                        unsafe_alloc!(SOCKADDR_IN6, AddrInfoError::AllocationFailed)?;
+                    let sockaddr_in6_ptr = unsafe_alloc!(SOCKADDR_IN6, HookError::NullPointer)?;
 
                     unsafe {
                         (*sockaddr_in6_ptr).sin6_family = AF_INET6 as u16;

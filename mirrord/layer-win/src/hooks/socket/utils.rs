@@ -9,7 +9,7 @@ use std::{
 };
 
 use mirrord_layer_lib::{
-    error::{AddrInfoError, HookError, HookResult},
+    error::{HookError, HookResult},
     socket::SocketAddrExt,
     unsafe_alloc,
 };

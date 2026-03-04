@@ -63,22 +63,6 @@ mod ignore_codes {
     }
 }
 
-/// Error types for connect operations
-#[derive(Debug, thiserror::Error)]
-pub enum AddrInfoError {
-    #[error("Null pointer found")]
-    NullPointer,
-    #[error("Failed to allocate memory for address info")]
-    AllocationFailed,
-    #[error("Failed to allocate memory for layout")]
-    LayoutError(#[from] std::alloc::LayoutError),
-    #[error("Should use local DNS resolution for {0}")]
-    ResolveDisabled(String),
-    #[error("DNS lookup failed")]
-    LookupFailed(#[from] std::io::Error),
-    #[error("No addresses in DNS response")]
-    LookupEmpty,
-}
 
 /// Error types for connect operations
 #[derive(Debug, thiserror::Error)]
@@ -242,8 +226,8 @@ pub enum HookError {
     #[error("mirrord-layer: Managed Socket not found on address `{0}`!")]
     ConnectError(#[from] ConnectError),
 
-    #[error("mirrord-layer: Address resolution failed with `{0}`!")]
-    AddrInfoError(#[from] AddrInfoError),
+    #[error("Failed to allocate memory for layout")]
+    LayoutError(#[from] std::alloc::LayoutError),
 
     #[error("mirrord-layer: SendTo failed with `{0}`!")]
     SendToError(#[from] SendToError),
@@ -462,7 +446,7 @@ fn get_platform_errno(fail: HookError) -> i32 {
         HookError::SocketNotFound(_) => libc::EBADF,
         HookError::ManagedSocketNotFound(_) => libc::EBADF,
         HookError::ConnectError(_) => libc::EFAULT,
-        HookError::AddrInfoError(_) => libc::EFAULT,
+        HookError::LayoutError(_) => libc::EFAULT,
         HookError::SendToError(_) => libc::EFAULT,
         HookError::HostnameResolveError(_) => libc::EFAULT,
         // Note: temporary mapping, will be removed once Detour is migrated to windows
@@ -539,7 +523,7 @@ fn get_platform_errno(fail: HookError) -> u32 {
         HookError::SocketNotFound(_) => WSAEBADF,
         HookError::ManagedSocketNotFound(_) => WSAEBADF,
         HookError::ConnectError(_) => WSAEFAULT,
-        HookError::AddrInfoError(_) => WSAEFAULT,
+        HookError::LayoutError(_) => WSAEFAULT,
         HookError::SendToError(_) => WSAEFAULT,
         HookError::HostnameResolveError(_) => WSAEFAULT,
         // Note: temporary mapping, will be removed once Detour is migrated to windows
