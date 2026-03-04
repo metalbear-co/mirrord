@@ -104,7 +104,7 @@ pub struct ExperimentalConfig {
     /// DEPRECATED, WILL BE REMOVED
     #[config(
         default = true,
-        deprecated = "`hook_rename` is depcrecated and is default to true."
+        deprecated = "`hook_rename` is deprecated and is default to true."
     )]
     pub hook_rename: bool,
 
@@ -120,7 +120,7 @@ pub struct ExperimentalConfig {
     /// DEPRECATED, WILL BE REMOVED
     #[config(
         default = true,
-        deprecated = "`dns_permission_error_fatal` is depcrecated and is default to true."
+        deprecated = "`dns_permission_error_fatal` is deprecated and is default to true."
     )]
     pub dns_permission_error_fatal: bool,
 
@@ -135,7 +135,7 @@ pub struct ExperimentalConfig {
     /// DEPRECATED, WILL BE REMOVED
     #[config(
         default = true,
-        deprecated = "`force_hook_connect` is depcrecated and is default to true."
+        deprecated = "`force_hook_connect` is deprecated and is default to true."
     )]
     pub force_hook_connect: bool,
 

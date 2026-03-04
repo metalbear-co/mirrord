@@ -103,10 +103,7 @@ impl ConfigField {
             .map(|rename| quote! { #[serde(rename = #rename)] });
 
         let deprecated = flags.deprecated.as_ref().map(|note| {
-            quote! {
-                #[allow(depcrecated)]
-                #[deprecated(note = #note)]
-            }
+            quote! { #[deprecated(note = #note)] }
         });
 
         quote! {
