@@ -63,7 +63,6 @@ mod ignore_codes {
     }
 }
 
-
 /// Error types for connect operations
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
