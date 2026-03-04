@@ -8,6 +8,20 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.192.1](https://github.com/metalbear-co/mirrord/tree/3.192.1) - 2026-03-04
+
+
+### Internal
+
+- Added a release workflow step to build and push the latest config docs to the
+  docs branch.
+  If there were no schema changes since the "latest" tag, the step will not
+  run.
+  If the workflow was manually dispatched, it will do a dry run and not push
+  changes.
+- Don't use jaq-all, expose jaq utils in the mirrord-jaq crate to reuse in the
+  operator.
+
 ## [3.192.0](https://github.com/metalbear-co/mirrord/tree/3.192.0) - 2026-03-02
 
 
