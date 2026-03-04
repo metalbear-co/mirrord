@@ -750,7 +750,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: docs
           clean: false # prevent SUMMARY.md in target folder from being removed
-          dry-run: $ {{ github.event_name == 'workflow_dispatch' }} # dry run on manual dispatch
+          dry-run: ${{ github.event_name == 'workflow_dispatch' }} # dry run on manual dispatch
       - name: Cleanup temp files from script
         continue-on-error: true
         if: ${{ always() }}
