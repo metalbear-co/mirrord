@@ -253,7 +253,7 @@ pub enum ConnectionSourceType {
 }
 
 /// Connection parameters specified as individual environment variable names.
-/// The `type` field is optional -- when omitted, the operator auto-detects
+/// The `type` field is optional - when omitted, the operator auto-detects
 /// whether the variable comes from `env` or `envFrom` on the target pod.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub struct ConnectionParamsConfig {
