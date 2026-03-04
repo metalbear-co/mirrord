@@ -4959,7 +4959,7 @@ dependencies = [
  "jaq-core",
  "jaq-json",
  "jaq-std",
- "rstest",
+ "mirrord-test-macros",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
@@ -5222,6 +5222,15 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "which",
+]
+
+[[package]]
+name = "mirrord-test-macros"
+version = "3.192.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]

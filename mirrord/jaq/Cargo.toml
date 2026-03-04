@@ -25,7 +25,7 @@ thiserror = { workspace = true}
 tokio = { workspace = true, features = ["rt", "time"], optional = true }
 
 [dev-dependencies]
-rstest = { workspace = true }
+mirrord-test-macros.workspace = true
 
 [features]
 default = ["eval"]
