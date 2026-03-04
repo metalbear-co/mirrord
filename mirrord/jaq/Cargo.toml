@@ -24,6 +24,9 @@ serde_json = {workspace = true, optional = true}
 thiserror = { workspace = true}
 tokio = { workspace = true, features = ["rt", "time"], optional = true }
 
+[dev-dependencies]
+rstest = { workspace = true }
+
 [features]
 default = ["eval"]
 eval = ["dep:tokio", "dep:serde_json"]

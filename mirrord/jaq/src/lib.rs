@@ -193,6 +193,7 @@ impl AsRef<str> for VerifiedJqString {
 #[cfg(test)]
 mod tests {
     use jaq_core::compile::Undefined;
+    use rstest::rstest;
 
     use super::*;
 
@@ -259,6 +260,83 @@ mod tests {
         assert_eq!(
             estimated_string_len(&minimal_err),
             compiler_error_to_string(minimal_err).len()
+        );
+    }
+
+    #[cfg(feature = "eval")]
+    #[rstest]
+    #[timeout(std::time::Duration::from_secs(10))]
+    #[tokio::test]
+    async fn test_jq_evaluation_true() {
+        let jq_code = ".[] | select(.snow > 25) | test(.wind > 10)";
+        let payload = serde_json::json!([
+            {"snow": 10, "wind": 5},
+            {"snow": 30, "wind": 15},
+            {"snow": 20, "wind": 10}
+        ]);
+
+        let result = evaluate_jq(jq_code, &payload, std::time::Duration::from_millis(500))
+            .await
+            .expect("JQ evaluation failed");
+        assert!(
+            result,
+            "Wrong jq evaluation: expected to find a match but got false"
+        );
+    }
+
+    #[cfg(feature = "eval")]
+    #[rstest]
+    #[timeout(std::time::Duration::from_secs(10))]
+    #[tokio::test]
+    async fn test_jq_evaluation_false() {
+        let jq_code = ".[] | select(.snow > 25) | test(.wind > 20)";
+        let payload = serde_json::json!([
+            {"snow": 10, "wind": 5},
+            {"snow": 30, "wind": 15},
+            {"snow": 20, "wind": 10}
+        ]);
+
+        let result = evaluate_jq(jq_code, &payload, std::time::Duration::from_millis(500))
+            .await
+            .expect("JQ evaluation failed");
+        assert!(
+            !result,
+            "Wrong jq evaluation: expected not to find a match
+         but got true"
+        );
+    }
+
+    #[cfg(feature = "eval")]
+    #[rstest]
+    #[timeout(std::time::Duration::from_secs(10))]
+    #[tokio::test]
+    async fn test_jq_evaluation_timeout() {
+        let jq_code = "def infinite_loop: infinite_loop; infinite_loop";
+        let payload = serde_json::json!({});
+
+        assert!(
+            matches!(
+                evaluate_jq(jq_code, &payload, std::time::Duration::from_secs(1)).await,
+                Err(JqError::Timeout { .. })
+            ),
+            "Expected jq evaluation to timeout but it didn't"
+        );
+    }
+
+    #[cfg(feature = "eval")]
+    #[rstest]
+    #[timeout(std::time::Duration::from_secs(10))]
+    #[tokio::test]
+    async fn test_jq_evaluation_failed() {
+        let jq_code = "def error_filter: error(\"This filter always errors\"); error_filter";
+        let payload = serde_json::json!({});
+
+        assert!(
+            matches!(
+                evaluate_jq(jq_code, &payload, std::time::Duration::from_secs(1)).await,
+                Err(JqError::Evaluate { .. })
+            ),
+            "Expected jq evaluation to crash but it didn't"
         );
     }
 }
