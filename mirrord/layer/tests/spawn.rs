@@ -4,6 +4,8 @@
 use std::{collections::HashSet, path::Path, time::Duration};
 
 #[cfg(not(target_os = "macos"))]
+use mirrord_protocol::file::MetadataInternal;
+#[cfg(not(target_os = "macos"))]
 use mirrord_protocol::file::XstatResponse;
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, FileRequest, FileResponse,
@@ -67,7 +69,10 @@ async fn node_spawn(dylib_path: &Path) {
                 intproxy
                     .send(DaemonMessage::File(FileResponse::Xstat(Ok(
                         XstatResponse {
-                            metadata: Default::default(),
+                            metadata: MetadataInternal {
+                                mode: 0o100000,
+                                ..Default::default()
+                            },
                         },
                     ))))
                     .await
