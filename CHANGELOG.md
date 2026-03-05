@@ -8,6 +8,18 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [1.193.0](https://github.com/metalbear-co/mirrord/tree/1.193.0) - 2026-03-05
+
+
+### Changed
+
+- Make db branching type to be optional, now it always checks for env and
+  env_from.
+- Updated the `experimental` section of the mirrord config:
+  1. Marked `hook_rename` as deprecated.
+  2. Marked `dns_permission_error_fatal` as deprecated.
+  3. Marked `force_hook_connect` as deprecated.
+
 ## [3.192.1](https://github.com/metalbear-co/mirrord/tree/3.192.1) - 2026-03-04
 
 
