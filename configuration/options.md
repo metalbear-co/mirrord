@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-03-04T00:00:00.000Z
+lastmod: 2026-03-05T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -562,6 +562,8 @@ enabled.
 
 Defaults to `true`
 
+DEPRECATED, WILL BE REMOVED
+
 ### _experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}
 
 Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application
@@ -574,6 +576,10 @@ Forces hooking all instances of the connect function.
 In very niche cases the connect function has multiple exports and this flag
 makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>
 
+Defaults to `true`
+
+DEPRECATED, WILL BE REMOVED
+
 ### _experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}
 
 Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.
@@ -584,6 +590,8 @@ Enables hooking the `rename` function.
 
 Useful if you need file remapping and your application uses `rename`, i.e. `php-fpm`,
 `twig`, to create and rename temporary files.
+
+DEPRECATED, WILL BE REMOVED
 
 ### _experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}
 
@@ -915,6 +923,8 @@ Individual connection params with password from a Kubernetes Secret:
 The type of environment variable source for connection params.
 
 Connection parameters specified as individual environment variable names.
+The `type` field is optional - when omitted, the operator auto-detects
+whether the variable comes from `env` or `envFrom` on the target pod.
 
 Individual database connection parameter sources.
 At least one parameter must be specified.
@@ -1042,6 +1052,8 @@ Individual connection params with password from a Kubernetes Secret:
 The type of environment variable source for connection params.
 
 Connection parameters specified as individual environment variable names.
+The `type` field is optional - when omitted, the operator auto-detects
+whether the variable comes from `env` or `envFrom` on the target pod.
 
 Individual database connection parameter sources.
 At least one parameter must be specified.
@@ -1171,6 +1183,8 @@ Individual connection params with password from a Kubernetes Secret:
 The type of environment variable source for connection params.
 
 Connection parameters specified as individual environment variable names.
+The `type` field is optional - when omitted, the operator auto-detects
+whether the variable comes from `env` or `envFrom` on the target pod.
 
 Individual database connection parameter sources.
 At least one parameter must be specified.
