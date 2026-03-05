@@ -12,12 +12,11 @@ fn recheck_and_setup_layer_file() {
         } else {
             std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER").unwrap()
         };
-        unsafe { std::env::set_var("MIRRORD_LAYER_FILE", layer_path) };
+        println!(
+            "cargo:rustc-env=MIRRORD_LAYER_FILE={}",
+            layer_path
+        );
     };
-    println!(
-        "cargo:rustc-env=MIRRORD_LAYER_FILE={}",
-        std::env::var("MIRRORD_LAYER_FILE").unwrap()
-    );
 }
 
 #[cfg(feature = "wizard")]

@@ -31,7 +31,7 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, config_dir: &Path) {
     let (mut test_process, mut intproxy) = Application::RustOutgoingTcp {
         non_blocking: false,
     }
-    .start_process_with_layer(vec![], config.as_deref())
+    .start_process(vec![], config.as_deref())
     .await;
 
     let peers = RUST_OUTGOING_PEERS

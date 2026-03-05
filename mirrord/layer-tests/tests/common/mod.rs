@@ -93,7 +93,7 @@ impl Application {
         run_exec_targetless(cmdline, None, cli_args, Some(env_refs)).await
     }
 
-    pub async fn start_process_with_layer(
+    pub async fn start_process(
         &self,
         extra_env_vars: Vec<(&str, &str)>,
         configuration_file: Option<&Path>,
@@ -109,8 +109,8 @@ impl Application {
         )
     }
 
-    /// Like `start_process_with_layer`, but also verify a port subscribe.
-    pub async fn start_process_with_layer_and_port(
+    /// Like `start_process`, but also verify a port subscribe.
+    pub async fn start_process_with_port(
         &self,
         extra_env_vars: Vec<(&str, &str)>,
         configuration_file: Option<&Path>,
