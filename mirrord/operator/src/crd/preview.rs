@@ -8,7 +8,10 @@
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use mirrord_config::{
-    feature::network::incoming::{IncomingConfig, IncomingMode},
+    feature::{
+        network::incoming::{IncomingConfig, IncomingMode},
+        preview::PreviewTtlMins,
+    },
     target::Target,
 };
 use schemars::JsonSchema;
@@ -47,7 +50,7 @@ pub struct PreviewSessionSpec {
     pub incoming: Option<PreviewIncomingConfig>,
 
     /// How long (in seconds) this session is allowed to live.
-    /// The operator will terminate the session when this time elapses.
+    /// Values >= `u32::MAX` are treated as infinite.
     pub ttl_secs: u64,
 }
 
@@ -55,6 +58,11 @@ impl PreviewSessionSpec {
     /// Convert the [`SessionTarget`] into a [`mirrord_config::target::Target`].
     pub fn config_target(&self) -> Option<Target> {
         self.target.clone().into_config()
+    }
+
+    /// Returns `true` when `ttl_secs` should be treated as infinite.
+    pub fn has_infinite_ttl(&self) -> bool {
+        self.ttl_secs >= PreviewTtlMins::INFINITE_TTL_SECS
     }
 }
 
@@ -83,9 +91,10 @@ pub struct PreviewSessionStatus {
 
     /// Timestamp when the session's TTL expires.
     ///
-    /// Set when the session enters the `Ready` phase. Computed as `now + ttl_secs` at the
-    /// moment the operator starts the TTL countdown. `None` during earlier phases or when
-    /// running against an older operator that does not set this field.
+    /// Set when the session enters the `Ready` phase for finite TTL sessions.
+    /// Computed as `now + ttl_secs` at the moment the operator starts the TTL countdown.
+    /// `None` for infinite TTL, during earlier phases, or when running against an older
+    /// operator that does not set this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<MicroTime>,
 }
@@ -94,7 +103,7 @@ pub struct PreviewSessionStatus {
 ///
 /// Progresses through `Initializing` → `Waiting` → `Ready`. Any phase may transition to
 /// `Failed` on error.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
 pub enum PreviewSessionPhase {
     /// Operator is setting up — the preview pod has not been created yet.
     Initializing,

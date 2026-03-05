@@ -242,36 +242,6 @@ pub fn register_socket(socket: SocketDescriptor, domain: i32, socket_type: i32, 
     tracing::info!("SocketManager: Registered socket {} with mirrord", socket);
 }
 
-/// Remove a socket from the managed collection
-pub fn remove_socket(socket: SocketDescriptor) {
-    let mut sockets = match SOCKETS.lock() {
-        Ok(sockets) => sockets,
-        Err(poisoned) => {
-            tracing::warn!(
-                "SocketManager: sockets mutex was poisoned during removal, attempting recovery"
-            );
-            poisoned.into_inner()
-        }
-    };
-
-    let sockets_removed = sockets.remove(&socket).is_some();
-
-    if sockets_removed {
-        tracing::debug!(
-            "SocketManager: Removed socket {} from mirrord tracking",
-            socket
-        );
-    }
-}
-
-/// Get socket info
-pub fn get_socket(socket: SocketDescriptor) -> Option<Arc<UserSocket>> {
-    SOCKETS
-        .lock()
-        .ok()
-        .and_then(|sockets| sockets.get(&socket).cloned())
-}
-
 /// Check if a socket is managed by mirrord
 pub fn is_socket_managed(socket: SocketDescriptor) -> bool {
     SOCKETS

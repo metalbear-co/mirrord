@@ -4,14 +4,13 @@
 //! Here we also have the convenient detour helpers that are used by the hooks to either return a
 //! [`Result`]-like value, or the special [`Bypass`] case, which makes the _detour_ function call
 //! the original [`libc`] equivalent, stored in a hook function pointer.
-#[cfg(unix)]
 use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::net::SocketAddr;
 #[cfg(unix)]
-use std::{cell::RefCell, ffi::CString, ops::Deref, path::PathBuf, sync::OnceLock};
+use std::{cell::RefCell, ffi::CString, ops::Deref, path::PathBuf};
+use std::{net::SocketAddr, sync::OnceLock};
 
 #[cfg(target_os = "macos")]
 use libc::c_char;
@@ -266,7 +265,6 @@ impl Bypass {
 /// Conversion from `Option`:
 /// - `Option::Some` -> `Detour::Success`
 /// - `Option::None` -> `Detour::Bypass`
-#[cfg(unix)]
 #[must_use = "this `Detour` may be an `Error` or a `Bypass` variant, which should be handled"]
 #[derive(Debug)]
 pub enum Detour<S = ()> {
@@ -279,7 +277,6 @@ pub enum Detour<S = ()> {
     Error(HookError),
 }
 
-#[cfg(unix)]
 impl<S> Try for Detour<S> {
     type Output = S;
 
@@ -298,7 +295,6 @@ impl<S> Try for Detour<S> {
     }
 }
 
-#[cfg(unix)]
 impl<S> FromResidual<Detour<convert::Infallible>> for Detour<S> {
     fn from_residual(residual: Detour<convert::Infallible>) -> Self {
         match residual {
@@ -308,7 +304,6 @@ impl<S> FromResidual<Detour<convert::Infallible>> for Detour<S> {
     }
 }
 
-#[cfg(unix)]
 impl<S, E> FromResidual<Result<convert::Infallible, E>> for Detour<S>
 where
     E: Into<HookError>,
@@ -321,7 +316,6 @@ where
     }
 }
 
-#[cfg(unix)]
 impl<S, E> From<Result<S, E>> for Detour<S>
 where
     E: Into<HookError>,
@@ -337,19 +331,16 @@ where
     }
 }
 
-#[cfg(unix)]
 impl<S> FromResidual<Option<convert::Infallible>> for Detour<S> {
     fn from_residual(_none_residual: Option<convert::Infallible>) -> Self {
         Detour::Bypass(Bypass::EmptyOption)
     }
 }
 
-#[cfg(unix)]
 impl<S> Residual<S> for Detour<convert::Infallible> {
     type TryType = Detour<S>;
 }
 
-#[cfg(unix)]
 impl<S> Detour<S> {
     /// Calls `op` if the result is `Success`, otherwise returns the `Bypass` or `Error` value of
     /// self.
@@ -408,7 +399,6 @@ impl<S> Detour<S> {
     }
 }
 
-#[cfg(unix)]
 impl<S> Detour<S>
 where
     S: From<HookError>,
@@ -479,9 +469,11 @@ pub trait OptionDetourExt<T>: OptionExt {
     ///
     /// ```no_run
     /// use mirrord_layer_lib::detour::{Detour, OptionDetourExt};
-    /// let x: Detour<Option<i32>> = Detour::Success(Some(5));
-    /// let y: Option<Detour<i32>> = Some(Detour::Success(5));
-    /// assert_eq!(x, y.transpose());
+    /// let result: Option<Detour<i32>> = Some(Detour::Success(5));
+    /// match result.transpose() {
+    ///     Detour::Success(inner) => assert_eq!(inner, Some(5)),
+    ///     _ => unreachable!(),
+    /// };
     /// ```
     fn transpose(self) -> Detour<Option<T>>;
 }
@@ -524,7 +516,6 @@ impl<T> OptionDetourExt<T> for Option<Detour<T>> {
 }
 
 /// Extends [`OnceLock`] with a helper function to initialize it with a [`Detour`].
-#[cfg(unix)]
 pub trait OnceLockExt<T> {
     /// Initializes a [`OnceLock`] with a [`Detour`] (similar to [`OnceLock::get_or_try_init`]).
     fn get_or_detour_init<F>(&self, f: F) -> Detour<&T>
@@ -532,7 +523,6 @@ pub trait OnceLockExt<T> {
         F: FnOnce() -> Detour<T>;
 }
 
-#[cfg(unix)]
 impl<T> OnceLockExt<T> for OnceLock<T> {
     fn get_or_detour_init<F>(&self, f: F) -> Detour<&T>
     where

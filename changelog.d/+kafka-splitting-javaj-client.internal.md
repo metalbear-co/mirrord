@@ -1,1 +1,0 @@
-Added client implementation config to `MirrordKafkaClientConfig`, and `application.id` sources to `MirrordKafkaTopicsConsumer`.

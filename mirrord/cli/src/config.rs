@@ -16,9 +16,12 @@ use clap_complete::Shell;
 pub use mirrord_config::container::ContainerRuntime;
 use mirrord_config::{
     LayerConfig, env_key,
-    feature::env::{
-        MIRRORD_OVERRIDE_ENV_FILE_ENV, MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV,
-        MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV,
+    feature::{
+        env::{
+            MIRRORD_OVERRIDE_ENV_FILE_ENV, MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV,
+            MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV,
+        },
+        preview::PreviewTtlMins,
     },
     target::TargetType,
 };
@@ -1267,8 +1270,10 @@ pub(super) struct PreviewStartArgs {
     /// TTL in minutes for the preview session.
     ///
     /// The operator will terminate the session after this time elapses.
+    ///
+    /// Set to `"infinite"` to disable TTL.
     #[arg(long)]
-    pub ttl: Option<u64>,
+    pub ttl: Option<PreviewTtlMins>,
 
     /// How long (in seconds) to wait for the preview to become ready.
     ///
@@ -1386,6 +1391,12 @@ impl PreviewStopArgs {
     pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
         let mut envs = self.common.as_env_vars();
 
+        if let Some(target) = &self.target {
+            envs.insert(
+                "MIRRORD_IMPERSONATED_TARGET".as_ref(),
+                Cow::Borrowed(target.as_ref()),
+            );
+        }
         if let Some(namespace) = &self.namespace {
             envs.insert(
                 "MIRRORD_TARGET_NAMESPACE".as_ref(),
