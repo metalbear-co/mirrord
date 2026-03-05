@@ -122,8 +122,7 @@ impl TryFrom<(String, IpAddr)> for ManagedHostent {
         // produce empty aliases ptr list (we having nothing but the hostname)
         // So if we ever want to support aliases, we will need to own them in ManagedHostent, in
         // addition to their reported pointer
-        let mut aliases_ptrs: Vec<*mut i8> = Vec::with_capacity(1);
-        aliases_ptrs.push(ptr::null_mut());
+        let aliases_ptrs: Vec<*mut i8> = vec![ptr::null_mut()];
 
         let (addr_buf, addr_ptr, addrtype, addrlen) = match ip {
             IpAddr::V4(ipv4) => {
@@ -149,9 +148,7 @@ impl TryFrom<(String, IpAddr)> for ManagedHostent {
         };
 
         // Note from WINAPI: addr_list is a NULL-terminated list of addresses for the host
-        // we were given one address, so we hold an address list of 1 + null termination pointer
-        let mut addr_list: Vec<*mut i8> = vec![ptr::null_mut(); 2];
-        addr_list[0] = addr_ptr as *mut i8;
+        let addr_list: Vec<*mut i8> = vec![addr_ptr as *mut _, ptr::null_mut()];
 
         let mut data = Box::new(ManagedHostentData {
             hostname,
