@@ -12,9 +12,7 @@ use winapi::{
     um::winsock2::SOCK_STREAM,
 };
 
-use crate::{
-    error::{HookError, HookResult},
-};
+use crate::error::{HookError, HookResult};
 
 const IPV4_ADDR_LEN: usize = mem::size_of::<IN_ADDR>();
 const IPV6_ADDR_LEN: usize = mem::size_of::<IN6_ADDR>();
@@ -214,7 +212,6 @@ impl WindowsAddrInfo for ADDRINFOA {
     fn ai_family(&self) -> i32 {
         self.ai_family
     }
-
 }
 
 impl WindowsAddrInfo for ADDRINFOW {
@@ -274,7 +271,6 @@ impl WindowsAddrInfo for ADDRINFOW {
     fn ai_family(&self) -> i32 {
         self.ai_family
     }
-
 }
 
 /// RAII wrapper for Windows ADDRINFO structures that automatically cleans up on drop

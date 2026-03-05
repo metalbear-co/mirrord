@@ -9,8 +9,7 @@ use std::{
 
 use mirrord_layer_lib::{
     error::{HookError, HookResult},
-    socket::SocketAddrExt,
-    socket::dns::windows::utils::IpAddrBytes,
+    socket::{SocketAddrExt, dns::windows::utils::IpAddrBytes},
 };
 use winapi::{
     shared::{
