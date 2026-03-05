@@ -745,18 +745,24 @@
       ]
     },
     "ConnectionParamsConfig": {
-      "description": "Connection parameters specified as individual environment variable names.",
+      "description": "Connection parameters specified as individual environment variable names. The `type` field is optional - when omitted, the operator auto-detects whether the variable comes from `env` or `envFrom` on the target pod.",
       "type": "object",
       "required": [
-        "params",
-        "type"
+        "params"
       ],
       "properties": {
         "params": {
           "$ref": "#/definitions/ConnectionParamsVars"
         },
         "type": {
-          "$ref": "#/definitions/ConnectionSourceType"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConnectionSourceType"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1327,12 +1333,18 @@
         {
           "type": "object",
           "required": [
-            "type",
             "url"
           ],
           "properties": {
             "type": {
-              "$ref": "#/definitions/ConnectionSourceType"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ConnectionSourceType"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "url": {
               "type": "string"
