@@ -115,7 +115,7 @@ impl TryFrom<(String, IpAddr)> for ManagedHostent {
         let addr_buf = IpAddrBytes::from(ip);
         let addr_ptr = addr_buf.as_ptr() as *mut u8;
         let addrtype = addr_buf.family() as i16;
-        let addrlen = addr_buf.len() as i16;
+        let addrlen = addr_buf.addr_len() as i16;
 
         // Note from WINAPI: addr_list is a NULL-terminated list of addresses for the host
         let addr_list: Vec<*mut i8> = vec![addr_ptr as *mut _, ptr::null_mut()];

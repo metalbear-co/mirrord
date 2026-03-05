@@ -32,7 +32,7 @@ impl IpAddrBytes {
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub fn addr_len(&self) -> usize {
         match self {
             IpAddrBytes::V4(_) => IPV4_ADDR_LEN,
             IpAddrBytes::V6(_) => IPV6_ADDR_LEN,
@@ -41,7 +41,9 @@ impl IpAddrBytes {
 
     pub fn as_ptr(&self) -> *const u8 {
         match self {
-            IpAddrBytes::V4(bytes) | IpAddrBytes::V6(bytes) => bytes.as_ptr(),
+            // Note: the following branches cannot be unified because of the difference in bytes size
+            IpAddrBytes::V4(bytes) => bytes.as_ptr(),
+            IpAddrBytes::V6(bytes) => bytes.as_ptr(),
         }
     }
 
@@ -54,7 +56,7 @@ impl IpAddrBytes {
                 addr.sin_port = 0;
                 unsafe {
                     *addr.sin_addr.S_un.S_addr_mut() = u32::from(ipv4).to_be();
-                    ptr::write_bytes(addr.sin_zero.as_mut_ptr(), 0, 8);
+                    ptr::write_bytes(addr.sin_zero.as_mut_ptr(), 0, mem::size_of_val(&addr.sin_zero));
                 }
                 AddrStorage::V4(Box::new(addr))
             }
@@ -82,7 +84,6 @@ impl From<IpAddr> for IpAddrBytes {
 }
 
 /// Owned sockaddr storage for ADDRINFO chains.
-#[derive(Debug)]
 pub enum AddrStorage {
     V4(Box<SOCKADDR_IN>),
     V6(Box<SOCKADDR_IN6>),
@@ -238,12 +239,18 @@ impl WindowsAddrInfo for ADDRINFOW {
 }
 
 /// RAII wrapper for Windows ADDRINFO structures that owns node, sockaddr, and canonname storage.
-#[derive(Debug)]
 pub struct ManagedAddrInfo<T: WindowsAddrInfo> {
     nodes: Vec<Box<T>>,
     sockaddrs: Vec<AddrStorage>,
     _canonnames: Vec<Option<T::CanonNameOwned>>,
 }
+
+// SAFETY: ManagedAddrInfo owns all pointed-to memory (nodes, sockaddrs, canonname buffers).
+// Raw pointers inside the ADDRINFO nodes only reference this owned storage. The wrapper is
+// accessed behind synchronization at the call sites (e.g., Mutex), so sending across threads
+// does not introduce data races.
+unsafe impl<T: WindowsAddrInfo> Send for ManagedAddrInfo<T> {}
+unsafe impl<T: WindowsAddrInfo> Sync for ManagedAddrInfo<T> {}
 
 impl<T: WindowsAddrInfo> PartialEq for ManagedAddrInfo<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -349,14 +356,18 @@ impl<T: WindowsAddrInfo> TryFrom<Vec<(String, IpAddr)>> for ManagedAddrInfo<T> {
             nodes.push(node);
         }
 
-        for i in 0..nodes.len().saturating_sub(1) {
-            let next_ptr = nodes[i + 1].as_mut() as *mut T;
-            T::set_next(nodes[i].as_mut(), next_ptr);
+        let mut iter = nodes.iter_mut();
+        if let Some(mut prev) = iter.next() {
+            for next in iter {
+                let next_ptr = next.as_mut() as *mut T;
+                T::set_next(prev.as_mut(), next_ptr);
+                prev = next;
+            }
         }
 
         Ok(Self {
             nodes,
-            sockaddrs: sockaddrs,
+            sockaddrs,
             _canonnames: canonnames,
         })
     }
