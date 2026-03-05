@@ -1,1 +1,0 @@
-Make db branching type to be optional, now it always checks for env and env_from.
