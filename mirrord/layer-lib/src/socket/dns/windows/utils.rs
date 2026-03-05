@@ -144,16 +144,6 @@ pub trait WindowsAddrInfo: Sized {
 
     /// Extract family, socktype, and protocol from this structure (for hints processing)
     fn get_family_socktype_protocol(&self) -> (i32, i32, i32);
-
-    // Raw field accessors used by ManagedAddrInfo traversal.
-    /// Get the ai_next field.
-    fn ai_next(&self) -> *mut Self;
-
-    /// Get the ai_addr field.
-    fn ai_addr(&self) -> *mut SOCKADDR;
-
-    /// Get the ai_family field.
-    fn ai_family(&self) -> i32;
 }
 
 impl WindowsAddrInfo for ADDRINFOA {
@@ -198,19 +188,6 @@ impl WindowsAddrInfo for ADDRINFOA {
 
     fn get_family_socktype_protocol(&self) -> (i32, i32, i32) {
         (self.ai_family, self.ai_socktype, self.ai_protocol)
-    }
-
-    // Raw field accessors used by ManagedAddrInfo traversal.
-    fn ai_next(&self) -> *mut Self {
-        self.ai_next
-    }
-
-    fn ai_addr(&self) -> *mut SOCKADDR {
-        self.ai_addr
-    }
-
-    fn ai_family(&self) -> i32 {
-        self.ai_family
     }
 }
 
@@ -258,33 +235,15 @@ impl WindowsAddrInfo for ADDRINFOW {
     fn get_family_socktype_protocol(&self) -> (i32, i32, i32) {
         (self.ai_family, self.ai_socktype, self.ai_protocol)
     }
-
-    // Raw field accessors used by ManagedAddrInfo traversal.
-    fn ai_next(&self) -> *mut Self {
-        self.ai_next
-    }
-
-    fn ai_addr(&self) -> *mut SOCKADDR {
-        self.ai_addr
-    }
-
-    fn ai_family(&self) -> i32 {
-        self.ai_family
-    }
 }
 
-/// RAII wrapper for Windows ADDRINFO structures that automatically cleans up on drop
+/// RAII wrapper for Windows ADDRINFO structures that owns node, sockaddr, and canonname storage.
 #[derive(Debug)]
 pub struct ManagedAddrInfo<T: WindowsAddrInfo> {
     nodes: Vec<Box<T>>,
     sockaddrs: Vec<AddrStorage>,
     _canonnames: Vec<Option<T::CanonNameOwned>>,
 }
-
-// SAFETY: We ensure thread safety by only accessing the pointer through controlled operations
-// and the pointer is only used for memory management within the same process
-unsafe impl<T: WindowsAddrInfo> Send for ManagedAddrInfo<T> {}
-unsafe impl<T: WindowsAddrInfo> Sync for ManagedAddrInfo<T> {}
 
 impl<T: WindowsAddrInfo> PartialEq for ManagedAddrInfo<T> {
     fn eq(&self, other: &Self) -> bool {
