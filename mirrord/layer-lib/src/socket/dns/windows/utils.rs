@@ -41,7 +41,8 @@ impl IpAddrBytes {
 
     pub fn as_ptr(&self) -> *const u8 {
         match self {
-            // Note: the following branches cannot be unified because of the difference in bytes size
+            // Note: the following branches cannot be unified because of the difference in bytes
+            // size
             IpAddrBytes::V4(bytes) => bytes.as_ptr(),
             IpAddrBytes::V6(bytes) => bytes.as_ptr(),
         }
@@ -56,7 +57,11 @@ impl IpAddrBytes {
                 addr.sin_port = 0;
                 unsafe {
                     *addr.sin_addr.S_un.S_addr_mut() = u32::from(ipv4).to_be();
-                    ptr::write_bytes(addr.sin_zero.as_mut_ptr(), 0, mem::size_of_val(&addr.sin_zero));
+                    ptr::write_bytes(
+                        addr.sin_zero.as_mut_ptr(),
+                        0,
+                        mem::size_of_val(&addr.sin_zero),
+                    );
                 }
                 AddrStorage::V4(Box::new(addr))
             }
