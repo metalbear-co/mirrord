@@ -263,6 +263,7 @@ where
     // Temporary workaround until all socket ops are unified - WIN-85
     match connect_common(socket, SockAddr::from(remote_addr), connect_fn) {
         Detour::Success(res) => Ok(res),
-        _ => Err(ConnectError::Fallback.into()),
+        Detour::Bypass(_) => Err(ConnectError::Fallback.into()),
+        Detour::Error(err) => Err(err),
     }
 }
