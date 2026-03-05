@@ -41,7 +41,7 @@ resolver = "2"
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.192.0"
+version = "3.192.1"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -186,6 +186,9 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 
 # Used by `layer-macro`, `config-derive`.
 quote = "1"
+
+# Used by `jaq` tests.
+mirrord-test-macros = { path = "mirrord/test-macros" }
 
 # Used by `console`, `cli`.
 miette = "7"

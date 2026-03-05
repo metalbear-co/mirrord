@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use fancy_regex::Regex;
-use jaq_all::load::FileReportsDisp;
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -112,19 +111,12 @@ impl SplitQueuesConfig {
         queue_id: &str,
         jq_code: &str,
     ) -> Result<(), QueueSplittingVerificationError> {
-        jaq_all::data::compile(jq_code)
-            .map(|_| ())
-            .map_err(
-                |reports| QueueSplittingVerificationError::InvalidJqProgram {
-                    queue_name: queue_id.to_string(),
-                    jq_compile_errors: reports
-                        .iter()
-                        .map(FileReportsDisp::new)
-                        .map(|report_disp| report_disp.to_string())
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                },
-            )
+        mirrord_jaq::compile_jq(jq_code).map(|_| ()).map_err(|err| {
+            QueueSplittingVerificationError::InvalidJqProgram {
+                queue_name: queue_id.to_string(),
+                jq_compile_errors: err.to_string(),
+            }
+        })
     }
 
     pub fn verify(

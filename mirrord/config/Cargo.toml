@@ -20,6 +20,9 @@ workspace = true
 mirrord-config-derive = { path = "./derive" }
 mirrord-analytics = { path = "../analytics" }
 mirrord-protocol = { path = "../protocol" }
+# We don't need the `eval` feature here because we only want to compile
+# the `jaq` code to verify its validity, but we don't need to run it here.
+mirrord-jaq = { path = "../jaq", default-features = false}
 
 clap = { workspace = true, features = ["derive"] }
 serde.workspace = true
@@ -43,7 +46,6 @@ strum.workspace = true
 strum_macros.workspace = true
 semver.workspace = true
 uuid.workspace = true
-jaq-all = "0.1.0-beta"
 
 [dev-dependencies]
 rstest.workspace = true
