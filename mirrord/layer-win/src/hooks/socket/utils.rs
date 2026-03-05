@@ -10,14 +10,13 @@ use std::{
 use mirrord_layer_lib::{
     error::{HookError, HookResult},
     socket::SocketAddrExt,
+    socket::dns::windows::utils::IpAddrBytes,
 };
 use winapi::{
     shared::{
-        in6addr::IN6_ADDR,
-        inaddr::IN_ADDR,
         minwindef::INT,
         winerror::ERROR_SUCCESS,
-        ws2def::{AF_INET, AF_INET6, SOCKADDR, SOCKADDR_STORAGE},
+        ws2def::{SOCKADDR, SOCKADDR_STORAGE},
     },
     um::winsock2::{
         HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, closesocket, getpeername, getsockname,
@@ -25,8 +24,6 @@ use winapi::{
 };
 
 pub const ERROR_SUCCESS_I32: i32 = ERROR_SUCCESS as i32;
-const IPV4_ADDR_LEN: usize = mem::size_of::<IN_ADDR>();
-const IPV6_ADDR_LEN: usize = mem::size_of::<IN6_ADDR>();
 
 /// RAII wrapper for automatically closing sockets on error
 /// The socket will be automatically closed when dropped unless explicitly released
@@ -74,14 +71,6 @@ thread_local! {
     static THREAD_HOSTENT: std::cell::RefCell<Option<ManagedHostent>> = const { std::cell::RefCell::new(None) };
 }
 
-/// enum for owning IPADDR_IN and IPADDR6_IN data and cleanup on drop
-/// it is only read as ptr, therefore clippy warns as dead_code
-#[allow(dead_code)]
-enum HostentAddrBuf {
-    V4(Box<[u8; IPV4_ADDR_LEN]>),
-    V6(Box<[u8; IPV6_ADDR_LEN]>),
-}
-
 /// RAII wrapper for Windows HOSTENT structure that automatically cleans up on drop
 pub struct ManagedHostent {
     hostent: Box<HOSTENT>,
@@ -95,7 +84,7 @@ pub struct ManagedHostent {
 pub struct ManagedHostentData {
     hostname: CString,
     aliases_ptrs: Vec<*mut i8>,
-    _addr_buf: HostentAddrBuf,
+    _addr_buf: IpAddrBytes,
     addr_list: Vec<*mut i8>,
 }
 
@@ -124,28 +113,10 @@ impl TryFrom<(String, IpAddr)> for ManagedHostent {
         // addition to their reported pointer
         let aliases_ptrs: Vec<*mut i8> = vec![ptr::null_mut()];
 
-        let (addr_buf, addr_ptr, addrtype, addrlen) = match ip {
-            IpAddr::V4(ipv4) => {
-                let boxed = Box::new(ipv4.octets());
-                let ptr = boxed.as_ref().as_ptr() as *mut u8;
-                (
-                    HostentAddrBuf::V4(boxed),
-                    ptr,
-                    AF_INET as i16,
-                    IPV4_ADDR_LEN as i16,
-                )
-            }
-            IpAddr::V6(ipv6) => {
-                let boxed = Box::new(ipv6.octets());
-                let ptr = boxed.as_ref().as_ptr() as *mut u8;
-                (
-                    HostentAddrBuf::V6(boxed),
-                    ptr,
-                    AF_INET6 as i16,
-                    IPV6_ADDR_LEN as i16,
-                )
-            }
-        };
+        let addr_buf = IpAddrBytes::from(ip);
+        let addr_ptr = addr_buf.as_ptr() as *mut u8;
+        let addrtype = addr_buf.family() as i16;
+        let addrlen = addr_buf.len() as i16;
 
         // Note from WINAPI: addr_list is a NULL-terminated list of addresses for the host
         let addr_list: Vec<*mut i8> = vec![addr_ptr as *mut _, ptr::null_mut()];

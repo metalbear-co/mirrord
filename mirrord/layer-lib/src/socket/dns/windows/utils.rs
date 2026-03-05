@@ -3,6 +3,8 @@ use std::{alloc::Layout, convert::TryFrom, mem, net::IpAddr, ptr};
 
 use winapi::{
     shared::{
+        in6addr::IN6_ADDR,
+        inaddr::IN_ADDR,
         minwindef::INT,
         ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR, SOCKADDR_IN},
         ws2ipdef::SOCKADDR_IN6,
@@ -12,8 +14,51 @@ use winapi::{
 
 use crate::{
     error::{HookError, HookResult},
-    unsafe_alloc,
 };
+
+const IPV4_ADDR_LEN: usize = mem::size_of::<IN_ADDR>();
+const IPV6_ADDR_LEN: usize = mem::size_of::<IN6_ADDR>();
+
+/// Owned IP bytes shared across HOSTENT and ADDRINFO construction.
+#[derive(Debug, Clone, Copy)]
+pub enum IpAddrBytes {
+    V4([u8; IPV4_ADDR_LEN]),
+    V6([u8; IPV6_ADDR_LEN]),
+}
+
+impl IpAddrBytes {
+    pub fn family(&self) -> i32 {
+        match self {
+            IpAddrBytes::V4(_) => AF_INET,
+            IpAddrBytes::V6(_) => AF_INET6,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            IpAddrBytes::V4(_) => IPV4_ADDR_LEN,
+            IpAddrBytes::V6(_) => IPV6_ADDR_LEN,
+        }
+    }
+
+    pub fn as_ptr(&self) -> *const u8 {
+        match self {
+            IpAddrBytes::V4(bytes) => bytes.as_ptr(),
+            IpAddrBytes::V6(bytes) => bytes.as_ptr(),
+        }
+    }
+
+}
+
+impl From<IpAddr> for IpAddrBytes {
+    fn from(value: IpAddr) -> Self {
+        match value {
+            IpAddr::V4(ipv4) => IpAddrBytes::V4(ipv4.octets()),
+            IpAddr::V6(ipv6) => IpAddrBytes::V6(ipv6.octets()),
+        }
+    }
+}
+
 
 /// Trait to abstract over Windows ADDRINFO types (ADDRINFOA and ADDRINFOW).
 /// Prefer interacting with these pointers through [`ManagedAddrInfo`], which provides the RAII
