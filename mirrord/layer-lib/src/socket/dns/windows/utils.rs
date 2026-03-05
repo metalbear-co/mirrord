@@ -1,5 +1,5 @@
 //! Utility functions for Windows socket operations
-use std::{alloc::Layout, convert::TryFrom, mem, net::IpAddr, ptr};
+use std::{convert::TryFrom, mem, net::IpAddr, ptr};
 
 use winapi::{
     shared::{
@@ -43,11 +43,35 @@ impl IpAddrBytes {
 
     pub fn as_ptr(&self) -> *const u8 {
         match self {
-            IpAddrBytes::V4(bytes) => bytes.as_ptr(),
-            IpAddrBytes::V6(bytes) => bytes.as_ptr(),
+            IpAddrBytes::V4(bytes) | IpAddrBytes::V6(bytes) => bytes.as_ptr(),
         }
     }
 
+    pub fn to_sockaddr_box(&self) -> AddrStorage {
+        match self {
+            IpAddrBytes::V4(bytes) => {
+                let mut addr: SOCKADDR_IN = unsafe { mem::zeroed() };
+                let ipv4 = std::net::Ipv4Addr::from(*bytes);
+                addr.sin_family = AF_INET as u16;
+                addr.sin_port = 0;
+                unsafe {
+                    *addr.sin_addr.S_un.S_addr_mut() = u32::from(ipv4).to_be();
+                    ptr::write_bytes(addr.sin_zero.as_mut_ptr(), 0, 8);
+                }
+                AddrStorage::V4(Box::new(addr))
+            }
+            IpAddrBytes::V6(bytes) => {
+                let mut addr: SOCKADDR_IN6 = unsafe { mem::zeroed() };
+                addr.sin6_family = AF_INET6 as u16;
+                addr.sin6_port = 0;
+                addr.sin6_flowinfo = 0;
+                unsafe {
+                    *addr.sin6_addr.u.Byte_mut() = *bytes;
+                }
+                AddrStorage::V6(Box::new(addr))
+            }
+        }
+    }
 }
 
 impl From<IpAddr> for IpAddrBytes {
@@ -59,139 +83,118 @@ impl From<IpAddr> for IpAddrBytes {
     }
 }
 
+/// Owned sockaddr storage for ADDRINFO chains.
+#[derive(Debug)]
+pub enum AddrStorage {
+    V4(Box<SOCKADDR_IN>),
+    V6(Box<SOCKADDR_IN6>),
+}
+
+impl AddrStorage {
+    pub fn family(&self) -> i32 {
+        match self {
+            AddrStorage::V4(_) => AF_INET,
+            AddrStorage::V6(_) => AF_INET6,
+        }
+    }
+
+    pub fn addrlen(&self) -> usize {
+        match self {
+            AddrStorage::V4(_) => mem::size_of::<SOCKADDR_IN>(),
+            AddrStorage::V6(_) => mem::size_of::<SOCKADDR_IN6>(),
+        }
+    }
+
+    pub fn as_ptr(&mut self) -> *mut SOCKADDR {
+        match self {
+            AddrStorage::V4(addr) => addr.as_mut() as *mut SOCKADDR_IN as *mut SOCKADDR,
+            AddrStorage::V6(addr) => addr.as_mut() as *mut SOCKADDR_IN6 as *mut SOCKADDR,
+        }
+    }
+}
 
 /// Trait to abstract over Windows ADDRINFO types (ADDRINFOA and ADDRINFOW).
-/// Prefer interacting with these pointers through [`ManagedAddrInfo`], which provides the RAII
-/// semantics and enforces the ownership rules described in each method's safety contract.
+/// Prefer interacting with these pointers through [`ManagedAddrInfo`], which owns the storage
+/// for nodes, sockaddrs, and canonical names.
 pub trait WindowsAddrInfo: Sized {
     type CanonName;
+    type CanonNameOwned;
 
-    /// Allocate a new instance
-    ///
-    /// # Safety
-    /// - Returned pointer must be initialized with [`WindowsAddrInfo::fill`] and ultimately owned
-    ///   by [`ManagedAddrInfo::drop`], which will free the entire linked list that starts at the
-    ///   pointer. Handing it to any other deallocator or freeing it twice is UB.
-    /// - The allocation must come from the global allocator so `drop` can release it with
-    ///   `std::alloc::dealloc`.
-    /// - Implementations must zero/initialize auxiliary fields (`ai_flags`, `ai_socktype`,
-    ///   `ai_protocol`, and `ai_next`) so the caller can rely on deterministic defaults before
-    ///   invoking [`WindowsAddrInfo::fill`] or [`WindowsAddrInfo::set_next`].
-    unsafe fn alloc() -> HookResult<*mut Self>;
+    /// Initialize default fields (`ai_flags`, `ai_socktype`, `ai_protocol`, and `ai_next`).
+    fn init_defaults(node: &mut Self);
 
-    /// Fill the structure with the given parameters
-    ///
-    /// # Safety
-    /// - `ptr` must come from [`WindowsAddrInfo::alloc`] and the resulting node becomes part of the
-    ///   singly linked list that [`ManagedAddrInfo::drop`] walks and frees. Sharing nodes between
-    ///   lists or forming cycles will cause double frees or leaks.
-    /// - `addr` must point to memory allocated for the concrete socket family (AF_INET or AF_INET6)
-    ///   so that `drop` can select the correct layout when it calls `std::alloc::dealloc`.
-    /// - `canonname` must have been allocated with the global allocator (via
-    ///   [`WindowsAddrInfo::string_to_canonname`] or similar) because `drop` releases it through
-    ///   [`WindowsAddrInfo::free_canonname`].
-    unsafe fn fill(
-        ptr: *mut Self,
+    /// Fill the structure with the given parameters.
+    fn fill(
+        node: &mut Self,
         family: i32,
         addrlen: usize,
         canonname: Self::CanonName,
         addr: *mut SOCKADDR,
     );
 
-    /// Set the next pointer
-    ///
-    /// # Safety
-    /// `ptr` and `next` must either be null or originate from [`WindowsAddrInfo::alloc`]; linking
-    /// nodes allocated elsewhere will confuse [`ManagedAddrInfo::drop`] and may lead to UB.
-    unsafe fn set_next(ptr: *mut Self, next: *mut Self);
+    /// Set the next pointer.
+    fn set_next(node: &mut Self, next: *mut Self);
 
-    /// Convert a string to the appropriate canonical name type
-    fn string_to_canonname(s: String) -> HookResult<Self::CanonName>;
+    /// Convert a string to the appropriate owned canonical name type.
+    fn canonname_from_string(s: String) -> HookResult<Self::CanonNameOwned>;
 
-    /// Get null canonical name
-    fn null_canonname() -> Self::CanonName;
+    /// Get a raw pointer for a canonical name.
+    fn canonname_ptr(owned: &mut Self::CanonNameOwned) -> Self::CanonName;
+
+    /// Get null canonical name pointer.
+    fn null_canonname_ptr() -> Self::CanonName;
 
     /// Extract family, socktype, and protocol from this structure (for hints processing)
     fn get_family_socktype_protocol(&self) -> (i32, i32, i32);
 
-    // Field accessor methods for Drop implementation
-    /// Get the ai_next field
-    ///
-    /// # Safety
-    /// `self` must be a valid reference obtained from a node allocated by this trait. Returning the
-    /// raw pointer transfers responsibility back to [`ManagedAddrInfo`] for traversal.
-    unsafe fn ai_next(&self) -> *mut Self;
+    // Raw field accessors used by ManagedAddrInfo traversal.
+    /// Get the ai_next field.
+    fn ai_next(&self) -> *mut Self;
 
-    /// Get the ai_addr field
-    ///
-    /// # Safety
-    /// Caller must ensure `self` is valid and respect the returned pointer's lifetime; it is freed
-    /// by [`ManagedAddrInfo::drop`] according to the `ai_family` layout.
-    unsafe fn ai_addr(&self) -> *mut SOCKADDR;
+    /// Get the ai_addr field.
+    fn ai_addr(&self) -> *mut SOCKADDR;
 
-    /// Get the ai_family field
-    ///
-    /// # Safety
-    /// `self` must be valid. The returned family dictates how Drop will interpret `ai_addr`.
-    unsafe fn ai_family(&self) -> i32;
-
-    /// Get the ai_canonname field
-    ///
-    /// # Safety
-    /// Caller must hold a valid reference; the returned pointer remains owned by
-    /// [`ManagedAddrInfo`] and will be released through [`WindowsAddrInfo::free_canonname`].
-    unsafe fn ai_canonname(&self) -> Self::CanonName;
-
-    /// Free the canonical name
-    ///
-    /// # Safety
-    /// `canonname` must have been allocated through the canonical allocation path for the concrete
-    /// implementation (e.g., [`WindowsAddrInfo::string_to_canonname`]). Passing any other pointer
-    /// causes undefined behavior.
-    unsafe fn free_canonname(canonname: Self::CanonName);
+    /// Get the ai_family field.
+    fn ai_family(&self) -> i32;
 }
 
 impl WindowsAddrInfo for ADDRINFOA {
     type CanonName = *mut i8;
+    type CanonNameOwned = std::ffi::CString;
 
-    unsafe fn alloc() -> HookResult<*mut Self> {
-        let ptr = unsafe_alloc!(ADDRINFOA, HookError::NullPointer)?;
-        unsafe {
-            (*ptr).ai_flags = 0;
-            (*ptr).ai_socktype = SOCK_STREAM;
-            (*ptr).ai_protocol = 0;
-            (*ptr).ai_next = ptr::null_mut();
-        }
-        Ok(ptr)
+    fn init_defaults(node: &mut Self) {
+        node.ai_flags = 0;
+        node.ai_socktype = SOCK_STREAM;
+        node.ai_protocol = 0;
+        node.ai_next = ptr::null_mut();
     }
 
-    unsafe fn fill(
-        ptr: *mut Self,
+    fn fill(
+        node: &mut Self,
         family: i32,
         addrlen: usize,
         canonname: Self::CanonName,
         addr: *mut SOCKADDR,
     ) {
-        unsafe {
-            (*ptr).ai_family = family;
-            (*ptr).ai_addrlen = addrlen;
-            (*ptr).ai_canonname = canonname;
-            (*ptr).ai_addr = addr;
-        }
+        node.ai_family = family;
+        node.ai_addrlen = addrlen;
+        node.ai_canonname = canonname;
+        node.ai_addr = addr;
     }
 
-    unsafe fn set_next(ptr: *mut Self, next: *mut Self) {
-        unsafe {
-            (*ptr).ai_next = next;
-        }
+    fn set_next(node: &mut Self, next: *mut Self) {
+        node.ai_next = next;
     }
 
-    fn string_to_canonname(s: String) -> HookResult<Self::CanonName> {
-        use std::ffi::CString;
-        Ok(CString::new(s)?.into_raw())
+    fn canonname_from_string(s: String) -> HookResult<Self::CanonNameOwned> {
+        Ok(std::ffi::CString::new(s)?)
     }
 
-    fn null_canonname() -> Self::CanonName {
+    fn canonname_ptr(owned: &mut Self::CanonNameOwned) -> Self::CanonName {
+        owned.as_ptr() as *mut i8
+    }
+
+    fn null_canonname_ptr() -> Self::CanonName {
         ptr::null_mut()
     }
 
@@ -199,84 +202,59 @@ impl WindowsAddrInfo for ADDRINFOA {
         (self.ai_family, self.ai_socktype, self.ai_protocol)
     }
 
-    // Field accessor methods for Drop implementation
-    unsafe fn ai_next(&self) -> *mut Self {
+    // Raw field accessors used by ManagedAddrInfo traversal.
+    fn ai_next(&self) -> *mut Self {
         self.ai_next
     }
 
-    unsafe fn ai_addr(&self) -> *mut SOCKADDR {
+    fn ai_addr(&self) -> *mut SOCKADDR {
         self.ai_addr
     }
 
-    unsafe fn ai_family(&self) -> i32 {
+    fn ai_family(&self) -> i32 {
         self.ai_family
     }
 
-    unsafe fn ai_canonname(&self) -> Self::CanonName {
-        self.ai_canonname
-    }
-
-    unsafe fn free_canonname(canonname: Self::CanonName) {
-        if !canonname.is_null() {
-            unsafe {
-                let ptr = canonname;
-                let len = (0..).take_while(|&i| *ptr.offset(i) != 0).count();
-                let layout = Layout::array::<u16>(len + 1).unwrap();
-                std::alloc::dealloc(canonname as *mut u8, layout);
-            }
-        }
-    }
 }
 
 impl WindowsAddrInfo for ADDRINFOW {
     type CanonName = *mut u16;
+    type CanonNameOwned = Vec<u16>;
 
-    unsafe fn alloc() -> HookResult<*mut Self> {
-        let ptr = unsafe_alloc!(ADDRINFOW, HookError::NullPointer)?;
-        unsafe {
-            (*ptr).ai_flags = 0;
-            (*ptr).ai_socktype = SOCK_STREAM;
-            (*ptr).ai_protocol = 0;
-            (*ptr).ai_next = ptr::null_mut();
-        }
-        Ok(ptr)
+    fn init_defaults(node: &mut Self) {
+        node.ai_flags = 0;
+        node.ai_socktype = SOCK_STREAM;
+        node.ai_protocol = 0;
+        node.ai_next = ptr::null_mut();
     }
 
-    unsafe fn fill(
-        ptr: *mut Self,
+    fn fill(
+        node: &mut Self,
         family: i32,
         addrlen: usize,
         canonname: Self::CanonName,
         addr: *mut SOCKADDR,
     ) {
-        unsafe {
-            (*ptr).ai_family = family;
-            (*ptr).ai_addrlen = addrlen;
-            (*ptr).ai_canonname = canonname;
-            (*ptr).ai_addr = addr;
-        }
+        node.ai_family = family;
+        node.ai_addrlen = addrlen;
+        node.ai_canonname = canonname;
+        node.ai_addr = addr;
     }
 
-    unsafe fn set_next(ptr: *mut Self, next: *mut Self) {
-        unsafe {
-            (*ptr).ai_next = next;
-        }
+    fn set_next(node: &mut Self, next: *mut Self) {
+        node.ai_next = next;
     }
 
-    fn string_to_canonname(s: String) -> HookResult<Self::CanonName> {
+    fn canonname_from_string(s: String) -> HookResult<Self::CanonNameOwned> {
         let wide: Vec<u16> = s.encode_utf16().chain(Some(0)).collect();
-        let layout = Layout::array::<u16>(wide.len())?;
-        let ptr = unsafe { std::alloc::alloc(layout) as *mut u16 };
-        if ptr.is_null() {
-            return Err(HookError::NullPointer);
-        }
-        unsafe {
-            std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
-        }
-        Ok(ptr)
+        Ok(wide)
     }
 
-    fn null_canonname() -> Self::CanonName {
+    fn canonname_ptr(owned: &mut Self::CanonNameOwned) -> Self::CanonName {
+        owned.as_mut_ptr()
+    }
+
+    fn null_canonname_ptr() -> Self::CanonName {
         ptr::null_mut()
     }
 
@@ -284,39 +262,27 @@ impl WindowsAddrInfo for ADDRINFOW {
         (self.ai_family, self.ai_socktype, self.ai_protocol)
     }
 
-    // Field accessor methods for Drop implementation
-    unsafe fn ai_next(&self) -> *mut Self {
+    // Raw field accessors used by ManagedAddrInfo traversal.
+    fn ai_next(&self) -> *mut Self {
         self.ai_next
     }
 
-    unsafe fn ai_addr(&self) -> *mut SOCKADDR {
+    fn ai_addr(&self) -> *mut SOCKADDR {
         self.ai_addr
     }
 
-    unsafe fn ai_family(&self) -> i32 {
+    fn ai_family(&self) -> i32 {
         self.ai_family
     }
 
-    unsafe fn ai_canonname(&self) -> Self::CanonName {
-        self.ai_canonname
-    }
-
-    unsafe fn free_canonname(canonname: Self::CanonName) {
-        if !canonname.is_null() {
-            unsafe {
-                let ptr = canonname;
-                let len = (0..).take_while(|&i| *ptr.offset(i) != 0).count();
-                let layout = Layout::array::<u16>(len + 1).unwrap();
-                std::alloc::dealloc(canonname as *mut u8, layout);
-            }
-        }
-    }
 }
 
 /// RAII wrapper for Windows ADDRINFO structures that automatically cleans up on drop
 #[derive(Debug)]
 pub struct ManagedAddrInfo<T: WindowsAddrInfo> {
-    ptr: *mut T,
+    nodes: Vec<Box<T>>,
+    sockaddrs: Vec<AddrStorage>,
+    _canonnames: Vec<Option<T::CanonNameOwned>>,
 }
 
 // SAFETY: We ensure thread safety by only accessing the pointer through controlled operations
@@ -326,13 +292,13 @@ unsafe impl<T: WindowsAddrInfo> Sync for ManagedAddrInfo<T> {}
 
 impl<T: WindowsAddrInfo> PartialEq for ManagedAddrInfo<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.ptr == other.ptr
+        self.as_ptr() == other.as_ptr()
     }
 }
 
 impl<T: WindowsAddrInfo> std::hash::Hash for ManagedAddrInfo<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.ptr.hash(state);
+        self.as_ptr().hash(state);
     }
 }
 
@@ -348,46 +314,31 @@ impl Eq for ManagedAddrInfoAny {}
 impl std::fmt::Debug for ManagedAddrInfoAny {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ManagedAddrInfoAny::A(info) => write!(f, "A({:p})", info.ptr),
-            ManagedAddrInfoAny::W(info) => write!(f, "W({:p})", info.ptr),
+            ManagedAddrInfoAny::A(info) => write!(f, "A({:p})", info.as_ptr()),
+            ManagedAddrInfoAny::W(info) => write!(f, "W({:p})", info.as_ptr()),
         }
     }
 }
 
 impl<T: WindowsAddrInfo> ManagedAddrInfo<T> {
-    /// Create a new managed ADDRINFO from a raw pointer
-    ///
-    /// # Safety
-    /// The caller must ensure the pointer is valid and was allocated by our system
-    pub unsafe fn new(ptr: *mut T) -> Self {
-        Self { ptr }
-    }
-
     /// Get the raw pointer (for returning to Windows API)
     pub fn as_ptr(&self) -> *mut T {
-        self.ptr
+        self.nodes
+            .first()
+            .map(|node| node.as_ref() as *const T as *mut T)
+            .unwrap_or(ptr::null_mut())
     }
 
     /// Propagate the requested service port into each sockaddr entry
     pub fn apply_port(&mut self, port: u16) {
-        unsafe {
-            let mut current = self.ptr;
-            while !current.is_null() {
-                let addr = (*current).ai_addr();
-                if !addr.is_null() {
-                    match (*current).ai_family() {
-                        AF_INET => {
-                            let sockaddr_in_ptr = addr as *mut SOCKADDR_IN;
-                            (*sockaddr_in_ptr).sin_port = port.to_be();
-                        }
-                        AF_INET6 => {
-                            let sockaddr_in6_ptr = addr as *mut SOCKADDR_IN6;
-                            (*sockaddr_in6_ptr).sin6_port = port.to_be();
-                        }
-                        _ => {}
-                    }
+        for addr in &mut self.sockaddrs {
+            match addr {
+                AddrStorage::V4(sockaddr) => {
+                    sockaddr.sin_port = port.to_be();
                 }
-                current = (*current).ai_next();
+                AddrStorage::V6(sockaddr) => {
+                    sockaddr.sin6_port = port.to_be();
+                }
             }
         }
     }
@@ -401,122 +352,57 @@ impl<T: WindowsAddrInfo> TryFrom<Vec<(String, IpAddr)>> for ManagedAddrInfo<T> {
             return Err(HookError::DNSNoName);
         }
 
-        let mut first_addrinfo: *mut T = ptr::null_mut();
-        let mut current_addrinfo: *mut T = ptr::null_mut();
+        let mut nodes: Vec<Box<T>> = Vec::with_capacity(records.len());
+        let mut sockaddrs: Vec<AddrStorage> = Vec::with_capacity(records.len());
+        let mut canonnames: Vec<Option<T::CanonNameOwned>> = Vec::with_capacity(records.len());
 
         for (name, ip) in records.into_iter() {
-            // Allocate ADDRINFO structure
-            let addrinfo_ptr = unsafe { T::alloc()? };
+            let ip_bytes = IpAddrBytes::from(ip);
+            let mut sockaddr_storage = ip_bytes.to_sockaddr_box();
 
-            // Parse the IP address and create sockaddr
-            let (sockaddr_ptr, sockaddr_len, family) = match ip {
-                IpAddr::V4(ipv4) => {
-                    let sockaddr_in_ptr = unsafe_alloc!(SOCKADDR_IN, HookError::NullPointer)?;
-
-                    unsafe {
-                        (*sockaddr_in_ptr).sin_family = AF_INET as u16;
-                        // Port applied later via ManagedAddrInfo::apply_port
-                        (*sockaddr_in_ptr).sin_port = 0;
-                        *(*sockaddr_in_ptr).sin_addr.S_un.S_addr_mut() = u32::from(ipv4).to_be();
-                        ptr::write_bytes((*sockaddr_in_ptr).sin_zero.as_mut_ptr(), 0, 8);
-                    }
-
-                    (
-                        sockaddr_in_ptr as *mut SOCKADDR,
-                        mem::size_of::<SOCKADDR_IN>() as INT,
-                        AF_INET,
-                    )
-                }
-                IpAddr::V6(ipv6) => {
-                    let sockaddr_in6_ptr = unsafe_alloc!(SOCKADDR_IN6, HookError::NullPointer)?;
-
-                    unsafe {
-                        (*sockaddr_in6_ptr).sin6_family = AF_INET6 as u16;
-                        // Port applied later via ManagedAddrInfo::apply_port
-                        (*sockaddr_in6_ptr).sin6_port = 0;
-                        (*sockaddr_in6_ptr).sin6_flowinfo = 0;
-                        *(*sockaddr_in6_ptr).sin6_addr.u.Byte_mut() = ipv6.octets();
-                        // Note: sin6_scope_id field may not be available in this Windows API
-                        // version
-                    }
-
-                    (
-                        sockaddr_in6_ptr as *mut SOCKADDR,
-                        mem::size_of::<SOCKADDR_IN6>() as INT,
-                        AF_INET6,
-                    )
-                }
-            };
+            let sockaddr_ptr = sockaddr_storage.as_ptr();
+            let sockaddr_len = sockaddr_storage.addrlen() as INT;
+            let family = sockaddr_storage.family();
 
             // Create canonical name if available
-            let canonname = if !name.is_empty() {
-                T::string_to_canonname(name)?
+            let mut canonname_owned = if !name.is_empty() {
+                Some(T::canonname_from_string(name)?)
             } else {
-                T::null_canonname()
+                None
+            };
+            let canonname_ptr = match canonname_owned.as_mut() {
+                Some(owned) => T::canonname_ptr(owned),
+                None => T::null_canonname_ptr(),
             };
 
+            // SAFETY: T is a C struct; we immediately initialize the fields we rely on via
+            // `init_defaults` and `fill`.
+            let mut node: Box<T> = Box::new(unsafe { mem::MaybeUninit::zeroed().assume_init() });
+            T::init_defaults(&mut node);
+
             // Fill in the ADDRINFO structure
-            unsafe {
-                T::fill(
-                    addrinfo_ptr,
-                    family,                // ai_family
-                    sockaddr_len as usize, // ai_addrlen
-                    canonname,             // ai_canonname
-                    sockaddr_ptr,          // ai_addr
-                );
-            }
+            T::fill(
+                node.as_mut(),
+                family,
+                sockaddr_len as usize,
+                canonname_ptr,
+                sockaddr_ptr,
+            );
 
-            // Link into the list
-            if first_addrinfo.is_null() {
-                first_addrinfo = addrinfo_ptr;
-                current_addrinfo = addrinfo_ptr;
-            } else {
-                unsafe {
-                    T::set_next(current_addrinfo, addrinfo_ptr);
-                    current_addrinfo = addrinfo_ptr;
-                }
-            }
-
-            // Note: We can't insert into MANAGED_ADDRINFO here because we don't have
-            // the ManagedAddrInfo wrapper. This tracking is done in the calling functions.
-            // guard.insert(addrinfo_ptr as usize, ...);
+            sockaddrs.push(sockaddr_storage);
+            canonnames.push(canonname_owned);
+            nodes.push(node);
         }
 
-        Ok(unsafe { Self::new(first_addrinfo) })
-    }
-}
-
-impl<T: WindowsAddrInfo> Drop for ManagedAddrInfo<T> {
-    fn drop(&mut self) {
-        if !self.ptr.is_null() {
-            unsafe {
-                // Walk the entire chain and free each node
-                let mut current = self.ptr;
-                while !current.is_null() {
-                    let next = (*current).ai_next();
-
-                    // Free the sockaddr structure
-                    let addr = (*current).ai_addr();
-                    if !addr.is_null() {
-                        let sockaddr_layout = if (*current).ai_family() == AF_INET {
-                            Layout::new::<SOCKADDR_IN>()
-                        } else {
-                            Layout::new::<SOCKADDR_IN6>()
-                        };
-                        std::alloc::dealloc(addr as *mut u8, sockaddr_layout);
-                    }
-
-                    // Free the canonical name
-                    let canonname = (*current).ai_canonname();
-                    T::free_canonname(canonname);
-
-                    // Free the ADDRINFO structure itself
-                    let addrinfo_layout = Layout::new::<T>();
-                    std::alloc::dealloc(current as *mut u8, addrinfo_layout);
-
-                    current = next;
-                }
-            }
+        for i in 0..nodes.len().saturating_sub(1) {
+            let next_ptr = nodes[i + 1].as_mut() as *mut T;
+            T::set_next(nodes[i].as_mut(), next_ptr);
         }
+
+        Ok(Self {
+            nodes,
+            sockaddrs: sockaddrs,
+            _canonnames: canonnames,
+        })
     }
 }
