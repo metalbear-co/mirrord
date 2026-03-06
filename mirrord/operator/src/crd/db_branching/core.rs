@@ -106,12 +106,14 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
     fn from(config: &ConnectionParamsConfig) -> Self {
         let wrap = |param: &Option<ParamSource>| -> Option<ConnectionSourceKind> {
             param.as_ref().map(|p| match p {
-                ParamSource::Variable(v) => match &config.source_type {
-                    ConnectionSourceType::Env => ConnectionSourceKind::Env {
+                ParamSource::Variable(v) => match config.source_type.as_ref() {
+                    Some(ConnectionSourceType::EnvFrom) => ConnectionSourceKind::EnvFrom {
                         container: None,
                         variable: v.clone(),
                     },
-                    ConnectionSourceType::EnvFrom => ConnectionSourceKind::EnvFrom {
+                    // None or Env: default to Env. The operator auto-detects
+                    // envFrom at resolution time if the variable isn't in env[].
+                    _ => ConnectionSourceKind::Env {
                         container: None,
                         variable: v.clone(),
                     },
