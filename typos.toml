@@ -1,0 +1,13 @@
+[default]
+extend-ignore-re = [
+    ## ignore markdown links
+    "\\[[^\\]]+\\]\\([^\\)]+\\)",
+]
+
+[default.extend-identifiers]
+HashiCorp = "HashiCorp"
+AKS = "AKS"
+
+[default.extend-words]
+mirrord = "mirrord"
+bimap = "bimap"
