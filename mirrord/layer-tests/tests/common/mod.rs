@@ -155,9 +155,6 @@ pub fn get_env(
         .collect::<Vec<_>>();
 
     [
-        ("RUST_LOG".to_string(), "warn,mirrord=debug".to_string()),
-        ("MIRRORD_CHECK_VERSION".to_string(), "false".to_string()),
-        ("MIRRORD_PROGRESS_MODE".to_string(), "off".to_string()),
         (
             MIRRORD_TEST_INTPROXY_ADDR.to_string(),
             intproxy_addr.to_string(),
