@@ -818,6 +818,7 @@ jobs:
     needs:
       [
         towncrier_check,
+        typos_check,
         changed_files,
         intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
