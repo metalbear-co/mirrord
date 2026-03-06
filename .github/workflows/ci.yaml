@@ -68,7 +68,7 @@ jobs:
       - name: verify newsfragment exist
         run: uv run towncrier check
 
- typos_check:
+  typos_check:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
