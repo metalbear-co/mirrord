@@ -5,50 +5,63 @@ use mirrord_config::feature::database_branches::{
     BranchItemCopyConfig, MongodbBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig,
     PgIamAuthConfig,
 };
-use schemars::JsonSchema;
+use schemars::{
+    JsonSchema,
+    schema::{InstanceType, ObjectValidation, Schema, SchemaObject, SubschemaValidation},
+};
 use serde::{Deserialize, Serialize};
 
+use super::core::IamAuthConfig;
+pub use super::core::{
+    BranchDatabasePhase, BranchDatabaseStatus, ConnectionSource, ConnectionSourceKind, SessionInfo,
+};
 use crate::crd::session::SessionTarget;
 
-pub use super::core::{
-    BranchDatabasePhase, BranchDatabaseStatus, ConnectionSource, ConnectionSourceKind,
-    IamAuthConfig, SessionInfo,
-};
-
-#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize)]
 #[kube(
     group = "dbs.mirrord.metalbear.co",
     version = "v1alpha1",
     kind = "BranchDatabase",
     status = "BranchDatabaseStatus",
-    namespaced
+    namespaced,
+    schema = "manual"
 )]
 #[serde(rename_all = "camelCase")]
 pub struct BranchDatabaseSpec {
     /// ID derived by mirrord CLI.
     pub id: String,
-    /// The database engine to provision.
-    pub dialect: DatabaseDialect,
     /// Database connection info from the workload.
     pub connection_source: ConnectionSource,
     /// Database name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_name: Option<String>,
     /// Target k8s resource to extract connection source info from.
     pub target: SessionTarget,
     /// The duration in seconds this branch database will live idling.
     pub ttl_secs: u64,
-    /// Database server image version, e.g. "16" for PostgreSQL, "8.0" for MySQL, "7.0" for
-    /// MongoDB.
-    pub version: Option<String>,
-    /// Options for copying data from source database to the branch.
-    #[serde(default)]
-    pub copy: BranchCopyConfig,
-    /// Engine-specific configuration options.
+    /// Database server image version (e.g. "16" for PostgreSQL, "8.0" for MySQL).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dialect_options: Option<DialectOptions>,
+    pub version: Option<String>,
+    /// Dialect-specific configuration. The key name determines the database engine.
+    #[serde(flatten)]
+    pub dialect: DialectConfig,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
+/// Externally-tagged enum where the key name (`postgresOptions`, `mysqlOptions`,
+/// `mongodbOptions`) doubles as the dialect discriminant.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum DialectConfig {
+    #[serde(rename = "postgresOptions")]
+    Postgres(Box<PostgresOptions>),
+    #[serde(rename = "mysqlOptions")]
+    Mysql(Box<MysqlOptions>),
+    #[serde(rename = "mongodbOptions")]
+    Mongodb(Box<MongodbOptions>),
+}
+
+/// Simple discriminant enum for dialect matching without carrying option data.
+/// Used by the operator controller to filter resources by database engine.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DatabaseDialect {
     Postgres,
@@ -59,51 +72,239 @@ pub enum DatabaseDialect {
 impl std::fmt::Display for DatabaseDialect {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DatabaseDialect::Postgres => write!(f, "PostgreSQL"),
-            DatabaseDialect::Mysql => write!(f, "MySQL"),
-            DatabaseDialect::Mongodb => write!(f, "MongoDB"),
+            Self::Postgres => write!(f, "PostgreSQL"),
+            Self::Mysql => write!(f, "MySQL"),
+            Self::Mongodb => write!(f, "MongoDB"),
+        }
+    }
+}
+
+impl std::fmt::Display for DialectConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.dialect().fmt(f)
+    }
+}
+
+impl DialectConfig {
+    /// Extract the dialect discriminant (without options data).
+    pub fn dialect(&self) -> DatabaseDialect {
+        match self {
+            Self::Postgres(_) => DatabaseDialect::Postgres,
+            Self::Mysql(_) => DatabaseDialect::Mysql,
+            Self::Mongodb(_) => DatabaseDialect::Mongodb,
+        }
+    }
+}
+
+/// PostgreSQL-specific branch options.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PostgresOptions {
+    #[serde(default)]
+    pub copy: SqlBranchCopyConfig,
+    /// IAM auth config for cloud-managed databases (RDS, Cloud SQL).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_auth: Option<IamAuthConfig>,
+}
+
+/// MySQL-specific branch options.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MysqlOptions {
+    #[serde(default)]
+    pub copy: SqlBranchCopyConfig,
+}
+
+/// MongoDB-specific branch options.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MongodbOptions {
+    #[serde(default)]
+    pub copy: MongodbBranchCopyConfig_,
+}
+
+impl JsonSchema for BranchDatabase {
+    fn schema_name() -> String {
+        "BranchDatabase".into()
+    }
+
+    fn json_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
+        crd_schema(schema_gen)
+    }
+}
+
+fn crd_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
+    let spec_schema = spec_schema(schema_gen);
+    let status_schema = schema_gen.subschema_for::<BranchDatabaseStatus>();
+
+    let mut properties = schemars::Map::new();
+    properties.insert("apiVersion".into(), string_schema());
+    properties.insert("kind".into(), string_schema());
+    properties.insert(
+        "metadata".into(),
+        schema_gen.subschema_for::<k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta>(),
+    );
+    properties.insert("spec".into(), spec_schema);
+    properties.insert("status".into(), status_schema);
+
+    SchemaObject {
+        instance_type: Some(InstanceType::Object.into()),
+        object: Some(Box::new(ObjectValidation {
+            properties,
+            required: ["apiVersion", "kind", "metadata", "spec"]
+                .iter()
+                .map(|s| (*s).into())
+                .collect(),
+            ..Default::default()
+        })),
+        ..Default::default()
+    }
+    .into()
+}
+
+fn spec_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
+    let pg_schema = schema_gen.subschema_for::<PostgresOptions>();
+    let mysql_schema = schema_gen.subschema_for::<MysqlOptions>();
+    let mongodb_schema = schema_gen.subschema_for::<MongodbBranchCopyConfig_>();
+
+    let mut properties = schemars::Map::new();
+    properties.insert("id".into(), string_schema());
+    properties.insert(
+        "connectionSource".into(),
+        schema_gen.subschema_for::<ConnectionSource>(),
+    );
+    properties.insert("databaseName".into(), string_schema());
+    properties.insert("target".into(), schema_gen.subschema_for::<SessionTarget>());
+    properties.insert(
+        "ttlSecs".into(),
+        SchemaObject {
+            instance_type: Some(InstanceType::Integer.into()),
+            format: Some("uint64".into()),
+            ..Default::default()
+        }
+        .into(),
+    );
+    properties.insert("version".into(), string_schema());
+    properties.insert("postgresOptions".into(), pg_schema);
+    properties.insert("mysqlOptions".into(), mysql_schema);
+    properties.insert("mongodbOptions".into(), mongodb_schema);
+
+    let required: std::collections::BTreeSet<String> =
+        ["id", "connectionSource", "target", "ttlSecs"]
+            .iter()
+            .map(|s| (*s).into())
+            .collect();
+
+    fn required_key(key: &str) -> Schema {
+        SchemaObject {
+            object: Some(Box::new(ObjectValidation {
+                required: std::iter::once(key.to_owned()).collect(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+
+    SchemaObject {
+        instance_type: Some(InstanceType::Object.into()),
+        object: Some(Box::new(ObjectValidation {
+            properties,
+            required,
+            ..Default::default()
+        })),
+        subschemas: Some(Box::new(SubschemaValidation {
+            one_of: Some(vec![
+                required_key("postgresOptions"),
+                required_key("mysqlOptions"),
+                required_key("mongodbOptions"),
+            ]),
+            ..Default::default()
+        })),
+        ..Default::default()
+    }
+    .into()
+}
+
+fn string_schema() -> Schema {
+    SchemaObject {
+        instance_type: Some(InstanceType::String.into()),
+        ..Default::default()
+    }
+    .into()
+}
+
+/// Read-only view of the common fields shared by all dialects.
+pub struct CommonFieldsRef<'a> {
+    pub id: &'a str,
+    pub connection_source: &'a ConnectionSource,
+    pub database_name: Option<&'a str>,
+    pub target: &'a SessionTarget,
+    pub ttl_secs: u64,
+    pub version: Option<&'a str>,
+}
+
+impl BranchDatabaseSpec {
+    pub fn common(&self) -> CommonFieldsRef<'_> {
+        CommonFieldsRef {
+            id: &self.id,
+            connection_source: &self.connection_source,
+            database_name: self.database_name.as_deref(),
+            target: &self.target,
+            ttl_secs: self.ttl_secs,
+            version: self.version.as_deref(),
         }
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DialectOptions {
-    /// IAM authentication configuration for the source database.
-    /// Currently only used by PostgreSQL with AWS RDS / GCP Cloud SQL.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub iam_auth: Option<IamAuthConfig>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct BranchCopyConfig {
-    /// The copy mode for the branch.
-    pub mode: BranchCopyMode,
-
-    /// An optional map of items (tables for SQL databases, collections for MongoDB) to copy,
-    /// each with an optional filter.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+pub struct SqlBranchCopyConfig {
+    pub mode: SqlBranchCopyMode,
+    /// Per-table copy filters. Only compatible with Empty and Schema modes.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub items: Option<BTreeMap<String, ItemCopyConfig>>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
 #[serde(rename_all = "camelCase")]
-pub enum BranchCopyMode {
-    /// Create an empty database only.
+#[strum(serialize_all = "lowercase")]
+pub enum SqlBranchCopyMode {
     Empty,
-    /// Create a database with all tables' schema copied from the source database.
-    /// Valid for relational databases (PostgreSQL, MySQL) only.
     Schema,
-    /// Create a database and copy all data from the source database.
     All,
 }
 
-impl Default for BranchCopyConfig {
+impl Default for SqlBranchCopyConfig {
     fn default() -> Self {
-        BranchCopyConfig {
-            mode: BranchCopyMode::Empty,
-            items: Default::default(),
+        Self {
+            mode: SqlBranchCopyMode::Empty,
+            items: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MongodbBranchCopyConfig_ {
+    pub mode: MongodbBranchCopyMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items: Option<BTreeMap<String, ItemCopyConfig>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
+#[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "lowercase")]
+pub enum MongodbBranchCopyMode {
+    Empty,
+    All,
+}
+
+impl Default for MongodbBranchCopyConfig_ {
+    fn default() -> Self {
+        Self {
+            mode: MongodbBranchCopyMode::Empty,
+            items: None,
         }
     }
 }
@@ -112,8 +313,8 @@ impl Default for BranchCopyConfig {
 #[serde(rename_all = "camelCase")]
 pub struct ItemCopyConfig {
     /// Data that matches the filter will be copied.
-    /// For SQL databases, this is a WHERE clause like `username = 'alice'`.
-    /// For MongoDB, this is a JSON query document like `{"username": "alice"}`.
+    /// For SQL databases this is a WHERE clause (e.g. `username = 'alice'`).
+    /// For MongoDB this is a JSON query document (e.g. `{"username": "alice"}`).
     pub filter: Option<String>,
 }
 
@@ -144,53 +345,53 @@ impl From<&PgIamAuthConfig> for IamAuthConfig {
     }
 }
 
-impl From<PgBranchCopyConfig> for BranchCopyConfig {
+impl From<PgBranchCopyConfig> for SqlBranchCopyConfig {
     fn from(config: PgBranchCopyConfig) -> Self {
         match config {
-            PgBranchCopyConfig::Empty { tables } => BranchCopyConfig {
-                mode: BranchCopyMode::Empty,
+            PgBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
             },
-            PgBranchCopyConfig::Schema { tables } => BranchCopyConfig {
-                mode: BranchCopyMode::Schema,
+            PgBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
             },
-            PgBranchCopyConfig::All => BranchCopyConfig {
-                mode: BranchCopyMode::All,
+            PgBranchCopyConfig::All => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::All,
                 items: None,
             },
         }
     }
 }
 
-impl From<MysqlBranchCopyConfig> for BranchCopyConfig {
+impl From<MysqlBranchCopyConfig> for SqlBranchCopyConfig {
     fn from(config: MysqlBranchCopyConfig) -> Self {
         match config {
-            MysqlBranchCopyConfig::Empty { tables } => BranchCopyConfig {
-                mode: BranchCopyMode::Empty,
+            MysqlBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
             },
-            MysqlBranchCopyConfig::Schema { tables } => BranchCopyConfig {
-                mode: BranchCopyMode::Schema,
+            MysqlBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
             },
-            MysqlBranchCopyConfig::All => BranchCopyConfig {
-                mode: BranchCopyMode::All,
+            MysqlBranchCopyConfig::All => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::All,
                 items: None,
             },
         }
     }
 }
 
-impl From<MongodbBranchCopyConfig> for BranchCopyConfig {
+impl From<MongodbBranchCopyConfig> for MongodbBranchCopyConfig_ {
     fn from(config: MongodbBranchCopyConfig) -> Self {
         match config {
-            MongodbBranchCopyConfig::Empty { collections } => BranchCopyConfig {
-                mode: BranchCopyMode::Empty,
+            MongodbBranchCopyConfig::Empty { collections } => MongodbBranchCopyConfig_ {
+                mode: MongodbBranchCopyMode::Empty,
                 items: convert_item_copy_configs(collections),
             },
-            MongodbBranchCopyConfig::All { collections } => BranchCopyConfig {
-                mode: BranchCopyMode::All,
+            MongodbBranchCopyConfig::All { collections } => MongodbBranchCopyConfig_ {
+                mode: MongodbBranchCopyMode::All,
                 items: convert_item_copy_configs(collections),
             },
         }

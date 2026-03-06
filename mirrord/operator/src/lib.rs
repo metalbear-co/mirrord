@@ -2,6 +2,8 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
+use strum_macros as _;
+
 #[cfg(feature = "client")]
 pub mod client;
 
