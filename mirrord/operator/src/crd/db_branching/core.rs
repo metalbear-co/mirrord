@@ -4,7 +4,10 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use mirrord_config::feature::database_branches::{
     ConnectionParamsConfig, ConnectionSourceType, ParamSource, TargetEnviromentVariableSource,
 };
-use schemars::JsonSchema;
+use schemars::{
+    JsonSchema,
+    schema::{InstanceType, ObjectValidation, Schema, SchemaObject},
+};
 use serde::{Deserialize, Serialize};
 
 use crate::crd::session::SessionOwner;
@@ -184,7 +187,7 @@ pub struct BranchDatabaseStatus {
 /// Environment variable sources follow the same pattern as `connection.url`:
 /// - `Env` - direct env var from pod spec
 /// - `EnvFrom` - from configMapRef/secretRef
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IamAuthConfig {
     /// AWS RDS/Aurora IAM authentication.
@@ -223,4 +226,40 @@ pub enum IamAuthConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project: Option<ConnectionSourceKind>,
     },
+}
+
+/// Manual JsonSchema because schemars' derive for internally-tagged enums
+/// (`#[serde(tag = "type")]`) produces `oneOf` subschemas with conflicting
+/// `type` property schemas, which kube-rs's CRD generator cannot merge.
+/// We produce a simple discriminated schema: object with a required `type`
+/// string and no further validation, matching what Kubernetes accepts.
+impl JsonSchema for IamAuthConfig {
+    fn schema_name() -> String {
+        "IamAuthConfig".into()
+    }
+
+    fn json_schema(_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
+        let mut type_prop = schemars::Map::new();
+        type_prop.insert(
+            "type".into(),
+            SchemaObject {
+                instance_type: Some(InstanceType::String.into()),
+                enum_values: Some(vec!["aws_rds".into(), "gcp_cloud_sql".into()]),
+                ..Default::default()
+            }
+            .into(),
+        );
+
+        SchemaObject {
+            instance_type: Some(InstanceType::Object.into()),
+            object: Some(Box::new(ObjectValidation {
+                properties: type_prop,
+                required: std::iter::once("type".to_owned()).collect(),
+                additional_properties: Some(Box::new(Schema::Bool(true))),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
 }
