@@ -154,12 +154,10 @@ pub fn get_env(
         .map(|(key, value)| (key.to_string(), value.to_string()))
         .collect::<Vec<_>>();
 
-    [
-        (
-            MIRRORD_TEST_INTPROXY_ADDR.to_string(),
-            intproxy_addr.to_string(),
-        ),
-    ]
+    [(
+        MIRRORD_TEST_INTPROXY_ADDR.to_string(),
+        intproxy_addr.to_string(),
+    )]
     .into_iter()
     .chain(extra_vars_owned)
     .collect()
