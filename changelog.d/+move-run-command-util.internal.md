@@ -1,1 +1,0 @@
-Move `run_command` utility from mirrord-tests to mirrord-test-utils for future exec-based test harness usage

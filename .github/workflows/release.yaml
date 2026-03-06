@@ -705,6 +705,58 @@ jobs:
             ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }}
             ghcr.io/metalbear-co/mirrord-cli:latest
 
+  check_for_new_docs:
+    runs-on: ubuntu-24.04
+    outputs:
+      config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+          fetch-depth: 0
+      - name: get config changes since last release
+        id: changed-config-schema
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        with:
+          files: |
+            mirrord-schema.json
+          base_sha: latest
+
+  update_config_docs:
+    runs-on: ubuntu-24.04
+    needs: check_for_new_docs
+    if: ${{needs.check_for_new_docs.outputs.config_schema_changed == 'true'}}
+    permissions:
+      contents: write
+    env:
+      TEMP_DIR_NAME: temp-docs-dir
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          toolchain: ${{ env.PINNED_NIGHTLY }}
+          cache: false
+      - run: mkdir ${{ env.TEMP_DIR_NAME }}
+      - name: Generate new GitBook files from our config
+        run: ./scripts/residency.sh # uses env.TEMP_DIR_NAME
+        shell: bash
+      - name: Commit to docs branch (syncs with GitBook)
+        uses: metalbear-co/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f
+        with:
+          folder: ${{ env.TEMP_DIR_NAME }}
+          target-folder: configuration
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: docs
+          clean: false # prevent SUMMARY.md in target folder from being removed
+          dry-run: ${{ github.event_name == 'workflow_dispatch' }} # dry run on manual dispatch
+      - name: Cleanup temp files from script
+        continue-on-error: true
+        if: ${{ always() }}
+        run: rm -rf ${{ env.TEMP_DIR_NAME }}
+        shell: bash
+
   release_gh:
     needs:
       [
@@ -1015,7 +1067,7 @@ jobs:
           Write-Host "Successfully updated WinGet manifest"
 
   update_latest:
-    needs: release_homebrew
+    needs: [release_homebrew, check_for_new_docs]
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch'
     permissions:

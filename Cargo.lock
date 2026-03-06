@@ -454,12 +454,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arraydeque"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
-
-[[package]]
 name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1673,22 +1667,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ciborium-io"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05afea1e0a06c9be33d539b876f1ce3692f4afea2cb41f740e7743225ed1c757"
-
-[[package]]
-name = "ciborium-ll"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57663b653d948a338bfb3eeba9bb2fd5fcfaecb9e199e87e1eda4d9e8b240fd9"
-dependencies = [
- "ciborium-io",
- "half",
-]
-
-[[package]]
 name = "cipher"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1766,12 +1744,6 @@ checksum = "75443c44cd6b379beb8c5b45d85d0773baf31cce901fe7bb252f4eff3008ef7d"
 dependencies = [
  "cc",
 ]
-
-[[package]]
-name = "codesnake"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2205f7f6d3de68ecf4c291c789b3edf07b6569268abd0188819086f71ae42225"
 
 [[package]]
 name = "colorchoice"
@@ -2440,7 +2412,7 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "double_listen"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "libc",
 ]
@@ -2755,7 +2727,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "libc",
 ]
@@ -3186,17 +3158,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "half"
-version = "2.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b"
-dependencies = [
- "cfg-if",
- "crunchy",
- "zerocopy",
-]
-
-[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3227,15 +3188,6 @@ name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
-
-[[package]]
-name = "hashlink"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1"
-dependencies = [
- "hashbrown 0.15.5",
-]
 
 [[package]]
 name = "headers"
@@ -3330,12 +3282,6 @@ name = "hifijson"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0a7763b98ba8a24f59e698bf9ab197e7676c640d6455d1580b4ce7dc560f0f0d"
-
-[[package]]
-name = "hifijson"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e31b7adc036c0d7e45ccaf90b90464df98bcf74b706ad5178750d442268ca17e"
 
 [[package]]
 name = "hkdf"
@@ -3963,7 +3909,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "issue1317"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "actix-web",
  "env_logger",
@@ -3973,7 +3919,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "errno 0.3.14",
  "libc",
@@ -3982,7 +3928,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "libc",
  "socket2 0.5.10",
@@ -3990,14 +3936,14 @@ dependencies = [
 
 [[package]]
 name = "issue1899"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "issue2001"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "libc",
 ]
@@ -4047,20 +3993,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
 
 [[package]]
-name = "jaq-all"
-version = "0.1.0-beta"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ae9edd516e2e15384951dd0e28f5ff6fb57bc01812b356f2e6fc7c83bcab2ab"
-dependencies = [
- "codesnake",
- "jaq-core 3.0.0-beta",
- "jaq-fmts",
- "jaq-json 2.0.0-beta",
- "jaq-std 3.0.0-beta",
- "unicode-width 0.1.14",
-]
-
-[[package]]
 name = "jaq-core"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4072,68 +4004,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "jaq-core"
-version = "3.0.0-beta"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f8be1f6e12cf2b24aa2a30680104403650a5e6aac8e0a9fc1195879366b8919"
-dependencies = [
- "dyn-clone",
- "once_cell",
- "typed-arena",
-]
-
-[[package]]
-name = "jaq-fmts"
-version = "0.1.0-beta"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f87a96a09168df6dd78fb9bdad0ea465216c50af23cf5a37e48fcfae86aafb50"
-dependencies = [
- "base64",
- "bstr",
- "bytes",
- "ciborium-io",
- "ciborium-ll",
- "jaq-core 3.0.0-beta",
- "jaq-json 2.0.0-beta",
- "jaq-std 3.0.0-beta",
- "memmap2",
- "num-bigint",
- "saphyr-parser",
- "toml_edit 0.23.10+spec-1.0.0",
- "xmlparser",
-]
-
-[[package]]
 name = "jaq-json"
 version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "01dbdbd07b076e8403abac68ce7744d93e2ecd953bbc44bf77bf00e1e81172bc"
 dependencies = [
  "foldhash",
- "hifijson 0.2.3",
+ "hifijson",
  "indexmap 2.13.0",
- "jaq-core 2.2.1",
- "jaq-std 2.1.2",
+ "jaq-core",
+ "jaq-std",
  "serde_json",
-]
-
-[[package]]
-name = "jaq-json"
-version = "2.0.0-beta"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfb0e332a04b1d705316161cbb027cb892b02273929b510df46db967b38d7c25"
-dependencies = [
- "bstr",
- "bytes",
- "foldhash",
- "hifijson 0.4.0",
- "indexmap 2.13.0",
- "jaq-core 3.0.0-beta",
- "jaq-std 3.0.0-beta",
- "num-bigint",
- "num-traits",
- "ryu",
- "self_cell",
 ]
 
 [[package]]
@@ -4145,27 +4026,10 @@ dependencies = [
  "aho-corasick",
  "base64",
  "chrono",
- "jaq-core 2.2.1",
+ "jaq-core",
  "libm",
  "log",
  "regex-lite",
- "urlencoding",
-]
-
-[[package]]
-name = "jaq-std"
-version = "3.0.0-beta"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da48542201db5084085d28efaaf6732dbc3236a030ac15d71965ba8f647e5995"
-dependencies = [
- "aho-corasick",
- "base64",
- "bstr",
- "jaq-core 3.0.0-beta",
- "jiff",
- "libm",
- "log",
- "regex-bites",
  "urlencoding",
 ]
 
@@ -4176,12 +4040,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3e3d65f018c6ae946ab16e80944b97096ed73c35b221d1c478a6c81d8f57940"
 dependencies = [
  "jiff-static",
- "jiff-tzdb-platform",
  "log",
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4193,21 +4055,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "jiff-tzdb"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68971ebff725b9e2ca27a601c5eb38a4c5d64422c4cbab0c535f248087eda5c2"
-
-[[package]]
-name = "jiff-tzdb-platform"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "875a5a69ac2bab1a891711cf5eccbec1ce0341ea805560dcd90b7a2e925132e8"
-dependencies = [
- "jiff-tzdb",
 ]
 
 [[package]]
@@ -4535,7 +4382,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "listen_ports"
-version = "3.191.0"
+version = "3.193.0"
 
 [[package]]
 name = "litemap"
@@ -4661,15 +4508,6 @@ name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
-
-[[package]]
-name = "memmap2"
-version = "0.9.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "714098028fe011992e1c3962653c96b2d578c4b4bce9036e15ff220319b1e0e3"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "memoffset"
@@ -4805,7 +4643,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "actix-codec",
  "axum 0.8.8",
@@ -4884,7 +4722,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "actix-codec",
  "async-pidfd",
@@ -4942,7 +4780,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-env"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "base64",
  "k8s-openapi",
@@ -4955,7 +4793,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-iptables"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "async-trait",
  "caps",
@@ -4971,7 +4809,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "assert-json-diff",
  "base64",
@@ -4987,7 +4825,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "base64",
  "bcder",
@@ -5011,7 +4849,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "base64",
  "bimap",
@@ -5019,10 +4857,10 @@ dependencies = [
  "clap",
  "fancy-regex",
  "ipnet",
- "jaq-all",
  "k8s-openapi",
  "mirrord-analytics",
  "mirrord-config-derive",
+ "mirrord-jaq",
  "mirrord-protocol",
  "nom",
  "rand 0.9.2",
@@ -5045,7 +4883,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -5055,7 +4893,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "bincode",
  "drain",
@@ -5071,7 +4909,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "bytes",
  "futures",
@@ -5106,7 +4944,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy-protocol"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "bincode",
  "mirrord-protocol",
@@ -5115,8 +4953,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-jaq"
+version = "3.193.0"
+dependencies = [
+ "jaq-core",
+ "jaq-json",
+ "jaq-std",
+ "mirrord-test-macros",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "mirrord-kube"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "async-stream",
  "futures",
@@ -5142,7 +4993,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "actix-codec",
  "apple-codesign",
@@ -5181,7 +5032,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-lib"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -5217,7 +5068,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5226,7 +5077,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-win"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -5254,7 +5105,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -5264,7 +5115,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "base64",
  "bincode",
@@ -5303,7 +5154,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "enum_dispatch",
  "indicatif",
@@ -5342,7 +5193,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol-io"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -5359,7 +5210,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "apple-codesign",
  "fs4 0.12.0",
@@ -5374,8 +5225,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-test-macros"
+version = "3.193.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "mirrord-test-utils"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "chrono",
  "fancy-regex",
@@ -5426,7 +5286,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-tls-util"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "http 1.4.0",
  "pem",
@@ -5443,7 +5303,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-vpn"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "futures",
  "ipnet",
@@ -5903,7 +5763,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "tokio",
 ]
@@ -6892,12 +6752,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "regex-bites"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6a15a2fa0bfda9361941c45550896ae87b15cc6c8c939ea350079670332e211"
-
-[[package]]
 name = "regex-lite"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7069,14 +6923,14 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "libc",
 ]
@@ -7093,7 +6947,7 @@ dependencies = [
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "tokio",
 ]
@@ -7308,9 +7162,9 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 name = "safejaq"
 version = "0.1.0"
 dependencies = [
- "jaq-core 2.2.1",
- "jaq-json 1.1.3",
- "jaq-std 2.1.2",
+ "jaq-core",
+ "jaq-json",
+ "jaq-std",
  "nix 0.29.0",
  "rstest",
  "serde",
@@ -7334,16 +7188,6 @@ name = "sample-rust"
 version = "0.1.0"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "saphyr-parser"
-version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fb771b59f6b1985d1406325ec28f97cfb14256abcec4fdfb37b36a1766d6af7"
-dependencies = [
- "arraydeque",
- "hashlink",
 ]
 
 [[package]]
@@ -8528,7 +8372,6 @@ dependencies = [
  "indexmap 2.13.0",
  "toml_datetime 0.7.5+spec-1.1.0",
  "toml_parser",
- "toml_writer",
  "winnow",
 ]
 
@@ -8546,12 +8389,6 @@ name = "toml_write"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
-
-[[package]]
-name = "toml_writer"
-version = "1.0.6+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab16f14aed21ee8bfd8ec22513f7287cd4a91aa92e44edfe2c17ddd004e92607"
 
 [[package]]
 name = "tonic"
@@ -9976,7 +9813,7 @@ checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
 
 [[package]]
 name = "xtask"
-version = "3.191.0"
+version = "3.193.0"
 dependencies = [
  "anyhow",
  "clap",
