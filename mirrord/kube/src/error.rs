@@ -84,6 +84,10 @@ pub enum KubeApiError {
     /// Spawned agent pod was deleted during startup.
     #[error("Agent pod was unexpectedly deleted")]
     AgentPodDeleted,
+
+    /// Target node has no room for a new agent pod.
+    #[error("Node `{node_name}` is out of pod capacity (currently running {pod_count} pods)")]
+    NodeOutOfPods { node_name: String, pod_count: usize },
 }
 
 impl KubeApiError {
