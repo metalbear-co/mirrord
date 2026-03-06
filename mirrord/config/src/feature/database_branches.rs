@@ -292,8 +292,8 @@ pub enum ConnectionSource {
         url: TargetEnviromentVariableSource,
     },
     FlatUrl {
-        #[serde(rename = "type")]
-        source_type: ConnectionSourceType,
+        #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+        source_type: Option<ConnectionSourceType>,
         url: String,
     },
     Params(ConnectionParamsConfig),
@@ -311,14 +311,20 @@ impl Serialize for ConnectionSource {
                 map.end()
             }
             Self::FlatUrl { source_type, url } => {
-                let mut map = serializer.serialize_map(Some(2))?;
-                map.serialize_entry("type", source_type)?;
+                let entries = if source_type.is_some() { 2 } else { 1 };
+                let mut map = serializer.serialize_map(Some(entries))?;
+                if let Some(st) = source_type {
+                    map.serialize_entry("type", st)?;
+                }
                 map.serialize_entry("url", url)?;
                 map.end()
             }
             Self::Params(config) => {
-                let mut map = serializer.serialize_map(Some(2))?;
-                map.serialize_entry("type", &config.source_type)?;
+                let entries = if config.source_type.is_some() { 2 } else { 1 };
+                let mut map = serializer.serialize_map(Some(entries))?;
+                if let Some(ref st) = config.source_type {
+                    map.serialize_entry("type", st)?;
+                }
                 map.serialize_entry("params", &config.params)?;
                 map.end()
             }
@@ -335,10 +341,12 @@ pub enum ConnectionSourceType {
 }
 
 /// Connection parameters specified as individual environment variable names.
+/// The `type` field is optional - when omitted, the operator auto-detects
+/// whether the variable comes from `env` or `envFrom` on the target pod.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub struct ConnectionParamsConfig {
-    #[serde(rename = "type")]
-    pub source_type: ConnectionSourceType,
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub source_type: Option<ConnectionSourceType>,
     pub params: ConnectionParamsVars,
 }
 
@@ -500,7 +508,7 @@ mod tests {
         assert_eq!(
             source,
             ConnectionSource::FlatUrl {
-                source_type: ConnectionSourceType::Env,
+                source_type: Some(ConnectionSourceType::Env),
                 url: "DB_URL".to_string(),
             }
         );
@@ -513,7 +521,20 @@ mod tests {
         assert_eq!(
             source,
             ConnectionSource::FlatUrl {
-                source_type: ConnectionSourceType::EnvFrom,
+                source_type: Some(ConnectionSourceType::EnvFrom),
+                url: "DB_URL".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_flat_url_no_type() {
+        let json = r#"{ "url": "DB_URL" }"#;
+        let source: ConnectionSource = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            source,
+            ConnectionSource::FlatUrl {
+                source_type: None,
                 url: "DB_URL".to_string(),
             }
         );
@@ -534,7 +555,7 @@ mod tests {
         let source: ConnectionSource = serde_json::from_str(json).unwrap();
         match source {
             ConnectionSource::Params(config) => {
-                assert_eq!(config.source_type, ConnectionSourceType::Env);
+                assert_eq!(config.source_type, Some(ConnectionSourceType::Env));
                 assert_eq!(
                     config.params.host,
                     Some(ParamSource::Variable("DB_HOST".to_string()))
@@ -589,7 +610,7 @@ mod tests {
         assert_eq!(
             result,
             ConnectionSource::Params(ConnectionParamsConfig {
-                source_type: ConnectionSourceType::Env,
+                source_type: Some(ConnectionSourceType::Env),
                 params: ConnectionParamsVars {
                     host: None,
                     port: None,
@@ -599,6 +620,26 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[test]
+    fn deserialize_params_no_type() {
+        let json = r#"{ "params": { "host": "DB_HOST", "database": "DB_NAME" } }"#;
+        let source: ConnectionSource = serde_json::from_str(json).unwrap();
+        match source {
+            ConnectionSource::Params(config) => {
+                assert_eq!(config.source_type, None);
+                assert_eq!(
+                    config.params.host,
+                    Some(ParamSource::Variable("DB_HOST".to_string()))
+                );
+                assert_eq!(
+                    config.params.database,
+                    Some(ParamSource::Variable("DB_NAME".to_string()))
+                );
+            }
+            other => panic!("expected Params, got {:?}", other),
+        }
     }
 
     #[test]
@@ -624,7 +665,7 @@ mod tests {
     #[test]
     fn serialize_roundtrip_params() {
         let source = ConnectionSource::Params(ConnectionParamsConfig {
-            source_type: ConnectionSourceType::Env,
+            source_type: Some(ConnectionSourceType::Env),
             params: ConnectionParamsVars {
                 host: Some(ParamSource::Variable("DB_HOST".to_string())),
                 port: None,
@@ -653,7 +694,7 @@ mod tests {
         let source: ConnectionSource = serde_json::from_str(json).unwrap();
         match source {
             ConnectionSource::Params(config) => {
-                assert_eq!(config.source_type, ConnectionSourceType::Env);
+                assert_eq!(config.source_type, Some(ConnectionSourceType::Env));
                 assert_eq!(
                     config.params.host,
                     Some(ParamSource::Variable("DB_HOST".to_string()))
@@ -677,7 +718,7 @@ mod tests {
     #[test]
     fn serialize_roundtrip_params_with_secret() {
         let source = ConnectionSource::Params(ConnectionParamsConfig {
-            source_type: ConnectionSourceType::Env,
+            source_type: Some(ConnectionSourceType::Env),
             params: ConnectionParamsVars {
                 host: Some(ParamSource::Variable("DB_HOST".to_string())),
                 port: None,
