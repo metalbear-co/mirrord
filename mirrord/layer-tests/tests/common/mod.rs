@@ -8,7 +8,7 @@ use std::{
 
 use mirrord_config::MIRRORD_TEST_INTPROXY_ADDR;
 use mirrord_layer_tests::intproxy::TestIntProxy;
-pub use mirrord_test_utils::{TestProcess, run_command::run_exec_targetless};
+pub use mirrord_test_utils::{TestProcess, run_command::run_exec};
 use rstest::fixture;
 use tokio::net::TcpListener;
 
@@ -90,7 +90,7 @@ impl Application {
             .collect();
 
         let cmdline: Vec<String> = [executable].into_iter().chain(self.get_args()).collect();
-        run_exec_targetless(cmdline, None, cli_args, Some(env_refs)).await
+        run_exec(cmdline, None, None, cli_args, Some(env_refs)).await
     }
 
     pub async fn start_process(
