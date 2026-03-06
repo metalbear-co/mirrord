@@ -21,7 +21,7 @@ use crate::{
 /// can be read/write remotely based on our default/user specified.
 /// Default option for general file configuration.
 ///
-/// The accepted values are: `"local"`, `"localwithoverrides`, `"read"`, or `"write`.
+/// The accepted values are: `"local"`, `"localwithoverrides"`, `"read"`, or `"write"`.
 #[derive(Serialize, Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum FsModeConfig {

@@ -488,7 +488,7 @@ pub enum BodyFilter {
     ///
     ///
     ///
-    /// To use with with `all_of` or `any_of`, use the following syntax:
+    /// To use with `all_of` or `any_of`, use the following syntax:
     /// ```json
     /// "http_filter": {
     ///   "all_of": [

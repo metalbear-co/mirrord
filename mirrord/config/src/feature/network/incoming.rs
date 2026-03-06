@@ -163,7 +163,7 @@ impl MirrordToggleableConfig for IncomingFileConfig {
     }
 }
 
-// Change to manual deserializtion to prevent useless untagged enum errors
+// Change to manual deserialization to prevent useless untagged enum errors
 impl<'de> Deserialize<'de> for IncomingFileConfig {
     fn deserialize<D>(deserializer: D) -> Result<IncomingFileConfig, D::Error>
     where

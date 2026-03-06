@@ -40,7 +40,7 @@ pub const READONLY_FILE_BUFFER_HARD_LIMIT: u64 = 15 * 1024 * 1024;
 /// 1. `"read_write"` - List of patterns that should be read/write remotely.
 /// 2. `"read_only"` - List of patterns that should be read only remotely.
 /// 3. `"local"` - List of patterns that should be read locally.
-/// 4. `"not_found"` - List of patters that should never be read nor written. These files should be
+/// 4. `"not_found"` - List of patterns that should never be read nor written. These files should be
 ///    treated as non-existent.
 /// 4. `"mapping"` - Map of patterns and their corresponding replacers. The replacement happens before any specific behavior as defined above or mode (uses [`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace))
 ///
