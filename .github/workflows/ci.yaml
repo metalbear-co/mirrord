@@ -345,6 +345,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [changed_files]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    env:
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/debug/mirrord
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
@@ -453,7 +456,10 @@ jobs:
           cargo build
       - run: ./mirrord/layer/tests/apps/dlopen_cgo/build_test_app.sh
       - run: ./scripts/build_c_apps.sh
+      - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord-layer
+      - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-lib
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: create dummy file to compile wizard feature
         run: touch wizard-frontend.tar.gz
@@ -489,8 +495,12 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
-      MIRRORD_TEST_USE_EXISTING_LIB: ../../target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
-      MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/debug/libmirrord_layer.dylib
+      # mirrod-layer integration tests (mimic test harness)
+      MIRRORD_TEST_USE_EXISTING_LIB: ${{ github.workspace }}/target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
+      MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/debug/libmirrord_layer.dylib
+      # mirrord-layer-tests (exec test harness)
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/libmirrord_layer.dylib
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -510,6 +520,8 @@ jobs:
         run: cargo build -p mirrord-layer
       - name: build layer x86
         run: cargo build -p mirrord-layer --target=x86_64-apple-darwin
+      - name: build cli
+        run: cargo build -p mirrord
       - name: mirrord-sip UT
         run: cargo test -p mirrord-sip
       - name: mirrord-intproxy UT
@@ -616,10 +628,10 @@ jobs:
           node-version: 24
       - run: npm install express # For http mirroring test with node.
       - run: npm install portfinder # For a node specific test
+      - name: mirrord layer unified tests
+        run: cargo test -p mirrord-layer-tests --no-default-features
       - name: mirrord layer tests
         run: cargo test -p mirrord-layer
-      - name: mirrord layer-lib tests
-        run: cargo test -p mirrord-layer-lib
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
@@ -702,6 +714,9 @@ jobs:
     needs: changed_files
     if: ${{ needs.changed_files.outputs.rs_changed == 'true' ||needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
     runs-on: windows-latest
+    env:
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord.exe
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/mirrord_layer_win.dll
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -712,11 +727,21 @@ jobs:
           target: x86_64-pc-windows-msvc
           toolchain: ${{ env.PINNED_NIGHTLY }}
 
+      - run: |
+          cd mirrord/layer/tests/apps/outgoing
+          cargo build
+      - name: build layer
+        run: cargo build -p mirrord-layer-win
+      - name: build mirrord
+        run: cargo build -p mirrord
+      - name: mirrord layer unified integration tests
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test -p mirrord-layer-tests --no-default-features
       - name: run UT
         run: |
           $ErrorActionPreference = "Stop"
-          New-Item -Path target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll -ItemType File -Force
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
+          cargo test -p mirrord -p mirrord-layer-win
 
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
   # building concurrently can run faster the release ide tests
