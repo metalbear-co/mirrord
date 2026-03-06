@@ -76,7 +76,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install typos
-        uses: taiki-e/install-action@v2
+        uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
         with:
           tool: typos-cli
 
