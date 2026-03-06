@@ -1000,7 +1000,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch, &user_data).await?;
-            },
+            }
             Commands::InternalProxy {
                 port,
                 mirrord_for_ci,
