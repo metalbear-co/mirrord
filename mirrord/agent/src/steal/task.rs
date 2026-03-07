@@ -265,7 +265,7 @@ impl TcpStealerTask {
         let (parts, body_reader) = http.parts_and_body();
 
         for (client_id, filter) in filters {
-            if filter.matches(parts, body_reader).not() {
+            if filter.matches(parts, body_reader).await.not() {
                 continue;
             }
 

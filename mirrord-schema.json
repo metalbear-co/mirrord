@@ -463,6 +463,16 @@
             "null"
           ]
         },
+        "jaq_time_limit": {
+          "title": "agent.jaq_time_limit {#agent-jaq_time_limit}",
+          "description": "Time limit for running jaq queries, in milliseconds. Defaults to 500ms.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
         "json_log": {
           "title": "agent.json_log {#agent-json_log}",
           "description": "Controls whether the agent produces logs in a human-friendly format, or json.\n\n```json { \"agent\": { \"json_log\": true } } ```",
@@ -2052,6 +2062,14 @@
             "null"
           ]
         },
+        "header_filter_jq": {
+          "title": "feature.network.incoming.http_filter.header_filter_jq {#feature-network-incoming-http-header-filter-jq}",
+          "description": "Supports jq expressions, matches when the expression returns `true`. The expression is evaluated on each present header in the request, in `HeaderKey: HeaderValue` format.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "method_filter": {
           "title": "feature.network.incoming.http_filter.method_filter {#feature-network-incoming-http-method-filter}",
           "description": "Supports standard [HTTP methods](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods), and non-standard HTTP methods.\n\nCase-insensitive. If the request method matches the filter, the request is stolen.",
@@ -2327,6 +2345,19 @@
               "$ref": "#/definitions/BodyFilter"
             }
           ]
+        },
+        {
+          "title": "feature.network.incoming.inner_filter.header_filter_jq",
+          "description": "##### {#feature-network-incoming-inner-header-filter-jq}\n\nSupports jq expressions, matches when the expression returns `true`. The expression is evaluated on each present header in the request, in `HeaderKey: HeaderValue` format.",
+          "type": "object",
+          "required": [
+            "query"
+          ],
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          }
         }
       ]
     },
