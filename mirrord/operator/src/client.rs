@@ -1621,7 +1621,13 @@ impl OperatorApi<PreparedClientCert> {
         let branch_api: Api<BranchDatabase> = Api::namespaced(self.client.clone(), api_namespace);
         let DatabaseBranchParams {
             branches: mut create_params,
-        } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+        } = DatabaseBranchParams::new(
+            &layer_config.feature.db_branches,
+            &target,
+            self.client(),
+            Some(target_namespace),
+        )
+        .await?;
 
         if let Some(ref ns) = target_ns_annotation {
             for params in create_params.values_mut() {

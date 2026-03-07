@@ -684,6 +684,9 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::ProtocolError(error) => Self::from(error),
             OperatorApiError::ApiKey(fail) => Self::ApiKey(fail),
             OperatorApiError::SerdeJson(fail) => Self::JsonSerializeError(fail),
+            OperatorApiError::TargetResolutionFailed(msg) => {
+                Self::OperatorTargetResolution(KubeApiError::MalformedResource(msg))
+            }
         }
     }
 }

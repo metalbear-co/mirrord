@@ -4,7 +4,7 @@ use std::{
 };
 
 use kube::{
-    Api, Resource,
+    Api, Client, Resource,
     api::{ListParams, ObjectMeta},
     runtime::wait::await_condition,
 };
@@ -15,21 +15,25 @@ use mirrord_config::{
     },
     target::{Target, TargetDisplay},
 };
-use mirrord_kube::error::KubeApiError;
+use mirrord_kube::{api::runtime::RuntimeDataProvider, error::KubeApiError};
 use mirrord_progress::Progress;
 use tracing::Level;
 use uuid::Uuid;
 
 use crate::{
     client::error::{OperatorApiError, OperatorOperation},
-    crd::db_branching::{
-        branch_database::{
-            BranchCopyConfig, BranchDatabase, BranchDatabaseSpec, DatabaseDialect, DialectOptions,
+    crd::{
+        db_branching::{
+            branch_database::{
+                BranchDatabase, BranchDatabaseSpec, DialectConfig, MongodbOptions, MysqlOptions,
+                PostgresOptions, SqlBranchCopyConfig,
+            },
+            core::{
+                BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
+                IamAuthConfig as CrdIamAuthConfig,
+            },
         },
-        core::{
-            BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
-            IamAuthConfig as CrdIamAuthConfig,
-        },
+        session::SessionTarget,
     },
 };
 
@@ -199,7 +203,26 @@ impl DatabaseBranchParams {
     /// Create branch database parameters from user config.
     ///
     /// We generate unique database IDs unless the user explicitly specifies them.
-    pub fn new(config: &DatabaseBranchesConfig, target: &Target) -> Self {
+    /// If the target has no container set, resolves it from the cluster via
+    /// [`RuntimeDataProvider`].
+    pub async fn new(
+        config: &DatabaseBranchesConfig,
+        target: &Target,
+        client: &Client,
+        namespace: Option<&str>,
+    ) -> Result<Self, OperatorApiError> {
+        let mut target_with_container = target.clone();
+        if target_with_container.container().is_none() {
+            let runtime_data = target
+                .runtime_data(client, namespace)
+                .await
+                .map_err(OperatorApiError::KubeApi)?;
+            target_with_container.set_container(runtime_data.container_name);
+        }
+        let target_display = target_with_container.to_string();
+        let session_target = SessionTarget::from_config(target_with_container)
+            .ok_or_else(|| OperatorApiError::TargetResolutionFailed(target_display))?;
+
         let mut branches = HashMap::new();
         for branch_db_config in config.0.iter() {
             match branch_db_config {
@@ -208,7 +231,12 @@ impl DatabaseBranchParams {
                         Some(id) => BranchDatabaseId::specified(id),
                         None => BranchDatabaseId::generate_new(),
                     };
-                    let params = BranchParams::from_mongodb(id.as_ref(), mongodb_config, target);
+                    let params = BranchParams::from_mongodb(
+                        id.as_ref(),
+                        mongodb_config,
+                        target,
+                        &session_target,
+                    );
                     branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Mysql(mysql_config) => {
@@ -216,7 +244,12 @@ impl DatabaseBranchParams {
                         Some(id) => BranchDatabaseId::specified(id),
                         None => BranchDatabaseId::generate_new(),
                     };
-                    let params = BranchParams::from_mysql(id.as_ref(), mysql_config, target);
+                    let params = BranchParams::from_mysql(
+                        id.as_ref(),
+                        mysql_config,
+                        target,
+                        &session_target,
+                    );
                     branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Pg(pg_config) => {
@@ -224,7 +257,8 @@ impl DatabaseBranchParams {
                         Some(id) => BranchDatabaseId::specified(id),
                         None => BranchDatabaseId::generate_new(),
                     };
-                    let params = BranchParams::from_pg(id.as_ref(), pg_config, target);
+                    let params =
+                        BranchParams::from_pg(id.as_ref(), pg_config, target, &session_target);
                     branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Mssql(mssql_config) => {
@@ -238,7 +272,7 @@ impl DatabaseBranchParams {
                 DatabaseBranchConfig::Redis(_) => {}
             };
         }
-        Self { branches }
+        Ok(Self { branches })
     }
 }
 
@@ -323,6 +357,7 @@ impl BranchParams {
         id: &str,
         config: &mirrord_config::feature::database_branches::PgBranchConfig,
         target: &Target,
+        session_target: &SessionTarget,
     ) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
@@ -330,20 +365,17 @@ impl BranchParams {
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
 
-        let dialect_options = iam_auth.map(|auth| DialectOptions {
-            iam_auth: Some(auth),
-        });
-
         let spec = BranchDatabaseSpec {
             id: id.to_string(),
-            dialect: DatabaseDialect::Postgres,
             database_name: config.base.name.clone(),
             connection_source,
-            target: target.clone(),
+            target: session_target.clone(),
             ttl_secs: config.base.ttl_secs,
             version: config.base.version.clone(),
-            copy: BranchCopyConfig::from(config.copy.clone()),
-            dialect_options,
+            dialect: DialectConfig::Postgres(Box::new(PostgresOptions {
+                copy: SqlBranchCopyConfig::from(config.copy.clone()),
+                iam_auth,
+            })),
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -359,19 +391,20 @@ impl BranchParams {
         id: &str,
         config: &mirrord_config::feature::database_branches::MysqlBranchConfig,
         target: &Target,
+        session_target: &SessionTarget,
     ) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_string(),
-            dialect: DatabaseDialect::Mysql,
             database_name: config.base.name.clone(),
             connection_source,
-            target: target.clone(),
+            target: session_target.clone(),
             ttl_secs: config.base.ttl_secs,
             version: config.base.version.clone(),
-            copy: BranchCopyConfig::from(config.copy.clone()),
-            dialect_options: None,
+            dialect: DialectConfig::Mysql(Box::new(MysqlOptions {
+                copy: SqlBranchCopyConfig::from(config.copy.clone()),
+            })),
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -387,19 +420,20 @@ impl BranchParams {
         id: &str,
         config: &mirrord_config::feature::database_branches::MongodbBranchConfig,
         target: &Target,
+        session_target: &SessionTarget,
     ) -> Self {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_string(),
-            dialect: DatabaseDialect::Mongodb,
             database_name: config.base.name.clone(),
             connection_source,
-            target: target.clone(),
+            target: session_target.clone(),
             ttl_secs: config.base.ttl_secs,
             version: config.base.version.clone(),
-            copy: BranchCopyConfig::from(config.copy.clone()),
-            dialect_options: None,
+            dialect: DialectConfig::Mongodb(Box::new(MongodbOptions {
+                copy: config.copy.clone().into(),
+            })),
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);

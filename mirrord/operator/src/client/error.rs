@@ -92,6 +92,9 @@ pub enum OperatorApiError {
         message: String,
     },
 
+    #[error("failed to resolve target: {0}")]
+    TargetResolutionFailed(String),
+
     #[error(transparent)]
     InvalidBackoff(#[from] InvalidBackoff),
 
