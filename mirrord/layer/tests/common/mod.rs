@@ -187,6 +187,8 @@ pub enum Application {
     NodeIssue3456,
     /// C++ app that dlopen c-shared go library.
     DlopenCgoCShared,
+    /// C++ app that dlopen C++ library that wraps static CGO library.
+    DlopenCppCgoCArchive,
     /// C app that calls BSD connectx(2).
     Connectx,
     /// Rust app that closes a clone socket.
@@ -376,6 +378,9 @@ impl Application {
             Application::DlopenCgoCShared => {
                 String::from("tests/apps/dlopen_cgo/out.dlopen_cgo_c_shared")
             }
+            Application::DlopenCppCgoCArchive => {
+                String::from("tests/apps/dlopen_cgo/out.dlopen_cpp_wrapper_cgo_c_archive")
+            }
             Application::Connectx => String::from("tests/apps/connectx/out.c_test_app"),
             Application::DupListen => {
                 format!(
@@ -511,6 +516,7 @@ impl Application {
             | Application::RustIssue3248
             | Application::GoIssue2988(..)
             | Application::DlopenCgoCShared
+            | Application::DlopenCppCgoCArchive
             | Application::Connectx
             | Application::DoubleListen
             | Application::DupListen => vec![],
@@ -609,10 +615,11 @@ impl Application {
             | Application::GoIssue2988(..)
             | Application::NodeMakeConnections
             | Application::DoubleListen
+            | Application::DlopenCgoCShared
+            | Application::DlopenCppCgoCArchive
             | Application::Connectx => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
-            Application::DlopenCgoCShared => 23333,
         }
     }
 

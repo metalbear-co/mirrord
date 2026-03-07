@@ -17,7 +17,8 @@ use mirrord_protocol::tcp::{LayerTcpSteal, StealType};
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn test_dlopen_cgo(
-    #[values(Application::DlopenCgoCShared)] application: Application,
+    #[values(Application::DlopenCgoCShared, Application::DlopenCppCgoCArchive)]
+    application: Application,
     dylib_path: &Path,
 ) {
     use mirrord_protocol::ClientMessage;
