@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use kube::CustomResource;
 use mirrord_config::feature::database_branches::{
-    BranchItemCopyConfig, MongodbBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig,
-    PgIamAuthConfig,
+    BranchItemCopyConfig, MongodbBranchCopyConfig, MssqlBranchCopyConfig, MysqlBranchCopyConfig,
+    PgBranchCopyConfig, PgIamAuthConfig,
 };
 use schemars::{
     JsonSchema,
@@ -57,6 +57,8 @@ pub enum DialectConfig {
     Mysql(Box<MysqlOptions>),
     #[serde(rename = "mongodbOptions")]
     Mongodb(Box<MongodbOptions>),
+    #[serde(rename = "mssqlOptions")]
+    Mssql(Box<MssqlOptions>),
 }
 
 /// Simple discriminant enum for dialect matching without carrying option data.
@@ -67,6 +69,7 @@ pub enum DatabaseDialect {
     Postgres,
     Mysql,
     Mongodb,
+    Mssql,
 }
 
 impl std::fmt::Display for DatabaseDialect {
@@ -75,6 +78,7 @@ impl std::fmt::Display for DatabaseDialect {
             Self::Postgres => write!(f, "PostgreSQL"),
             Self::Mysql => write!(f, "MySQL"),
             Self::Mongodb => write!(f, "MongoDB"),
+            Self::Mssql => write!(f, "MSSQL"),
         }
     }
 }
@@ -92,6 +96,7 @@ impl DialectConfig {
             Self::Postgres(_) => DatabaseDialect::Postgres,
             Self::Mysql(_) => DatabaseDialect::Mysql,
             Self::Mongodb(_) => DatabaseDialect::Mongodb,
+            Self::Mssql(_) => DatabaseDialect::Mssql,
         }
     }
 }
@@ -115,12 +120,20 @@ pub struct MysqlOptions {
     pub copy: SqlBranchCopyConfig,
 }
 
+/// MySQL-specific branch options.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MssqlOptions {
+    #[serde(default)]
+    pub copy: SqlBranchCopyConfig,
+}
+
 /// MongoDB-specific branch options.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MongodbOptions {
     #[serde(default)]
-    pub copy: MongodbBranchCopyConfig_,
+    pub copy: MongodbCopySpec,
 }
 
 impl JsonSchema for BranchDatabase {
@@ -165,7 +178,8 @@ fn crd_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
 fn spec_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
     let pg_schema = schema_gen.subschema_for::<PostgresOptions>();
     let mysql_schema = schema_gen.subschema_for::<MysqlOptions>();
-    let mongodb_schema = schema_gen.subschema_for::<MongodbBranchCopyConfig_>();
+    let mongodb_schema = schema_gen.subschema_for::<MongodbCopySpec>();
+    let mssql_schema = schema_gen.subschema_for::<MssqlOptions>();
 
     let mut properties = schemars::Map::new();
     properties.insert("id".into(), string_schema());
@@ -188,6 +202,7 @@ fn spec_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
     properties.insert("postgresOptions".into(), pg_schema);
     properties.insert("mysqlOptions".into(), mysql_schema);
     properties.insert("mongodbOptions".into(), mongodb_schema);
+    properties.insert("mssqlOptions".into(), mssql_schema);
 
     let required: std::collections::BTreeSet<String> =
         ["id", "connectionSource", "target", "ttlSecs"]
@@ -218,6 +233,7 @@ fn spec_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
                 required_key("postgresOptions"),
                 required_key("mysqlOptions"),
                 required_key("mongodbOptions"),
+                required_key("mssqlOptions"),
             ]),
             ..Default::default()
         })),
@@ -286,8 +302,8 @@ impl Default for SqlBranchCopyConfig {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct MongodbBranchCopyConfig_ {
-    pub mode: MongodbBranchCopyMode,
+pub struct MongodbCopySpec {
+    pub mode: MongodbCopyMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub items: Option<BTreeMap<String, ItemCopyConfig>>,
 }
@@ -295,15 +311,15 @@ pub struct MongodbBranchCopyConfig_ {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
 #[serde(rename_all = "camelCase")]
 #[strum(serialize_all = "lowercase")]
-pub enum MongodbBranchCopyMode {
+pub enum MongodbCopyMode {
     Empty,
     All,
 }
 
-impl Default for MongodbBranchCopyConfig_ {
+impl Default for MongodbCopySpec {
     fn default() -> Self {
         Self {
-            mode: MongodbBranchCopyMode::Empty,
+            mode: MongodbCopyMode::Empty,
             items: None,
         }
     }
@@ -383,15 +399,33 @@ impl From<MysqlBranchCopyConfig> for SqlBranchCopyConfig {
     }
 }
 
-impl From<MongodbBranchCopyConfig> for MongodbBranchCopyConfig_ {
+impl From<MssqlBranchCopyConfig> for SqlBranchCopyConfig {
+    fn from(config: MssqlBranchCopyConfig) -> Self {
+        match config {
+            MssqlBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Empty,
+                items: convert_item_copy_configs(tables),
+            },
+            MssqlBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Schema,
+                items: convert_item_copy_configs(tables),
+            },
+            MssqlBranchCopyConfig::All => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::All,
+                items: None,
+            },
+        }
+    }
+}
+impl From<MongodbBranchCopyConfig> for MongodbCopySpec {
     fn from(config: MongodbBranchCopyConfig) -> Self {
         match config {
-            MongodbBranchCopyConfig::Empty { collections } => MongodbBranchCopyConfig_ {
-                mode: MongodbBranchCopyMode::Empty,
+            MongodbBranchCopyConfig::Empty { collections } => MongodbCopySpec {
+                mode: MongodbCopyMode::Empty,
                 items: convert_item_copy_configs(collections),
             },
-            MongodbBranchCopyConfig::All { collections } => MongodbBranchCopyConfig_ {
-                mode: MongodbBranchCopyMode::All,
+            MongodbBranchCopyConfig::All { collections } => MongodbCopySpec {
+                mode: MongodbCopyMode::All,
                 items: convert_item_copy_configs(collections),
             },
         }

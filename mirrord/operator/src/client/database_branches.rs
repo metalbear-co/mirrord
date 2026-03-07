@@ -25,8 +25,8 @@ use crate::{
     crd::{
         db_branching::{
             branch_database::{
-                BranchDatabase, BranchDatabaseSpec, DialectConfig, MongodbOptions, MysqlOptions,
-                PostgresOptions, SqlBranchCopyConfig,
+                BranchDatabase, BranchDatabaseSpec, DialectConfig, MongodbOptions, MssqlOptions,
+                MysqlOptions, PostgresOptions, SqlBranchCopyConfig,
             },
             core::{
                 BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -266,7 +266,12 @@ impl DatabaseBranchParams {
                         Some(id) => BranchDatabaseId::specified(id),
                         None => BranchDatabaseId::generate_new(),
                     };
-                    let params = BranchParams::from_mssql(id.as_ref(), mssql_config, target);
+                    let params = BranchParams::from_mssql(
+                        id.as_ref(),
+                        mssql_config,
+                        target,
+                        &session_target,
+                    );
                     branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Redis(_) => {}
@@ -449,19 +454,20 @@ impl BranchParams {
         id: &str,
         config: &mirrord_config::feature::database_branches::MssqlBranchConfig,
         target: &Target,
+        session_target: &SessionTarget,
     ) -> Self {
         let name_prefix = format!("{}-mssql-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_string(),
-            dialect: DatabaseDialect::Mssql,
             database_name: config.base.name.clone(),
             connection_source,
-            target: target.clone(),
+            target: session_target.clone(),
             ttl_secs: config.base.ttl_secs,
             version: config.base.version.clone(),
-            copy: BranchCopyConfig::from(config.copy.clone()),
-            dialect_options: None,
+            dialect: DialectConfig::Mssql(Box::new(MssqlOptions {
+                copy: SqlBranchCopyConfig::from(config.copy.clone()),
+            })),
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
