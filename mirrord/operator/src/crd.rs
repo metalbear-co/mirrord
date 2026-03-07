@@ -3,6 +3,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
@@ -22,21 +23,27 @@ use crate::{
 };
 
 pub mod copy_target;
+pub mod db_branching;
 pub mod external;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
-pub mod mongodb_branching;
-pub mod mysql_branching;
+pub mod multi_cluster;
 pub mod patch;
-pub mod pg_branching;
 pub mod policy;
+pub mod preview;
 pub mod profile;
 pub mod session;
 pub mod steal_tls;
 
 pub use kafka::MirrordKafkaEphemeralTopic;
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
+
+/// For Multi-Cluster Management-Only mode: Annotation used to specify the target namespace on
+/// remote clusters. When a CRD is created in the operator namespace on Primary, this annotation
+/// tells the sync controller which namespace to use on the Default cluster. If not present, the
+/// CRD's own namespace is used.
+pub const TARGET_NAMESPACE_ANNOTATION: &str = "mirrord.metalbear.co/target-namespace";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
@@ -149,6 +156,10 @@ pub struct MirrordOperatorSpec {
     /// this field).
     #[deprecated(note = "use supported_features instead")]
     copy_target_enabled: Option<bool>,
+    /// The namespace where the operator is deployed.
+    /// Used by CLI in multi-cluster management-only mode to create CRDs
+    /// in the operator's namespace with a target-namespace annotation.
+    pub operator_namespace: Option<String>,
 }
 
 impl MirrordOperatorSpec {
@@ -158,6 +169,7 @@ impl MirrordOperatorSpec {
         supported_features: Vec<NewOperatorFeature>,
         license: LicenseInfoOwned,
         protocol_version: Option<String>,
+        operator_namespace: Option<String>,
     ) -> Self {
         let features = supported_features
             .contains(&NewOperatorFeature::ProxyApi)
@@ -173,6 +185,7 @@ impl MirrordOperatorSpec {
             protocol_version,
             features,
             copy_target_enabled,
+            operator_namespace,
         }
     }
 
@@ -275,6 +288,66 @@ pub struct MirrordOperatorStatus {
 
     /// Option because added later.
     pub copy_targets: Option<Vec<CopyTargetEntryCompat>>,
+
+    /// Status of connected remote clusters (only on primary with multi-cluster enabled).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connected_clusters: Option<Vec<ConnectedClusterStatus>>,
+
+    /// Active multi-cluster sessions (only on primary with multi-cluster enabled).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multi_cluster_sessions: Option<Vec<MultiClusterSessionInfo>>,
+}
+
+/// Display representation of a multi-cluster session for `mirrord operator status`.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MultiClusterSessionInfo {
+    /// Session ID (CRD name).
+    pub id: String,
+    /// Duration of the session in seconds.
+    pub duration_secs: u64,
+    /// User who created the session.
+    pub user: String,
+    /// Target identifier (e.g., "deployment/my-app").
+    pub target: String,
+    /// Namespace for the target.
+    pub namespace: String,
+    /// List of clusters this session spans.
+    pub clusters: Vec<String>,
+    /// Current phase of the session.
+    pub phase: String,
+}
+
+/// Status of a connected remote cluster.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectedClusterStatus {
+    /// Logical name of the cluster.
+    pub name: String,
+    /// Timestamp of last health check.
+    pub last_check: MicroTime,
+    /// Result of the health check.
+    #[serde(flatten)]
+    pub result: ClusterCheckResult,
+}
+
+/// Result of a cluster health check.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum ClusterCheckResult {
+    /// Cluster is connected and responding.
+    Connected {
+        /// Operator version running on the remote cluster.
+        operator_version: String,
+        /// License fingerprint from the remote cluster (for license validation).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        license_fingerprint: Option<String>,
+    },
+    /// Cluster check failed.
+    Error {
+        /// Error message describing the failure.
+        message: String,
+    },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -408,6 +481,15 @@ pub enum NewOperatorFeature {
     BypassCiCertificateVerification,
 
     MongodbBranching,
+    /// This operator can act as a primary and use envoy to connect to remote clusters.
+    MultiClusterPrimary,
+    /// This operator can be connected to by a primary.
+    MultiClusterRemote,
+    /// This operator can accept jq filters for SQS queue splitting.
+    SqsQueueSplittingWithJqFilter,
+
+    PreviewEnv,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -434,9 +516,15 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::MySqlBranching => "MySQL branching",
             NewOperatorFeature::PgBranching => "PostgreSQL branching",
             NewOperatorFeature::MongodbBranching => "MongoDB branching",
+            NewOperatorFeature::PreviewEnv => "preview environments",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
             NewOperatorFeature::BypassCiCertificateVerification => {
                 "BypassCiCertificateVerification"
+            }
+            NewOperatorFeature::MultiClusterPrimary => "multi-cluster primary",
+            NewOperatorFeature::MultiClusterRemote => "multi-cluster remote",
+            NewOperatorFeature::SqsQueueSplittingWithJqFilter => {
+                "Splitting SQS queues with a jq filter"
             }
             NewOperatorFeature::Unknown => "unknown feature",
         };
@@ -753,6 +841,14 @@ pub struct MirrordSqsSessionSpec {
     /// The name of the queue on AWS.
     pub queue_filters: HashMap<QueueId, QueueMessageFilter>,
 
+    /// Specify jq programs that will be used to filter messages from queues.
+    /// For queues with a specified jq program, for every message the jq filter runs on a JSON
+    /// representation of the SQS `Message` object.
+    ///
+    /// If the jq program outputs `true`, that message is considered as matching the filter.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub queue_jq_filters: HashMap<QueueId, String>,
+
     /// The target of this session.
     pub queue_consumer: QueueConsumer,
 
@@ -760,6 +856,14 @@ pub struct MirrordSqsSessionSpec {
     // The Kubernetes API can't deal with 64 bit numbers (with most significant bit set)
     // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
+
+    /// Multi-cluster coordination: explicit output queue names.
+    ///
+    /// Maps original queue names to their corresponding output queue names.
+    /// For multi-cluster: the default cluster creates temp queues and passes the exact names here.
+    /// Other clusters use these names directly instead of generating their own.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub output_queue_names: HashMap<String, String>,
 }
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -793,4 +897,214 @@ pub enum UserCredentialKind {
     #[schemars(skip)]
     #[serde(other)]
     Unknown,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::PathBuf};
+
+    use kube::CustomResourceExt;
+
+    use crate::crd::{
+        MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
+        MirrordWorkloadQueueRegistry, SessionCrd,
+        db_branching::{
+            mongodb::MongodbBranchDatabase, mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
+        },
+        external::MirrordClusterExternalResource,
+        kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
+        multi_cluster::MirrordMultiClusterSession,
+        patch::{MirrordClusterWorkloadPatch, MirrordClusterWorkloadPatchRequest},
+        policy::{MirrordClusterPolicy, MirrordPolicy},
+        preview::PreviewSession,
+        profile::{MirrordClusterProfile, MirrordProfile},
+        session::MirrordClusterSession,
+        steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig},
+    };
+
+    fn write_crd_yaml<T: CustomResourceExt>() {
+        let crd = T::crd();
+        let file_name = crd
+            .metadata
+            .name
+            .clone()
+            .unwrap_or_else(|| "crd".to_owned());
+
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("crds");
+        path.push(format!("{file_name}.yaml"));
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+
+        let yaml = serde_yaml::to_string(&crd).unwrap();
+        fs::write(path, yaml).unwrap();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_operator_crd_yaml() {
+        write_crd_yaml::<MirrordOperatorCrd>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_session_crd_yaml() {
+        write_crd_yaml::<SessionCrd>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_workload_queue_registry_crd_yaml() {
+        write_crd_yaml::<MirrordWorkloadQueueRegistry>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_sqs_session_crd_yaml() {
+        write_crd_yaml::<MirrordSqsSession>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_cluster_operator_user_credential_crd_yaml() {
+        write_crd_yaml::<MirrordClusterOperatorUserCredential>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_preview_session_crd_yaml() {
+        write_crd_yaml::<PreviewSession>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_cluster_session_crd_yaml() {
+        write_crd_yaml::<MirrordClusterSession>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_multi_cluster_session_crd_yaml() {
+        write_crd_yaml::<MirrordMultiClusterSession>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_pg_branch_database_crd_yaml() {
+        write_crd_yaml::<PgBranchDatabase>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mysql_branch_database_crd_yaml() {
+        write_crd_yaml::<MysqlBranchDatabase>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mongodb_branch_database_crd_yaml() {
+        write_crd_yaml::<MongodbBranchDatabase>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_policy_crd_yaml() {
+        write_crd_yaml::<MirrordPolicy>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_cluster_policy_crd_yaml() {
+        write_crd_yaml::<MirrordClusterPolicy>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_cluster_external_resource_crd_yaml() {
+        write_crd_yaml::<MirrordClusterExternalResource>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_cluster_workload_patch_crd_yaml() {
+        write_crd_yaml::<MirrordClusterWorkloadPatch>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_cluster_workload_patch_request_crd_yaml() {
+        write_crd_yaml::<MirrordClusterWorkloadPatchRequest>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_kafka_client_config_crd_yaml() {
+        write_crd_yaml::<MirrordKafkaClientConfig>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_kafka_topics_consumer_crd_yaml() {
+        write_crd_yaml::<MirrordKafkaTopicsConsumer>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_kafka_ephemeral_topic_crd_yaml() {
+        write_crd_yaml::<MirrordKafkaEphemeralTopic>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_cluster_profile_crd_yaml() {
+        write_crd_yaml::<MirrordClusterProfile>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_profile_crd_yaml() {
+        write_crd_yaml::<MirrordProfile>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_tls_steal_config_crd_yaml() {
+        write_crd_yaml::<MirrordTlsStealConfig>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_cluster_tls_steal_config_crd_yaml() {
+        write_crd_yaml::<MirrordClusterTlsStealConfig>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_all_crd_yamls() {
+        write_crd_yaml::<MirrordOperatorCrd>();
+        write_crd_yaml::<SessionCrd>();
+        write_crd_yaml::<MirrordWorkloadQueueRegistry>();
+        write_crd_yaml::<MirrordSqsSession>();
+        write_crd_yaml::<MirrordClusterOperatorUserCredential>();
+        write_crd_yaml::<PreviewSession>();
+        write_crd_yaml::<MirrordClusterSession>();
+        write_crd_yaml::<MirrordMultiClusterSession>();
+        write_crd_yaml::<PgBranchDatabase>();
+        write_crd_yaml::<MysqlBranchDatabase>();
+        write_crd_yaml::<MongodbBranchDatabase>();
+        write_crd_yaml::<MirrordPolicy>();
+        write_crd_yaml::<MirrordClusterPolicy>();
+        write_crd_yaml::<MirrordClusterExternalResource>();
+        write_crd_yaml::<MirrordClusterWorkloadPatch>();
+        write_crd_yaml::<MirrordClusterWorkloadPatchRequest>();
+        write_crd_yaml::<MirrordKafkaClientConfig>();
+        write_crd_yaml::<MirrordKafkaTopicsConsumer>();
+        write_crd_yaml::<MirrordKafkaEphemeralTopic>();
+        write_crd_yaml::<MirrordClusterProfile>();
+        write_crd_yaml::<MirrordProfile>();
+        write_crd_yaml::<MirrordTlsStealConfig>();
+        write_crd_yaml::<MirrordClusterTlsStealConfig>();
+    }
 }

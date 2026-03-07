@@ -1,4 +1,4 @@
-#![feature(assert_matches)]
+#![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
 use std::{env::temp_dir, os::unix::fs, path::Path, time::Duration};

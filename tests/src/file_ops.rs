@@ -11,6 +11,7 @@ mod file_ops_tests {
 
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
+    use mirrord_test_utils::run_command::run_exec_with_target;
     use rstest::*;
     use serde::Deserialize;
     use tempfile::NamedTempFile;
@@ -19,7 +20,6 @@ mod file_ops_tests {
         application::{file_ops::FileOps, GoVersion},
         kube_client,
         kube_service::KubeService,
-        run_command::run_exec_with_target,
         services::{basic_service, go_statfs_service},
     };
 
@@ -235,7 +235,7 @@ mod file_ops_tests {
         #[future]
         #[notrace]
         basic_service: KubeService,
-        #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
+        #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
     ) {
         let service = basic_service.await;
         let command = FileOps::GoDir(go_version).command();

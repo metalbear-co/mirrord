@@ -27,10 +27,11 @@ The following guide details the steps to setup a local development environment f
 
 - [GCC](https://gcc.gnu.org/) - only on Linux, GCC is needed for Go dynamic linking
 - [Rust](https://www.rust-lang.org/)
-- [NodeJS](https://nodejs.org/en/), [ExpressJS](https://expressjs.com/)
+- [NodeJS](https://nodejs.org/en/), [ExpressJS](https://expressjs.com/), [portfinder](https://www.npmjs.com/package/portfinder)
 - [Python](https://www.python.org/), [Flask](https://flask.palletsprojects.com/en/2.1.x/), [FastAPI](https://fastapi.tiangolo.com/), [Uvicorn](https://www.uvicorn.org/)
 - [Go](https://go.dev/)
 - Kubernetes Cluster (local/remote)
+- [Argo Rollouts CRD](https://argoproj.github.io/argo-rollouts/) - required for rollout-related E2E tests (`kubectl create namespace argo-rollouts && kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml`)
 
 ### Setup a Kubernetes cluster
 
@@ -106,7 +107,12 @@ The basic command to run the E2E tests is:
 cargo test --package mirrord-tests
 ```
 
-However, when running on macOS a universal binary has to be created first:
+However, when running on macOS a universal binary has to be created first. You can use xtask:
+```bash
+cargo xtask build-cli
+```
+
+Or the build script:
 ```bash
 scripts/build_fat_mac.sh
 ```
@@ -192,7 +198,12 @@ The basic command to run the integration tests is:
 cargo test --package mirrord-layer
 ```
 
-However, when running on macOS a dylib has to be created first:
+However, when running on macOS a dylib has to be created first. You can use xtask:
+```bash
+cargo xtask build-layer
+```
+
+Or the build script:
 ```bash
 scripts/build_fat_mac.sh
 ```
@@ -298,6 +309,24 @@ py-serv-deployment-ff89b5974-x9tjx   1/1     Running   0          3h8m
 ### Build and run mirrord
 
 To build this project, you will first need a [Protocol Buffer Compiler](https://grpc.io/docs/protoc-installation/) installed.
+
+We recommend using `xtask` for building mirrord, which handles all platform-specific requirements:
+
+```bash
+# Debug build for your platform (auto-detected)
+cargo xtask build-cli
+
+# Release build
+cargo xtask build-cli --release
+
+# Build for specific platform
+cargo xtask build-cli --release --platform macos-universal
+cargo xtask build-cli --release --platform linux-x86_64
+```
+
+See [xtask/README.md](xtask/README.md) for complete documentation.
+
+**Alternative (platform-specific methods):**
 
 #### macOS
 ```bash
@@ -525,6 +554,16 @@ kubectl logs <YOUR_POD_NAME> | less -R
 
 where you would replace `<YOUR_POD_NAME>` with the name of the pod.
 
+## Operator Isolation Marker
+
+When multiple operator instances share the same cluster, each uses an isolation marker to avoid
+reconciling resources created by the other. The marker is set via the `OPERATOR_ISOLATION_MARKER`
+environment variable and defaults to `mirrord-operator`. Its value is used as a special label on
+operator-managed resources (agents, copy-targets, preview sessions, etc.).
+
+The operator reads this env var at **compile time** (via `option_env!`), while the CLI reads it at
+**runtime** (via `std::env::var`).
+
 # New Hook Guidelines
 
 Adding a feature to mirrord that introduces a new hook (file system, network) can be tricky and there are a lot of edge cases we might need to cover.
@@ -617,7 +656,11 @@ You can check the run as it progresses and download the completed artifacts from
 
 ## Changing the release on MacOS
 
-If you're making changes to the release and/or CI workflows for MacOS specifically - for example changing how the universal binary is created, you need to ensure that [the script for building the universal binary](/scripts/build_fat_mac.sh) that is run manually when developing has also been updated if necessary.
+If you're making changes to the release and/or CI workflows for MacOS specifically - for example changing how the universal binary is created, you need to update the build logic in both:
+- [xtask/](/xtask/) - the recommended build automation tool
+- [scripts/build_fat_mac.sh](/scripts/build_fat_mac.sh) - the legacy build script (still supported)
+
+The xtask approach is preferred for new development as it provides better error messages, type safety, and consistency across platforms. See [xtask/README.md](xtask/README.md) for details.
 
 # Submitting a Pull Request
 

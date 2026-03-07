@@ -1,22 +1,12 @@
-use std::{
-    net::{IpAddr, SocketAddr, ToSocketAddrs},
-    sync::{Arc, OnceLock},
-};
+use std::{net::SocketAddr, sync::OnceLock};
 
-use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
 use mirrord_layer_lib::{
-    error::{ConnectError, HostnameResolveError},
-    proxy_connection::make_proxy_request_with_response,
+    error::ConnectError,
     socket::{
-        ConnectionThrough, DnsResolver, HookResult, SocketDescriptor, SocketKind, SocketState,
-        UserSocket, get_socket,
-        hostname::remote_dns_resolve_via_proxy,
-        is_ignored_port,
-        ops::{ConnectResult, call_connect_fn, connect_outgoing},
-        sockets::find_listener_address_by_port,
+        HookResult, SocketAddrExt,
+        ops::{ConnectResult, connect_common},
     },
 };
-use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
 use winapi::{
     ctypes::c_void,
@@ -28,12 +18,9 @@ use winapi::{
     um::{
         minwinbase::OVERLAPPED,
         mswsock::{LPFN_CONNECTEX, WSAID_CONNECTEX},
-        winsock2::{SOCKET, SOCKET_ERROR, WSAGetLastError},
+        winsock2::{SOCKET, WSAGetLastError},
     },
 };
-use windows_strings::PCWSTR;
-
-use crate::{hooks::socket::utils::SocketAddrExtWin, layer_setup};
 
 type ConnectExFn = unsafe extern "system" fn(
     SOCKET,
@@ -214,99 +201,6 @@ impl TryFrom<(*mut u8, u32)> for WSABufferData {
     }
 }
 
-/// Windows-specific DNS resolver implementation
-pub struct WindowsDnsResolver;
-
-impl DnsResolver for WindowsDnsResolver {
-    type Error = HostnameResolveError;
-
-    fn resolve_hostname(
-        hostname: &str,
-        _port: u16,
-        _family: i32,
-        _protocol: i32,
-    ) -> Result<Vec<IpAddr>, Self::Error> {
-        // Use the existing Windows remote DNS resolution
-        match remote_dns_resolve_via_proxy(hostname) {
-            Ok(records) => Ok(records.into_iter().map(|(_, ip)| ip).collect()),
-            Err(e) => {
-                tracing::debug!("Remote DNS resolution failed for {}: {}", hostname, e);
-                // Fallback to local resolution as in Unix layer
-                match (hostname, 0u16).to_socket_addrs() {
-                    Ok(addresses) => Ok(addresses.map(|addr| addr.ip()).collect()),
-                    Err(local_err) => {
-                        tracing::debug!(
-                            "Local DNS resolution also failed for {}: {}",
-                            hostname,
-                            local_err
-                        );
-                        Ok(vec![]) // No records found
-                    }
-                }
-            }
-        }
-    }
-
-    fn remote_dns_enabled() -> bool {
-        layer_setup().remote_dns_enabled()
-    }
-}
-
-/// Helper function to check if a UDP socket's remote address is reachable using GetNameInfoW
-/// This is a workaround for WSASend not failing on unreachable addresses (due to UDP being
-/// connectionless) Returns:
-/// - 0 on success (address is reachable)
-/// - Non-zero error code on failure (address unreachable or resolution failed)
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-pub fn check_address_reachability(remote_addr: &SocketAddress, socket: SOCKET) -> i32 {
-    let Ok((sock_addr_storage, sock_addr_len)) = remote_addr.to_sockaddr() else {
-        tracing::debug!(
-            "check_address_reachability -> address conversion failed for socket {}",
-            socket
-        );
-        return SOCKET_ERROR;
-    };
-
-    // Buffer for hostname
-    let mut node_buffer = [0u16; 256];
-    // Buffer for service/port
-    let mut service_buffer = [0u16; 32];
-
-    let result = unsafe {
-        winapi::um::ws2tcpip::GetNameInfoW(
-            &sock_addr_storage as *const _ as *const SOCKADDR,
-            sock_addr_len,
-            node_buffer.as_mut_ptr(),
-            node_buffer.len() as u32,
-            service_buffer.as_mut_ptr(),
-            service_buffer.len() as u32,
-            //When the NI_NAMEREQD flag is set, a host name that cannot be resolved by the DNS
-            // results in an error.
-            winapi::shared::ws2def::NI_NAMEREQD, // | winapi::shared::ws2def::NI_DGRAM,
-        )
-    };
-
-    if result != 0 {
-        tracing::debug!(
-            "check_address_reachability -> address resolution failed for socket {} with error {}, wsagetlasterror: {}",
-            socket,
-            result,
-            unsafe { WSAGetLastError() }
-        );
-        // on failure, GetNameInfoW sets WSALastError
-        return result;
-    }
-
-    // Successfully resolved - address is reachable
-    tracing::debug!(
-        "check_address_reachability -> address resolution successful for socket {}: node_buffer: {:?}",
-        socket,
-        unsafe { str_win::u16_buffer_to_string(PCWSTR(node_buffer.as_ptr()).as_wide()) }
-    );
-
-    0 // Success
-}
-
 /// Log connection result and return it
 pub fn log_connection_result<T>(result: T, function_name: &str, addr: SockAddr)
 where
@@ -330,146 +224,6 @@ where
     }
 }
 
-/// Attempt to establish a connection through the mirrord proxy using layer-lib
-/// This integrates with the shared connect_outgoing logic from layer-lib
-#[allow(clippy::result_large_err)]
-#[mirrord_layer_macro::instrument(level = "trace", skip(connect_fn), ret)]
-pub fn connect_through_proxy_with_layer_lib<F>(
-    socket: SOCKET,
-    user_socket: Arc<UserSocket>,
-    remote_addr: SocketAddr,
-    connect_fn: F,
-) -> HookResult<ConnectResult>
-where
-    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
-{
-    tracing::debug!(
-        "connect_through_proxy_with_layer_lib -> attempting proxy connection for socket {} to address {:#?}",
-        socket,
-        remote_addr
-    );
-    let raw_remote_addr = SockAddr::from(remote_addr);
-    let optional_ip_address = raw_remote_addr.as_socket();
-
-    if let Some(ip_address) = optional_ip_address {
-        if is_ignored_port(&ip_address) {
-            return Err(ConnectError::BypassPort(ip_address.port()).into());
-        }
-
-        // Handle localhost/unspecified addresses first -
-        //  if applicable, connect locally without proxy
-        if !layer_setup().outgoing_config().ignore_localhost
-            && (ip_address.ip().is_loopback() || ip_address.ip().is_unspecified())
-            && let Some(local_address) =
-                find_listener_address_by_port(ip_address.port(), user_socket.protocol)
-        {
-            tracing::debug!(
-                "connect_through_proxy_with_layer_lib -> connecting locally to listener at {}",
-                local_address
-            );
-            let local_sockaddr = SockAddr::from(local_address);
-            let connect_result = connect_fn(socket, local_sockaddr);
-            return Ok(connect_result);
-        }
-    }
-
-    // Determine the protocol based on the socket type
-    let protocol = match user_socket.kind {
-        SocketKind::Tcp(_) => NetProtocol::Stream,
-        SocketKind::Udp(_) => NetProtocol::Datagrams,
-    };
-
-    // Check the outgoing selector to determine routing
-    match layer_setup()
-        .outgoing_selector()
-        .get_connection_through_with_resolver::<WindowsDnsResolver>(remote_addr, protocol)
-    {
-        Ok(ConnectionThrough::Remote(_filtered_addr)) => {
-            tracing::debug!(
-                "connect_through_proxy_with_layer_lib -> outgoing filter indicates remote connection for {:?}",
-                remote_addr
-            );
-            // Continue with proxy connection using the filtered address
-        }
-        Ok(ConnectionThrough::Local(_)) => {
-            tracing::debug!(
-                "connect_through_proxy_with_layer_lib -> outgoing filter indicates local connection for {:?}, calling original",
-                remote_addr
-            );
-
-            if check_address_reachability(&SocketAddress::from(remote_addr), socket) != 0 {
-                return Err(ConnectError::AddressUnreachable(format!("{}", remote_addr)).into());
-            }
-
-            return call_connect_fn(connect_fn, socket, remote_addr.into(), None, None);
-        }
-        Err(e) => {
-            tracing::warn!(
-                "connect_through_proxy_with_layer_lib -> outgoing filter check failed: {}, falling back to original",
-                e
-            );
-            return Err(ConnectError::Fallback.into());
-        }
-    }
-
-    tracing::info!(
-        "connect_through_proxy_with_layer_lib -> intercepting connection to {}",
-        remote_addr
-    );
-
-    // Create the proxy request function that matches layer-lib expectations
-    let proxy_request_fn =
-        |request: OutgoingConnectRequest| -> HookResult<OutgoingConnectResponse> {
-            match make_proxy_request_with_response(request) {
-                Ok(Ok(response)) => Ok(response),
-                Ok(Err(e)) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-                Err(e) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-            }
-        };
-
-    // Convert SocketAddr to SockAddr for layer-lib
-    let remote_sock_addr = SockAddr::from(remote_addr);
-
-    let enabled_tcp_outgoing = layer_setup().outgoing_config().tcp;
-    let enabled_udp_outgoing = layer_setup().outgoing_config().udp;
-
-    match NetProtocol::from(user_socket.kind) {
-        NetProtocol::Datagrams if enabled_udp_outgoing => connect_outgoing(
-            socket,
-            remote_sock_addr,
-            user_socket,
-            NetProtocol::Datagrams,
-            proxy_request_fn,
-            connect_fn,
-        ),
-
-        NetProtocol::Stream => match user_socket.state {
-            SocketState::Initialized | SocketState::Bound(..)
-                if (optional_ip_address.is_some() && enabled_tcp_outgoing) =>
-            {
-                connect_outgoing(
-                    socket,
-                    remote_sock_addr,
-                    user_socket,
-                    protocol,
-                    proxy_request_fn,
-                    connect_fn,
-                )
-            }
-
-            _ => Err(ConnectError::DisabledOutgoing(
-                mirrord_layer_lib::socket::sockets::socket_descriptor_to_i64(socket),
-            )
-            .into()),
-        },
-
-        _ => Err(ConnectError::DisabledOutgoing(
-            mirrord_layer_lib::socket::sockets::socket_descriptor_to_i64(socket),
-        )
-        .into()),
-    }
-}
-
 /// Complete proxy connection flow that handles validation, conversion, and preparation
 ///
 /// This function encapsulates the entire flow from raw sockaddr to prepared connection:
@@ -482,7 +236,7 @@ where
 /// or Fallback to indicate the caller should use the original function.
 #[allow(clippy::result_large_err)]
 #[mirrord_layer_macro::instrument(level = "trace", skip(connect_fn), ret)]
-pub fn attempt_proxy_connection<F>(
+pub fn connect<F>(
     socket: SOCKET,
     name: *const SOCKADDR,
     namelen: INT,
@@ -490,25 +244,10 @@ pub fn attempt_proxy_connection<F>(
     connect_fn: F,
 ) -> HookResult<ConnectResult>
 where
-    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
+    F: FnOnce(SockAddr) -> ConnectResult,
 {
-    use crate::hooks::socket::utils::SocketAddrExtWin;
-
-    // Get the socket state (we know it exists from validation)
-    let user_socket = match get_socket(socket) {
-        Some(socket) => socket,
-        None => {
-            tracing::error!(
-                "{} -> socket {} validated but not found in manager",
-                function_name,
-                socket
-            );
-            return Err(ConnectError::Fallback.into());
-        }
-    };
-
     // Convert Windows sockaddr to Rust SocketAddr
-    let remote_addr = match SocketAddr::try_from_raw(name, namelen) {
+    let remote_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
         None => {
             tracing::warn!(
@@ -520,5 +259,5 @@ where
     };
 
     // Try to connect through the mirrord proxy using layer-lib integration
-    connect_through_proxy_with_layer_lib(socket, user_socket, remote_addr, connect_fn)
+    connect_common(socket, SockAddr::from(remote_addr), connect_fn)
 }

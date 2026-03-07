@@ -1,7 +1,8 @@
-#![feature(assert_matches)]
+#![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{assert_matches::assert_matches, path::Path, time::Duration};
+use core::assert_matches;
+use std::{path::Path, time::Duration};
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, FileRequest, FileResponse, ToPayload,

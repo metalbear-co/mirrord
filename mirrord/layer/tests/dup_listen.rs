@@ -1,4 +1,4 @@
-#![feature(assert_matches)]
+#![cfg(target_family = "unix")]
 
 use std::{path::Path, time::Duration};
 

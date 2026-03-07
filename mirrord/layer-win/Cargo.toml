@@ -22,7 +22,6 @@ mirrord-layer-lib = { path = "../layer-lib", features = ["layer-hook-execution"]
 mirrord-protocol = { path = "../protocol" }
 mirrord-progress = { path = "../progress" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
-mirrord-console = { path = "../console" }
 mirrord-config = { path = "../config" }
 
 # Used for internal error type set-up
@@ -31,8 +30,6 @@ socket2.workspace = true
 
 # Used for logging and tracing
 tracing.workspace = true
-tracing-subscriber.workspace = true
-chrono.workspace = true
 
 libc = "0.2.175"
 [target.'cfg(windows)'.dependencies]

@@ -31,8 +31,10 @@
 name: CI
 
 on:
+  merge_group:
   workflow_dispatch:
   push:
+    branches: [main, "*staging*", "windows-support", "gh-readonly-queue*"]
   pull_request:
     branches: [main, "*staging*", "windows-support"]
     types: [opened, synchronize, reopened, ready_for_review]
@@ -48,6 +50,7 @@ permissions:
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
+  PINNED_NIGHTLY: nightly-2026-02-24
 
 jobs:
   towncrier_check:
@@ -160,19 +163,6 @@ jobs:
         with:
           files: |
             mirrord-schema.json
-      - name: get configuration.md changes
-        id: changed-configuration-md
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
-        with:
-          files: |
-            mirrord/config/configuration.md
-      - name: verify configuration.md is up-to-date
-        run: |
-          if [ "${{ steps.changed-config-schema.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-configuration-md.outputs.any_changed }}" != "true" ]; then
-            echo "Error: mirrord configuration has changed but `configuration.md` documentation has not."
-            echo "Try running medschool (see `./medschool/readme.md`) and updating `configuration.md`."
-            exit 1
-          fi
       - name: output test
         run: |
           echo ${{ steps.changed-rs.outputs.any_changed }};
@@ -186,39 +176,52 @@ jobs:
           echo ${{ steps.changed-windows.outputs.any_changed }};
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-config-schema.outputs.any_changed }};
-          echo ${{ steps.changed-configuration-md.outputs.any_changed }};
 
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
-          
+
   lint:
-    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{matrix.os}}
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 24
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       # Otherwise the arguments to the setup-rust-toolchain action are ignored.
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
-          toolchain: nightly-2025-08-01
+          toolchain: ${{ env.PINNED_NIGHTLY }}
           components: rustfmt, clippy
-          target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
-      - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
-      # ziglang version is pinned, because `cargo zigbuild clippy ...` fails with ziglang==0.14.0
-      - run: pip3 install --break-system-packages ziglang==0.13.0.post1 cargo-zigbuild
-      - run: cargo fmt --all -- --check
-      # x64
-      - run: cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
-      # Check that compiles for the supported linux targets (aarch64)
-      - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
-      # Check whether `mirrord-operator` crate compiles the way it's used in the operator
-      - run: cargo-zigbuild check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
+          target: ${{matrix.target}}
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: cargo fmt (run only on one platform)
+        if: ${{matrix.target == 'x86_64-unknown-linux-gnu'}}
+        run: cargo fmt --all -- --check
+
+        # Check whether `mirrord-operator` crate compiles the way it's used in the operator
+      - if: ${{matrix.target == 'x86_64-unknown-linux-gnu'}}
+        run: cargo check -p mirrord-operator --features crd --target ${{matrix.target}}
+
+        # Wclippy is quoted for Windows T_T. They don't like ::
+      - if: ${{matrix.os == 'macos-latest'}}
+        run: touch /tmp/not-really-layer.dylib
+      - run: cargo clippy --workspace --lib --bins --all-features --target ${{matrix.target}} --tests -- "-Wclippy::indexing_slicing" -D warnings
+        env:
+          MIRRORD_LAYER_FILE_MACOS_ARM64: /tmp/not-really-layer.dylib
 
   wizard-frontend-lint:
     runs-on: ubuntu-24.04
@@ -233,7 +236,6 @@ jobs:
         working-directory: ./wizard-frontend
       - run: npm run lint
         working-directory: ./wizard-frontend
-  
 
   # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
   # the output of this test is a boolean indicating if it's a release branch
@@ -258,7 +260,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: metalbear-co/cargo-deny-action@76cd80eb775d7bbbd2d80292136d74d39e1b4918
         with:
-          rust-version: nightly-2025-08-01
+          rust-version: ${{ env.PINNED_NIGHTLY }}
 
   check-rust-docs:
     runs-on: ubuntu-24.04
@@ -274,7 +276,8 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
-          toolchain: nightly-2025-08-01
+          toolchain: ${{ env.PINNED_NIGHTLY }}
+          cache: false
       # TODO(alex): `no-deps` here due to an issue in `futures-util`.
       - run: cargo doc --document-private-items --no-deps
 
@@ -283,7 +286,7 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     container:
-      image: ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9
+      image: ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21
     steps:
       - uses: actions/checkout@v4
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
@@ -291,7 +294,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       # the setup rust toolchain action ignores the input if file exists.. so remove it
       - run: rm rust-toolchain.toml
-      - run: rustup default nightly-2025-08-01
+      - run: rustup default ${{ env.PINNED_NIGHTLY }}
       - name: mirrord-agent UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent
       - name: mirrord-agent-env UT
@@ -306,33 +309,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Sanitize branch name for cache prefix
-        id: sanitize
-        run: |
-          BRANCH_NAME="${{ github.ref_name }}"
-          SANITIZED=$(echo "$BRANCH_NAME" | sed 's/\//-/g')
-          echo "cache_tag=$SANITIZED" >> "$GITHUB_OUTPUT"
-      - name: Check sccache secrets
-        env:
-          GCS_BUCKET: ${{ secrets.SCCACHE_GCS_BUCKET }}
-          GCP_CREDENTIALS: ${{ secrets.GCP_SCCACHE_CREDENTIALS }}
-        run: |
-          echo "Checking sccache GCS secrets"
-          if [[ -n "$GCS_BUCKET" ]]; then
-            echo "SCCACHE_GCS_BUCKET is set (length: ${#GCS_BUCKET})"
-          else
-            echo "SCCACHE_GCS_BUCKET is NOT set or empty"
-          fi
-          if [[ -n "$GCP_CREDENTIALS" ]]; then
-            echo "GCP_SCCACHE_CREDENTIALS is set (length: ${#GCP_CREDENTIALS})"
-          else
-            echo "GCP_SCCACHE_CREDENTIALS is NOT set or empty"
-          fi
-          echo "End secrets check"
       - name: build and export
         uses: docker/build-push-action@v6
-        env:
-          GCP_CREDENTIALS: ${{ secrets.GCP_SCCACHE_CREDENTIALS }}
         with:
           context: .
           tags: test
@@ -340,12 +318,6 @@ jobs:
           outputs: type=docker,dest=/tmp/test.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          secret-envs: |
-            gcp_credentials=GCP_CREDENTIALS
-          build-args: |
-            GCS_BUCKET=${{ secrets.SCCACHE_GCS_BUCKET }}
-            GCS_RW_MODE=READ_WRITE
-            GCS_PATH_PREFIX=mirrord-agent/${{ steps.sanitize.outputs.cache_tag }}
       - name: upload image
         uses: actions/upload-artifact@v4
         with:
@@ -373,6 +345,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [changed_files]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    env:
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/debug/mirrord
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
@@ -412,17 +387,8 @@ jobs:
       # don't use "cache" for other Gos since it will try to overwrite and have bad results.
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
-          cache-dependency-path: tests/go-e2e/go.sum
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          cd mirrord/layer/tests
-          ../../../scripts/build_go_apps.sh 23
-      - uses: actions/setup-go@v5
-        with:
           go-version: "1.24"
-          cache: false
+          cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       - run: | # Build Go test apps.
@@ -438,6 +404,15 @@ jobs:
       - run: | # Build Go test apps.
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 25
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 26
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
@@ -481,6 +456,10 @@ jobs:
           cd mirrord/layer/tests/apps/double_listen
           cargo build
       - run: ./scripts/build_c_apps.sh
+      - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord-layer
+      - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-lib
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: create dummy file to compile wizard feature
         run: touch wizard-frontend.tar.gz
@@ -500,6 +479,8 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord --features "wizard"
       - name: mirrord protocol-io UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
+      - name: mirrord jaq UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-jaq
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
@@ -514,8 +495,12 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
-      MIRRORD_TEST_USE_EXISTING_LIB: ../../target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
-      MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/debug/libmirrord_layer.dylib
+      # mirrod-layer integration tests (mimic test harness)
+      MIRRORD_TEST_USE_EXISTING_LIB: ${{ github.workspace }}/target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
+      MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/debug/libmirrord_layer.dylib
+      # mirrord-layer-tests (exec test harness)
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/libmirrord_layer.dylib
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -524,20 +509,19 @@ jobs:
         with:
           components: rustfmt, clippy
           target: x86_64-apple-darwin, aarch64-apple-darwin
-          toolchain: nightly-2025-08-01
+          toolchain: ${{ env.PINNED_NIGHTLY }}
       - name: Install Protoc
         uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: verify SIP status
         run: csrutil status
-      # Build layer before linting because the `mirrord` crate expects `MIRRORD_LAYER_FILE_MACOS_ARM64` to point to an existing file.
       - name: build layer
         run: cargo build -p mirrord-layer
       - name: build layer x86
         run: cargo build -p mirrord-layer --target=x86_64-apple-darwin
-      - name: lint
-        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --tests -- -Wclippy::indexing_slicing -D warnings
+      - name: build cli
+        run: cargo build -p mirrord
       - name: mirrord-sip UT
         run: cargo test -p mirrord-sip
       - name: mirrord-intproxy UT
@@ -560,20 +544,11 @@ jobs:
           rustc issue2058.rs --out-dir target
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.24"
           cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       # don't use "cache" for other Gos since it will try to overwrite and have bad results.
-      - run: | # Build Go test apps.
-          cd mirrord/layer/tests
-          ../../../scripts/build_go_apps.sh 23
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-          cache: false
-      - run: |
-          go version
       - run: | # Build Go test apps.
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 24
@@ -586,6 +561,15 @@ jobs:
       - run: | # Build Go test apps.
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 25
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 26
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
@@ -644,6 +628,8 @@ jobs:
           node-version: 24
       - run: npm install express # For http mirroring test with node.
       - run: npm install portfinder # For a node specific test
+      - name: mirrord layer unified tests
+        run: cargo test -p mirrord-layer-tests --no-default-features
       - name: mirrord layer tests
         run: cargo test -p mirrord-layer
       - name: save intproxy logs
@@ -728,6 +714,9 @@ jobs:
     needs: changed_files
     if: ${{ needs.changed_files.outputs.rs_changed == 'true' ||needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
     runs-on: windows-latest
+    env:
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord.exe
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/mirrord_layer_win.dll
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -736,21 +725,23 @@ jobs:
         with:
           components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
-          toolchain: nightly-2025-08-01
-      - name: run lint/fmt
+          toolchain: ${{ env.PINNED_NIGHTLY }}
+
+      - run: |
+          cd mirrord/layer/tests/apps/outgoing
+          cargo build
+      - name: build layer
+        run: cargo build -p mirrord-layer-win
+      - name: build mirrord
+        run: cargo build -p mirrord
+      - name: mirrord layer unified integration tests
         run: |
           $ErrorActionPreference = "Stop"
-
-          # create dummy mirrord
-          New-Item -ItemType File -Force -Path "target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll" -Value "content"
-
-          cargo fmt --all -- --check
-          cargo clippy --target x86_64-pc-windows-msvc
+          cargo test -p mirrord-layer-tests --no-default-features
       - name: run UT
         run: |
           $ErrorActionPreference = "Stop"
-
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
+          cargo test -p mirrord -p mirrord-layer-win
 
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
   # building concurrently can run faster the release ide tests

@@ -6,7 +6,12 @@ use std::{
 };
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter};
-use mirrord_config::{LayerConfig, config::ConfigContext};
+use mirrord_config::{
+    LayerConfig,
+    config::ConfigContext,
+    target::{Target, TargetConfig},
+};
+use mirrord_kube::resolved::ResolvedTarget;
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonMessage, LogLevel, LogMessage, RequestId, ResponseError,
@@ -25,7 +30,10 @@ use tokio::{
 use tracing::{debug, info};
 
 use super::config::DumpArgs;
-use crate::{connection::create_and_connect, error::CliResult, user_data::UserData};
+use crate::{
+    CliError, connection::create_and_connect, error::CliResult,
+    kube::kube_client_from_layer_config, user_data::UserData,
+};
 
 /// Implements the `mirrord dump` command.
 ///
@@ -51,6 +59,18 @@ pub async fn dump_command(
         user_data.machine_id(),
     );
 
+    // Ensure a target was specified
+    let TargetConfig { path, namespace } = config.target.clone();
+    let path: Target = match path {
+        Some(Target::Targetless) | None => {
+            return Err(CliError::MissingArg {
+                command: "mirrord dump".to_string(),
+                arg: "--target".to_string(),
+            });
+        }
+        valid_target => valid_target.unwrap(),
+    };
+
     if !args.params.disable_version_check {
         super::prompt_outdated_version(&progress).await;
     }
@@ -61,8 +81,45 @@ pub async fn dump_command(
     let (_connection_info, connection) =
         create_and_connect(&mut config, &mut progress, &mut analytics, None, None).await?;
 
+    // If the user didn't specify ports, detect them on the target
+    let ports = if args.ports.is_empty() {
+        let client = kube_client_from_layer_config(&config).await?;
+
+        let resolved = ResolvedTarget::new(&client, &path, namespace.as_deref())
+            .await
+            .map_err(|error| {
+                DumpSessionError::PortDetectionFailed(format!("failed to resolve target: {error}"))
+            })?;
+        let pod_spec = resolved.resolve_pod_spec(&client).await.map_err(|error| {
+            DumpSessionError::PortDetectionFailed(format!(
+                "failed to resolve target pod spec: {error}"
+            ))
+        })?;
+        let ports: Vec<_> = pod_spec
+            .map(|spec| {
+                spec.containers
+                    .iter()
+                    .flat_map(|container| container.ports.clone().unwrap_or_default())
+                    .map(|port| port.container_port.unsigned_abs() as u16)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if ports.is_empty() {
+            Err(DumpSessionError::PortDetectionFailed(format!(
+                "no ports found in the resource spec for target {path}"
+            )))?;
+        }
+
+        progress.info(
+            format!("No ports were specified, attaching to all detected ports: {ports:?}").as_str(),
+        );
+        ports
+    } else {
+        args.ports.clone()
+    };
+
     // Start the dump session
-    let session = DumpSession::new(connection, args.ports.clone());
+    let session = DumpSession::new(connection, ports);
     session.run(&mut progress).await?;
 
     Ok(())
@@ -82,6 +139,9 @@ pub enum DumpSessionError {
 
     #[error("port subscription failed: {0}")]
     PortSubscriptionFailed(ResponseError),
+
+    #[error("couldn't detect ports on target, try using the `--ports` flag: {0}")]
+    PortDetectionFailed(String),
 }
 
 impl From<mpsc::error::SendError<ClientMessage>> for DumpSessionError {

@@ -578,6 +578,12 @@ pub enum IncomingMode {
     Off,
 }
 
+impl IncomingMode {
+    pub fn is_off(&self) -> bool {
+        matches!(self, Self::Off)
+    }
+}
+
 #[derive(Error, Debug)]
 #[error("could not parse IncomingConfig from string, values must be bool or mirror/steal")]
 pub struct IncomingConfigParseError;

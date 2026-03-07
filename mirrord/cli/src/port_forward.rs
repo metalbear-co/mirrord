@@ -2,15 +2,11 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     ops::Not,
-    str::FromStr,
     time::{Duration, Instant},
 };
 
 use futures::StreamExt;
-use mirrord_config::feature::network::incoming::{
-    IncomingConfig,
-    http_filter::{BodyFilter, HttpFilterConfig, InnerFilter},
-};
+use mirrord_config::feature::network::incoming::IncomingConfig;
 use mirrord_intproxy::{
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     main_tasks::{ProxyMessage, ToLayer},
@@ -27,10 +23,7 @@ use mirrord_protocol::{
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
-    tcp::{
-        Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, JsonPathQuery,
-        MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType,
-    },
+    tcp::{HttpFilter, MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType},
 };
 use mirrord_protocol_io::{Client, Connection};
 use semver::Version;
@@ -931,121 +924,15 @@ impl IncomingMode {
             .cloned()
             .map(HashSet::from);
 
-        let http_filter_config = &config.http_filter;
-
-        // Matching all fields to make this check future-proof.
-        // TODO(areg) unify this with mirrord_layer::setup::parse_http_filter
-        let filter = match http_filter_config {
-            HttpFilterConfig {
-                path_filter: Some(path),
-                header_filter: None,
-                method_filter: None,
-                body_filter: None,
-                all_of: None,
-                any_of: None,
-                ports: _ports,
-            } => HttpFilter::Path(Filter::new(path.into()).expect("invalid filter expression")),
-
-            HttpFilterConfig {
-                path_filter: None,
-                header_filter: Some(header),
-                method_filter: None,
-                body_filter: None,
-                all_of: None,
-                any_of: None,
-                ports: _ports,
-            } => HttpFilter::Header(Filter::new(header.into()).expect("invalid filter expression")),
-
-            HttpFilterConfig {
-                path_filter: None,
-                header_filter: None,
-                method_filter: Some(method),
-                body_filter: None,
-                all_of: None,
-                any_of: None,
-                ports: _ports,
-            } => HttpFilter::Method(
-                HttpMethodFilter::from_str(method).expect("invalid method filter string"),
-            ),
-
-            HttpFilterConfig {
-                path_filter: None,
-                header_filter: None,
-                method_filter: None,
-                body_filter: Some(filter),
-                all_of: None,
-                any_of: None,
-                ports: _ports,
-            } => HttpFilter::Body(
-                // TODO(areg) unification
-                match filter {
-                    BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
-                        query: JsonPathQuery::new(query.clone())
-                            .expect("invalid json body filter `query` string"),
-                        matches: Filter::new(matches.clone())
-                            .expect("invalid json body filter `matches` string"),
-                    },
-                },
-            ),
-
-            HttpFilterConfig {
-                path_filter: None,
-                header_filter: None,
-                method_filter: None,
-                body_filter: None,
-                all_of: Some(filters),
-                any_of: None,
-                ports: _ports,
-            } => Self::make_composite_filter(true, filters),
-
-            HttpFilterConfig {
-                path_filter: None,
-                header_filter: None,
-                method_filter: None,
-                body_filter: None,
-                all_of: None,
-                any_of: Some(filters),
-                ports: _ports,
-            } => Self::make_composite_filter(false, filters),
-
-            _ => panic!("No HTTP filters specified, this should have been caught earlier"),
-        };
+        let filter = config
+            .http_filter
+            .as_protocol_http_filter()
+            .expect("invalid HTTP filter expression");
 
         Self {
             steal: config.is_steal(),
             http_settings: Some(HttpSettings { filter, ports }),
         }
-    }
-
-    // TODO(areg) unify this with mirrord_layer::setup::parse_http_filter
-    fn make_composite_filter(all: bool, filters: &[InnerFilter]) -> HttpFilter {
-        let filters = filters
-            .iter()
-            .map(|filter| match filter {
-                InnerFilter::Path { path } => {
-                    HttpFilter::Path(Filter::new(path.clone()).expect("invalid filter expression"))
-                }
-                InnerFilter::Header { header } => HttpFilter::Header(
-                    Filter::new(header.clone()).expect("invalid filter expression"),
-                ),
-                InnerFilter::Method { method } => HttpFilter::Method(
-                    HttpMethodFilter::from_str(method).expect("invalid method filter string"),
-                ),
-                InnerFilter::Body(body_filter) => HttpFilter::Body(
-                    // TODO(areg) unify
-                    match body_filter {
-                        BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
-                            query: JsonPathQuery::new(query.clone())
-                                .expect("invalid json body filter `query` string"),
-                            matches: Filter::new(matches.clone())
-                                .expect("invalid json body filter `matches` string"),
-                        },
-                    },
-                ),
-            })
-            .collect();
-
-        HttpFilter::Composite { all, filters }
     }
 
     /// Returns [`PortSubscription`] request to be used for the given port.

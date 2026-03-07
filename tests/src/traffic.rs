@@ -9,6 +9,7 @@ mod traffic_tests {
     use futures_util::{stream::TryStreamExt, AsyncBufReadExt};
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
+    use mirrord_test_utils::run_command::run_exec_with_target;
     use rstest::*;
 
     #[cfg(target_os = "windows")]
@@ -18,7 +19,6 @@ mod traffic_tests {
         ipv6::ipv6_service,
         kube_client,
         kube_service::KubeService,
-        run_command::run_exec_with_target,
         services::{basic_service, hostname_service, udp_logger_service},
         CONTAINER_NAME,
     };
@@ -513,7 +513,7 @@ mod traffic_tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn go_outgoing_traffic_single_request_enabled(
-        #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
+        #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
         #[future] basic_service: KubeService,
     ) {
         let command = vec![format!("go-e2e-outgoing/{go_version}.go_test_app")];
@@ -529,7 +529,7 @@ mod traffic_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
     pub async fn go_dns_lookup(
-        #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
+        #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
         #[future] basic_service: KubeService,
     ) {
         let command = vec![format!("go-e2e-dns/{go_version}.go_test_app")];

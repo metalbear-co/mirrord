@@ -1,4 +1,5 @@
-#![feature(assert_matches)]
+#![cfg(target_family = "unix")]
+
 use std::{net::IpAddr, path::Path, time::Duration};
 
 use mirrord_protocol::{

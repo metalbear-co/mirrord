@@ -1,5 +1,3 @@
-#[cfg(target_os = "windows")]
-use std::path::Path;
 use std::process::exit;
 
 fn recheck_and_setup_layer_file() {
@@ -9,30 +7,12 @@ fn recheck_and_setup_layer_file() {
     println!("cargo::rerun-if-env-changed=MIRRORD_LAYER_FILE_MACOS_ARM64");
 
     if std::env::var("MIRRORD_LAYER_FILE").is_err() {
-        #[cfg(target_os = "windows")]
-        {
-            let out_dir_env =
-                std::env::var("OUT_DIR").expect("Failed getting OUT_DIR from environment");
-            let out_dir = Path::new(&out_dir_env);
-            let build_dir = out_dir
-                .ancestors()
-                .nth(3)
-                .expect("Failed extracting build directory from OUT_DIR");
-            let layer = build_dir.join("mirrord_layer_win.dll");
-
-            println!(
-                "cargo:rustc-env=MIRRORD_LAYER_FILE={}",
-                layer.to_str().unwrap()
-            );
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            println!(
-                "cargo:rustc-env=MIRRORD_LAYER_FILE={}",
-                std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER").unwrap()
-            );
-        }
+        let layer_path = if cfg!(windows) {
+            std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER_WIN").unwrap()
+        } else {
+            std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER").unwrap()
+        };
+        println!("cargo:rustc-env=MIRRORD_LAYER_FILE={}", layer_path);
     };
 }
 
@@ -57,21 +37,22 @@ fn build_wizard_frontend() {
         // https://doc.rust-lang.org/cargo/reference/build-scripts.html#rerun-if-changed)
         println!("cargo::rerun-if-changed=.");
 
-        let mut npm_install_command = Command::new("bash");
-        let status = npm_install_command
-            .args(["-c", "npm install"])
+        let status = Command::new("npm")
+            .args(["install"])
             .current_dir(input_path)
             .status()
             .expect("npm install command should finish");
         assert!(status.success(), "npm install command should succeed");
 
-        let mut npm_build_command = Command::new("bash");
-        let build_command_string = format!(
-            "npm run build -- --emptyOutDir --outDir {}",
-            &dist_path.display()
-        );
-        let status = npm_build_command
-            .args(["-c", &build_command_string])
+        let status = Command::new("npm")
+            .args([
+                "run",
+                "build",
+                "--",
+                "--emptyOutDir",
+                "--outDir",
+                &dist_path.display().to_string(),
+            ])
             .current_dir(input_path)
             .status()
             .expect("npm build command should finish");
@@ -93,6 +74,28 @@ fn build_wizard_frontend() {
 }
 
 fn main() {
+    // don't run on clippy
+    if std::env::var("CLIPPY_ARGS").is_ok() {
+        // stupid hack so we don't need dependencies or anything
+        println!(
+            "cargo:rustc-env=MIRRORD_LAYER_FILE={}",
+            std::env::var("CARGO_MANIFEST_PATH").unwrap()
+        );
+        println!(
+            "cargo:rustc-env=MIRRORD_LAYER_FILE_MACOS_ARM64={}",
+            std::env::var("CARGO_MANIFEST_PATH").unwrap()
+        );
+
+        let frontend_path = format!(
+            "{}/wizard-frontend.tar.gz",
+            std::env::var("OUT_DIR").unwrap()
+        );
+
+        if !std::fs::exists(&frontend_path).unwrap_or(false) {
+            std::fs::write(frontend_path, "").unwrap();
+        };
+        return;
+    }
     // Make sure `MIRRORD_LAYER_FILE` is provided either by user, or computed.
     recheck_and_setup_layer_file();
 

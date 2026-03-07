@@ -10,8 +10,8 @@ use kube::{
 };
 use mirrord_config::{
     feature::database_branches::{
-        ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig, MongodbBranchConfig,
-        MysqlBranchConfig, PgBranchConfig, TargetEnviromentVariableSource,
+        ConnectionSource, ConnectionSourceType, DatabaseBranchConfig, DatabaseBranchesConfig,
+        MongodbBranchConfig, MysqlBranchConfig, PgBranchConfig, TargetEnviromentVariableSource,
     },
     target::{Target, TargetDisplay},
 };
@@ -22,24 +22,14 @@ use uuid::Uuid;
 
 use crate::{
     client::error::{OperatorApiError, OperatorOperation},
-    crd::{
-        mongodb_branching::{
-            BranchDatabasePhase as BranchDatabasePhaseMongodb,
-            ConnectionSource as CrdConnectionSourceMongodb,
-            ConnectionSourceKind as CrdConnectionSourceKindMongodb, MongodbBranchDatabase,
-            MongodbBranchDatabaseSpec,
+    crd::db_branching::{
+        core::{
+            BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
+            IamAuthConfig as CrdIamAuthConfig,
         },
-        mysql_branching::{
-            BranchDatabasePhase as BranchDatabasePhaseMysql,
-            ConnectionSource as CrdConnectionSourceMysql,
-            ConnectionSourceKind as CrdConnectionSourceKindMysql, MysqlBranchDatabase,
-            MysqlBranchDatabaseSpec,
-        },
-        pg_branching::{
-            BranchDatabasePhase as BranchDatabasePhasePg,
-            ConnectionSource as CrdConnectionSourcePg, IamAuthConfig as CrdIamAuthConfig,
-            PgBranchDatabase, PgBranchDatabaseSpec,
-        },
+        mongodb::{MongodbBranchDatabase, MongodbBranchDatabaseSpec},
+        mysql::{MysqlBranchDatabase, MysqlBranchDatabaseSpec},
+        pg::{PgBranchDatabase, PgBranchDatabaseSpec},
     },
 };
 
@@ -47,7 +37,7 @@ use crate::{
 ///
 /// Timeout after the duration specified by `timeout`.
 #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
-pub(crate) async fn create_mysql_branches<P: Progress>(
+pub async fn create_mysql_branches<P: Progress>(
     api: &Api<MysqlBranchDatabase>,
     params: HashMap<BranchDatabaseId, MysqlBranchParams>,
     timeout: Duration,
@@ -62,10 +52,16 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
 
     for (id, params) in params {
         let name_prefix = params.name_prefix;
+        let annotations = if params.annotations.is_empty() {
+            None
+        } else {
+            Some(params.annotations)
+        };
         let branch = MysqlBranchDatabase {
             metadata: ObjectMeta {
                 generate_name: Some(name_prefix),
                 labels: Some(params.labels),
+                annotations,
                 ..Default::default()
             },
             spec: params.spec,
@@ -102,8 +98,8 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
             await_condition(api.clone(), name, |db: Option<&MysqlBranchDatabase>| {
                 db.and_then(|db| {
                     db.status.as_ref().map(|status| {
-                        status.phase == BranchDatabasePhaseMysql::Ready
-                            || status.phase == BranchDatabasePhaseMysql::Failed
+                        status.phase == BranchDatabasePhase::Ready
+                            || status.phase == BranchDatabasePhase::Failed
                     })
                 })
                 .unwrap_or(false)
@@ -124,7 +120,7 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
             continue;
         };
         if let Some(status) = &db.status
-            && status.phase == BranchDatabasePhaseMysql::Failed
+            && status.phase == BranchDatabasePhase::Failed
         {
             let error_msg = status
                 .error
@@ -147,7 +143,7 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
 /// A MySQL branch is considered reusable if
 /// 1. it has a user specified unique ID, and
 /// 2. it is in the "Ready" phase.
-pub(crate) async fn list_reusable_mysql_branches<P: Progress>(
+pub async fn list_reusable_mysql_branches<P: Progress>(
     api: &Api<MysqlBranchDatabase>,
     params: &HashMap<BranchDatabaseId, MysqlBranchParams>,
     progress: &P,
@@ -184,7 +180,7 @@ pub(crate) async fn list_reusable_mysql_branches<P: Progress>(
         .into_iter()
         .filter(|db| {
             if let Some(status) = &db.status {
-                status.phase == BranchDatabasePhaseMysql::Ready
+                status.phase == BranchDatabasePhase::Ready
             } else {
                 false
             }
@@ -203,7 +199,7 @@ pub(crate) async fn list_reusable_mysql_branches<P: Progress>(
 ///
 /// Timeout after the duration specified by `timeout`.
 #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
-pub(crate) async fn create_pg_branches<P: Progress>(
+pub async fn create_pg_branches<P: Progress>(
     api: &Api<PgBranchDatabase>,
     params: HashMap<BranchDatabaseId, PgBranchParams>,
     timeout: Duration,
@@ -218,10 +214,16 @@ pub(crate) async fn create_pg_branches<P: Progress>(
 
     for (id, params) in params {
         let name_prefix = params.name_prefix;
+        let annotations = if params.annotations.is_empty() {
+            None
+        } else {
+            Some(params.annotations)
+        };
         let branch = PgBranchDatabase {
             metadata: ObjectMeta {
                 generate_name: Some(name_prefix),
                 labels: Some(params.labels),
+                annotations,
                 ..Default::default()
             },
             spec: params.spec,
@@ -258,8 +260,8 @@ pub(crate) async fn create_pg_branches<P: Progress>(
             await_condition(api.clone(), name, |db: Option<&PgBranchDatabase>| {
                 db.and_then(|db| {
                     db.status.as_ref().map(|status| {
-                        status.phase == BranchDatabasePhasePg::Ready
-                            || status.phase == BranchDatabasePhasePg::Failed
+                        status.phase == BranchDatabasePhase::Ready
+                            || status.phase == BranchDatabasePhase::Failed
                     })
                 })
                 .unwrap_or(false)
@@ -280,7 +282,7 @@ pub(crate) async fn create_pg_branches<P: Progress>(
             continue;
         };
         if let Some(status) = &db.status
-            && status.phase == BranchDatabasePhasePg::Failed
+            && status.phase == BranchDatabasePhase::Failed
         {
             let error_msg = status
                 .error
@@ -302,7 +304,7 @@ pub(crate) async fn create_pg_branches<P: Progress>(
 /// A PostgreSQL branch is considered reusable if
 /// 1. it has a user specified unique ID, and
 /// 2. it is in the "Ready" phase.
-pub(crate) async fn list_reusable_pg_branches<P: Progress>(
+pub async fn list_reusable_pg_branches<P: Progress>(
     api: &Api<PgBranchDatabase>,
     params: &HashMap<BranchDatabaseId, PgBranchParams>,
     progress: &P,
@@ -339,7 +341,7 @@ pub(crate) async fn list_reusable_pg_branches<P: Progress>(
         .into_iter()
         .filter(|db| {
             if let Some(status) = &db.status {
-                status.phase == BranchDatabasePhasePg::Ready
+                status.phase == BranchDatabasePhase::Ready
             } else {
                 false
             }
@@ -358,7 +360,7 @@ pub(crate) async fn list_reusable_pg_branches<P: Progress>(
 ///
 /// Timeout after the duration specified by `timeout`.
 #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
-pub(crate) async fn create_mongodb_branches<P: Progress>(
+pub async fn create_mongodb_branches<P: Progress>(
     api: &Api<MongodbBranchDatabase>,
     params: HashMap<BranchDatabaseId, MongodbBranchParams>,
     timeout: Duration,
@@ -373,10 +375,16 @@ pub(crate) async fn create_mongodb_branches<P: Progress>(
 
     for (id, params) in params {
         let name_prefix = params.name_prefix;
+        let annotations = if params.annotations.is_empty() {
+            None
+        } else {
+            Some(params.annotations)
+        };
         let branch = MongodbBranchDatabase {
             metadata: ObjectMeta {
                 generate_name: Some(name_prefix),
                 labels: Some(params.labels),
+                annotations,
                 ..Default::default()
             },
             spec: params.spec,
@@ -413,7 +421,7 @@ pub(crate) async fn create_mongodb_branches<P: Progress>(
                 db.and_then(|db| {
                     db.status
                         .as_ref()
-                        .map(|status| status.phase == BranchDatabasePhaseMongodb::Ready)
+                        .map(|status| status.phase == BranchDatabasePhase::Ready)
                 })
                 .unwrap_or(false)
             })
@@ -436,7 +444,7 @@ pub(crate) async fn create_mongodb_branches<P: Progress>(
 /// A MongoDB branch is considered reusable if
 /// 1. it has a user specified unique ID, and
 /// 2. it is in the "Ready" phase.
-pub(crate) async fn list_reusable_mongodb_branches<P: Progress>(
+pub async fn list_reusable_mongodb_branches<P: Progress>(
     api: &Api<MongodbBranchDatabase>,
     params: &HashMap<BranchDatabaseId, MongodbBranchParams>,
     progress: &P,
@@ -473,7 +481,7 @@ pub(crate) async fn list_reusable_mongodb_branches<P: Progress>(
         .into_iter()
         .filter(|db| {
             if let Some(status) = &db.status {
-                status.phase == BranchDatabasePhaseMongodb::Ready
+                status.phase == BranchDatabasePhase::Ready
             } else {
                 false
             }
@@ -488,17 +496,17 @@ pub(crate) async fn list_reusable_mongodb_branches<P: Progress>(
     Ok(reusable_mongodb_branches)
 }
 
-pub(crate) struct DatabaseBranchParams {
-    pub(crate) mongodb: HashMap<BranchDatabaseId, MongodbBranchParams>,
-    pub(crate) mysql: HashMap<BranchDatabaseId, MysqlBranchParams>,
-    pub(crate) pg: HashMap<BranchDatabaseId, PgBranchParams>,
+pub struct DatabaseBranchParams {
+    pub mongodb: HashMap<BranchDatabaseId, MongodbBranchParams>,
+    pub mysql: HashMap<BranchDatabaseId, MysqlBranchParams>,
+    pub pg: HashMap<BranchDatabaseId, PgBranchParams>,
 }
 
 impl DatabaseBranchParams {
     /// Create branch database parameters.
     ///
     /// We generate unique database IDs unless the user explicitly specifies them.
-    pub(crate) fn new(config: &DatabaseBranchesConfig, target: &Target) -> Self {
+    pub fn new(config: &DatabaseBranchesConfig, target: &Target) -> Self {
         let mut mongodb = HashMap::new();
         let mut mysql = HashMap::new();
         let mut pg = HashMap::new();
@@ -543,19 +551,19 @@ impl DatabaseBranchParams {
 /// This ID is used for selecting reusable branch database and should not be confused with
 /// Kubernetes resource uid.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum BranchDatabaseId {
+pub enum BranchDatabaseId {
     Specified(String),
     Generated(String),
 }
 
 impl BranchDatabaseId {
     /// Use a specified ID directly.
-    pub(crate) fn specified(value: String) -> Self {
+    pub fn specified(value: String) -> Self {
         Self::Specified(value)
     }
 
     /// Generate a new UUID.
-    pub(crate) fn generate_new() -> Self {
+    pub fn generate_new() -> Self {
         Self::Generated(Uuid::new_v4().to_string())
     }
 }
@@ -584,34 +592,42 @@ impl AsRef<str> for BranchDatabaseId {
     }
 }
 
+fn convert_connection_source(source: &ConnectionSource) -> CrdConnectionSource {
+    match source {
+        ConnectionSource::Url { url } => CrdConnectionSource::Url(Box::new(url.into())),
+        ConnectionSource::FlatUrl { source_type, url } => {
+            let kind = match source_type {
+                Some(ConnectionSourceType::EnvFrom) => TargetEnviromentVariableSource::EnvFrom {
+                    container: None,
+                    variable: url.clone(),
+                },
+                // None or Env: default to Env. The operator auto-detects
+                // envFrom at resolution time if needed.
+                _ => TargetEnviromentVariableSource::Env {
+                    container: None,
+                    variable: url.clone(),
+                },
+            };
+            CrdConnectionSource::Url(Box::new((&kind).into()))
+        }
+        ConnectionSource::Params(config) => {
+            CrdConnectionSource::Params(Box::new(ConnectionParamsSpec::from(config)))
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
-pub(crate) struct MysqlBranchParams {
-    pub(crate) name_prefix: String,
-    pub(crate) labels: BTreeMap<String, String>,
-    pub(crate) spec: MysqlBranchDatabaseSpec,
+pub struct MysqlBranchParams {
+    pub name_prefix: String,
+    pub labels: BTreeMap<String, String>,
+    pub annotations: BTreeMap<String, String>,
+    pub spec: MysqlBranchDatabaseSpec,
 }
 
 impl MysqlBranchParams {
-    pub(crate) fn new(id: &str, config: &MysqlBranchConfig, target: &Target) -> Self {
+    pub fn new(id: &str, config: &MysqlBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
-        let connection_source = match &config.base.connection {
-            ConnectionSource::Url(kind) => match kind {
-                TargetEnviromentVariableSource::Env {
-                    container,
-                    variable,
-                } => CrdConnectionSourceMysql::Url(CrdConnectionSourceKindMysql::Env {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-                TargetEnviromentVariableSource::EnvFrom {
-                    container,
-                    variable,
-                } => CrdConnectionSourceMysql::Url(CrdConnectionSourceKindMysql::EnvFrom {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-            },
-        };
+        let connection_source = convert_connection_source(&config.base.connection);
         let spec = MysqlBranchDatabaseSpec {
             id: id.to_string(),
             database_name: config.base.name.clone(),
@@ -628,24 +644,24 @@ impl MysqlBranchParams {
         Self {
             name_prefix,
             labels,
+            annotations: BTreeMap::new(),
             spec,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct PgBranchParams {
-    pub(crate) name_prefix: String,
-    pub(crate) labels: BTreeMap<String, String>,
-    pub(crate) spec: PgBranchDatabaseSpec,
+pub struct PgBranchParams {
+    pub name_prefix: String,
+    pub labels: BTreeMap<String, String>,
+    pub annotations: BTreeMap<String, String>,
+    pub spec: PgBranchDatabaseSpec,
 }
 
 impl PgBranchParams {
-    pub(crate) fn new(id: &str, config: &PgBranchConfig, target: &Target) -> Self {
+    pub fn new(id: &str, config: &PgBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
-        let connection_source = match &config.base.connection {
-            ConnectionSource::Url(kind) => CrdConnectionSourcePg::Url(kind.into()),
-        };
+        let connection_source = convert_connection_source(&config.base.connection);
 
         // Convert IAM auth config if present
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
@@ -667,39 +683,24 @@ impl PgBranchParams {
         Self {
             name_prefix,
             labels,
+            annotations: BTreeMap::new(),
             spec,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MongodbBranchParams {
-    pub(crate) name_prefix: String,
-    pub(crate) labels: BTreeMap<String, String>,
-    pub(crate) spec: MongodbBranchDatabaseSpec,
+pub struct MongodbBranchParams {
+    pub name_prefix: String,
+    pub labels: BTreeMap<String, String>,
+    pub annotations: BTreeMap<String, String>,
+    pub spec: MongodbBranchDatabaseSpec,
 }
 
 impl MongodbBranchParams {
     pub(crate) fn new(id: &str, config: &MongodbBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
-        let connection_source = match &config.base.connection {
-            ConnectionSource::Url(kind) => match kind {
-                TargetEnviromentVariableSource::Env {
-                    container,
-                    variable,
-                } => CrdConnectionSourceMongodb::Url(CrdConnectionSourceKindMongodb::Env {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-                TargetEnviromentVariableSource::EnvFrom {
-                    container,
-                    variable,
-                } => CrdConnectionSourceMongodb::Url(CrdConnectionSourceKindMongodb::EnvFrom {
-                    container: container.clone(),
-                    variable: variable.clone(),
-                }),
-            },
-        };
+        let connection_source = convert_connection_source(&config.base.connection);
         let spec = MongodbBranchDatabaseSpec {
             id: id.to_string(),
             database_name: config.base.name.clone(),
@@ -716,13 +717,17 @@ impl MongodbBranchParams {
         Self {
             name_prefix,
             labels,
+            annotations: BTreeMap::new(),
             spec,
         }
     }
 }
 
-pub(crate) mod labels {
+pub mod labels {
     pub(crate) const MIRRORD_MONGODB_BRANCH_ID_LABEL: &str = "mirrord-mongodb-branch-id";
     pub(crate) const MIRRORD_MYSQL_BRANCH_ID_LABEL: &str = "mirrord-mysql-branch-id";
     pub(crate) const MIRRORD_PG_BRANCH_ID_LABEL: &str = "mirrord-pg-branch-id";
 }
+
+// Re-export for convenience
+pub use crate::crd::TARGET_NAMESPACE_ANNOTATION;

@@ -304,12 +304,14 @@ mod extract;
 mod internal_proxy;
 #[cfg(target_os = "linux")]
 mod is_static;
+mod kube;
 mod list;
 mod local_redis;
 mod logging;
 mod newsletter;
 mod operator;
 mod port_forward;
+mod preview;
 mod profile;
 mod teams;
 mod user_data;
@@ -686,7 +688,13 @@ pub(crate) fn print_config<P>(
         config.internal_proxy.log_destination.display()
     ));
 
-    progress.info(&format!("key: {}", config.key.as_str()));
+    if operator_used {
+        progress.info(&format!(
+            "Session key: {}\nIf enabled, a `mirrord-key` header with this value will be injected \
+into redirected HTTP requests before they're routed to the target.",
+            config.key.as_str()
+        ));
+    }
 }
 
 async fn exec(
@@ -1040,6 +1048,7 @@ fn main() -> miette::Result<()> {
             Commands::Ci(args) => windows_unsupported!(args, "ci", {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
+            Commands::Preview(args) => preview::preview_command(*args).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             #[cfg(feature = "wizard")]
             Commands::Wizard(args) => {
@@ -1092,7 +1101,8 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
         let result: Result<(), Box<dyn std::error::Error>> = try {
             let client = reqwest::Client::builder()
                 .user_agent(format!("mirrord-cli/{CURRENT_VERSION}"))
-                .build()?;
+                .build()
+                .map_err(From::from)?;
 
             let sent = client
                 .get(format!(
@@ -1101,9 +1111,9 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                     platform = std::env::consts::OS,
                 ))
                 .timeout(Duration::from_secs(1))
-                .send().await?;
+                .send().await.map_err(From::from)?;
 
-            let latest_version = Version::parse(&sent.text().await.unwrap())?;
+            let latest_version = Version::parse(&sent.text().await.unwrap()).map_err(From::from)?;
 
             if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
                 let is_homebrew = which("mirrord")

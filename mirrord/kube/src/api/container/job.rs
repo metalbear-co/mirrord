@@ -483,6 +483,7 @@ mod test {
                 pod_ips: vec![],
                 pod_namespace: "default".to_string(),
                 node_name: "foobaz".to_string(),
+                node_hostname: None,
                 container_id: "container".to_string(),
                 container_runtime: ContainerRuntime::Docker,
                 container_name: "foo".to_string(),

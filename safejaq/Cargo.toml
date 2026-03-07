@@ -1,0 +1,31 @@
+[package]
+name = "safejaq"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+documentation.workspace = true
+authors.workspace = true
+description.workspace = true
+homepage.workspace = true
+publish.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+jaq-std.workspace = true
+jaq-core.workspace = true
+jaq-json = { workspace = true, features = ["serde_json"] }
+tokio = { workspace = true, features = ["rt", "time", "process"] }
+nix = { workspace = true, features = ["resource"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+rstest.workspace = true
+
+[lints]
+workspace = true

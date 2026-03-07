@@ -48,7 +48,7 @@ impl From<net::SocketAddr> for SocketAddress {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(unix)]
 impl TryFrom<UnixAddr> for socket2::SockAddr {
     type Error = io::Error;
 
@@ -82,14 +82,14 @@ impl TryFrom<SocketAddress> for net::SocketAddr {
 impl TryFrom<socket2::SockAddr> for SocketAddress {
     type Error = SerializationError;
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     fn try_from(addr: socket2::SockAddr) -> Result<Self, Self::Error> {
         addr.as_socket()
             .map(Self::Ip)
             .ok_or(SerializationError::SocketAddress)
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(unix)]
     fn try_from(addr: socket2::SockAddr) -> Result<Self, Self::Error> {
         addr.as_socket()
             .map(Self::Ip)
@@ -112,9 +112,9 @@ impl TryFrom<SocketAddress> for socket2::SockAddr {
     fn try_from(addr: SocketAddress) -> Result<Self, Self::Error> {
         match addr {
             SocketAddress::Ip(socket_addr) => Ok(socket_addr.into()),
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(unix)]
             SocketAddress::Unix(unix_addr) => unix_addr.try_into(),
-            #[cfg(target_os = "windows")]
+            #[cfg(windows)]
             _ => Err(Self::Error::new(
                 io::ErrorKind::InvalidInput,
                 SerializationError::SocketAddress,
@@ -128,17 +128,17 @@ impl Display for SocketAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             SocketAddress::Ip(ip_address) => ip_address.fmt(f),
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(unix)]
             SocketAddress::Unix(UnixAddr::Pathname(path)) => {
                 write!(f, "<UNIX-PATH> {}", path.display())
             }
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(unix)]
             SocketAddress::Unix(UnixAddr::Abstract(name)) => {
                 write!(f, "<UNIX-ABSTRACT> {}", String::from_utf8_lossy(name))
             }
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(unix)]
             SocketAddress::Unix(UnixAddr::Unnamed) => f.write_str("<UNIX-UNNAMED>"),
-            #[cfg(target_os = "windows")]
+            #[cfg(windows)]
             _ => f.write_str("<UNSUPPORTED-UNIX-ADDRESS>"),
         }
     }

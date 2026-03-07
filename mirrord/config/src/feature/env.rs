@@ -95,6 +95,7 @@ pub struct EnvConfig {
     ///
     /// This setting is meant to resolve issues when using mirrord via the IntelliJ plugin on WSL
     /// and the remote environment contains a lot of variables.
+    #[config(env = "MIRRORD_ENV_LOAD_FROM_PROCESS")]
     pub load_from_process: Option<bool>,
 
     /// #### feature.env.unset {#feature-env-unset}

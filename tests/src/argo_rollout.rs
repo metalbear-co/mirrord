@@ -4,11 +4,11 @@
 
 use core::time::Duration;
 
+use mirrord_test_utils::run_command::run_exec_with_target;
 use rstest::*;
 
 use crate::utils::{
-    application::env::EnvApp, kube_service::KubeService, run_command::run_exec_with_target,
-    services::rollout_service,
+    application::env::EnvApp, kube_service::KubeService, services::rollout_service,
 };
 
 /// Starts mirrord targeting a [rollout](https://argoproj.github.io/argo-rollouts/features/specification/).

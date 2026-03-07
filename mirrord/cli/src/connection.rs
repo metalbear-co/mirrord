@@ -11,7 +11,10 @@ use mirrord_kube::{
     error::KubeApiError,
     resolved::ResolvedTarget,
 };
-use mirrord_operator::client::{OperatorApi, OperatorSessionConnection};
+use mirrord_operator::{
+    client::{OperatorApi, OperatorSessionConnection},
+    crd::NewOperatorFeature,
+};
 use mirrord_progress::{
     IdeAction, IdeMessage, NotificationLevel, Progress,
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
@@ -91,28 +94,53 @@ where
 
     user_cert_subtask.success(Some("user credentials prepared"));
 
-    let target = ResolvedTarget::new(
-        api.client(),
-        &layer_config
+    let is_multi_cluster = api
+        .operator()
+        .spec
+        .supported_features()
+        .contains(&NewOperatorFeature::MultiClusterPrimary);
+
+    let mut session_subtask = operator_subtask.subtask("starting session");
+    let connection = if is_multi_cluster {
+        // Multi-cluster: CLI connects to Primary, which routes to the workload cluster
+        // where the target is resolved and the session is created
+        let target_config = layer_config
             .target
             .path
             .clone()
-            .unwrap_or(Target::Targetless),
-        layer_config.target.namespace.as_deref(),
-    )
-    .await
-    .map_err(CliError::OperatorTargetResolution)?;
+            .unwrap_or(Target::Targetless);
 
-    let mut session_subtask = operator_subtask.subtask("starting session");
-    let connection = api
-        .connect_in_new_session(
-            target.clone(),
+        api.connect_in_multi_cluster_session(
+            &target_config,
             layer_config,
             &session_subtask,
             branch_name,
             mirrord_for_ci.map(MirrordCi::info),
         )
-        .await?;
+        .await?
+    } else {
+        // Single-cluster: CLI resolves target of the connected cluster
+        let target = ResolvedTarget::new(
+            api.client(),
+            &layer_config
+                .target
+                .path
+                .clone()
+                .unwrap_or(Target::Targetless),
+            layer_config.target.namespace.as_deref(),
+        )
+        .await
+        .map_err(CliError::OperatorTargetResolution)?;
+
+        api.connect_in_new_session(
+            target,
+            layer_config,
+            &session_subtask,
+            branch_name,
+            mirrord_for_ci.map(MirrordCi::info),
+        )
+        .await?
+    };
     session_subtask.success(Some("session started"));
 
     operator_subtask.success(Some("using operator"));
@@ -256,27 +284,24 @@ where
 {
     // Send to IDEs that we're in multi-pod without operator.
     progress.ide(serde_json::to_value(IdeMessage {
-            id: MULTIPOD_WARNING.0.to_string(),
-            level: NotificationLevel::Warning,
-            text: MULTIPOD_WARNING.1.to_string(),
-            actions: {
-                let mut actions = HashSet::new();
-                actions.insert(IdeAction::Link {
-                    label: "Get started (read the docs)".to_string(),
-                    link: "https://metalbear.com/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=plugin".to_string(),
-                });
-                actions.insert(IdeAction::Link {
-                    label: "Try it now".to_string(),
-                    link: "https://app.metalbear.com/".to_string(),
-                });
+        id: MULTIPOD_WARNING.0.to_string(),
+        level: NotificationLevel::Warning,
+        text: MULTIPOD_WARNING.1.to_string(),
+        actions: {
+            let mut actions = HashSet::new();
+            actions.insert(IdeAction::Link {
+                label: "Try mirrord for Teams".to_string(),
+                link: "https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=plugin"
+                    .to_string(),
+            });
 
-                actions
-            },
-        })?);
+            actions
+        },
+    })?);
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
     progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
-    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=cli");
+    progress.print("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=cli");
     Ok(())
 }
 
@@ -292,12 +317,9 @@ where
         actions: {
             let mut actions = HashSet::new();
             actions.insert(IdeAction::Link {
-                label: "Get started (read the docs)".to_string(),
-                link: "https://metalbear.com/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=plugin".to_string(),
-            });
-            actions.insert(IdeAction::Link {
-                label: "Try it now".to_string(),
-                link: "https://app.metalbear.com/".to_string(),
+                label: "Try mirrord for Teams".to_string(),
+                link: "https://app.metalbear.com/?utm_source=httpfilter&utm_medium=plugin"
+                    .to_string(),
             });
 
             actions
@@ -306,7 +328,7 @@ where
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("You're using an HTTP filter, which generally indicates the use of a shared environment. If so, we recommend");
     progress.print("considering mirrord for Teams, which is better suited to shared environments.");
-    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=cli");
+    progress.print("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=httpfilter&utm_medium=cli");
     Ok(())
 }
 

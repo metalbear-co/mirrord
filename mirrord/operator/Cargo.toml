@@ -46,6 +46,7 @@ crd = [
   "dep:kube",
   "dep:mirrord-agent-env",
   "dep:mirrord-config",
+  "dep:mirrord-kube",
   "dep:semver",
   "dep:serde_json",
   "dep:thiserror",
@@ -75,6 +76,7 @@ futures = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 schemars = { workspace = true, features = ["chrono"] }
 semver = { workspace = true, features = ["serde"], optional = true }
+strum_macros = { workspace = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 serde_urlencoded = { version = "0.7", optional = true }
@@ -87,3 +89,4 @@ uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
 rstest.workspace = true
+serde_yaml.workspace = true

@@ -8,6 +8,224 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [1.193.0](https://github.com/metalbear-co/mirrord/tree/1.193.0) - 2026-03-05
+
+
+### Changed
+
+- Make db branching type to be optional, now it always checks for env and
+  env_from.
+- Updated the `experimental` section of the mirrord config:
+  1. Marked `hook_rename` as deprecated.
+  2. Marked `dns_permission_error_fatal` as deprecated.
+  3. Marked `force_hook_connect` as deprecated.
+
+## [3.192.1](https://github.com/metalbear-co/mirrord/tree/3.192.1) - 2026-03-04
+
+
+### Internal
+
+- Added a release workflow step to build and push the latest config docs to the
+  docs branch.
+  If there were no schema changes since the "latest" tag, the step will not
+  run.
+  If the workflow was manually dispatched, it will do a dry run and not push
+  changes.
+- Don't use jaq-all, expose jaq utils in the mirrord-jaq crate to reuse in the
+  operator.
+
+## [3.192.0](https://github.com/metalbear-co/mirrord/tree/3.192.0) - 2026-03-02
+
+
+### Added
+
+- You can now update the configuration and/or image of an existing preview
+  environment session by re-running `preview start` with the same key, target,
+  image registry and image repository.
+  [#1664](https://github.com/metalbear-co/mirrord/issues/1664)
+- `mirrord preview stop` now resolves the given target's container before
+  comparing it to the preview sessions, allowing you to specify, for example,
+  `deployment/foo`, instead of having to spell out the full target, including
+  container. [#1676](https://github.com/metalbear-co/mirrord/issues/1676)
+- The `feature.preview.ttl_mins`/`--ttl` setting for preview environments now
+  accepts the `"infinite"` string value, which makes the session live
+  indefinitely until being manually stopped.
+
+
+### Internal
+
+- Added client implementation config to `MirrordKafkaClientConfig`, and
+  `application.id` sources to `MirrordKafkaTopicsConsumer`.
+- Changed internal proxy first timeout to 15 seconds in layer integration test.
+- Make Detour helper traits and ergonomics fully cross-platform so they work
+  cleanly on Windows, removing Unix/Windows-specific forks.
+
+  Introduce a shared socket helper in layer-lib and unify Unix + Windows socket
+  detours around it as the first real consumer of the cross-platform Detour
+  API.
+- Move `run_command` utility from mirrord-tests to mirrord-test-utils for
+  future exec-based test harness usage
+- Update `CONTRIBUTING.md` with missing dev dependencies: `portfinder` npm
+  package and Argo Rollouts CRD
+- Updated sha256 hash of the manifest retrieved from the new nightly date
+
+## [3.191.0](https://github.com/metalbear-co/mirrord/tree/3.191.0) - 2026-02-26
+
+
+### Added
+
+- SQS splitting now supports filtering by jq programs. A jq program runs
+  against a json of each message and if it returns true, the messaged is
+  filtered.
+- `mirrord dump` no longer requires `--ports` to be specified manually - they
+  will be auto-detected if absent.
+
+
+### Changed
+
+- Updated mirrord for Teams links across CLI, error messages, and agent to
+  point directly to app.metalbear.com instead of docs pages, providing a
+  shorter path to trial signup.
+- Use nodeSelector when possible for agent creation. Improve
+  capacity/scheduling issues.
+
+  When using nodeName directly (old, fallback way) we bypass kube scheduler,
+  meaning we can't preempt existing pods.
+  By using nodeSelector, we still use kube scheduler and with the right
+  priority class for the agent (default in operator chart now) we always get
+  scheduled.
+  User might not have "get" access on node, but operator always has so that's
+  why we have a fallback.
+
+
+### Internal
+
+- Update rust to nightly 2026-02-24.
+- Added safejaq crate
+- Fixed header levels in `feature.preview.env` and `feature.magic` docs.
+- Fixed the progress message for `mirrord dump` to show detected ports.
+- Preview sessions are now marked with the operator's ownership label, allowing
+  developers to create preview sessions when multiple operators are running
+  concurrently.
+- Update db branching so we have all the common logic between different
+  databases reusable instead of having it everywhere duplicated.
+
+## [3.190.0](https://github.com/metalbear-co/mirrord/tree/3.190.0) - 2026-02-23
+
+
+### Added
+
+- Add multi cluster session to the CLI status.
+- The `mirrord preview status` command will now show the remaining TTL of each
+  preview environment session.
+
+
+### Changed
+
+- Update reqwest dependency
+
+
+### Fixed
+
+- Fixed a Windows file-read regression where remote reads could return EOF too
+  early when reading beyond the first chunk of data.
+
+
+### Internal
+
+- Add xtask, change release to use it + improve macOS release time
+- Refactor and fix connect param tests.
+- Unify Layer crates - LayerSetup and some socket operations unified in
+  `layer-lib`
+- fix go26 windows e2e
+
+## [3.189.0](https://github.com/metalbear-co/mirrord/tree/3.189.0) - 2026-02-19
+
+
+### Added
+
+- Added feature.magic.aws — allows using the AWS CLI within mirrord with the remote pod's identity by default.
+- Inject mirrord session key headers into incoming requests.
+- mirrord now supports "Preview Environments" — a new type of mirrord session that runs directly in the cluster and can be shared with other users.
+
+### Fixed
+
+- Show all branches in the db-branching status command when no branch name is specified.
+- `mirrord dump` no longer hangs if the required `--ports` flag is not specified.
+  It also no longer reports an incorrect error when no target is specified.
+
+### Internal
+
+- Removed github pages.
+- Replaced Go 1.23 with Go 1.26 in test.
+- Updated the flake lockfile.
+- Changed linting to run on all platforms from one job using zigbuild.
+- Avoid running CI twice on PR + branch.
+- Removed chef from docker agent build, cache sccache in the GHA cache.
+
+
+## [3.188.2](https://github.com/metalbear-co/mirrord/tree/3.188.2) - 2026-02-13
+
+
+### Fixed
+
+- Rolled back the change for loading into arm64e, fixing many bugs on macOS.
+
+
+### Internal
+
+- Added a checklist to the PR template for important tasks.
+- Added a fixture for a test `KubeService` with a Stateful Set.
+- Added method on `ResolvedTarget` to get `VolumeClaimTemplates` (for
+  `StatefulSets`).
+
+## [3.188.1](https://github.com/metalbear-co/mirrord/tree/3.188.0) - 2026-02-12
+
+Re-releasing 3.188.0 for pipeline mistake.
+
+## [3.188.0](https://github.com/metalbear-co/mirrord/tree/3.188.0) - 2026-02-12
+
+
+### Added
+
+- Expose feature.env.load_from_process as env MIRRORD_ENV_LOAD_FROM_PROCESS
+
+
+### Fixed
+
+- Don't require emulation for macOS arm64e
+- The db-branches status command would fail when one of the branching features
+  (MySQL/PostgreSQL) was not enabled on the cluster.
+
+
+### Internal
+
+- Added CODE_REVIEW.md guide documenting code review standards and
+  responsibilities.
+- After a release is done and everything is published, set it to be the latest
+  release on GitHub.
+- Migrates the MIRRORD_LAYER_LOG_PATH capability to layer-lib, making it also
+  accessible to the unix layer crate.
+
+  MIRRORD_LAYER_LOG_PATH allows for the specification of a directory in which
+  layer tracing logs will be written, one per process in the format
+  `mirrord-layer_{%Y%m%d_%H%M%S}_{pid}_{processName}`.
+  Where processName is a sanitized version which only contains characters from
+  alphanumeric, `-`, `_`; any other character falls back to `_`.
+
+## [3.187.0](https://github.com/metalbear-co/mirrord/tree/3.187.0) - 2026-02-09
+
+
+### Added
+
+- Add new fuctionality to support multi cluster sessions.
+
+
+### Internal
+
+- Added a regression test that verifies two consecutive calls of listen do not
+  close the socket.
+
 ## [3.186.0](https://github.com/metalbear-co/mirrord/tree/3.186.0) - 2026-02-06
 
 
@@ -1009,7 +1227,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 ### Internal
 
 - E2E test SQS with argo rollouts.
-- Updated Rust toolchain to nightly-2025-08-01.
+- Updated Rust toolchain to nightly-2026-02-24.
 - Use return-dispatch action to trigger operator e2e from mirrord.
 
 ## [3.154.1](https://github.com/metalbear-co/mirrord/tree/3.154.1) - 2025-08-04

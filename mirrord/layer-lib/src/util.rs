@@ -3,6 +3,17 @@
 
 use std::{env, path::PathBuf};
 
+/// Macro to safely allocate memory for Windows structures with error handling
+#[cfg(windows)]
+#[macro_export]
+macro_rules! unsafe_alloc {
+    ($type:ty, $err: expr) => {{
+        let layout = std::alloc::Layout::new::<$type>();
+        let ptr = unsafe { std::alloc::alloc(layout) as *mut $type };
+        if ptr.is_null() { Err($err) } else { Ok(ptr) }
+    }};
+}
+
 #[cfg(windows)]
 use str_win::path_to_unix_path;
 
