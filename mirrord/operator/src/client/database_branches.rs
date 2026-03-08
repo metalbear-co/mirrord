@@ -4,7 +4,7 @@ use std::{
 };
 
 use kube::{
-    Api, Client, Resource,
+    Api, Resource,
     api::{ListParams, ObjectMeta},
     runtime::wait::await_condition,
 };
@@ -15,7 +15,7 @@ use mirrord_config::{
     },
     target::{Target, TargetDisplay},
 };
-use mirrord_kube::{api::runtime::RuntimeDataProvider, error::KubeApiError};
+use mirrord_kube::error::KubeApiError;
 use mirrord_progress::Progress;
 use tracing::Level;
 use uuid::Uuid;
@@ -203,21 +203,14 @@ impl DatabaseBranchParams {
     /// Create branch database parameters from user config.
     ///
     /// We generate unique database IDs unless the user explicitly specifies them.
-    /// If the target has no container set, resolves it from the cluster via
-    /// [`RuntimeDataProvider`].
-    pub async fn new(
-        config: &DatabaseBranchesConfig,
-        target: &Target,
-        client: &Client,
-        namespace: Option<&str>,
-    ) -> Result<Self, OperatorApiError> {
+    ///
+    /// Container resolution is left to the operator - the client may not have access to the
+    /// workload cluster (e.g. management-only multi-cluster). An empty container string in the
+    /// [`SessionTarget`] tells the operator to resolve it, same as `target.rs` in the session flow.
+    pub fn new(config: &DatabaseBranchesConfig, target: &Target) -> Result<Self, OperatorApiError> {
         let mut target_with_container = target.clone();
         if target_with_container.container().is_none() {
-            let runtime_data = target
-                .runtime_data(client, namespace)
-                .await
-                .map_err(OperatorApiError::KubeApi)?;
-            target_with_container.set_container(runtime_data.container_name);
+            target_with_container.set_container(String::new());
         }
         let target_display = target_with_container.to_string();
         let session_target = SessionTarget::from_config(target_with_container)
