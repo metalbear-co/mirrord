@@ -120,7 +120,7 @@ pub struct MysqlOptions {
 #[serde(rename_all = "camelCase")]
 pub struct MongodbOptions {
     #[serde(default)]
-    pub copy: MongodbBranchCopyConfig_,
+    pub copy: MongodbCopySpec,
 }
 
 impl JsonSchema for BranchDatabase {
@@ -165,7 +165,7 @@ fn crd_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
 fn spec_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
     let pg_schema = schema_gen.subschema_for::<PostgresOptions>();
     let mysql_schema = schema_gen.subschema_for::<MysqlOptions>();
-    let mongodb_schema = schema_gen.subschema_for::<MongodbBranchCopyConfig_>();
+    let mongodb_schema = schema_gen.subschema_for::<MongodbOptions>();
 
     let mut properties = schemars::Map::new();
     properties.insert("id".into(), string_schema());
@@ -286,7 +286,7 @@ impl Default for SqlBranchCopyConfig {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct MongodbBranchCopyConfig_ {
+pub struct MongodbCopySpec {
     pub mode: MongodbBranchCopyMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub items: Option<BTreeMap<String, ItemCopyConfig>>,
@@ -300,7 +300,7 @@ pub enum MongodbBranchCopyMode {
     All,
 }
 
-impl Default for MongodbBranchCopyConfig_ {
+impl Default for MongodbCopySpec {
     fn default() -> Self {
         Self {
             mode: MongodbBranchCopyMode::Empty,
@@ -383,14 +383,14 @@ impl From<MysqlBranchCopyConfig> for SqlBranchCopyConfig {
     }
 }
 
-impl From<MongodbBranchCopyConfig> for MongodbBranchCopyConfig_ {
+impl From<MongodbBranchCopyConfig> for MongodbCopySpec {
     fn from(config: MongodbBranchCopyConfig) -> Self {
         match config {
-            MongodbBranchCopyConfig::Empty { collections } => MongodbBranchCopyConfig_ {
+            MongodbBranchCopyConfig::Empty { collections } => MongodbCopySpec {
                 mode: MongodbBranchCopyMode::Empty,
                 items: convert_item_copy_configs(collections),
             },
-            MongodbBranchCopyConfig::All { collections } => MongodbBranchCopyConfig_ {
+            MongodbBranchCopyConfig::All { collections } => MongodbCopySpec {
                 mode: MongodbBranchCopyMode::All,
                 items: convert_item_copy_configs(collections),
             },
