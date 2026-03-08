@@ -311,7 +311,7 @@ pub struct MongodbCopySpec {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
 #[serde(rename_all = "camelCase")]
 #[strum(serialize_all = "lowercase")]
-pub enum MongodbCopyMode {
+pub enum MongodbBranchCopyMode {
     Empty,
     All,
 }
@@ -319,7 +319,7 @@ pub enum MongodbCopyMode {
 impl Default for MongodbCopySpec {
     fn default() -> Self {
         Self {
-            mode: MongodbCopyMode::Empty,
+            mode: MongodbBranchCopyMode::Empty,
             items: None,
         }
     }
