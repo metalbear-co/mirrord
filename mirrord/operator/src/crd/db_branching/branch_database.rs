@@ -178,7 +178,7 @@ fn crd_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
 fn spec_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
     let pg_schema = schema_gen.subschema_for::<PostgresOptions>();
     let mysql_schema = schema_gen.subschema_for::<MysqlOptions>();
-    let mongodb_schema = schema_gen.subschema_for::<MongodbCopySpec>();
+    let mongodb_schema = schema_gen.subschema_for::<MongodbOptions>();
     let mssql_schema = schema_gen.subschema_for::<MssqlOptions>();
 
     let mut properties = schemars::Map::new();
@@ -303,7 +303,7 @@ impl Default for SqlBranchCopyConfig {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MongodbCopySpec {
-    pub mode: MongodbCopyMode,
+    pub mode: MongodbBranchCopyMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub items: Option<BTreeMap<String, ItemCopyConfig>>,
 }
@@ -421,11 +421,11 @@ impl From<MongodbBranchCopyConfig> for MongodbCopySpec {
     fn from(config: MongodbBranchCopyConfig) -> Self {
         match config {
             MongodbBranchCopyConfig::Empty { collections } => MongodbCopySpec {
-                mode: MongodbCopyMode::Empty,
+                mode: MongodbBranchCopyMode::Empty,
                 items: convert_item_copy_configs(collections),
             },
             MongodbBranchCopyConfig::All { collections } => MongodbCopySpec {
-                mode: MongodbCopyMode::All,
+                mode: MongodbBranchCopyMode::All,
                 items: convert_item_copy_configs(collections),
             },
         }
