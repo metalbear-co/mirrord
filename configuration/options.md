@@ -1645,17 +1645,17 @@ The logic for choosing the behavior is as follows:
 
 3. There are pre-defined exceptions to the set FS mode.
   1. Paths that match the pre-defined patterns
-    [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_local_by_default.rs) or
-    [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_local_by_default.rs)
-    are read locally by default.
+     [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_local_by_default.rs) or
+     [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_local_by_default.rs)
+     are read locally by default.
   2. Paths that match the pre-defined patterns
-    [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_remote_by_default.rs) or
-    [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_remote_by_default.rs)
-    are read remotely by default when the mode is `localwithoverrides`.
+     [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_remote_by_default.rs) or
+     [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_remote_by_default.rs)
+     are read remotely by default when the mode is `localwithoverrides`.
   3. Paths that match the pre-defined patterns
-    [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/not_found_by_default.rs) or
-    [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/not_found_by_default.rs)
-    under the running user's home directory will not be found by the application when the mode is not `local`.
+     [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/not_found_by_default.rs) or
+     [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/not_found_by_default.rs)
+     under the running user's home directory will not be found by the application when the mode is not `local`.
 
   In order to override that default setting for a path, or a pattern, include it the
   appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even
