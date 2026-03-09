@@ -4742,6 +4742,9 @@ dependencies = [
  "httparse",
  "hyper 1.8.1",
  "hyper-util",
+ "jaq-core 2.2.1",
+ "jaq-json 1.1.3",
+ "jaq-std 2.1.2",
  "k8s-cri",
  "libc",
  "mirrord-agent-env",
@@ -4767,6 +4770,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-retry",
  "tokio-rustls 0.26.4",
  "tokio-stream",
  "tokio-util",
@@ -5184,7 +5188,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.25.1"
+version = "1.26.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -5195,6 +5199,9 @@ dependencies = [
  "http-body-util",
  "http-serde",
  "hyper 1.8.1",
+ "jaq-core 2.2.1",
+ "jaq-json 1.1.3",
+ "jaq-std 2.1.2",
  "libc",
  "mirrord-macros",
  "nix 0.29.0",
