@@ -57,18 +57,24 @@ pub const READONLY_FILE_BUFFER_HARD_LIMIT: u64 = 15 * 1024 * 1024;
 ///    behaviour.
 ///
 /// 3. There are pre-defined exceptions to the set FS mode.
-///   1. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs)
+///   1. Paths that match the pre-defined patterns
+///      [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_local_by_default.rs) or
+///      [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_local_by_default.rs)
 ///      are read locally by default.
-///   2. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_remote_by_default.rs)
+///   2. Paths that match the pre-defined patterns
+///      [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_remote_by_default.rs) or
+///      [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_remote_by_default.rs)
 ///      are read remotely by default when the mode is `localwithoverrides`.
-///   3. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/not_found_by_default.rs)
+///   3. Paths that match the pre-defined patterns
+///      [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/not_found_by_default.rs) or
+///      [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/not_found_by_default.rs)
 ///      under the running user's home directory will not be found by the application when the mode
 ///      is not `local`.
 ///
 ///   In order to override that default setting for a path, or a pattern, include it the
 ///   appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even
-///   though it is covered by [the set of patterns that are read locally by default](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs),
-///     add `"^/etc/."` to the `read_only` set.
+///   though it is covered by the set of pre-defined patterns that are read locally by default,
+///   add `"^/etc/."` to the `read_only` set.
 ///
 /// 4. If none of the above match, use the default behavior (mode).
 ///
