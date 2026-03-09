@@ -40,14 +40,14 @@ pub const READONLY_FILE_BUFFER_HARD_LIMIT: u64 = 15 * 1024 * 1024;
 /// 1. `"read_write"` - List of patterns that should be read/write remotely.
 /// 2. `"read_only"` - List of patterns that should be read only remotely.
 /// 3. `"local"` - List of patterns that should be read locally.
-/// 4. `"not_found"` - List of patters that should never be read nor written. These files should be
+/// 4. `"not_found"` - List of patterns that should never be read nor written. These files should be
 ///    treated as non-existent.
 /// 4. `"mapping"` - Map of patterns and their corresponding replacers. The replacement happens before any specific behavior as defined above or mode (uses [`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace))
 ///
 /// The logic for choosing the behavior is as follows:
 ///
 ///
-/// 1. Check agains "mapping" if path needs to be replaced, if matched then continue to next step
+/// 1. Check against "mapping" if path needs to be replaced, if matched then continue to next step
 ///    with new path after replacements otherwise continue as usual.
 /// 2. Check if one of the patterns match the file path, do the corresponding action. There's no
 ///    specified order if two lists match the same path, we will use the first one (and we do not
@@ -135,7 +135,7 @@ pub struct FsConfig {
     ///   "^/home/(?<user>\\S+)/dev/config/(?<app>\\S+)": "/mnt/configs/${user}-$app"
     /// }
     /// ```
-    /// Will do the next replacements for any io operaton
+    /// Will do the next replacements for any io operation
     ///
     /// `/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml`
     /// `/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`

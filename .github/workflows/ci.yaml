@@ -68,6 +68,30 @@ jobs:
       - name: verify newsfragment exist
         run: uv run towncrier check
 
+  typos_check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: install typos
+        uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
+        with:
+          tool: typos-cli
+
+      - name: print typos version
+        run: echo $(typos --version)
+
+      - name: list markdown files
+        run: echo $(git ls-files '*.md')
+
+      - name: spell check markdown files
+        run: typos --format brief $(git ls-files '*.md')
+
+      - name: spell check mirrord/config crate
+        run: typos --format brief $(git ls-files 'mirrord/config/*.rs')
+
   changed_files:
     runs-on: ubuntu-24.04
     # don't run CI on drafts
@@ -794,6 +818,7 @@ jobs:
     needs:
       [
         towncrier_check,
+        typos_check,
         changed_files,
         intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,

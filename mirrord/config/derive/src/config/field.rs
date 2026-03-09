@@ -11,7 +11,7 @@ use crate::config::flag::{ConfigFlags, ConfigFlagsType, EnvFlag};
 ///  #[config(env = "TEST")]
 ///             |-----ty-----|
 /// |vis||ident|      |option|
-///  pub  flag:  Opton<Foobar>,
+///  pub  flag:  Option<Foobar>,
 /// ```
 #[derive(Debug)]
 pub struct ConfigField {
@@ -39,7 +39,7 @@ impl ConfigField {
         })?
     }
 
-    /// Will create the stuct definition part of the code
+    /// Will create the struct definition part of the code
     ///
     /// #### 1
     /// ```rust
