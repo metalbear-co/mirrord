@@ -79,18 +79,19 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 }
 
 fn layer_start() -> LayerResult<()> {
-    // Try to open the parent's init event. In the normal `mirrord exec` flow, the parent
-    // creates this event and waits on it. In the `mirrord attach` flow (IDE extension),
-    // the env var won't be set because the process was spawned independently — that's fine,
-    // we just skip the synchronization.
+    // Catch init/attach event
     let init_event = match LayerInitEvent::for_child() {
         Ok(event) => Some(event),
-        Err(_) => {
-            tracing::debug!(
-                "No layer init event found (attach flow), skipping parent synchronization"
-            );
-            None
-        }
+        Err(_) => match LayerInitEvent::for_attach_child() {
+            Ok(event) => {
+                tracing::debug!("Found attach layer init event, will signal on completion");
+                Some(event)
+            }
+            Err(_) => {
+                tracing::debug!("No layer init event found, skipping parent synchronization");
+                None
+            }
+        },
     };
 
     let config = read_resolved_config().map_err(LayerError::Config)?;

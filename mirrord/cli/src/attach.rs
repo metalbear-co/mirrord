@@ -1,9 +1,12 @@
 use std::ffi::OsString;
 
 use dll_syringe::{Syringe, process::OwnedProcess};
+use mirrord_layer_lib::process::windows::sync::LayerInitEvent;
 use mirrord_progress::Progress;
 
 use crate::{CliResult, config::AttachArgs, error::CliError, extract::extract_library};
+
+const ATTACH_SIGNAL_TIMEOUT_MS: u32 = 30_000;
 
 /// Attach the mirrord layer to an already-running process by injecting the layer DLL.
 ///
@@ -23,11 +26,29 @@ where
         .map_err(|e| CliError::AttachProcessOpenFailed(args.pid, e))?;
     sub_progress.info(&format!("obtained handle to process {}", args.pid));
 
+    // Create the attach event before injection. The layer reads this by name (derived from its
+    // own PID) and signals it when initialization is complete.
+    let init_event = LayerInitEvent::for_attach_parent(args.pid)
+        .map_err(|e| CliError::AttachInjectionFailed(args.pid, e.to_string()))?;
+
     let syringe = Syringe::for_process(process);
     syringe
         .inject(OsString::from(&lib_path))
         .map_err(|e| CliError::AttachInjectionFailed(args.pid, e.to_string()))?;
 
-    sub_progress.success(Some(&format!("layer injected into process {}", args.pid)));
-    Ok(())
+    sub_progress.info("waiting for layer to signal injection complete");
+
+    match init_event
+        .wait_for_signal(Some(ATTACH_SIGNAL_TIMEOUT_MS))
+        .map_err(|e| CliError::AttachInjectionFailed(args.pid, e.to_string()))?
+    {
+        true => {
+            sub_progress.success(Some(&format!(
+                "layer successfully initialized in process {}",
+                args.pid
+            )));
+            Ok(())
+        }
+        false => Err(CliError::AttachLayerTimeout(args.pid)),
+    }
 }
