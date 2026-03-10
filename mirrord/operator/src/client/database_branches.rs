@@ -11,7 +11,7 @@ use kube::{
 use mirrord_config::{
     feature::database_branches::{
         ConnectionSource, ConnectionSourceType, DatabaseBranchConfig, DatabaseBranchesConfig,
-        MongodbBranchConfig, MysqlBranchConfig, PgBranchConfig, TargetEnviromentVariableSource,
+        MongodbBranchConfig, MysqlBranchConfig, PgBranchConfig, TargetEnvironmentVariableSource,
     },
     target::{Target, TargetDisplay},
 };
@@ -597,11 +597,13 @@ fn convert_connection_source(source: &ConnectionSource) -> CrdConnectionSource {
         ConnectionSource::Url { url } => CrdConnectionSource::Url(Box::new(url.into())),
         ConnectionSource::FlatUrl { source_type, url } => {
             let kind = match source_type {
-                ConnectionSourceType::Env => TargetEnviromentVariableSource::Env {
+                Some(ConnectionSourceType::EnvFrom) => TargetEnvironmentVariableSource::EnvFrom {
                     container: None,
                     variable: url.clone(),
                 },
-                ConnectionSourceType::EnvFrom => TargetEnviromentVariableSource::EnvFrom {
+                // None or Env: default to Env. The operator auto-detects
+                // envFrom at resolution time if needed.
+                _ => TargetEnvironmentVariableSource::Env {
                     container: None,
                     variable: url.clone(),
                 },

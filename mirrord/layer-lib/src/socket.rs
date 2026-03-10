@@ -8,15 +8,12 @@ pub mod sockets;
 
 #[cfg(windows)]
 use std::mem;
-use std::{
-    collections::HashSet,
-    net::{SocketAddr, ToSocketAddrs},
-    str::FromStr,
-};
+use std::{collections::HashSet, net::SocketAddr, str::FromStr};
 
 use bincode::{Decode, Encode};
 // Re-export dns module items
 pub use dns::reverse_dns::get_hostname_for_ip;
+use hickory_resolver::{Resolver, error::ResolveErrorKind};
 use libc::c_int;
 // Cross-platform socket constants
 #[cfg(unix)]
@@ -604,9 +601,13 @@ impl OutgoingSelector {
 
         #[cfg(unix)]
         let _guard = DetourGuard::new();
-        (hostname, address.port())
-            .to_socket_addrs()?
+
+        Resolver::from_system_conf()?
+            .lookup_ip(hostname)
+            .map_err(|_| HookError::DNSNoName)?
+            .into_iter()
             .next()
+            .map(|resolved| SocketAddr::new(resolved, address.port()))
             .ok_or(HookError::DNSNoName)
     }
 
@@ -642,9 +643,8 @@ trait ProtocolAndAddressFilterExt {
     /// # Note on DNS resolution
     ///
     /// This method may require a DNS resolution (when [`ProtocolAndAddressFilter::address`] is
-    /// [`AddressFilter::Name`]). If remote DNS is disabled or `force_local_dns`
-    /// flag is used, the method uses local resolution [`ToSocketAddrs`]. Otherwise, it uses
-    /// remote resolution [`remote_getaddrinfo`].
+    /// [`AddressFilter::Name`]). If remote DNS is disabled or `force_local_dns` flag is used, the
+    /// method uses local resolution. Otherwise, it uses remote resolution [`remote_getaddrinfo`].
     fn matches(
         &self,
         address: SocketAddr,
@@ -698,22 +698,15 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
                     #[cfg(unix)]
                     let _guard = DetourGuard::new();
 
-                    // Use standard library DNS resolution as fallback
-                    match (name.as_str(), *port).to_socket_addrs() {
-                        Ok(addresses) => addresses.map(|addr| addr.ip()).collect(),
+                    // Fall back to local resolution.
+                    match Resolver::from_system_conf()?.lookup_ip(name) {
+                        Ok(addresses) => addresses.into_iter().collect(),
                         Err(e) => {
-                            let as_string = e.to_string();
-                            if as_string.contains("Temporary failure in name resolution")
-                                || as_string
-                                    .contains("nodename nor servname provided, or not known")
-                            {
-                                // There is no special `ErrorKind` for case when no records are
-                                // found. We catch this case based
-                                // on error message.
+                            if matches!(e.kind(), ResolveErrorKind::NoRecordsFound { .. }) {
                                 vec![]
                             } else {
                                 tracing::error!(error = ?e, "Local resolution of OutgoingFilter failed");
-                                return Err(e.into());
+                                return Err(HookError::DNSNoName);
                             }
                         }
                     }

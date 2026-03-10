@@ -16,6 +16,7 @@ Make sure to take a look at the project's [style guide](STYLE.md).
 - [Compiling on MacOS](#compiling-on-macos)
 - [Adding new target types](#adding-new-target-types)
 - [Testing the release workflow](#testing-the-release-workflow)
+- [Submitting a Pull Request](#submitting-a-pull-request)
 - [Architecture](#architecture)
 - [Release mirrord](#release-mirrord)
 
@@ -663,6 +664,31 @@ If you're making changes to the release and/or CI workflows for MacOS specifical
 The xtask approach is preferred for new development as it provides better error messages, type safety, and consistency across platforms. See [xtask/README.md](xtask/README.md) for details.
 
 # Submitting a Pull Request
+
+## Typo Checks
+
+mirrord uses [`typos`](https://github.com/crate-ci/typos) to catch typos in CI. If the pipeline fails
+due to a false positive (e.g. a domain-specific term, identifier, or intentional spelling), you can add
+an exception in [`typos.toml`](typos.toml) at the root of the repository:
+
+- **Identifiers** (variable names, type names, etc.) — add to `[default.extend-identifiers]`:
+  ```toml
+  [default.extend-identifiers]
+  MyTerm = "MyTerm"
+  ```
+
+- **Words** (plain words in prose or strings) — add to `[default.extend-words]`:
+  ```toml
+  [default.extend-words]
+  myword = "myword"
+  ```
+
+- **Regex patterns** (e.g. to ignore URLs or structured text) — add to `extend-ignore-re` under `[default]`:
+  ```toml
+  [default]
+  extend-ignore-re = ["<your-pattern>"]
+  ```
+
 
 ## Changelog Entry
 

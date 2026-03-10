@@ -1,5 +1,6 @@
 use std::{
-    fmt,
+    error::Error as StdError,
+    fmt, io,
     net::{Ipv4Addr, SocketAddr},
     ops::Not,
     pin::Pin,
@@ -504,9 +505,14 @@ impl TestRequest {
         }
 
         let conn_task_ret = conn_task.await.unwrap();
+
+        // hyper `SendRequest` closes the connection abruptly. Server can see an IO error
+        // when sending its shutdown.
+        // https://github.com/hyperium/hyper/issues/3775
         assert!(
-            conn_task_ret.is_none(),
-            "Connection task returned {conn_task_ret:?}, exepcted None"
+            conn_task_ret.is_none()
+                || matches!(conn_task_ret, Some(Err(ref error)) if is_broken_pipe(error)),
+            "Connection task returned {conn_task_ret:?}, exepcted None or BrokenPipe"
         );
     }
 
@@ -1017,4 +1023,14 @@ where
     fn is_end_stream(&self) -> bool {
         self.inner.is_end_stream()
     }
+}
+
+fn is_broken_pipe(error: &hyper::Error) -> bool {
+    if let Some(err) = error.source()
+        && let Some(io_error) = err.downcast_ref::<io::Error>()
+    {
+        return io_error.kind() == io::ErrorKind::BrokenPipe;
+    }
+
+    false
 }

@@ -28,8 +28,8 @@ use crate::{
 /// }
 /// ```
 ///
-/// - Only queries for addresses in subnet `1.1.1.0/24` with service port `1337`` will go through
-///   the remote pod.
+/// - Only queries for addresses in subnet `1.1.1.0/24` with service port `1337` will go through the
+///   remote pod.
 ///
 /// ```json
 /// {

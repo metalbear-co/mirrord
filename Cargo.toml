@@ -34,14 +34,13 @@ members = [
     "tests/rust-websockets",
     "tests/rust-sqs-printer",
     "xtask",
-	"safejaq",
 ]
 resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.192.1"
+version = "3.193.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -274,7 +273,7 @@ yamlpatch = "0.9.0"
 yamlpath = "0.32.0"
 oci-spec = { version = "0.9", default-features = false, features = ["distribution"] }
 
-# Used by `safejaq`, `protocol`
+# Used by `agent`, `protocol`
 jaq-core = "2.2.1"
 jaq-parse = "1.0.3"
 jaq-std = "2.1.2"

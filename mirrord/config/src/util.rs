@@ -51,8 +51,8 @@ where
     type Generator = T::Generator;
 }
 
-// We manualy deserialize ToggleableConfig to properly propogate deserialzation errors and not via
-// untagged enum usless error
+// We manually deserialize ToggleableConfig to properly propagate deserialization errors and not via
+// untagged enum useless error
 impl<'de, T> Deserialize<'de> for ToggleableConfig<T>
 where
     T: Deserialize<'de>,

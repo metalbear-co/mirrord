@@ -17,7 +17,7 @@ pub struct UnknownTargetType(pub String);
 ///
 /// You should avoid passing this type around, instead try to get the `Known` variant
 /// out, and potentially throw an error if it's an `Unknown` target. If you feel compelled
-/// to write methods for this type, think again, you probaly don't want to do that.
+/// to write methods for this type, think again, you probably don't want to do that.
 ///
 /// ## Why not an `Option`
 ///
