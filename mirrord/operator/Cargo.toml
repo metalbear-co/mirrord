@@ -42,6 +42,7 @@ client = [
   "dep:tower",
 ]
 crd = [
+  "dep:amq-protocol-types",
   "dep:k8s-openapi",
   "dep:kube",
   "dep:mirrord-agent-env",
@@ -49,6 +50,8 @@ crd = [
   "dep:mirrord-kube",
   "dep:semver",
   "dep:serde_json",
+  "dep:strum",
+  "dep:strum_macros",
   "dep:thiserror",
 ]
 
@@ -61,8 +64,9 @@ mirrord-kube = { path = "../kube", optional = true }
 mirrord-progress = { path = "../progress", optional = true }
 mirrord-protocol = { path = "../protocol", optional = true }
 mirrord-protocol-io = { path = "../protocol-io", optional = true}
+  
 
-
+amq-protocol-types = { version = "10", optional = true }
 base64 = { workspace = true, optional = true }
 bincode = { workspace = true, features = ["serde"], optional = true }
 chrono = { workspace = true, features = ["clock", "serde"] }
@@ -76,7 +80,8 @@ futures = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 schemars = { workspace = true, features = ["chrono"] }
 semver = { workspace = true, features = ["serde"], optional = true }
-strum_macros = { workspace = true }
+strum = { workspace = true, optional = true }
+strum_macros = { workspace = true, optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 serde_urlencoded = { version = "0.7", optional = true }

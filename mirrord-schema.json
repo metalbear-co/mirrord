@@ -3146,6 +3146,26 @@
               ]
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "queue_type"
+          ],
+          "properties": {
+            "headers_filter": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "enum": [
+                "RMQ"
+              ]
+            }
+          }
         }
       ]
     },

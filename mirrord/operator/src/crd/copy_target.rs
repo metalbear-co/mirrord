@@ -26,6 +26,7 @@ pub struct CopyTargetSpec {
     /// Ignored if [`Target`] is [`Target::Pod`].
     pub scale_down: bool,
     /// Split queues client side configuration.
+    #[schemars(with = "Option::<serde_json::Map<String, serde_json::Value>>")]
     pub split_queues: Option<SplitQueuesConfig>,
     /// Containers that are ignored by copy target.
     #[serde(default)]

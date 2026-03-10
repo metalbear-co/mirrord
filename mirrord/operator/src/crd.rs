@@ -31,6 +31,7 @@ pub mod label_selector;
 pub mod multi_cluster;
 pub mod patch;
 pub mod policy;
+pub mod rabbitmq;
 pub mod preview;
 pub mod profile;
 pub mod session;
@@ -489,6 +490,8 @@ pub enum NewOperatorFeature {
     SqsQueueSplittingWithJqFilter,
 
     PreviewEnv,
+    /// This operator can perform queue splitting on RabbitMQ
+    RmqQueueSplitting,
 
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
@@ -526,6 +529,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SqsQueueSplittingWithJqFilter => {
                 "Splitting SQS queues with a jq filter"
             }
+            NewOperatorFeature::RmqQueueSplitting => {
+                "RabbitMQ queue splitting"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -538,6 +544,26 @@ impl From<&OperatorFeatures> for NewOperatorFeature {
             OperatorFeatures::ProxyApi => NewOperatorFeature::ProxyApi,
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")] // name_source -> nameSource in yaml.
+pub struct SplitQueueNameDetails {
+    /// Where the application gets the queue name from. Will be used to read messages from that
+    /// queue and distribute them to the output queues. When running with mirrord and splitting
+    /// this queue, applications will get a modified name from that source.
+    pub name_source: QueueNameSource,
+
+    /// Fallback queue name, if the source specified in `nameSource` is not present on the target.
+    /// If the configured source is not present and the fallback is used - the configured source
+    /// will be used to make the target use the temporary queue.
+    /// For example, if `nameSource` is `envVar: MEME_QUEUE_NAME`, but `MEME_QUEUE_NAME` is not
+    /// present in the target, and `IncomingMemeQueue.fifo` was set as a fallback queue name, then
+    /// the target will be modified to include the environment variable `MEME_QUEUE_NAME`, with the
+    /// name of the temporary queue as a value.
+    /// Setting a fallback name only makes sense if the target application indeed uses the defined
+    /// queue name source to override the source it uses on its absence.
+    pub fallback_name: Option<String>,
 }
 
 /// Set where the application reads the name of the queue from, so that mirrord can find that queue,
@@ -560,21 +586,8 @@ pub enum QueueNameSource {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // name_source -> nameSource in yaml.
 pub struct SqsQueueDetails {
-    /// Where the application gets the queue name from. Will be used to read messages from that
-    /// queue and distribute them to the output queues. When running with mirrord and splitting
-    /// this queue, applications will get a modified name from that source.
-    pub name_source: QueueNameSource,
-
-    /// Fallback queue name, if the source specified in `nameSource` is not present on the target.
-    /// If the configured source is not present and the fallback is used - the configured source
-    /// will be used to make the target use the temporary queue.
-    /// For example, if `nameSource` is `envVar: MEME_QUEUE_NAME`, but `MEME_QUEUE_NAME` is not
-    /// present in the target, and `IncomingMemeQueue.fifo` was set as a fallback queue name, then
-    /// the target will be modified to include the environment variable `MEME_QUEUE_NAME`, with the
-    /// name of the temporary queue as a value.
-    /// Setting a fallback name only makes sense if the target application indeed uses the defined
-    /// queue name source to override the source it uses on its absence.
-    pub fallback_name: Option<String>,
+    #[serde(flatten)]
+    pub name_details: SplitQueueNameDetails,
 
     /// If set, the value read from `name_source` or `fallback_name`
     /// will be parsed as a JSON map. The values in this map will be used as queue names.
@@ -593,13 +606,41 @@ pub struct SqsQueueDetails {
     pub sns: Option<bool>,
 }
 
+// This is a proxy to generate a schemars schema that contains the common fields between [`SqsQueueDetails`] and [`RmqQueueDetails`](rabbitmq::RmqQueueDetails)
 /// The details of a queue that should be split.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(JsonSchema)]
+#[serde(rename_all = "camelCase")] // queue_type -> queueType
+pub struct SplitQueueSchemarsProxy {
+    pub queue_type: SplitQueueVariant,
+
+    #[serde(flatten)]
+    pub name: SplitQueueNameDetails,
+}
+
+/// The details of a queue that should be split.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, strum_macros::EnumDiscriminants)]
+#[strum_discriminants(name(SplitQueueVariant))]
+#[strum_discriminants(derive(JsonSchema))]
+#[strum_discriminants(serde(rename_all = "UPPERCASE"))]
 #[serde(tag = "queueType")]
 pub enum SplitQueue {
     /// Amazon SQS
     #[serde(rename = "SQS")]
     Sqs(SqsQueueDetails),
+
+    /// RabbitMQ
+    #[serde(rename = "RMQ")]
+    Rmq(rabbitmq::RmqQueueDetails)
+}
+
+impl JsonSchema for SplitQueue {
+    fn schema_name() -> String {
+        "SplitQueue".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::schema::Schema {
+        SplitQueueSchemarsProxy::json_schema(generator)
+    }
 }
 
 /// A workload that is a consumer of a queue that is being split.
@@ -702,11 +743,27 @@ impl ActiveSqsSplits {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")] // workload_type -> workloadType
+pub struct ActiveRmqSplits {
+    /// For each queue_id, the actual queue name as retrieved from the target's pod spec or config
+    /// map, together with the name of its temporary output queue.
+    pub queue_names: BTreeMap<QueueId, QueueNameUpdate>,
+
+    /// Names of env vars that contain the queue name directly in the pod template, without config
+    /// map refs, mapped to their queue id.
+    pub direct_env_vars: HashMap<String, QueueId>,
+
+    pub env_updates: BTreeMap<String, QueueNameUpdate>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // sqs_details -> sqsDetails
 pub struct WorkloadQueueRegistryStatus {
     /// Optional even though it's currently the only field, because in the future there will be
     /// fields for other queue types.
     pub sqs_details: Option<ActiveSqsSplits>,
+
+    pub rmq_details: Option<ActiveRmqSplits>,
 }
 
 /// Defines a Custom Resource that holds a central configuration for splitting queues for a
@@ -906,8 +963,8 @@ mod tests {
     use kube::CustomResourceExt;
 
     use crate::crd::{
-        MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
-        MirrordWorkloadQueueRegistry, SessionCrd,
+        MirrordClusterOperatorUserCredential, MirrordSqsSession,
+        MirrordWorkloadQueueRegistry,
         db_branching::{
             mongodb::MongodbBranchDatabase, mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
         },
@@ -942,17 +999,6 @@ mod tests {
         fs::write(path, yaml).unwrap();
     }
 
-    #[test]
-    #[ignore]
-    fn write_mirrord_operator_crd_yaml() {
-        write_crd_yaml::<MirrordOperatorCrd>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_session_crd_yaml() {
-        write_crd_yaml::<SessionCrd>();
-    }
 
     #[test]
     #[ignore]
@@ -1083,8 +1129,6 @@ mod tests {
     #[test]
     #[ignore]
     fn write_all_crd_yamls() {
-        write_crd_yaml::<MirrordOperatorCrd>();
-        write_crd_yaml::<SessionCrd>();
         write_crd_yaml::<MirrordWorkloadQueueRegistry>();
         write_crd_yaml::<MirrordSqsSession>();
         write_crd_yaml::<MirrordClusterOperatorUserCredential>();
