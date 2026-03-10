@@ -215,9 +215,6 @@ pub enum HookError {
     #[error("mirrord-layer: Managed Socket not found on address `{0}`!")]
     ConnectError(#[from] ConnectError),
 
-    #[error("Failed to allocate memory for layout")]
-    LayoutError(#[from] std::alloc::LayoutError),
-
     #[error("mirrord-layer: SendTo failed with `{0}`!")]
     SendToError(#[from] SendToError),
 
@@ -425,7 +422,6 @@ fn get_platform_errno(fail: HookError) -> i32 {
         HookError::SocketNotFound(_) => libc::EBADF,
         HookError::ManagedSocketNotFound(_) => libc::EBADF,
         HookError::ConnectError(_) => libc::EFAULT,
-        HookError::LayoutError(_) => libc::EFAULT,
         HookError::SendToError(_) => libc::EFAULT,
         HookError::HostnameResolveError(_) => libc::EFAULT,
     }
@@ -500,7 +496,6 @@ fn get_platform_errno(fail: HookError) -> u32 {
         HookError::SocketNotFound(_) => WSAEBADF,
         HookError::ManagedSocketNotFound(_) => WSAEBADF,
         HookError::ConnectError(_) => WSAEFAULT,
-        HookError::LayoutError(_) => WSAEFAULT,
         HookError::SendToError(_) => WSAEFAULT,
         HookError::HostnameResolveError(_) => WSAEFAULT,
     }
