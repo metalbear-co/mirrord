@@ -97,6 +97,13 @@ impl SplitQueuesConfig {
         })
     }
 
+    pub fn rmq(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ QueueMessageFilter)> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::Rmq { header_filter } => Some((name.as_str(), header_filter)),
+            _ => None,
+        })
+    }
+
     fn verify_message_attribute_filter(
         queue_id: &QueueId,
         filter: &QueueMessageFilter,
@@ -144,6 +151,9 @@ impl SplitQueuesConfig {
                 }
                 QueueFilter::Kafka { message_filter } => {
                     Self::verify_message_attribute_filter(queue_name, message_filter)?;
+                }
+                QueueFilter::Rmq { header_filter } => {
+                    Self::verify_message_attribute_filter(queue_name, header_filter)?;
                 }
                 QueueFilter::Unknown => {
                     return Err(QueueSplittingVerificationError::UnknownQueueType(
@@ -232,6 +242,12 @@ pub enum QueueFilter {
         message_filter: QueueMessageFilter,
     },
 
+    #[serde(rename = "RMQ")]
+    Rmq {
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        header_filter: QueueMessageFilter,
+    },
+
     // When a newer client sends a new filter kind to an older operator, that does not yet know
     // about that filter type, the filter will be deserialized to unknown.
     #[schemars(skip)]
@@ -247,6 +263,7 @@ impl CollectAnalytics for &SplitQueuesConfig {
         // The number of SQS queues filtered with jq filters.
         analytics.add("sqs_jq_filter_count", self.sqs_jq_filters().count());
         analytics.add("kafka_queue_count", self.kafka().count());
+        analytics.add("rmq_queue_count", self.rmq().count());
     }
 }
 

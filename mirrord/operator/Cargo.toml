@@ -49,6 +49,8 @@ crd = [
   "dep:mirrord-kube",
   "dep:semver",
   "dep:serde_json",
+  "dep:strum",
+  "dep:strum_macros",
   "dep:thiserror",
 ]
 
@@ -62,7 +64,6 @@ mirrord-progress = { path = "../progress", optional = true }
 mirrord-protocol = { path = "../protocol", optional = true }
 mirrord-protocol-io = { path = "../protocol-io", optional = true}
 
-
 base64 = { workspace = true, optional = true }
 bincode = { workspace = true, features = ["serde"], optional = true }
 chrono = { workspace = true, features = ["clock", "serde"] }
@@ -74,10 +75,10 @@ k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, features = ["derive", "ws"], optional = true }
 futures = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
-schemars = { workspace = true, features = ["chrono04"] }
+schemars = { workspace = true, features = ["chrono04", "url2"] }
 semver = { workspace = true, features = ["serde"], optional = true }
-strum_macros = { workspace = true }
-strum = { workspace = true }
+strum_macros = { workspace = true, optional = true }
+strum = { workspace = true, optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 serde_urlencoded = { version = "0.7", optional = true }
