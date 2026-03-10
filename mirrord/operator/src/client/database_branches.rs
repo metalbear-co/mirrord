@@ -298,6 +298,32 @@ pub async fn wait_for_pending_branches<P: Progress>(
     Ok(ready_branches)
 }
 
+/// Resolve a branch database ID from the user config and session key.
+///
+/// - No `id` in config: uses the session key as the branch ID (enables automatic reuse)
+/// - `id` contains `{key}`: substitutes `{key}` with the session key
+/// - `id` without `{key}`: uses the custom ID as-is, emits a warning
+fn resolve_branch_id<P: Progress>(
+    config_id: &Option<String>,
+    session_key: &str,
+    progress: &P,
+) -> BranchDatabaseId {
+    match config_id {
+        None => BranchDatabaseId::specified(session_key.to_string()),
+        Some(id) if id.contains("{key}") => {
+            let resolved = id.replace("{key}", session_key);
+            BranchDatabaseId::specified(resolved)
+        }
+        Some(id) => {
+            progress.warning(
+                "Custom branch ID provided, session key will not be used. \
+                 Remove the ID or use {{ key }} to include it.",
+            );
+            BranchDatabaseId::specified(id.clone())
+        }
+    }
+}
+
 pub struct DatabaseBranchParams {
     pub branches: HashMap<BranchDatabaseId, BranchParams>,
 }
@@ -305,14 +331,19 @@ pub struct DatabaseBranchParams {
 impl DatabaseBranchParams {
     /// Create branch database parameters from user config.
     ///
-    /// We generate unique database IDs unless the user explicitly specifies them.
+    /// When no branch `id` is provided, the session key is used as the branch ID so that
+    /// sessions sharing the same key automatically reuse the same branch. Custom IDs can
+    /// reference `{key}` for substitution.
+    ///
     /// If the target has no container set, resolves it from the cluster via
     /// [`RuntimeDataProvider`].
-    pub async fn new(
+    pub async fn new<P: Progress>(
         config: &DatabaseBranchesConfig,
         target: &Target,
         client: &Client,
         namespace: Option<&str>,
+        session_key: &str,
+        progress: &P,
     ) -> Result<Self, OperatorApiError> {
         let mut target_with_container = target.clone();
         if target_with_container.container().is_none() {
@@ -330,10 +361,11 @@ impl DatabaseBranchParams {
         for branch_db_config in config.0.iter() {
             match branch_db_config {
                 DatabaseBranchConfig::Mongodb(mongodb_config) => {
-                    let id = match mongodb_config.base.id.clone() {
-                        Some(id) => BranchDatabaseId::specified(id),
-                        None => BranchDatabaseId::generate_new(),
-                    };
+                    let id = resolve_branch_id(
+                        &mongodb_config.base.id,
+                        session_key,
+                        progress,
+                    );
                     let params = BranchParams::from_mongodb(
                         id.as_ref(),
                         mongodb_config,
@@ -343,10 +375,11 @@ impl DatabaseBranchParams {
                     branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Mysql(mysql_config) => {
-                    let id = match mysql_config.base.id.clone() {
-                        Some(id) => BranchDatabaseId::specified(id),
-                        None => BranchDatabaseId::generate_new(),
-                    };
+                    let id = resolve_branch_id(
+                        &mysql_config.base.id,
+                        session_key,
+                        progress,
+                    );
                     let params = BranchParams::from_mysql(
                         id.as_ref(),
                         mysql_config,
@@ -356,19 +389,21 @@ impl DatabaseBranchParams {
                     branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Pg(pg_config) => {
-                    let id = match pg_config.base.id.clone() {
-                        Some(id) => BranchDatabaseId::specified(id),
-                        None => BranchDatabaseId::generate_new(),
-                    };
+                    let id = resolve_branch_id(
+                        &pg_config.base.id,
+                        session_key,
+                        progress,
+                    );
                     let params =
                         BranchParams::from_pg(id.as_ref(), pg_config, target, &session_target);
                     branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Mssql(mssql_config) => {
-                    let id = match mssql_config.base.id.clone() {
-                        Some(id) => BranchDatabaseId::specified(id),
-                        None => BranchDatabaseId::generate_new(),
-                    };
+                    let id = resolve_branch_id(
+                        &mssql_config.base.id,
+                        session_key,
+                        progress,
+                    );
                     let params = BranchParams::from_mssql(
                         id.as_ref(),
                         mssql_config,

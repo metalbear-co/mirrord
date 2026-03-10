@@ -1628,6 +1628,8 @@ impl OperatorApi<PreparedClientCert> {
             &target,
             self.client(),
             Some(target_namespace),
+            layer_config.key.as_str(),
+            &subtask,
         )
         .await?;
 
