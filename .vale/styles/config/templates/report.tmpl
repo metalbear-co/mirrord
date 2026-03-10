@@ -1,0 +1,6 @@
+{{- range .Files }}
+{{- $path := .Path }}
+{{- range .Alerts }}
+{{ $path }}:{{ .Line }}:{{ index .Span 0 }}: {{ .Message }}
+{{- end }}
+{{- end }}
