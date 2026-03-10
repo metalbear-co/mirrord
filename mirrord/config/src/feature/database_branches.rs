@@ -64,16 +64,16 @@ pub enum IamAuthConfig {
     ///   AWS_SESSION_TOKEN.
     AwsRds {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        region: Option<TargetEnviromentVariableSource>,
+        region: Option<TargetEnvironmentVariableSource>,
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        access_key_id: Option<TargetEnviromentVariableSource>,
+        access_key_id: Option<TargetEnvironmentVariableSource>,
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        secret_access_key: Option<TargetEnviromentVariableSource>,
+        secret_access_key: Option<TargetEnvironmentVariableSource>,
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        session_token: Option<TargetEnviromentVariableSource>,
+        session_token: Option<TargetEnvironmentVariableSource>,
     },
     /// For GCP Cloud SQL IAM authentication, set `type` to `"gcp_cloud_sql"`.
     ///
@@ -100,13 +100,13 @@ pub enum IamAuthConfig {
     /// - `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
     GcpCloudSql {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        credentials_json: Option<TargetEnviromentVariableSource>,
+        credentials_json: Option<TargetEnvironmentVariableSource>,
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        credentials_path: Option<TargetEnviromentVariableSource>,
+        credentials_path: Option<TargetEnvironmentVariableSource>,
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        project: Option<TargetEnviromentVariableSource>,
+        project: Option<TargetEnvironmentVariableSource>,
     },
 }
 
