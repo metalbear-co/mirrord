@@ -43,7 +43,9 @@ use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
 use crate::{
-    client::database_branches::{DatabaseBranchParams, create_branches, list_reusable_branches},
+    client::database_branches::{
+        DatabaseBranchParams, create_branches, list_existing_branches, wait_for_pending_branches,
+    },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
         OPERATOR_STATUS_NAME, TargetCrd,
@@ -1637,10 +1639,13 @@ impl OperatorApi<PreparedClientCert> {
             }
         }
 
-        let reusable_branches =
-            list_reusable_branches(&branch_api, &create_params, &subtask).await?;
+        let existing =
+            list_existing_branches(&branch_api, &create_params, &subtask).await?;
 
-        create_params.retain(|id, _| !reusable_branches.contains_key(id));
+        // Don't create branches that already exist (ready or still being created)
+        create_params.retain(|id, _| {
+            !existing.ready.contains_key(id) && !existing.pending.contains_key(id)
+        });
 
         let timeout_secs = layer_config
             .feature
@@ -1665,13 +1670,19 @@ impl OperatorApi<PreparedClientCert> {
             .unwrap_or(default_creation_timeout_secs());
         let timeout = std::time::Duration::from_secs(timeout_secs);
 
+        // Wait for branches that another session is already creating
+        let waited_branches =
+            wait_for_pending_branches(&branch_api, &existing.pending, timeout, &subtask).await?;
+
         let created_branches =
             create_branches(&branch_api, create_params, timeout, &subtask).await?;
 
         subtask.success(None);
 
-        let branch_names = reusable_branches
+        let branch_names = existing
+            .ready
             .values()
+            .chain(waited_branches.values())
             .chain(created_branches.values())
             .map(|branch| {
                 branch
