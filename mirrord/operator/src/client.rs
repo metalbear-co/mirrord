@@ -1286,6 +1286,7 @@ impl OperatorApi<PreparedClientCert> {
             profile,
             // Kafka and SQS splits are passed in the request body.
             kafka_splits: Default::default(),
+            rmq_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
             branch_name,
@@ -1964,6 +1965,7 @@ mod test {
         concurrent_steal: ConcurrentSteal,
         profile: Option<&'static str>,
         kafka_splits: HashMap<&'static str, BTreeMap<String, String>>,
+        rmq_splits: HashMap<&'static str, BTreeMap<String, String>>,
         sqs_splits: HashMap<&'static str, BTreeMap<String, String>>,
         sqs_jq_filters: HashMap<&'static str, &'static str>,
         mysql_branch_names: Vec<String>,
@@ -1994,6 +1996,7 @@ mod test {
                 concurrent_steal: Default::default(),
                 profile: None,
                 kafka_splits: Default::default(),
+                rmq_splits: Default::default(),
                 sqs_splits: Default::default(),
                 sqs_jq_filters: Default::default(),
                 mysql_branch_names: Default::default(),
@@ -2030,7 +2033,7 @@ mod test {
         TargetConnectUrlTestCase{
             expected: "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_no_container_proxy(
         TargetConnectUrlTestCase{
@@ -2038,14 +2041,14 @@ mod test {
             key: Some("my-key"),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort&key=my-key",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_container_no_proxy(
         TargetConnectUrlTestCase{
             target: deployment_with_container(),
             expected: "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_container_proxy_key(
         TargetConnectUrlTestCase{
@@ -2054,7 +2057,7 @@ mod test {
             key: Some("auth-token-123"),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&key=auth-token-123",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_container_proxy_profile(
         TargetConnectUrlTestCase{
@@ -2063,7 +2066,7 @@ mod test {
             profile: Some("no-steal"),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=no-steal",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_container_proxy_profile_escape(
         TargetConnectUrlTestCase{
@@ -2073,7 +2076,7 @@ mod test {
             key: Some("key-value"),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=%2Fshould%3Fbe%26escaped&key=key-value",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_container_proxy_kafka_splits(
         TargetConnectUrlTestCase{
@@ -2089,7 +2092,24 @@ mod test {
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&kafka_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
             ..Default::default()
-            }
+        }
+    )]
+    #[case::deployment_container_proxy_rmq_splits(
+        TargetConnectUrlTestCase{
+            use_proxy: true,
+            target: deployment_with_container(),
+            rmq_splits: HashMap::from([(
+                "topic-id",
+                BTreeMap::from([
+                    ("header-1".to_string(), "filter-1".to_string()),
+                    ("header-2".to_string(), "filter-2".to_string()),
+                ]),
+            )]),
+            key: Some("sqs-key"),
+            expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
+            ?connect=true&on_concurrent_steal=abort&rmq_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D&key=sqs-key",
+            ..Default::default()
+        }
     )]
     #[case::deployment_container_proxy_sqs_splits(
         TargetConnectUrlTestCase{
@@ -2106,7 +2126,7 @@ mod test {
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort&sqs_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D&key=sqs-key",
             ..Default::default()
-            }
+        }
     )]
     #[case::sqs_splits_and_sqs_jq_filters(
         TargetConnectUrlTestCase{
@@ -2127,7 +2147,7 @@ mod test {
             header-2%22%3A%22filter-2%22%7D%7D&sqs_jq_filters=%7B%22some-topic-id%22%3A%22\
             .message_body+%7C+fromjson+%7C+.user_id+%7C+test%28%5C%22%5E%28cookie%7C%5C%5C%5C%5Cd%2B%29%24%5C%22%29%22%7D",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_container_proxy_mysql_branches(
         TargetConnectUrlTestCase{
@@ -2137,7 +2157,7 @@ mod test {
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort&mysql_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_container_proxy_pg_branches(
         TargetConnectUrlTestCase{
@@ -2148,7 +2168,7 @@ mod test {
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort&pg_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D&key=pg-access-key",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_container_proxy_mongodb_branches(
         TargetConnectUrlTestCase{
@@ -2158,7 +2178,7 @@ mod test {
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort&mongodb_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_no_container_no_proxy_with_session_ci_info(
         TargetConnectUrlTestCase{
@@ -2171,7 +2191,7 @@ mod test {
             key: Some("ci-key-123"),
             expected: "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort&session_ci_info=%7B%22provider%22%3A%22Krzysztof%22%2C%22environment%22%3A%22Kresy%22%2C%22pipeline%22%3A%22Wschodnie%22%2C%22triggeredBy%22%3A%22Kononowicz%22%7D&key=ci-key-123",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_with_key_none(
         TargetConnectUrlTestCase{
@@ -2179,7 +2199,7 @@ mod test {
             target: deployment_with_container(),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_with_key_special_chars(
         TargetConnectUrlTestCase{
@@ -2188,7 +2208,7 @@ mod test {
             key: Some("key/with?special&chars=value"),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&key=key%2Fwith%3Fspecial%26chars%3Dvalue",
             ..Default::default()
-            }
+        }
     )]
     #[test]
     fn target_connect_url(
@@ -2198,6 +2218,7 @@ mod test {
             concurrent_steal,
             profile,
             kafka_splits,
+            rmq_splits,
             sqs_splits,
             sqs_jq_filters,
             mysql_branch_names,
@@ -2213,6 +2234,11 @@ mod test {
             .map(|(topic_id, filters)| (*topic_id, filters))
             .collect();
 
+        let rmq_splits = rmq_splits
+            .iter()
+            .map(|(topic_id, filters)| (*topic_id, filters))
+            .collect();
+
         let sqs_splits = sqs_splits
             .iter()
             .map(|(topic_id, filters)| (*topic_id, filters))
@@ -2223,6 +2249,7 @@ mod test {
             on_concurrent_steal: Some(concurrent_steal),
             profile,
             kafka_splits,
+            rmq_splits,
             sqs_splits,
             sqs_jq_filters,
             branch_name: None,
@@ -2340,6 +2367,7 @@ mod test {
             on_concurrent_steal: Some(ConcurrentSteal::Abort),
             profile: None,
             kafka_splits: Default::default(),
+            rmq_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
             branch_name: None,
