@@ -5046,6 +5046,7 @@ dependencies = [
  "dll-syringe",
  "exec",
  "frida-gum",
+ "hickory-resolver",
  "http 1.4.0",
  "libc",
  "mirrord-config",
