@@ -71,7 +71,7 @@ impl TargetCrd {
     /// # Warning
     ///
     /// Do **not** change url paths here, even if the operator recognizes the other format.
-    /// It can break exisiting [`policy::MirrordPolicy`]s and [`policy::MirrordClusterPolicy`]
+    /// It can break existing [`policy::MirrordPolicy`]s and [`policy::MirrordClusterPolicy`]
     /// (see [`policy::MirrordPolicySpec::target_path`] and
     /// [`policy::MirrordClusterPolicySpec::target_path`]).
     pub fn urlfied_name(target: &Target) -> String {
@@ -878,7 +878,7 @@ pub struct MirrordClusterOperatorUserCredentialSpec {
     /// Certificate signing request created using the client's key pair.
     pub csr: String,
 
-    /// The intented usage of this credential.
+    /// The intended usage of this credential.
     pub kind: UserCredentialKind,
 }
 

@@ -219,7 +219,7 @@ pub struct FsPolicy {
     pub not_found: HashSet<String>,
 }
 
-/// Network operations policy that partialy mimics the mirrord network config.
+/// Network operations policy that partially mimics the mirrord network config.
 #[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkPolicy {
@@ -229,7 +229,7 @@ pub struct NetworkPolicy {
     pub outgoing: OutgoingNetworkPolicy,
 }
 
-/// Incoming network operations policy that partialy mimics the mirrord `network.incoming` config.
+/// Incoming network operations policy that partially mimics the mirrord `network.incoming` config.
 #[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct IncomingNetworkPolicy {
@@ -237,7 +237,7 @@ pub struct IncomingNetworkPolicy {
     pub http_filter: HttpFilterPolicy,
 }
 
-/// Outgoing network operations policy that partialy mimics the mirrord `network.outgoing` config.
+/// Outgoing network operations policy that partially mimics the mirrord `network.outgoing` config.
 #[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OutgoingNetworkPolicy {

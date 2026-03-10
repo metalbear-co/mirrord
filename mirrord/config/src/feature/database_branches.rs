@@ -289,7 +289,7 @@ pub struct DatabaseBranchBaseConfig {
 #[serde(untagged)]
 pub enum ConnectionSource {
     Url {
-        url: TargetEnviromentVariableSource,
+        url: TargetEnvironmentVariableSource,
     },
     FlatUrl {
         #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
@@ -405,7 +405,7 @@ pub struct ConnectionParamsVars {
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSourceKind")]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum TargetEnviromentVariableSource {
+pub enum TargetEnvironmentVariableSource {
     Env {
         container: Option<String>,
         variable: String,
@@ -463,7 +463,7 @@ mod tests {
         assert_eq!(
             source,
             ConnectionSource::Url {
-                url: TargetEnviromentVariableSource::Env {
+                url: TargetEnvironmentVariableSource::Env {
                     container: None,
                     variable: "DB_URL".to_string(),
                 }
@@ -478,7 +478,7 @@ mod tests {
         assert_eq!(
             source,
             ConnectionSource::Url {
-                url: TargetEnviromentVariableSource::EnvFrom {
+                url: TargetEnvironmentVariableSource::EnvFrom {
                     container: None,
                     variable: "DB_URL".to_string(),
                 }
@@ -493,7 +493,7 @@ mod tests {
         assert_eq!(
             source,
             ConnectionSource::Url {
-                url: TargetEnviromentVariableSource::Env {
+                url: TargetEnvironmentVariableSource::Env {
                     container: Some("my-app".to_string()),
                     variable: "DB_URL".to_string(),
                 }
@@ -652,7 +652,7 @@ mod tests {
     #[test]
     fn serialize_roundtrip_url() {
         let source = ConnectionSource::Url {
-            url: TargetEnviromentVariableSource::Env {
+            url: TargetEnvironmentVariableSource::Env {
                 container: None,
                 variable: "DB_URL".to_string(),
             },

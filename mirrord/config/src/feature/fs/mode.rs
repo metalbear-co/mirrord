@@ -15,13 +15,13 @@ use crate::{
 ///
 /// Configuration for enabling read-only or read-write file operations.
 ///
-/// These options are overriden by user specified overrides and mirrord default overrides.
+/// These options are overridden by user specified overrides and mirrord default overrides.
 ///
 /// If you set [`"localwithoverrides"`](#feature-fs-mode-localwithoverrides) then some files
 /// can be read/write remotely based on our default/user specified.
 /// Default option for general file configuration.
 ///
-/// The accepted values are: `"local"`, `"localwithoverrides`, `"read"`, or `"write`.
+/// The accepted values are: `"local"`, `"localwithoverrides"`, `"read"`, or `"write"`.
 #[derive(Serialize, Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum FsModeConfig {

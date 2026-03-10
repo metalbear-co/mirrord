@@ -119,7 +119,7 @@ impl TcpMirrorApi {
                                 return Ok(M::Http(http));
                             };
 
-                            if filter.matches(parts, body) {
+                            if filter.matches(parts, body).await {
                                 Ok(M::Http(http))
                             } else {
                                 continue
@@ -151,7 +151,7 @@ impl TcpMirrorApi {
                                 return Ok(M::Http(http));
                             };
 
-                            if filter.matches(parts, body) {
+                            if filter.matches(parts, body).await {
                                 return Ok(M::Http(http));
                             }
 

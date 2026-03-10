@@ -11,10 +11,15 @@ use std::{
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
+use derive_more::{Deref, Display};
 use http_body_util::BodyExt;
 use hyper::{
     HeaderMap, Method, Request, Response, StatusCode, Uri, Version,
     body::{Body, Frame},
+};
+use jaq_core::{
+    Compiler,
+    load::{Arena, File, Loader},
 };
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
@@ -181,7 +186,7 @@ pub struct ChunkedRequestErrorV2 {
 
 /// Wraps the string that will become a [`fancy_regex::Regex`], providing a nice API in
 /// `Filter::new` that validates the regex in mirrord-layer.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Deref, Display)]
 pub struct Filter(String);
 
 impl Filter {
@@ -204,23 +209,9 @@ impl Filter {
     }
 }
 
-impl Display for Filter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
-
-impl std::ops::Deref for Filter {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 /// Wraps the string that will become a [`serde_json_path::JsonPath`], providing a nice API in
 /// `JsonPathQuery::new` that validates the regex.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Deref)]
 pub struct JsonPathQuery(String);
 impl JsonPathQuery {
     pub fn new(query_str: String) -> Result<Self, serde_json_path::ParseError> {
@@ -238,14 +229,6 @@ impl JsonPathQuery {
     /// giving us false errors.
     pub fn new_unchecked(query_str: String) -> Self {
         Self(query_str)
-    }
-}
-
-impl std::ops::Deref for JsonPathQuery {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 
@@ -295,6 +278,56 @@ fn type_of(nodes: NodesType) -> ValueType {
     }
 
     first_type.into()
+}
+#[derive(Debug, Clone, Deref, PartialEq, Eq, Encode, Decode, Display)]
+pub struct JqQuery(String);
+
+impl JqQuery {
+    pub fn new(expr: &str) -> Result<Self, String> {
+        let inner = || {
+            let program = File {
+                code: expr,
+                path: (),
+            };
+            let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
+            let arena = Arena::default();
+
+            let modules = loader.load(&arena, program).map_err(|errors| {
+                errors
+                    .into_iter()
+                    .map(|e| format!("{e:?}"))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            })?;
+
+            Compiler::default()
+                .with_funs(jaq_std::funs().chain(jaq_json::funs()))
+                .compile(modules)
+                .map_err(|errors| {
+                    errors
+                        .into_iter()
+                        .map(|e| format!("{e:?}"))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                })?;
+
+            Ok(JqQuery(expr.to_owned()))
+        };
+
+        inner().inspect_err(|fail| {
+            tracing::error!(
+                r"
+                Something went wrong while compiling jaq query {expr:?}
+
+                >> Please check that the string supplied is a valid jaq expression according to
+                   https://gedenkt.at/jaq/manual/.
+
+                > Error:
+                {fail:#?}
+                "
+            )
+        })
+    }
 }
 
 /// HTTP filter for HTTP methods.
@@ -353,6 +386,9 @@ pub enum HttpFilter {
 
     /// Filter by body
     Body(HttpBodyFilter),
+
+    /// Filter by header using JQ
+    HeaderJq(JqQuery),
 }
 
 impl Display for HttpFilter {
@@ -390,6 +426,7 @@ impl Display for HttpFilter {
                 }
             },
             HttpFilter::Body(filter) => write!(f, "body={filter}"),
+            HttpFilter::HeaderJq(filter) => write!(f, "header_jq={filter}"),
         }
     }
 }
@@ -600,6 +637,11 @@ pub static MIRROR_HTTP_FILTER_VERSION: LazyLock<VersionReq> =
 /// ([`HttpFilter::Body`]) by JSON.
 pub static HTTP_BODY_JSON_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.23.0".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows HTTP header filtering with JQ
+/// ([`HttpFilter::Body`]) by JSON.
+pub static HTTP_HEADER_JQ_FILTER_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.26.0".parse().expect("Bad Identifier"));
 
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
 /// so we can avoid losing this information.

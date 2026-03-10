@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Formatter};
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use mirrord_config::feature::database_branches::{
-    ConnectionParamsConfig, ConnectionSourceType, ParamSource, TargetEnviromentVariableSource,
+    ConnectionParamsConfig, ConnectionSourceType, ParamSource, TargetEnvironmentVariableSource,
 };
 use schemars::{
     JsonSchema,
@@ -56,48 +56,48 @@ pub enum ConnectionSourceKind {
     Secret { name: String, key: String },
 }
 
-impl From<TargetEnviromentVariableSource> for ConnectionSourceKind {
-    fn from(src: TargetEnviromentVariableSource) -> Self {
+impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
+    fn from(src: TargetEnvironmentVariableSource) -> Self {
         match src {
-            TargetEnviromentVariableSource::Env {
+            TargetEnvironmentVariableSource::Env {
                 container,
                 variable,
             } => ConnectionSourceKind::Env {
                 container,
                 variable,
             },
-            TargetEnviromentVariableSource::EnvFrom {
+            TargetEnvironmentVariableSource::EnvFrom {
                 container,
                 variable,
             } => ConnectionSourceKind::EnvFrom {
                 container,
                 variable,
             },
-            TargetEnviromentVariableSource::Secret { name, key } => {
+            TargetEnvironmentVariableSource::Secret { name, key } => {
                 ConnectionSourceKind::Secret { name, key }
             }
         }
     }
 }
 
-impl From<&TargetEnviromentVariableSource> for ConnectionSourceKind {
-    fn from(src: &TargetEnviromentVariableSource) -> Self {
+impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
+    fn from(src: &TargetEnvironmentVariableSource) -> Self {
         match src {
-            TargetEnviromentVariableSource::Env {
+            TargetEnvironmentVariableSource::Env {
                 container,
                 variable,
             } => ConnectionSourceKind::Env {
                 container: container.clone(),
                 variable: variable.clone(),
             },
-            TargetEnviromentVariableSource::EnvFrom {
+            TargetEnvironmentVariableSource::EnvFrom {
                 container,
                 variable,
             } => ConnectionSourceKind::EnvFrom {
                 container: container.clone(),
                 variable: variable.clone(),
             },
-            TargetEnviromentVariableSource::Secret { name, key } => ConnectionSourceKind::Secret {
+            TargetEnvironmentVariableSource::Secret { name, key } => ConnectionSourceKind::Secret {
                 name: name.clone(),
                 key: key.clone(),
             },

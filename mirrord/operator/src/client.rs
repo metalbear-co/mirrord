@@ -658,7 +658,7 @@ where
             .await
             .map_err(|error| {
                 OperatorApiError::ClientCertError(format!(
-                    "failed to get client cerfificate: {error}"
+                    "failed to get client certificate: {error}"
                 ))
             })
     }
@@ -1069,7 +1069,7 @@ impl OperatorApi<PreparedClientCert> {
             }
             // The rollout does not exist.
             // It might be that rollouts are not even installed in the cluster.
-            // Depeneding on how hardened the cluster is, we might get one of these error codes.
+            // Depending on how hardened the cluster is, we might get one of these error codes.
             Err(kube::Error::Api(response)) if [404, 403, 401].contains(&response.code) => {}
             Err(error) => {
                 tracing::warn!(
