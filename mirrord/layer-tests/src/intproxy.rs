@@ -428,9 +428,12 @@ impl TestIntProxy {
         fd: u64,
         open_options: OpenOptionsInternal,
     ) {
+        // Consume xstat calls, if any.
+        let message = self.consume_xstats().await;
+
         // Verify the app tries to open the expected file.
         assert_eq!(
-            self.recv().await,
+            message,
             ClientMessage::FileRequest(FileRequest::Open(
                 mirrord_protocol::file::OpenFileRequest {
                     path: file_name.to_string().into(),
@@ -800,7 +803,10 @@ impl TestIntProxy {
             self.codec
                 .send(DaemonMessage::File(FileResponse::Xstat(Ok(
                     XstatResponse {
-                        metadata: Default::default(),
+                        metadata: MetadataInternal {
+                            mode: 0o100000,
+                            ..Default::default()
+                        },
                     },
                 ))))
                 .await
