@@ -1,6 +1,15 @@
 {{- range .Files }}
 {{- $path := .Path }}
 {{- range .Alerts }}
-{{ $path }}:{{ .Line }}:{{ index .Span 0 }}: {{ .Message }}
+
+{{- $error := "" -}}
+{{- if eq .Severity "error" -}}
+    {{- $error = .Severity | red -}}
+{{- else if eq .Severity "warning" -}}
+    {{- $error = .Severity | yellow -}}
+{{- else -}}
+    {{- $error = .Severity | blue -}}
+{{- end}}
+{{ $path }}:{{ .Line }}:{{ index .Span 0 }} :: {{ .Check }} :: {{  $error  }}: {{ .Message }}
 {{- end }}
 {{- end }}
