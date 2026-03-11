@@ -19,8 +19,13 @@ impl BoundTcpSocket {
         let (socket, ip) = match ip {
             IpAddr::V4(Ipv4Addr::UNSPECIFIED) => (TcpSocket::new_v4()?, Ipv4Addr::LOCALHOST.into()),
             IpAddr::V6(Ipv6Addr::UNSPECIFIED) => (TcpSocket::new_v6()?, Ipv6Addr::LOCALHOST.into()),
-            addr @ IpAddr::V4(..) => (TcpSocket::new_v4()?, addr),
-            addr @ IpAddr::V6(..) => (TcpSocket::new_v6()?, addr),
+            // Loopback addresses can be bound directly.
+            addr @ IpAddr::V4(_) if addr.is_loopback() => (TcpSocket::new_v4()?, addr),
+            addr @ IpAddr::V6(_) if addr.is_loopback() => (TcpSocket::new_v6()?, addr),
+            // Non-local addresses (e.g. pod IPs when intproxy runs in-process in the operator):
+            // bind to unspecified and let the OS pick the right interface.
+            IpAddr::V4(_) => (TcpSocket::new_v4()?, Ipv4Addr::UNSPECIFIED.into()),
+            IpAddr::V6(_) => (TcpSocket::new_v6()?, Ipv6Addr::UNSPECIFIED.into()),
         };
 
         socket.bind(SocketAddr::new(ip, 0))?;
