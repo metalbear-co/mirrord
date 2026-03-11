@@ -113,7 +113,7 @@ jobs:
           mv /tmp/vale/vale /usr/local/bin
 
       - name: check root markdown files
-        run: vale $(find . -name '*.md' -maxdepth 1 -not -name CLAUDE.md) --output=report.tmpl
+        run: vale $(find . -name '*.md' -maxdepth 1 -not -name CLAUDE.md -not -name CHANGELOG.md) --output=report.tmpl
 
       - name: check changelog.d files
         run: vale $(git ls-files 'changelog.d/*.md') --output=report.tmpl
