@@ -114,7 +114,7 @@ nix-env -iA nixpkgs.mirrord
 nix profile install nixpkgs#mirrord
 ```
 
-- Windows isn't currently supported (you can use WSL)
+- Windows is supported via the CLI
 
 ### How To Use
 
