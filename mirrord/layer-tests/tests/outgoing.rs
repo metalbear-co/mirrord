@@ -6,6 +6,8 @@ use std::{
     time::Duration,
 };
 
+#[cfg(unix)]
+use mirrord_protocol::outgoing::udp::{DaemonUdpOutgoing, LayerUdpOutgoing};
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
     outgoing::{
@@ -13,8 +15,6 @@ use mirrord_protocol::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
 };
-#[cfg(unix)]
-use mirrord_protocol::outgoing::udp::{DaemonUdpOutgoing, LayerUdpOutgoing};
 use rstest::rstest;
 
 mod common;
