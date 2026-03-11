@@ -5,10 +5,7 @@ use mirrord_config::feature::database_branches::{
     BranchItemCopyConfig, MongodbBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig,
     PgIamAuthConfig,
 };
-use schemars::{
-    JsonSchema,
-    schema::{InstanceType, ObjectValidation, Schema, SchemaObject, SubschemaValidation},
-};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::core::IamAuthConfig;
@@ -17,14 +14,13 @@ pub use super::core::{
 };
 use crate::crd::session::SessionTarget;
 
-#[derive(CustomResource, Clone, Debug, Deserialize, Serialize)]
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "dbs.mirrord.metalbear.co",
     version = "v1alpha1",
     kind = "BranchDatabase",
     status = "BranchDatabaseStatus",
-    namespaced,
-    schema = "manual"
+    namespaced
 )]
 #[serde(rename_all = "camelCase")]
 pub struct BranchDatabaseSpec {
@@ -42,20 +38,24 @@ pub struct BranchDatabaseSpec {
     /// Database server image version (e.g. "16" for PostgreSQL, "8.0" for MySQL).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
-    /// Dialect-specific configuration. The key name determines the database engine.
-    #[serde(flatten)]
-    pub dialect: DialectConfig,
+    /// PostgreSQL-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub postgres_options: Option<PostgresOptions>,
+    /// MySQL-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mysql_options: Option<MysqlOptions>,
+    /// MongoDB-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mongodb_options: Option<MongodbOptions>,
 }
 
-/// Externally-tagged enum where the key name (`postgresOptions`, `mysqlOptions`,
-/// `mongodbOptions`) doubles as the dialect discriminant.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Validated dialect configuration extracted from a [`BranchDatabaseSpec`].
+/// Exactly one of the three option fields must be set; this enum represents
+/// the result after that validation.
+#[derive(Clone, Debug)]
 pub enum DialectConfig {
-    #[serde(rename = "postgresOptions")]
     Postgres(Box<PostgresOptions>),
-    #[serde(rename = "mysqlOptions")]
     Mysql(Box<MysqlOptions>),
-    #[serde(rename = "mongodbOptions")]
     Mongodb(Box<MongodbOptions>),
 }
 
@@ -96,6 +96,18 @@ impl DialectConfig {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum DialectValidationError {
+    #[error(
+        "exactly one of postgresOptions, mysqlOptions, or mongodbOptions must be set, but none were"
+    )]
+    NoneSet,
+    #[error(
+        "exactly one of postgresOptions, mysqlOptions, or mongodbOptions must be set, but multiple were"
+    )]
+    MultipleSet,
+}
+
 /// PostgreSQL-specific branch options.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -123,117 +135,6 @@ pub struct MongodbOptions {
     pub copy: MongodbCopySpec,
 }
 
-impl JsonSchema for BranchDatabase {
-    fn schema_name() -> String {
-        "BranchDatabase".into()
-    }
-
-    fn json_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
-        crd_schema(schema_gen)
-    }
-}
-
-fn crd_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
-    let spec_schema = spec_schema(schema_gen);
-    let status_schema = schema_gen.subschema_for::<BranchDatabaseStatus>();
-
-    let mut properties = schemars::Map::new();
-    properties.insert("apiVersion".into(), string_schema());
-    properties.insert("kind".into(), string_schema());
-    properties.insert(
-        "metadata".into(),
-        schema_gen.subschema_for::<k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta>(),
-    );
-    properties.insert("spec".into(), spec_schema);
-    properties.insert("status".into(), status_schema);
-
-    SchemaObject {
-        instance_type: Some(InstanceType::Object.into()),
-        object: Some(Box::new(ObjectValidation {
-            properties,
-            required: ["apiVersion", "kind", "metadata", "spec"]
-                .iter()
-                .map(|s| (*s).into())
-                .collect(),
-            ..Default::default()
-        })),
-        ..Default::default()
-    }
-    .into()
-}
-
-fn spec_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
-    let pg_schema = schema_gen.subschema_for::<PostgresOptions>();
-    let mysql_schema = schema_gen.subschema_for::<MysqlOptions>();
-    let mongodb_schema = schema_gen.subschema_for::<MongodbOptions>();
-
-    let mut properties = schemars::Map::new();
-    properties.insert("id".into(), string_schema());
-    properties.insert(
-        "connectionSource".into(),
-        schema_gen.subschema_for::<ConnectionSource>(),
-    );
-    properties.insert("databaseName".into(), string_schema());
-    properties.insert("target".into(), schema_gen.subschema_for::<SessionTarget>());
-    properties.insert(
-        "ttlSecs".into(),
-        SchemaObject {
-            instance_type: Some(InstanceType::Integer.into()),
-            format: Some("uint64".into()),
-            ..Default::default()
-        }
-        .into(),
-    );
-    properties.insert("version".into(), string_schema());
-    properties.insert("postgresOptions".into(), pg_schema);
-    properties.insert("mysqlOptions".into(), mysql_schema);
-    properties.insert("mongodbOptions".into(), mongodb_schema);
-
-    let required: std::collections::BTreeSet<String> =
-        ["id", "connectionSource", "target", "ttlSecs"]
-            .iter()
-            .map(|s| (*s).into())
-            .collect();
-
-    fn required_key(key: &str) -> Schema {
-        SchemaObject {
-            object: Some(Box::new(ObjectValidation {
-                required: std::iter::once(key.to_owned()).collect(),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-
-    SchemaObject {
-        instance_type: Some(InstanceType::Object.into()),
-        object: Some(Box::new(ObjectValidation {
-            properties,
-            required,
-            ..Default::default()
-        })),
-        subschemas: Some(Box::new(SubschemaValidation {
-            one_of: Some(vec![
-                required_key("postgresOptions"),
-                required_key("mysqlOptions"),
-                required_key("mongodbOptions"),
-            ]),
-            ..Default::default()
-        })),
-        ..Default::default()
-    }
-    .into()
-}
-
-fn string_schema() -> Schema {
-    SchemaObject {
-        instance_type: Some(InstanceType::String.into()),
-        ..Default::default()
-    }
-    .into()
-}
-
 /// Read-only view of the common fields shared by all dialects.
 pub struct CommonFieldsRef<'a> {
     pub id: &'a str,
@@ -245,6 +146,22 @@ pub struct CommonFieldsRef<'a> {
 }
 
 impl BranchDatabaseSpec {
+    /// Validate and extract the dialect config from the spec.
+    /// Exactly one of `postgres_options`, `mysql_options`, `mongodb_options` must be set.
+    pub fn dialect(&self) -> Result<DialectConfig, DialectValidationError> {
+        match (
+            &self.postgres_options,
+            &self.mysql_options,
+            &self.mongodb_options,
+        ) {
+            (Some(pg), None, None) => Ok(DialectConfig::Postgres(Box::new(pg.clone()))),
+            (None, Some(my), None) => Ok(DialectConfig::Mysql(Box::new(my.clone()))),
+            (None, None, Some(mo)) => Ok(DialectConfig::Mongodb(Box::new(mo.clone()))),
+            (None, None, None) => Err(DialectValidationError::NoneSet),
+            _ => Err(DialectValidationError::MultipleSet),
+        }
+    }
+
     pub fn common(&self) -> CommonFieldsRef<'_> {
         CommonFieldsRef {
             id: &self.id,

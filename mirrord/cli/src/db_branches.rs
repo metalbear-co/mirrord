@@ -35,7 +35,10 @@ impl From<BranchDatabase> for BranchInfo {
     ) -> Self {
         Self {
             name: metadata.name.unwrap_or_default(),
-            db_type: spec.dialect.to_string(),
+            db_type: spec
+                .dialect()
+                .map(|d| d.to_string())
+                .unwrap_or_else(|_| "Unknown".to_string()),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
             database: spec.database_name,

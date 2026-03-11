@@ -25,8 +25,8 @@ use crate::{
     crd::{
         db_branching::{
             branch_database::{
-                BranchDatabase, BranchDatabaseSpec, DialectConfig, MongodbOptions, MysqlOptions,
-                PostgresOptions, SqlBranchCopyConfig,
+                BranchDatabase, BranchDatabaseSpec, MongodbOptions, MysqlOptions, PostgresOptions,
+                SqlBranchCopyConfig,
             },
             core::{
                 BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -357,10 +357,12 @@ impl BranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.ttl_secs,
             version: config.base.version.clone(),
-            dialect: DialectConfig::Postgres(Box::new(PostgresOptions {
+            postgres_options: Some(PostgresOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
                 iam_auth,
-            })),
+            }),
+            mysql_options: None,
+            mongodb_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -387,9 +389,11 @@ impl BranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.ttl_secs,
             version: config.base.version.clone(),
-            dialect: DialectConfig::Mysql(Box::new(MysqlOptions {
+            postgres_options: None,
+            mysql_options: Some(MysqlOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
-            })),
+            }),
+            mongodb_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -416,9 +420,11 @@ impl BranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.ttl_secs,
             version: config.base.version.clone(),
-            dialect: DialectConfig::Mongodb(Box::new(MongodbOptions {
+            postgres_options: None,
+            mysql_options: None,
+            mongodb_options: Some(MongodbOptions {
                 copy: config.copy.clone().into(),
-            })),
+            }),
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
