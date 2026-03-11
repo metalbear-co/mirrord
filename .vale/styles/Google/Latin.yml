@@ -2,7 +2,7 @@ extends: substitution
 message: "Use '%s' instead of '%s'."
 link: 'https://developers.google.com/style/abbreviations'
 ignorecase: true
-level: error
+level: suggestion
 nonword: true
 action:
   name: replace
