@@ -1641,13 +1641,11 @@ impl OperatorApi<PreparedClientCert> {
             }
         }
 
-        let existing =
-            list_existing_branches(&branch_api, &create_params, &subtask).await?;
+        let existing = list_existing_branches(&branch_api, &create_params, &subtask).await?;
 
         // Don't create branches that already exist (ready or still being created)
-        create_params.retain(|id, _| {
-            !existing.ready.contains_key(id) && !existing.pending.contains_key(id)
-        });
+        create_params
+            .retain(|id, _| !existing.ready.contains_key(id) && !existing.pending.contains_key(id));
 
         let timeout_secs = layer_config
             .feature

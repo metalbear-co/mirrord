@@ -239,12 +239,7 @@ pub async fn wait_for_pending_branches<P: Progress>(
 
     let branch_names: Vec<(BranchDatabaseId, String)> = pending
         .iter()
-        .filter_map(|(id, db)| {
-            db.meta()
-                .name
-                .clone()
-                .map(|name| (id.clone(), name))
-        })
+        .filter_map(|(id, db)| db.meta().name.clone().map(|name| (id.clone(), name)))
         .collect();
 
     let wait_futures = branch_names
@@ -361,11 +356,7 @@ impl DatabaseBranchParams {
         for branch_db_config in config.0.iter() {
             match branch_db_config {
                 DatabaseBranchConfig::Mongodb(mongodb_config) => {
-                    let id = resolve_branch_id(
-                        &mongodb_config.base.id,
-                        session_key,
-                        progress,
-                    );
+                    let id = resolve_branch_id(&mongodb_config.base.id, session_key, progress);
                     let params = BranchParams::from_mongodb(
                         id.as_ref(),
                         mongodb_config,
@@ -375,11 +366,7 @@ impl DatabaseBranchParams {
                     branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Mysql(mysql_config) => {
-                    let id = resolve_branch_id(
-                        &mysql_config.base.id,
-                        session_key,
-                        progress,
-                    );
+                    let id = resolve_branch_id(&mysql_config.base.id, session_key, progress);
                     let params = BranchParams::from_mysql(
                         id.as_ref(),
                         mysql_config,
@@ -389,21 +376,13 @@ impl DatabaseBranchParams {
                     branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Pg(pg_config) => {
-                    let id = resolve_branch_id(
-                        &pg_config.base.id,
-                        session_key,
-                        progress,
-                    );
+                    let id = resolve_branch_id(&pg_config.base.id, session_key, progress);
                     let params =
                         BranchParams::from_pg(id.as_ref(), pg_config, target, &session_target);
                     branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Mssql(mssql_config) => {
-                    let id = resolve_branch_id(
-                        &mssql_config.base.id,
-                        session_key,
-                        progress,
-                    );
+                    let id = resolve_branch_id(&mssql_config.base.id, session_key, progress);
                     let params = BranchParams::from_mssql(
                         id.as_ref(),
                         mssql_config,
@@ -623,3 +602,94 @@ pub mod labels {
 }
 
 pub use crate::crd::TARGET_NAMESPACE_ANNOTATION;
+
+#[cfg(test)]
+mod test {
+    use mirrord_progress::NullProgress;
+
+    use super::{BranchDatabaseId, resolve_branch_id};
+
+    #[test]
+    fn no_id_uses_session_key() {
+        let id = resolve_branch_id(&None, "my-session-key", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("my-session-key".to_string())
+        );
+    }
+
+    #[test]
+    fn id_with_key_placeholder_substitutes_session_key() {
+        let config_id = Some("branch-{key}-db".to_string());
+        let id = resolve_branch_id(&config_id, "abc123", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("branch-abc123-db".to_string())
+        );
+    }
+
+    #[test]
+    fn id_with_only_key_placeholder() {
+        let config_id = Some("{key}".to_string());
+        let id = resolve_branch_id(&config_id, "full-key", &NullProgress);
+        assert_eq!(id, BranchDatabaseId::Specified("full-key".to_string()));
+    }
+
+    #[test]
+    fn id_with_multiple_key_placeholders() {
+        let config_id = Some("{key}-{key}".to_string());
+        let id = resolve_branch_id(&config_id, "x", &NullProgress);
+        assert_eq!(id, BranchDatabaseId::Specified("x-x".to_string()));
+    }
+
+    #[test]
+    fn custom_id_without_key_used_as_is() {
+        let config_id = Some("fixed-branch-id".to_string());
+        let id = resolve_branch_id(&config_id, "ignored-key", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("fixed-branch-id".to_string())
+        );
+    }
+
+    #[test]
+    fn empty_session_key_with_no_id() {
+        let id = resolve_branch_id(&None, "", &NullProgress);
+        assert_eq!(id, BranchDatabaseId::Specified(String::new()));
+    }
+
+    #[test]
+    fn empty_session_key_substituted_into_placeholder() {
+        let config_id = Some("prefix-{key}-suffix".to_string());
+        let id = resolve_branch_id(&config_id, "", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("prefix--suffix".to_string())
+        );
+    }
+
+    #[test]
+    fn session_key_with_special_characters() {
+        let id = resolve_branch_id(&None, "key/with:special@chars", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("key/with:special@chars".to_string())
+        );
+    }
+
+    #[test]
+    fn resolved_id_is_always_specified_variant() {
+        let cases: Vec<(Option<String>, &str)> = vec![
+            (None, "session-key"),
+            (Some("{key}-branch".to_string()), "session-key"),
+            (Some("static-id".to_string()), "session-key"),
+        ];
+        for (config_id, key) in cases {
+            let id = resolve_branch_id(&config_id, key, &NullProgress);
+            assert!(
+                matches!(id, BranchDatabaseId::Specified(_)),
+                "expected Specified variant for config_id={config_id:?}, key={key}"
+            );
+        }
+    }
+}
