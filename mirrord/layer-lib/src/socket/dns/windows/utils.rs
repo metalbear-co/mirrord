@@ -92,20 +92,24 @@ impl From<IpAddrBytes> for AddrStorage {
     fn from(value: IpAddrBytes) -> Self {
         match value {
             IpAddrBytes::V4(bytes) => {
-                let mut addr = SOCKADDR_IN::default();
+                let mut addr = SOCKADDR_IN {
+                    sin_family: AF_INET as u16,
+                    sin_port: 0,
+                    sin_zero: [0; 8],
+                    ..Default::default()
+                };
                 let ipv4 = std::net::Ipv4Addr::from(bytes);
-                addr.sin_family = AF_INET as u16;
-                addr.sin_port = 0;
                 unsafe {
                     *addr.sin_addr.S_un.S_addr_mut() = u32::from(ipv4).to_be();
                 }
-                addr.sin_zero = [0; 8];
                 Self::V4(Box::new(addr))
             }
             IpAddrBytes::V6(bytes) => {
-                let mut addr = SOCKADDR_IN6::default();
-                addr.sin6_family = AF_INET6 as u16;
-                addr.sin6_port = 0;
+                let mut addr = SOCKADDR_IN6 {
+                    sin6_family: AF_INET6 as u16,
+                    sin6_port: 0,
+                    ..Default::default()
+                };
                 unsafe {
                     *addr.sin6_addr.u.Byte_mut() = bytes;
                 }
