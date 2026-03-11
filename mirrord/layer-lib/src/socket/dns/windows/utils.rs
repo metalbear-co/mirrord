@@ -27,54 +27,25 @@ pub enum IpAddrBytes {
 impl IpAddrBytes {
     pub fn family(&self) -> i32 {
         match self {
-            IpAddrBytes::V4(_) => AF_INET,
-            IpAddrBytes::V6(_) => AF_INET6,
+            Self::V4(_) => AF_INET,
+            Self::V6(_) => AF_INET6,
         }
     }
 
     pub fn addr_len(&self) -> usize {
-        match self {
-            IpAddrBytes::V4(_) => IPV4_ADDR_LEN,
-            IpAddrBytes::V6(_) => IPV6_ADDR_LEN,
-        }
+        self.as_ref().len()
     }
 
     pub fn as_ptr(&self) -> *const u8 {
-        match self {
-            // Note: the following branches cannot be unified because of the difference in bytes
-            // size
-            IpAddrBytes::V4(bytes) => bytes.as_ptr(),
-            IpAddrBytes::V6(bytes) => bytes.as_ptr(),
-        }
+        self.as_ref().as_ptr()
     }
+}
 
-    pub fn to_sockaddr_box(&self) -> AddrStorage {
+impl AsRef<[u8]> for IpAddrBytes {
+    fn as_ref(&self) -> &[u8] {
         match self {
-            IpAddrBytes::V4(bytes) => {
-                let mut addr: SOCKADDR_IN = unsafe { mem::zeroed() };
-                let ipv4 = std::net::Ipv4Addr::from(*bytes);
-                addr.sin_family = AF_INET as u16;
-                addr.sin_port = 0;
-                unsafe {
-                    *addr.sin_addr.S_un.S_addr_mut() = u32::from(ipv4).to_be();
-                    ptr::write_bytes(
-                        addr.sin_zero.as_mut_ptr(),
-                        0,
-                        mem::size_of_val(&addr.sin_zero),
-                    );
-                }
-                AddrStorage::V4(Box::new(addr))
-            }
-            IpAddrBytes::V6(bytes) => {
-                let mut addr: SOCKADDR_IN6 = unsafe { mem::zeroed() };
-                addr.sin6_family = AF_INET6 as u16;
-                addr.sin6_port = 0;
-                addr.sin6_flowinfo = 0;
-                unsafe {
-                    *addr.sin6_addr.u.Byte_mut() = *bytes;
-                }
-                AddrStorage::V6(Box::new(addr))
-            }
+            Self::V4(bytes) => bytes,
+            Self::V6(bytes) => bytes,
         }
     }
 }
@@ -82,8 +53,8 @@ impl IpAddrBytes {
 impl From<IpAddr> for IpAddrBytes {
     fn from(value: IpAddr) -> Self {
         match value {
-            IpAddr::V4(ipv4) => IpAddrBytes::V4(ipv4.octets()),
-            IpAddr::V6(ipv6) => IpAddrBytes::V6(ipv6.octets()),
+            IpAddr::V4(ipv4) => Self::V4(ipv4.octets()),
+            IpAddr::V6(ipv6) => Self::V6(ipv6.octets()),
         }
     }
 }
@@ -97,22 +68,49 @@ pub enum AddrStorage {
 impl AddrStorage {
     pub fn family(&self) -> i32 {
         match self {
-            AddrStorage::V4(_) => AF_INET,
-            AddrStorage::V6(_) => AF_INET6,
+            Self::V4(_) => AF_INET,
+            Self::V6(_) => AF_INET6,
         }
     }
 
     pub fn addrlen(&self) -> usize {
         match self {
-            AddrStorage::V4(_) => mem::size_of::<SOCKADDR_IN>(),
-            AddrStorage::V6(_) => mem::size_of::<SOCKADDR_IN6>(),
+            Self::V4(addr) => mem::size_of_val(addr.as_ref()),
+            Self::V6(addr) => mem::size_of_val(addr.as_ref()),
         }
     }
 
     pub fn as_ptr(&mut self) -> *mut SOCKADDR {
         match self {
-            AddrStorage::V4(addr) => addr.as_mut() as *mut SOCKADDR_IN as *mut SOCKADDR,
-            AddrStorage::V6(addr) => addr.as_mut() as *mut SOCKADDR_IN6 as *mut SOCKADDR,
+            Self::V4(addr) => ptr::from_mut(addr.as_mut()).cast(),
+            Self::V6(addr) => ptr::from_mut(addr.as_mut()).cast(),
+        }
+    }
+}
+
+impl From<IpAddrBytes> for AddrStorage {
+    fn from(value: IpAddrBytes) -> Self {
+        match value {
+            IpAddrBytes::V4(bytes) => {
+                let mut addr = SOCKADDR_IN::default();
+                let ipv4 = std::net::Ipv4Addr::from(bytes);
+                addr.sin_family = AF_INET as u16;
+                addr.sin_port = 0;
+                unsafe {
+                    *addr.sin_addr.S_un.S_addr_mut() = u32::from(ipv4).to_be();
+                }
+                addr.sin_zero = [0; 8];
+                Self::V4(Box::new(addr))
+            }
+            IpAddrBytes::V6(bytes) => {
+                let mut addr = SOCKADDR_IN6::default();
+                addr.sin6_family = AF_INET6 as u16;
+                addr.sin6_port = 0;
+                unsafe {
+                    *addr.sin6_addr.u.Byte_mut() = bytes;
+                }
+                Self::V6(Box::new(addr))
+            }
         }
     }
 }
@@ -281,8 +279,8 @@ impl Eq for ManagedAddrInfoAny {}
 impl std::fmt::Debug for ManagedAddrInfoAny {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ManagedAddrInfoAny::A(info) => write!(f, "A({:p})", info.as_ptr()),
-            ManagedAddrInfoAny::W(info) => write!(f, "W({:p})", info.as_ptr()),
+            Self::A(info) => write!(f, "A({:p})", info.as_ptr()),
+            Self::W(info) => write!(f, "W({:p})", info.as_ptr()),
         }
     }
 }
@@ -325,7 +323,7 @@ impl<T: WindowsAddrInfo> TryFrom<Vec<(String, IpAddr)>> for ManagedAddrInfo<T> {
 
         for (name, ip) in records.into_iter() {
             let ip_bytes = IpAddrBytes::from(ip);
-            let mut sockaddr_storage = ip_bytes.to_sockaddr_box();
+            let mut sockaddr_storage = AddrStorage::from(ip_bytes);
 
             let sockaddr_ptr = sockaddr_storage.as_ptr();
             let sockaddr_len = sockaddr_storage.addrlen() as INT;
@@ -344,7 +342,7 @@ impl<T: WindowsAddrInfo> TryFrom<Vec<(String, IpAddr)>> for ManagedAddrInfo<T> {
 
             // SAFETY: T is a C struct; we immediately initialize the fields we rely on via
             // `init_defaults` and `fill`.
-            let mut node: Box<T> = Box::new(unsafe { mem::MaybeUninit::zeroed().assume_init() });
+            let mut node: Box<T> = unsafe { Box::new_zeroed().assume_init() };
             T::init_defaults(&mut node);
 
             // Fill in the ADDRINFO structure
