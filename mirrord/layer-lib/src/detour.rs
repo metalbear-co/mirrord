@@ -15,8 +15,6 @@ use std::{net::SocketAddr, sync::OnceLock};
 #[cfg(target_os = "macos")]
 use libc::c_char;
 
-#[cfg(windows)]
-use crate::error::HookResult;
 use crate::{error::HookError, socket::sockets::SocketDescriptor};
 
 #[cfg(unix)]
@@ -309,25 +307,13 @@ where
     E: Into<HookError>,
 {
     fn from_residual(Err(e): Result<convert::Infallible, E>) -> Self {
-        match e.into() {
-            HookError::Bypass(bypass) => Detour::Bypass(bypass),
-            error => Detour::Error(error),
-        }
+        Detour::Error(e.into())
     }
 }
 
-impl<S, E> From<Result<S, E>> for Detour<S>
-where
-    E: Into<HookError>,
-{
-    fn from(res: Result<S, E>) -> Self {
-        match res {
-            Ok(s) => Detour::Success(s),
-            Err(e) => match e.into() {
-                HookError::Bypass(b) => Detour::Bypass(b),
-                err => Detour::Error(err),
-            },
-        }
+impl<S> FromResidual<Result<convert::Infallible, Bypass>> for Detour<S> {
+    fn from_residual(Err(e): Result<convert::Infallible, Bypass>) -> Self {
+        Detour::Bypass(e)
     }
 }
 
@@ -431,7 +417,6 @@ where
 }
 
 /// Extends `Option<T>` with the `Option::bypass` function.
-#[cfg(unix)]
 pub trait OptionExt {
     /// Inner `T` of the `Option<T>`.
     type Opt;
@@ -441,18 +426,6 @@ pub trait OptionExt {
     /// - `Some` => `Detour::Success`;
     /// - `None` => `Detour::Bypass`.
     fn bypass(self, value: Bypass) -> Detour<Self::Opt>;
-}
-
-#[cfg(windows)]
-pub trait OptionExt {
-    /// Inner `T` of the `Option<T>`.
-    type Opt;
-
-    /// Converts `Option<T>` into `Detour<T>`, mapping:
-    ///
-    /// - `Some` => `Detour::Success`;
-    /// - `None` => `Detour::Bypass`.
-    fn bypass(self, value: Bypass) -> HookResult<Self::Opt>;
 }
 
 /// Extends `Option<T>` with `Detour<T>` conversion methods.
@@ -478,7 +451,6 @@ pub trait OptionDetourExt<T>: OptionExt {
     fn transpose(self) -> Detour<Option<T>>;
 }
 
-#[cfg(unix)]
 impl<T> OptionExt for Option<T> {
     type Opt = T;
 
@@ -486,18 +458,6 @@ impl<T> OptionExt for Option<T> {
         match self {
             Some(v) => Detour::Success(v),
             None => Detour::Bypass(value),
-        }
-    }
-}
-
-#[cfg(windows)]
-impl<T> OptionExt for Option<T> {
-    type Opt = T;
-
-    fn bypass(self, value: Bypass) -> HookResult<T> {
-        match self {
-            Some(v) => Ok(v),
-            None => Err(HookError::Bypass(value)),
         }
     }
 }

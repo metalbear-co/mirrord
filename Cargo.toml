@@ -263,6 +263,7 @@ winapi = { version = "0.3.9", features = [
     "timezoneapi",
     "securitybaseapi",
     "namedpipeapi",
+    "impl-default",
 ] }
 
 # Used by `analytics`, `cli`

@@ -1,6 +1,7 @@
 //! Common layer functionality shared between Unix layer and Windows layer-win.
 #![feature(try_trait_v2)]
 #![feature(try_trait_v2_residual)]
+#![feature(return_type_notation)]
 
 extern crate alloc;
 
