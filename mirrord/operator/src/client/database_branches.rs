@@ -735,7 +735,6 @@ pub mod labels {
 }
 
 pub use crate::crd::TARGET_NAMESPACE_ANNOTATION;
-
 use crate::crd::session::SessionTarget;
 
 /// Create unified branch databases and wait for their readiness.
