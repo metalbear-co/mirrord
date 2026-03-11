@@ -6,10 +6,7 @@ use mirrord_config::feature::network::{
 };
 use tracing::Level;
 
-use crate::{
-    detour::Bypass,
-    error::{HookError, HookResult},
-};
+use crate::detour::{Bypass, Detour};
 
 /// Generated from [`DnsConfig`] provided in the [`LayerConfig`](mirrord_config::LayerConfig).
 /// Decides whether DNS queries are done locally or remotely.
@@ -24,7 +21,7 @@ pub struct DnsSelector {
 impl DnsSelector {
     /// Bypasses queries that should be done locally.
     #[tracing::instrument(level = Level::DEBUG, ret)]
-    pub fn check_query(&self, node: &str, port: u16) -> HookResult<()> {
+    pub fn check_query(&self, node: &str, port: u16) -> Detour<()> {
         let matched = self
             .filters
             .iter()
@@ -49,9 +46,9 @@ impl DnsSelector {
             });
 
         if matched == self.filter_is_local {
-            Err(HookError::Bypass(Bypass::LocalDns))
+            Detour::Bypass(Bypass::LocalDns)
         } else {
-            Ok(())
+            Detour::Success(())
         }
     }
 }

@@ -31,7 +31,7 @@ use socket2::SockAddr;
 // Re-export sockets module items
 pub use sockets::{
     SHARED_SOCKETS_ENV_VAR, SOCKETS, SocketDescriptor, get_bound_address, get_connected_addresses,
-    get_socket_state, is_socket_in_state, is_socket_managed, register_socket,
+    get_socket_state, is_socket_in_state, is_socket_managed,
 };
 #[cfg(windows)]
 pub use winapi::{
@@ -46,7 +46,7 @@ pub use winapi::{
 };
 
 #[cfg(unix)]
-use crate::detour::DetourGuard;
+use crate::detour::{Detour, DetourGuard, OptionExt};
 #[cfg(windows)]
 use crate::error::windows::{WindowsError, WindowsResult};
 pub use crate::{
@@ -239,17 +239,14 @@ impl UserSocket {
 #[cfg(unix)]
 pub trait SocketAddrExt {
     /// Converts a raw [`sockaddr`] pointer into a more _Rusty_ type
-    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> HookResult<Self>
+    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<Self>
     where
         Self: Sized;
 }
 
 #[cfg(unix)]
 impl SocketAddrExt for SockAddr {
-    fn try_from_raw(
-        raw_address: *const sockaddr,
-        address_length: socklen_t,
-    ) -> HookResult<SockAddr> {
+    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SockAddr> {
         unsafe {
             SockAddr::try_init(|storage, len| {
                 // storage and raw_address size is dynamic.
@@ -259,22 +256,17 @@ impl SocketAddrExt for SockAddr {
                 Ok(())
             })
         }
-        .map_err(|_| HookError::Bypass(Bypass::AddressConversion))
+        .ok()
         .map(|((), address)| address)
+        .bypass(Bypass::AddressConversion)
     }
 }
 
 #[cfg(unix)]
 impl SocketAddrExt for SocketAddr {
-    fn try_from_raw(
-        raw_address: *const sockaddr,
-        address_length: socklen_t,
-    ) -> HookResult<SocketAddr> {
-        SockAddr::try_from_raw(raw_address, address_length).and_then(|address| {
-            address
-                .as_socket()
-                .ok_or(HookError::Bypass(Bypass::AddressConversion))
-        })
+    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SocketAddr> {
+        SockAddr::try_from_raw(raw_address, address_length)
+            .and_then(|address| address.as_socket().bypass(Bypass::AddressConversion))
     }
 }
 
