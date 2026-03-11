@@ -5087,6 +5087,7 @@ version = "3.193.0"
 dependencies = [
  "actix-codec",
  "futures",
+ "libc",
  "mirrord-config",
  "mirrord-intproxy",
  "mirrord-intproxy-protocol",
@@ -5097,6 +5098,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tracing",
  "tracing-subscriber",
 ]
 

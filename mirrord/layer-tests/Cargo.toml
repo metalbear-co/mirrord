@@ -37,6 +37,7 @@ default = ["build-cli"]
 build-cli = ["mirrord-test-utils/build-cli"]
 
 [dev-dependencies]
+libc.workspace = true
 mirrord-intproxy = { path = "../intproxy" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
 actix-codec.workspace = true
@@ -46,4 +47,5 @@ rstest.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "fs"] }
 tempfile.workspace = true
 rand.workspace = true
+tracing.workspace = true
 tracing-subscriber.workspace = true

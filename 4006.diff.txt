@@ -1,0 +1,2239 @@
+diff --git a/changelog.d/+win_detour_align.internal.md b/changelog.d/+win_detour_align.internal.md
+new file mode 100644
+index 00000000000..ae849a06e55
+--- /dev/null
++++ b/changelog.d/+win_detour_align.internal.md
+@@ -0,0 +1 @@
++Align usages of `Detour` for windows usages by getting rid of `HookError::Bypass`
+\ No newline at end of file
+diff --git a/mirrord/layer-lib/src/detour.rs b/mirrord/layer-lib/src/detour.rs
+index ebf64b99212..692f0bd6d93 100644
+--- a/mirrord/layer-lib/src/detour.rs
++++ b/mirrord/layer-lib/src/detour.rs
+@@ -15,8 +15,6 @@ use std::{net::SocketAddr, sync::OnceLock};
+ #[cfg(target_os = "macos")]
+ use libc::c_char;
+ 
+-#[cfg(windows)]
+-use crate::error::HookResult;
+ use crate::{error::HookError, socket::sockets::SocketDescriptor};
+ 
+ #[cfg(unix)]
+@@ -309,25 +307,13 @@ where
+     E: Into<HookError>,
+ {
+     fn from_residual(Err(e): Result<convert::Infallible, E>) -> Self {
+-        match e.into() {
+-            HookError::Bypass(bypass) => Detour::Bypass(bypass),
+-            error => Detour::Error(error),
+-        }
++        Detour::Error(e.into())
+     }
+ }
+ 
+-impl<S, E> From<Result<S, E>> for Detour<S>
+-where
+-    E: Into<HookError>,
+-{
+-    fn from(res: Result<S, E>) -> Self {
+-        match res {
+-            Ok(s) => Detour::Success(s),
+-            Err(e) => match e.into() {
+-                HookError::Bypass(b) => Detour::Bypass(b),
+-                err => Detour::Error(err),
+-            },
+-        }
++impl<S> FromResidual<Result<convert::Infallible, Bypass>> for Detour<S> {
++    fn from_residual(Err(e): Result<convert::Infallible, Bypass>) -> Self {
++        Detour::Bypass(e)
+     }
+ }
+ 
+@@ -431,7 +417,6 @@ where
+ }
+ 
+ /// Extends `Option<T>` with the `Option::bypass` function.
+-#[cfg(unix)]
+ pub trait OptionExt {
+     /// Inner `T` of the `Option<T>`.
+     type Opt;
+@@ -443,18 +428,6 @@ pub trait OptionExt {
+     fn bypass(self, value: Bypass) -> Detour<Self::Opt>;
+ }
+ 
+-#[cfg(windows)]
+-pub trait OptionExt {
+-    /// Inner `T` of the `Option<T>`.
+-    type Opt;
+-
+-    /// Converts `Option<T>` into `Detour<T>`, mapping:
+-    ///
+-    /// - `Some` => `Detour::Success`;
+-    /// - `None` => `Detour::Bypass`.
+-    fn bypass(self, value: Bypass) -> HookResult<Self::Opt>;
+-}
+-
+ /// Extends `Option<T>` with `Detour<T>` conversion methods.
+ #[cfg(target_os = "linux")]
+ pub trait OptionDetourExt<T>: OptionExt {
+@@ -478,7 +451,6 @@ pub trait OptionDetourExt<T>: OptionExt {
+     fn transpose(self) -> Detour<Option<T>>;
+ }
+ 
+-#[cfg(unix)]
+ impl<T> OptionExt for Option<T> {
+     type Opt = T;
+ 
+@@ -490,18 +462,6 @@ impl<T> OptionExt for Option<T> {
+     }
+ }
+ 
+-#[cfg(windows)]
+-impl<T> OptionExt for Option<T> {
+-    type Opt = T;
+-
+-    fn bypass(self, value: Bypass) -> HookResult<T> {
+-        match self {
+-            Some(v) => Ok(v),
+-            None => Err(HookError::Bypass(value)),
+-        }
+-    }
+-}
+-
+ #[cfg(target_os = "linux")]
+ impl<T> OptionDetourExt<T> for Option<Detour<T>> {
+     #[inline]
+diff --git a/mirrord/layer-lib/src/error.rs b/mirrord/layer-lib/src/error.rs
+index eeb67d63247..a99e3499660 100644
+--- a/mirrord/layer-lib/src/error.rs
++++ b/mirrord/layer-lib/src/error.rs
+@@ -28,7 +28,9 @@ use tracing::{error, info};
+ #[cfg(windows)]
+ use winapi::shared::winerror::{WSAHOST_NOT_FOUND, WSANO_RECOVERY, WSATRY_AGAIN};
+ 
+-use crate::{detour::Bypass, graceful_exit, proxy_connection::ProxyError, setup::setup};
++use crate::{
++    graceful_exit, proxy_connection::ProxyError, setup::setup, socket::sockets::SocketDescriptor,
++};
+ 
+ mod ignore_codes {
+     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
+@@ -63,40 +65,11 @@ mod ignore_codes {
+     }
+ }
+ 
+-/// Error types for connect operations
+-#[derive(Debug, thiserror::Error)]
+-pub enum AddrInfoError {
+-    #[error("Null pointer found")]
+-    NullPointer,
+-    #[error("Failed to allocate memory for address info")]
+-    AllocationFailed,
+-    #[error("Failed to allocate memory for layout")]
+-    LayoutError(#[from] std::alloc::LayoutError),
+-    #[error("Should use local DNS resolution for {0}")]
+-    ResolveDisabled(String),
+-    #[error("DNS lookup failed")]
+-    LookupFailed(#[from] std::io::Error),
+-    #[error("No addresses in DNS response")]
+-    LookupEmpty,
+-}
+-
+ /// Error types for connect operations
+ #[derive(Debug, thiserror::Error)]
+ pub enum ConnectError {
+-    #[error("IO error: {0}")]
+-    Io(#[from] std::io::Error),
+-    #[error("Address conversion error")]
+-    AddressConversion,
+-    #[error("Proxy request failed: {0}")]
+-    ProxyRequest(String),
+     #[error("Fallback to original connection")]
+     Fallback,
+-    #[error("Disabled outgoing connection")]
+-    DisabledOutgoing(i64),
+-    #[error("Bypass port: {0}")]
+-    BypassPort(u16),
+-    #[error("Parameter missing: {0}")]
+-    ParameterMissing(String),
+     #[error("Address unreachable")]
+     AddressUnreachable(String),
+ }
+@@ -234,7 +207,7 @@ pub enum HookError {
+     BincodeEncode(#[from] bincode::error::EncodeError),
+ 
+     #[error("mirrord-layer: Socket not found `{0}`!")]
+-    SocketNotFound(i64),
++    SocketNotFound(SocketDescriptor),
+ 
+     #[error("mirrord-layer: Managed Socket not found on address `{0}`!")]
+     ManagedSocketNotFound(SocketAddr),
+@@ -242,24 +215,14 @@ pub enum HookError {
+     #[error("mirrord-layer: Managed Socket not found on address `{0}`!")]
+     ConnectError(#[from] ConnectError),
+ 
+-    #[error("mirrord-layer: Address resolution failed with `{0}`!")]
+-    AddrInfoError(#[from] AddrInfoError),
++    #[error("Failed to allocate memory for layout")]
++    LayoutError(#[from] std::alloc::LayoutError),
+ 
+     #[error("mirrord-layer: SendTo failed with `{0}`!")]
+     SendToError(#[from] SendToError),
+ 
+     #[error("mirrord-layer: Hostname resolution failed with `{0}`!")]
+     HostnameResolveError(#[from] HostnameResolveError),
+-
+-    #[error("mirrord-layer: Hook bypassed")]
+-    Bypass(Bypass),
+-}
+-
+-// mirrord/layer-lib/src/error.rs
+-impl From<Bypass> for HookError {
+-    fn from(bypass: Bypass) -> Self {
+-        HookError::Bypass(bypass)
+-    }
+ }
+ 
+ /// Errors internal to mirrord-layer.
+@@ -462,11 +425,9 @@ fn get_platform_errno(fail: HookError) -> i32 {
+         HookError::SocketNotFound(_) => libc::EBADF,
+         HookError::ManagedSocketNotFound(_) => libc::EBADF,
+         HookError::ConnectError(_) => libc::EFAULT,
+-        HookError::AddrInfoError(_) => libc::EFAULT,
++        HookError::LayoutError(_) => libc::EFAULT,
+         HookError::SendToError(_) => libc::EFAULT,
+         HookError::HostnameResolveError(_) => libc::EFAULT,
+-        // Note: temporary mapping, will be removed once Detour is migrated to windows
+-        HookError::Bypass(_) => libc::ENOTSUP,
+     }
+ }
+ 
+@@ -539,11 +500,9 @@ fn get_platform_errno(fail: HookError) -> u32 {
+         HookError::SocketNotFound(_) => WSAEBADF,
+         HookError::ManagedSocketNotFound(_) => WSAEBADF,
+         HookError::ConnectError(_) => WSAEFAULT,
+-        HookError::AddrInfoError(_) => WSAEFAULT,
++        HookError::LayoutError(_) => WSAEFAULT,
+         HookError::SendToError(_) => WSAEFAULT,
+         HookError::HostnameResolveError(_) => WSAEFAULT,
+-        // Note: temporary mapping, will be removed once Detour is migrated to windows
+-        HookError::Bypass(_) => WSAEPROTONOSUPPORT,
+     }
+ }
+ 
+diff --git a/mirrord/layer-lib/src/socket.rs b/mirrord/layer-lib/src/socket.rs
+index f15f3298442..80c8278160c 100644
+--- a/mirrord/layer-lib/src/socket.rs
++++ b/mirrord/layer-lib/src/socket.rs
+@@ -31,7 +31,7 @@ use socket2::SockAddr;
+ // Re-export sockets module items
+ pub use sockets::{
+     SHARED_SOCKETS_ENV_VAR, SOCKETS, SocketDescriptor, get_bound_address, get_connected_addresses,
+-    get_socket_state, is_socket_in_state, is_socket_managed, register_socket,
++    get_socket_state, is_socket_in_state, is_socket_managed,
+ };
+ #[cfg(windows)]
+ pub use winapi::{
+@@ -46,7 +46,7 @@ pub use winapi::{
+ };
+ 
+ #[cfg(unix)]
+-use crate::detour::DetourGuard;
++use crate::detour::{Detour, DetourGuard, OptionExt};
+ #[cfg(windows)]
+ use crate::error::windows::{WindowsError, WindowsResult};
+ pub use crate::{
+@@ -239,17 +239,14 @@ impl UserSocket {
+ #[cfg(unix)]
+ pub trait SocketAddrExt {
+     /// Converts a raw [`sockaddr`] pointer into a more _Rusty_ type
+-    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> HookResult<Self>
++    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<Self>
+     where
+         Self: Sized;
+ }
+ 
+ #[cfg(unix)]
+ impl SocketAddrExt for SockAddr {
+-    fn try_from_raw(
+-        raw_address: *const sockaddr,
+-        address_length: socklen_t,
+-    ) -> HookResult<SockAddr> {
++    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SockAddr> {
+         unsafe {
+             SockAddr::try_init(|storage, len| {
+                 // storage and raw_address size is dynamic.
+@@ -259,22 +256,17 @@ impl SocketAddrExt for SockAddr {
+                 Ok(())
+             })
+         }
+-        .map_err(|_| HookError::Bypass(Bypass::AddressConversion))
++        .ok()
+         .map(|((), address)| address)
++        .bypass(Bypass::AddressConversion)
+     }
+ }
+ 
+ #[cfg(unix)]
+ impl SocketAddrExt for SocketAddr {
+-    fn try_from_raw(
+-        raw_address: *const sockaddr,
+-        address_length: socklen_t,
+-    ) -> HookResult<SocketAddr> {
+-        SockAddr::try_from_raw(raw_address, address_length).and_then(|address| {
+-            address
+-                .as_socket()
+-                .ok_or(HookError::Bypass(Bypass::AddressConversion))
+-        })
++    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SocketAddr> {
++        SockAddr::try_from_raw(raw_address, address_length)
++            .and_then(|address| address.as_socket().bypass(Bypass::AddressConversion))
+     }
+ }
+ 
+diff --git a/mirrord/layer-lib/src/socket/dns.rs b/mirrord/layer-lib/src/socket/dns.rs
+index c0fe890149c..0f8c0e3b784 100644
+--- a/mirrord/layer-lib/src/socket/dns.rs
++++ b/mirrord/layer-lib/src/socket/dns.rs
+@@ -11,7 +11,7 @@ use mirrord_protocol::dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, S
+ use tracing::Level;
+ 
+ use crate::{
+-    HookResult,
++    error::HookResult,
+     proxy_connection::make_proxy_request_with_response,
+     socket::{
+         AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM,
+diff --git a/mirrord/layer-lib/src/socket/dns/windows.rs b/mirrord/layer-lib/src/socket/dns/windows.rs
+index ca53981ba1d..4aeb334d779 100644
+--- a/mirrord/layer-lib/src/socket/dns/windows.rs
++++ b/mirrord/layer-lib/src/socket/dns/windows.rs
+@@ -1,21 +1,24 @@
+ pub mod utils;
+ 
+ use std::{
+-    net::SocketAddr,
++    net::{IpAddr, Ipv4Addr, SocketAddr},
++    ops::Not,
+     sync::{LazyLock, Mutex},
+ };
+ 
++use socket2::SockAddr;
+ use utils::{ManagedAddrInfo, ManagedAddrInfoAny, WindowsAddrInfo};
+ use winapi::{
+     shared::ws2def::SOCKADDR,
+-    um::winsock2::{SOCKET, SOCKET_ERROR, WSAGetLastError},
++    um::winsock2::{SOCKET, WSAGetLastError},
+ };
+ use windows_strings::PCWSTR;
+ 
+ use crate::{
+-    error::{AddrInfoError, HookResult},
++    detour::{Bypass, Detour, OptionExt},
++    error::ConnectError,
+     setup::setup,
+-    socket::{SocketAddrExt, dns::remote_getaddrinfo},
++    socket::dns::remote_getaddrinfo,
+ };
+ 
+ /// Keep track of managed address info structures for proper cleanup.
+@@ -33,14 +36,13 @@ pub fn getaddrinfo<T: WindowsAddrInfo>(
+     raw_node: Option<String>,
+     raw_service: Option<String>,
+     raw_hints: Option<&T>,
+-) -> HookResult<ManagedAddrInfo<T>> {
++) -> Detour<ManagedAddrInfo<T>> {
+     // Convert node to string
+-    let node = match raw_node {
+-        Some(s) => s,
+-        None => return Err(AddrInfoError::NullPointer.into()),
+-    };
++    let node = raw_node.bypass(Bypass::NullNode)?;
+ 
+     // Convert service to port number
++    // TODO: according to the man page, service could also be a service name, it doesn't have to
++    //   be a port number.
+     let port = raw_service.and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
+ 
+     tracing::warn!(
+@@ -51,18 +53,26 @@ pub fn getaddrinfo<T: WindowsAddrInfo>(
+ 
+     // Check DNS selector to determine if this should be resolved remotely
+     setup().dns_selector().check_query(&node, port)?;
++    let ipv6_enabled = setup().layer_config().feature.network.ipv6;
+     tracing::warn!("Using remote DNS resolution for {}", node);
+ 
+     let (ai_family, ai_socktype, ai_protocol) = raw_hints
+         .map(|hints| hints.get_family_socktype_protocol())
+         .unwrap_or((0, 0, 0));
+ 
+-    let lookups = remote_getaddrinfo(node, port, 0, ai_family, ai_socktype, ai_protocol)?;
++    // Some apps (gRPC on Python) use `::` to listen on all interfaces, and usually that just means
++    // resolve on unspecified. So we just return that in IPv4, if IPv6 support is disabled.
++    let resolved_addr = if ipv6_enabled.not() && (node == "::") {
++        // name is "" because that's what happens in real flow.
++        vec![("".to_string(), IpAddr::V4(Ipv4Addr::UNSPECIFIED))]
++    } else {
++        remote_getaddrinfo(node, port, 0, ai_family, ai_socktype, ai_protocol)?
++    };
+ 
+     // Convert response back to Windows ADDRINFO structures using trait method
+-    let mut managed = ManagedAddrInfo::<T>::try_from(lookups)?;
++    let mut managed = ManagedAddrInfo::<T>::try_from(resolved_addr)?;
+     managed.apply_port(port);
+-    Ok(managed)
++    Detour::Success(managed)
+ }
+ 
+ /// Safely deallocates ADDRINFOA structures that were allocated by our getaddrinfo_detour.
+@@ -102,14 +112,9 @@ pub unsafe fn free_managed_addrinfo<T: WindowsAddrInfo>(addrinfo: *mut T) -> boo
+ /// - 0 on success (address is reachable)
+ /// - Non-zero error code on failure (address unreachable or resolution failed)
+ #[mirrord_layer_macro::instrument(level = "trace", ret)]
+-pub fn check_address_reachability(socket: SOCKET, remote_addr: &SocketAddr) -> i32 {
+-    let Ok((sock_addr_storage, sock_addr_len)) = remote_addr.to_sockaddr() else {
+-        tracing::debug!(
+-            "check_address_reachability -> address conversion failed for socket {}",
+-            socket
+-        );
+-        return SOCKET_ERROR;
+-    };
++pub fn check_address_reachability(socket: SOCKET, remote_addr: &SocketAddr) -> Detour<()> {
++    let rawish_sock_addr = SockAddr::from(*remote_addr);
++    let sock_addr_len = rawish_sock_addr.len();
+ 
+     // Buffer for hostname
+     let mut node_buffer = [0u16; 256];
+@@ -118,7 +123,7 @@ pub fn check_address_reachability(socket: SOCKET, remote_addr: &SocketAddr) -> i
+ 
+     let result = unsafe {
+         winapi::um::ws2tcpip::GetNameInfoW(
+-            &sock_addr_storage as *const _ as *const SOCKADDR,
++            rawish_sock_addr.as_ptr() as *const _ as *const SOCKADDR,
+             sock_addr_len,
+             node_buffer.as_mut_ptr(),
+             node_buffer.len() as u32,
+@@ -138,7 +143,7 @@ pub fn check_address_reachability(socket: SOCKET, remote_addr: &SocketAddr) -> i
+             unsafe { WSAGetLastError() }
+         );
+         // on failure, GetNameInfoW sets WSALastError
+-        return result;
++        return Detour::Error(ConnectError::AddressUnreachable(remote_addr.to_string()).into());
+     }
+ 
+     // Successfully resolved - address is reachable
+@@ -148,5 +153,5 @@ pub fn check_address_reachability(socket: SOCKET, remote_addr: &SocketAddr) -> i
+         unsafe { str_win::u16_buffer_to_string(PCWSTR(node_buffer.as_ptr()).as_wide()) }
+     );
+ 
+-    0 // Success
++    Detour::Success(())
+ }
+diff --git a/mirrord/layer-lib/src/socket/dns/windows/utils.rs b/mirrord/layer-lib/src/socket/dns/windows/utils.rs
+index 8cb34eae1ac..af80dce86f4 100644
+--- a/mirrord/layer-lib/src/socket/dns/windows/utils.rs
++++ b/mirrord/layer-lib/src/socket/dns/windows/utils.rs
+@@ -1,9 +1,10 @@
+ //! Utility functions for Windows socket operations
+-use std::{alloc::Layout, convert::TryFrom, mem, net::IpAddr, ptr};
++use std::{convert::TryFrom, mem, net::IpAddr, ptr};
+ 
+-use mirrord_protocol::error::{DnsLookupError, ResolveErrorKindInternal, ResponseError};
+ use winapi::{
+     shared::{
++        in6addr::IN6_ADDR,
++        inaddr::IN_ADDR,
+         minwindef::INT,
+         ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR, SOCKADDR_IN},
+         ws2ipdef::SOCKADDR_IN6,
+@@ -11,287 +12,260 @@ use winapi::{
+     um::winsock2::SOCK_STREAM,
+ };
+ 
+-use crate::{
+-    error::{AddrInfoError, HookError, HookResult},
+-    unsafe_alloc,
+-};
++use crate::error::{HookError, HookResult};
++
++const IPV4_ADDR_LEN: usize = mem::size_of::<IN_ADDR>();
++const IPV6_ADDR_LEN: usize = mem::size_of::<IN6_ADDR>();
++
++/// Owned IP bytes shared across HOSTENT and ADDRINFO construction.
++#[derive(Debug, Clone, Copy)]
++pub enum IpAddrBytes {
++    V4([u8; IPV4_ADDR_LEN]),
++    V6([u8; IPV6_ADDR_LEN]),
++}
++
++impl IpAddrBytes {
++    pub fn family(&self) -> i32 {
++        match self {
++            IpAddrBytes::V4(_) => AF_INET,
++            IpAddrBytes::V6(_) => AF_INET6,
++        }
++    }
++
++    pub fn addr_len(&self) -> usize {
++        match self {
++            IpAddrBytes::V4(_) => IPV4_ADDR_LEN,
++            IpAddrBytes::V6(_) => IPV6_ADDR_LEN,
++        }
++    }
++
++    pub fn as_ptr(&self) -> *const u8 {
++        match self {
++            // Note: the following branches cannot be unified because of the difference in bytes
++            // size
++            IpAddrBytes::V4(bytes) => bytes.as_ptr(),
++            IpAddrBytes::V6(bytes) => bytes.as_ptr(),
++        }
++    }
++
++    pub fn to_sockaddr_box(&self) -> AddrStorage {
++        match self {
++            IpAddrBytes::V4(bytes) => {
++                let mut addr: SOCKADDR_IN = unsafe { mem::zeroed() };
++                let ipv4 = std::net::Ipv4Addr::from(*bytes);
++                addr.sin_family = AF_INET as u16;
++                addr.sin_port = 0;
++                unsafe {
++                    *addr.sin_addr.S_un.S_addr_mut() = u32::from(ipv4).to_be();
++                    ptr::write_bytes(
++                        addr.sin_zero.as_mut_ptr(),
++                        0,
++                        mem::size_of_val(&addr.sin_zero),
++                    );
++                }
++                AddrStorage::V4(Box::new(addr))
++            }
++            IpAddrBytes::V6(bytes) => {
++                let mut addr: SOCKADDR_IN6 = unsafe { mem::zeroed() };
++                addr.sin6_family = AF_INET6 as u16;
++                addr.sin6_port = 0;
++                addr.sin6_flowinfo = 0;
++                unsafe {
++                    *addr.sin6_addr.u.Byte_mut() = *bytes;
++                }
++                AddrStorage::V6(Box::new(addr))
++            }
++        }
++    }
++}
++
++impl From<IpAddr> for IpAddrBytes {
++    fn from(value: IpAddr) -> Self {
++        match value {
++            IpAddr::V4(ipv4) => IpAddrBytes::V4(ipv4.octets()),
++            IpAddr::V6(ipv6) => IpAddrBytes::V6(ipv6.octets()),
++        }
++    }
++}
++
++/// Owned sockaddr storage for ADDRINFO chains.
++pub enum AddrStorage {
++    V4(Box<SOCKADDR_IN>),
++    V6(Box<SOCKADDR_IN6>),
++}
++
++impl AddrStorage {
++    pub fn family(&self) -> i32 {
++        match self {
++            AddrStorage::V4(_) => AF_INET,
++            AddrStorage::V6(_) => AF_INET6,
++        }
++    }
++
++    pub fn addrlen(&self) -> usize {
++        match self {
++            AddrStorage::V4(_) => mem::size_of::<SOCKADDR_IN>(),
++            AddrStorage::V6(_) => mem::size_of::<SOCKADDR_IN6>(),
++        }
++    }
++
++    pub fn as_ptr(&mut self) -> *mut SOCKADDR {
++        match self {
++            AddrStorage::V4(addr) => addr.as_mut() as *mut SOCKADDR_IN as *mut SOCKADDR,
++            AddrStorage::V6(addr) => addr.as_mut() as *mut SOCKADDR_IN6 as *mut SOCKADDR,
++        }
++    }
++}
+ 
+ /// Trait to abstract over Windows ADDRINFO types (ADDRINFOA and ADDRINFOW).
+-/// Prefer interacting with these pointers through [`ManagedAddrInfo`], which provides the RAII
+-/// semantics and enforces the ownership rules described in each method's safety contract.
++/// Prefer interacting with these pointers through [`ManagedAddrInfo`], which owns the storage
++/// for nodes, sockaddrs, and canonical names.
+ pub trait WindowsAddrInfo: Sized {
+     type CanonName;
++    type CanonNameOwned;
++
++    /// Initialize default fields (`ai_flags`, `ai_socktype`, `ai_protocol`, and `ai_next`).
++    fn init_defaults(node: &mut Self);
+ 
+-    /// Allocate a new instance
+-    ///
+-    /// # Safety
+-    /// - Returned pointer must be initialized with [`WindowsAddrInfo::fill`] and ultimately owned
+-    ///   by [`ManagedAddrInfo::drop`], which will free the entire linked list that starts at the
+-    ///   pointer. Handing it to any other deallocator or freeing it twice is UB.
+-    /// - The allocation must come from the global allocator so `drop` can release it with
+-    ///   `std::alloc::dealloc`.
+-    /// - Implementations must zero/initialize auxiliary fields (`ai_flags`, `ai_socktype`,
+-    ///   `ai_protocol`, and `ai_next`) so the caller can rely on deterministic defaults before
+-    ///   invoking [`WindowsAddrInfo::fill`] or [`WindowsAddrInfo::set_next`].
+-    unsafe fn alloc() -> Result<*mut Self, AddrInfoError>;
+-
+-    /// Fill the structure with the given parameters
+-    ///
+-    /// # Safety
+-    /// - `ptr` must come from [`WindowsAddrInfo::alloc`] and the resulting node becomes part of the
+-    ///   singly linked list that [`ManagedAddrInfo::drop`] walks and frees. Sharing nodes between
+-    ///   lists or forming cycles will cause double frees or leaks.
+-    /// - `addr` must point to memory allocated for the concrete socket family (AF_INET or AF_INET6)
+-    ///   so that `drop` can select the correct layout when it calls `std::alloc::dealloc`.
+-    /// - `canonname` must have been allocated with the global allocator (via
+-    ///   [`WindowsAddrInfo::string_to_canonname`] or similar) because `drop` releases it through
+-    ///   [`WindowsAddrInfo::free_canonname`].
+-    unsafe fn fill(
+-        ptr: *mut Self,
++    /// Fill the structure with the given parameters.
++    fn fill(
++        node: &mut Self,
+         family: i32,
+         addrlen: usize,
+         canonname: Self::CanonName,
+         addr: *mut SOCKADDR,
+     );
+ 
+-    /// Set the next pointer
+-    ///
+-    /// # Safety
+-    /// `ptr` and `next` must either be null or originate from [`WindowsAddrInfo::alloc`]; linking
+-    /// nodes allocated elsewhere will confuse [`ManagedAddrInfo::drop`] and may lead to UB.
+-    unsafe fn set_next(ptr: *mut Self, next: *mut Self);
++    /// Set the next pointer.
++    fn set_next(node: &mut Self, next: *mut Self);
++
++    /// Convert a string to the appropriate owned canonical name type.
++    fn canonname_from_string(s: String) -> HookResult<Self::CanonNameOwned>;
+ 
+-    /// Convert a string to the appropriate canonical name type
+-    fn string_to_canonname(s: String) -> Result<Self::CanonName, AddrInfoError>;
++    /// Get a raw pointer for a canonical name.
++    fn canonname_ptr(owned: &mut Self::CanonNameOwned) -> Self::CanonName;
+ 
+-    /// Get null canonical name
+-    fn null_canonname() -> Self::CanonName;
++    /// Get null canonical name pointer.
++    fn null_canonname_ptr() -> Self::CanonName;
+ 
+     /// Extract family, socktype, and protocol from this structure (for hints processing)
+     fn get_family_socktype_protocol(&self) -> (i32, i32, i32);
+-
+-    // Field accessor methods for Drop implementation
+-    /// Get the ai_next field
+-    ///
+-    /// # Safety
+-    /// `self` must be a valid reference obtained from a node allocated by this trait. Returning the
+-    /// raw pointer transfers responsibility back to [`ManagedAddrInfo`] for traversal.
+-    unsafe fn ai_next(&self) -> *mut Self;
+-
+-    /// Get the ai_addr field
+-    ///
+-    /// # Safety
+-    /// Caller must ensure `self` is valid and respect the returned pointer's lifetime; it is freed
+-    /// by [`ManagedAddrInfo::drop`] according to the `ai_family` layout.
+-    unsafe fn ai_addr(&self) -> *mut SOCKADDR;
+-
+-    /// Get the ai_family field
+-    ///
+-    /// # Safety
+-    /// `self` must be valid. The returned family dictates how Drop will interpret `ai_addr`.
+-    unsafe fn ai_family(&self) -> i32;
+-
+-    /// Get the ai_canonname field
+-    ///
+-    /// # Safety
+-    /// Caller must hold a valid reference; the returned pointer remains owned by
+-    /// [`ManagedAddrInfo`] and will be released through [`WindowsAddrInfo::free_canonname`].
+-    unsafe fn ai_canonname(&self) -> Self::CanonName;
+-
+-    /// Free the canonical name
+-    ///
+-    /// # Safety
+-    /// `canonname` must have been allocated through the canonical allocation path for the concrete
+-    /// implementation (e.g., [`WindowsAddrInfo::string_to_canonname`]). Passing any other pointer
+-    /// causes undefined behavior.
+-    unsafe fn free_canonname(canonname: Self::CanonName);
+ }
+ 
+ impl WindowsAddrInfo for ADDRINFOA {
+     type CanonName = *mut i8;
++    type CanonNameOwned = std::ffi::CString;
+ 
+-    unsafe fn alloc() -> Result<*mut Self, AddrInfoError> {
+-        let ptr = unsafe_alloc!(ADDRINFOA, AddrInfoError::AllocationFailed)?;
+-        unsafe {
+-            (*ptr).ai_flags = 0;
+-            (*ptr).ai_socktype = SOCK_STREAM;
+-            (*ptr).ai_protocol = 0;
+-            (*ptr).ai_next = ptr::null_mut();
+-        }
+-        Ok(ptr)
++    fn init_defaults(node: &mut Self) {
++        node.ai_flags = 0;
++        node.ai_socktype = SOCK_STREAM;
++        node.ai_protocol = 0;
++        node.ai_next = ptr::null_mut();
+     }
+ 
+-    unsafe fn fill(
+-        ptr: *mut Self,
++    fn fill(
++        node: &mut Self,
+         family: i32,
+         addrlen: usize,
+         canonname: Self::CanonName,
+         addr: *mut SOCKADDR,
+     ) {
+-        unsafe {
+-            (*ptr).ai_family = family;
+-            (*ptr).ai_addrlen = addrlen;
+-            (*ptr).ai_canonname = canonname;
+-            (*ptr).ai_addr = addr;
+-        }
++        node.ai_family = family;
++        node.ai_addrlen = addrlen;
++        node.ai_canonname = canonname;
++        node.ai_addr = addr;
+     }
+ 
+-    unsafe fn set_next(ptr: *mut Self, next: *mut Self) {
+-        unsafe {
+-            (*ptr).ai_next = next;
+-        }
++    fn set_next(node: &mut Self, next: *mut Self) {
++        node.ai_next = next;
+     }
+ 
+-    fn string_to_canonname(s: String) -> Result<Self::CanonName, AddrInfoError> {
+-        use std::ffi::CString;
+-        match CString::new(s) {
+-            Ok(cstr) => Ok(cstr.into_raw()),
+-            Err(_) => Err(AddrInfoError::NullPointer),
+-        }
++    fn canonname_from_string(s: String) -> HookResult<Self::CanonNameOwned> {
++        Ok(std::ffi::CString::new(s)?)
+     }
+ 
+-    fn null_canonname() -> Self::CanonName {
++    fn canonname_ptr(owned: &mut Self::CanonNameOwned) -> Self::CanonName {
++        owned.as_ptr() as *mut i8
++    }
++
++    fn null_canonname_ptr() -> Self::CanonName {
+         ptr::null_mut()
+     }
+ 
+     fn get_family_socktype_protocol(&self) -> (i32, i32, i32) {
+         (self.ai_family, self.ai_socktype, self.ai_protocol)
+     }
+-
+-    // Field accessor methods for Drop implementation
+-    unsafe fn ai_next(&self) -> *mut Self {
+-        self.ai_next
+-    }
+-
+-    unsafe fn ai_addr(&self) -> *mut SOCKADDR {
+-        self.ai_addr
+-    }
+-
+-    unsafe fn ai_family(&self) -> i32 {
+-        self.ai_family
+-    }
+-
+-    unsafe fn ai_canonname(&self) -> Self::CanonName {
+-        self.ai_canonname
+-    }
+-
+-    unsafe fn free_canonname(canonname: Self::CanonName) {
+-        if !canonname.is_null() {
+-            unsafe {
+-                let ptr = canonname;
+-                let len = (0..).take_while(|&i| *ptr.offset(i) != 0).count();
+-                let layout = Layout::array::<u16>(len + 1).unwrap();
+-                std::alloc::dealloc(canonname as *mut u8, layout);
+-            }
+-        }
+-    }
+ }
+ 
+ impl WindowsAddrInfo for ADDRINFOW {
+     type CanonName = *mut u16;
++    type CanonNameOwned = Vec<u16>;
+ 
+-    unsafe fn alloc() -> Result<*mut Self, AddrInfoError> {
+-        let ptr = unsafe_alloc!(ADDRINFOW, AddrInfoError::AllocationFailed)?;
+-        unsafe {
+-            (*ptr).ai_flags = 0;
+-            (*ptr).ai_socktype = SOCK_STREAM;
+-            (*ptr).ai_protocol = 0;
+-            (*ptr).ai_next = ptr::null_mut();
+-        }
+-        Ok(ptr)
++    fn init_defaults(node: &mut Self) {
++        node.ai_flags = 0;
++        node.ai_socktype = SOCK_STREAM;
++        node.ai_protocol = 0;
++        node.ai_next = ptr::null_mut();
+     }
+ 
+-    unsafe fn fill(
+-        ptr: *mut Self,
++    fn fill(
++        node: &mut Self,
+         family: i32,
+         addrlen: usize,
+         canonname: Self::CanonName,
+         addr: *mut SOCKADDR,
+     ) {
+-        unsafe {
+-            (*ptr).ai_family = family;
+-            (*ptr).ai_addrlen = addrlen;
+-            (*ptr).ai_canonname = canonname;
+-            (*ptr).ai_addr = addr;
+-        }
++        node.ai_family = family;
++        node.ai_addrlen = addrlen;
++        node.ai_canonname = canonname;
++        node.ai_addr = addr;
+     }
+ 
+-    unsafe fn set_next(ptr: *mut Self, next: *mut Self) {
+-        unsafe {
+-            (*ptr).ai_next = next;
+-        }
++    fn set_next(node: &mut Self, next: *mut Self) {
++        node.ai_next = next;
+     }
+ 
+-    fn string_to_canonname(s: String) -> Result<Self::CanonName, AddrInfoError> {
++    fn canonname_from_string(s: String) -> HookResult<Self::CanonNameOwned> {
+         let wide: Vec<u16> = s.encode_utf16().chain(Some(0)).collect();
+-        let layout = Layout::array::<u16>(wide.len()).map_err(AddrInfoError::LayoutError)?;
+-        let ptr = unsafe { std::alloc::alloc(layout) as *mut u16 };
+-        if ptr.is_null() {
+-            return Err(AddrInfoError::NullPointer);
+-        }
+-        unsafe {
+-            std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
+-        }
+-        Ok(ptr)
++        Ok(wide)
+     }
+ 
+-    fn null_canonname() -> Self::CanonName {
++    fn canonname_ptr(owned: &mut Self::CanonNameOwned) -> Self::CanonName {
++        owned.as_mut_ptr()
++    }
++
++    fn null_canonname_ptr() -> Self::CanonName {
+         ptr::null_mut()
+     }
+ 
+     fn get_family_socktype_protocol(&self) -> (i32, i32, i32) {
+         (self.ai_family, self.ai_socktype, self.ai_protocol)
+     }
+-
+-    // Field accessor methods for Drop implementation
+-    unsafe fn ai_next(&self) -> *mut Self {
+-        self.ai_next
+-    }
+-
+-    unsafe fn ai_addr(&self) -> *mut SOCKADDR {
+-        self.ai_addr
+-    }
+-
+-    unsafe fn ai_family(&self) -> i32 {
+-        self.ai_family
+-    }
+-
+-    unsafe fn ai_canonname(&self) -> Self::CanonName {
+-        self.ai_canonname
+-    }
+-
+-    unsafe fn free_canonname(canonname: Self::CanonName) {
+-        if !canonname.is_null() {
+-            unsafe {
+-                let ptr = canonname;
+-                let len = (0..).take_while(|&i| *ptr.offset(i) != 0).count();
+-                let layout = Layout::array::<u16>(len + 1).unwrap();
+-                std::alloc::dealloc(canonname as *mut u8, layout);
+-            }
+-        }
+-    }
+ }
+ 
+-/// RAII wrapper for Windows ADDRINFO structures that automatically cleans up on drop
+-#[derive(Debug)]
++/// RAII wrapper for Windows ADDRINFO structures that owns node, sockaddr, and canonname storage.
+ pub struct ManagedAddrInfo<T: WindowsAddrInfo> {
+-    ptr: *mut T,
++    nodes: Vec<Box<T>>,
++    sockaddrs: Vec<AddrStorage>,
++    _canonnames: Vec<Option<T::CanonNameOwned>>,
+ }
+ 
+-// SAFETY: We ensure thread safety by only accessing the pointer through controlled operations
+-// and the pointer is only used for memory management within the same process
++// SAFETY: ManagedAddrInfo owns all pointed-to memory (nodes, sockaddrs, canonname buffers).
++// Raw pointers inside the ADDRINFO nodes only reference this owned storage. The wrapper is
++// accessed behind synchronization at the call sites (e.g., Mutex), so sending across threads
++// does not introduce data races.
+ unsafe impl<T: WindowsAddrInfo> Send for ManagedAddrInfo<T> {}
+ unsafe impl<T: WindowsAddrInfo> Sync for ManagedAddrInfo<T> {}
+ 
+ impl<T: WindowsAddrInfo> PartialEq for ManagedAddrInfo<T> {
+     fn eq(&self, other: &Self) -> bool {
+-        self.ptr == other.ptr
++        self.as_ptr() == other.as_ptr()
+     }
+ }
+ 
+ impl<T: WindowsAddrInfo> std::hash::Hash for ManagedAddrInfo<T> {
+     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+-        self.ptr.hash(state);
++        self.as_ptr().hash(state);
+     }
+ }
+ 
+@@ -307,46 +281,31 @@ impl Eq for ManagedAddrInfoAny {}
+ impl std::fmt::Debug for ManagedAddrInfoAny {
+     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+         match self {
+-            ManagedAddrInfoAny::A(info) => write!(f, "A({:p})", info.ptr),
+-            ManagedAddrInfoAny::W(info) => write!(f, "W({:p})", info.ptr),
++            ManagedAddrInfoAny::A(info) => write!(f, "A({:p})", info.as_ptr()),
++            ManagedAddrInfoAny::W(info) => write!(f, "W({:p})", info.as_ptr()),
+         }
+     }
+ }
+ 
+ impl<T: WindowsAddrInfo> ManagedAddrInfo<T> {
+-    /// Create a new managed ADDRINFO from a raw pointer
+-    ///
+-    /// # Safety
+-    /// The caller must ensure the pointer is valid and was allocated by our system
+-    pub unsafe fn new(ptr: *mut T) -> Self {
+-        Self { ptr }
+-    }
+-
+     /// Get the raw pointer (for returning to Windows API)
+     pub fn as_ptr(&self) -> *mut T {
+-        self.ptr
++        self.nodes
++            .first()
++            .map(|node| node.as_ref() as *const T as *mut T)
++            .unwrap_or(ptr::null_mut())
+     }
+ 
+     /// Propagate the requested service port into each sockaddr entry
+     pub fn apply_port(&mut self, port: u16) {
+-        unsafe {
+-            let mut current = self.ptr;
+-            while !current.is_null() {
+-                let addr = (*current).ai_addr();
+-                if !addr.is_null() {
+-                    match (*current).ai_family() {
+-                        AF_INET => {
+-                            let sockaddr_in_ptr = addr as *mut SOCKADDR_IN;
+-                            (*sockaddr_in_ptr).sin_port = port.to_be();
+-                        }
+-                        AF_INET6 => {
+-                            let sockaddr_in6_ptr = addr as *mut SOCKADDR_IN6;
+-                            (*sockaddr_in6_ptr).sin6_port = port.to_be();
+-                        }
+-                        _ => {}
+-                    }
++        for addr in &mut self.sockaddrs {
++            match addr {
++                AddrStorage::V4(sockaddr) => {
++                    sockaddr.sin_port = port.to_be();
++                }
++                AddrStorage::V6(sockaddr) => {
++                    sockaddr.sin6_port = port.to_be();
+                 }
+-                current = (*current).ai_next();
+             }
+         }
+     }
+@@ -357,130 +316,64 @@ impl<T: WindowsAddrInfo> TryFrom<Vec<(String, IpAddr)>> for ManagedAddrInfo<T> {
+ 
+     fn try_from(records: Vec<(String, IpAddr)>) -> HookResult<Self> {
+         if records.is_empty() {
+-            return Err(ResponseError::DnsLookup(DnsLookupError {
+-                kind: ResolveErrorKindInternal::NoRecordsFound(0),
+-            })
+-            .into());
++            return Err(HookError::DNSNoName);
+         }
+ 
+-        let mut first_addrinfo: *mut T = ptr::null_mut();
+-        let mut current_addrinfo: *mut T = ptr::null_mut();
++        let mut nodes: Vec<Box<T>> = Vec::with_capacity(records.len());
++        let mut sockaddrs: Vec<AddrStorage> = Vec::with_capacity(records.len());
++        let mut canonnames: Vec<Option<T::CanonNameOwned>> = Vec::with_capacity(records.len());
+ 
+         for (name, ip) in records.into_iter() {
+-            // Allocate ADDRINFO structure
+-            let addrinfo_ptr = unsafe { T::alloc()? };
+-
+-            // Parse the IP address and create sockaddr
+-            let (sockaddr_ptr, sockaddr_len, family) = match ip {
+-                IpAddr::V4(ipv4) => {
+-                    let sockaddr_in_ptr =
+-                        unsafe_alloc!(SOCKADDR_IN, AddrInfoError::AllocationFailed)?;
+-
+-                    unsafe {
+-                        (*sockaddr_in_ptr).sin_family = AF_INET as u16;
+-                        // Port applied later via ManagedAddrInfo::apply_port
+-                        (*sockaddr_in_ptr).sin_port = 0;
+-                        *(*sockaddr_in_ptr).sin_addr.S_un.S_addr_mut() = u32::from(ipv4).to_be();
+-                        ptr::write_bytes((*sockaddr_in_ptr).sin_zero.as_mut_ptr(), 0, 8);
+-                    }
+-
+-                    (
+-                        sockaddr_in_ptr as *mut SOCKADDR,
+-                        mem::size_of::<SOCKADDR_IN>() as INT,
+-                        AF_INET,
+-                    )
+-                }
+-                IpAddr::V6(ipv6) => {
+-                    let sockaddr_in6_ptr =
+-                        unsafe_alloc!(SOCKADDR_IN6, AddrInfoError::AllocationFailed)?;
+-
+-                    unsafe {
+-                        (*sockaddr_in6_ptr).sin6_family = AF_INET6 as u16;
+-                        // Port applied later via ManagedAddrInfo::apply_port
+-                        (*sockaddr_in6_ptr).sin6_port = 0;
+-                        (*sockaddr_in6_ptr).sin6_flowinfo = 0;
+-                        *(*sockaddr_in6_ptr).sin6_addr.u.Byte_mut() = ipv6.octets();
+-                        // Note: sin6_scope_id field may not be available in this Windows API
+-                        // version
+-                    }
+-
+-                    (
+-                        sockaddr_in6_ptr as *mut SOCKADDR,
+-                        mem::size_of::<SOCKADDR_IN6>() as INT,
+-                        AF_INET6,
+-                    )
+-                }
+-            };
++            let ip_bytes = IpAddrBytes::from(ip);
++            let mut sockaddr_storage = ip_bytes.to_sockaddr_box();
++
++            let sockaddr_ptr = sockaddr_storage.as_ptr();
++            let sockaddr_len = sockaddr_storage.addrlen() as INT;
++            let family = sockaddr_storage.family();
+ 
+             // Create canonical name if available
+-            let canonname = if !name.is_empty() {
+-                T::string_to_canonname(name)?
++            let mut canonname_owned = if !name.is_empty() {
++                Some(T::canonname_from_string(name)?)
+             } else {
+-                T::null_canonname()
++                None
++            };
++            let canonname_ptr = match canonname_owned.as_mut() {
++                Some(owned) => T::canonname_ptr(owned),
++                None => T::null_canonname_ptr(),
+             };
+ 
+-            // Fill in the ADDRINFO structure
+-            unsafe {
+-                T::fill(
+-                    addrinfo_ptr,
+-                    family,                // ai_family
+-                    sockaddr_len as usize, // ai_addrlen
+-                    canonname,             // ai_canonname
+-                    sockaddr_ptr,          // ai_addr
+-                );
+-            }
+-
+-            // Link into the list
+-            if first_addrinfo.is_null() {
+-                first_addrinfo = addrinfo_ptr;
+-                current_addrinfo = addrinfo_ptr;
+-            } else {
+-                unsafe {
+-                    T::set_next(current_addrinfo, addrinfo_ptr);
+-                    current_addrinfo = addrinfo_ptr;
+-                }
+-            }
++            // SAFETY: T is a C struct; we immediately initialize the fields we rely on via
++            // `init_defaults` and `fill`.
++            let mut node: Box<T> = Box::new(unsafe { mem::MaybeUninit::zeroed().assume_init() });
++            T::init_defaults(&mut node);
+ 
+-            // Note: We can't insert into MANAGED_ADDRINFO here because we don't have
+-            // the ManagedAddrInfo wrapper. This tracking is done in the calling functions.
+-            // guard.insert(addrinfo_ptr as usize, ...);
++            // Fill in the ADDRINFO structure
++            T::fill(
++                node.as_mut(),
++                family,
++                sockaddr_len as usize,
++                canonname_ptr,
++                sockaddr_ptr,
++            );
++
++            sockaddrs.push(sockaddr_storage);
++            canonnames.push(canonname_owned);
++            nodes.push(node);
+         }
+ 
+-        Ok(unsafe { Self::new(first_addrinfo) })
+-    }
+-}
+-
+-impl<T: WindowsAddrInfo> Drop for ManagedAddrInfo<T> {
+-    fn drop(&mut self) {
+-        if !self.ptr.is_null() {
+-            unsafe {
+-                // Walk the entire chain and free each node
+-                let mut current = self.ptr;
+-                while !current.is_null() {
+-                    let next = (*current).ai_next();
+-
+-                    // Free the sockaddr structure
+-                    let addr = (*current).ai_addr();
+-                    if !addr.is_null() {
+-                        let sockaddr_layout = if (*current).ai_family() == AF_INET {
+-                            Layout::new::<SOCKADDR_IN>()
+-                        } else {
+-                            Layout::new::<SOCKADDR_IN6>()
+-                        };
+-                        std::alloc::dealloc(addr as *mut u8, sockaddr_layout);
+-                    }
+-
+-                    // Free the canonical name
+-                    let canonname = (*current).ai_canonname();
+-                    T::free_canonname(canonname);
+-
+-                    // Free the ADDRINFO structure itself
+-                    let addrinfo_layout = Layout::new::<T>();
+-                    std::alloc::dealloc(current as *mut u8, addrinfo_layout);
+-
+-                    current = next;
+-                }
++        let mut iter = nodes.iter_mut();
++        if let Some(mut prev) = iter.next() {
++            for next in iter {
++                let next_ptr = next.as_mut() as *mut T;
++                T::set_next(prev.as_mut(), next_ptr);
++                prev = next;
+             }
+         }
++
++        Ok(Self {
++            nodes,
++            sockaddrs,
++            _canonnames: canonnames,
++        })
+     }
+ }
+diff --git a/mirrord/layer-lib/src/socket/dns_selector.rs b/mirrord/layer-lib/src/socket/dns_selector.rs
+index a8550b0abaf..e83dbba2d9f 100644
+--- a/mirrord/layer-lib/src/socket/dns_selector.rs
++++ b/mirrord/layer-lib/src/socket/dns_selector.rs
+@@ -6,10 +6,7 @@ use mirrord_config::feature::network::{
+ };
+ use tracing::Level;
+ 
+-use crate::{
+-    detour::Bypass,
+-    error::{HookError, HookResult},
+-};
++use crate::detour::{Bypass, Detour};
+ 
+ /// Generated from [`DnsConfig`] provided in the [`LayerConfig`](mirrord_config::LayerConfig).
+ /// Decides whether DNS queries are done locally or remotely.
+@@ -24,7 +21,7 @@ pub struct DnsSelector {
+ impl DnsSelector {
+     /// Bypasses queries that should be done locally.
+     #[tracing::instrument(level = Level::DEBUG, ret)]
+-    pub fn check_query(&self, node: &str, port: u16) -> HookResult<()> {
++    pub fn check_query(&self, node: &str, port: u16) -> Detour<()> {
+         let matched = self
+             .filters
+             .iter()
+@@ -49,9 +46,9 @@ impl DnsSelector {
+             });
+ 
+         if matched == self.filter_is_local {
+-            Err(HookError::Bypass(Bypass::LocalDns))
++            Detour::Bypass(Bypass::LocalDns)
+         } else {
+-            Ok(())
++            Detour::Success(())
+         }
+     }
+ }
+diff --git a/mirrord/layer-lib/src/socket/ops.rs b/mirrord/layer-lib/src/socket/ops.rs
+index 76f7ce90f62..362165ecdb4 100644
+--- a/mirrord/layer-lib/src/socket/ops.rs
++++ b/mirrord/layer-lib/src/socket/ops.rs
+@@ -23,21 +23,19 @@ use tracing::{Level, debug, trace};
+ #[cfg(windows)]
+ use winapi::um::winsock2::{WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR};
+ 
+-use super::sockets::socket_descriptor_to_i64;
+-#[cfg(windows)]
+-use crate::socket::dns::windows::check_address_reachability;
+ use crate::{
+-    HookError, HookResult,
+     detour::{Bypass, Detour},
+-    error::ConnectError,
++    error::{HookError, HookResult},
+     proxy_connection::make_proxy_request_with_response,
+     setup::setup,
+     socket::{
+         AF_INET, AF_INET6, AF_UNIX, Bound, Connected, ConnectionThrough, SOCKETS, SocketDescriptor,
+-        SocketState, UserSocket, sockets::reconstruct_user_socket,
++        SocketKind, SocketState, UserSocket, sockets::reconstruct_user_socket,
+     },
+ };
+ #[cfg(windows)]
++use crate::{error::ConnectError, socket::dns::windows::check_address_reachability};
++#[cfg(windows)]
+ use crate::{error::windows::WindowsError, socket::sockets::find_listener_address_by_port};
+ 
+ /// Result type for connect operations that preserves errno information
+@@ -150,7 +148,7 @@ pub fn socket<F>(
+ where
+     F: FnOnce() -> Detour<SocketDescriptor>,
+ {
+-    let socket_kind = type_.try_into()?;
++    let socket_kind = SocketKind::try_from(type_)?;
+ 
+     if !((domain == AF_INET) || (domain == AF_INET6) || (cfg!(unix) && domain == AF_UNIX)) {
+         Err(Bypass::Domain(domain))
+@@ -189,28 +187,30 @@ pub fn connect_to_local_address<F>(
+     user_socket_info: &UserSocket,
+     ip_address: SocketAddr,
+     connect_fn: F,
+-) -> HookResult<Option<ConnectResult>>
++) -> Detour<Option<ConnectResult>>
+ where
+     F: FnOnce(SockAddr) -> ConnectResult,
+ {
+     if setup().outgoing_config().ignore_localhost {
+-        Err(HookError::Bypass(Bypass::IgnoredInIncoming(ip_address)))
++        Detour::Bypass(Bypass::IgnoredInIncoming(ip_address))
+     } else {
+-        Ok(SOCKETS
+-            .lock()?
+-            .iter()
+-            .find_map(|(_, socket)| match socket.state {
+-                SocketState::Listening(Bound {
+-                    requested_address,
+-                    address,
+-                }) => (requested_address.port() == ip_address.port()
+-                    && socket.protocol == user_socket_info.protocol)
+-                    .then(|| SockAddr::from(address)),
+-                SocketState::Bound { .. }
+-                | SocketState::Initialized
+-                | SocketState::Connected(_) => None,
+-            })
+-            .map(connect_fn))
++        Detour::Success(
++            SOCKETS
++                .lock()?
++                .iter()
++                .find_map(|(_, socket)| match socket.state {
++                    SocketState::Listening(Bound {
++                        requested_address,
++                        address,
++                    }) => (requested_address.port() == ip_address.port()
++                        && socket.protocol == user_socket_info.protocol)
++                        .then(|| SockAddr::from(address)),
++                    SocketState::Bound { .. }
++                    | SocketState::Initialized
++                    | SocketState::Connected(_) => None,
++                })
++                .map(connect_fn),
++        )
+     }
+ }
+ 
+@@ -235,7 +235,7 @@ pub fn connect_common<F>(
+     sockfd: SocketDescriptor,
+     remote_address: SockAddr,
+     connect_fn: F,
+-) -> HookResult<ConnectResult>
++) -> Detour<ConnectResult>
+ where
+     F: FnOnce(SockAddr) -> ConnectResult,
+ {
+@@ -256,7 +256,7 @@ where
+ 
+     if let Some(ip_address) = optional_ip_address {
+         if setup().experimental().tcp_ping4_mock && ip_address.port() == 7 {
+-            return Ok(ConnectResult::from(0));
++            return Detour::Success(ConnectResult::from(0));
+         }
+ 
+         // Handle localhost/unspecified addresses first -
+@@ -276,7 +276,7 @@ where
+             )? {
+                 // `result` here is always a success, as error and bypass are returned on the `?`
+                 // above.
+-                return Ok(result);
++                return Detour::Success(result);
+             }
+             #[cfg(windows)]
+             if let Some(local_address) =
+@@ -285,18 +285,18 @@ where
+                 tracing::debug!("connecting locally to listener at {}", local_address);
+                 let local_sockaddr = SockAddr::from(local_address);
+                 let connect_result = call_connect_fn(local_sockaddr);
+-                return Ok(connect_result);
++                return Detour::Success(connect_result);
+             }
+         }
+ 
+         if is_ignored_port(&ip_address) {
+-            return Err(HookError::Bypass(Bypass::IgnoredInIncoming(ip_address)));
++            return Detour::Bypass(Bypass::IgnoredInIncoming(ip_address));
+         }
+ 
+         // Ports 50000 and 50001 are commonly used to communicate with sidecar containers.
+         let bypass_debugger_check = ip_address.port() == 50000 || ip_address.port() == 50001;
+         if bypass_debugger_check.not() && setup().is_debugger_port(&ip_address) {
+-            return Err(HookError::Bypass(Bypass::IgnoredInIncoming(ip_address)));
++            return Detour::Bypass(Bypass::IgnoredInIncoming(ip_address));
+         }
+     } else if remote_address.is_unix() {
+         #[cfg(unix)]
+@@ -314,19 +314,17 @@ where
+                 .map(|addr| unix_streams.is_match(addr))
+                 .unwrap_or(false);
+             if !handle_remotely {
+-                return Err(HookError::Bypass(Bypass::UnixSocket(address)));
++                return Detour::Bypass(Bypass::UnixSocket(address));
+             }
+         }
+         #[cfg(windows)]
+         {
+             debug!("bypassing unix socket, not supported on windows");
+-            return Err(HookError::Bypass(Bypass::UnixSocket(None)));
++            return Detour::Bypass(Bypass::UnixSocket(None));
+         }
+     } else {
+         // We do not hijack connections of this address type - Bypass!
+-        return Err(HookError::Bypass(Bypass::Domain(
+-            remote_address.domain().into(),
+-        )));
++        return Detour::Bypass(Bypass::Domain(remote_address.domain().into()));
+     }
+ 
+     tracing::info!("intercepting connection to {:?}", remote_address);
+@@ -357,10 +355,10 @@ where
+                 )
+             }
+ 
+-            _ => Err(HookError::Bypass(Bypass::DisabledOutgoing)),
++            _ => Detour::Bypass(Bypass::DisabledOutgoing),
+         },
+ 
+-        _ => Err(HookError::Bypass(Bypass::DisabledOutgoing)),
++        _ => Detour::Bypass(Bypass::DisabledOutgoing),
+     }
+ }
+ 
+@@ -385,7 +383,7 @@ pub fn connect_outgoing_common<F>(
+     mut user_socket_info: Arc<UserSocket>,
+     protocol: NetProtocol,
+     connect_fn: F,
+-) -> HookResult<ConnectResult>
++) -> Detour<ConnectResult>
+ where
+     F: FnOnce(SockAddr) -> ConnectResult,
+ {
+@@ -399,7 +397,7 @@ where
+     };
+ 
+     // Closure that performs the connection with mirrord messaging.
+-    let remote_connection = |remote_addr: SockAddr| -> HookResult<ConnectResult> {
++    let remote_connection = |remote_addr: SockAddr| -> Detour<ConnectResult> {
+         // Prepare this socket to be intercepted.
+         let remote_address = SocketAddress::try_from(remote_addr.clone()).unwrap();
+ 
+@@ -408,16 +406,11 @@ where
+             protocol,
+         };
+ 
+-        let response = match make_proxy_request_with_response(request)? {
+-            Ok(response) => response,
+-            Err(e) => return Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
+-        };
+-
+         let OutgoingConnectResponse {
+             connection_id,
+             mut layer_address,
+             in_cluster_address,
+-        } = response;
++        } = make_proxy_request_with_response(request)??;
+ 
+         if let SocketAddress::Ip(interceptor_addr) = &mut layer_address {
+             // Our socket can be bound to any local interface,
+@@ -486,7 +479,7 @@ where
+                 "Failed to connect to an internal proxy socket. \
+                 This is most likely a bug, please report it.",
+             );
+-            return Err(error.into());
++            return Detour::Error(error.into());
+         }
+ 
+         let connected = Connected {
+@@ -500,7 +493,7 @@ where
+ 
+         Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
+         SOCKETS.lock()?.insert(sockfd, user_socket_info);
+-        Ok(connect_result)
++        Detour::Success(connect_result)
+     };
+ 
+     let connect_result = if remote_address.is_unix() {
+@@ -521,16 +514,12 @@ where
+             ConnectionThrough::Remote(addr) => remote_connection(SockAddr::from(addr))?,
+             ConnectionThrough::Local(addr) => {
+                 #[cfg(windows)]
+-                if check_address_reachability(sockfd, &addr) != 0 {
+-                    tracing::error!("socket {} connect target {:?} is unreachable", sockfd, addr);
+-                    return Err(ConnectError::AddressUnreachable(format!("{}", addr)).into());
+-                }
+-
++                check_address_reachability(sockfd, &addr)?;
+                 call_connect_fn(SockAddr::from(addr))
+             }
+         }
+     };
+-    Ok(connect_result)
++    Detour::Success(connect_result)
+ }
+ 
+ /// Creates an outgoing connection request for the specified address and protocol
+@@ -648,7 +637,8 @@ pub fn send_dns_patch(
+ /// - `sendto_fn`: Platform-specific sendto function
+ ///
+ /// ## Returns
+-/// `HookResult<isize>`
++/// `Detour<isize>`
++#[cfg(windows)]
+ #[mirrord_layer_macro::instrument(level = "debug", ret, skip(raw_message, destination, sendto_fn))]
+ pub fn send_to<F>(
+     sockfd: SocketDescriptor,
+@@ -667,7 +657,7 @@ where
+     let user_socket_info = SOCKETS
+         .lock()?
+         .remove(&sockfd)
+-        .ok_or_else(|| HookError::SocketNotFound(socket_descriptor_to_i64(sockfd)))?;
++        .ok_or_else(|| HookError::SocketNotFound(sockfd))?;
+ 
+     // we don't support unix sockets which don't use `connect`
+     #[cfg(unix)]
+@@ -703,13 +693,20 @@ where
+             rawish_true_destination,
+         )
+     } else {
+-        connect_outgoing_common(
++        // Note: temporary Detour workaround until send_to is cross-platform (WIN-85)
++        // The current implementation will bypass any error returned.
++        match connect_outgoing_common(
+             sockfd,
+             destination.into(),
+             user_socket_info,
+             NetProtocol::Datagrams,
+             nop_connect_fn,
+-        )?;
++        ) {
++            Detour::Success(..) => {}
++            _ => {
++                return Err(ConnectError::Fallback.into());
++            }
++        }
+ 
+         let layer_address: SockAddr = SOCKETS
+             .lock()?
+diff --git a/mirrord/layer-lib/src/socket/sockets.rs b/mirrord/layer-lib/src/socket/sockets.rs
+index 2b301ebabba..c6a3fcef943 100644
+--- a/mirrord/layer-lib/src/socket/sockets.rs
++++ b/mirrord/layer-lib/src/socket/sockets.rs
+@@ -26,8 +26,7 @@ use winapi::{
+ 
+ use super::{SocketKind, SocketState, UserSocket};
+ use crate::{
+-    detour::Bypass,
+-    error::{HookError, HookResult},
++    detour::{Bypass, Detour},
+     setup::setup,
+ };
+ 
+@@ -113,16 +112,6 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>>
+             .unwrap_or_default()
+     });
+ 
+-/// Helper function to safely convert socket descriptors to i64 for error handling and logging
+-pub fn socket_descriptor_to_i64(socket: SocketDescriptor) -> i64 {
+-    socket as i64
+-}
+-
+-/// Helper function to convert i64 back to SocketDescriptor (for cases where it's needed)
+-pub fn i64_to_socket_descriptor(value: i64) -> SocketDescriptor {
+-    value as SocketDescriptor
+-}
+-
+ // Helper function to convert socket types to SocketKind
+ pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
+     if (socket_type & SOCK_STREAM) == SOCK_STREAM {
+@@ -144,14 +133,10 @@ pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
+ /// ```ignore
+ /// let user_socket = match SOCKETS.lock()?.remove(&sockfd) {
+ ///     Some(socket) => socket,
+-///     None => match reconstruct_user_socket(sockfd) {
+-///         Ok(socket) => socket,
+-///         Err(HookError::Bypass(bypass)) => return Detour::Bypass(bypass),
+-///         Err(error) => return Detour::Error(error),
+-///     },
++///     None => reconstruct_user_socket(sockfd)?
+ /// };
+ /// ```
+-pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserSocket>> {
++pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> Detour<Arc<UserSocket>> {
+     // Here we just recreate `UserSocket` using domain and type fetched from the descriptor
+     // we have.
+     let (domain, type_) = {
+@@ -163,7 +148,7 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
+                 .map(|family| family as i32)
+                 .unwrap_or(-1);
+             if domain != libc::AF_INET && domain != libc::AF_UNIX {
+-                return Err(HookError::Bypass(Bypass::Domain(domain)));
++                return Detour::Bypass(Bypass::Domain(domain));
+             }
+             // I really hate it, but nix seems to really make this API bad :(
+             let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
+@@ -186,13 +171,14 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
+                 )
+             };
+             if result == SOCKET_ERROR {
+-                return Err(HookError::from(io::Error::last_os_error()));
++                return Detour::Error(io::Error::last_os_error().into());
+             }
+ 
+             let proto_info = unsafe { proto_info.assume_init() };
+             let domain = proto_info.iAddressFamily;
++            // currently only support reconstruction of AF_INET sockets
+             if domain != AF_INET {
+-                return Err(HookError::Bypass(Bypass::Domain(domain)));
++                return Detour::Bypass(Bypass::Domain(domain));
+             }
+ 
+             let socket_type = proto_info.iSocketType;
+@@ -200,8 +186,8 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
+         }
+     };
+ 
+-    let kind = socket_kind_from_type(type_).map_err(|_| HookError::Bypass(Bypass::Type(type_)))?;
+-    Ok(Arc::new(UserSocket::new(
++    let kind = SocketKind::try_from(type_)?;
++    Detour::Success(Arc::new(UserSocket::new(
+         domain,
+         type_,
+         0,
+@@ -210,38 +196,6 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
+     )))
+ }
+ 
+-/// Register a new socket with the unified SOCKETS collection
+-pub fn register_socket(socket: SocketDescriptor, domain: i32, socket_type: i32, protocol: i32) {
+-    let kind = match socket_kind_from_type(socket_type) {
+-        Ok(kind) => kind,
+-        Err(e) => {
+-            tracing::warn!("Failed to create socket kind: {}", e);
+-            return;
+-        }
+-    };
+-
+-    let user_socket = UserSocket::new(
+-        domain,
+-        socket_type,
+-        protocol,
+-        SocketState::Initialized,
+-        kind,
+-    );
+-
+-    let mut sockets = match SOCKETS.lock() {
+-        Ok(sockets) => sockets,
+-        Err(poisoned) => {
+-            tracing::warn!(
+-                "SocketManager: sockets mutex was poisoned during registration, attempting recovery"
+-            );
+-            poisoned.into_inner()
+-        }
+-    };
+-
+-    sockets.insert(socket, Arc::new(user_socket));
+-    tracing::info!("SocketManager: Registered socket {} with mirrord", socket);
+-}
+-
+ /// Check if a socket is managed by mirrord
+ pub fn is_socket_managed(socket: SocketDescriptor) -> bool {
+     SOCKETS
+diff --git a/mirrord/layer-win/src/hooks/socket/mod.rs b/mirrord/layer-win/src/hooks/socket/mod.rs
+index a112defe2a9..7e9bf7c6d2e 100644
+--- a/mirrord/layer-win/src/hooks/socket/mod.rs
++++ b/mirrord/layer-win/src/hooks/socket/mod.rs
+@@ -20,7 +20,7 @@ use mirrord_intproxy_protocol::{
+     ConnMetadataRequest, ConnMetadataResponse, OutgoingConnMetadataRequest, PortSubscribe,
+ };
+ use mirrord_layer_lib::{
+-    detour::{Bypass, Detour, OptionExt},
++    detour::Detour,
+     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
+     proxy_connection::make_proxy_request_with_response,
+     setup::{LayerSetup, NetworkHookConfig, setup},
+@@ -36,7 +36,7 @@ use mirrord_layer_lib::{
+         hostname::remote_hostname_string,
+         is_socket_managed,
+         ops::{ConnectResult, get_last_error, send_to, socket},
+-        sockets::socket_kind_from_type,
++        sockets::{SocketDescriptor, socket_kind_from_type},
+     },
+ };
+ use socket2::SockAddr;
+@@ -218,14 +218,13 @@ static CLOSE_SOCKET_ORIGINAL: OnceLock<&CloseSocketType> = OnceLock::new();
+ unsafe extern "system" fn socket_detour(af: INT, type_: INT, protocol: INT) -> SOCKET {
+     // Call the original function to create the socket
+     let original = SOCKET_ORIGINAL.get().unwrap();
+-    let call_original = || -> Detour<SOCKET> {
++    let call_original = || -> Detour<SocketDescriptor> {
+         let socket_result = unsafe { original(af, type_, protocol) };
+         if socket_result == INVALID_SOCKET {
+-            Err(std::io::Error::from_raw_os_error(get_last_error()))
++            Detour::Error(std::io::Error::from_raw_os_error(get_last_error()).into())
+         } else {
+-            Ok(socket_result)
++            Detour::Success(socket_result)
+         }
+-        .into()
+     };
+     socket(call_original, af, type_, protocol)
+         .unwrap_or_bypass_with(|_| unsafe { original(af, type_, protocol) })
+@@ -242,15 +241,14 @@ unsafe extern "system" fn wsa_socket_detour(
+     dwFlags: u32,
+ ) -> SOCKET {
+     let original = WSA_SOCKET_ORIGINAL.get().unwrap();
+-    let call_original = || -> Detour<SOCKET> {
++    let call_original = || -> Detour<SocketDescriptor> {
+         let socket_result =
+             unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
+         if socket_result == INVALID_SOCKET {
+-            Err(std::io::Error::from_raw_os_error(get_last_error()))
++            Detour::Error(std::io::Error::from_raw_os_error(get_last_error()).into())
+         } else {
+-            Ok(socket_result)
++            Detour::Success(socket_result)
+         }
+-        .into()
+     };
+     socket(call_original, af, socket_type, protocol).unwrap_or_bypass_with(|_| unsafe {
+         original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags)
+@@ -271,11 +269,10 @@ unsafe extern "system" fn wsa_socket_w_detour(
+         let socket_result =
+             unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
+         if socket_result == INVALID_SOCKET {
+-            Err(std::io::Error::from_raw_os_error(get_last_error()))
++            Detour::Error(std::io::Error::from_raw_os_error(get_last_error()).into())
+         } else {
+-            Ok(socket_result)
++            Detour::Success(socket_result)
+         }
+-        .into()
+     };
+     socket(call_original, af, socket_type, protocol).unwrap_or_bypass_with(|_| unsafe {
+         original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags)
+@@ -712,11 +709,10 @@ unsafe extern "system" fn getsockname_detour(
+         .lock()
+         .expect("getsockname_detour -> failed to lock sockets for socket retrieval")
+         .get(&s)
+-        .bypass(Bypass::LocalFdNotFound(s))
+     {
+-        Ok(sock) => sock.clone(),
+-        Err(err) => {
+-            tracing::warn!("getsockname_detour -> failed to get socket: {}", err);
++        Some(sock) => sock.clone(),
++        None => {
++            tracing::warn!("getsockname_detour -> failed to get socket: {}", s);
+             return getsockname_fn();
+         }
+     };
+@@ -1494,12 +1490,15 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT
+     }
+ 
+     // Check if we should resolve this hostname remotely using the DNS selector
+-    if setup()
++    if let Detour::Bypass(reason) = setup()
+         .dns_selector()
+         .check_query(hostname_cstr.as_ref(), 0)
+-        .is_err()
+     {
+-        tracing::debug!("DNS selector check returned local for '{}'", hostname_cstr,);
++        tracing::debug!(
++            ?reason,
++            "DNS selector check returned local for '{}'",
++            hostname_cstr,
++        );
+         return fallback_to_original();
+     }
+ 
+@@ -1578,37 +1577,39 @@ unsafe extern "system" fn getaddrinfo_detour(
+ 
+     let hints_ref = unsafe { raw_hints.as_ref() };
+ 
+-    unsafe {
+-        match getaddrinfo::<ADDRINFOA>(node_opt, service_opt, hints_ref) {
+-            Ok(managed_addr_info) => {
+-                // Store the managed result pointer and move the object to MANAGED_ADDRINFO
+-                let addr_ptr = managed_addr_info.as_ptr();
+-                let mut managed = match MANAGED_ADDRINFO.lock() {
+-                    Ok(guard) => guard,
+-                    Err(poisoned) => {
+-                        tracing::warn!(
+-                            "getaddrinfo: MANAGED_ADDRINFO was poisoned, attempting recovery"
+-                        );
+-                        poisoned.into_inner()
+-                    }
+-                };
+-                managed.insert(addr_ptr as usize, ManagedAddrInfoAny::A(managed_addr_info));
+-                *out_addr_info = addr_ptr;
+-                // Success
+-                ERROR_SUCCESS_I32
+-            }
+-            Err(_) => {
+-                // Fall back to original Windows getaddrinfo
+-                tracing::debug!("getaddrinfo: falling back to original Windows function");
++    // temporary Detour workaround until WIN-85
++    let managed_addr_info = match getaddrinfo::<ADDRINFOA>(node_opt, service_opt, hints_ref) {
++        Detour::Success(info) => info,
++        Detour::Bypass(bypass) => {
++            // Fall back to original Windows getaddrinfo
++            tracing::debug!(
++                ?bypass,
++                "getaddrinfo: falling back to original Windows function"
++            );
++            return unsafe {
+                 GET_ADDR_INFO_ORIGINAL.get().unwrap()(
+                     raw_node,
+                     raw_service,
+                     raw_hints,
+                     out_addr_info,
+                 )
+-            }
++            };
+         }
+-    }
++        Detour::Error(err) => {
++            tracing::error!(?err, "getaddrinfo failed");
++            return err.into();
++        }
++    };
++
++    // Store the managed result pointer and move the object to MANAGED_ADDRINFO
++    let addr_ptr = managed_addr_info.as_ptr();
++    MANAGED_ADDRINFO
++        .lock()
++        .expect("getaddrinfo: MANAGED_ADDRINFO was poisoned")
++        .insert(addr_ptr as usize, ManagedAddrInfoAny::A(managed_addr_info));
++    unsafe { *out_addr_info = addr_ptr };
++
++    ERROR_SUCCESS_I32
+ }
+ 
+ /// Hook for GetAddrInfoW (Unicode version) to handle DNS resolution
+@@ -1638,41 +1639,36 @@ unsafe extern "system" fn getaddrinfow_detour(
+ 
+     let hints_ref = unsafe { hints.as_ref() };
+ 
+-    // Use full windows_getaddrinfo approach with DNS selector logic and service/hints support
+-    match getaddrinfo::<ADDRINFOW>(node_opt.clone(), service_opt, hints_ref) {
+-        Ok(managed_result) => {
+-            tracing::debug!("GetAddrInfoW: full resolution succeeded");
+-            // Store the managed result pointer and move the object to MANAGED_ADDRINFO
+-            let result_ptr = managed_result.as_ptr();
+-            unsafe { *result = result_ptr };
+-            let mut managed = match MANAGED_ADDRINFO.lock() {
+-                Ok(guard) => guard,
+-                Err(poisoned) => {
+-                    tracing::warn!(
+-                        "GetAddrInfoW: MANAGED_ADDRINFO was poisoned, attempting recovery"
+-                    );
+-                    poisoned.into_inner()
+-                }
++    // temporary Detour workaround until WIN-85
++    let managed_addr_info = match getaddrinfo::<ADDRINFOW>(node_opt.clone(), service_opt, hints_ref)
++    {
++        Detour::Success(info) => info,
++        Detour::Bypass(bypass) => {
++            // For all other hostnames or if conversion fails, call original function
++            tracing::debug!(
++                ?bypass,
++                "GetAddrInfoW: calling original function for hostname: {:?}",
++                node_opt
++            );
++            return unsafe {
++                GET_ADDR_INFO_W_ORIGINAL.get().unwrap()(node_name, service_name, hints, result)
+             };
+-            managed.insert(result_ptr as usize, ManagedAddrInfoAny::W(managed_result));
+-            return ERROR_SUCCESS_I32;
+         }
+-        Err(e) => {
+-            tracing::warn!(
+-                "GetAddrInfoW: resolution failed for '{:?}': {}",
+-                node_opt,
+-                e
+-            );
+-            // Fall through to original function
++        Detour::Error(err) => {
++            tracing::error!(?err, "GetAddrInfoW failed");
++            return err.into();
+         }
+-    }
++    };
+ 
+-    // For all other hostnames or if conversion fails, call original function
+-    tracing::debug!(
+-        "GetAddrInfoW: calling original function for hostname: {:?}",
+-        node_opt
+-    );
+-    unsafe { GET_ADDR_INFO_W_ORIGINAL.get().unwrap()(node_name, service_name, hints, result) }
++    // Store the managed result pointer and move the object to MANAGED_ADDRINFO
++    let addr_ptr = managed_addr_info.as_ptr();
++    MANAGED_ADDRINFO
++        .lock()
++        .expect("getaddrinfo: MANAGED_ADDRINFO was poisoned")
++        .insert(addr_ptr as usize, ManagedAddrInfoAny::W(managed_addr_info));
++    unsafe { *result = addr_ptr };
++
++    ERROR_SUCCESS_I32
+ }
+ 
+ /// Deallocates ADDRINFOA structures that were allocated by our getaddrinfo_detour.
+diff --git a/mirrord/layer-win/src/hooks/socket/ops.rs b/mirrord/layer-win/src/hooks/socket/ops.rs
+index 5d62450366b..d3c31a8c935 100644
+--- a/mirrord/layer-win/src/hooks/socket/ops.rs
++++ b/mirrord/layer-win/src/hooks/socket/ops.rs
+@@ -1,9 +1,10 @@
+ use std::{net::SocketAddr, sync::OnceLock};
+ 
+ use mirrord_layer_lib::{
+-    error::ConnectError,
++    detour::Detour,
++    error::{ConnectError, HookResult},
+     socket::{
+-        HookResult, SocketAddrExt,
++        SocketAddrExt,
+         ops::{ConnectResult, connect_common},
+     },
+ };
+@@ -259,5 +260,10 @@ where
+     };
+ 
+     // Try to connect through the mirrord proxy using layer-lib integration
+-    connect_common(socket, SockAddr::from(remote_addr), connect_fn)
++    // Temporary workaround until all socket ops are unified - WIN-85
++    match connect_common(socket, SockAddr::from(remote_addr), connect_fn) {
++        Detour::Success(res) => Ok(res),
++        Detour::Bypass(_) => Err(ConnectError::Fallback.into()),
++        Detour::Error(err) => Err(err),
++    }
+ }
+diff --git a/mirrord/layer-win/src/hooks/socket/utils.rs b/mirrord/layer-win/src/hooks/socket/utils.rs
+index 3992c97fe96..7753c7dcac5 100644
+--- a/mirrord/layer-win/src/hooks/socket/utils.rs
++++ b/mirrord/layer-win/src/hooks/socket/utils.rs
+@@ -1,6 +1,5 @@
+ //! Utility functions for Windows socket operations
+ use std::{
+-    alloc::Layout,
+     convert::TryFrom,
+     ffi::CString,
+     mem,
+@@ -9,15 +8,14 @@ use std::{
+ };
+ 
+ use mirrord_layer_lib::{
+-    error::{AddrInfoError, HookError, HookResult},
+-    socket::SocketAddrExt,
+-    unsafe_alloc,
++    error::{HookError, HookResult},
++    socket::{SocketAddrExt, dns::windows::utils::IpAddrBytes},
+ };
+ use winapi::{
+     shared::{
+         minwindef::INT,
+         winerror::ERROR_SUCCESS,
+-        ws2def::{AF_INET, AF_INET6, SOCKADDR, SOCKADDR_STORAGE},
++        ws2def::{SOCKADDR, SOCKADDR_STORAGE},
+     },
+     um::winsock2::{
+         HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, closesocket, getpeername, getsockname,
+@@ -73,9 +71,20 @@ thread_local! {
+ }
+ 
+ /// RAII wrapper for Windows HOSTENT structure that automatically cleans up on drop
+-#[derive(Debug)]
+ pub struct ManagedHostent {
+-    ptr: *mut HOSTENT,
++    hostent: Box<HOSTENT>,
++
++    // the data's ptrs are encompassed in hostent,
++    //  we hold the data itself to own it and cleanup on drop
++    //  clippy doesnt consider this is as read so it is named _
++    _data: Box<ManagedHostentData>,
++}
++
++pub struct ManagedHostentData {
++    hostname: CString,
++    aliases_ptrs: Vec<*mut i8>,
++    _addr_buf: IpAddrBytes,
++    addr_list: Vec<*mut i8>,
+ }
+ 
+ // SAFETY: We ensure thread safety by only accessing the pointer through controlled operations
+@@ -86,210 +95,50 @@ unsafe impl Sync for ManagedHostent {}
+ impl ManagedHostent {
+     /// Get the raw pointer (for returning to Windows API)
+     pub fn as_ptr(&self) -> *mut HOSTENT {
+-        self.ptr
+-    }
+-
+-    /// Create a new managed HOSTENT from a raw pointer
+-    ///
+-    /// # Safety
+-    /// The caller must ensure the pointer is valid and was allocated by our system
+-    pub unsafe fn new(ptr: *mut HOSTENT) -> Self {
+-        Self { ptr }
++        self.hostent.as_ref() as *const HOSTENT as *mut HOSTENT
+     }
+ }
+ 
+ impl TryFrom<(String, IpAddr)> for ManagedHostent {
+-    type Error = AddrInfoError;
+-
+-    /// Creates a WinAPI compliant HOSTENT structure from hostname and IP address
+-    ///
+-    /// This function properly allocates all required memory using the unsafe_alloc macro
+-    /// and follows WinAPI requirements:
+-    /// - All strings and arrays are heap-allocated
+-    /// - Arrays are null-terminated
+-    /// - Address type and length match the IP version
+-    /// - Memory remains valid until explicitly freed
+-    ///
+-    /// # Arguments
+-    /// * `value` - A tuple containing (hostname, ip_address)
+-    ///
+-    /// # Returns
+-    /// * `Ok(ManagedHostent)` - Managed HOSTENT structure
+-    /// * `Err(AddrInfoError)` - If allocation fails
+-    fn try_from((hostname, ip): (String, IpAddr)) -> Result<Self, Self::Error> {
+-        // Allocate the main HOSTENT structure
+-        let hostent_ptr = unsafe_alloc!(HOSTENT, AddrInfoError::AllocationFailed)?;
+-
+-        // Initialize the structure with null values
+-        unsafe {
+-            ptr::write(
+-                hostent_ptr,
+-                HOSTENT {
+-                    h_name: ptr::null_mut(),
+-                    h_aliases: ptr::null_mut(),
+-                    h_addrtype: 0,
+-                    h_length: 0,
+-                    h_addr_list: ptr::null_mut(),
+-                },
+-            );
+-        }
+-
+-        // Set the hostname - allocate and copy the string
+-        let hostname_cstring = match CString::new(hostname) {
+-            Ok(cstr) => cstr,
+-            Err(_) => {
+-                // Clean up the already allocated HOSTENT
+-                unsafe {
+-                    std::alloc::dealloc(hostent_ptr as *mut u8, Layout::new::<HOSTENT>());
+-                }
+-                return Err(AddrInfoError::AllocationFailed);
+-            }
+-        };
+-
+-        // Allocate memory for the hostname string
+-        let hostname_bytes = hostname_cstring.into_bytes_with_nul();
+-        let hostname_layout = Layout::from_size_align(hostname_bytes.len(), 1)
+-            .map_err(|_| AddrInfoError::AllocationFailed)?;
+-        let hostname_ptr = unsafe { std::alloc::alloc(hostname_layout) as *mut i8 };
+-        if hostname_ptr.is_null() {
+-            unsafe {
+-                std::alloc::dealloc(hostent_ptr as *mut u8, Layout::new::<HOSTENT>());
+-            }
+-            return Err(AddrInfoError::AllocationFailed);
+-        }
+-
+-        // Copy hostname data
+-        unsafe {
+-            ptr::copy_nonoverlapping(
+-                hostname_bytes.as_ptr(),
+-                hostname_ptr as *mut u8,
+-                hostname_bytes.len(),
+-            );
+-            (*hostent_ptr).h_name = hostname_ptr;
+-        }
+-
+-        // Create empty aliases array (just null terminator)
+-        let aliases_ptr = unsafe_alloc!(*mut i8, AddrInfoError::AllocationFailed)?;
+-        unsafe {
+-            ptr::write(aliases_ptr, ptr::null_mut());
+-            (*hostent_ptr).h_aliases = aliases_ptr;
+-        }
+-
+-        match ip {
+-            IpAddr::V4(ipv4) => {
+-                unsafe {
+-                    (*hostent_ptr).h_addrtype = AF_INET as i16;
+-                    (*hostent_ptr).h_length = 4;
+-                }
+-
+-                // Allocate memory for IPv4 address (4 bytes)
+-                let addr_ptr = unsafe_alloc!([u8; 4], AddrInfoError::AllocationFailed)?;
+-                let addr_bytes = ipv4.octets();
+-                unsafe {
+-                    ptr::write(addr_ptr, addr_bytes);
+-                }
+-
+-                // Create address list array with one address + null terminator
+-                let addr_list_ptr = unsafe_alloc!([*mut i8; 2], AddrInfoError::AllocationFailed)?;
+-                unsafe {
+-                    ptr::write(addr_list_ptr, [addr_ptr as *mut i8, ptr::null_mut()]);
+-                    (*hostent_ptr).h_addr_list = addr_list_ptr as *mut *mut i8;
+-                }
+-            }
+-            IpAddr::V6(ipv6) => {
+-                unsafe {
+-                    (*hostent_ptr).h_addrtype = AF_INET6 as i16;
+-                    (*hostent_ptr).h_length = 16;
+-                }
+-
+-                // Allocate memory for IPv6 address (16 bytes)
+-                let addr_ptr = unsafe_alloc!([u8; 16], AddrInfoError::AllocationFailed)?;
+-                let addr_bytes = ipv6.octets();
+-                unsafe {
+-                    ptr::write(addr_ptr, addr_bytes);
+-                }
+-
+-                // Create address list array with one address + null terminator
+-                let addr_list_ptr = unsafe_alloc!([*mut i8; 2], AddrInfoError::AllocationFailed)?;
+-                unsafe {
+-                    ptr::write(addr_list_ptr, [addr_ptr as *mut i8, ptr::null_mut()]);
+-                    (*hostent_ptr).h_addr_list = addr_list_ptr as *mut *mut i8;
+-                }
+-            }
+-        }
+-
+-        Ok(unsafe { Self::new(hostent_ptr) })
+-    }
+-}
+-
+-impl Drop for ManagedHostent {
+-    /// Safely frees all memory associated with a HOSTENT structure
+-    ///
+-    /// This function properly deallocates all the memory that was allocated in the TryFrom
+-    /// implementation:
+-    /// - The hostname string
+-    /// - The aliases array
+-    /// - The address data
+-    /// - The address list array
+-    /// - The HOSTENT structure itself
+-    fn drop(&mut self) {
+-        if self.ptr.is_null() {
+-            return;
+-        }
+-
+-        let hostent = unsafe { &*self.ptr };
+-
+-        // Free hostname string
+-        if !hostent.h_name.is_null() {
+-            // Calculate the length of the null-terminated string
+-            let hostname_len = unsafe {
+-                let ptr = hostent.h_name;
+-                (0..).take_while(|&i| *ptr.offset(i) != 0).count() + 1
+-            };
+-
+-            if let Ok(layout) = Layout::from_size_align(hostname_len, 1) {
+-                unsafe {
+-                    std::alloc::dealloc(hostent.h_name as *mut u8, layout);
+-                }
+-            }
+-        }
+-
+-        // Free aliases array (we only allocated space for one null pointer)
+-        if !hostent.h_aliases.is_null() {
+-            unsafe {
+-                std::alloc::dealloc(hostent.h_aliases as *mut u8, Layout::new::<*mut i8>());
+-            }
+-        }
+-
+-        // Free address list and address data
+-        if !hostent.h_addr_list.is_null() {
+-            let first_addr = unsafe { *hostent.h_addr_list };
+-            if !first_addr.is_null() {
+-                // Free the address data based on the address type
+-                match hostent.h_addrtype as i32 {
+-                    AF_INET => unsafe {
+-                        std::alloc::dealloc(first_addr as *mut u8, Layout::new::<[u8; 4]>());
+-                    },
+-                    AF_INET6 => unsafe {
+-                        std::alloc::dealloc(first_addr as *mut u8, Layout::new::<[u8; 16]>());
+-                    },
+-                    _ => {} // Unknown address type, skip deallocation to avoid corruption
+-                }
+-            }
+-
+-            // Free the address list array (contains 2 pointers: address + null)
+-            unsafe {
+-                std::alloc::dealloc(
+-                    hostent.h_addr_list as *mut u8,
+-                    Layout::new::<[*mut i8; 2]>(),
+-                );
+-            }
+-        }
+-
+-        // Finally, free the HOSTENT structure itself
+-        unsafe {
+-            std::alloc::dealloc(self.ptr as *mut u8, Layout::new::<HOSTENT>());
+-        }
++    type Error = HookError;
++
++    /// Creates a WinAPI compliant HOSTENT structure from hostname and IP address.
++    fn try_from((hostname, ip): (String, IpAddr)) -> HookResult<Self> {
++        let hostname = CString::new(hostname)?;
++
++        // Note from WINAPI: h_aliases is a NULL-terminated list of alternate names
++        // produce empty aliases ptr list (we having nothing but the hostname)
++        // So if we ever want to support aliases, we will need to own them in ManagedHostent, in
++        // addition to their reported pointer
++        let aliases_ptrs: Vec<*mut i8> = vec![ptr::null_mut()];
++
++        let addr_buf = IpAddrBytes::from(ip);
++        let addr_ptr = addr_buf.as_ptr() as *mut u8;
++        let addrtype = addr_buf.family() as i16;
++        let addrlen = addr_buf.addr_len() as i16;
++
++        // Note from WINAPI: addr_list is a NULL-terminated list of addresses for the host
++        let addr_list: Vec<*mut i8> = vec![addr_ptr as *mut _, ptr::null_mut()];
++
++        let mut data = Box::new(ManagedHostentData {
++            hostname,
++            aliases_ptrs,
++            _addr_buf: addr_buf,
++            addr_list,
++        });
++
++        let hostent = Box::new(HOSTENT {
++            h_name: data.hostname.as_ptr() as *mut i8,
++            h_aliases: data.aliases_ptrs.as_mut_ptr(),
++            h_addrtype: addrtype,
++            h_length: addrlen,
++            h_addr_list: data.addr_list.as_mut_ptr(),
++        });
++
++        Ok(Self {
++            hostent,
++            _data: data,
++        })
+     }
+ }
+ 
+@@ -307,7 +156,7 @@ impl Drop for ManagedHostent {
+ ///
+ /// # Returns
+ /// * `Ok(*mut HOSTENT)` - Raw pointer to thread-local HOSTENT structure
+-/// * `Err(AddrInfoError)` - If allocation fails
++/// * `Err(HookError)` - If allocation fails
+ ///
+ /// # Safety
+ /// The returned pointer is valid until:
+@@ -315,10 +164,7 @@ impl Drop for ManagedHostent {
+ /// 2. The thread exits (automatic cleanup)
+ ///
+ /// This matches the documented behavior of WinSock's gethostbyname function.
+-pub fn create_thread_local_hostent(
+-    hostname: String,
+-    ip: IpAddr,
+-) -> Result<*mut HOSTENT, AddrInfoError> {
++pub fn create_thread_local_hostent(hostname: String, ip: IpAddr) -> HookResult<*mut HOSTENT> {
+     THREAD_HOSTENT.with(|cell| {
+         let mut hostent_ref = cell.borrow_mut();
+ 
+diff --git a/mirrord/layer/src/socket/hooks.rs b/mirrord/layer/src/socket/hooks.rs
+index 631fd6499f6..0982a24d9bb 100644
+--- a/mirrord/layer/src/socket/hooks.rs
++++ b/mirrord/layer/src/socket/hooks.rs
+@@ -8,7 +8,11 @@ use libc::{c_uint, iovec, sa_endpoints_t, sae_associd_t, sae_connid_t};
+ use mirrord_config::experimental::ExperimentalConfig;
+ #[cfg(target_os = "macos")]
+ use mirrord_layer_lib::socket::apple_dnsinfo::*;
+-use mirrord_layer_lib::{detour::DetourGuard, mutex::Mutex, socket::ops::socket};
++use mirrord_layer_lib::{
++    detour::{Detour, DetourGuard},
++    mutex::Mutex,
++    socket::ops::socket,
++};
+ use mirrord_layer_macro::{hook_fn, hook_guard_fn};
+ use nix::errno::Errno;
+ 
+@@ -30,11 +34,10 @@ pub(crate) unsafe extern "C" fn socket_detour(
+         let call_original = || {
+             let socket_result = FN_SOCKET(domain, type_, protocol);
+             if socket_result == -1 {
+-                Err(std::io::Error::last_os_error())
++                Detour::Error(std::io::Error::last_os_error().into())
+             } else {
+-                Ok(socket_result)
++                Detour::Success(socket_result)
+             }
+-            .into()
+         };
+         socket(call_original, domain, type_, protocol)
+             .unwrap_or_bypass_with(|_| FN_SOCKET(domain, type_, protocol))
+diff --git a/mirrord/layer/src/socket/ops.rs b/mirrord/layer/src/socket/ops.rs
+index a0431874cd7..2535e8b98dc 100644
+--- a/mirrord/layer/src/socket/ops.rs
++++ b/mirrord/layer/src/socket/ops.rs
+@@ -484,7 +484,6 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
+         protocol,
+         connect_fn,
+     )
+-    .into()
+ }
+ 
+ /// Handles 3 different cases, depending on if the outgoing traffic feature is enabled or not:
+@@ -508,7 +507,7 @@ pub(super) fn connect(
+     };
+     trace!("in connect {:#?}", SOCKETS);
+ 
+-    connect_common(sockfd, remote_address, connect_fn).into()
++    connect_common(sockfd, remote_address, connect_fn)
+ }
+ 
+ /// For IPv6 server / IPv4 client connections, translate IPv4
