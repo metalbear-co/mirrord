@@ -490,6 +490,11 @@ pub enum NewOperatorFeature {
 
     PreviewEnv,
 
+    /// The operator supports the unified `BranchDatabase` CRD with per-dialect options
+    /// (`postgresOptions`, `mysqlOptions`, `mongodbOptions`) instead of the old separate
+    /// `PgBranchDatabase`, `MysqlBranchDatabase`, `MongodbBranchDatabase` CRDs.
+    UnifiedBranchDbCrd,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -526,6 +531,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SqsQueueSplittingWithJqFilter => {
                 "Splitting SQS queues with a jq filter"
             }
+            NewOperatorFeature::UnifiedBranchDbCrd => "unified branch database CRD",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
