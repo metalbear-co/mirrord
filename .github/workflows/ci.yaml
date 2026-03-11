@@ -845,6 +845,7 @@ jobs:
       [
         towncrier_check,
         typos_check,
+        vale_check,
         changed_files,
         intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
@@ -868,6 +869,8 @@ jobs:
         env:
           CI_SUCCESS: ${{ (needs.changed_files.result == 'success') &&
             (needs.towncrier_check.result == 'success') &&
+            (needs.typos_check.result == 'sucess' ) &&
+            (needs.vale_check.result == 'success') &&
             (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
             (needs.test_cli_image.result == 'success' || needs.test_cli_image.result == 'skipped') &&
             (needs.macos_tests.result == 'success' || needs.macos_tests.result == 'skipped') &&
