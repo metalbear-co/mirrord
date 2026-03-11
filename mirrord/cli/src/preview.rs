@@ -327,6 +327,9 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
 
     // This line is parsed by the github action to generate an output,
     // so please update it as well if you're gonna change this line.
+    // We're doing this weird .subtask().success() stuff because
+    // otherwise it messes up the ordering or looks weird in some
+    // other way :'(
     progress.subtask(&format!("key: {key}")).success(None);
     progress
         .subtask(&format!("namespace: {namespace}"))
