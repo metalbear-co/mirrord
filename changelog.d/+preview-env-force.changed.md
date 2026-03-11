@@ -1,0 +1,1 @@
+`mirrord preview start` no longer replaces an existing session automatically when giving it the same image registry, image repository, target and key. To replace an existing session use the new `--force` argument, which will replace it regardless of whether the images "match" or not.
