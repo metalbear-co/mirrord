@@ -23,20 +23,18 @@ use tracing::{Level, debug, trace};
 #[cfg(windows)]
 use winapi::um::winsock2::{WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR};
 
-use super::sockets::socket_descriptor_to_i64;
-#[cfg(windows)]
-use crate::socket::dns::windows::check_address_reachability;
 use crate::{
-    HookError, HookResult,
     detour::{Bypass, Detour},
-    error::ConnectError,
+    error::{HookError, HookResult},
     proxy_connection::make_proxy_request_with_response,
     setup::setup,
     socket::{
         AF_INET, AF_INET6, AF_UNIX, Bound, Connected, ConnectionThrough, SOCKETS, SocketDescriptor,
-        SocketState, UserSocket, sockets::reconstruct_user_socket,
+        SocketKind, SocketState, UserSocket, sockets::reconstruct_user_socket,
     },
 };
+#[cfg(windows)]
+use crate::{error::ConnectError, socket::dns::windows::check_address_reachability};
 #[cfg(windows)]
 use crate::{error::windows::WindowsError, socket::sockets::find_listener_address_by_port};
 
@@ -150,7 +148,7 @@ pub fn socket<F>(
 where
     F: FnOnce() -> Detour<SocketDescriptor>,
 {
-    let socket_kind = type_.try_into()?;
+    let socket_kind = SocketKind::try_from(type_)?;
 
     if !((domain == AF_INET) || (domain == AF_INET6) || (cfg!(unix) && domain == AF_UNIX)) {
         Err(Bypass::Domain(domain))
@@ -189,28 +187,30 @@ pub fn connect_to_local_address<F>(
     user_socket_info: &UserSocket,
     ip_address: SocketAddr,
     connect_fn: F,
-) -> HookResult<Option<ConnectResult>>
+) -> Detour<Option<ConnectResult>>
 where
     F: FnOnce(SockAddr) -> ConnectResult,
 {
     if setup().outgoing_config().ignore_localhost {
-        Err(HookError::Bypass(Bypass::IgnoredInIncoming(ip_address)))
+        Detour::Bypass(Bypass::IgnoredInIncoming(ip_address))
     } else {
-        Ok(SOCKETS
-            .lock()?
-            .iter()
-            .find_map(|(_, socket)| match socket.state {
-                SocketState::Listening(Bound {
-                    requested_address,
-                    address,
-                }) => (requested_address.port() == ip_address.port()
-                    && socket.protocol == user_socket_info.protocol)
-                    .then(|| SockAddr::from(address)),
-                SocketState::Bound { .. }
-                | SocketState::Initialized
-                | SocketState::Connected(_) => None,
-            })
-            .map(connect_fn))
+        Detour::Success(
+            SOCKETS
+                .lock()?
+                .iter()
+                .find_map(|(_, socket)| match socket.state {
+                    SocketState::Listening(Bound {
+                        requested_address,
+                        address,
+                    }) => (requested_address.port() == ip_address.port()
+                        && socket.protocol == user_socket_info.protocol)
+                        .then(|| SockAddr::from(address)),
+                    SocketState::Bound { .. }
+                    | SocketState::Initialized
+                    | SocketState::Connected(_) => None,
+                })
+                .map(connect_fn),
+        )
     }
 }
 
@@ -235,7 +235,7 @@ pub fn connect_common<F>(
     sockfd: SocketDescriptor,
     remote_address: SockAddr,
     connect_fn: F,
-) -> HookResult<ConnectResult>
+) -> Detour<ConnectResult>
 where
     F: FnOnce(SockAddr) -> ConnectResult,
 {
@@ -256,7 +256,7 @@ where
 
     if let Some(ip_address) = optional_ip_address {
         if setup().experimental().tcp_ping4_mock && ip_address.port() == 7 {
-            return Ok(ConnectResult::from(0));
+            return Detour::Success(ConnectResult::from(0));
         }
 
         // Handle localhost/unspecified addresses first -
@@ -276,7 +276,7 @@ where
             )? {
                 // `result` here is always a success, as error and bypass are returned on the `?`
                 // above.
-                return Ok(result);
+                return Detour::Success(result);
             }
             #[cfg(windows)]
             if let Some(local_address) =
@@ -285,18 +285,18 @@ where
                 tracing::debug!("connecting locally to listener at {}", local_address);
                 let local_sockaddr = SockAddr::from(local_address);
                 let connect_result = call_connect_fn(local_sockaddr);
-                return Ok(connect_result);
+                return Detour::Success(connect_result);
             }
         }
 
         if is_ignored_port(&ip_address) {
-            return Err(HookError::Bypass(Bypass::IgnoredInIncoming(ip_address)));
+            return Detour::Bypass(Bypass::IgnoredInIncoming(ip_address));
         }
 
         // Ports 50000 and 50001 are commonly used to communicate with sidecar containers.
         let bypass_debugger_check = ip_address.port() == 50000 || ip_address.port() == 50001;
         if bypass_debugger_check.not() && setup().is_debugger_port(&ip_address) {
-            return Err(HookError::Bypass(Bypass::IgnoredInIncoming(ip_address)));
+            return Detour::Bypass(Bypass::IgnoredInIncoming(ip_address));
         }
     } else if remote_address.is_unix() {
         #[cfg(unix)]
@@ -314,19 +314,17 @@ where
                 .map(|addr| unix_streams.is_match(addr))
                 .unwrap_or(false);
             if !handle_remotely {
-                return Err(HookError::Bypass(Bypass::UnixSocket(address)));
+                return Detour::Bypass(Bypass::UnixSocket(address));
             }
         }
         #[cfg(windows)]
         {
             debug!("bypassing unix socket, not supported on windows");
-            return Err(HookError::Bypass(Bypass::UnixSocket(None)));
+            return Detour::Bypass(Bypass::UnixSocket(None));
         }
     } else {
         // We do not hijack connections of this address type - Bypass!
-        return Err(HookError::Bypass(Bypass::Domain(
-            remote_address.domain().into(),
-        )));
+        return Detour::Bypass(Bypass::Domain(remote_address.domain().into()));
     }
 
     tracing::info!("intercepting connection to {:?}", remote_address);
@@ -357,10 +355,10 @@ where
                 )
             }
 
-            _ => Err(HookError::Bypass(Bypass::DisabledOutgoing)),
+            _ => Detour::Bypass(Bypass::DisabledOutgoing),
         },
 
-        _ => Err(HookError::Bypass(Bypass::DisabledOutgoing)),
+        _ => Detour::Bypass(Bypass::DisabledOutgoing),
     }
 }
 
@@ -385,7 +383,7 @@ pub fn connect_outgoing_common<F>(
     mut user_socket_info: Arc<UserSocket>,
     protocol: NetProtocol,
     connect_fn: F,
-) -> HookResult<ConnectResult>
+) -> Detour<ConnectResult>
 where
     F: FnOnce(SockAddr) -> ConnectResult,
 {
@@ -399,7 +397,7 @@ where
     };
 
     // Closure that performs the connection with mirrord messaging.
-    let remote_connection = |remote_addr: SockAddr| -> HookResult<ConnectResult> {
+    let remote_connection = |remote_addr: SockAddr| -> Detour<ConnectResult> {
         // Prepare this socket to be intercepted.
         let remote_address = SocketAddress::try_from(remote_addr.clone()).unwrap();
 
@@ -408,16 +406,11 @@ where
             protocol,
         };
 
-        let response = match make_proxy_request_with_response(request)? {
-            Ok(response) => response,
-            Err(e) => return Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-        };
-
         let OutgoingConnectResponse {
             connection_id,
             mut layer_address,
             in_cluster_address,
-        } = response;
+        } = make_proxy_request_with_response(request)??;
 
         if let SocketAddress::Ip(interceptor_addr) = &mut layer_address {
             // Our socket can be bound to any local interface,
@@ -486,7 +479,7 @@ where
                 "Failed to connect to an internal proxy socket. \
                 This is most likely a bug, please report it.",
             );
-            return Err(error.into());
+            return Detour::Error(error.into());
         }
 
         let connected = Connected {
@@ -500,7 +493,7 @@ where
 
         Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
         SOCKETS.lock()?.insert(sockfd, user_socket_info);
-        Ok(connect_result)
+        Detour::Success(connect_result)
     };
 
     let connect_result = if remote_address.is_unix() {
@@ -521,16 +514,12 @@ where
             ConnectionThrough::Remote(addr) => remote_connection(SockAddr::from(addr))?,
             ConnectionThrough::Local(addr) => {
                 #[cfg(windows)]
-                if check_address_reachability(sockfd, &addr) != 0 {
-                    tracing::error!("socket {} connect target {:?} is unreachable", sockfd, addr);
-                    return Err(ConnectError::AddressUnreachable(format!("{}", addr)).into());
-                }
-
+                check_address_reachability(sockfd, &addr)?;
                 call_connect_fn(SockAddr::from(addr))
             }
         }
     };
-    Ok(connect_result)
+    Detour::Success(connect_result)
 }
 
 /// Creates an outgoing connection request for the specified address and protocol
@@ -648,7 +637,8 @@ pub fn send_dns_patch(
 /// - `sendto_fn`: Platform-specific sendto function
 ///
 /// ## Returns
-/// `HookResult<isize>`
+/// `Detour<isize>`
+#[cfg(windows)]
 #[mirrord_layer_macro::instrument(level = "debug", ret, skip(raw_message, destination, sendto_fn))]
 pub fn send_to<F>(
     sockfd: SocketDescriptor,
@@ -667,7 +657,7 @@ where
     let user_socket_info = SOCKETS
         .lock()?
         .remove(&sockfd)
-        .ok_or_else(|| HookError::SocketNotFound(socket_descriptor_to_i64(sockfd)))?;
+        .ok_or_else(|| HookError::SocketNotFound(sockfd))?;
 
     // we don't support unix sockets which don't use `connect`
     #[cfg(unix)]
@@ -703,13 +693,20 @@ where
             rawish_true_destination,
         )
     } else {
-        connect_outgoing_common(
+        // Note: temporary Detour workaround until send_to is cross-platform (WIN-85)
+        // The current implementation will bypass any error returned.
+        match connect_outgoing_common(
             sockfd,
             destination.into(),
             user_socket_info,
             NetProtocol::Datagrams,
             nop_connect_fn,
-        )?;
+        ) {
+            Detour::Success(..) => {}
+            _ => {
+                return Err(ConnectError::Fallback.into());
+            }
+        }
 
         let layer_address: SockAddr = SOCKETS
             .lock()?
