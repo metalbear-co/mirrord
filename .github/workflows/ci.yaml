@@ -834,7 +834,7 @@ jobs:
     with:
       mirrord_release_branch: true
 
-  # We need some "accummulation" job here because bors fails (timeouts) to
+  # We need some "accumulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
   # Hence, we have some kind of dummy here that bors can listen on
   ci-success:
@@ -869,7 +869,7 @@ jobs:
         env:
           CI_SUCCESS: ${{ (needs.changed_files.result == 'success') &&
             (needs.towncrier_check.result == 'success') &&
-            (needs.typos_check.result == 'sucess' ) &&
+            (needs.typos_check.result == 'success' ) &&
             (needs.vale_check.result == 'success') &&
             (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
             (needs.test_cli_image.result == 'success' || needs.test_cli_image.result == 'skipped') &&
