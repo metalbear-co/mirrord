@@ -6,6 +6,7 @@ MetalBear
 kubectl
 kubeconfig
 Kubernetes
+Minikube
 namespace
 namespaces
 CRD
@@ -180,6 +181,7 @@ shasums
 regex
 regexes
 logfile
+env
 
 # Package managers / version tools
 Akka
@@ -200,6 +202,7 @@ OpenAPI
 openapi
 podname
 run_id
+user_application
 libuv
 newtype
 ```

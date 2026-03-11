@@ -4,4 +4,4 @@ link: 'https://developers.google.com/style/quotation-marks'
 level: error
 nonword: true
 tokens:
-  - '"[^"]+"[.,?]'
+  - '"[^"]+"[.,?]\s+'
