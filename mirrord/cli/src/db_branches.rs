@@ -306,8 +306,7 @@ async fn delete_branches<I, R, P>(
     P: Progress,
 {
     for (name, namespace) in branches {
-        let mut branch_progress =
-            progress.subtask(&format!("destroying {} {name}", R::kind(&())));
+        let mut branch_progress = progress.subtask(&format!("destroying {} {name}", R::kind(&())));
         let api: Api<R> = Api::namespaced(client.clone(), &namespace);
         match api.delete(&name, delete_params).await {
             Ok(_) => branch_progress.success(Some(&format!("destroyed {name}"))),
@@ -395,8 +394,7 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &[String]) -> 
         let mysql_api: Api<MysqlBranchDatabase> = get_api(args, &client, &layer_config);
         let mongodb_api: Api<MongodbBranchDatabase> = get_api(args, &client, &layer_config);
 
-        let mysql_branches =
-            list_resource_if_defined(&mysql_api, &mut destroy_progress).await?;
+        let mysql_branches = list_resource_if_defined(&mysql_api, &mut destroy_progress).await?;
         let pg_branches = list_resource_if_defined(&pg_api, &mut destroy_progress).await?;
         let mongodb_branches =
             list_resource_if_defined(&mongodb_api, &mut destroy_progress).await?;
@@ -458,9 +456,7 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &[String]) -> 
             )
             .await;
 
-            let pg_matching = pg_pairs
-                .into_iter()
-                .filter(|(name, _)| wanted.remove(name));
+            let pg_matching = pg_pairs.into_iter().filter(|(name, _)| wanted.remove(name));
             delete_branches::<_, PgBranchDatabase, _>(
                 pg_matching,
                 &client,
