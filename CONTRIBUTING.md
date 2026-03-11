@@ -343,7 +343,7 @@ The binary is created at `./target/<platform>/debug/mirrord`
 
 #### Run mirrord with a local process
 
-Sample web server - `app.js` (present at `sample/node/app.mjs` in the repo)
+Sample web server - `app.js` (present at `sample/node/app.mjs` in the repository)
 
 <details>
   <summary>sample/node/app.mjs</summary>
@@ -648,8 +648,8 @@ From [the release workflow definition](/.github/workflows/release.yaml):
 
 To test the release workflow:
 
-1. Push your changes to a branch on the main mirrord repo (not a fork)
-2. Go to [the release workflow section under the Actions tab on the mirrord repo](https://github.com/metalbear-co/mirrord/actions/workflows/release.yaml)
+1. Push your changes to a branch on the main mirrord repository (not a fork)
+2. Go to [the release workflow section under the Actions tab on the mirrord repository](https://github.com/metalbear-co/mirrord/actions/workflows/release.yaml)
 3. On the right of the "This workflow has a `workflow_dispatch` event trigger." banner, select the dropdown labelled "Run workflow"
 4. Select the branch with your changes and run
 
@@ -669,7 +669,7 @@ The xtask approach is preferred for new development as it provides better error 
 
 mirrord uses [`typos`](https://github.com/crate-ci/typos) to catch typos in CI. If the pipeline fails
 due to a false positive (e.g. a domain-specific term, identifier, or intentional spelling), you can add
-an exception in [`typos.toml`](typos.toml) at the root of the repository:
+an exception in the [typos configuration file](typos.toml) at the root of the repository:
 
 - **Identifiers** (variable names, type names, etc.) — add to `[default.extend-identifiers]`:
   ```toml
@@ -699,9 +699,9 @@ Add a changelog file in `changelog.d/` named `<identifier>.<category>.md`
 - `+some-name.added.md` (without issue)
 
 **Identifier:**
-- If a GitHub issue exists, use the issue number from the public [mirrord repo](https://github.com/metalbear-co/mirrord)
+- If a GitHub issue exists, use the issue number from the public [mirrord repository](https://github.com/metalbear-co/mirrord)
 - Use `+some-name` if no issue exists
-- Don't use Linear issues or private repo issue numbers
+- Don't use Linear issues or private repository issue numbers
 
 **Category:**
 - `added` for new functionality
