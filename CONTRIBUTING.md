@@ -690,6 +690,32 @@ an exception in the [typos configuration file](typos.toml) at the root of the re
   ```
 
 
+## Prose Checks (Vale)
+
+mirrord uses [Vale](https://vale.sh) to enforce writing style in Markdown files and Rust doc comments. It runs in CI on changed files. To run it locally:
+
+```bash
+vale .
+```
+
+If Vale reports a false positive, you have two options depending on the type of issue:
+
+- **Unknown word** (spelling error on a valid technical term) - add it to the vocabulary file at [.vale/styles/config/vocabularies/Metalbear/accept.txt](.vale/styles/config/vocabularies/Metalbear/accept.txt), one word per line.
+
+- **Wrong term** (Vale flags a correct capitalization or spelling as wrong) - add a substitution rule to [.vale/styles/Metalbear/Terms.yml](.vale/styles/Metalbear/Terms.yml):
+  ```yaml
+  swap:
+    WrongForm: CorrectForm
+  ```
+
+- **Inline suppression** (single occurrence that shouldn't be a global exception) — wrap the text with Vale's disable/enable comments:
+  ```markdown
+  <!-- vale off -->
+  Text that should not be checked.
+  <!-- vale on -->
+  ```
+
+
 ## Changelog Entry
 
 Add a changelog file in `changelog.d/` named `<identifier>.<category>.md`
