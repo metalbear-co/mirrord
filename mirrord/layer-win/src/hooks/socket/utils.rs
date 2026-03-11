@@ -1,6 +1,5 @@
 //! Utility functions for Windows socket operations
 use std::{
-    alloc::Layout,
     convert::TryFrom,
     ffi::CString,
     mem,
@@ -9,15 +8,14 @@ use std::{
 };
 
 use mirrord_layer_lib::{
-    error::{AddrInfoError, HookError, HookResult},
-    socket::SocketAddrExt,
-    unsafe_alloc,
+    error::{HookError, HookResult},
+    socket::{SocketAddrExt, dns::windows::utils::IpAddrBytes},
 };
 use winapi::{
     shared::{
         minwindef::INT,
         winerror::ERROR_SUCCESS,
-        ws2def::{AF_INET, AF_INET6, SOCKADDR, SOCKADDR_STORAGE},
+        ws2def::{SOCKADDR, SOCKADDR_STORAGE},
     },
     um::winsock2::{
         HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, closesocket, getpeername, getsockname,
@@ -73,9 +71,20 @@ thread_local! {
 }
 
 /// RAII wrapper for Windows HOSTENT structure that automatically cleans up on drop
-#[derive(Debug)]
 pub struct ManagedHostent {
-    ptr: *mut HOSTENT,
+    hostent: Box<HOSTENT>,
+
+    // the data's ptrs are encompassed in hostent,
+    //  we hold the data itself to own it and cleanup on drop
+    //  clippy doesnt consider this is as read so it is named _
+    _data: Box<ManagedHostentData>,
+}
+
+pub struct ManagedHostentData {
+    hostname: CString,
+    aliases_ptrs: Vec<*mut i8>,
+    _addr_buf: IpAddrBytes,
+    addr_list: Vec<*mut i8>,
 }
 
 // SAFETY: We ensure thread safety by only accessing the pointer through controlled operations
@@ -86,210 +95,50 @@ unsafe impl Sync for ManagedHostent {}
 impl ManagedHostent {
     /// Get the raw pointer (for returning to Windows API)
     pub fn as_ptr(&self) -> *mut HOSTENT {
-        self.ptr
-    }
-
-    /// Create a new managed HOSTENT from a raw pointer
-    ///
-    /// # Safety
-    /// The caller must ensure the pointer is valid and was allocated by our system
-    pub unsafe fn new(ptr: *mut HOSTENT) -> Self {
-        Self { ptr }
+        self.hostent.as_ref() as *const HOSTENT as *mut HOSTENT
     }
 }
 
 impl TryFrom<(String, IpAddr)> for ManagedHostent {
-    type Error = AddrInfoError;
+    type Error = HookError;
 
-    /// Creates a WinAPI compliant HOSTENT structure from hostname and IP address
-    ///
-    /// This function properly allocates all required memory using the unsafe_alloc macro
-    /// and follows WinAPI requirements:
-    /// - All strings and arrays are heap-allocated
-    /// - Arrays are null-terminated
-    /// - Address type and length match the IP version
-    /// - Memory remains valid until explicitly freed
-    ///
-    /// # Arguments
-    /// * `value` - A tuple containing (hostname, ip_address)
-    ///
-    /// # Returns
-    /// * `Ok(ManagedHostent)` - Managed HOSTENT structure
-    /// * `Err(AddrInfoError)` - If allocation fails
-    fn try_from((hostname, ip): (String, IpAddr)) -> Result<Self, Self::Error> {
-        // Allocate the main HOSTENT structure
-        let hostent_ptr = unsafe_alloc!(HOSTENT, AddrInfoError::AllocationFailed)?;
+    /// Creates a WinAPI compliant HOSTENT structure from hostname and IP address.
+    fn try_from((hostname, ip): (String, IpAddr)) -> HookResult<Self> {
+        let hostname = CString::new(hostname)?;
 
-        // Initialize the structure with null values
-        unsafe {
-            ptr::write(
-                hostent_ptr,
-                HOSTENT {
-                    h_name: ptr::null_mut(),
-                    h_aliases: ptr::null_mut(),
-                    h_addrtype: 0,
-                    h_length: 0,
-                    h_addr_list: ptr::null_mut(),
-                },
-            );
-        }
+        // Note from WINAPI: h_aliases is a NULL-terminated list of alternate names
+        // produce empty aliases ptr list (we having nothing but the hostname)
+        // So if we ever want to support aliases, we will need to own them in ManagedHostent, in
+        // addition to their reported pointer
+        let aliases_ptrs: Vec<*mut i8> = vec![ptr::null_mut()];
 
-        // Set the hostname - allocate and copy the string
-        let hostname_cstring = match CString::new(hostname) {
-            Ok(cstr) => cstr,
-            Err(_) => {
-                // Clean up the already allocated HOSTENT
-                unsafe {
-                    std::alloc::dealloc(hostent_ptr as *mut u8, Layout::new::<HOSTENT>());
-                }
-                return Err(AddrInfoError::AllocationFailed);
-            }
-        };
+        let addr_buf = IpAddrBytes::from(ip);
+        let addr_ptr = addr_buf.as_ptr() as *mut u8;
+        let addrtype = addr_buf.family() as i16;
+        let addrlen = addr_buf.addr_len() as i16;
 
-        // Allocate memory for the hostname string
-        let hostname_bytes = hostname_cstring.into_bytes_with_nul();
-        let hostname_layout = Layout::from_size_align(hostname_bytes.len(), 1)
-            .map_err(|_| AddrInfoError::AllocationFailed)?;
-        let hostname_ptr = unsafe { std::alloc::alloc(hostname_layout) as *mut i8 };
-        if hostname_ptr.is_null() {
-            unsafe {
-                std::alloc::dealloc(hostent_ptr as *mut u8, Layout::new::<HOSTENT>());
-            }
-            return Err(AddrInfoError::AllocationFailed);
-        }
+        // Note from WINAPI: addr_list is a NULL-terminated list of addresses for the host
+        let addr_list: Vec<*mut i8> = vec![addr_ptr as *mut _, ptr::null_mut()];
 
-        // Copy hostname data
-        unsafe {
-            ptr::copy_nonoverlapping(
-                hostname_bytes.as_ptr(),
-                hostname_ptr as *mut u8,
-                hostname_bytes.len(),
-            );
-            (*hostent_ptr).h_name = hostname_ptr;
-        }
+        let mut data = Box::new(ManagedHostentData {
+            hostname,
+            aliases_ptrs,
+            _addr_buf: addr_buf,
+            addr_list,
+        });
 
-        // Create empty aliases array (just null terminator)
-        let aliases_ptr = unsafe_alloc!(*mut i8, AddrInfoError::AllocationFailed)?;
-        unsafe {
-            ptr::write(aliases_ptr, ptr::null_mut());
-            (*hostent_ptr).h_aliases = aliases_ptr;
-        }
+        let hostent = Box::new(HOSTENT {
+            h_name: data.hostname.as_ptr() as *mut i8,
+            h_aliases: data.aliases_ptrs.as_mut_ptr(),
+            h_addrtype: addrtype,
+            h_length: addrlen,
+            h_addr_list: data.addr_list.as_mut_ptr(),
+        });
 
-        match ip {
-            IpAddr::V4(ipv4) => {
-                unsafe {
-                    (*hostent_ptr).h_addrtype = AF_INET as i16;
-                    (*hostent_ptr).h_length = 4;
-                }
-
-                // Allocate memory for IPv4 address (4 bytes)
-                let addr_ptr = unsafe_alloc!([u8; 4], AddrInfoError::AllocationFailed)?;
-                let addr_bytes = ipv4.octets();
-                unsafe {
-                    ptr::write(addr_ptr, addr_bytes);
-                }
-
-                // Create address list array with one address + null terminator
-                let addr_list_ptr = unsafe_alloc!([*mut i8; 2], AddrInfoError::AllocationFailed)?;
-                unsafe {
-                    ptr::write(addr_list_ptr, [addr_ptr as *mut i8, ptr::null_mut()]);
-                    (*hostent_ptr).h_addr_list = addr_list_ptr as *mut *mut i8;
-                }
-            }
-            IpAddr::V6(ipv6) => {
-                unsafe {
-                    (*hostent_ptr).h_addrtype = AF_INET6 as i16;
-                    (*hostent_ptr).h_length = 16;
-                }
-
-                // Allocate memory for IPv6 address (16 bytes)
-                let addr_ptr = unsafe_alloc!([u8; 16], AddrInfoError::AllocationFailed)?;
-                let addr_bytes = ipv6.octets();
-                unsafe {
-                    ptr::write(addr_ptr, addr_bytes);
-                }
-
-                // Create address list array with one address + null terminator
-                let addr_list_ptr = unsafe_alloc!([*mut i8; 2], AddrInfoError::AllocationFailed)?;
-                unsafe {
-                    ptr::write(addr_list_ptr, [addr_ptr as *mut i8, ptr::null_mut()]);
-                    (*hostent_ptr).h_addr_list = addr_list_ptr as *mut *mut i8;
-                }
-            }
-        }
-
-        Ok(unsafe { Self::new(hostent_ptr) })
-    }
-}
-
-impl Drop for ManagedHostent {
-    /// Safely frees all memory associated with a HOSTENT structure
-    ///
-    /// This function properly deallocates all the memory that was allocated in the TryFrom
-    /// implementation:
-    /// - The hostname string
-    /// - The aliases array
-    /// - The address data
-    /// - The address list array
-    /// - The HOSTENT structure itself
-    fn drop(&mut self) {
-        if self.ptr.is_null() {
-            return;
-        }
-
-        let hostent = unsafe { &*self.ptr };
-
-        // Free hostname string
-        if !hostent.h_name.is_null() {
-            // Calculate the length of the null-terminated string
-            let hostname_len = unsafe {
-                let ptr = hostent.h_name;
-                (0..).take_while(|&i| *ptr.offset(i) != 0).count() + 1
-            };
-
-            if let Ok(layout) = Layout::from_size_align(hostname_len, 1) {
-                unsafe {
-                    std::alloc::dealloc(hostent.h_name as *mut u8, layout);
-                }
-            }
-        }
-
-        // Free aliases array (we only allocated space for one null pointer)
-        if !hostent.h_aliases.is_null() {
-            unsafe {
-                std::alloc::dealloc(hostent.h_aliases as *mut u8, Layout::new::<*mut i8>());
-            }
-        }
-
-        // Free address list and address data
-        if !hostent.h_addr_list.is_null() {
-            let first_addr = unsafe { *hostent.h_addr_list };
-            if !first_addr.is_null() {
-                // Free the address data based on the address type
-                match hostent.h_addrtype as i32 {
-                    AF_INET => unsafe {
-                        std::alloc::dealloc(first_addr as *mut u8, Layout::new::<[u8; 4]>());
-                    },
-                    AF_INET6 => unsafe {
-                        std::alloc::dealloc(first_addr as *mut u8, Layout::new::<[u8; 16]>());
-                    },
-                    _ => {} // Unknown address type, skip deallocation to avoid corruption
-                }
-            }
-
-            // Free the address list array (contains 2 pointers: address + null)
-            unsafe {
-                std::alloc::dealloc(
-                    hostent.h_addr_list as *mut u8,
-                    Layout::new::<[*mut i8; 2]>(),
-                );
-            }
-        }
-
-        // Finally, free the HOSTENT structure itself
-        unsafe {
-            std::alloc::dealloc(self.ptr as *mut u8, Layout::new::<HOSTENT>());
-        }
+        Ok(Self {
+            hostent,
+            _data: data,
+        })
     }
 }
 
@@ -307,7 +156,7 @@ impl Drop for ManagedHostent {
 ///
 /// # Returns
 /// * `Ok(*mut HOSTENT)` - Raw pointer to thread-local HOSTENT structure
-/// * `Err(AddrInfoError)` - If allocation fails
+/// * `Err(HookError)` - If allocation fails
 ///
 /// # Safety
 /// The returned pointer is valid until:
@@ -315,10 +164,7 @@ impl Drop for ManagedHostent {
 /// 2. The thread exits (automatic cleanup)
 ///
 /// This matches the documented behavior of WinSock's gethostbyname function.
-pub fn create_thread_local_hostent(
-    hostname: String,
-    ip: IpAddr,
-) -> Result<*mut HOSTENT, AddrInfoError> {
+pub fn create_thread_local_hostent(hostname: String, ip: IpAddr) -> HookResult<*mut HOSTENT> {
     THREAD_HOSTENT.with(|cell| {
         let mut hostent_ref = cell.borrow_mut();
 
