@@ -112,8 +112,11 @@ jobs:
           chmod +x /tmp/vale/vale
           mv /tmp/vale/vale /usr/local/bin
 
-      - name: run vale
-        run: vale $(git ls-files '*.md') --output=report.tmpl
+      - name: check root markdown files
+        run: vale $(find . -name '*.md' -maxdepth 1 -not -name CLAUDE.md) --output=report.tmpl
+
+      - name: check changelog.d files
+        run: vale $(git ls-files 'changelog.d/*.md') --output=report.tmpl
 
   changed_files:
     runs-on: ubuntu-24.04
