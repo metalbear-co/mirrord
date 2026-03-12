@@ -484,7 +484,6 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
         protocol,
         connect_fn,
     )
-    .into()
 }
 
 /// Handles 3 different cases, depending on if the outgoing traffic feature is enabled or not:
@@ -508,7 +507,7 @@ pub(super) fn connect(
     };
     trace!("in connect {:#?}", SOCKETS);
 
-    connect_common(sockfd, remote_address, connect_fn).into()
+    connect_common(sockfd, remote_address, connect_fn)
 }
 
 /// For IPv6 server / IPv4 client connections, translate IPv4

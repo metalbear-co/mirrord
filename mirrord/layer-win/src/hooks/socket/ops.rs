@@ -1,9 +1,10 @@
 use std::{net::SocketAddr, sync::OnceLock};
 
 use mirrord_layer_lib::{
-    error::ConnectError,
+    detour::Detour,
+    error::{ConnectError, HookResult},
     socket::{
-        HookResult, SocketAddrExt,
+        SocketAddrExt,
         ops::{ConnectResult, connect_common},
     },
 };
@@ -259,5 +260,10 @@ where
     };
 
     // Try to connect through the mirrord proxy using layer-lib integration
-    connect_common(socket, SockAddr::from(remote_addr), connect_fn)
+    // Temporary workaround until all socket ops are unified - WIN-85
+    match connect_common(socket, SockAddr::from(remote_addr), connect_fn) {
+        Detour::Success(res) => Ok(res),
+        Detour::Bypass(_) => Err(ConnectError::Fallback.into()),
+        Detour::Error(err) => Err(err),
+    }
 }

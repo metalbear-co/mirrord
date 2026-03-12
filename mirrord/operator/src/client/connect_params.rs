@@ -40,7 +40,16 @@ pub struct ConnectParams<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch_name: Option<String>,
 
-    /// Resource names of the branch databases to use for the connection.
+    /// Per-dialect branch names (kept for backwards compatibility with older operators).
+    #[serde(with = "force_json_ser", skip_serializing_if = "Vec::is_empty")]
+    pub mysql_branch_names: Vec<String>,
+    #[serde(with = "force_json_ser", skip_serializing_if = "Vec::is_empty")]
+    pub pg_branch_names: Vec<String>,
+    #[serde(with = "force_json_ser", skip_serializing_if = "Vec::is_empty")]
+    pub mongodb_branch_names: Vec<String>,
+
+    /// Unified branch database names. Used by internal operator-to-operator communication
+    /// (multi-cluster envoy). New operators accept both this and the per-dialect fields above.
     #[serde(with = "force_json_ser", skip_serializing_if = "Vec::is_empty")]
     pub branch_db_names: Vec<String>,
 
@@ -66,11 +75,26 @@ pub struct ConnectParams<'a> {
     pub key: Option<&'a str>,
 }
 
+/// Per-dialect branch database names, used to keep the connect params
+/// backwards-compatible with older operators that expect three separate fields.
+#[derive(Debug, Default, Clone)]
+pub struct BranchDbNames {
+    pub pg: Vec<String>,
+    pub mysql: Vec<String>,
+    pub mongodb: Vec<String>,
+}
+
+impl BranchDbNames {
+    pub fn is_empty(&self) -> bool {
+        self.pg.is_empty() && self.mysql.is_empty() && self.mongodb.is_empty()
+    }
+}
+
 impl<'a> ConnectParams<'a> {
     pub fn new(
         config: &'a LayerConfig,
         branch_name: Option<String>,
-        branch_db_names: Vec<String>,
+        branch_db_names: BranchDbNames,
         session_ci_info: Option<SessionCiInfo>,
         key: &'a str,
     ) -> Self {
@@ -82,7 +106,10 @@ impl<'a> ConnectParams<'a> {
             sqs_splits: config.feature.split_queues.sqs().collect(),
             sqs_jq_filters: config.feature.split_queues.sqs_jq_filters().collect(),
             branch_name,
-            branch_db_names,
+            pg_branch_names: branch_db_names.pg,
+            mysql_branch_names: branch_db_names.mysql,
+            mongodb_branch_names: branch_db_names.mongodb,
+            branch_db_names: Vec::new(),
             session_ci_info,
             is_default_cluster: None,
             sqs_output_queues: HashMap::new(),
@@ -99,10 +126,10 @@ impl<'a> ConnectParams<'a> {
 /// ### Concrete example
 ///
 /// Without the custom serializer, a `Vec<String>` would typically serialize into repeated params
-/// like: `branch_db_names=branch-1&branch_db_names=branch-2`
+/// like: `pg_branch_names=branch-1&pg_branch_names=branch-2`
 ///
 /// But the operator expects a single JSON value, so the custom module emits:
-/// `branch_db_names = ["branch-1", "branch-2"]`
+/// `pg_branch_names = ["branch-1", "branch-2"]`
 ///
 /// Which then gets URL-encoded by serde_urlencoded.
 mod force_json_ser {

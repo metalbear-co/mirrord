@@ -71,7 +71,7 @@ impl TargetCrd {
     /// # Warning
     ///
     /// Do **not** change url paths here, even if the operator recognizes the other format.
-    /// It can break exisiting [`policy::MirrordPolicy`]s and [`policy::MirrordClusterPolicy`]
+    /// It can break existing [`policy::MirrordPolicy`]s and [`policy::MirrordClusterPolicy`]
     /// (see [`policy::MirrordPolicySpec::target_path`] and
     /// [`policy::MirrordClusterPolicySpec::target_path`]).
     pub fn urlfied_name(target: &Target) -> String {
@@ -490,6 +490,11 @@ pub enum NewOperatorFeature {
 
     PreviewEnv,
 
+    /// The operator supports the unified `BranchDatabase` CRD with per-dialect options
+    /// (`postgresOptions`, `mysqlOptions`, `mongodbOptions`) instead of the old separate
+    /// `PgBranchDatabase`, `MysqlBranchDatabase`, `MongodbBranchDatabase` CRDs.
+    UnifiedBranchDbCrd,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -526,6 +531,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SqsQueueSplittingWithJqFilter => {
                 "Splitting SQS queues with a jq filter"
             }
+            NewOperatorFeature::UnifiedBranchDbCrd => "unified branch database CRD",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -878,7 +884,7 @@ pub struct MirrordClusterOperatorUserCredentialSpec {
     /// Certificate signing request created using the client's key pair.
     pub csr: String,
 
-    /// The intented usage of this credential.
+    /// The intended usage of this credential.
     pub kind: UserCredentialKind,
 }
 

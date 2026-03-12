@@ -66,16 +66,16 @@ pub enum IamAuthConfig {
     ///   AWS_SESSION_TOKEN.
     AwsRds {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        region: Option<TargetEnviromentVariableSource>,
+        region: Option<TargetEnvironmentVariableSource>,
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        access_key_id: Option<TargetEnviromentVariableSource>,
+        access_key_id: Option<TargetEnvironmentVariableSource>,
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        secret_access_key: Option<TargetEnviromentVariableSource>,
+        secret_access_key: Option<TargetEnvironmentVariableSource>,
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        session_token: Option<TargetEnviromentVariableSource>,
+        session_token: Option<TargetEnvironmentVariableSource>,
     },
     /// For GCP Cloud SQL IAM authentication, set `type` to `"gcp_cloud_sql"`.
     ///
@@ -102,13 +102,13 @@ pub enum IamAuthConfig {
     /// - `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
     GcpCloudSql {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        credentials_json: Option<TargetEnviromentVariableSource>,
+        credentials_json: Option<TargetEnvironmentVariableSource>,
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        credentials_path: Option<TargetEnviromentVariableSource>,
+        credentials_path: Option<TargetEnvironmentVariableSource>,
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        project: Option<TargetEnviromentVariableSource>,
+        project: Option<TargetEnvironmentVariableSource>,
     },
 }
 
@@ -299,7 +299,7 @@ pub struct DatabaseBranchBaseConfig {
 #[serde(untagged)]
 pub enum ConnectionSource {
     Url {
-        url: TargetEnviromentVariableSource,
+        url: TargetEnvironmentVariableSource,
     },
     FlatUrl {
         #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
@@ -415,7 +415,7 @@ pub struct ConnectionParamsVars {
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSourceKind")]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum TargetEnviromentVariableSource {
+pub enum TargetEnvironmentVariableSource {
     Env {
         container: Option<String>,
         variable: String,
@@ -474,7 +474,7 @@ mod tests {
         assert_eq!(
             source,
             ConnectionSource::Url {
-                url: TargetEnviromentVariableSource::Env {
+                url: TargetEnvironmentVariableSource::Env {
                     container: None,
                     variable: "DB_URL".to_string(),
                 }
@@ -489,7 +489,7 @@ mod tests {
         assert_eq!(
             source,
             ConnectionSource::Url {
-                url: TargetEnviromentVariableSource::EnvFrom {
+                url: TargetEnvironmentVariableSource::EnvFrom {
                     container: None,
                     variable: "DB_URL".to_string(),
                 }
@@ -504,7 +504,7 @@ mod tests {
         assert_eq!(
             source,
             ConnectionSource::Url {
-                url: TargetEnviromentVariableSource::Env {
+                url: TargetEnvironmentVariableSource::Env {
                     container: Some("my-app".to_string()),
                     variable: "DB_URL".to_string(),
                 }
@@ -663,7 +663,7 @@ mod tests {
     #[test]
     fn serialize_roundtrip_url() {
         let source = ConnectionSource::Url {
-            url: TargetEnviromentVariableSource::Env {
+            url: TargetEnvironmentVariableSource::Env {
                 container: None,
                 variable: "DB_URL".to_string(),
             },

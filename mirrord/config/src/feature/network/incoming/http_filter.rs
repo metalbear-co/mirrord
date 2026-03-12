@@ -4,7 +4,8 @@ use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use mirrord_protocol::tcp::{
     Filter, HTTP_BODY_JSON_FILTER_VERSION, HTTP_COMPOSITE_FILTER_VERSION,
-    HTTP_METHOD_FILTER_VERSION, HttpBodyFilter, HttpFilter, HttpMethodFilter, JsonPathQuery,
+    HTTP_HEADER_JQ_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION, HttpBodyFilter, HttpFilter,
+    HttpMethodFilter, JqQuery, JsonPathQuery,
 };
 use schemars::JsonSchema;
 use semver::{Version, VersionReq};
@@ -127,6 +128,14 @@ pub struct HttpFilterConfig {
     /// Matches the request based on the contents of its body.
     pub body_filter: Option<BodyFilter>,
 
+    /// ##### feature.network.incoming.http_filter.header_filter_jq {#feature-network-incoming-http-header-filter-jq}
+    ///
+    /// Supports jq expressions, matches when the expression returns
+    /// `true`. The expression is evaluated on each present header in
+    /// the request, in `HeaderKey: HeaderValue` format.
+    #[config(env = "MIRRORD_HTTP_HEADER_FILTER_JQ")]
+    pub header_filter_jq: Option<String>,
+
     /// ##### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
     ///
     /// An array of HTTP filters.
@@ -185,6 +194,7 @@ impl HttpFilterConfig {
             || self.all_of.is_some()
             || self.any_of.is_some()
             || self.body_filter.is_some()
+            || self.header_filter_jq.is_some()
     }
 
     pub fn ensure_usable_with(
@@ -192,7 +202,7 @@ impl HttpFilterConfig {
         agent_protocol_version: Option<Version>,
     ) -> Result<(), ConfigError> {
         #![allow(clippy::type_complexity)]
-        static REQUIREMENTS: [(fn(&HttpFilterConfig) -> bool, &LazyLock<VersionReq>, &str); 3] = [
+        static REQUIREMENTS: [(fn(&HttpFilterConfig) -> bool, &LazyLock<VersionReq>, &str); 4] = [
             (
                 HttpFilterConfig::is_composite,
                 &HTTP_COMPOSITE_FILTER_VERSION,
@@ -207,6 +217,11 @@ impl HttpFilterConfig {
                 HttpFilterConfig::has_json_body_filter,
                 &HTTP_BODY_JSON_FILTER_VERSION,
                 "JSON body filters",
+            ),
+            (
+                HttpFilterConfig::has_header_jq_filter,
+                &HTTP_HEADER_JQ_FILTER_VERSION,
+                "JQ header filters",
             ),
         ];
 
@@ -244,6 +259,20 @@ impl HttpFilterConfig {
                 composite
                     .iter()
                     .any(|f| matches!(f, InnerFilter::Method { .. }))
+            })
+    }
+
+    fn has_header_jq_filter(&self) -> bool {
+        self.header_filter_jq.is_some()
+            || self.all_of.as_ref().is_some_and(|composite| {
+                composite
+                    .iter()
+                    .any(|f| matches!(f, InnerFilter::HeaderJq { .. }))
+            })
+            || self.any_of.as_ref().is_some_and(|composite| {
+                composite
+                    .iter()
+                    .any(|f| matches!(f, InnerFilter::HeaderJq { .. }))
             })
     }
 
@@ -285,6 +314,7 @@ impl HttpFilterConfig {
                 header_filter: None,
                 method_filter: None,
                 body_filter: None,
+                header_filter_jq: None,
                 all_of: None,
                 any_of: None,
                 ports: _,
@@ -295,6 +325,7 @@ impl HttpFilterConfig {
                 header_filter: Some(header),
                 method_filter: None,
                 body_filter: None,
+                header_filter_jq: None,
                 all_of: None,
                 any_of: None,
                 ports: _,
@@ -305,6 +336,7 @@ impl HttpFilterConfig {
                 header_filter: None,
                 method_filter: Some(method),
                 body_filter: None,
+                header_filter_jq: None,
                 all_of: None,
                 any_of: None,
                 ports: _,
@@ -315,6 +347,7 @@ impl HttpFilterConfig {
                 header_filter: None,
                 method_filter: None,
                 body_filter: Some(filter),
+                header_filter_jq: None,
                 all_of: None,
                 any_of: None,
                 ports: _,
@@ -325,6 +358,20 @@ impl HttpFilterConfig {
                 header_filter: None,
                 method_filter: None,
                 body_filter: None,
+                header_filter_jq: Some(filter),
+                all_of: None,
+                any_of: None,
+                ports: _,
+            } => Ok(HttpFilter::HeaderJq(
+                JqQuery::new(filter).map_err(HttpFilterParseError::Jq)?,
+            )),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                body_filter: None,
+                header_filter_jq: None,
                 all_of: Some(filters),
                 any_of: None,
                 ports: _,
@@ -335,6 +382,7 @@ impl HttpFilterConfig {
                 header_filter: None,
                 method_filter: None,
                 body_filter: None,
+                header_filter_jq: None,
                 all_of: None,
                 any_of: Some(filters),
                 ports: _,
@@ -360,6 +408,9 @@ impl HttpFilterConfig {
                 }
                 InnerFilter::Body(body_filter) => Ok(HttpFilter::Body(
                     body_filter.as_protocol_http_body_filter()?,
+                )),
+                InnerFilter::HeaderJq { query } => Ok(HttpFilter::HeaderJq(
+                    JqQuery::new(query).map_err(HttpFilterParseError::Jq)?,
                 )),
             })
             .collect::<Result<Vec<_>, HttpFilterParseError>>()?;
@@ -404,6 +455,16 @@ pub enum InnerFilter {
     /// Matches the request based on the contents of its body. Currently only JSON body filtering is
     /// supported.
     Body(BodyFilter),
+
+    /// ##### feature.network.incoming.inner_filter.header_filter_jq
+    /// ##### {#feature-network-incoming-inner-header-filter-jq}
+    ///
+    /// Supports jq expressions, matches when the expression returns
+    /// `true`. The expression is evaluated on each present header in
+    /// the request, in `HeaderKey: HeaderValue` format.
+    HeaderJq {
+        query: String,
+    },
 }
 
 /// Currently only JSON body filtering is supported.
@@ -488,7 +549,7 @@ pub enum BodyFilter {
     ///
     ///
     ///
-    /// To use with with `all_of` or `any_of`, use the following syntax:
+    /// To use with `all_of` or `any_of`, use the following syntax:
     /// ```json
     /// "http_filter": {
     ///   "all_of": [
@@ -532,6 +593,10 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
             .source_value(context)
             .transpose()?;
 
+        let header_filter_jq = FromEnv::new("MIRRORD_HTTP_HEADER_FILTER_JQ")
+            .source_value(context)
+            .transpose()?;
+
         let all_of = None;
         let any_of = None;
 
@@ -546,6 +611,7 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
             path_filter,
             method_filter,
             body_filter,
+            header_filter_jq,
             all_of,
             any_of,
             ports,
@@ -569,4 +635,7 @@ pub enum HttpFilterParseError {
 
     #[error(transparent)]
     Method(#[from] strum::ParseError),
+
+    #[error("error while compiling jq expression: {0}")]
+    Jq(String),
 }

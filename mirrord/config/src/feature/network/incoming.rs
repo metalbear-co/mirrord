@@ -163,7 +163,7 @@ impl MirrordToggleableConfig for IncomingFileConfig {
     }
 }
 
-// Change to manual deserializtion to prevent usless untagged enum errors
+// Change to manual deserialization to prevent useless untagged enum errors
 impl<'de> Deserialize<'de> for IncomingFileConfig {
     fn deserialize<D>(deserializer: D) -> Result<IncomingFileConfig, D::Error>
     where
@@ -246,7 +246,7 @@ impl<'de> de::Visitor<'de> for IncomingFileConfigVisitor {
 pub struct IncomingAdvancedFileConfig {
     /// ### mode
     ///
-    /// Allows selecting between mirrorring or stealing traffic.
+    /// Allows selecting between mirroring or stealing traffic.
     ///
     /// See [`mode`](##mode (incoming)) for details.
     pub mode: Option<IncomingMode>,
@@ -532,7 +532,7 @@ impl IncomingConfig {
     }
 }
 
-/// Allows selecting between mirrorring or stealing traffic.
+/// Allows selecting between mirroring or stealing traffic.
 ///
 /// Can be set to either `"mirror"` (default), `"steal"` or `"off"`.
 ///
