@@ -3097,7 +3097,7 @@
       "oneOf": [
         {
           "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
-          "description": "Only supported with `queue_type` of `SQS`. When this field is specified, for each SQS message, the jq filter runs on a JSON representation of the SQS `Message` object. If the jq program outputs `true`, that message is considered as matching the filter.\n\nSee [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).\n\nThis can be used to filter messages based on their body content, for example. ``` \"jq_filter\": \".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\" ``` This filter will tell mirrord to only make available to this local application messages with a json in the message body, with a `customer_email` field that contains \"metalbear.com\".",
+          "description": "Only supported with `queue_type` of `SQS`. When this field is specified, for each SQS message, the jq filter runs on a JSON representation of the SQS `Message` object. If the jq program outputs `true`, that message is considered as matching the filter.\n\nSee [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).\n\nThis can be used to filter messages based on their body content, for example.\n\nThis filter, for example, will tell mirrord to only make available to this local application messages with a json in the message body, with a `customer_email` field that contains \"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
           "type": "object",
           "required": [
             "queue_type"
