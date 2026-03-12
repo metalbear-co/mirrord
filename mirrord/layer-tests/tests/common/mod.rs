@@ -699,6 +699,11 @@ pub fn get_env(
             intproxy_addr.to_string(),
         ),
         ("MIRRORD_FILE_MODE".to_string(), "local".to_string()),
+        (
+            "MIRRORD_IMPERSONATED_TARGET".to_string(),
+            "pod/mock-target".to_string(),
+        ),
+        ("MIRRORD_REMOTE_DNS".to_string(), "false".to_string()),
     ]
     .into_iter()
     .chain(extra_vars_owned)
