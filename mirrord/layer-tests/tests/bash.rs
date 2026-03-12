@@ -1,7 +1,7 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-use std::time::Duration;
+use std::{path::Path, time::Duration};
 
 #[cfg(not(target_os = "macos"))]
 use mirrord_protocol::{
