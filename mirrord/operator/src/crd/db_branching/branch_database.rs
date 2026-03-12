@@ -165,10 +165,15 @@ impl BranchDatabaseSpec {
     /// Exactly one dialect option field must be set.
     pub fn dialect(&self) -> Result<DialectConfig, DialectValidationError> {
         let mut dialects = [
-            self.postgres_options.as_ref().map(|v| DialectConfig::Postgres(Box::new(v.clone()))),
-            self.mysql_options.as_ref().map(|v| DialectConfig::Mysql(Box::new(v.clone()))),
-            self.mongodb_options.as_ref().map(|v| DialectConfig::Mongodb(Box::new(v.clone()))),
-            self.mssql_options.as_ref().map(|v| DialectConfig::Mssql(Box::new(v.clone()))),
+            self.postgres_options
+                .as_ref()
+                .map(|v| DialectConfig::Postgres(Box::new(v.clone()))),
+            self.mysql_options
+                .as_ref()
+                .map(|v| DialectConfig::Mysql(Box::new(v.clone()))),
+            self.mongodb_options
+                .as_ref()
+                .map(|v| DialectConfig::Mongodb(Box::new(v.clone()))),
         ]
         .into_iter()
         .flatten();
