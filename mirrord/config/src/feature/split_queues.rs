@@ -10,6 +10,14 @@ use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig};
 
 pub type QueueId = String;
 
+/// A mapping from queue ids to their filters. Each queue filter defines which messages from the
+/// original queue will be made available to the local application, based on message attributes
+/// or headers, and possibly on jq filters (for SQS).
+///
+/// The queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` or
+/// `MirrordKafkaTopicsConsumer` for SQS or Kafka respectively.
+///
+///
 /// ```json
 /// {
 ///   "feature": {
@@ -171,6 +179,17 @@ pub type QueueMessageFilter = BTreeMap<String, String>;
 /// Amazon Simple Queue Service and Kafka are supported.
 ///
 /// More queue types might be added in the future.
+///
+///
+/// For each queue, `message_filter` is a mapping between message attribute names and regexes they
+/// should match. The local application will only receive messages that match **all** of the given
+/// patterns. This means, only messages that have **all** of the attributes in the
+/// filter, with values of those attributes matching the respective patterns.
+///
+/// For SQS queues, an additional `jq_filter` can be specified. When this is specified, for each SQS
+/// message, the jq filter runs on a JSON representation of the SQS `Message` object. If the jq
+/// program outputs `true`, that message is considered as matching the filter.
+/// See [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
 #[serde(tag = "queue_type")]
 pub enum QueueFilter {
