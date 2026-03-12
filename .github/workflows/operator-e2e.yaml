@@ -1,5 +1,32 @@
 name: Operator E2E Test
 
+# This workflow supports two entry points:
+# 1. `workflow_dispatch` for manual testing.
+# 2. `workflow_run` after the unprivileged release-PR approval workflow completes.
+#
+# The split exists because `pull_request_review` runs for fork PRs do not receive
+# repository secrets. The approval workflow runs without secrets, then this
+# workflow runs as a privileged follow-up and can safely use `OPERATOR_E2E_PAT`.
+#
+# `OPERATOR_E2E_PAT` requirements:
+# - Classic PAT: `repo` and `read:org`
+# - Fine-grained PAT:
+#   - Organization permission: `Members: read`
+#   - `metalbear-co/mirrord`: `Pull requests: read`
+#   - `metalbear-co/operator`: `Actions: read` and `Actions: write`
+# The PAT owner must also be able to view the `metalbear-co/rnd` team, because
+# this workflow checks that approved release PR authors are active rnd members.
+#
+# Manual runs only proceed when the person who started the workflow is an
+# active member of `metalbear-co/rnd`.
+#
+# Automatic runs only proceed when all of the following are true:
+# - the PR targets `main`
+# - the PR is not a draft
+# - the PR head branch matches `x.y.z`
+# - the latest review decision is `APPROVED`
+# - the PR author is an active member of `metalbear-co/rnd`
+#
 on:
   workflow_dispatch:
     inputs:
@@ -16,26 +43,170 @@ on:
         required: false
         type: string
         default: "main"
-  pull_request_review:
-    branches: [main]
-    types: [submitted]
+  workflow_run:
+    # `pull_request_review` runs for fork PRs without repository secrets.
+    # A lightweight approval workflow triggers this privileged follow-up run.
+    workflows: ["Operator E2E Release PR Approval"]
+    types: [completed]
 
 jobs:
-  check_if_release_branch:
+  resolve_trigger_context:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request_review') }}
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
-      release_branch: ${{ steps.release-branch.outputs.branch }}
+      should_run: ${{ steps.resolve.outputs.should_run }}
+      mirrord_commit: ${{ steps.resolve.outputs.mirrord_commit }}
+      mirrord_branch: ${{ steps.resolve.outputs.mirrord_branch }}
+      operator_branch: ${{ steps.resolve.outputs.operator_branch }}
     steps:
-      - id: release-branch
-        run: |
-          echo "branch=$([[ "${{ github.event.pull_request.head.ref || github.head_ref || github.ref_name }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
-      - name: output test
-        run: |
-          echo ${{ steps.release-branch.outputs.branch }}
+      - name: Resolve workflow context and verify rnd membership
+        id: resolve
+        uses: actions/github-script@v7
+        with:
+          # This token is used to read PR metadata, verify rnd team membership,
+          # and later dispatch/await the remote operator workflow.
+          github-token: ${{ secrets.OPERATOR_E2E_PAT }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            async function isActiveRndMember(username) {
+              try {
+                const membership = await github.rest.teams.getMembershipForUserInOrg({
+                  org: owner,
+                  team_slug: "rnd",
+                  username,
+                });
+
+                return membership.data.state === "active";
+              } catch (error) {
+                if (error.status === 404) {
+                  return false;
+                }
+
+                throw error;
+              }
+            }
+
+            if (context.eventName === "workflow_dispatch") {
+              const inputs = context.payload.inputs ?? {};
+              const actorLogin = context.actor;
+              let isRndMember = false;
+
+              try {
+                isRndMember = await isActiveRndMember(actorLogin);
+              } catch (error) {
+                core.notice(`Failed to verify @${actorLogin} against team "rnd": ${error.message}`);
+                core.setOutput("should_run", "false");
+                return;
+              }
+
+              core.info(`workflow_dispatch actor=@${actorLogin}, rndMember=${isRndMember}`);
+              if (!isRndMember) {
+                core.setOutput("should_run", "false");
+                return;
+              }
+
+              core.setOutput("should_run", "true");
+              core.setOutput("mirrord_commit", inputs.mirrord_commit ?? "");
+              core.setOutput("mirrord_branch", inputs.mirrord_branch ?? "");
+              core.setOutput("operator_branch", inputs.operator_branch || "main");
+              return;
+            }
+            let prNumber = context.payload.workflow_run.pull_requests?.[0]?.number;
+
+            if (!prNumber) {
+              const associatedPullRequests = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner,
+                repo,
+                commit_sha: context.payload.workflow_run.head_sha,
+              });
+
+              prNumber = associatedPullRequests.data.find(
+                (pullRequest) => pullRequest.base.repo.full_name === `${owner}/${repo}`
+              )?.number;
+            }
+
+            if (!prNumber) {
+              core.notice("No associated pull request found for the approved review run.");
+              core.setOutput("should_run", "false");
+              return;
+            }
+
+            const result = await github.graphql(
+              `
+                query($owner: String!, $repo: String!, $number: Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $number) {
+                      author {
+                        login
+                      }
+                      authorAssociation
+                      baseRefName
+                      headRefName
+                      isCrossRepository
+                      isDraft
+                      reviewDecision
+                    }
+                  }
+                }
+              `,
+              {
+                owner,
+                repo,
+                number: prNumber,
+              }
+            );
+
+            const pullRequest = result.repository.pullRequest;
+            const authorLogin = pullRequest.author?.login;
+
+            if (!authorLogin) {
+              core.notice(`PR #${prNumber} has no resolvable author login.`);
+              core.setOutput("should_run", "false");
+              return;
+            }
+
+            let isRndMember = false;
+            try {
+              isRndMember = await isActiveRndMember(authorLogin);
+            } catch (error) {
+              core.notice(`Failed to verify @${authorLogin} against team "rnd": ${error.message}`);
+              core.setOutput("should_run", "false");
+              return;
+            }
+
+            const isReleaseBranch = /^\d+\.\d+\.\d+$/.test(pullRequest.headRefName);
+            const shouldRun =
+              isRndMember &&
+              pullRequest.baseRefName === "main" &&
+              !pullRequest.isDraft &&
+              pullRequest.reviewDecision === "APPROVED" &&
+              isReleaseBranch;
+
+            core.info(
+              `PR #${prNumber}: author=@${authorLogin}, association=${pullRequest.authorAssociation}, rndMember=${isRndMember}, base=${pullRequest.baseRefName}, head=${pullRequest.headRefName}, crossRepo=${pullRequest.isCrossRepository}, reviewDecision=${pullRequest.reviewDecision}, draft=${pullRequest.isDraft}`
+            );
+
+            core.setOutput("should_run", shouldRun ? "true" : "false");
+            if (!shouldRun) {
+              return;
+            }
+
+            const mirrordBranch = pullRequest.isCrossRepository
+              ? `refs/pull/${prNumber}/head`
+              : pullRequest.headRefName;
+
+            core.setOutput("mirrord_commit", context.payload.workflow_run.head_sha);
+            core.setOutput("mirrord_branch", mirrordBranch);
+            core.setOutput("operator_branch", "main");
 
   trigger-operator-e2e:
-    needs: [check_if_release_branch]
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.review.state == 'approved' && needs.check_if_release_branch.outputs.release_branch == 'true') }}
+    needs: [resolve_trigger_context]
+    if: ${{ needs.resolve_trigger_context.outputs.should_run == 'true' }}
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -44,15 +215,17 @@ jobs:
         uses: metalbear-co/return-dispatch@main
         continue-on-error: true
         with:
+          # Same PAT requirements as documented above. This call needs access to
+          # dispatch the workflow in `metalbear-co/operator`.
           token: ${{ secrets.OPERATOR_E2E_PAT }}
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.operator_branch || 'main' }}
+          ref: ${{ needs.resolve_trigger_context.outputs.operator_branch }}
           repo: operator
           owner: metalbear-co
           workflow: operator-e2e.yaml
           workflow_inputs: |
             {
-              "mirrord_commit": "${{ github.event_name == 'workflow_dispatch' && inputs.mirrord_commit || github.event.pull_request.head.sha }}",
-              "mirrord_branch": "${{ github.event_name == 'workflow_dispatch' && inputs.mirrord_branch || github.event.pull_request.head.ref }}"
+              "mirrord_commit": "${{ needs.resolve_trigger_context.outputs.mirrord_commit }}",
+              "mirrord_branch": "${{ needs.resolve_trigger_context.outputs.mirrord_branch }}"
             }
           workflow_timeout_seconds: 7200
           workflow_job_steps_retry_seconds: 30
@@ -65,6 +238,8 @@ jobs:
       - name: Await Run ID ${{ steps.trigger-e2e.outputs.run_id }}
         uses: metalbear-co/await-remote-run@main
         with:
+          # Same PAT requirements as documented above. This call needs access to
+          # read workflow runs in `metalbear-co/operator`.
           token: ${{ secrets.OPERATOR_E2E_PAT }}
           repo: operator
           owner: metalbear-co

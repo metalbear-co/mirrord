@@ -1,0 +1,27 @@
+name: Operator E2E Release PR Approval
+
+# This workflow is intentionally minimal and does not use secrets.
+# Its only job is to observe `pull_request_review` approvals for release PRs,
+# including approvals on fork PRs, and complete successfully.
+#
+# `Operator E2E Test` listens for this workflow via `workflow_run`. That second
+# workflow runs with repository secrets and re-validates the PR before it
+# dispatches the privileged operator E2E run.
+#
+# Keeping this as a separate workflow avoids trying to use `OPERATOR_E2E_PAT`
+# directly from `pull_request_review`, where fork-triggered runs would receive
+# an empty secret value.
+#
+on:
+  pull_request_review:
+    branches: [main]
+    types: [submitted]
+
+jobs:
+  approved_review:
+    if: ${{ github.event.review.state == 'approved' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Record the approved review
+        run: |
+          echo "Approved review submitted for PR #${{ github.event.pull_request.number }}"
