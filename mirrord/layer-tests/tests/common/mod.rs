@@ -704,6 +704,7 @@ pub fn get_env(
             "pod/mock-target".to_string(),
         ),
         ("MIRRORD_REMOTE_DNS".to_string(), "false".to_string()),
+        ("MIRRORD_CLI_STRICT_ENV".to_string(), "true".to_string()),
     ]
     .into_iter()
     .chain(extra_vars_owned)

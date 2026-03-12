@@ -331,8 +331,10 @@ use mirrord_layer_lib::process::windows::{console, execution::LayerManagedProces
 use verify_config::verify_config;
 
 use crate::{
-    ci::MirrordCi, newsletter::suggest_newsletter_signup, user_data::UserData,
-    util::get_user_git_branch,
+    ci::MirrordCi,
+    newsletter::suggest_newsletter_signup,
+    user_data::UserData,
+    util::{cli_strict_env_enabled, get_user_git_branch},
 };
 
 async fn exec_process<P>(
@@ -727,6 +729,9 @@ async fn exec(
     }
 
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
+    if cli_strict_env_enabled() {
+        cfg_context = cfg_context.strict_env(true);
+    }
     let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
 
