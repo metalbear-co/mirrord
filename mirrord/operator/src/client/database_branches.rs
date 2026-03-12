@@ -938,12 +938,7 @@ pub async fn wait_for_pending_branches<P: Progress>(
 
     let branch_names: Vec<(BranchDatabaseId, String)> = pending
         .iter()
-        .filter_map(|(id, db)| {
-            db.meta()
-                .name
-                .clone()
-                .map(|name| (id.clone(), name))
-        })
+        .filter_map(|(id, db)| db.meta().name.clone().map(|name| (id.clone(), name)))
         .collect();
 
     let wait_futures = branch_names

@@ -45,9 +45,9 @@ use tracing::Level;
 use crate::{
     client::database_branches::{
         DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
-        create_mongodb_branches, create_mysql_branches, create_pg_branches,
-        list_existing_branches, list_reusable_mongodb_branches, list_reusable_mysql_branches,
-        list_reusable_pg_branches, wait_for_pending_branches,
+        create_mongodb_branches, create_mysql_branches, create_pg_branches, list_existing_branches,
+        list_reusable_mongodb_branches, list_reusable_mysql_branches, list_reusable_pg_branches,
+        wait_for_pending_branches,
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
@@ -1674,8 +1674,7 @@ impl OperatorApi<PreparedClientCert> {
             let branch_api: Api<BranchDatabase> =
                 Api::namespaced(self.client.clone(), api_namespace);
 
-            let existing =
-                list_existing_branches(&branch_api, &create_params, &subtask).await?;
+            let existing = list_existing_branches(&branch_api, &create_params, &subtask).await?;
 
             create_params.retain(|id, _| {
                 !existing.ready.contains_key(id) && !existing.pending.contains_key(id)
