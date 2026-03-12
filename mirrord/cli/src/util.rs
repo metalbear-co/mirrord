@@ -20,9 +20,6 @@ pub(crate) const MIRRORD_CONSOLE_ADDR_ENV: &str = "MIRRORD_CONSOLE_ADDR";
 /// User git branch (set by plugins).
 pub(crate) const MIRRORD_BRANCH_NAME_ENV: &str = "MIRRORD_BRANCH_NAME";
 
-/// When set, the CLI resolves config using only overrides and ignores the process environment.
-pub(crate) const MIRRORD_CLI_STRICT_ENV: &str = "MIRRORD_CLI_STRICT_ENV";
-
 /// Removes `HTTP_PROXY` and `https_proxy` from the environment
 pub(crate) fn remove_proxy_env() {
     for (key, _val) in std::env::vars() {
@@ -138,12 +135,6 @@ pub fn intproxy_container_mode() -> bool {
         .ok()
         .and_then(|value| value.parse::<bool>().ok())
         .unwrap_or_default()
-}
-
-pub(crate) fn cli_strict_env_enabled() -> bool {
-    std::env::var(MIRRORD_CLI_STRICT_ENV)
-        .map(|value| matches!(value.to_lowercase().as_str(), "1" | "true"))
-        .unwrap_or(false)
 }
 
 /// Tries to retrieve the user's git branch from [`MIRRORD_BRANCH_NAME_ENV`] in env (set by the
