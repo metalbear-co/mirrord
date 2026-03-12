@@ -2,7 +2,7 @@
 #![cfg(target_os = "linux")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{os::unix::fs::PermissionsExt, path::Path, time::Duration};
+use std::{os::unix::fs::PermissionsExt, time::Duration};
 
 use rstest::rstest;
 

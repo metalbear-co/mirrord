@@ -2,7 +2,7 @@
 #![warn(clippy::indexing_slicing)]
 
 use core::assert_matches;
-use std::{path::Path, time::Duration};
+use std::time::Duration;
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, FileRequest, FileResponse, ToPayload,

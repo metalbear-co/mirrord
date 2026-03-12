@@ -4,7 +4,7 @@
 mod common;
 
 use core::assert_matches;
-use std::{io::Write, ops::Not, path::Path, time::Duration};
+use std::{io::Write, ops::Not, time::Duration};
 
 pub use common::*;
 use mirrord_config::{

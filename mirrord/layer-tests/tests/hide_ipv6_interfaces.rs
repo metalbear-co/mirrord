@@ -2,7 +2,7 @@
 #![cfg(target_os = "macos")] // linux github runners don't have ipv6, which we require for these tests
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::Path, time::Duration};
+use std::time::Duration;
 
 use rstest::rstest;
 

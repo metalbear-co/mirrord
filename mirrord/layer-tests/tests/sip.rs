@@ -2,7 +2,7 @@
 #![cfg(target_os = "macos")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::Path, time::Duration};
+use std::time::Duration;
 
 use mirrord_protocol::ClientMessage;
 use rstest::rstest;

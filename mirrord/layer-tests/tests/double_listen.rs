@@ -4,7 +4,7 @@ use rstest::rstest;
 
 mod common;
 
-use std::{io::Write, path::Path, time::Duration};
+use std::{io::Write, time::Duration};
 
 pub use common::*;
 use mirrord_protocol::{

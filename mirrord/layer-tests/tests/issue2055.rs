@@ -1,6 +1,6 @@
 #![cfg(target_family = "unix")]
 
-use std::{net::IpAddr, path::Path, time::Duration};
+use std::{net::IpAddr, time::Duration};
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, DnsLookupError,

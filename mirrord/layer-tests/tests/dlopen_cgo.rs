@@ -8,7 +8,7 @@ use rstest::rstest;
 
 mod common;
 
-use std::{path::Path, time::Duration};
+use std::time::Duration;
 
 pub use common::*;
 use mirrord_protocol::tcp::{LayerTcpSteal, StealType};

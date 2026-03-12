@@ -5,7 +5,7 @@ use rstest::rstest;
 
 mod common;
 
-use std::{path::Path, time::Duration};
+use std::time::Duration;
 
 pub use common::*;
 use mirrord_protocol::outgoing::{DaemonConnectV2, LayerConnectV2, SocketAddress};

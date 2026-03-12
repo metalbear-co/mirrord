@@ -2,7 +2,7 @@
 #![warn(clippy::indexing_slicing)]
 #![allow(non_snake_case)]
 
-use std::{path::Path, time::Duration};
+use std::time::Duration;
 
 use nix::{
     sys::{signal, signal::Signal},

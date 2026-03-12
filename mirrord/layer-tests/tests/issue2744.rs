@@ -3,7 +3,7 @@
 
 mod common;
 
-use std::{io::Write, net::SocketAddr, ops::Not, path::Path, time::Duration};
+use std::{io::Write, net::SocketAddr, ops::Not, time::Duration};
 
 pub use common::*;
 use mirrord_protocol::{

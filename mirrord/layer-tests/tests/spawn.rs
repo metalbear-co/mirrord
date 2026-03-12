@@ -1,7 +1,7 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{collections::HashSet, path::Path, time::Duration};
+use std::{collections::HashSet, time::Duration};
 
 #[cfg(not(target_os = "macos"))]
 use mirrord_protocol::file::MetadataInternal;
