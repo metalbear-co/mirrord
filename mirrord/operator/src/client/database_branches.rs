@@ -1002,6 +1002,14 @@ fn resolve_branch_id<P: Progress>(
     session_key: &str,
     progress: &P,
 ) -> BranchDatabaseId {
+    if session_key.is_empty() {
+        progress.warning(
+            "Session key is empty, generating a random branch ID. \
+             Branch reuse will not work for this session.",
+        );
+        return BranchDatabaseId::generate_new();
+    }
+
     match config_id {
         None => BranchDatabaseId::specified(session_key.to_string()),
         Some(id) if id.contains("{key}") => {
@@ -1290,13 +1298,12 @@ mod test {
     }
 
     #[test]
-    fn empty_session_key_substituted_into_placeholder() {
-        let config_id = Some("prefix-{key}-suffix".to_string());
-        let id = resolve_branch_id(&config_id, "", &NullProgress);
-        assert_eq!(
-            id,
-            BranchDatabaseId::Specified("prefix--suffix".to_string())
-        );
+    fn empty_session_key_generates_random_id() {
+        let id1 = resolve_branch_id(&None, "", &NullProgress);
+        let id2 = resolve_branch_id(&None, "", &NullProgress);
+        assert!(matches!(id1, BranchDatabaseId::Generated(_)));
+        assert!(matches!(id2, BranchDatabaseId::Generated(_)));
+        assert_ne!(id1, id2, "each call with empty key should produce a unique ID");
     }
 
     #[test]
