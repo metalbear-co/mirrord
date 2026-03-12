@@ -1002,16 +1002,22 @@ fn resolve_branch_id<P: Progress>(
     session_key: &str,
     progress: &P,
 ) -> BranchDatabaseId {
-    if session_key.is_empty() {
-        progress.warning(
-            "Session key is empty, generating a random branch ID. \
-             Branch reuse will not work for this session.",
-        );
-        return BranchDatabaseId::generate_new();
-    }
-
     match config_id {
+        None if session_key.is_empty() => {
+            progress.warning(
+                "Session key is empty, generating a random branch ID. \
+                 Branch reuse will not work for this session.",
+            );
+            BranchDatabaseId::generate_new()
+        }
         None => BranchDatabaseId::specified(session_key.to_string()),
+        Some(id) if id.contains("{key}") && session_key.is_empty() => {
+            progress.warning(
+                "Session key is empty, generating a random branch ID. \
+                 Branch reuse will not work for this session.",
+            );
+            BranchDatabaseId::generate_new()
+        }
         Some(id) if id.contains("{key}") => {
             let resolved = id.replace("{key}", session_key);
             BranchDatabaseId::specified(resolved)
@@ -1304,6 +1310,26 @@ mod test {
         assert!(matches!(id1, BranchDatabaseId::Generated(_)));
         assert!(matches!(id2, BranchDatabaseId::Generated(_)));
         assert_ne!(id1, id2, "each call with empty key should produce a unique ID");
+    }
+
+    #[test]
+    fn empty_session_key_with_placeholder_generates_random_id() {
+        let config_id = Some("prefix-{key}-suffix".to_string());
+        let id = resolve_branch_id(&config_id, "", &NullProgress);
+        assert!(
+            matches!(id, BranchDatabaseId::Generated(_)),
+            "empty session key should generate a random ID even with a placeholder"
+        );
+    }
+
+    #[test]
+    fn empty_session_key_with_custom_id_uses_custom_id() {
+        let config_id = Some("my-fixed-branch".to_string());
+        let id = resolve_branch_id(&config_id, "", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("my-fixed-branch".to_string())
+        );
     }
 
     #[test]
