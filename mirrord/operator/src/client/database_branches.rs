@@ -992,12 +992,62 @@ pub async fn wait_for_pending_branches<P: Progress>(
     Ok(ready_branches)
 }
 
+/// Resolve a branch database ID from the user config and session key.
+///
+/// - No `id` in config: uses the session key as the branch ID (enables automatic reuse)
+/// - `id` contains `{key}`: substitutes `{key}` with the session key
+/// - `id` without `{key}`: uses the custom ID as-is, emits a warning
+fn resolve_branch_id<P: Progress>(
+    config_id: &Option<String>,
+    session_key: &str,
+    progress: &P,
+) -> BranchDatabaseId {
+    match config_id {
+        None if session_key.is_empty() => {
+            progress.warning(
+                "Session key is empty, generating a random branch ID. \
+                 Branch reuse will not work for this session.",
+            );
+            BranchDatabaseId::generate_new()
+        }
+        None => BranchDatabaseId::specified(session_key.to_string()),
+        Some(id) if id.contains("{key}") && session_key.is_empty() => {
+            progress.warning(
+                "Session key is empty, generating a random branch ID. \
+                 Branch reuse will not work for this session.",
+            );
+            BranchDatabaseId::generate_new()
+        }
+        Some(id) if id.contains("{key}") => {
+            let resolved = id.replace("{key}", session_key);
+            BranchDatabaseId::specified(resolved)
+        }
+        Some(id) => {
+            progress.warning(
+                "Custom branch ID provided, session key will not be used. \
+                 Remove the ID or use {key} to include it.",
+            );
+            BranchDatabaseId::specified(id.clone())
+        }
+    }
+}
+
 pub struct UnifiedDatabaseBranchParams {
     pub branches: HashMap<BranchDatabaseId, UnifiedBranchParams>,
 }
 
 impl UnifiedDatabaseBranchParams {
-    pub fn new(config: &DatabaseBranchesConfig, target: &Target) -> Result<Self, OperatorApiError> {
+    /// Create unified branch database parameters from user config.
+    ///
+    /// When no branch `id` is provided, the session key is used as the branch ID so that
+    /// sessions sharing the same key automatically reuse the same branch. Custom IDs can
+    /// reference `{key}` for substitution.
+    pub fn new<P: Progress>(
+        config: &DatabaseBranchesConfig,
+        target: &Target,
+        session_key: &str,
+        progress: &P,
+    ) -> Result<Self, OperatorApiError> {
         let mut target_with_container = target.clone();
         if target_with_container.container().is_none() {
             target_with_container.set_container(String::new());
@@ -1010,10 +1060,7 @@ impl UnifiedDatabaseBranchParams {
         for branch_db_config in config.0.iter() {
             match branch_db_config {
                 DatabaseBranchConfig::Mongodb(mongodb_config) => {
-                    let id = match mongodb_config.base.id.clone() {
-                        Some(id) => BranchDatabaseId::specified(id),
-                        None => BranchDatabaseId::generate_new(),
-                    };
+                    let id = resolve_branch_id(&mongodb_config.base.id, session_key, progress);
                     let params = UnifiedBranchParams::from_mongodb(
                         id.as_ref(),
                         mongodb_config,
@@ -1023,10 +1070,7 @@ impl UnifiedDatabaseBranchParams {
                     branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Mysql(mysql_config) => {
-                    let id = match mysql_config.base.id.clone() {
-                        Some(id) => BranchDatabaseId::specified(id),
-                        None => BranchDatabaseId::generate_new(),
-                    };
+                    let id = resolve_branch_id(&mysql_config.base.id, session_key, progress);
                     let params = UnifiedBranchParams::from_mysql(
                         id.as_ref(),
                         mysql_config,
@@ -1036,10 +1080,7 @@ impl UnifiedDatabaseBranchParams {
                     branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Pg(pg_config) => {
-                    let id = match pg_config.base.id.clone() {
-                        Some(id) => BranchDatabaseId::specified(id),
-                        None => BranchDatabaseId::generate_new(),
-                    };
+                    let id = resolve_branch_id(&pg_config.base.id, session_key, progress);
                     let params = UnifiedBranchParams::from_pg(
                         id.as_ref(),
                         pg_config,
@@ -1049,10 +1090,7 @@ impl UnifiedDatabaseBranchParams {
                     branches.insert(id, params);
                 }
                 DatabaseBranchConfig::Mssql(mssql_config) => {
-                    let id = match mssql_config.base.id.clone() {
-                        Some(id) => BranchDatabaseId::specified(id),
-                        None => BranchDatabaseId::generate_new(),
-                    };
+                    let id = resolve_branch_id(&mssql_config.base.id, session_key, progress);
                     let params = UnifiedBranchParams::from_mssql(
                         id.as_ref(),
                         mssql_config,
@@ -1206,6 +1244,116 @@ impl UnifiedBranchParams {
             labels,
             annotations: BTreeMap::new(),
             spec,
+        }
+    }
+}
+
+pub mod labels {
+    pub const MIRRORD_BRANCH_ID_LABEL: &str = "mirrord-branch-id";
+}
+
+pub use crate::crd::TARGET_NAMESPACE_ANNOTATION;
+
+#[cfg(test)]
+mod test {
+    use mirrord_progress::NullProgress;
+
+    use super::{BranchDatabaseId, resolve_branch_id};
+
+    #[test]
+    fn no_id_uses_session_key() {
+        let id = resolve_branch_id(&None, "my-session-key", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("my-session-key".to_string())
+        );
+    }
+
+    #[test]
+    fn id_with_key_placeholder_substitutes_session_key() {
+        let config_id = Some("branch-{key}-db".to_string());
+        let id = resolve_branch_id(&config_id, "abc123", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("branch-abc123-db".to_string())
+        );
+    }
+
+    #[test]
+    fn id_with_only_key_placeholder() {
+        let config_id = Some("{key}".to_string());
+        let id = resolve_branch_id(&config_id, "full-key", &NullProgress);
+        assert_eq!(id, BranchDatabaseId::Specified("full-key".to_string()));
+    }
+
+    #[test]
+    fn id_with_multiple_key_placeholders() {
+        let config_id = Some("{key}-{key}".to_string());
+        let id = resolve_branch_id(&config_id, "x", &NullProgress);
+        assert_eq!(id, BranchDatabaseId::Specified("x-x".to_string()));
+    }
+
+    #[test]
+    fn custom_id_without_key_used_as_is() {
+        let config_id = Some("fixed-branch-id".to_string());
+        let id = resolve_branch_id(&config_id, "ignored-key", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("fixed-branch-id".to_string())
+        );
+    }
+
+    #[test]
+    fn empty_session_key_generates_random_id() {
+        let id1 = resolve_branch_id(&None, "", &NullProgress);
+        let id2 = resolve_branch_id(&None, "", &NullProgress);
+        assert!(matches!(id1, BranchDatabaseId::Generated(_)));
+        assert!(matches!(id2, BranchDatabaseId::Generated(_)));
+        assert_ne!(id1, id2, "each call with empty key should produce a unique ID");
+    }
+
+    #[test]
+    fn empty_session_key_with_placeholder_generates_random_id() {
+        let config_id = Some("prefix-{key}-suffix".to_string());
+        let id = resolve_branch_id(&config_id, "", &NullProgress);
+        assert!(
+            matches!(id, BranchDatabaseId::Generated(_)),
+            "empty session key should generate a random ID even with a placeholder"
+        );
+    }
+
+    #[test]
+    fn empty_session_key_with_custom_id_uses_custom_id() {
+        let config_id = Some("my-fixed-branch".to_string());
+        let id = resolve_branch_id(&config_id, "", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("my-fixed-branch".to_string())
+        );
+    }
+
+    #[test]
+    fn session_key_with_special_characters() {
+        let id = resolve_branch_id(&None, "key/with:special@chars", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("key/with:special@chars".to_string())
+        );
+    }
+
+    #[test]
+    fn resolved_id_is_always_specified_variant() {
+        let cases: Vec<(Option<String>, &str)> = vec![
+            (None, "session-key"),
+            (Some("{key}-branch".to_string()), "session-key"),
+            (Some("static-id".to_string()), "session-key"),
+        ];
+        for (config_id, key) in cases {
+            let id = resolve_branch_id(&config_id, key, &NullProgress);
+            assert!(
+                matches!(id, BranchDatabaseId::Specified(_)),
+                "expected Specified variant for config_id={config_id:?}, key={key}"
+            );
         }
     }
 }
