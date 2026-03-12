@@ -198,14 +198,6 @@ pub struct MirrordRmqSessionSpec {
     /// The name of the queue on AWS.
     pub queue_filters: HashMap<QueueId, QueueMessageFilter>,
 
-    /// Specify jq programs that will be used to filter messages from queues.
-    /// For queues with a specified jq program, for every message the jq filter runs on a JSON
-    /// representation of the RMQ `Message` object.
-    ///
-    /// If the jq program outputs `true`, that message is considered as matching the filter.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub queue_jq_filters: HashMap<QueueId, String>,
-
     /// The target of this session.
     pub queue_consumer: QueueConsumer,
 
