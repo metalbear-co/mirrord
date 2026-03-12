@@ -20,6 +20,9 @@ pub enum OperatorOperation {
     SessionManagement,
     ListingTargets,
     DbBranching,
+    PgBranching,
+    MysqlBranching,
+    MongodbBranching,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -33,6 +36,9 @@ impl fmt::Display for OperatorOperation {
             Self::SessionManagement => "session management",
             Self::ListingTargets => "listing targets",
             Self::DbBranching => "database branching",
+            Self::PgBranching => "PostgreSQL branching",
+            Self::MysqlBranching => "MySQL branching",
+            Self::MongodbBranching => "MongoDB branching",
         };
 
         f.write_str(as_str)
