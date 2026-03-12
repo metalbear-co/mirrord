@@ -22,7 +22,7 @@ async fn bash_script(config_dir: &Path) {
     let mut config_path = config_dir.to_path_buf();
     config_path.push("bash_script.json");
 
-    let (mut test_process, mut intproxy) = Application::EnvBashCat
+    let (test_process, mut intproxy) = Application::EnvBashCat
         .start_process(vec![], Some(&config_path))
         .await;
 
