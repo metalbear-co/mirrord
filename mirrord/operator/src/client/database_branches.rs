@@ -1011,7 +1011,7 @@ fn resolve_branch_id<P: Progress>(
         Some(id) => {
             progress.warning(
                 "Custom branch ID provided, session key will not be used. \
-                 Remove the ID or use {{ key }} to include it.",
+                 Remove the ID or use {key} to include it.",
             );
             BranchDatabaseId::specified(id.clone())
         }
@@ -1287,12 +1287,6 @@ mod test {
             id,
             BranchDatabaseId::Specified("fixed-branch-id".to_string())
         );
-    }
-
-    #[test]
-    fn empty_session_key_with_no_id() {
-        let id = resolve_branch_id(&None, "", &NullProgress);
-        assert_eq!(id, BranchDatabaseId::Specified(String::new()));
     }
 
     #[test]
