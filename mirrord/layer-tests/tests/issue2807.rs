@@ -3,7 +3,7 @@
 #![warn(clippy::indexing_slicing)]
 
 use std::{
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::Duration,
 };
 

@@ -10,7 +10,7 @@ use std::{
 };
 
 use mirrord_config::MIRRORD_TEST_INTPROXY_ADDR;
-use mirrord_layer_tests::intproxy::TestIntProxy;
+pub use mirrord_layer_tests::intproxy::TestIntProxy;
 pub use mirrord_test_utils::{TestProcess, run_command::run_exec};
 use rstest::fixture;
 use tokio::{io::AsyncWriteExt, net::TcpListener, process::Command};
