@@ -2,23 +2,21 @@ name: Operator E2E Test
 
 # This workflow supports two entry points:
 # 1. `workflow_dispatch` for manual testing.
-# 2. `pull_request_review` for approved release PRs created from branches in
-#    the main `metalbear-co/mirrord` repository.
+# 2. `push` for release branches in the main `metalbear-co/mirrord`
+#    repository.
 #
-# Release PRs are expected to come from branches named `release/...` in this
-# repository. Because those PRs are opened from the repository itself instead of
-# a fork, this workflow can use `OPERATOR_E2E_PAT` directly on
-# `pull_request_review`.
+# Release PRs are expected to come from branches named
+# `release/<major>.<minor>.<patch>` in this repository. Automatic runs happen
+# when commits are pushed to those branches in `metalbear-co/mirrord`, so fork
+# PRs do not trigger this workflow.
 #
 # `OPERATOR_E2E_PAT` requirements for the remote operator workflow:
 # - Classic PAT: `repo`
 # - Fine-grained PAT:
 #   - `metalbear-co/operator`: `Actions: read` and `Actions: write`
 #
-# Automatic runs only proceed when all of the following are true:
-# - the PR targets `main`
-# - the review state is `approved`
-# - the PR head branch starts with `release/`
+# Automatic runs only proceed when the pushed branch matches
+# `release/<major>.<minor>.<patch>`.
 #
 on:
   workflow_dispatch:
@@ -36,13 +34,12 @@ on:
         required: false
         type: string
         default: "main"
-  pull_request_review:
-    branches: [main]
-    types: [submitted]
+  push:
+    branches:
+      - "release/[0-9]+.[0-9]+.[0-9]+"
 
 jobs:
   resolve_trigger_context:
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.review.state == 'approved' && startsWith(github.event.pull_request.head.ref, 'release/')) }}
     runs-on: ubuntu-24.04
     outputs:
       should_run: ${{ steps.resolve.outputs.should_run }}
@@ -54,16 +51,19 @@ jobs:
         id: resolve
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            manual_commit="${{ inputs.mirrord_commit }}"
+            manual_branch="${{ inputs.mirrord_branch }}"
+            operator_branch="${{ inputs.operator_branch || 'main' }}"
             echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "mirrord_commit=${{ inputs.mirrord_commit }}" >> "$GITHUB_OUTPUT"
-            echo "mirrord_branch=${{ inputs.mirrord_branch }}" >> "$GITHUB_OUTPUT"
-            echo "operator_branch=${{ inputs.operator_branch || 'main' }}" >> "$GITHUB_OUTPUT"
+            echo "mirrord_commit=$manual_commit" >> "$GITHUB_OUTPUT"
+            echo "mirrord_branch=$manual_branch" >> "$GITHUB_OUTPUT"
+            echo "operator_branch=$operator_branch" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "should_run=true" >> "$GITHUB_OUTPUT"
-          echo "mirrord_commit=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
-          echo "mirrord_branch=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_OUTPUT"
+          echo "mirrord_commit=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "mirrord_branch=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
           echo "operator_branch=main" >> "$GITHUB_OUTPUT"
 
   trigger-operator-e2e:
