@@ -6,7 +6,6 @@ use core::assert_matches;
 use std::{
     io::Write,
     net::{Ipv4Addr, SocketAddr},
-    path::Path,
     time::Duration,
 };
 

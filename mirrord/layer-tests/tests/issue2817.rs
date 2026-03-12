@@ -1,7 +1,7 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::Path, str::FromStr, time::Duration};
+use std::{str::FromStr, time::Duration};
 
 use mirrord_protocol::{
     ClientMessage,
