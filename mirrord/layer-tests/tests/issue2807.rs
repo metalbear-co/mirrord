@@ -2,10 +2,7 @@
 #![cfg(target_os = "macos")] // linux github runners don't have ipv6, which we require for these tests
 #![warn(clippy::indexing_slicing)]
 
-use std::{
-    path::PathBuf,
-    time::Duration,
-};
+use std::{path::PathBuf, time::Duration};
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, FileRequest, FileResponse, ToPayload,
