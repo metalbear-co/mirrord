@@ -31,9 +31,9 @@ pub mod label_selector;
 pub mod multi_cluster;
 pub mod patch;
 pub mod policy;
-pub mod rabbitmq;
 pub mod preview;
 pub mod profile;
+pub mod rabbitmq;
 pub mod session;
 pub mod steal_tls;
 
@@ -529,9 +529,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SqsQueueSplittingWithJqFilter => {
                 "Splitting SQS queues with a jq filter"
             }
-            NewOperatorFeature::RmqQueueSplitting => {
-                "RabbitMQ queue splitting"
-            }
+            NewOperatorFeature::RmqQueueSplitting => "RabbitMQ queue splitting",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -606,7 +604,8 @@ pub struct SqsQueueDetails {
     pub sns: Option<bool>,
 }
 
-// This is a proxy to generate a schemars schema that contains the common fields between [`SqsQueueDetails`] and [`RmqQueueDetails`](rabbitmq::RmqQueueDetails)
+// This is a proxy to generate a schemars schema that contains the common fields between
+// [`SqsQueueDetails`] and [`RmqQueueDetails`](rabbitmq::RmqQueueDetails)
 /// The details of a queue that should be split.
 #[derive(JsonSchema)]
 #[serde(rename_all = "camelCase")] // queue_type -> queueType
@@ -630,7 +629,7 @@ pub enum SplitQueue {
 
     /// RabbitMQ
     #[serde(rename = "RMQ")]
-    Rmq(rabbitmq::RmqQueueDetails)
+    Rmq(rabbitmq::RmqQueueDetails),
 }
 
 impl JsonSchema for SplitQueue {
@@ -963,8 +962,7 @@ mod tests {
     use kube::CustomResourceExt;
 
     use crate::crd::{
-        MirrordClusterOperatorUserCredential, MirrordSqsSession,
-        MirrordWorkloadQueueRegistry,
+        MirrordClusterOperatorUserCredential, MirrordSqsSession, MirrordWorkloadQueueRegistry,
         db_branching::{
             mongodb::MongodbBranchDatabase, mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
         },
@@ -975,6 +973,7 @@ mod tests {
         policy::{MirrordClusterPolicy, MirrordPolicy},
         preview::PreviewSession,
         profile::{MirrordClusterProfile, MirrordProfile},
+        rabbitmq::{MirrordRmqCluster, MirrordRmqSession},
         session::MirrordClusterSession,
         steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig},
     };
@@ -998,7 +997,6 @@ mod tests {
         let yaml = serde_yaml::to_string(&crd).unwrap();
         fs::write(path, yaml).unwrap();
     }
-
 
     #[test]
     #[ignore]
@@ -1104,6 +1102,18 @@ mod tests {
 
     #[test]
     #[ignore]
+    fn write_mirrord_rmq_cluster() {
+        write_crd_yaml::<MirrordRmqCluster>();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_mirrord_rmq_session() {
+        write_crd_yaml::<MirrordRmqSession>();
+    }
+
+    #[test]
+    #[ignore]
     fn write_mirrord_cluster_profile_crd_yaml() {
         write_crd_yaml::<MirrordClusterProfile>();
     }
@@ -1146,6 +1156,8 @@ mod tests {
         write_crd_yaml::<MirrordKafkaClientConfig>();
         write_crd_yaml::<MirrordKafkaTopicsConsumer>();
         write_crd_yaml::<MirrordKafkaEphemeralTopic>();
+        write_crd_yaml::<MirrordRmqCluster>();
+        write_crd_yaml::<MirrordRmqSession>();
         write_crd_yaml::<MirrordClusterProfile>();
         write_crd_yaml::<MirrordProfile>();
         write_crd_yaml::<MirrordTlsStealConfig>();
