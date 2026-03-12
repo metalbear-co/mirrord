@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt,
+};
 
 use amq_protocol_types::FieldTable;
 use base64::{Engine, engine::general_purpose};
@@ -158,6 +161,16 @@ pub struct RmqSessionError {
     pub reason: String,
 }
 
+impl fmt::Display for RmqSessionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
+        // Write strictly the first element into the supplied output
+        // stream: `f`. Returns `fmt::Result` which indicates whether the
+        // operation succeeded or failed. Note that `write!` uses syntax which
+        // is very similar to `println!`.
+        write!(f, "{}", self.reason)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename = "RMQSessionStatus")]
 pub enum RmqSessionStatus {
@@ -178,6 +191,22 @@ pub enum RmqSessionStatus {
         error: RmqSessionError,
         details: Option<RmqSplitDetails>,
     },
+}
+
+/// The [`kube::runtime::wait::Condition`] trait is auto-implemented for this function.
+/// To be used in [`kube::runtime::wait::await_condition`].
+pub fn is_session_ready(session: Option<&MirrordRmqSession>) -> bool {
+    session
+        .and_then(|session| session.status.as_ref())
+        .map(|status| {
+            matches!(
+                status,
+                RmqSessionStatus::Ready(..)
+                    | RmqSessionStatus::StartError(..)
+                    | RmqSessionStatus::CleanupError { .. }
+            )
+        })
+        .unwrap_or_default()
 }
 
 /// The operator creates this object when a user runs mirrord against a target that is a queue
