@@ -4,7 +4,7 @@ use std::{io, net::SocketAddr};
 
 #[cfg(not(target_os = "windows"))]
 use io::Write;
-use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
+use mirrord_config::{config::ConfigContext, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV};
 #[cfg(target_os = "macos")]
 use mirrord_sip::MIRRORD_SANTA_MODE_ENV;
 #[cfg(not(target_os = "windows"))]
@@ -47,15 +47,16 @@ pub(crate) fn cli_strict_env_allowlist() -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub(crate) fn apply_test_env_overrides(cfg_context: &mut mirrord_config::config::ConfigContext) {
+pub(crate) fn apply_test_env_overrides(mut cfg_context: ConfigContext) -> ConfigContext {
     if cli_strict_env_enabled() {
         for key in cli_strict_env_allowlist() {
             if let Ok(value) = std::env::var(&key) {
-                cfg_context.override_env_mut(key, value);
+                cfg_context = cfg_context.override_env(key, value);
             }
         }
-        cfg_context.strict_env(true);
+        cfg_context = cfg_context.strict_env(true);
     }
+    cfg_context
 }
 
 /// Removes `HTTP_PROXY` and `https_proxy` from the environment

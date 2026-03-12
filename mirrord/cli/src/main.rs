@@ -729,7 +729,7 @@ async fn exec(
     }
 
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
-    apply_test_env_overrides(&mut cfg_context);
+    cfg_context = apply_test_env_overrides(cfg_context);
     let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
 
