@@ -197,11 +197,11 @@ pub enum QueueFilter {
     /// See [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).
     ///
     /// This can be used to filter messages based on their body content, for example.
-    /// ```
-    /// "jq_filter": ".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"
-    /// ```
-    /// This filter will tell mirrord to only make available to this local application messages with
-    /// a json in the message body, with a `customer_email` field that contains "metalbear.com".
+    ///
+    ///
+    /// This filter, for example, will tell mirrord to only make available to this local application
+    /// messages with a json in the message body, with a `customer_email` field that contains
+    /// "metalbear.com": `".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"`
     #[serde(rename = "SQS")]
     Sqs {
         /// A filter is a mapping between message attribute names and regexes they should match.
