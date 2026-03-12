@@ -47,6 +47,9 @@ pub struct BranchDatabaseSpec {
     /// MongoDB-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mongodb_options: Option<MongodbOptions>,
+    /// MSSQL-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mssql_options: Option<MssqlOptions>,
 }
 
 /// Validated dialect configuration extracted from a [`BranchDatabaseSpec`].
@@ -57,7 +60,6 @@ pub enum DialectConfig {
     Postgres(Box<PostgresOptions>),
     Mysql(Box<MysqlOptions>),
     Mongodb(Box<MongodbOptions>),
-    #[serde(rename = "mssqlOptions")]
     Mssql(Box<MssqlOptions>),
 }
 
@@ -166,11 +168,13 @@ impl BranchDatabaseSpec {
             &self.postgres_options,
             &self.mysql_options,
             &self.mongodb_options,
+            &self.mssql_options,
         ) {
-            (Some(pg), None, None) => Ok(DialectConfig::Postgres(Box::new(pg.clone()))),
-            (None, Some(my), None) => Ok(DialectConfig::Mysql(Box::new(my.clone()))),
-            (None, None, Some(mo)) => Ok(DialectConfig::Mongodb(Box::new(mo.clone()))),
-            (None, None, None) => Err(DialectValidationError::NoneSet),
+            (Some(pg), None, None, None) => Ok(DialectConfig::Postgres(Box::new(pg.clone()))),
+            (None, Some(my), None, None) => Ok(DialectConfig::Mysql(Box::new(my.clone()))),
+            (None, None, Some(mo), None) => Ok(DialectConfig::Mongodb(Box::new(mo.clone()))),
+            (None, None, None, Some(ms)) => Ok(DialectConfig::Mssql(Box::new(ms.clone()))),
+            (None, None, None, None) => Err(DialectValidationError::NoneSet),
             _ => Err(DialectValidationError::MultipleSet),
         }
     }

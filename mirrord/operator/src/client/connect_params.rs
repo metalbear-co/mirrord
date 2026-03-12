@@ -82,11 +82,15 @@ pub struct BranchDbNames {
     pub pg: Vec<String>,
     pub mysql: Vec<String>,
     pub mongodb: Vec<String>,
+    pub mssql: Vec<String>,
 }
 
 impl BranchDbNames {
     pub fn is_empty(&self) -> bool {
-        self.pg.is_empty() && self.mysql.is_empty() && self.mongodb.is_empty()
+        self.pg.is_empty()
+            && self.mysql.is_empty()
+            && self.mongodb.is_empty()
+            && self.mssql.is_empty()
     }
 }
 
@@ -109,7 +113,7 @@ impl<'a> ConnectParams<'a> {
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
             mongodb_branch_names: branch_db_names.mongodb,
-            branch_db_names: Vec::new(),
+            branch_db_names: branch_db_names.mssql,
             session_ci_info,
             is_default_cluster: None,
             sqs_output_queues: HashMap::new(),

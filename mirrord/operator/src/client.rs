@@ -1243,7 +1243,7 @@ impl OperatorApi<PreparedClientCert> {
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
             mongodb_branch_names: branch_db_names.mongodb,
-            branch_db_names: Vec::new(),
+            branch_db_names: branch_db_names.mssql,
             session_ci_info,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
@@ -1697,6 +1697,8 @@ impl OperatorApi<PreparedClientCert> {
                     names.mysql.push(name);
                 } else if branch.spec.mongodb_options.is_some() {
                     names.mongodb.push(name);
+                } else if branch.spec.mssql_options.is_some() {
+                    names.mssql.push(name);
                 }
             }
             Ok(names)
@@ -1788,6 +1790,7 @@ impl OperatorApi<PreparedClientCert> {
                 pg: pg_names,
                 mysql: mysql_names,
                 mongodb: mongodb_names,
+                mssql: Vec::new(),
             })
         }
     }
@@ -1989,6 +1992,7 @@ mod test {
                 pg: vec!["pg-branch-1".into()],
                 mysql: vec!["mysql-branch-1".into()],
                 mongodb: vec![],
+                mssql: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\

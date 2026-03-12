@@ -24,8 +24,7 @@ use crate::{
     client::error::{OperatorApiError, OperatorOperation},
     crd::db_branching::{
         branch_database::{
-            BranchDatabase, BranchDatabaseSpec, MongodbOptions, MysqlOptions, PostgresOptions,
-            SqlBranchCopyConfig,
+            BranchDatabase, BranchDatabaseSpec, MongodbOptions, MssqlOptions, MysqlOptions, PostgresOptions, SqlBranchCopyConfig
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -543,7 +542,7 @@ impl DatabaseBranchParams {
                     let params = PgBranchParams::new(id.as_ref(), pg_config, target);
                     pg.insert(id, params);
                 }
-                DatabaseBranchConfig::Redis(_) => {}
+                DatabaseBranchConfig::Mssql(_) | DatabaseBranchConfig::Redis(_) => {}
             };
         }
         Self { mongodb, mysql, pg }
@@ -731,6 +730,7 @@ pub mod labels {
     pub(crate) const MIRRORD_MONGODB_BRANCH_ID_LABEL: &str = "mirrord-mongodb-branch-id";
     pub(crate) const MIRRORD_MYSQL_BRANCH_ID_LABEL: &str = "mirrord-mysql-branch-id";
     pub(crate) const MIRRORD_PG_BRANCH_ID_LABEL: &str = "mirrord-pg-branch-id";
+    pub(crate) const MIRRORD_MSSQL_BRANCH_ID_LABEL: &str = "mirrord-mssql-branch-id";
     pub const MIRRORD_BRANCH_ID_LABEL: &str = "mirrord-branch-id";
 }
 
@@ -946,6 +946,19 @@ impl UnifiedDatabaseBranchParams {
                     );
                     branches.insert(id, params);
                 }
+                DatabaseBranchConfig::Mssql(mssql_config) => {
+                    let id = match mssql_config.base.id.clone() {
+                        Some(id) => BranchDatabaseId::specified(id),
+                        None => BranchDatabaseId::generate_new(),
+                    };
+                    let params = UnifiedBranchParams::from_mssql(
+                        id.as_ref(),
+                        mssql_config,
+                        target,
+                        &session_target,
+                    );
+                    branches.insert(id, params);
+                }
                 DatabaseBranchConfig::Redis(_) => {}
             };
         }
@@ -986,6 +999,7 @@ impl UnifiedBranchParams {
             }),
             mysql_options: None,
             mongodb_options: None,
+            mssql_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1017,6 +1031,7 @@ impl UnifiedBranchParams {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
             }),
             mongodb_options: None,
+            mssql_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1046,6 +1061,40 @@ impl UnifiedBranchParams {
             postgres_options: None,
             mysql_options: None,
             mongodb_options: Some(MongodbOptions {
+                copy: config.copy.clone().into(),
+            }),
+            mssql_options: None,
+        };
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        Self {
+            name_prefix,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+        }
+    }
+
+
+    pub fn from_mssql(
+        id: &str,
+        config: &mirrord_config::feature::database_branches::MssqlBranchConfig,
+        target: &Target,
+        session_target: &SessionTarget,
+    ) -> Self {
+        let name_prefix = format!("{}-mssql-branch-", target.name());
+        let connection_source = convert_connection_source(&config.base.connection);
+        let spec = BranchDatabaseSpec {
+            id: id.to_string(),
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.ttl_secs,
+            version: config.base.version.clone(),
+            postgres_options: None,
+            mysql_options: None,
+            mongodb_options: None,
+            mssql_options: Some(MssqlOptions {
                 copy: config.copy.clone().into(),
             }),
         };
