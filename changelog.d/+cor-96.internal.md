@@ -1,1 +1,1 @@
-Trigger operator e2e on mirrord release PRs..
+Trigger operator e2e on mirrord release PRs.
