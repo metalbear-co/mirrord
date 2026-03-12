@@ -11,7 +11,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn fork(dylib_path: &Path) {
+async fn fork() {
     let application = Application::Fork;
     let (mut test_process, mut intproxy) =
         application.start_process(Default::default(), None).await;

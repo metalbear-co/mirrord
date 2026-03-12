@@ -24,7 +24,7 @@ async fn symlink_app(app: &Application) -> Application {
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
-async fn skip_based_on_exec_name(dylib_path: &Path) {
+async fn skip_based_on_exec_name() {
     let app = Application::OpenFile;
     let symlinked_app = symlink_app(&app).await;
 
@@ -46,7 +46,7 @@ async fn skip_based_on_exec_name(dylib_path: &Path) {
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
-async fn skip_based_on_invocation_name(dylib_path: &Path) {
+async fn skip_based_on_invocation_name() {
     let app = Application::OpenFile;
     let symlinked_app = symlink_app(&app).await;
 
@@ -69,7 +69,7 @@ async fn skip_based_on_invocation_name(dylib_path: &Path) {
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
-async fn dont_skip(dylib_path: &Path) {
+async fn dont_skip() {
     let app = Application::OpenFile;
     let symlinked_app = symlink_app(&app).await;
 

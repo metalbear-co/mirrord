@@ -14,7 +14,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn dup_listen(dylib_path: &Path) {
+async fn dup_listen() {
     let application = Application::DupListen;
     let (mut test_process, mut intproxy) =
         application.start_process(Default::default(), None).await;

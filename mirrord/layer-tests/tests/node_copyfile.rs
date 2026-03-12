@@ -22,7 +22,7 @@ pub use common::*;
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
 #[cfg_attr(target_os = "linux", ignore)]
-async fn node_copyfile(dylib_path: &Path) {
+async fn node_copyfile() {
     let _tracing = init_tracing();
 
     let application = Application::NodeCopyFile;

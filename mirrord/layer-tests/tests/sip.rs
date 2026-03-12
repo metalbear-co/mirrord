@@ -15,7 +15,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
-async fn tmp_dir_read_locally(dylib_path: &Path) {
+async fn tmp_dir_read_locally() {
     let (mut test_process, mut intproxy) =
         Application::BashShebang.start_process(vec![], None).await;
 

@@ -15,7 +15,7 @@ use mirrord_protocol::tcp::LayerTcp;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn self_connect(dylib_path: &Path) {
+async fn self_connect() {
     let application = Application::PythonSelfConnect;
     let (mut test_process, mut intproxy) = application
         .start_process_with_port(vec![("MIRRORD_FILE_MODE", "local")], None)

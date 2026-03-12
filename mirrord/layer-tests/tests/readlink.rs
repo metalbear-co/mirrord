@@ -11,7 +11,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn readlink(dylib_path: &Path) {
+async fn readlink() {
     let application = Application::ReadLink;
 
     let (mut test_process, mut intproxy) =

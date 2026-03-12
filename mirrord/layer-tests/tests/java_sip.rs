@@ -16,7 +16,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
-async fn java_temurin_sip(dylib_path: &Path) {
+async fn java_temurin_sip() {
     let (mut test_process, _intproxy) = Application::JavaTemurinSip
         .start_process(vec![("MIRRORD_FILE_MODE", "local")], None)
         .await;

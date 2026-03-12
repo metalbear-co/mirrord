@@ -58,7 +58,7 @@ async fn go_self_open(
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
-async fn read_from_mirrord_bin(dylib_path: &Path) {
+async fn read_from_mirrord_bin() {
     let _tracing = init_tracing();
 
     let contents = "please don't flake";

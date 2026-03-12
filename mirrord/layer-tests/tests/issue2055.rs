@@ -18,7 +18,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn issue_2055(dylib_path: &Path) {
+async fn issue_2055() {
     let application = Application::CIssue2055;
     let (mut test_process, mut intproxy) = application
         .start_process(vec![("MIRRORD_REMOTE_DNS", "true")], None)

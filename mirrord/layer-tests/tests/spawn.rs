@@ -28,7 +28,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn node_spawn(dylib_path: &Path) {
+async fn node_spawn() {
     let application = Application::NodeSpawn;
     let (mut test_process, mut intproxy) = application
         .start_process(vec![("MIRRORD_FILE_MODE", "read")], None)

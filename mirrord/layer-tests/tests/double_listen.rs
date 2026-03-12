@@ -16,7 +16,7 @@ use mirrord_protocol::{
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(15))]
-async fn double_listen(dylib_path: &Path) {
+async fn double_listen() {
     let config = serde_json::json!({
         "target": "pod/real-pod",
         "feature": {
