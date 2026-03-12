@@ -705,9 +705,23 @@ pub fn get_env(
     ];
     if cfg!(windows) {
         // on windows default to local file_mode to prevent accidental TestIntproxy failure due to
-        // remote-first read approach
-        default_env.push(("MIRRORD_FILE_MODE".to_string(), "local".to_string()))
+        // remote-first read approach, implicitly overriden through `extra_vars` for tests that
+        // require it.
+        default_env.push(("MIRRORD_FILE_MODE".to_string(), "local".to_string()));
     }
 
-    default_env.into_iter().chain(extra_vars_owned).collect()
+    let mut exec_env_map: HashMap<String, String> =
+        default_env.into_iter().chain(extra_vars_owned).collect();
+    // Make CLI ConfigContext strict
+    // except for the above default env vars + extra env vars provided
+    exec_env_map.extend([
+        ("MIRRORD_CLI_STRICT_ENV".to_string(), "true".to_string()),
+        (
+            "MIRRORD_CLI_STRICT_ENV_ALLOWLIST".to_string(),
+            exec_env_map.keys().cloned().collect::<Vec<_>>().join(","),
+        ),
+    ]);
+    // Don't add additional env vars past this MIRRORD_CLI_STRICT_ENV line
+
+    exec_env_map
 }

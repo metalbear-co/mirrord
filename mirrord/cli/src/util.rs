@@ -20,6 +20,44 @@ pub(crate) const MIRRORD_CONSOLE_ADDR_ENV: &str = "MIRRORD_CONSOLE_ADDR";
 /// User git branch (set by plugins).
 pub(crate) const MIRRORD_BRANCH_NAME_ENV: &str = "MIRRORD_BRANCH_NAME";
 
+/// When set, the CLI resolves config using only overrides and ignores the process environment.
+pub(crate) const MIRRORD_CLI_STRICT_ENV: &str = "MIRRORD_CLI_STRICT_ENV";
+
+/// Comma/whitespace separated allowlist of env vars to read even in strict env mode.
+pub(crate) const MIRRORD_CLI_STRICT_ENV_ALLOWLIST: &str = "MIRRORD_CLI_STRICT_ENV_ALLOWLIST";
+
+pub(crate) fn cli_strict_env_enabled() -> bool {
+    std::env::var(MIRRORD_CLI_STRICT_ENV)
+        .map(|value| matches!(value.to_lowercase().as_str(), "1" | "true"))
+        .unwrap_or(false)
+}
+
+/// Returns a list of env var names allowed to pass through in strict env mode.
+pub(crate) fn cli_strict_env_allowlist() -> Vec<String> {
+    std::env::var(MIRRORD_CLI_STRICT_ENV_ALLOWLIST)
+        .ok()
+        .map(|value| {
+            value
+                .split(|c: char| c == ',' || c.is_whitespace())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub(crate) fn apply_test_env_overrides(cfg_context: &mut mirrord_config::config::ConfigContext) {
+    if cli_strict_env_enabled() {
+        for key in cli_strict_env_allowlist() {
+            if let Ok(value) = std::env::var(&key) {
+                cfg_context.override_env_mut(key, value);
+            }
+        }
+        cfg_context.strict_env(true);
+    }
+}
+
 /// Removes `HTTP_PROXY` and `https_proxy` from the environment
 pub(crate) fn remove_proxy_env() {
     for (key, _val) in std::env::vars() {
