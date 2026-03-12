@@ -70,20 +70,19 @@ pub enum OutgoingFilterConfig {
 /// See the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic/#outgoing) for more
 /// details.
 ///
-/// You can use either the `remote` or `local` value to turn outgoing traffic tunneling on or off.
+/// You can use either the `true` or `false` values to turn outgoing traffic tunneling on or off.
 ///
 /// ```json
 /// {
 ///   "feature": {
 ///     "network": {
-///       "outgoing": "remote"
+///       "outgoing": true
 ///     }
 ///   }
 /// }
 /// ```
 ///
-/// Alternatively, you can use more fine-grained configuration. The `remote` and `local` config for
-/// this feature are **mutually** exclusive.
+/// Alternatively, you can use more fine-grained configuration.
 ///
 /// ```json
 /// {
