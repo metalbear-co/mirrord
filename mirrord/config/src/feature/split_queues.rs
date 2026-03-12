@@ -174,21 +174,21 @@ impl FromMirrordConfig for SplitQueuesConfig {
 
 pub type QueueMessageFilter = BTreeMap<String, String>;
 
-/// ### feature.split_queues.<queue-id>.message_filter {#feature-split_queues-queue_id-message_filter}
+/// ### feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}
 ///
 /// For each queue, `message_filter` is a mapping between message attribute names and regexes they
 /// should match. The local application will only receive messages that match **all** of the given
 /// patterns. This means, only messages that have **all** of the attributes in the
 /// filter, with values of those attributes matching the respective patterns.
 ///
-/// ### feature.split_queues.<queue-id>.queue_type {#feature-split_queues-queue_id-queue_type}
+/// ### feature.split_queues.{}.queue_type {#feature-split_queues-queue_id-queue_type}
 ///
 /// The type of queue to be split, currently `SQS` and `Kafka` are supported. More queue types might
 /// be added in the future.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
 #[serde(tag = "queue_type")]
 pub enum QueueFilter {
-    /// ### feature.split_queues.<queue-id>.jq_filter {#feature-split_queues-queue_id-jq_filter}
+    /// ### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
     /// Only supported with `queue_type` of `SQS`.
     /// When this field is specified, for each SQS message, the jq filter runs on a JSON
     /// representation of the SQS `Message` object. If the jq program outputs `true`, that
