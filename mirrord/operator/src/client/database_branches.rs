@@ -24,7 +24,8 @@ use crate::{
     client::error::{OperatorApiError, OperatorOperation},
     crd::db_branching::{
         branch_database::{
-            BranchDatabase, BranchDatabaseSpec, MongodbOptions, MssqlOptions, MysqlOptions, PostgresOptions, SqlBranchCopyConfig
+            BranchDatabase, BranchDatabaseSpec, MongodbOptions, MssqlOptions, MysqlOptions,
+            PostgresOptions, SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -1180,7 +1181,6 @@ impl UnifiedBranchParams {
             spec,
         }
     }
-
 
     pub fn from_mssql(
         id: &str,
