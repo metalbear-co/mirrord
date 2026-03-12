@@ -31,9 +31,7 @@ pub type QueueId = String;
 ///       },
 ///       "second-queue": {
 ///         "queue_type": "SQS",
-///         "message_filter": {
-///           "who": "you$"
-///         }
+///         "jq_filter": ".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"
 ///       },
 ///       "third-queue": {
 ///         "queue_type": "Kafka",
@@ -190,6 +188,14 @@ pub type QueueMessageFilter = BTreeMap<String, String>;
 /// message, the jq filter runs on a JSON representation of the SQS `Message` object. If the jq
 /// program outputs `true`, that message is considered as matching the filter.
 /// See [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).
+///
+/// This can be used to filter messages based on their body content, for example.
+/// ```
+/// "jq_filter": ".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"
+/// ```
+/// This filter will tell mirrord to only make available to this local application messages with a
+/// json in the message body, with a `customer_email` field that contains "metalbear.com".
+
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
 #[serde(tag = "queue_type")]
 pub enum QueueFilter {
