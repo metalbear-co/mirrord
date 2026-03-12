@@ -2,10 +2,7 @@
 #![cfg(target_os = "linux")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{path::PathBuf, time::Duration};
 
 use rstest::rstest;
 

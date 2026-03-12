@@ -5,11 +5,7 @@
 use core::assert_matches;
 #[cfg(target_os = "macos")]
 use std::{env, fs};
-use std::{
-    env::temp_dir,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{env::temp_dir, path::PathBuf, time::Duration};
 
 use libc::{O_RDWR, pid_t};
 use mirrord_protocol::{file::*, *};
