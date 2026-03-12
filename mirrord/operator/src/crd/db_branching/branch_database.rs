@@ -147,19 +147,21 @@ pub struct CommonFieldsRef<'a> {
 
 impl BranchDatabaseSpec {
     /// Validate and extract the dialect config from the spec.
-    /// Exactly one of `postgres_options`, `mysql_options`, `mongodb_options` must be set.
+    /// Exactly one dialect option field must be set.
     pub fn dialect(&self) -> Result<DialectConfig, DialectValidationError> {
-        match (
-            &self.postgres_options,
-            &self.mysql_options,
-            &self.mongodb_options,
-        ) {
-            (Some(pg), None, None) => Ok(DialectConfig::Postgres(Box::new(pg.clone()))),
-            (None, Some(my), None) => Ok(DialectConfig::Mysql(Box::new(my.clone()))),
-            (None, None, Some(mo)) => Ok(DialectConfig::Mongodb(Box::new(mo.clone()))),
-            (None, None, None) => Err(DialectValidationError::NoneSet),
-            _ => Err(DialectValidationError::MultipleSet),
+        let mut dialects = [
+            self.postgres_options.as_ref().map(|v| DialectConfig::Postgres(Box::new(v.clone()))),
+            self.mysql_options.as_ref().map(|v| DialectConfig::Mysql(Box::new(v.clone()))),
+            self.mongodb_options.as_ref().map(|v| DialectConfig::Mongodb(Box::new(v.clone()))),
+        ]
+        .into_iter()
+        .flatten();
+
+        let config = dialects.next().ok_or(DialectValidationError::NoneSet)?;
+        if dialects.next().is_some() {
+            return Err(DialectValidationError::MultipleSet);
         }
+        Ok(config)
     }
 
     pub fn common(&self) -> CommonFieldsRef<'_> {
