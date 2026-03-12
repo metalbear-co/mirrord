@@ -2,7 +2,7 @@ use std::{fmt, ops::Not, time::Duration};
 
 use base64::{Engine, engine::general_purpose};
 use chrono::{DateTime, Utc};
-use connect_params::ConnectParams;
+use connect_params::{BranchDbNames, ConnectParams};
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
 use futures::{SinkExt, StreamExt, future::Either};
 use http::{HeaderName, HeaderValue, request::Request};
@@ -44,13 +44,19 @@ use tracing::Level;
 
 use crate::{
     client::database_branches::{
-        DatabaseBranchParams, create_branches, list_existing_branches, wait_for_pending_branches,
+        DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
+        create_mongodb_branches, create_mysql_branches, create_pg_branches,
+        list_existing_branches, list_reusable_mongodb_branches, list_reusable_mysql_branches,
+        list_reusable_pg_branches, wait_for_pending_branches,
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
         OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
-        db_branching::branch_database::BranchDatabase,
+        db_branching::{
+            branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
+            mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
+        },
         session::SessionCiInfo,
     },
     types::{
@@ -660,7 +666,7 @@ where
             .await
             .map_err(|error| {
                 OperatorApiError::ClientCertError(format!(
-                    "failed to get client cerfificate: {error}"
+                    "failed to get client certificate: {error}"
                 ))
             })
     }
@@ -725,9 +731,9 @@ impl OperatorApi<PreparedClientCert> {
             .contains(&NewOperatorFeature::ProxyApi);
 
         let branch_db_names = if layer_config.feature.db_branches.is_empty().not() {
-            Some(self.prepare_branch_dbs(layer_config, progress).await?)
+            self.prepare_branch_dbs(layer_config, progress).await?
         } else {
-            None
+            BranchDbNames::default()
         };
 
         let (session, reused_copy) = if do_copy_target {
@@ -757,7 +763,7 @@ impl OperatorApi<PreparedClientCert> {
                 use_proxy_api,
                 layer_config.profile.as_deref(),
                 branch_name.clone(),
-                branch_db_names.clone().unwrap_or_default(),
+                branch_db_names.clone(),
                 session_ci_info.clone(),
                 layer_config.key.as_str(),
             );
@@ -815,7 +821,7 @@ impl OperatorApi<PreparedClientCert> {
             let params = ConnectParams::new(
                 layer_config,
                 branch_name.clone(),
-                branch_db_names.clone().unwrap_or_default(),
+                branch_db_names.clone(),
                 session_ci_info.clone(),
                 layer_config.key.as_str(),
             );
@@ -849,7 +855,7 @@ impl OperatorApi<PreparedClientCert> {
                     use_proxy_api,
                     layer_config.profile.as_deref(),
                     branch_name,
-                    branch_db_names.unwrap_or_default(),
+                    branch_db_names,
                     session_ci_info.clone(),
                     layer_config.key.as_str(),
                 );
@@ -925,7 +931,7 @@ impl OperatorApi<PreparedClientCert> {
         let branch_db_names = if layer_config.feature.db_branches.is_empty().not() {
             self.prepare_branch_dbs(layer_config, progress).await?
         } else {
-            vec![]
+            BranchDbNames::default()
         };
 
         let params = ConnectParams::new(
@@ -1071,7 +1077,7 @@ impl OperatorApi<PreparedClientCert> {
             }
             // The rollout does not exist.
             // It might be that rollouts are not even installed in the cluster.
-            // Depeneding on how hardened the cluster is, we might get one of these error codes.
+            // Depending on how hardened the cluster is, we might get one of these error codes.
             Err(kube::Error::Api(response)) if [404, 403, 401].contains(&response.code) => {}
             Err(error) => {
                 tracing::warn!(
@@ -1209,7 +1215,7 @@ impl OperatorApi<PreparedClientCert> {
         use_proxy: bool,
         profile: Option<&str>,
         branch_name: Option<String>,
-        branch_db_names: Vec<String>,
+        branch_db_names: BranchDbNames,
         session_ci_info: Option<SessionCiInfo>,
         key: &str,
     ) -> String {
@@ -1235,7 +1241,10 @@ impl OperatorApi<PreparedClientCert> {
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
             branch_name,
-            branch_db_names,
+            pg_branch_names: branch_db_names.pg,
+            mysql_branch_names: branch_db_names.mysql,
+            mongodb_branch_names: branch_db_names.mongodb,
+            branch_db_names: branch_db_names.mssql,
             session_ci_info,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
@@ -1596,7 +1605,7 @@ impl OperatorApi<PreparedClientCert> {
         &self,
         layer_config: &LayerConfig,
         progress: &P,
-    ) -> OperatorApiResult<Vec<String>> {
+    ) -> OperatorApiResult<BranchDbNames> {
         use database_branches::TARGET_NAMESPACE_ANNOTATION;
 
         let mut subtask = progress.subtask("preparing branch databases");
@@ -1619,33 +1628,6 @@ impl OperatorApi<PreparedClientCert> {
             } else {
                 (target_namespace, None)
             };
-
-        let branch_api: Api<BranchDatabase> = Api::namespaced(self.client.clone(), api_namespace);
-        let DatabaseBranchParams {
-            branches: mut create_params,
-        } = DatabaseBranchParams::new(
-            &layer_config.feature.db_branches,
-            &target,
-            self.client(),
-            Some(target_namespace),
-        )
-        .await?;
-
-        if let Some(ref ns) = target_ns_annotation {
-            for params in create_params.values_mut() {
-                params
-                    .annotations
-                    .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
-            }
-        }
-
-        let existing =
-            list_existing_branches(&branch_api, &create_params, &subtask).await?;
-
-        // Don't create branches that already exist (ready or still being created)
-        create_params.retain(|id, _| {
-            !existing.ready.contains_key(id) && !existing.pending.contains_key(id)
-        });
 
         let timeout_secs = layer_config
             .feature
@@ -1670,30 +1652,159 @@ impl OperatorApi<PreparedClientCert> {
             .unwrap_or(default_creation_timeout_secs());
         let timeout = std::time::Duration::from_secs(timeout_secs);
 
-        // Wait for branches that another session is already creating
-        let waited_branches =
-            wait_for_pending_branches(&branch_api, &existing.pending, timeout, &subtask).await?;
+        let use_unified_crd = self
+            .operator
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::UnifiedBranchDbCrd);
 
-        let created_branches =
-            create_branches(&branch_api, create_params, timeout, &subtask).await?;
+        if use_unified_crd {
+            let UnifiedDatabaseBranchParams {
+                branches: mut create_params,
+            } = UnifiedDatabaseBranchParams::new(&layer_config.feature.db_branches, &target)?;
 
-        subtask.success(None);
+            if let Some(ref ns) = target_ns_annotation {
+                for params in create_params.values_mut() {
+                    params
+                        .annotations
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                }
+            }
 
-        let branch_names = existing
-            .ready
-            .values()
-            .chain(waited_branches.values())
-            .chain(created_branches.values())
-            .map(|branch| {
-                branch
+            let branch_api: Api<BranchDatabase> =
+                Api::namespaced(self.client.clone(), api_namespace);
+
+            let existing =
+                list_existing_branches(&branch_api, &create_params, &subtask).await?;
+
+            create_params.retain(|id, _| {
+                !existing.ready.contains_key(id) && !existing.pending.contains_key(id)
+            });
+
+            let waited_branches =
+                wait_for_pending_branches(&branch_api, &existing.pending, timeout, &subtask)
+                    .await?;
+
+            let created_branches =
+                create_branches(&branch_api, create_params, timeout, &subtask).await?;
+
+            subtask.success(None);
+
+            let mut names = BranchDbNames::default();
+            for branch in existing
+                .ready
+                .values()
+                .chain(waited_branches.values())
+                .chain(created_branches.values())
+            {
+                let name = branch
                     .meta()
                     .name
                     .clone()
-                    .ok_or(KubeApiError::missing_field(branch, ".metadata.name"))
-            })
-            .collect::<Result<Vec<String>, _>>()?;
+                    .ok_or(KubeApiError::missing_field(branch, ".metadata.name"))?;
 
-        Ok(branch_names)
+                if branch.spec.postgres_options.is_some() {
+                    names.pg.push(name);
+                } else if branch.spec.mysql_options.is_some() {
+                    names.mysql.push(name);
+                } else if branch.spec.mongodb_options.is_some() {
+                    names.mongodb.push(name);
+                } else if branch.spec.mssql_options.is_some() {
+                    names.mssql.push(name);
+                }
+            }
+            Ok(names)
+        } else {
+            let DatabaseBranchParams {
+                mongodb: mut create_mongodb_params,
+                mysql: mut create_mysql_params,
+                pg: mut create_pg_params,
+            } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+
+            if let Some(ref ns) = target_ns_annotation {
+                for params in create_pg_params.values_mut() {
+                    params
+                        .annotations
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                }
+                for params in create_mysql_params.values_mut() {
+                    params
+                        .annotations
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                }
+                for params in create_mongodb_params.values_mut() {
+                    params
+                        .annotations
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                }
+            }
+
+            let pg_api: Api<PgBranchDatabase> = Api::namespaced(self.client.clone(), api_namespace);
+            let mysql_api: Api<MysqlBranchDatabase> =
+                Api::namespaced(self.client.clone(), api_namespace);
+            let mongodb_api: Api<MongodbBranchDatabase> =
+                Api::namespaced(self.client.clone(), api_namespace);
+
+            let reusable_pg =
+                list_reusable_pg_branches(&pg_api, &create_pg_params, &subtask).await?;
+            create_pg_params.retain(|id, _| !reusable_pg.contains_key(id));
+            let created_pg =
+                create_pg_branches(&pg_api, create_pg_params, timeout, &subtask).await?;
+
+            let reusable_mysql =
+                list_reusable_mysql_branches(&mysql_api, &create_mysql_params, &subtask).await?;
+            create_mysql_params.retain(|id, _| !reusable_mysql.contains_key(id));
+            let created_mysql =
+                create_mysql_branches(&mysql_api, create_mysql_params, timeout, &subtask).await?;
+
+            let reusable_mongodb =
+                list_reusable_mongodb_branches(&mongodb_api, &create_mongodb_params, &subtask)
+                    .await?;
+            create_mongodb_params.retain(|id, _| !reusable_mongodb.contains_key(id));
+            let created_mongodb =
+                create_mongodb_branches(&mongodb_api, create_mongodb_params, timeout, &subtask)
+                    .await?;
+
+            subtask.success(None);
+
+            let pg_names = reusable_pg
+                .values()
+                .chain(created_pg.values())
+                .map(|b| {
+                    b.meta()
+                        .name
+                        .clone()
+                        .ok_or(KubeApiError::missing_field(b, ".metadata.name"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mysql_names = reusable_mysql
+                .values()
+                .chain(created_mysql.values())
+                .map(|b| {
+                    b.meta()
+                        .name
+                        .clone()
+                        .ok_or(KubeApiError::missing_field(b, ".metadata.name"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mongodb_names = reusable_mongodb
+                .values()
+                .chain(created_mongodb.values())
+                .map(|b| {
+                    b.meta()
+                        .name
+                        .clone()
+                        .ok_or(KubeApiError::missing_field(b, ".metadata.name"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok(BranchDbNames {
+                pg: pg_names,
+                mysql: mysql_names,
+                mongodb: mongodb_names,
+                mssql: Vec::new(),
+            })
+        }
     }
 }
 
@@ -1708,7 +1819,10 @@ mod test {
     use rstest::rstest;
 
     use super::OperatorApi;
-    use crate::{client::connect_params::ConnectParams, crd::session::SessionCiInfo};
+    use crate::{
+        client::connect_params::{BranchDbNames, ConnectParams},
+        crd::session::SessionCiInfo,
+    };
 
     /// A test case for the [`target_connect_url`] test.
     ///
@@ -1723,7 +1837,7 @@ mod test {
         kafka_splits: HashMap<&'static str, BTreeMap<String, String>>,
         sqs_splits: HashMap<&'static str, BTreeMap<String, String>>,
         sqs_jq_filters: HashMap<&'static str, &'static str>,
-        branch_db_names: Vec<String>,
+        branch_db_names: BranchDbNames,
         session_ci_info: Option<SessionCiInfo>,
         key: Option<&'static str>,
         expected: &'static str,
@@ -1886,9 +2000,16 @@ mod test {
         TargetConnectUrlTestCase{
             use_proxy: true,
             target: deployment_with_container(),
-            branch_db_names: vec!["branch-1".into(), "branch-2".into()],
+            branch_db_names: BranchDbNames {
+                pg: vec!["pg-branch-1".into()],
+                mysql: vec!["mysql-branch-1".into()],
+                mongodb: vec![],
+                mssql: vec![],
+            },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
-            ?connect=true&on_concurrent_steal=abort&branch_db_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
+            ?connect=true&on_concurrent_steal=abort\
+            &mysql_branch_names=%5B%22mysql-branch-1%22%5D\
+            &pg_branch_names=%5B%22pg-branch-1%22%5D",
             ..Default::default()
             }
     )]
@@ -1956,7 +2077,10 @@ mod test {
             sqs_splits,
             sqs_jq_filters,
             branch_name: None,
-            branch_db_names,
+            pg_branch_names: branch_db_names.pg,
+            mysql_branch_names: branch_db_names.mysql,
+            mongodb_branch_names: branch_db_names.mongodb,
+            branch_db_names: Vec::new(),
             session_ci_info,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
@@ -2071,6 +2195,9 @@ mod test {
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
             branch_name: None,
+            pg_branch_names: Default::default(),
+            mysql_branch_names: Default::default(),
+            mongodb_branch_names: Default::default(),
             branch_db_names: Default::default(),
             session_ci_info: None,
             is_default_cluster: None,

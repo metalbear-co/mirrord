@@ -204,10 +204,10 @@ pub struct KafkaTopicDetails {
     ///
     /// Relevant only for standard Kafka consumers.
     /// Must be empty if `applicationIdSources` is not empty.
-    #[serde(default)] // no `skip_serializing_if` to preseve backwards compatibility
+    #[serde(default)] // no `skip_serializing_if` to preserve backwards compatibility
     pub group_id_sources: Vec<TopicPropertySource>,
 
-    /// All occurences of this topic's application id in the workload's pod template.
+    /// All occurrences of this topic's application id in the workload's pod template.
     ///
     /// Relevant only for Kafka Streams consumers.
     /// Must be empty if `groupIdSources` is not empty.

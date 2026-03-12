@@ -1,11 +1,19 @@
-use std::{fmt::Debug, io::Read};
+use std::{fmt::Debug, io::Read, ops::Not, sync::LazyLock, time::Duration};
 
 use fancy_regex::Regex;
+use http::HeaderMap;
 use hyper::http::request::Parts;
-use mirrord_protocol::tcp::HttpMethodFilter;
+use jaq_core::{
+    Ctx, RcIter,
+    load::{Arena, File, Loader},
+};
+use jaq_json::Val;
+use mirrord_agent_env::envs::JAQ_TIME_LIMIT;
+use mirrord_protocol::tcp::{HttpMethodFilter, JqQuery};
 use serde_json::Value;
 use serde_json_path::JsonPath;
-use tracing::Level;
+use tokio_retry::strategy::ExponentialBackoff;
+use tracing::{Instrument, Level};
 
 /// Currently supported filtering criterias.
 #[derive(Debug, Clone)]
@@ -27,6 +35,9 @@ pub enum HttpFilter {
 
     /// Filter based on request body
     Body(HttpBodyFilter),
+
+    /// Header based on header using jq
+    HeaderJq(JqQuery),
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -36,6 +47,9 @@ pub enum FilterCreationError {
 
     #[error("error compiling jsonpath query: {0}")]
     JsonPath(#[from] serde_json_path::ParseError),
+
+    #[error("error compiling jq expression: {0}")]
+    Jq(String),
 }
 
 impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
@@ -60,6 +74,12 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
             }
             mirrord_protocol::tcp::HttpFilter::Body(http_body_filter) => {
                 Ok(Self::Body(http_body_filter.try_into()?))
+            }
+            mirrord_protocol::tcp::HttpFilter::HeaderJq(header) => {
+                // Recompile to validate again
+                JqQuery::new(header)
+                    .map(HttpFilter::HeaderJq)
+                    .map_err(FilterCreationError::Jq)
             }
         }
     }
@@ -86,23 +106,12 @@ impl TryFrom<&mirrord_protocol::tcp::HttpBodyFilter> for HttpBodyFilter {
 impl HttpFilter {
     /// Checks whether the given request [`Parts`] match this filter.
     #[tracing::instrument(level = Level::DEBUG, skip_all, fields(has_body = body.is_some()), ret)]
-    pub fn matches<T: Read + Copy>(&self, parts: &mut Parts, body: Option<T>) -> bool {
+    pub async fn matches<T: Read + Copy>(&self, parts: &mut Parts, body: Option<T>) -> bool {
         match self {
             Self::Header(filter) => {
-                let headers = parts.extensions.get_or_insert_with(|| {
-                    let normalized = parts
-                        .headers
-                        .iter()
-                        .filter_map(|(header_name, header_value)| {
-                            header_value
-                                .to_str()
-                                .ok()
-                                .map(|header_value| format!("{header_name}: {header_value}"))
-                        })
-                        .collect::<Vec<_>>();
-
-                    NormalizedHeaders(normalized)
-                });
+                let headers = parts
+                    .extensions
+                    .get_or_insert_with(|| NormalizedHeaders::from_headers(&parts.headers));
 
                 headers.has_match(filter)
             }
@@ -138,14 +147,24 @@ impl HttpFilter {
                 // beginning. Need to make sure that we don't read
                 // anything from `body` before passing (copies of) it
                 // to other fns.
-                filters.iter().all(|f| f.matches(parts, body))
+                for filter in filters {
+                    if Box::pin(filter.matches(parts, body)).await.not() {
+                        return false;
+                    }
+                }
+                true
             }
             Self::Composite {
                 all: false,
                 filters,
             } => {
                 // Same as above
-                filters.iter().any(|f| f.matches(parts, body))
+                for filter in filters {
+                    if Box::pin(filter.matches(parts, body)).await {
+                        return true;
+                    }
+                }
+                false
             }
             Self::Body(filter) => {
                 let Some(body) = body else { return false };
@@ -172,6 +191,23 @@ impl HttpFilter {
                     }
                 }
             }
+            Self::HeaderJq(filter) => {
+                let headers = parts
+                    .extensions
+                    .get_or_insert_with(|| NormalizedHeaders::from_headers(&parts.headers));
+
+                for header in headers.0.iter() {
+                    match eval_jaq(filter.clone(), header.clone()).await {
+                        Ok(true) => return true,
+                        Ok(false) => (),
+                        Err(err) => {
+                            tracing::error!(?err, ?header, ?filter, "failed to run jaq query");
+                        }
+                    }
+                }
+
+                false
+            }
         }
     }
 
@@ -184,7 +220,76 @@ impl HttpFilter {
     }
 }
 
-/// [`HeaderMap`](hyper::http::header::HeaderMap) entries formatted like `k: v` (format expected by
+async fn eval_jaq(query: JqQuery, payload: String) -> Result<bool, String> {
+    static TIME_LIMIT: LazyLock<Duration> = LazyLock::new(|| {
+        Duration::from_secs(JAQ_TIME_LIMIT.try_from_env().ok().flatten().unwrap_or(500))
+    });
+
+    let span = tracing::warn_span!("jaq eval", ?query);
+
+    let mut handle = tokio::task::spawn_blocking(move || {
+        let program = File {
+            code: query.as_str(),
+            path: (),
+        };
+        let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
+        let arena = Arena::default();
+        let modules = loader
+            .load(&arena, program)
+            .map_err(|errors| format!("failed to parse the filter: {errors:?}"))?;
+
+        let filter =
+            jaq_core::Compiler::default().with_funs(jaq_std::funs().chain(jaq_json::funs()));
+
+        let filter = filter
+            .compile(modules)
+            .map_err(|errors| format!("failed to compile the filter: {errors:?}"))?;
+
+        let inputs = RcIter::new(core::iter::empty());
+        let mut out = filter.run((Ctx::new([], &inputs), Val::from(payload)));
+
+        let found_match = out
+            .find_map(|item| {
+                if let Ok(Val::Bool(value)) = &item {
+                    Some(*value)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(false);
+        Ok(found_match)
+    });
+
+    tokio::select! {
+        result = &mut handle => {
+            match result {
+                Ok(r) => r,
+                Err(join) => {
+                    tracing::error!(?join, "panic in jaq evaluation task");
+                    Ok(false)
+                }
+            }
+        }
+        _ = tokio::time::sleep(*TIME_LIMIT) => {
+            tracing::warn!("jq expr evaluation took longer than max allowed time");
+
+            tokio::spawn(async move {
+                let backoff = ExponentialBackoff::from_millis(5)
+                    .factor(200)
+                    .max_delay(Duration::from_secs(25));
+
+                for delay in backoff {
+                    tokio::time::sleep(delay).await;
+                    tracing::warn!("jq evaluation has not completed");
+                }
+            }.instrument(span));
+
+            Ok(false)
+        }
+    }
+}
+
+/// [`HeaderMap`] entries formatted like `k: v` (format expected by
 /// [`HttpFilter::Header`]). Computed and cached in [`Parts::extensions`] the first time
 /// [`HttpFilter::matches`] is called on [`Parts`].
 #[derive(Clone, Debug)]
@@ -202,6 +307,20 @@ impl NormalizedHeaders {
                 .unwrap_or_default()
         })
     }
+
+    fn from_headers(headers: &HeaderMap) -> Self {
+        Self(
+            headers
+                .iter()
+                .filter_map(|(header_name, header_value)| {
+                    header_value
+                        .to_str()
+                        .ok()
+                        .map(|header_value| format!("{header_name}: {header_value}"))
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -213,8 +332,8 @@ mod test {
 
     use super::HttpFilter;
 
-    #[test]
-    fn matching_all_filter() {
+    #[tokio::test]
+    async fn matching_all_filter() {
         let tcp_filter = tcp::HttpFilter::Composite {
             all: true,
             filters: vec![
@@ -234,7 +353,7 @@ mod test {
             .into_parts()
             .0;
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
-        assert!(filter.matches::<&[u8]>(&mut input, None));
+        assert!(filter.matches::<&[u8]>(&mut input, None).await);
 
         // should fail
         let mut input = Request::builder()
@@ -245,11 +364,11 @@ mod test {
             .unwrap()
             .into_parts()
             .0;
-        assert!(filter.matches::<&[u8]>(&mut input, None).not());
+        assert!(filter.matches::<&[u8]>(&mut input, None).await.not());
     }
 
-    #[test]
-    fn matching_any_filter() {
+    #[tokio::test]
+    async fn matching_any_filter() {
         let tcp_filter = tcp::HttpFilter::Composite {
             all: false,
             filters: vec![
@@ -271,7 +390,7 @@ mod test {
             .into_parts()
             .0;
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
-        assert!(filter.matches::<&[u8]>(&mut input, None));
+        assert!(filter.matches::<&[u8]>(&mut input, None).await);
 
         // should fail
         let mut input = Request::builder()
@@ -283,6 +402,6 @@ mod test {
             .into_parts()
             .0;
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
-        assert!(!filter.matches::<&[u8]>(&mut input, None));
+        assert!(!filter.matches::<&[u8]>(&mut input, None).await);
     }
 }

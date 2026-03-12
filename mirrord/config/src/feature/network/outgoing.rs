@@ -37,7 +37,7 @@ use crate::{
 /// ```
 ///
 /// - Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will be
-///   emmited remotely in the cluster.
+///   emitted remotely in the cluster.
 ///
 /// ```json
 /// {
