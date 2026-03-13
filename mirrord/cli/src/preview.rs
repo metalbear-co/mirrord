@@ -196,6 +196,10 @@ async fn preview_start(
         labels
     };
 
+    let branch_db_names = operator_api
+        .prepare_branch_dbs(&layer_config, &progress)
+        .await?;
+
     let session_spec = PreviewSessionSpec {
         image: image.clone(),
         key: layer_config.key.as_str().to_owned(),
@@ -208,6 +212,7 @@ async fn preview_start(
         queue_splitting: PreviewQueueSplittingConfig::from_config(
             &layer_config.feature.split_queues,
         ),
+        db_branching: PreviewDbBranchingConfig::from_db_names(branch_db_names),
     };
 
     let session = PreviewSession {

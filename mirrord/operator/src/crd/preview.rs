@@ -25,6 +25,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::session::SessionTarget;
+#[cfg(feature = "client")]
+use crate::client::connect_params::BranchDbNames;
 
 /// This resource represents a preview environment created by the `mirrord preview start` command.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -63,6 +65,10 @@ pub struct PreviewSessionSpec {
     /// Queue splitting configuration for this preview session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_splitting: Option<PreviewQueueSplittingConfig>,
+
+    /// Database branching configuration for this preview session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub db_branching: Option<PreviewDbBranchingConfig>,
 }
 
 impl PreviewSessionSpec {
@@ -330,4 +336,42 @@ pub struct PreviewSqsFilter {
     /// considered as matching.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jq_filter: Option<String>,
+}
+
+/// Database branching configuration for preview environments.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewDbBranchingConfig {
+    /// MySQL branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mysql_branch_names: Vec<String>,
+
+    /// PostgreSQL branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pg_branch_names: Vec<String>,
+
+    /// MongoDB branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mongodb_branch_names: Vec<String>,
+
+    /// MSSQL branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mssql_branch_names: Vec<String>,
+}
+
+impl PreviewDbBranchingConfig {
+    /// Returns `None` when all branch name lists are empty.
+    #[cfg(feature = "client")]
+    pub fn from_db_names(branch_db_names: BranchDbNames) -> Option<Self> {
+        if branch_db_names.is_empty() {
+            None
+        } else {
+            Some(Self {
+                mysql_branch_names: branch_db_names.mysql,
+                pg_branch_names: branch_db_names.pg,
+                mongodb_branch_names: branch_db_names.mongodb,
+                mssql_branch_names: branch_db_names.mssql,
+            })
+        }
+    }
 }
