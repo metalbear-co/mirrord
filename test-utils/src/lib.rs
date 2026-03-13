@@ -201,7 +201,7 @@ impl TestProcess {
             .captures_iter(stderr)
             .filter_map(|m| m.ok())
             .filter_map(|m| m.get(1).map(|m| m.as_str().trim().to_string()))
-            .filter(|warning_text| ALLOWED_WARNINGS.contains(warning_text.as_str()).not())
+            .filter(|warning_text| ALLOWED_WARNINGS.contains(&warning_text.as_str()).not())
             .collect();
 
         assert!(
