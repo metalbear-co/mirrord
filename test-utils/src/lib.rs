@@ -200,10 +200,7 @@ impl TestProcess {
             .warn_capture
             .captures_iter(stderr)
             .filter_map(|m| m.ok())
-            .map(|m| {
-                let (_, [warning_text]) = m.extract();
-                warning_text.trim().to_string()
-            })
+            .filter_map(|m| m.get(1).map(|m| m.as_str().trim().to_string()))
             .filter(|warning_text| ALLOWED_WARNINGS.contains(warning_text.as_str()).not())
             .collect();
 
