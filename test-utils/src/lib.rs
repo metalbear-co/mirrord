@@ -179,12 +179,33 @@ impl TestProcess {
     }
 
     pub async fn assert_no_warn_in_stderr(&self) {
+        // The following WARN messages are exempted from this check
+        const ALLOWED_WARNINGS: [&str] = [
+            // part of the `exec` based test-harness
+            "mirrord::config: Accepting invalid certificates",
+        ];
+
+        let stderr = self.stderr_data.read().await;
+        let warning_lines: Vec<String> = stderr
+            .lines()
+            .filter(|line| self.warn_capture.is_match(line).unwrap())
+            .collect();
+
+        // exit early when no WARN lines (capture is expensive)
+        if warning_lines.is_empty() {
+            return;
+        }
+
+        let unexpected_warns: Vec<String> = self
+            .warn_capture
+            .captures_iter(stderr)
+            .map(|m| m.extract())
+            .filter(|_, [warning_text]| ALLOWED_WARNINGS.contains(&warning_text))
+            .collect();
+
         assert!(
-            self.warn_capture
-                .is_match(&self.stderr_data.read().await)
-                .unwrap()
-                .not(),
-            "application stderr contains a warning"
+            unexpected_warns.is_empty(),
+            "application stderr contains unexpected warnings: {unexpected_warns:?}"
         );
     }
 
@@ -341,7 +362,7 @@ impl TestProcess {
         }));
 
         let error_capture = Regex::new(r"^.*ERROR[^\w_-]").unwrap();
-        let warn_capture = Regex::new(r"WARN").unwrap();
+        let warn_capture = Regex::new(r"WARN\s+(.*)$").unwrap();
 
         TestProcess {
             child,
