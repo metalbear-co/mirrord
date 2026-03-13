@@ -2818,7 +2818,7 @@
       "additionalProperties": false
     },
     "OutgoingFileConfig": {
-      "description": "Tunnel outgoing network operations through mirrord.\n\nSee the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic/#outgoing) for more details.\n\nYou can use either the `remote` or `local` value to turn outgoing traffic tunneling on or off.\n\n```json { \"feature\": { \"network\": { \"outgoing\": \"remote\" } } } ```\n\nAlternatively, you can use more fine-grained configuration. The `remote` and `local` config for this feature are **mutually** exclusive.\n\n```json { \"feature\": { \"network\": { \"outgoing\": { \"tcp\": true, \"udp\": true, \"ignore_localhost\": false, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"unix_streams\": \"bear.+\" } } } } ```",
+      "description": "Tunnel outgoing network operations through mirrord.\n\nSee the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic/#outgoing) for more details.\n\nYou can use either the `true` or `false` values to turn outgoing traffic tunneling on or off.\n\n```json { \"feature\": { \"network\": { \"outgoing\": true } } } ```\n\nAlternatively, you can use more fine-grained configuration.\n\n```json { \"feature\": { \"network\": { \"outgoing\": { \"tcp\": true, \"udp\": true, \"ignore_localhost\": false, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"unix_streams\": \"bear.+\" } } } } ```",
       "type": "object",
       "properties": {
         "filter": {
@@ -3067,9 +3067,12 @@
       ]
     },
     "QueueFilter": {
-      "description": "Amazon Simple Queue Service and Kafka are supported.\n\nMore queue types might be added in the future.",
+      "title": "feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}",
+      "description": "For each queue, `message_filter` is a mapping between message attribute names and regexes they should match. The local application will only receive messages that match **all** of the given patterns. This means, only messages that have **all** of the attributes in the filter, with values of those attributes matching the respective patterns.\n\n### feature.split_queues.{}.queue_type {#feature-split_queues-queue_id-queue_type}\n\nThe type of queue to be split, currently `SQS` and `Kafka` are supported. More queue types might be added in the future.",
       "oneOf": [
         {
+          "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
+          "description": "Only supported with `queue_type` of `SQS`. When this field is specified, for each SQS message, the jq filter runs on a JSON representation of the SQS `Message` object. If the jq program outputs `true`, that message is considered as matching the filter.\n\nSee [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).\n\nThis can be used to filter messages based on their body content, for example.\n\nThis filter, for example, will tell mirrord to only make available to this local application messages with a json in the message body, with a `customer_email` field that contains \"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
           "type": "object",
           "required": [
             "queue_type"
@@ -3453,7 +3456,7 @@
       "additionalProperties": false
     },
     "SplitQueuesConfig": {
-      "description": "```json { \"feature\": { \"split_queues\": { \"first-queue\": { \"queue_type\": \"SQS\", \"message_filter\": { \"wows\": \"so wows\", \"coolz\": \"^very\" } }, \"second-queue\": { \"queue_type\": \"SQS\", \"message_filter\": { \"who\": \"you$\" } }, \"third-queue\": { \"queue_type\": \"Kafka\", \"message_filter\": { \"who\": \"you$\" } }, \"fourth-queue\": { \"queue_type\": \"Kafka\", \"message_filter\": { \"wows\": \"so wows\", \"coolz\": \"^very\" } }, } } } ```",
+      "description": "A mapping from queue ids to their filters. Each queue filter defines which messages from the original queue will be made available to the local application, based on message attributes or headers, and possibly on jq filters (for SQS).\n\nThe queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` or `MirrordKafkaTopicsConsumer` for SQS or Kafka respectively.\n\n```json { \"feature\": { \"split_queues\": { \"first-queue\": { \"queue_type\": \"SQS\", \"message_filter\": { \"wows\": \"so wows\", \"coolz\": \"^very\" } }, \"second-queue\": { \"queue_type\": \"SQS\", \"jq_filter\": \".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\" }, \"third-queue\": { \"queue_type\": \"Kafka\", \"message_filter\": { \"who\": \"you$\" } }, \"fourth-queue\": { \"queue_type\": \"Kafka\", \"message_filter\": { \"wows\": \"so wows\", \"coolz\": \"^very\" } }, } } } ```",
       "type": "object",
       "additionalProperties": {
         "$ref": "#/definitions/QueueFilter"

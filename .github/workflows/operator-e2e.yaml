@@ -16,9 +16,26 @@ on:
         required: false
         type: string
         default: "main"
+  pull_request_review:
+    branches: [main]
+    types: [submitted]
 
 jobs:
+  check_if_release_branch:
+    runs-on: ubuntu-24.04
+    outputs:
+      release_branch: ${{ steps.release-branch.outputs.branch }}
+    steps:
+      - id: release-branch
+        run: |
+          echo "branch=$([[ "${{ github.event.pull_request.head.ref || github.head_ref || github.ref_name }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
+      - name: output test
+        run: |
+          echo ${{ steps.release-branch.outputs.branch }}
+
   trigger-operator-e2e:
+    needs: [check_if_release_branch]
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.review.state == 'approved' && needs.check_if_release_branch.outputs.release_branch == 'true') }}
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -28,14 +45,14 @@ jobs:
         continue-on-error: true
         with:
           token: ${{ secrets.OPERATOR_E2E_PAT }}
-          ref: ${{ inputs.operator_branch || 'main' }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.operator_branch || 'main' }}
           repo: operator
           owner: metalbear-co
           workflow: operator-e2e.yaml
           workflow_inputs: |
             {
-              "mirrord_commit": "${{ inputs.mirrord_commit || github.event.pull_request.head.sha }}",
-              "mirrord_branch": "${{ inputs.mirrord_branch || github.event.pull_request.head.ref }}"
+              "mirrord_commit": "${{ github.event_name == 'workflow_dispatch' && inputs.mirrord_commit || github.event.pull_request.head.sha }}",
+              "mirrord_branch": "${{ github.event_name == 'workflow_dispatch' && inputs.mirrord_branch || github.event.pull_request.head.ref }}"
             }
           workflow_timeout_seconds: 7200
           workflow_job_steps_retry_seconds: 30
