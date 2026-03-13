@@ -165,6 +165,49 @@ impl LayerInitEvent {
         }
     }
 
+    /// Create a new event for the CLI parent in the attach flow.
+    ///
+    /// Uses a PID-based event name so the injected layer can open it without requiring an
+    /// environment variable to be set in the target process.
+    pub fn for_attach_parent(target_pid: u32) -> LayerResult<Self> {
+        Self::for_parent_with_name(attach_event_name(target_pid))
+    }
+
+    /// Open existing event for the layer in the attach flow.
+    ///
+    /// Uses the current process's PID to construct the event name, matching what the CLI
+    /// created via [`LayerInitEvent::for_attach_parent`].
+    pub fn for_attach_child() -> LayerResult<Self> {
+        unsafe {
+            let pid = std::process::id();
+            let name = attach_event_name(pid);
+
+            let name_cstr = CString::new(name.clone())
+                .map_err(|_| LayerError::GlobalAlreadyInitialized("Failed to create event name"))?;
+
+            let handle = OpenEventA(EVENT_ALL_ACCESS, FALSE, name_cstr.as_ptr());
+
+            if handle.is_null() {
+                return Err(LayerError::ProcessSynchronization(format!(
+                    "No attach event found for pid {}",
+                    pid
+                )));
+            }
+
+            tracing::debug!(
+                event_name = %name,
+                role = "child",
+                "opened attach layer initialization event"
+            );
+
+            Ok(Self {
+                handle,
+                name,
+                role: EventRole::Child,
+            })
+        }
+    }
+
     /// Get the event name.
     pub fn name(&self) -> &str {
         &self.name
@@ -284,6 +327,14 @@ pub fn generate_unique_event_name() -> String {
     let rand_part = timestamp & 0xFFFF; // Use lower 16 bits for some randomness
 
     format!("mirrord_layer_init_{}_{}", pid, rand_part)
+}
+
+/// Generate the attach event name for a given target PID.
+///
+/// Both the CLI (parent) and the injected layer (child) use this to agree on an event name
+/// without needing an environment variable.
+fn attach_event_name(target_pid: u32) -> String {
+    format!("mirrord_attach_{}", target_pid)
 }
 
 /// Extract the initialization event name from environment variables.

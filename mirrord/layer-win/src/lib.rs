@@ -79,8 +79,20 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 }
 
 fn layer_start() -> LayerResult<()> {
-    // Create layer initialization event first
-    let init_event = LayerInitEvent::for_child()?;
+    // Catch init/attach event
+    let init_event = match LayerInitEvent::for_child() {
+        Ok(event) => Some(event),
+        Err(_) => match LayerInitEvent::for_attach_child() {
+            Ok(event) => {
+                tracing::debug!("Found attach layer init event, will signal on completion");
+                Some(event)
+            }
+            Err(_) => {
+                tracing::debug!("No layer init event found, skipping parent synchronization");
+                None
+            }
+        },
+    };
 
     let config = read_resolved_config().map_err(LayerError::Config)?;
     init_layer_setup(config, false);
@@ -100,8 +112,10 @@ fn layer_start() -> LayerResult<()> {
     initialize_hooks(guard)?;
     tracing::info!("Hooks initialized");
 
-    // Signal that initialization is complete
-    init_event.signal_complete()?;
+    // Signal that initialization is complete (only if parent is waiting)
+    if let Some(event) = init_event {
+        event.signal_complete()?;
+    }
 
     if is_trace_only_mode() {
         tracing::info!("mirrord-layer-win fully initialized in trace-only mode");
