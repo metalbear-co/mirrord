@@ -693,7 +693,6 @@ pub fn get_env(
         .map(|(key, value)| (key.to_string(), value.to_string()))
         .collect::<Vec<_>>();
     let mut default_env = vec![
-        ("RUST_LOG".to_string(), "warn,mirrord=debug".to_string()),
         (
             "MIRRORD_IMPERSONATED_TARGET".to_string(),
             "pod/mock-target".to_string(),
