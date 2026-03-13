@@ -24,6 +24,12 @@ use tokio::{
 
 pub mod run_command;
 
+/// WARN messages exempted from `assert_no_warn_in_stderr` check
+const ALLOWED_WARNINGS: [&str; 1] = [
+    // part of the `exec` based test-harness
+    "mirrord::config: Accepting invalid certificates",
+];
+
 /// Returns string with time format of hh:mm:ss
 pub fn format_time() -> String {
     let now = Utc::now();
@@ -179,12 +185,28 @@ impl TestProcess {
     }
 
     pub async fn assert_no_warn_in_stderr(&self) {
+        let stderr = &self.stderr_data.read().await;
+
+        // exit early when no WARN lines
+        if stderr
+            .lines()
+            .any(|line| self.warn_capture.is_match(line).unwrap())
+            .not()
+        {
+            return;
+        }
+
+        let unexpected_warns: Vec<String> = self
+            .warn_capture
+            .captures_iter(stderr)
+            .filter_map(|m| m.ok())
+            .filter_map(|m| m.get(1).map(|m| m.as_str().trim().to_string()))
+            .filter(|warning_text| ALLOWED_WARNINGS.contains(&warning_text.as_str()).not())
+            .collect();
+
         assert!(
-            self.warn_capture
-                .is_match(&self.stderr_data.read().await)
-                .unwrap()
-                .not(),
-            "application stderr contains a warning"
+            unexpected_warns.is_empty(),
+            "application stderr contains unexpected warnings: {unexpected_warns:?}"
         );
     }
 
@@ -341,7 +363,7 @@ impl TestProcess {
         }));
 
         let error_capture = Regex::new(r"^.*ERROR[^\w_-]").unwrap();
-        let warn_capture = Regex::new(r"WARN").unwrap();
+        let warn_capture = Regex::new(r"(?m)WARN\s+(.*)$").unwrap();
 
         TestProcess {
             child,

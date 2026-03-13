@@ -462,7 +462,7 @@ impl MirrordExecution {
                 "invalid {MIRRORD_TEST_INTPROXY_ADDR} value: {e}"
             ))
         })?;
-        warn!("{MIRRORD_TEST_INTPROXY_ADDR} was set, Using existing intproxy {intproxy_address}");
+        debug!("{MIRRORD_TEST_INTPROXY_ADDR} was set, Using existing intproxy {intproxy_address}");
 
         let mut env_vars: HashMap<String, String> = Default::default();
         env_vars.insert(LayerConfig::RESOLVED_CONFIG_ENV.into(), config.encode()?);
