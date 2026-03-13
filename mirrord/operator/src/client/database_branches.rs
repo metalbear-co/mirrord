@@ -839,19 +839,37 @@ pub async fn create_branches<P: Progress>(
     Ok(created_branches)
 }
 
-/// List reusable unified branch databases.
-pub async fn list_reusable_branches<P: Progress>(
+/// Branches found by ID that can be reused or waited on.
+pub struct ExistingBranches {
+    /// Branches already in Ready phase, can be used immediately.
+    pub ready: HashMap<BranchDatabaseId, BranchDatabase>,
+    /// Branches still being created (not Ready, not Failed). The caller should wait
+    /// for these instead of creating duplicates.
+    pub pending: HashMap<BranchDatabaseId, BranchDatabase>,
+}
+
+/// List existing branch databases that match user-specified IDs.
+///
+/// Returns branches split into two groups:
+/// - `ready`: branches in Ready phase that can be reused immediately
+/// - `pending`: branches still initializing that the caller should wait for
+///
+/// Failed branches are ignored so a fresh one can be created.
+pub async fn list_existing_branches<P: Progress>(
     api: &Api<BranchDatabase>,
     params: &HashMap<BranchDatabaseId, UnifiedBranchParams>,
     progress: &P,
-) -> Result<HashMap<BranchDatabaseId, BranchDatabase>, OperatorApiError> {
+) -> Result<ExistingBranches, OperatorApiError> {
     let specified_ids = params
         .iter()
         .filter(|&(id, _)| matches!(id, BranchDatabaseId::Specified(_)))
         .map(|(id, _)| id.as_ref())
         .collect::<Vec<_>>();
     let label_selector = if specified_ids.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(ExistingBranches {
+            ready: HashMap::new(),
+            pending: HashMap::new(),
+        });
     } else {
         Some(format!(
             "{} in ({})",
@@ -860,13 +878,13 @@ pub async fn list_reusable_branches<P: Progress>(
         ))
     };
 
-    let mut subtask = progress.subtask("listing reusable branch databases");
+    let mut subtask = progress.subtask("listing existing branch databases");
 
     let list_params = ListParams {
         label_selector,
         ..Default::default()
     };
-    let reusable_branches = api
+    let all_branches: Vec<BranchDatabase> = api
         .list(&list_params)
         .await
         .map_err(|e| OperatorApiError::KubeError {
@@ -874,21 +892,104 @@ pub async fn list_reusable_branches<P: Progress>(
             operation: OperatorOperation::DbBranching,
         })?
         .into_iter()
-        .filter(|db| {
-            if let Some(status) = &db.status {
-                status.phase == BranchDatabasePhase::Ready
-            } else {
-                false
+        .collect();
+
+    let mut ready = HashMap::new();
+    let mut pending = HashMap::new();
+
+    for db in all_branches {
+        let id: BranchDatabaseId = db.spec.id.clone().into();
+        match db.status.as_ref().map(|s| &s.phase) {
+            Some(&BranchDatabasePhase::Ready) => {
+                ready.insert(id, db);
             }
-        })
-        .map(|db| (db.spec.id.clone().into(), db))
-        .collect::<HashMap<_, _>>();
+            Some(&BranchDatabasePhase::Failed) => {
+                // Skip failed branches so a new one will be created
+            }
+            _ => {
+                // Initializing, Pending, or no status yet -- still being created
+                pending.insert(id, db);
+            }
+        }
+    }
 
     subtask.success(Some(&format!(
-        "{} reusable branches found",
-        reusable_branches.len()
+        "{} ready, {} pending",
+        ready.len(),
+        pending.len()
     )));
-    Ok(reusable_branches)
+    Ok(ExistingBranches { ready, pending })
+}
+
+/// Wait for pending branch databases to become Ready or Failed.
+///
+/// Returns the branches that reached Ready. Returns an error if any branch failed.
+pub async fn wait_for_pending_branches<P: Progress>(
+    api: &Api<BranchDatabase>,
+    pending: &HashMap<BranchDatabaseId, BranchDatabase>,
+    timeout: Duration,
+    progress: &P,
+) -> Result<HashMap<BranchDatabaseId, BranchDatabase>, OperatorApiError> {
+    if pending.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut subtask = progress.subtask("waiting for in-progress branch databases");
+
+    let branch_names: Vec<(BranchDatabaseId, String)> = pending
+        .iter()
+        .filter_map(|(id, db)| db.meta().name.clone().map(|name| (id.clone(), name)))
+        .collect();
+
+    let wait_futures = branch_names
+        .iter()
+        .map(|(_, name)| {
+            await_condition(api.clone(), name, |db: Option<&BranchDatabase>| {
+                db.and_then(|db| {
+                    db.status.as_ref().map(|status| {
+                        status.phase == BranchDatabasePhase::Ready
+                            || status.phase == BranchDatabasePhase::Failed
+                    })
+                })
+                .unwrap_or(false)
+            })
+        })
+        .collect::<Vec<_>>();
+
+    subtask.info("waiting for readiness");
+    let results = tokio::time::timeout(timeout, futures::future::join_all(wait_futures))
+        .await
+        .map_err(|_| OperatorApiError::OperationTimeout {
+            operation: OperatorOperation::DbBranching,
+        })?;
+
+    let mut ready_branches = HashMap::new();
+    for (result, (id, _name)) in results.into_iter().zip(branch_names.iter()) {
+        let Ok(Some(db)) = result else {
+            continue;
+        };
+
+        if let Some(status) = &db.status
+            && status.phase == BranchDatabasePhase::Failed
+        {
+            let error_msg = status
+                .error
+                .clone()
+                .unwrap_or_else(|| "Branch database creation failed".to_string());
+            return Err(OperatorApiError::BranchCreationFailed {
+                operation: OperatorOperation::DbBranching,
+                message: error_msg,
+            });
+        }
+
+        ready_branches.insert(id.clone(), db);
+    }
+
+    subtask.success(Some(&format!(
+        "{} pending branches now ready",
+        ready_branches.len()
+    )));
+    Ok(ready_branches)
 }
 
 pub struct UnifiedDatabaseBranchParams {

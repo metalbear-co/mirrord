@@ -45,8 +45,9 @@ use tracing::Level;
 use crate::{
     client::database_branches::{
         DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
-        create_mongodb_branches, create_mysql_branches, create_pg_branches, list_reusable_branches,
+        create_mongodb_branches, create_mysql_branches, create_pg_branches, list_existing_branches,
         list_reusable_mongodb_branches, list_reusable_mysql_branches, list_reusable_pg_branches,
+        wait_for_pending_branches,
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
@@ -1673,10 +1674,15 @@ impl OperatorApi<PreparedClientCert> {
             let branch_api: Api<BranchDatabase> =
                 Api::namespaced(self.client.clone(), api_namespace);
 
-            let reusable_branches =
-                list_reusable_branches(&branch_api, &create_params, &subtask).await?;
+            let existing = list_existing_branches(&branch_api, &create_params, &subtask).await?;
 
-            create_params.retain(|id, _| !reusable_branches.contains_key(id));
+            create_params.retain(|id, _| {
+                !existing.ready.contains_key(id) && !existing.pending.contains_key(id)
+            });
+
+            let waited_branches =
+                wait_for_pending_branches(&branch_api, &existing.pending, timeout, &subtask)
+                    .await?;
 
             let created_branches =
                 create_branches(&branch_api, create_params, timeout, &subtask).await?;
@@ -1684,7 +1690,12 @@ impl OperatorApi<PreparedClientCert> {
             subtask.success(None);
 
             let mut names = BranchDbNames::default();
-            for branch in reusable_branches.values().chain(created_branches.values()) {
+            for branch in existing
+                .ready
+                .values()
+                .chain(waited_branches.values())
+                .chain(created_branches.values())
+            {
                 let name = branch
                     .meta()
                     .name
