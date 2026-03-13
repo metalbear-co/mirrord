@@ -580,7 +580,7 @@ where
     }
 
     /// Check the operator supports all the operator features required by the user's configuration.
-    fn check_feature_support(&self, layer_config: &LayerConfig) -> OperatorApiResult<()> {
+    pub fn check_feature_support(&self, layer_config: &LayerConfig) -> OperatorApiResult<()> {
         if layer_config.feature.copy_target.enabled {
             self.operator
                 .spec
