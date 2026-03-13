@@ -31,6 +31,7 @@ use crate::{
         mysql::{MysqlBranchDatabase, MysqlBranchDatabaseSpec},
         pg::{PgBranchDatabase, PgBranchDatabaseSpec},
     },
+    types::{OPERATOR_ISOLATION_MARKER_ENV, OPERATOR_OWNERSHIP_LABEL},
 };
 
 /// Create MySQL branch databases and wait for their readiness.
@@ -158,9 +159,10 @@ pub async fn list_reusable_mysql_branches<P: Progress>(
         return Ok(HashMap::new());
     } else {
         Some(format!(
-            "{} in ({})",
+            "{} in ({}),{}",
             labels::MIRRORD_MYSQL_BRANCH_ID_LABEL,
-            specified_ids.join(",")
+            specified_ids.join(","),
+            ownership_label_selector(),
         ))
     };
 
@@ -319,9 +321,10 @@ pub async fn list_reusable_pg_branches<P: Progress>(
         return Ok(HashMap::new());
     } else {
         Some(format!(
-            "{} in ({})",
+            "{} in ({}),{}",
             labels::MIRRORD_PG_BRANCH_ID_LABEL,
-            specified_ids.join(",")
+            specified_ids.join(","),
+            ownership_label_selector(),
         ))
     };
 
@@ -459,9 +462,10 @@ pub async fn list_reusable_mongodb_branches<P: Progress>(
         return Ok(HashMap::new());
     } else {
         Some(format!(
-            "{} in ({})",
+            "{} in ({}),{}",
             labels::MIRRORD_MONGODB_BRANCH_ID_LABEL,
-            specified_ids.join(",")
+            specified_ids.join(","),
+            ownership_label_selector(),
         ))
     };
 
@@ -542,6 +546,25 @@ impl DatabaseBranchParams {
                 DatabaseBranchConfig::Redis(_) => {}
             };
         }
+
+        if let Ok(marker) = std::env::var(OPERATOR_ISOLATION_MARKER_ENV) {
+            for params in mongodb.values_mut() {
+                params
+                    .labels
+                    .insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker.clone());
+            }
+            for params in mysql.values_mut() {
+                params
+                    .labels
+                    .insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker.clone());
+            }
+            for params in pg.values_mut() {
+                params
+                    .labels
+                    .insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker.clone());
+            }
+        }
+
         Self { mongodb, mysql, pg }
     }
 }
@@ -720,6 +743,16 @@ impl MongodbBranchParams {
             annotations: BTreeMap::new(),
             spec,
         }
+    }
+}
+
+/// Returns a label selector fragment that scopes queries to branches owned by the current
+/// operator isolation context. When `OPERATOR_ISOLATION_MARKER` is set, matches branches
+/// with that marker; otherwise matches branches without any ownership label.
+fn ownership_label_selector() -> String {
+    match std::env::var(OPERATOR_ISOLATION_MARKER_ENV) {
+        Ok(marker) => format!("{}={}", OPERATOR_OWNERSHIP_LABEL, marker),
+        Err(_) => format!("!{}", OPERATOR_OWNERSHIP_LABEL),
     }
 }
 
