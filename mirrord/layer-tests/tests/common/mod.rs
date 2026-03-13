@@ -687,8 +687,8 @@ pub fn config_dir() -> PathBuf {
 /// 3. `MIRRORD_TEST_INTPROXY_ADDR` (for `mirrord exec` test harness)
 /// 4. `MIRRORD_FILE_MODE=local` on Windows
 /// 5. Given `extra_vars` (can override any of the above)
-/// 6. Strict CLI environment via `MIRRORD_CLI_STRICT_ENV=true` and an allowlist that contains
-///    all keys from the defaults and `extra_vars`
+/// 6. Strict CLI environment via `MIRRORD_CLI_STRICT_ENV=true` and an allowlist that contains all
+///    keys from the defaults and `extra_vars`
 pub fn get_env(
     intproxy_addr: SocketAddr,
     extra_vars: Vec<(&str, &str)>,
