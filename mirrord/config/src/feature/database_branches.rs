@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize, ser::SerializeMap};
 use crate::config::{self, source::MirrordConfigSource};
 
 pub mod mongodb;
+pub mod mssql;
 pub mod mysql;
 pub mod pg;
 pub mod redis;
@@ -15,6 +16,7 @@ pub mod redis;
 pub use mongodb::{
     MongodbBranchCollectionCopyConfig, MongodbBranchConfig, MongodbBranchCopyConfig,
 };
+pub use mssql::{MssqlBranchConfig, MssqlBranchCopyConfig, MssqlBranchTableCopyConfig};
 pub use mysql::{MysqlBranchConfig, MysqlBranchCopyConfig, MysqlBranchTableCopyConfig};
 pub use pg::{PgBranchConfig, PgBranchCopyConfig, PgBranchTableCopyConfig};
 pub use redis::{
@@ -177,6 +179,13 @@ impl DatabaseBranchesConfig {
             .count()
     }
 
+    pub fn count_mssql(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::Mssql { .. }))
+            .count()
+    }
+
     pub fn count_redis(&self) -> usize {
         self.0
             .iter()
@@ -208,6 +217,7 @@ impl DatabaseBranchesConfig {
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum DatabaseBranchConfig {
     Mongodb(Box<MongodbBranchConfig>),
+    Mssql(Box<MssqlBranchConfig>),
     Mysql(Box<MysqlBranchConfig>),
     Pg(Box<PgBranchConfig>),
     Redis(Box<RedisBranchConfig>),
@@ -438,6 +448,7 @@ impl config::FromMirrordConfig for DatabaseBranchesConfig {
 impl CollectAnalytics for &DatabaseBranchesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
         analytics.add("mongodb_branch_count", self.count_mongodb());
+        analytics.add("mssql_branch_count", self.count_mssql());
         analytics.add("mysql_branch_count", self.count_mysql());
         analytics.add("pg_branch_count", self.count_pg());
         analytics.add("redis_branch_count", self.count_redis());
