@@ -776,7 +776,11 @@ jobs:
           components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
           toolchain: ${{ env.PINNED_NIGHTLY }}
-
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 24
+      - run: npm install express # For http mirroring test with node.
+      - run: npm install portfinder # For a node specific test
       - run: |
           cd mirrord/layer-tests/tests/apps/outgoing
           cargo build
