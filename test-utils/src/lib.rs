@@ -24,6 +24,12 @@ use tokio::{
 
 pub mod run_command;
 
+/// WARN messages exempted from `assert_no_warn_in_stderr` check
+const ALLOWED_WARNINGS: [&str; 1] = [
+    // part of the `exec` based test-harness
+    "mirrord::config: Accepting invalid certificates",
+];
+
 /// Returns string with time format of hh:mm:ss
 pub fn format_time() -> String {
     let now = Utc::now();
@@ -179,28 +185,26 @@ impl TestProcess {
     }
 
     pub async fn assert_no_warn_in_stderr(&self) {
-        // The following WARN messages are exempted from this check
-        const ALLOWED_WARNINGS: [&str] = [
-            // part of the `exec` based test-harness
-            "mirrord::config: Accepting invalid certificates",
-        ];
+        let stderr = &self.stderr_data.read().await;
 
-        let stderr = self.stderr_data.read().await;
-        let warning_lines: Vec<String> = stderr
+        // exit early when no WARN lines
+        if stderr
             .lines()
-            .filter(|line| self.warn_capture.is_match(line).unwrap())
-            .collect();
-
-        // exit early when no WARN lines (capture is expensive)
-        if warning_lines.is_empty() {
+            .any(|line| self.warn_capture.is_match(line).unwrap())
+            .not()
+        {
             return;
         }
 
         let unexpected_warns: Vec<String> = self
             .warn_capture
             .captures_iter(stderr)
-            .map(|m| m.extract())
-            .filter(|_, [warning_text]| ALLOWED_WARNINGS.contains(&warning_text))
+            .filter_map(|m| m.ok())
+            .map(|m| {
+                let (_, [warning_text]) = m.extract();
+                warning_text.trim().to_string()
+            })
+            .filter(|warning_text| ALLOWED_WARNINGS.contains(warning_text.as_str()).not())
             .collect();
 
         assert!(
@@ -362,7 +366,7 @@ impl TestProcess {
         }));
 
         let error_capture = Regex::new(r"^.*ERROR[^\w_-]").unwrap();
-        let warn_capture = Regex::new(r"WARN\s+(.*)$").unwrap();
+        let warn_capture = Regex::new(r"(?m)WARN\s+(.*)$").unwrap();
 
         TestProcess {
             child,
