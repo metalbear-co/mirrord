@@ -211,7 +211,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
                 CliError::friendlier_error_or_else(error, CliError::AgentConnectionFailed)
             })?,
     )
-    .await?;
+    .await;
 
     Ok((AgentConnectInfo::DirectKubernetes(agent_connect_info), conn))
 }

@@ -52,7 +52,7 @@ mod failover_strategy;
 mod layer_conn;
 mod layer_initializer;
 pub mod main_tasks;
-mod ping_pong;
+pub mod ping_pong;
 pub mod proxies;
 mod remote_resources;
 mod request_queue;
