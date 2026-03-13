@@ -1,3 +1,4 @@
+#![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
 use std::{str::FromStr, time::Duration};
