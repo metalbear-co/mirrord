@@ -31,10 +31,13 @@ use mirrord_config::{
 };
 use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
-    client::OperatorApi,
+    client::{NoClientCert, OperatorApi},
     crd::{
         NewOperatorFeature,
-        preview::{PreviewIncomingConfig, PreviewSession, PreviewSessionPhase, PreviewSessionSpec},
+        preview::{
+            PreviewIncomingConfig, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
+            PreviewSqsFilter,
+        },
         session::SessionTarget,
     },
     types::OPERATOR_OWNERSHIP_LABEL,
@@ -75,7 +78,8 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
 
     let layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
 
-    let (client, api) = create_preview_api(&layer_config, false, &progress).await?;
+    let (operator_api, api) = create_preview_api(&layer_config, false, &progress).await?;
+    operator_api.check_feature_support(&layer_config)?;
 
     // Create the `PreviewSession` resource in the cluster. The CR name is derived from
     // the target with a short random suffix to avoid collisions (e.g.
@@ -96,7 +100,7 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
 
     let session_target = resolve_config_target(
         config_target,
-        &client,
+        operator_api.client(),
         layer_config.target.namespace.as_deref(),
     )
     .await
@@ -182,6 +186,23 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
         labels
     };
 
+    // Prepare branch databases if configured.
+    let (mysql_branch_names, pg_branch_names, mongodb_branch_names) =
+        if !layer_config.feature.db_branches.is_empty() {
+            let mysql = operator_api
+                .prepare_mysql_branch_dbs(&layer_config, &progress)
+                .await?;
+            let pg = operator_api
+                .prepare_pg_branch_dbs(&layer_config, &progress)
+                .await?;
+            let mongodb = operator_api
+                .prepare_mongodb_branch_dbs(&layer_config, &progress)
+                .await?;
+            (mysql, pg, mongodb)
+        } else {
+            Default::default()
+        };
+
     let session_spec = PreviewSessionSpec {
         image: image.clone(),
         key: layer_config.key.as_str().to_owned(),
@@ -191,6 +212,31 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
             PreviewTtlMins::Finite(mins) => mins.saturating_mul(60),
             PreviewTtlMins::Infinite(_) => PreviewTtlMins::INFINITE_TTL_SECS,
         },
+        sqs_queue_filters: {
+            let mut filters = BTreeMap::new();
+            for (id, message_filter) in layer_config.feature.split_queues.sqs() {
+                filters
+                    .entry(id.to_owned())
+                    .or_insert_with(PreviewSqsFilter::default)
+                    .message_filter = Some(message_filter.clone());
+            }
+            for (id, jq_filter) in layer_config.feature.split_queues.sqs_jq_filters() {
+                filters
+                    .entry(id.to_owned())
+                    .or_insert_with(PreviewSqsFilter::default)
+                    .jq_filter = Some(jq_filter.to_owned());
+            }
+            filters
+        },
+        kafka_queue_filters: layer_config
+            .feature
+            .split_queues
+            .kafka()
+            .map(|(id, filter)| (id.to_owned(), filter.clone()))
+            .collect(),
+        mysql_branch_names,
+        pg_branch_names,
+        mongodb_branch_names,
     };
 
     let session = PreviewSession {
@@ -319,7 +365,7 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
         .target
         .namespace
         .as_deref()
-        .unwrap_or(client.default_namespace());
+        .unwrap_or(operator_api.client().default_namespace());
 
     progress.success(None);
 
@@ -468,7 +514,7 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
 
     // Default to all namespaces when no namespace is configured, same as `status`.
     let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
-    let (client, api) = create_preview_api(&layer_config, all_namespaces, &progress).await?;
+    let (operator_api, api) = create_preview_api(&layer_config, all_namespaces, &progress).await?;
 
     let mut subtask = progress.subtask("finding preview sessions");
 
@@ -479,7 +525,7 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
         Some(config_target) => {
             let session_target = resolve_config_target(
                 config_target,
-                &client,
+                operator_api.client(),
                 layer_config.target.namespace.as_deref(),
             )
             .await
@@ -540,7 +586,8 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
             .as_deref()
             .expect("preview session should have a namespace");
 
-        let namespaced_api = Api::<PreviewSession>::namespaced(client.clone(), namespace);
+        let namespaced_api =
+            Api::<PreviewSession>::namespaced(operator_api.client().clone(), namespace);
 
         if let Err(e) =
             delete::delete_and_finalize(namespaced_api.clone(), name, &DeleteParams::default())
@@ -602,13 +649,13 @@ fn load_preview_config(
 }
 
 /// Connects to the operator, validates the license and checks that the `PreviewEnv` feature is
-/// supported, then returns a Kubernetes client and a `PreviewSession` API handle scoped to
+/// supported, then returns an `OperatorApi` and a `PreviewSession` API handle scoped to
 /// the appropriate namespace(s).
 async fn create_preview_api(
     config: &LayerConfig,
     all_namespaces: bool,
     progress: &ProgressTracker,
-) -> CliResult<(kube::Client, Api<PreviewSession>)> {
+) -> CliResult<(OperatorApi<NoClientCert>, Api<PreviewSession>)> {
     let mut subtask = progress.subtask("connecting to operator");
 
     let operator_api = OperatorApi::try_new(config, &mut NullReporter::default(), progress)
@@ -639,7 +686,7 @@ async fn create_preview_api(
         Api::default_namespaced(client.clone())
     };
 
-    Ok((client, api))
+    Ok((operator_api, api))
 }
 
 /// Returns `true` when two OCI image references point at the same repository, ignoring any tag or
