@@ -69,13 +69,19 @@ pub enum DatabaseDialect {
     Mongodb,
 }
 
+impl AsRef<str> for DatabaseDialect {
+    fn as_ref(&self) -> &str {
+        match self {
+            Self::Postgres => "PostgreSQL",
+            Self::Mysql => "MySQL",
+            Self::Mongodb => "MongoDB",
+        }
+    }
+}
+
 impl std::fmt::Display for DatabaseDialect {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Postgres => write!(f, "PostgreSQL"),
-            Self::Mysql => write!(f, "MySQL"),
-            Self::Mongodb => write!(f, "MongoDB"),
-        }
+        f.write_str(self.as_ref())
     }
 }
 
