@@ -693,15 +693,16 @@ pub fn get_env(
         .map(|(key, value)| (key.to_string(), value.to_string()))
         .collect::<Vec<_>>();
     let mut default_env = vec![
-        (
-            MIRRORD_TEST_INTPROXY_ADDR.to_string(),
-            intproxy_addr.to_string(),
-        ),
+        ("RUST_LOG".to_string(), "warn,mirrord=debug".to_string()),
         (
             "MIRRORD_IMPERSONATED_TARGET".to_string(),
             "pod/mock-target".to_string(),
         ),
         ("MIRRORD_REMOTE_DNS".to_string(), "false".to_string()),
+        (
+            MIRRORD_TEST_INTPROXY_ADDR.to_string(),
+            intproxy_addr.to_string(),
+        ),
     ];
     if cfg!(windows) {
         // on windows default to local file_mode to prevent accidental TestIntproxy failure due to
