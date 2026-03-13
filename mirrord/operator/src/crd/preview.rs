@@ -5,7 +5,7 @@
 //! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Failed`), which
 //! the CLI watches to report progress back to the user.
 
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use k8s_openapi::{apimachinery::pkg::apis::meta::v1::MicroTime, jiff::Timestamp};
 use kube::{
@@ -16,6 +16,7 @@ use mirrord_config::{
     feature::{
         network::incoming::{IncomingConfig, IncomingMode},
         preview::PreviewTtlMins,
+        split_queues::{QueueId, SplitQueuesConfig},
     },
     target::Target,
 };
@@ -47,6 +48,10 @@ pub struct PreviewSessionSpec {
     /// The preview pod will be a copy of the target's pod spec with the user's image.
     pub target: SessionTarget,
 
+    /// How long (in seconds) this session is allowed to live.
+    /// Values >= `u32::MAX` are treated as infinite.
+    pub ttl_secs: u64,
+
     /// Incoming traffic configuration for the preview environment.
     ///
     /// Specifies which ports to steal/mirror traffic from and optional HTTP filters.
@@ -55,9 +60,9 @@ pub struct PreviewSessionSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub incoming: Option<PreviewIncomingConfig>,
 
-    /// How long (in seconds) this session is allowed to live.
-    /// Values >= `u32::MAX` are treated as infinite.
-    pub ttl_secs: u64,
+    /// Queue splitting configuration for this preview session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_splitting: Option<PreviewQueueSplittingConfig>,
 }
 
 impl PreviewSessionSpec {
@@ -252,4 +257,77 @@ impl PreviewIncomingConfig {
             }),
         }
     }
+}
+
+/// Queue splitting configuration for preview environments.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewQueueSplittingConfig {
+    /// SQS queue splitting filters, keyed by queue ID.
+    ///
+    /// Each entry configures how messages from a specific SQS queue should be filtered
+    /// for this preview session.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sqs_queue_filters: BTreeMap<QueueId, PreviewSqsFilter>,
+
+    /// Kafka queue splitting filters, keyed by topic ID.
+    ///
+    /// Each value maps header names to regex patterns that messages must match.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub kafka_queue_filters: BTreeMap<QueueId, BTreeMap<String, String>>,
+}
+
+impl PreviewQueueSplittingConfig {
+    /// Converts from the user's split queues config. Returns `None` when no queues are configured.
+    pub fn from_config(value: &SplitQueuesConfig) -> Option<Self> {
+        let mut sqs_queue_filters = BTreeMap::new();
+
+        for (id, message_filter) in value.sqs() {
+            sqs_queue_filters
+                .entry(id.to_owned())
+                .or_insert_with(PreviewSqsFilter::default)
+                .message_filter = Some(message_filter.clone());
+        }
+
+        for (id, jq_filter) in value.sqs_jq_filters() {
+            sqs_queue_filters
+                .entry(id.to_owned())
+                .or_insert_with(PreviewSqsFilter::default)
+                .jq_filter = Some(jq_filter.to_owned());
+        }
+
+        let kafka_queue_filters: BTreeMap<_, _> = value
+            .kafka()
+            .map(|(id, filter)| (id.to_owned(), filter.clone()))
+            .collect();
+
+        if sqs_queue_filters.is_empty() && kafka_queue_filters.is_empty() {
+            None
+        } else {
+            Some(Self {
+                sqs_queue_filters,
+                kafka_queue_filters,
+            })
+        }
+    }
+}
+
+/// Per-queue SQS filter configuration for preview sessions.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSqsFilter {
+    /// Message attribute filter: a mapping from attribute names to regex patterns.
+    ///
+    /// Only messages whose attributes match **all** patterns will be delivered
+    /// to the preview environment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_filter: Option<BTreeMap<String, String>>,
+
+    /// A jq filter expression.
+    ///
+    /// For each SQS message, the jq filter runs on a JSON representation of the
+    /// SQS `Message` object. If the jq program outputs `true`, the message is
+    /// considered as matching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jq_filter: Option<String>,
 }

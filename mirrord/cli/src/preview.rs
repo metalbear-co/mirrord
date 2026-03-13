@@ -37,7 +37,10 @@ use mirrord_operator::{
     client::{OperatorApi, PreparedClientCert},
     crd::{
         NewOperatorFeature,
-        preview::{PreviewIncomingConfig, PreviewSession, PreviewSessionPhase, PreviewSessionSpec},
+        preview::{
+            PreviewDbBranchingConfig, PreviewIncomingConfig, PreviewQueueSplittingConfig,
+            PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
+        },
         session::SessionTarget,
     },
     types::OPERATOR_OWNERSHIP_LABEL,
@@ -197,11 +200,14 @@ async fn preview_start(
         image: image.clone(),
         key: layer_config.key.as_str().to_owned(),
         target: session_target,
-        incoming: PreviewIncomingConfig::from_config(&layer_config.feature.network.incoming),
         ttl_secs: match layer_config.feature.preview.ttl_mins {
             PreviewTtlMins::Finite(mins) => mins.saturating_mul(60),
             PreviewTtlMins::Infinite(_) => PreviewTtlMins::INFINITE_TTL_SECS,
         },
+        incoming: PreviewIncomingConfig::from_config(&layer_config.feature.network.incoming),
+        queue_splitting: PreviewQueueSplittingConfig::from_config(
+            &layer_config.feature.split_queues,
+        ),
     };
 
     let session = PreviewSession {
