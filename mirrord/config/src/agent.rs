@@ -601,6 +601,31 @@ impl AgentConfig {
     pub fn image(&self) -> &str {
         &self.image.0
     }
+
+    /// Returns `true` if any agent setting that is ignored by the operator appears to be
+    /// explicitly configured. The `namespace` field is excluded because it is used even with the
+    /// operator in targetless mode.
+    pub fn has_non_default_settings(&self) -> bool {
+        self.image_pull_secrets.is_some()
+            || self.communication_timeout.is_some()
+            || self.disabled_capabilities.is_some()
+            || self.tolerations.is_some()
+            || self.resources.is_some()
+            || self.nftables.is_some()
+            || self.labels.is_some()
+            || self.annotations.is_some()
+            || self.node_selector.is_some()
+            || self.service_account.is_some()
+            || self.metrics.is_some()
+            || self.priority_class.is_some()
+            || self.security_context.is_some()
+            || self.clean_iptables_on_start.is_some()
+            || self.dns.timeout.is_some()
+            || self.dns.attempts.is_some()
+            || self.image != AgentImageConfig::default()
+            || self.ephemeral
+            || self.privileged
+    }
 }
 
 impl AgentFileConfig {
@@ -690,6 +715,74 @@ mod tests {
 
     use super::*;
     use crate::config::{ConfigContext, MirrordConfig};
+
+    #[test]
+    fn has_non_default_settings_false_for_defaults() {
+        let mut cfg_context = ConfigContext::default().strict_env(true);
+        let agent = AgentFileConfig::default()
+            .generate_config(&mut cfg_context)
+            .unwrap();
+        assert!(!agent.has_non_default_settings());
+    }
+
+    #[test]
+    fn has_non_default_settings_true_for_optional_fields() {
+        let mut cfg_context = ConfigContext::default().strict_env(true);
+        let mut agent = AgentFileConfig::default()
+            .generate_config(&mut cfg_context)
+            .unwrap();
+
+        agent.communication_timeout = Some(30);
+        assert!(agent.has_non_default_settings());
+
+        agent.communication_timeout = None;
+        agent.tolerations = Some(vec![]);
+        assert!(agent.has_non_default_settings());
+    }
+
+    #[test]
+    fn has_non_default_settings_true_for_custom_image() {
+        let mut cfg_context = ConfigContext::default()
+            .override_env("MIRRORD_AGENT_IMAGE", "custom:latest")
+            .strict_env(true);
+        let agent = AgentFileConfig::default()
+            .generate_config(&mut cfg_context)
+            .unwrap();
+        assert!(agent.has_non_default_settings());
+    }
+
+    #[test]
+    fn has_non_default_settings_true_for_ephemeral() {
+        let mut cfg_context = ConfigContext::default()
+            .override_env("MIRRORD_EPHEMERAL_CONTAINER", "true")
+            .strict_env(true);
+        let agent = AgentFileConfig::default()
+            .generate_config(&mut cfg_context)
+            .unwrap();
+        assert!(agent.has_non_default_settings());
+    }
+
+    #[test]
+    fn has_non_default_settings_ignores_namespace() {
+        let mut cfg_context = ConfigContext::default()
+            .override_env("MIRRORD_AGENT_NAMESPACE", "custom-ns")
+            .strict_env(true);
+        let agent = AgentFileConfig::default()
+            .generate_config(&mut cfg_context)
+            .unwrap();
+        assert!(!agent.has_non_default_settings());
+    }
+
+    #[test]
+    fn has_non_default_settings_true_for_dns() {
+        let mut cfg_context = ConfigContext::default().strict_env(true);
+        let mut agent = AgentFileConfig::default()
+            .generate_config(&mut cfg_context)
+            .unwrap();
+
+        agent.dns.timeout = Some(5);
+        assert!(agent.has_non_default_settings());
+    }
 
     #[rstest]
     fn default(
