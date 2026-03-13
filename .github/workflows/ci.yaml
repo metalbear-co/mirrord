@@ -91,6 +91,32 @@ jobs:
 
       - name: spell check mirrord/config crate
         run: typos --format brief $(git ls-files 'mirrord/config/*.rs')
+        
+  vale_check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      ## POC setup.
+      ## The vale-action currently downloads the latest version of Vale without checksum verification, which we want to avoid.
+      ## For this proof of concept we install a pinned version and verify the checksum.
+      ## Adopting Vale is still in question, due to additional maintenance overhead.
+      - name: install vale
+        run: |
+          wget "https://github.com/errata-ai/vale/releases/download/v3.13.1/vale_3.13.1_Linux_64-bit.tar.gz" -O /tmp/vale.tgz
+          echo '99bd899f0ac52054444ffe3df571c749cc811f3b606cf5ef740c9a5a2db33df6 /tmp/vale.tgz' | sha256sum -c
+          mkdir -p /tmp/vale
+          tar -xzf /tmp/vale.tgz -C /tmp/vale
+          chmod +x /tmp/vale/vale
+          mv /tmp/vale/vale /usr/local/bin
+
+      - name: check root markdown files
+        run: vale $(find . -name '*.md' -maxdepth 1 -not -name CLAUDE.md -not -name CHANGELOG.md) --output=report.tmpl
+
+      - name: check changelog.d files
+        run: vale $(git ls-files 'changelog.d/*.md') --output=report.tmpl
 
   changed_files:
     runs-on: ubuntu-24.04
@@ -808,7 +834,7 @@ jobs:
     with:
       mirrord_release_branch: true
 
-  # We need some "accummulation" job here because bors fails (timeouts) to
+  # We need some "accumulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
   # Hence, we have some kind of dummy here that bors can listen on
   ci-success:
@@ -819,6 +845,7 @@ jobs:
       [
         towncrier_check,
         typos_check,
+        vale_check,
         changed_files,
         intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
@@ -842,6 +869,8 @@ jobs:
         env:
           CI_SUCCESS: ${{ (needs.changed_files.result == 'success') &&
             (needs.towncrier_check.result == 'success') &&
+            (needs.typos_check.result == 'success' ) &&
+            (needs.vale_check.result == 'success') &&
             (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
             (needs.test_cli_image.result == 'success' || needs.test_cli_image.result == 'skipped') &&
             (needs.macos_tests.result == 'success' || needs.macos_tests.result == 'skipped') &&

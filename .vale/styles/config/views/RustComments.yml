@@ -1,0 +1,7 @@
+# Extract Rust doc comments using tree-sitter and treat them as Markdown so
+# Vale lints documentation but ignores fenced code blocks correctly.
+engine: tree-sitter
+scopes:
+  - name: doc_comment
+    expr: "(line_comment doc: (doc_comment) @line_comment)"
+    type: md

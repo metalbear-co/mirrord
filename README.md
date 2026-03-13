@@ -114,7 +114,11 @@ nix-env -iA nixpkgs.mirrord
 nix profile install nixpkgs#mirrord
 ```
 
-- Windows isn't currently supported (you can use WSL)
+or on Windows using Chocolatey:
+
+```sh
+choco install --pre mirrord
+```
 
 ### How To Use
 
