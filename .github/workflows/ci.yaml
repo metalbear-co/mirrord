@@ -545,11 +545,9 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
-      # mirrod-layer integration tests (mimic test harness)
-      MIRRORD_TEST_USE_EXISTING_LIB: ${{ github.workspace }}/target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
-      MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/debug/libmirrord_layer.dylib
       # mirrord-layer-tests (exec test harness)
       MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
+      MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/debug/libmirrord_layer.dylib
       MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
@@ -776,11 +774,7 @@ jobs:
           components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
           toolchain: ${{ env.PINNED_NIGHTLY }}
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 24
-      - run: npm install express # For http mirroring test with node.
-      - run: npm install portfinder # For a node specific test
+
       - run: |
           cd mirrord/layer-tests/tests/apps/outgoing
           cargo build

@@ -682,8 +682,13 @@ pub fn config_dir() -> PathBuf {
 /// Environment for the user application.
 ///
 /// The environment includes:
-/// 1. [`MIRRORD_TEST_INTPROXY_ADDR`] (for `mirrord exec` override)
-/// 2. Given `extra_vars`
+/// 1. `MIRRORD_IMPERSONATED_TARGET=pod/mock-target` (to run exec NOT in `targetless` mode)
+/// 2. `MIRRORD_REMOTE_DNS=false` (no remote environment to do remote_dns to -.-)
+/// 3. `MIRRORD_TEST_INTPROXY_ADDR` (for `mirrord exec` test harness)
+/// 4. `MIRRORD_FILE_MODE=local` on Windows
+/// 5. Given `extra_vars` (can override any of the above)
+/// 6. Strict CLI environment via `MIRRORD_CLI_STRICT_ENV=true` and an allowlist that contains
+///    all keys from the defaults and `extra_vars`
 pub fn get_env(
     intproxy_addr: SocketAddr,
     extra_vars: Vec<(&str, &str)>,
