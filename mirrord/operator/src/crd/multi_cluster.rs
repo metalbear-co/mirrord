@@ -92,6 +92,11 @@ pub struct ClusterSessionStatus {
     /// Last heartbeat from agent
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_heartbeat: Option<MicroTime>,
+
+    /// Scale-down-only session (no agent routing). Excluded from readiness checks
+    /// but included in cleanup. Used for copy target downstream scale-down.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scaledown_only: bool,
 }
 
 /// Phase of multi-cluster session lifecycle
