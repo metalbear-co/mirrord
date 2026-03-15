@@ -6,7 +6,7 @@ use std::{
 use mirrord_config::{LayerConfig, feature::network::incoming::ConcurrentSteal};
 use serde::Serialize;
 
-use crate::crd::{QueueConsumer, session::SessionCiInfo};
+use crate::crd::session::SessionCiInfo;
 
 /// Query params for the operator connect request.
 ///

@@ -1367,7 +1367,6 @@ impl OperatorApi<PreparedClientCert> {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             key: Some(key),
-            queue_consumer: None,
         };
 
         if use_proxy {
