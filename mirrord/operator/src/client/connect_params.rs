@@ -73,13 +73,6 @@ pub struct ConnectParams<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<&'a str>,
 
-    /// MC copy target: original workload for queue consumer resolution.
-    /// When the agent connects to a copy Pod, the local operator can't derive the
-    /// queue consumer from the Pod target. This carries the original Deployment/Rollout
-    /// info so the local operator can create queue splitting sessions (SQS, Kafka)
-    /// against the correct workload.
-    #[serde(with = "force_json_ser", skip_serializing_if = "Option::is_none")]
-    pub queue_consumer: Option<QueueConsumer>,
 }
 
 impl<'a> ConnectParams<'a> {
@@ -107,7 +100,6 @@ impl<'a> ConnectParams<'a> {
             is_default_cluster: None,
             sqs_output_queues: HashMap::new(),
             key: Some(key),
-            queue_consumer: None,
         }
     }
 }
