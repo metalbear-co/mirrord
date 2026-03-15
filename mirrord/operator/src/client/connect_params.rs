@@ -6,7 +6,7 @@ use std::{
 use mirrord_config::{LayerConfig, feature::network::incoming::ConcurrentSteal};
 use serde::Serialize;
 
-use crate::crd::session::SessionCiInfo;
+use crate::crd::{QueueConsumer, session::SessionCiInfo};
 
 /// Query params for the operator connect request.
 ///
@@ -72,6 +72,14 @@ pub struct ConnectParams<'a> {
     /// Key for this session
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<&'a str>,
+
+    /// MC copy target: original workload for queue consumer resolution.
+    /// When the agent connects to a copy Pod, the local operator can't derive the
+    /// queue consumer from the Pod target. This carries the original Deployment/Rollout
+    /// info so the local operator can create queue splitting sessions (SQS, Kafka)
+    /// against the correct workload.
+    #[serde(with = "force_json_ser", skip_serializing_if = "Option::is_none")]
+    pub queue_consumer: Option<QueueConsumer>,
 }
 
 impl<'a> ConnectParams<'a> {
@@ -96,9 +104,10 @@ impl<'a> ConnectParams<'a> {
             mysql_branch_names,
             pg_branch_names,
             session_ci_info,
-            is_default_cluster: None,          // Only used in multi-cluster
-            sqs_output_queues: HashMap::new(), // Only used in multi-cluster
+            is_default_cluster: None,
+            sqs_output_queues: HashMap::new(),
             key: Some(key),
+            queue_consumer: None,
         }
     }
 }

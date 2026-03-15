@@ -1364,9 +1364,10 @@ impl OperatorApi<PreparedClientCert> {
             mysql_branch_names,
             pg_branch_names,
             session_ci_info,
-            is_default_cluster: None, // Only used in multi-cluster
-            sqs_output_queues: Default::default(), // Only used in multi-cluster
+            is_default_cluster: None,
+            sqs_output_queues: Default::default(),
             key: Some(key),
+            queue_consumer: None,
         };
 
         if use_proxy {
