@@ -545,7 +545,6 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
-      # mirrord-layer-tests (exec test harness)
       MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
       MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/debug/libmirrord_layer.dylib
       MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord
