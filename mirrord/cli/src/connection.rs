@@ -18,6 +18,7 @@ use mirrord_operator::{
 use mirrord_progress::{
     IdeAction, IdeMessage, NotificationLevel, Progress,
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
+    utm_medium,
 };
 use mirrord_protocol_io::{Client, Connection};
 use tracing::Level;
@@ -291,8 +292,10 @@ where
             let mut actions = HashSet::new();
             actions.insert(IdeAction::Link {
                 label: "Try mirrord for Teams".to_string(),
-                link: "https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=plugin"
-                    .to_string(),
+                link: format!(
+                    "https://app.metalbear.com/?utm_source=multipodwarn&utm_medium={}",
+                    utm_medium()
+                ),
             });
 
             actions
@@ -301,7 +304,7 @@ where
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
     progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
-    progress.print("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=cli");
+    progress.print(&format!("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=multipodwarn&utm_medium={}", utm_medium()));
     Ok(())
 }
 
@@ -318,8 +321,10 @@ where
             let mut actions = HashSet::new();
             actions.insert(IdeAction::Link {
                 label: "Try mirrord for Teams".to_string(),
-                link: "https://app.metalbear.com/?utm_source=httpfilter&utm_medium=plugin"
-                    .to_string(),
+                link: format!(
+                    "https://app.metalbear.com/?utm_source=httpfilter&utm_medium={}",
+                    utm_medium()
+                ),
             });
 
             actions
@@ -328,7 +333,7 @@ where
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("You're using an HTTP filter, which generally indicates the use of a shared environment. If so, we recommend");
     progress.print("considering mirrord for Teams, which is better suited to shared environments.");
-    progress.print("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=httpfilter&utm_medium=cli");
+    progress.print(&format!("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=httpfilter&utm_medium={}", utm_medium()));
     Ok(())
 }
 

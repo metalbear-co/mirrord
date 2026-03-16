@@ -11,6 +11,23 @@ pub use implementations::*;
 /// to determine the mode of progress reporting
 pub const MIRRORD_PROGRESS_ENV: &str = "MIRRORD_PROGRESS_MODE";
 
+/// The environment variable name that is used
+/// to communicate which IDE is running the CLI.
+///
+/// When set, the CLI uses this value as the `utm_medium` in upgrade/warning links
+/// so that IDE extensions don't need to do string replacement.
+///
+/// Expected values: `"vscode"`, `"intellij"`.
+/// Falls back to `"cli"` when unset.
+pub const MIRRORD_IDE_NAME_ENV: &str = "MIRRORD_IDE_NAME";
+
+/// Returns the UTM medium to use in upgrade/warning links.
+///
+/// Reads [`MIRRORD_IDE_NAME_ENV`] and returns it if set, otherwise returns `"cli"`.
+pub fn utm_medium() -> String {
+    std::env::var(MIRRORD_IDE_NAME_ENV).unwrap_or_else(|_| "cli".to_owned())
+}
+
 /// Progress report API for displaying notifications in cli/extensions.
 ///
 /// This is our IDE friendly way of sending notification messages from the cli, be careful not to
