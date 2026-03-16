@@ -288,11 +288,11 @@ print_step "Testing the setup..."
 
 # Test Rust compilation
 print_step "Testing Rust compilation..."
-cargo check -p mirrord-layer
+cargo check -p mirrord-layer-tests
 
 # Test clippy
 print_step "Testing clippy..."
-cargo clippy -p mirrord-layer -- -D warnings
+cargo clippy -p mirrord-layer-tests -- -D warnings
 
 # Test basic Go compilation
 print_step "Testing Go compilation..."
@@ -308,12 +308,12 @@ echo "  mirrord_test_env   - Set mirrord test environment variables"
 echo ""
 echo "🧪 Run integration tests:"
 echo "  cd /path/to/mirrord"
-echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer"
+echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests"
 echo ""
 echo "🐛 Run specific failing tests:"
-echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer faccessat_go"
-echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer read_go"
-echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer write_go"
+echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests faccessat_go"
+echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests read_go"
+echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests write_go"
 echo ""
 echo "📝 Remember to source your bashrc or restart your shell:"
 echo "  source ~/.bashrc"
