@@ -376,8 +376,8 @@ pub(crate) enum CliError {
 
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
-        "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
-        Read more here: https://metalbear.com/mirrord/docs/overview/quick-start/#operator.{GENERAL_HELP}"
+        "The mirrord operator is part of mirrord for Teams. \
+        You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=operatornotfound&utm_medium=cli"
     ))]
     OperatorNotInstalled,
 
