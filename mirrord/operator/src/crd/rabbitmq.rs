@@ -120,7 +120,8 @@ impl From<MirrordRmqClusterTlsConfig> for OwnedTLSConfig {
 #[kube(
     group = "queues.mirrord.metalbear.co",
     version = "v1alpha",
-    kind = "MirrordRmqCluster",
+    kind = "MirrordRMQCluster",
+    root = "MirrordRmqCluster",
     namespaced
 )]
 #[serde(rename_all = "camelCase")] // connection_url -> connectionUrl in yaml.

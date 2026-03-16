@@ -607,13 +607,17 @@ pub struct SqsQueueDetails {
 // This is a proxy to generate a schemars schema that contains the common fields between
 // [`SqsQueueDetails`] and [`RmqQueueDetails`](rabbitmq::RmqQueueDetails)
 /// The details of a queue that should be split.
+#[allow(dead_code)]
 #[derive(JsonSchema)]
-#[serde(rename_all = "camelCase")] // queue_type -> queueType
+#[schemars(rename_all = "camelCase")] // queue_type -> queueType
 pub struct SplitQueueSchemarsProxy {
-    pub queue_type: SplitQueueVariant,
+    queue_type: SplitQueueVariant,
 
     #[serde(flatten)]
-    pub name: SplitQueueNameDetails,
+    name: SplitQueueNameDetails,
+
+    #[schemars(flatten)]
+    rest: serde_json::Map<String, serde_json::Value>,
 }
 
 /// The details of a queue that should be split.
