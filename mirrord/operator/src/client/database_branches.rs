@@ -994,38 +994,24 @@ pub async fn wait_for_pending_branches<P: Progress>(
 
 /// Resolve a branch database ID from the user config and session key.
 ///
-/// - No `id` in config: uses the session key as the branch ID (enables automatic reuse)
-/// - `id` contains `{key}`: substitutes `{key}` with the session key
-/// - `id` without `{key}`: uses the custom ID as-is, emits a warning
+/// `{{key}}` expansion in the config is already handled by Tera before this point,
+/// so `config_id` (if present) is the fully-rendered value.
+///
+/// - No `id` in config: uses the session key directly (enables automatic reuse)
+/// - `id` contains the session key: user likely used `{{key}}` in their template
+/// - `id` without the session key: uses the custom ID as-is, warns that the key is unused
 fn resolve_branch_id<P: Progress>(
     config_id: &Option<String>,
     session_key: &str,
     progress: &P,
 ) -> BranchDatabaseId {
     match config_id {
-        None if session_key.is_empty() => {
-            progress.warning(
-                "Session key is empty, generating a random branch ID. \
-                 Branch reuse will not work for this session.",
-            );
-            BranchDatabaseId::generate_new()
-        }
         None => BranchDatabaseId::specified(session_key.to_string()),
-        Some(id) if id.contains("{key}") && session_key.is_empty() => {
-            progress.warning(
-                "Session key is empty, generating a random branch ID. \
-                 Branch reuse will not work for this session.",
-            );
-            BranchDatabaseId::generate_new()
-        }
-        Some(id) if id.contains("{key}") => {
-            let resolved = id.replace("{key}", session_key);
-            BranchDatabaseId::specified(resolved)
-        }
+        Some(id) if id.contains(session_key) => BranchDatabaseId::specified(id.clone()),
         Some(id) => {
             progress.warning(
-                "Custom branch ID provided, session key will not be used. \
-                 Remove the ID or use {key} to include it.",
+                "Custom branch ID does not contain the session key. \
+                 Use {{ key }} in your config to include it for automatic branch reuse.",
             );
             BranchDatabaseId::specified(id.clone())
         }
@@ -1040,8 +1026,7 @@ impl UnifiedDatabaseBranchParams {
     /// Create unified branch database parameters from user config.
     ///
     /// When no branch `id` is provided, the session key is used as the branch ID so that
-    /// sessions sharing the same key automatically reuse the same branch. Custom IDs can
-    /// reference `{key}` for substitution.
+    /// sessions sharing the same key automatically reuse the same branch.
     pub fn new<P: Progress>(
         config: &DatabaseBranchesConfig,
         target: &Target,
@@ -1248,12 +1233,6 @@ impl UnifiedBranchParams {
     }
 }
 
-pub mod labels {
-    pub const MIRRORD_BRANCH_ID_LABEL: &str = "mirrord-branch-id";
-}
-
-pub use crate::crd::TARGET_NAMESPACE_ANNOTATION;
-
 #[cfg(test)]
 mod test {
     use mirrord_progress::NullProgress;
@@ -1270,8 +1249,9 @@ mod test {
     }
 
     #[test]
-    fn id_with_key_placeholder_substitutes_session_key() {
-        let config_id = Some("branch-{key}-db".to_string());
+    fn custom_id_containing_session_key_is_recognized() {
+        // Simulates Tera having already expanded `{{key}}` in "branch-{{key}}-db"
+        let config_id = Some("branch-abc123-db".to_string());
         let id = resolve_branch_id(&config_id, "abc123", &NullProgress);
         assert_eq!(
             id,
@@ -1280,21 +1260,15 @@ mod test {
     }
 
     #[test]
-    fn id_with_only_key_placeholder() {
-        let config_id = Some("{key}".to_string());
+    fn custom_id_equal_to_session_key() {
+        // Simulates Tera having expanded a config id that was just `{{key}}`
+        let config_id = Some("full-key".to_string());
         let id = resolve_branch_id(&config_id, "full-key", &NullProgress);
         assert_eq!(id, BranchDatabaseId::Specified("full-key".to_string()));
     }
 
     #[test]
-    fn id_with_multiple_key_placeholders() {
-        let config_id = Some("{key}-{key}".to_string());
-        let id = resolve_branch_id(&config_id, "x", &NullProgress);
-        assert_eq!(id, BranchDatabaseId::Specified("x-x".to_string()));
-    }
-
-    #[test]
-    fn custom_id_without_key_used_as_is() {
+    fn custom_id_without_session_key_used_as_is() {
         let config_id = Some("fixed-branch-id".to_string());
         let id = resolve_branch_id(&config_id, "ignored-key", &NullProgress);
         assert_eq!(
@@ -1304,31 +1278,14 @@ mod test {
     }
 
     #[test]
-    fn empty_session_key_generates_random_id() {
-        let id1 = resolve_branch_id(&None, "", &NullProgress);
-        let id2 = resolve_branch_id(&None, "", &NullProgress);
-        assert!(matches!(id1, BranchDatabaseId::Generated(_)));
-        assert!(matches!(id2, BranchDatabaseId::Generated(_)));
-        assert_ne!(id1, id2, "each call with empty key should produce a unique ID");
-    }
-
-    #[test]
-    fn empty_session_key_with_placeholder_generates_random_id() {
-        let config_id = Some("prefix-{key}-suffix".to_string());
-        let id = resolve_branch_id(&config_id, "", &NullProgress);
-        assert!(
-            matches!(id, BranchDatabaseId::Generated(_)),
-            "empty session key should generate a random ID even with a placeholder"
-        );
-    }
-
-    #[test]
-    fn empty_session_key_with_custom_id_uses_custom_id() {
-        let config_id = Some("my-fixed-branch".to_string());
-        let id = resolve_branch_id(&config_id, "", &NullProgress);
+    fn custom_id_with_key_as_substring() {
+        // Key appears as a substring, e.g. user wrote "prefix-{{key}}-suffix"
+        // and Tera expanded it to "prefix-mykey-suffix"
+        let config_id = Some("prefix-mykey-suffix".to_string());
+        let id = resolve_branch_id(&config_id, "mykey", &NullProgress);
         assert_eq!(
             id,
-            BranchDatabaseId::Specified("my-fixed-branch".to_string())
+            BranchDatabaseId::Specified("prefix-mykey-suffix".to_string())
         );
     }
 
@@ -1342,10 +1299,13 @@ mod test {
     }
 
     #[test]
-    fn resolved_id_is_always_specified_variant() {
+    fn all_branches_produce_specified_variant() {
         let cases: Vec<(Option<String>, &str)> = vec![
             (None, "session-key"),
-            (Some("{key}-branch".to_string()), "session-key"),
+            (
+                Some("id-with-session-key-inside".to_string()),
+                "session-key",
+            ),
             (Some("static-id".to_string()), "session-key"),
         ];
         for (config_id, key) in cases {
