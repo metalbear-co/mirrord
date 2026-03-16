@@ -1,0 +1,1 @@
+Align usages of `Detour` for windows usages by getting rid of `HookError::Bypass`

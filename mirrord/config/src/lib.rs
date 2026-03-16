@@ -64,9 +64,15 @@ use crate::{
 /// Environment variable we use to pass the internal proxy address to the layer.
 pub const MIRRORD_LAYER_INTPROXY_ADDR: &str = "MIRRORD_LAYER_INTPROXY_ADDR";
 
+/// Environment variable we use to pass an already-running internal proxy address to the layer
+/// during exec-based tests.
+pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";
+
 /// Environment variable to indicate towards layer to wait for debugger.
 pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGGER";
 
+/// # Getting Started
+///
 /// mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
 ///
@@ -80,6 +86,8 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 /// To use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag.
 /// Or if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file
 /// or use the UI.
+///
+/// ## Examples
 ///
 /// To help you get started, here are examples of a basic configuration file, and a complete
 /// configuration file containing all fields.
@@ -161,7 +169,7 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 ///       "incoming": {
 ///         "mode": "steal",
 ///         "http_filter": {
-///           "header_filter": "host: api\\..+"
+///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -403,7 +411,8 @@ pub struct LayerConfig {
     /// An identifier for a mirrord session.
     ///
     /// This key can be referenced in your configuration using the `{{ key }}` template variable.
-    /// For example, you can use it in HTTP filters: `"header_filter": "x-session: key-{{ key }}"`.
+    /// The recommended use is to propagate it in W3C `baggage` or `tracestate`, then filter on
+    /// `mirrord-session={{ key }}` in `feature.network.incoming.http_filter`.
     ///
     /// Priority (highest to lowest):
     /// 1. CLI argument: `mirrord exec --key my-key`
@@ -417,7 +426,7 @@ pub struct LayerConfig {
     ///     "network": {
     ///       "incoming": {
     ///         "http_filter": {
-    ///           "header_filter": "x-session: key-{{ key }}"
+    ///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
     ///         }
     ///       }
     ///     }

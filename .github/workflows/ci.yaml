@@ -68,6 +68,56 @@ jobs:
       - name: verify newsfragment exist
         run: uv run towncrier check
 
+  typos_check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: install typos
+        uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
+        with:
+          tool: typos-cli
+
+      - name: print typos version
+        run: echo $(typos --version)
+
+      - name: list markdown files
+        run: echo $(git ls-files '*.md')
+
+      - name: spell check markdown files
+        run: typos --format brief $(git ls-files '*.md')
+
+      - name: spell check mirrord/config crate
+        run: typos --format brief $(git ls-files 'mirrord/config/*.rs')
+        
+  vale_check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      ## POC setup.
+      ## The vale-action currently downloads the latest version of Vale without checksum verification, which we want to avoid.
+      ## For this proof of concept we install a pinned version and verify the checksum.
+      ## Adopting Vale is still in question, due to additional maintenance overhead.
+      - name: install vale
+        run: |
+          wget "https://github.com/errata-ai/vale/releases/download/v3.13.1/vale_3.13.1_Linux_64-bit.tar.gz" -O /tmp/vale.tgz
+          echo '99bd899f0ac52054444ffe3df571c749cc811f3b606cf5ef740c9a5a2db33df6 /tmp/vale.tgz' | sha256sum -c
+          mkdir -p /tmp/vale
+          tar -xzf /tmp/vale.tgz -C /tmp/vale
+          chmod +x /tmp/vale/vale
+          mv /tmp/vale/vale /usr/local/bin
+
+      - name: check root markdown files
+        run: vale $(find . -name '*.md' -maxdepth 1 -not -name CLAUDE.md -not -name CHANGELOG.md) --output=report.tmpl
+
+      - name: check changelog.d files
+        run: vale $(git ls-files 'changelog.d/*.md') --output=report.tmpl
+
   changed_files:
     runs-on: ubuntu-24.04
     # don't run CI on drafts
@@ -163,19 +213,6 @@ jobs:
         with:
           files: |
             mirrord-schema.json
-      - name: get configuration.md changes
-        id: changed-configuration-md
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
-        with:
-          files: |
-            mirrord/config/configuration.md
-      - name: verify configuration.md is up-to-date
-        run: |
-          if [ "${{ steps.changed-config-schema.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-configuration-md.outputs.any_changed }}" != "true" ]; then
-            echo "Error: mirrord configuration has changed but `configuration.md` documentation has not."
-            echo "Try running medschool (see `./medschool/readme.md`) and updating `configuration.md`."
-            exit 1
-          fi
       - name: output test
         run: |
           echo ${{ steps.changed-rs.outputs.any_changed }};
@@ -189,7 +226,6 @@ jobs:
           echo ${{ steps.changed-windows.outputs.any_changed }};
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-config-schema.outputs.any_changed }};
-          echo ${{ steps.changed-configuration-md.outputs.any_changed }};
 
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
 
@@ -359,6 +395,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [changed_files]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    env:
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/debug/mirrord
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
@@ -467,7 +506,10 @@ jobs:
           cargo build
       - run: ./mirrord/layer/tests/apps/dlopen_cgo/build_test_app.sh
       - run: ./scripts/build_c_apps.sh
+      - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord-layer
+      - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-lib
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: create dummy file to compile wizard feature
         run: touch wizard-frontend.tar.gz
@@ -487,6 +529,8 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord --features "wizard"
       - name: mirrord protocol-io UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
+      - name: mirrord jaq UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-jaq
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
@@ -501,8 +545,12 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
-      MIRRORD_TEST_USE_EXISTING_LIB: ../../target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
-      MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/debug/libmirrord_layer.dylib
+      # mirrod-layer integration tests (mimic test harness)
+      MIRRORD_TEST_USE_EXISTING_LIB: ${{ github.workspace }}/target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
+      MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/debug/libmirrord_layer.dylib
+      # mirrord-layer-tests (exec test harness)
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/libmirrord_layer.dylib
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -522,6 +570,8 @@ jobs:
         run: cargo build -p mirrord-layer
       - name: build layer x86
         run: cargo build -p mirrord-layer --target=x86_64-apple-darwin
+      - name: build cli
+        run: cargo build -p mirrord
       - name: mirrord-sip UT
         run: cargo test -p mirrord-sip
       - name: mirrord-intproxy UT
@@ -628,10 +678,10 @@ jobs:
           node-version: 24
       - run: npm install express # For http mirroring test with node.
       - run: npm install portfinder # For a node specific test
+      - name: mirrord layer unified tests
+        run: cargo test -p mirrord-layer-tests --no-default-features
       - name: mirrord layer tests
         run: cargo test -p mirrord-layer
-      - name: mirrord layer-lib tests
-        run: cargo test -p mirrord-layer-lib
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
@@ -714,6 +764,9 @@ jobs:
     needs: changed_files
     if: ${{ needs.changed_files.outputs.rs_changed == 'true' ||needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
     runs-on: windows-latest
+    env:
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord.exe
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/mirrord_layer_win.dll
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -724,11 +777,21 @@ jobs:
           target: x86_64-pc-windows-msvc
           toolchain: ${{ env.PINNED_NIGHTLY }}
 
+      - run: |
+          cd mirrord/layer/tests/apps/outgoing
+          cargo build
+      - name: build layer
+        run: cargo build -p mirrord-layer-win
+      - name: build mirrord
+        run: cargo build -p mirrord
+      - name: mirrord layer unified integration tests
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test -p mirrord-layer-tests --no-default-features
       - name: run UT
         run: |
           $ErrorActionPreference = "Stop"
-          New-Item -Path target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll -ItemType File -Force
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
+          cargo test -p mirrord -p mirrord-layer-win
 
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
   # building concurrently can run faster the release ide tests
@@ -771,7 +834,7 @@ jobs:
     with:
       mirrord_release_branch: true
 
-  # We need some "accummulation" job here because bors fails (timeouts) to
+  # We need some "accumulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
   # Hence, we have some kind of dummy here that bors can listen on
   ci-success:
@@ -781,6 +844,8 @@ jobs:
     needs:
       [
         towncrier_check,
+        typos_check,
+        vale_check,
         changed_files,
         intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
@@ -804,6 +869,8 @@ jobs:
         env:
           CI_SUCCESS: ${{ (needs.changed_files.result == 'success') &&
             (needs.towncrier_check.result == 'success') &&
+            (needs.typos_check.result == 'success' ) &&
+            (needs.vale_check.result == 'success') &&
             (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
             (needs.test_cli_image.result == 'success' || needs.test_cli_image.result == 'skipped') &&
             (needs.macos_tests.result == 'success' || needs.macos_tests.result == 'skipped') &&

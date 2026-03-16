@@ -1,0 +1,32 @@
+[package]
+name = "mirrord-jaq"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+jaq-core.workspace = true
+jaq-json = { workspace = true, features = ["serde_json"] }
+jaq-std.workspace = true
+serde_json = {workspace = true, optional = true}
+thiserror = { workspace = true}
+tokio = { workspace = true, features = ["rt", "time"], optional = true }
+
+[dev-dependencies]
+mirrord-test-macros.workspace = true
+
+[features]
+default = ["eval"]
+eval = ["dep:tokio", "dep:serde_json"]

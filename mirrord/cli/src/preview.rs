@@ -26,6 +26,7 @@ use mirrord_analytics::NullReporter;
 use mirrord_config::{
     LayerConfig,
     config::ConfigContext,
+    feature::preview::PreviewTtlMins,
     target::{Target, TargetDisplay},
 };
 use mirrord_kube::api::runtime::RuntimeDataProvider;
@@ -186,7 +187,10 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
         key: layer_config.key.as_str().to_owned(),
         target: session_target,
         incoming: PreviewIncomingConfig::from_config(&layer_config.feature.network.incoming),
-        ttl_secs: layer_config.feature.preview.ttl_mins * 60,
+        ttl_secs: match layer_config.feature.preview.ttl_mins {
+            PreviewTtlMins::Finite(mins) => mins.saturating_mul(60),
+            PreviewTtlMins::Infinite(_) => PreviewTtlMins::INFINITE_TTL_SECS,
+        },
     };
 
     let session = PreviewSession {
@@ -321,13 +325,16 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
 
     let key = layer_config.key.as_str();
 
-    println!(
-        r#"
-  info:
-    * key: {key}
-    * namespace: {namespace}
-    * pod: {pod_name}"#
-    );
+    // This line is parsed by the github action to generate an output,
+    // so please update it as well if you're gonna change this line.
+    // We're doing this weird .subtask().success() stuff because
+    // otherwise it messes up the ordering or looks weird in some
+    // other way :'(
+    progress.subtask(&format!("key: {key}")).success(None);
+    progress
+        .subtask(&format!("namespace: {namespace}"))
+        .success(None);
+    progress.subtask(&format!("pod: {pod_name}")).success(None);
 
     Ok(())
 }
@@ -404,15 +411,21 @@ async fn preview_status(args: PreviewStatusArgs) -> CliResult<()> {
                 Some(PreviewSessionPhase::Initializing) => "initializing".to_owned(),
                 Some(PreviewSessionPhase::Waiting) => "waiting".to_owned(),
                 Some(PreviewSessionPhase::Ready) => {
-                    let remaining = session
-                        .status
-                        .as_ref()
-                        .and_then(|s| s.expires_at.as_ref())
-                        .and_then(|expires_at| (expires_at.0 - Utc::now()).to_std().ok())
-                        .map(|d| Duration::from_secs(d.as_secs()));
-                    match remaining {
-                        Some(d) => format!("running ({} remaining)", humantime::format_duration(d)),
-                        None => "running".to_owned(),
+                    if session.spec.has_infinite_ttl() {
+                        "running (infinite)".to_owned()
+                    } else {
+                        let remaining = session
+                            .status
+                            .as_ref()
+                            .and_then(|s| s.expires_at.as_ref())
+                            .and_then(|expires_at| (expires_at.0 - Utc::now()).to_std().ok())
+                            .map(|d| Duration::from_secs(d.as_secs()));
+                        match remaining {
+                            Some(d) => {
+                                format!("running ({} remaining)", humantime::format_duration(d))
+                            }
+                            None => "running".to_owned(),
+                        }
                     }
                 }
                 Some(PreviewSessionPhase::Failed) => {

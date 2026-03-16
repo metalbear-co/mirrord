@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use fancy_regex::Regex;
-use jaq_all::load::FileReportsDisp;
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -11,6 +10,14 @@ use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig};
 
 pub type QueueId = String;
 
+/// A mapping from queue ids to their filters. Each queue filter defines which messages from the
+/// original queue will be made available to the local application, based on message attributes
+/// or headers, and possibly on jq filters (for SQS).
+///
+/// The queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` or
+/// `MirrordKafkaTopicsConsumer` for SQS or Kafka respectively.
+///
+///
 /// ```json
 /// {
 ///   "feature": {
@@ -24,9 +31,7 @@ pub type QueueId = String;
 ///       },
 ///       "second-queue": {
 ///         "queue_type": "SQS",
-///         "message_filter": {
-///           "who": "you$"
-///         }
+///         "jq_filter": ".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"
 ///       },
 ///       "third-queue": {
 ///         "queue_type": "Kafka",
@@ -112,19 +117,12 @@ impl SplitQueuesConfig {
         queue_id: &str,
         jq_code: &str,
     ) -> Result<(), QueueSplittingVerificationError> {
-        jaq_all::data::compile(jq_code)
-            .map(|_| ())
-            .map_err(
-                |reports| QueueSplittingVerificationError::InvalidJqProgram {
-                    queue_name: queue_id.to_string(),
-                    jq_compile_errors: reports
-                        .iter()
-                        .map(FileReportsDisp::new)
-                        .map(|report_disp| report_disp.to_string())
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                },
-            )
+        mirrord_jaq::compile_jq(jq_code).map(|_| ()).map_err(|err| {
+            QueueSplittingVerificationError::InvalidJqProgram {
+                queue_name: queue_id.to_string(),
+                jq_compile_errors: err.to_string(),
+            }
+        })
     }
 
     pub fn verify(
@@ -176,12 +174,34 @@ impl FromMirrordConfig for SplitQueuesConfig {
 
 pub type QueueMessageFilter = BTreeMap<String, String>;
 
-/// Amazon Simple Queue Service and Kafka are supported.
+/// ### feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}
 ///
-/// More queue types might be added in the future.
+/// For each queue, `message_filter` is a mapping between message attribute names and regexes they
+/// should match. The local application will only receive messages that match **all** of the given
+/// patterns. This means, only messages that have **all** of the attributes in the
+/// filter, with values of those attributes matching the respective patterns.
+///
+/// ### feature.split_queues.{}.queue_type {#feature-split_queues-queue_id-queue_type}
+///
+/// The type of queue to be split, currently `SQS` and `Kafka` are supported. More queue types might
+/// be added in the future.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
 #[serde(tag = "queue_type")]
 pub enum QueueFilter {
+    /// ### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
+    /// Only supported with `queue_type` of `SQS`.
+    /// When this field is specified, for each SQS message, the jq filter runs on a JSON
+    /// representation of the SQS `Message` object. If the jq program outputs `true`, that
+    /// message is considered as matching the filter.
+    ///
+    /// See [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).
+    ///
+    /// This can be used to filter messages based on their body content, for example.
+    ///
+    ///
+    /// This filter, for example, will tell mirrord to only make available to this local application
+    /// messages with a json in the message body, with a `customer_email` field that contains
+    /// "metalbear.com": `".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"`
     #[serde(rename = "SQS")]
     Sqs {
         /// A filter is a mapping between message attribute names and regexes they should match.
@@ -212,8 +232,8 @@ pub enum QueueFilter {
         message_filter: QueueMessageFilter,
     },
 
-    /// When a newer client sends a new filter kind to an older operator, that does not yet know
-    /// about that filter type, the filter will be deserialized to unknown.
+    // When a newer client sends a new filter kind to an older operator, that does not yet know
+    // about that filter type, the filter will be deserialized to unknown.
     #[schemars(skip)]
     #[serde(other, skip_serializing)]
     Unknown,

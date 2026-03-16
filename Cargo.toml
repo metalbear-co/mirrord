@@ -34,14 +34,13 @@ members = [
     "tests/rust-websockets",
     "tests/rust-sqs-printer",
     "xtask",
-	"safejaq",
 ]
 resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.191.0"
+version = "3.193.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -187,6 +186,9 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 # Used by `layer-macro`, `config-derive`.
 quote = "1"
 
+# Used by `jaq` tests.
+mirrord-test-macros = { path = "mirrord/test-macros" }
+
 # Used by `console`, `cli`.
 miette = "7"
 
@@ -261,6 +263,7 @@ winapi = { version = "0.3.9", features = [
     "timezoneapi",
     "securitybaseapi",
     "namedpipeapi",
+    "impl-default",
 ] }
 
 # Used by `analytics`, `cli`
@@ -271,7 +274,7 @@ yamlpatch = "0.9.0"
 yamlpath = "0.32.0"
 oci-spec = { version = "0.9", default-features = false, features = ["distribution"] }
 
-# Used by `safejaq`, `protocol`
+# Used by `agent`, `protocol`
 jaq-core = "2.2.1"
 jaq-parse = "1.0.3"
 jaq-std = "2.1.2"

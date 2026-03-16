@@ -1,0 +1,27 @@
+{{- range .Files }}
+{{- $path := .Path }}
+{{- range .Alerts }}
+{{- if eq .Severity "suggestion" }}
+{{- $severity := .Severity | blue }}
+{{ $path }}:{{ .Line }}:{{ index .Span 0 }} :: {{ .Check }} :: {{ $severity }}: {{ .Message }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- range .Files }}
+{{- $path := .Path }}
+{{- range .Alerts }}
+{{- if eq .Severity "warning" }}
+{{- $severity := .Severity | yellow }}
+{{ $path }}:{{ .Line }}:{{ index .Span 0 }} :: {{ .Check }} :: {{ $severity }}: {{ .Message }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- range .Files }}
+{{- $path := .Path }}
+{{- range .Alerts }}
+{{- if eq .Severity "error" }}
+{{- $severity := .Severity | red }}
+{{ $path }}:{{ .Line }}:{{ index .Span 0 }} :: {{ .Check }} :: {{ $severity }}: {{ .Message }}
+{{- end }}
+{{- end }}
+{{- end }}
