@@ -195,7 +195,7 @@ pub enum RmqSessionStatus {
 }
 
 impl RmqSessionStatus {
-    pub fn get_split_details(&self) -> Option<&SqsSplitDetails> {
+    pub fn get_split_details(&self) -> Option<&RmqSplitDetails> {
         match self {
             RmqSessionStatus::RegisteringFilters(details) | RmqSessionStatus::Ready(details) => {
                 Some(details)
