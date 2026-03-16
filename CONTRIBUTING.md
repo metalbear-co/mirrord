@@ -210,7 +210,7 @@ cargo test -p mirrord-layer-tests --no-default-features
 Swap `x86_64-unknown-linux-gnu` with your target triplet, or omit the triplet if you built for the host default.
 Paths use `../..` because `cargo test -p mirrord-layer-tests` runs tests with `mirrord/layer-tests` as the working directory.
 
-For macOS with precompiled binaries, build the universal CLI (which embeds both arch compilations):
+For macOS with pre-compiled binaries, build the universal CLI (which embeds both arch compilations):
 ```bash
 cargo xtask build-cli --platform macos-universal
 ```
