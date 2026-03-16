@@ -165,6 +165,12 @@ pub struct ExperimentalConfig {
     ///
     /// Configuration for inspecting and modifying apple variables. macOS only.
     pub applev: Option<AppleVariablesConfig>,
+
+    /// ### _experimental_ session_monitor {#experimental-session_monitor}
+    ///
+    /// Enables the session monitor Unix socket API server for observing mirrord session activity.
+    #[config(default = false)]
+    pub session_monitor: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -189,6 +195,7 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("latency_transmit_delay", self.latency.transmit_delay);
         analytics.add("latency_receive_delay", self.latency.receive_delay);
         analytics.add("applev", self.applev.is_some());
+        analytics.add("session_monitor", self.session_monitor);
     }
 }
 

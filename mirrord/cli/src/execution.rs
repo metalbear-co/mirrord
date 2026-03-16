@@ -544,6 +544,9 @@ impl MirrordExecution {
             serde_json::to_string(&connect_info)?,
         );
 
+        let session_id = uuid::Uuid::new_v4().to_string();
+        proxy_command.env("MIRRORD_SESSION_ID", &session_id);
+
         #[cfg(unix)]
         unsafe {
             proxy_command.pre_exec(|| reparent_to_init().map_err(Into::into));
