@@ -12,7 +12,7 @@ cargo check -p mirrord-protocol --keep-going
 cargo check -p mirrord-agent --target x86_64-unknown-linux-gnu --keep-going
 
 # Integration tests
-cargo test -p mirrord-layer
+cargo test -p mirrord-layer-tests
 
 # Format (run after every change)
 cargo fmt

@@ -675,9 +675,9 @@ jobs:
           node-version: 24
       - run: npm install express # For http mirroring test with node.
       - run: npm install portfinder # For a node specific test
-      - name: mirrord layer unified tests
+      - name: mirrord layer integration tests
         run: cargo test -p mirrord-layer-tests --no-default-features
-      - name: mirrord layer tests
+      - name: mirrord layer unit tests
         run: cargo test -p mirrord-layer
       - name: save intproxy logs
         continue-on-error: true
@@ -781,7 +781,7 @@ jobs:
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
         run: cargo build -p mirrord
-      - name: mirrord layer unified integration tests
+      - name: mirrord layer integration tests
         run: |
           $ErrorActionPreference = "Stop"
           cargo test -p mirrord-layer-tests --no-default-features

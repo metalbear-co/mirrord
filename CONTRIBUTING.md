@@ -196,12 +196,23 @@ Some test apps need to be compiled before they can be used in the tests
 
 The basic command to run the integration tests is:
 ```bash
-cargo test --package mirrord-layer
+cargo test --package mirrord-layer-tests
 ```
 
-However, when running on macOS a dylib has to be created first. You can use xtask:
+#### Running the Integration Tests using precompiled Binaries (Optional)
+If you want to avoid building the CLI as a build dependency (or speed up iteration), you can run the integration tests against prebuilt artifacts. This requires `--no-default-features` and pointing to the CLI binary and layer library.
+
 ```bash
-cargo xtask build-layer
+MIRRORD_TESTS_USE_BINARY=../../target/x86_64-unknown-linux-gnu/debug/mirrord \
+MIRRORD_LAYER_FILE=../../target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so \
+cargo test -p mirrord-layer-tests --no-default-features
+```
+Swap `x86_64-unknown-linux-gnu` with your target triplet, or omit the triplet if you built for the host default.
+Paths use `../..` because `cargo test -p mirrord-layer-tests` runs tests with `mirrord/layer-tests` as the working directory.
+
+For macOS with precompiled binaries, build the universal CLI (which embeds both layer dylibs):
+```bash
+cargo xtask build-cli --platform macos-universal
 ```
 
 Or the build script:
@@ -209,16 +220,11 @@ Or the build script:
 scripts/build_fat_mac.sh
 ```
 
-And then in order to use that dylib in the tests, run the tests like this:
+And then use it in the tests as follows:
 ```bash
-MIRRORD_TEST_USE_EXISTING_LIB=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib cargo test -p mirrord-layer
-```
-
-On Apple Silicon, set `MIRRORD_MACOS_ARM64_LIBRARY` additionally to use the arm64 layer lib as well:
-```bash
-MIRRORD_TEST_USE_EXISTING_LIB=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib \
-MIRRORD_MACOS_ARM64_LIBRARY=../../target/aarch64-apple-darwin/debug/libmirrord_layer.dylib \
-cargo test -p mirrord-layer
+MIRRORD_TESTS_USE_BINARY=../../target/universal-apple-darwin/debug/mirrord \
+MIRRORD_LAYER_FILE=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib \
+cargo test -p mirrord-layer-tests --no-default-features
 ```
 
 ### Integration Tests logs and you
