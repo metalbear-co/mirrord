@@ -595,7 +595,7 @@ In order to have a more structured approach, here's the flow you should follow w
     2. A call that should be bypassed. Make sure the result of the operation proves it happened locally. Please test
        different reasons for bypassing. E.g. for file operations, make a call with a relative path, and make a call
        with a path that is configured to be local. If it's easier for you, you can test bypassing in an integration
-       test of mirrord-layer (under mirrord/layer/tests).
+       test of mirrord-layer (under mirrord/layer-tests/tests).
     3. If the configuration supports mappings that are relevant for this hook, add test cases with those mappings,
        and test that the mappings take effect correctly. E.g. for file operations test with a path mapping.
 
