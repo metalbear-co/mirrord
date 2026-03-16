@@ -199,7 +199,7 @@ The basic command to run the integration tests is:
 cargo test --package mirrord-layer-tests
 ```
 
-#### Running the Integration Tests using precompiled Binaries (Optional)
+#### Running the Integration Tests using pre-compiled Binaries (Optional)
 If you want to avoid building the CLI as a build dependency (or speed up iteration), you can run the integration tests against prebuilt artifacts. This requires `--no-default-features` and pointing to the CLI binary and layer library.
 
 ```bash
@@ -210,7 +210,7 @@ cargo test -p mirrord-layer-tests --no-default-features
 Swap `x86_64-unknown-linux-gnu` with your target triplet, or omit the triplet if you built for the host default.
 Paths use `../..` because `cargo test -p mirrord-layer-tests` runs tests with `mirrord/layer-tests` as the working directory.
 
-For macOS with precompiled binaries, build the universal CLI (which embeds both layer dylibs):
+For macOS with precompiled binaries, build the universal CLI (which embeds both arch compilations):
 ```bash
 cargo xtask build-cli --platform macos-universal
 ```
