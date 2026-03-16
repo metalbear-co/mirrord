@@ -194,6 +194,18 @@ pub enum RmqSessionStatus {
     },
 }
 
+impl RmqSessionStatus {
+    pub fn get_split_details(&self) -> Option<&SqsSplitDetails> {
+        match self {
+            RmqSessionStatus::RegisteringFilters(details) | RmqSessionStatus::Ready(details) => {
+                Some(details)
+            }
+            RmqSessionStatus::CleanupError { details, .. } => details.as_ref(),
+            _ => None,
+        }
+    }
+}
+
 /// The [`kube::runtime::wait::Condition`] trait is auto-implemented for this function.
 /// To be used in [`kube::runtime::wait::await_condition`].
 pub fn is_session_ready(session: Option<&MirrordRmqSession>) -> bool {
