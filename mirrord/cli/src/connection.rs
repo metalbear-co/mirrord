@@ -27,7 +27,7 @@ use crate::{CliError, CliResult, MirrordCi, ci::error::CiError};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
 
-/// Sends a "Sign up for Teams" upgrade CTA to the IDE via the [`IdeMessage`] protocol.
+/// Sends a "Sign up for mirrord for Teams" upgrade CTA to the IDE via the [`IdeMessage`] protocol.
 ///
 /// Only has an effect when running inside an IDE (`MIRRORD_PROGRESS_MODE=json`).
 /// In CLI mode, [`Progress::ide`] is a no-op.
@@ -38,7 +38,7 @@ fn send_upgrade_ide_message<P: Progress>(
 ) -> CliResult<()> {
     let mut actions = HashSet::new();
     actions.insert(IdeAction::Link {
-        label: "Sign up for Teams".to_owned(),
+        label: "Sign up for mirrord for Teams".to_owned(),
         link: format!(
             "https://app.metalbear.com/?utm_source={utm_source}&utm_medium={}",
             utm_medium()
