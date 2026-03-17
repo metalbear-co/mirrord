@@ -1,6 +1,11 @@
 //! Handles the logic of the `outgoing` feature.
 
-use std::{collections::HashMap, fmt, io, net::SocketAddr, time::Instant};
+use std::{
+    collections::HashMap,
+    fmt, io,
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    time::Instant,
+};
 
 use bytes::Bytes;
 use mirrord_intproxy_protocol::{
@@ -17,6 +22,7 @@ use mirrord_protocol::{
 };
 use semver::Version;
 use thiserror::Error;
+use tokio::net::{TcpListener, TcpStream};
 use tracing::Level;
 
 use self::interceptor::Interceptor;
@@ -27,15 +33,11 @@ use crate::{
     },
     error::{UnexpectedAgentMessage, agent_lost_io_error},
     main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
-    proxies::outgoing::{
-        busy_tcp_listener::{BusyListenerMethod, BusyTcpListener},
-        net_protocol_ext::{NetProtocolExt, PreparedSocket},
-    },
+    proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
 };
 
-mod busy_tcp_listener;
 mod interceptor;
 mod net_protocol_ext;
 
@@ -95,7 +97,7 @@ impl From<AgentLostOutgoingResponse> for ToLayer {
 
 #[derive(Debug)]
 struct ConnectInProgress {
-    prepared_socket: Option<BusyTcpListener>,
+    prepared_stream: Option<TcpStream>,
     remote_address: SocketAddress,
     requested_at: Instant,
     layer_id: LayerId,
@@ -127,16 +129,22 @@ struct ConnectInProgress {
 /// 1. Proxy receives an [`OutgoingConnectRequest`] from the layer.
 /// 2. Proxy sends a corresponding [`LayerConnect`](mirrord_protocol::outgoing::LayerConnect) to the
 ///    agent.
-/// 3. Proxy creates a new [`BusyTcpListener`], and sends confirmation to the layer.
-/// 4. The layer starts connecting to the socket. Because we prepare the socket in a special way
-///    (see [`BusyTcpListener`] doc), this connect attempt will hang.
+/// 3. Proxy creates a new [`TcpListener`], and sends confirmation to the layer.
+/// 4. The layer connects to the socket immediately.
 /// 5. Proxy receives a confirmation from the agent.
 /// 6. Proxy starts a new outgoing [`Interceptor`] background task to manage the connection.
-/// 7. The [`Interceptor`] calls [`BusyTcpListener::accept`], and the layer socket finally connects
-///    to our socket.
-/// 8. The proxy passes the data between the agent and the [`Interceptor`] task.
-/// 9. If the layer closes the connection, the [`Interceptor`] exits and the proxy notifies the
+/// 7. The proxy passes the data between the agent and the [`Interceptor`] task.
+/// 8. If the layer closes the connection, the [`Interceptor`] exits and the proxy notifies the
 ///    agent. If the agent closes the connection, the proxy shuts down the [`Interceptor`].
+///
+/// The downside here is that the proxying of outgoing connections
+/// stops being "transparent" to the app, i.e. the existence of a TCP
+/// proxy becomes observable to the app. (e.g. if the agent <-> target
+/// connection fails, this will appear to the app as the connection
+/// getting accepted and subsequently dropped, when it was never
+/// accepted in the first place). Thankfully this should not affect
+/// the operation of any app unless it's doing something *very*
+/// nonstandard, in which case they can just use the blocking flow.
 ///
 /// ## Why?
 ///
@@ -219,12 +227,6 @@ impl OutgoingProxy {
         receive_delay_ms: u64,
         transmit_delay_ms: u64,
     ) -> Self {
-        if non_blocking_tcp_connect {
-            // First call to `get_working_method` might take a while.
-            // Initialize the function's state so that we won't block the layer later.
-            tokio::spawn(BusyListenerMethod::recommended());
-        }
-
         Self {
             datagrams_reqs: Default::default(),
             stream_reqs: Default::default(),
@@ -347,7 +349,7 @@ impl OutgoingProxy {
                     "Outgoing connect request failed",
                 );
 
-                if in_progress.prepared_socket.is_none() {
+                if in_progress.prepared_stream.is_none() {
                     message_bus
                         .send(ToLayer {
                             message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(
@@ -367,8 +369,8 @@ impl OutgoingProxy {
             self.agent_local_addresses.insert(in_progress.id, *addr);
         }
 
-        let prepared_socket = match in_progress.prepared_socket {
-            Some(socket) => PreparedSocket::BusyTcpListener(socket),
+        let prepared_socket = match in_progress.prepared_stream {
+            Some(socket) => PreparedSocket::TcpStream(socket),
             None => {
                 let prepared_socket = protocol.prepare_socket(remote_address).await?;
                 let layer_address = prepared_socket.local_address()?;
@@ -419,30 +421,22 @@ impl OutgoingProxy {
         request: OutgoingConnectRequest,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), OutgoingProxyError> {
-        let prepared_socket = if self.non_blocking_tcp_connect
-            && matches!(&request.remote_address, SocketAddress::Ip(..))
-            && request.protocol == NetProtocol::Stream
-        {
-            if let Some(method) = BusyListenerMethod::recommended().await {
-                let ipv4 = matches!(&request.remote_address, SocketAddress::Ip(ip) if ip.is_ipv4());
-                Some(method.prepare_socket(ipv4).await?)
-            } else {
-                tracing::warn!(
-                    remote_address = %request.remote_address,
-                    "Cannot emulate non-blocking TCP connect, no working hack detected."
-                );
-                None
-            }
-        } else {
-            None
-        };
-
         // The chance for collision here is negligible.
         let connection_id = rand::random::<u128>();
         self.connections_in_layers.add(session_id, connection_id);
 
-        if let Some(socket) = &prepared_socket {
-            let addr = socket.local_addr()?;
+        let prepared_stream = if self.non_blocking_tcp_connect
+            && request.protocol == NetProtocol::Stream
+            && let SocketAddress::Ip(ip) = request.remote_address
+        {
+            let bind_addr = if ip.is_ipv4() {
+                SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0)
+            } else {
+                SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0)
+            };
+
+            let listener = TcpListener::bind(bind_addr).await?;
+            let addr = listener.local_addr()?;
             let to_layer = ToLayer {
                 message_id,
                 layer_id: session_id,
@@ -455,7 +449,13 @@ impl OutgoingProxy {
                 ))),
             };
             message_bus.send(to_layer).await;
-        }
+
+            // Layer should connect immediately
+            let (stream, _addr) = listener.accept().await?;
+            Some(stream)
+        } else {
+            None
+        };
 
         let uid = if self
             .protocol_version
@@ -466,7 +466,7 @@ impl OutgoingProxy {
             self.v2_reqs.insert(
                 (request_uid, request.protocol),
                 ConnectInProgress {
-                    prepared_socket,
+                    prepared_stream,
                     remote_address: request.remote_address.clone(),
                     requested_at: Instant::now(),
                     layer_id: session_id,
@@ -481,7 +481,7 @@ impl OutgoingProxy {
                 session_id,
                 ConnectInProgress {
                     id: connection_id,
-                    prepared_socket,
+                    prepared_stream,
                     remote_address: request.remote_address.clone(),
                     requested_at: Instant::now(),
                     layer_id: session_id,
