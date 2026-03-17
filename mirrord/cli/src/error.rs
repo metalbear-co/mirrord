@@ -12,6 +12,7 @@ use mirrord_intproxy::{
     error::ProxyStartupError,
 };
 use mirrord_kube::error::KubeApiError;
+use mirrord_progress::utm_medium;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
 use mirrord_protocol_io::ProtocolError;
 use mirrord_tls_util::SecureChannelError;
@@ -320,11 +321,8 @@ pub(crate) enum CliError {
     RuntimeError(std::io::Error),
 
     #[error("Feature `{0}` requires using mirrord operator")]
-    #[diagnostic(help(
-        "The mirrord operator is part of mirrord for Teams. \
-        You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=requiresoperator&utm_medium=cli"
-    ))]
-    FeatureRequiresOperatorError(String),
+    #[diagnostic(help("{1}"))]
+    FeatureRequiresOperatorError(String, String),
 
     #[error("Feature `{feature}` is not supported in mirrord operator {operator_version}.")]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -354,11 +352,9 @@ pub(crate) enum CliError {
     ))]
     OperatorApiForbidden(OperatorOperation, String),
 
-    #[error(
-        "mirrord operator license expired. Visit https://app.metalbear.com to renew your license"
-    )]
+    #[error("{0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
-    OperatorLicenseExpired,
+    OperatorLicenseExpired(String),
 
     #[error("Failed to build a websocket connect request: {0:#?}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
@@ -465,12 +461,8 @@ pub(crate) enum CliError {
     InvalidBackoff(String),
 
     #[error("Job Agent's Pod got deleted during initialization")]
-    #[diagnostic(help(
-        "This likely means that you don't have the required permissions to spawn it.
-        Look into your namespace's Pod Security admission controllers and try mirrord for Teams if the issue persists.
-        You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=noperm&utm_medium=cli"
-    ))]
-    AgentPodDeleted,
+    #[diagnostic(help("{0}"))]
+    AgentPodDeleted(String),
 
     #[error("Detected mirrord being run within mirrord")]
     #[diagnostic(help(
@@ -613,7 +605,12 @@ impl CliError {
             {
                 Self::InvalidCertificate(error)
             }
-            KubeApiError::AgentPodDeleted => Self::AgentPodDeleted,
+            KubeApiError::AgentPodDeleted => Self::AgentPodDeleted(format!(
+                "This likely means that you don't have the required permissions to spawn it.\
+                Look into your namespace's Pod Security admission controllers and try mirrord for Teams if the issue persists.\
+                You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=noperm&utm_medium={}",
+                utm_medium()
+            )),
             error => fallback(error),
         }
     }
@@ -667,7 +664,10 @@ impl From<OperatorApiError> for CliError {
 
                 Self::OperatorApiFailed(operation, error)
             }
-            OperatorApiError::NoLicense => Self::OperatorLicenseExpired,
+            OperatorApiError::NoLicense => Self::OperatorLicenseExpired(format!(
+                "mirrord operator license expired. Visit https://app.metalbear.com/?utm_source=licenseexpired&utm_medium={} to renew your license",
+                utm_medium()
+            )),
             OperatorApiError::ClientCertError(error) => Self::OperatorClientCertError(error),
             OperatorApiError::FetchedUnknownTargetType(error) => {
                 Self::OperatorReturnedUnknownTargetType(error.0)

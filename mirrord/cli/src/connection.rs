@@ -224,14 +224,25 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
     if let Some(target) = config.target.path.as_ref()
         && Target::requires_operator(target)
     {
-        return Err(CliError::FeatureRequiresOperatorError(format!(
-            "target type {}",
-            target.type_()
-        )));
+        return Err(CliError::FeatureRequiresOperatorError(
+            format!("target type {}", target.type_()),
+            format!(
+                "The mirrord operator is part of mirrord for Teams. \
+                You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=requiresoperator&utm_medium={}",
+                utm_medium()
+            ),
+        ));
     }
 
     if config.feature.copy_target.enabled {
-        return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
+        return Err(CliError::FeatureRequiresOperatorError(
+            "copy_target".into(),
+            format!(
+                "The mirrord operator is part of mirrord for Teams. \
+                You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=requiresoperator&utm_medium={}",
+                utm_medium()
+            ),
+        ));
     }
 
     match (
