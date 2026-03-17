@@ -18,6 +18,7 @@ use mirrord_operator::{
 use mirrord_progress::{
     IdeAction, IdeMessage, NotificationLevel, Progress,
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
+    utm_medium,
 };
 use mirrord_protocol_io::{Client, Connection};
 use tracing::Level;
@@ -39,7 +40,8 @@ fn send_upgrade_ide_message<P: Progress>(
     actions.insert(IdeAction::Link {
         label: "Sign up for Teams".to_owned(),
         link: format!(
-            "https://app.metalbear.com/?utm_source={utm_source}&utm_medium=plugin"
+            "https://app.metalbear.com/?utm_source={utm_source}&utm_medium={}",
+            utm_medium()
         ),
     });
     progress.ide(serde_json::to_value(IdeMessage {
