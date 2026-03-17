@@ -975,7 +975,7 @@ pub async fn wait_for_pending_branches<P: Progress>(
             let error_msg = status
                 .error
                 .clone()
-                .unwrap_or_else(|| "Branch database creation failed".to_string());
+                .unwrap_or_else(|| "Branch database creation failed".to_owned());
             return Err(OperatorApiError::BranchCreationFailed {
                 operation: OperatorOperation::DbBranching,
                 message: error_msg,
