@@ -53,7 +53,7 @@ pub struct BranchDatabaseSpec {
 }
 
 /// Validated dialect configuration extracted from a [`BranchDatabaseSpec`].
-/// Exactly one of the three option fields must be set; this enum represents
+/// Exactly one of the four option fields must be set; this enum represents
 /// the result after that validation.
 #[derive(Clone, Debug)]
 pub enum DialectConfig {
@@ -74,14 +74,19 @@ pub enum DatabaseDialect {
     Mssql,
 }
 
+impl DatabaseDialect {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Postgres => "PostgreSQL",
+            Self::Mysql => "MySQL",
+            Self::Mongodb => "MongoDB",
+        }
+    }
+}
+
 impl std::fmt::Display for DatabaseDialect {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Postgres => write!(f, "PostgreSQL"),
-            Self::Mysql => write!(f, "MySQL"),
-            Self::Mongodb => write!(f, "MongoDB"),
-            Self::Mssql => write!(f, "MSSQL"),
-        }
+        f.write_str(self.as_str())
     }
 }
 
