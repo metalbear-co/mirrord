@@ -61,9 +61,13 @@ impl<F: 'static + Send + Sync + FnOnce(ClientResult<DaemonMessage>) -> TaskResul
 
 /// [`SimpleRequest`] prepared for processing by the client API.
 pub struct Prepared<R: SimpleRequest> {
+    /// The message that should be sent to the [`mirrord_protocol`] server.
     pub request: ClientMessage,
+    /// Response queue in which [`Self::result_handler`] should be store.
     pub queue_kind: QueueKind,
+    /// Function to call with the [`mirrord_protocol`] server's response.
     pub result_handler: Box<dyn ResultHandler>,
+    /// Channel that will receive the result.
     pub result_rx: oneshot::Receiver<Result<R::Response, ClientError>>,
 }
 
