@@ -53,7 +53,7 @@ pub struct BranchDatabaseSpec {
 }
 
 /// Validated dialect configuration extracted from a [`BranchDatabaseSpec`].
-/// Exactly one of the three option fields must be set; this enum represents
+/// Exactly one of the four option fields must be set; this enum represents
 /// the result after that validation.
 #[derive(Clone, Debug)]
 pub enum DialectConfig {
