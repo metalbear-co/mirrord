@@ -1,0 +1,1 @@
+Added `MIRRORD_IDE_NAME` environment variable support. When set by an IDE, the CLI uses it as the `utm_medium` in upgrade/warning links.
