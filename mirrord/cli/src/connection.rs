@@ -225,7 +225,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
         support_ipv6: config.feature.network.ipv6,
         ..Default::default()
     };
-    let agent_connect_info_result = tokio::time::timeout(
+    let agent_connect_info = tokio::time::timeout(
         Duration::from_secs(config.agent.startup_timeout),
         k8s_api.create_agent(
             progress,
@@ -236,15 +236,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     )
     .await
     .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
-    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed));
-    if let Err(CliError::AgentPodDeleted(_)) = &agent_connect_info_result {
-        send_upgrade_ide_message(
-            progress,
-            "Agent pod was deleted, possibly due to pod security policies. Try mirrord for Teams.",
-            "noperm",
-        )?;
-    }
-    let agent_connect_info = agent_connect_info_result?;
+    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 
     let conn = Connection::<Client>::from_stream(
         k8s_api
