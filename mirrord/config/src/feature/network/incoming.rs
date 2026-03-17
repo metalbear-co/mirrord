@@ -56,7 +56,7 @@ use http_filter::*;
 ///       "incoming": {
 ///         "mode": "steal",
 ///         "http_filter": {
-///           "header_filter": "host: api\\..+"
+///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -406,7 +406,7 @@ where
 ///       "incoming": {
 ///         "mode": "steal",
 ///         "http_filter": {
-///           "header_filter": "host: api\\..+"
+///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
