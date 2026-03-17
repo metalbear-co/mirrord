@@ -5169,7 +5169,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.26.0"
+version = "1.26.1"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -5197,6 +5197,30 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "mirrord-protocol-api"
+version = "3.193.0"
+dependencies = [
+ "bytes",
+ "futures",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "mirrord-protocol",
+ "nohash-hasher",
+ "pin-project-lite",
+ "rstest",
+ "semver 1.0.27",
+ "smallvec",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-retry",
+ "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
