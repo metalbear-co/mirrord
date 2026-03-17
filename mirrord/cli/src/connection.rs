@@ -26,6 +26,31 @@ use crate::{CliError, CliResult, MirrordCi, ci::error::CiError};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
 
+/// Sends a "Sign up for Teams" upgrade CTA to the IDE via the [`IdeMessage`] protocol.
+///
+/// Only has an effect when running inside an IDE (`MIRRORD_PROGRESS_MODE=json`).
+/// In CLI mode, [`Progress::ide`] is a no-op.
+fn send_upgrade_ide_message<P: Progress>(
+    progress: &P,
+    text: &str,
+    utm_source: &str,
+) -> CliResult<()> {
+    let mut actions = HashSet::new();
+    actions.insert(IdeAction::Link {
+        label: "Sign up for Teams".to_owned(),
+        link: format!(
+            "https://app.metalbear.com/?utm_source={utm_source}&utm_medium=plugin"
+        ),
+    });
+    progress.ide(serde_json::to_value(IdeMessage {
+        id: "upgrade_cta".to_owned(),
+        level: NotificationLevel::Warning,
+        text: text.to_owned(),
+        actions,
+    })?);
+    Ok(())
+}
+
 /// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
 ///    with the target using the mirrord-operator.
 /// 2. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], returns [`None`].
@@ -51,6 +76,11 @@ where
     let api = match OperatorApi::try_new(layer_config, analytics, progress).await? {
         Some(api) => api,
         None if layer_config.operator == Some(true) => {
+            send_upgrade_ide_message(
+                progress,
+                "mirrord operator was not found in the cluster.",
+                "operatornotinstalled",
+            )?;
             return Err(CliError::OperatorNotInstalled);
         }
         None => {
@@ -66,6 +96,11 @@ where
             license_subtask.failure(Some("operator license expired"));
 
             if layer_config.operator == Some(true) {
+                send_upgrade_ide_message(
+                    progress,
+                    "mirrord operator license expired.",
+                    "licenseexpired",
+                )?;
                 return Err(error.into());
             } else {
                 operator_subtask.failure(Some("proceeding without operator"));
@@ -190,7 +225,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
         support_ipv6: config.feature.network.ipv6,
         ..Default::default()
     };
-    let agent_connect_info = tokio::time::timeout(
+    let agent_connect_info_result = tokio::time::timeout(
         Duration::from_secs(config.agent.startup_timeout),
         k8s_api.create_agent(
             progress,
@@ -201,7 +236,15 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     )
     .await
     .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
-    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
+    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed));
+    if let Err(CliError::AgentPodDeleted(_)) = &agent_connect_info_result {
+        send_upgrade_ide_message(
+            progress,
+            "Agent pod was deleted, possibly due to pod security policies. Try mirrord for Teams.",
+            "noperm",
+        )?;
+    }
+    let agent_connect_info = agent_connect_info_result?;
 
     let conn = Connection::<Client>::from_stream(
         k8s_api
@@ -223,6 +266,14 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
     if let Some(target) = config.target.path.as_ref()
         && Target::requires_operator(target)
     {
+        send_upgrade_ide_message(
+            progress,
+            &format!(
+                "Target type {} requires the mirrord operator, which is part of mirrord for Teams.",
+                target.type_()
+            ),
+            "requiresoperator",
+        )?;
         return Err(CliError::FeatureRequiresOperatorError(format!(
             "target type {}",
             target.type_()
@@ -230,6 +281,11 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
     }
 
     if config.feature.copy_target.enabled {
+        send_upgrade_ide_message(
+            progress,
+            "copy_target requires the mirrord operator, which is part of mirrord for Teams.",
+            "requiresoperator",
+        )?;
         return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
     }
 
