@@ -5,10 +5,11 @@ use std::{
 
 /// Util trait allowing for shrinking collections in a smart way.
 pub trait Shrinkable {
-    /// Shrinks this collection by 1/3 if at least 2/3 of its capacity is unused.
+    /// Shrinks this collection by half if at least 3/4 of its capacity is unused,
+    /// and capacity is greater than 4.
     fn smart_shrink(&mut self) {
-        if self.len() <= self.capacity() / 3 {
-            self.shrink_to(self.capacity() * 2 / 3);
+        if self.len() <= self.capacity() / 4 && self.capacity() > 4 {
+            self.shrink_to(self.capacity() / 2);
         }
     }
 
