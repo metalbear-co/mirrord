@@ -274,6 +274,14 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_OPERATOR_ENABLE")]
     pub operator: Option<bool>,
 
+    /// ## force_single_cluster {#root-force_single_cluster}
+    ///
+    /// When connecting to a multi-cluster Primary operator, force a single-cluster session
+    /// on the Primary cluster instead of creating a multi-cluster session.
+    /// Only relevant when connecting to a multi-cluster Primary.
+    #[config(env = "MIRRORD_FORCE_SINGLE_CLUSTER")]
+    pub force_single_cluster: Option<bool>,
+
     /// ## profile {#root-profile}
     ///
     /// Name of the mirrord profile to use.

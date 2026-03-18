@@ -135,7 +135,8 @@ where
         .operator()
         .spec
         .supported_features()
-        .contains(&NewOperatorFeature::MultiClusterPrimary);
+        .contains(&NewOperatorFeature::MultiClusterPrimary)
+        && !layer_config.force_single_cluster.unwrap_or(false);
 
     let mut session_subtask = operator_subtask.subtask("starting session");
     let connection = if is_multi_cluster {

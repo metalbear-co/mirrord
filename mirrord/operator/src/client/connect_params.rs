@@ -69,6 +69,10 @@ pub struct ConnectParams<'a> {
     )]
     pub sqs_output_queues: HashMap<String, String>,
 
+    /// Force single-cluster session on a multi-cluster Primary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub force_single_cluster: Option<bool>,
+
     /// Key for this session
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<&'a str>,
@@ -96,8 +100,9 @@ impl<'a> ConnectParams<'a> {
             mysql_branch_names,
             pg_branch_names,
             session_ci_info,
-            is_default_cluster: None,          // Only used in multi-cluster
-            sqs_output_queues: HashMap::new(), // Only used in multi-cluster
+            is_default_cluster: None,
+            sqs_output_queues: HashMap::new(),
+            force_single_cluster: config.force_single_cluster,
             key: Some(key),
         }
     }
