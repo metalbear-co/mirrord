@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use kube::CustomResource;
 use mirrord_config::feature::database_branches::{
-    BranchItemCopyConfig, MongodbBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig,
-    PgIamAuthConfig,
+    BranchItemCopyConfig, MongodbBranchCopyConfig, MssqlBranchCopyConfig, MysqlBranchCopyConfig,
+    PgBranchCopyConfig, PgIamAuthConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -47,16 +47,20 @@ pub struct BranchDatabaseSpec {
     /// MongoDB-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mongodb_options: Option<MongodbOptions>,
+    /// MSSQL-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mssql_options: Option<MssqlOptions>,
 }
 
 /// Validated dialect configuration extracted from a [`BranchDatabaseSpec`].
-/// Exactly one of the three option fields must be set; this enum represents
+/// Exactly one of the four option fields must be set; this enum represents
 /// the result after that validation.
 #[derive(Clone, Debug)]
 pub enum DialectConfig {
     Postgres(Box<PostgresOptions>),
     Mysql(Box<MysqlOptions>),
     Mongodb(Box<MongodbOptions>),
+    Mssql(Box<MssqlOptions>),
 }
 
 /// Simple discriminant enum for dialect matching without carrying option data.
@@ -67,6 +71,9 @@ pub enum DatabaseDialect {
     Postgres,
     Mysql,
     Mongodb,
+    Mssql,
+    #[serde(other)]
+    Unknown,
 }
 
 impl DatabaseDialect {
@@ -75,6 +82,8 @@ impl DatabaseDialect {
             Self::Postgres => "PostgreSQL",
             Self::Mysql => "MySQL",
             Self::Mongodb => "MongoDB",
+            Self::Mssql => "MSSQL",
+            Self::Unknown => "Unknown",
         }
     }
 }
@@ -98,6 +107,7 @@ impl DialectConfig {
             Self::Postgres(_) => DatabaseDialect::Postgres,
             Self::Mysql(_) => DatabaseDialect::Mysql,
             Self::Mongodb(_) => DatabaseDialect::Mongodb,
+            Self::Mssql(_) => DatabaseDialect::Mssql,
         }
     }
 }
@@ -129,6 +139,14 @@ pub struct PostgresOptions {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MysqlOptions {
+    #[serde(default)]
+    pub copy: SqlBranchCopyConfig,
+}
+
+/// MySQL-specific branch options.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MssqlOptions {
     #[serde(default)]
     pub copy: SqlBranchCopyConfig,
 }
@@ -314,6 +332,24 @@ impl From<MysqlBranchCopyConfig> for SqlBranchCopyConfig {
     }
 }
 
+impl From<MssqlBranchCopyConfig> for SqlBranchCopyConfig {
+    fn from(config: MssqlBranchCopyConfig) -> Self {
+        match config {
+            MssqlBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Empty,
+                items: convert_item_copy_configs(tables),
+            },
+            MssqlBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Schema,
+                items: convert_item_copy_configs(tables),
+            },
+            MssqlBranchCopyConfig::All => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::All,
+                items: None,
+            },
+        }
+    }
+}
 impl From<MongodbBranchCopyConfig> for MongodbCopySpec {
     fn from(config: MongodbBranchCopyConfig) -> Self {
         match config {

@@ -45,8 +45,9 @@ use tracing::Level;
 use crate::{
     client::database_branches::{
         DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
-        create_mongodb_branches, create_mysql_branches, create_pg_branches, list_reusable_branches,
+        create_mongodb_branches, create_mysql_branches, create_pg_branches, list_existing_branches,
         list_reusable_mongodb_branches, list_reusable_mysql_branches, list_reusable_pg_branches,
+        wait_for_pending_branches,
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
@@ -1243,7 +1244,7 @@ impl OperatorApi<PreparedClientCert> {
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
             mongodb_branch_names: branch_db_names.mongodb,
-            branch_db_names: Vec::new(),
+            branch_db_names: branch_db_names.mssql,
             session_ci_info,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
@@ -1636,6 +1637,9 @@ impl OperatorApi<PreparedClientCert> {
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Mongodb(
                     mongodb_config,
                 ) => Some(mongodb_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mssql(
+                    mssql_config,
+                ) => Some(mssql_config.base.creation_timeout_secs),
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
                     mysql_config,
                 ) => Some(mysql_config.base.creation_timeout_secs),
@@ -1657,7 +1661,12 @@ impl OperatorApi<PreparedClientCert> {
         if use_unified_crd {
             let UnifiedDatabaseBranchParams {
                 branches: mut create_params,
-            } = UnifiedDatabaseBranchParams::new(&layer_config.feature.db_branches, &target)?;
+            } = UnifiedDatabaseBranchParams::new(
+                &layer_config.feature.db_branches,
+                &target,
+                layer_config.key.as_str(),
+                &subtask,
+            )?;
 
             if let Some(ref ns) = target_ns_annotation {
                 for params in create_params.values_mut() {
@@ -1670,10 +1679,15 @@ impl OperatorApi<PreparedClientCert> {
             let branch_api: Api<BranchDatabase> =
                 Api::namespaced(self.client.clone(), api_namespace);
 
-            let reusable_branches =
-                list_reusable_branches(&branch_api, &create_params, &subtask).await?;
+            let existing = list_existing_branches(&branch_api, &create_params, &subtask).await?;
 
-            create_params.retain(|id, _| !reusable_branches.contains_key(id));
+            create_params.retain(|id, _| {
+                !existing.ready.contains_key(id) && !existing.pending.contains_key(id)
+            });
+
+            let waited_branches =
+                wait_for_pending_branches(&branch_api, &existing.pending, timeout, &subtask)
+                    .await?;
 
             let created_branches =
                 create_branches(&branch_api, create_params, timeout, &subtask).await?;
@@ -1681,7 +1695,12 @@ impl OperatorApi<PreparedClientCert> {
             subtask.success(None);
 
             let mut names = BranchDbNames::default();
-            for branch in reusable_branches.values().chain(created_branches.values()) {
+            for branch in existing
+                .ready
+                .values()
+                .chain(waited_branches.values())
+                .chain(created_branches.values())
+            {
                 let name = branch
                     .meta()
                     .name
@@ -1694,6 +1713,8 @@ impl OperatorApi<PreparedClientCert> {
                     names.mysql.push(name);
                 } else if branch.spec.mongodb_options.is_some() {
                     names.mongodb.push(name);
+                } else if branch.spec.mssql_options.is_some() {
+                    names.mssql.push(name);
                 }
             }
             Ok(names)
@@ -1785,6 +1806,7 @@ impl OperatorApi<PreparedClientCert> {
                 pg: pg_names,
                 mysql: mysql_names,
                 mongodb: mongodb_names,
+                mssql: Vec::new(),
             })
         }
     }
@@ -1986,6 +2008,7 @@ mod test {
                 pg: vec!["pg-branch-1".into()],
                 mysql: vec!["mysql-branch-1".into()],
                 mongodb: vec![],
+                mssql: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\
