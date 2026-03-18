@@ -5,7 +5,7 @@
 //! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Failed`), which
 //! the CLI watches to report progress back to the user.
 
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
+use k8s_openapi::{apimachinery::pkg::apis::meta::v1::MicroTime, chrono::Utc};
 use kube::CustomResource;
 use mirrord_config::{
     feature::{
@@ -63,6 +63,21 @@ impl PreviewSessionSpec {
     /// Returns `true` when `ttl_secs` should be treated as infinite.
     pub fn has_infinite_ttl(&self) -> bool {
         self.ttl_secs >= PreviewTtlMins::INFINITE_TTL_SECS
+    }
+}
+
+impl PreviewSession {
+    pub fn runtime_secs(&self) -> u32 {
+        self.status
+            .as_ref()
+            .and_then(|status| {
+                Utc::now()
+                    .signed_duration_since(status.started_at.0)
+                    .to_std()
+                    .ok()
+            })
+            .map(|runtime| runtime.as_secs().try_into().unwrap_or(u32::MAX))
+            .unwrap_or_default()
     }
 }
 

@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use tracing::{Level, info};
 use uuid::Uuid;
 
+pub mod preview;
+
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Possible values for analytic data
@@ -19,6 +21,7 @@ pub enum AnalyticValue {
     Number(u32),
     Uuid(Uuid),
     Nested(Analytics),
+    Hash(AnalyticsHash),
 }
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone, Copy)]
@@ -42,6 +45,7 @@ pub enum ExecutionKind {
     PortForward = 3,
     Dump = 4,
     Wizard = 5,
+    Preview = 6,
     Other = 0,
 }
 
@@ -53,6 +57,7 @@ impl From<u32> for ExecutionKind {
             3 => ExecutionKind::PortForward,
             4 => ExecutionKind::Dump,
             5 => ExecutionKind::Wizard,
+            6 => ExecutionKind::Preview,
             _ => ExecutionKind::Other,
         }
     }
@@ -84,7 +89,7 @@ impl FromStr for ExecutionKind {
 /// let mut analytics = Analytics::default();
 /// analytics.add("a", true);
 /// analytics.add("b", false);
-/// analytics.add("c", 3);
+/// analytics.add("c", 3usize);
 ///
 /// struct A {}
 /// impl CollectAnalytics for A {
@@ -180,6 +185,12 @@ impl From<Uuid> for AnalyticValue {
 impl From<Analytics> for AnalyticValue {
     fn from(analytics: Analytics) -> Self {
         AnalyticValue::Nested(analytics)
+    }
+}
+
+impl From<AnalyticsHash> for AnalyticValue {
+    fn from(hash: AnalyticsHash) -> Self {
+        AnalyticValue::Hash(hash)
     }
 }
 
@@ -399,6 +410,19 @@ mod tests {
                     "d": true,
                     "e": true
                 }
+            })
+        );
+    }
+
+    #[test]
+    fn hash_value_serialization() {
+        let mut analytics = Analytics::default();
+        analytics.add("preview_key_identifier", AnalyticsHash::from_bytes(b"key"));
+
+        assert_json_eq!(
+            analytics,
+            json!({
+                "preview_key_identifier": "a2V5"
             })
         );
     }

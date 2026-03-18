@@ -24,7 +24,7 @@ pub struct UnexpectedAgentMessage(
 /// exist a failover strategy, so in case of incurring of this error, the proxy change behavior,
 /// according to [`crate::FailoverStrategy`]
 #[derive(Error, Debug)]
-pub(crate) enum ProxyRuntimeError {
+pub enum ProxyRuntimeError {
     #[error("layer sent unexpected message: {0:?}")]
     UnexpectedLayerMessage(LayerToProxyMessage),
 
