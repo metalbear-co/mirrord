@@ -238,8 +238,13 @@ impl JsonSchema for IamAuthConfig {
     fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
         #[derive(Serialize, Deserialize, JsonSchema)]
         struct Proxy {
+            // We verify the tag.
             #[serde(rename = "type")]
             tag: IamAuthConfigDiscriminants,
+            // Other fields can be whatever.
+            //
+            // Generated CRD has `x-kubernetes-preserve-unknown-fields`,
+            // so everything is all right.
             #[serde(flatten)]
             rest: HashMap<String, serde_json::Value>,
         }
