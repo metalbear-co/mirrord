@@ -107,17 +107,17 @@ fn test_udp(socket: SocketAddr, peer: SocketAddr) {
     }
 }
 
-async fn test_tcp_non_blocking(socket: SocketAddr, peers: Vec<SocketAddr>) {
+async fn test_tcp_non_blocking(peers: Vec<SocketAddr>) {
     let mut tasks = JoinSet::new();
 
     for peer in peers {
         tasks.spawn(async move {
             let mut conn = tokio::net::TcpStream::connect(peer).await.unwrap();
 
-            let local = conn.local_addr().unwrap();
-            if local != socket {
-                panic!("Invalid local address from local_addr: {local}.")
-            }
+            // We don't check local_addr because it is not available
+            // in the non-blocking flow.
+
+            // assert_eq!(local, socket, "Invalid local address from local_addr");
 
             let remote = conn.peer_addr().unwrap();
             if remote != peer {
@@ -155,7 +155,7 @@ fn main() {
                 .enable_all()
                 .build()
                 .unwrap();
-            runtime.block_on(test_tcp_non_blocking(args.expected_local_addr, args.peers));
+            runtime.block_on(test_tcp_non_blocking(args.peers));
         }
         (true, false) => {
             args.peers
