@@ -1,5 +1,5 @@
 use std::{
-    collections::hash_map::Entry,
+    collections::{HashMap, hash_map::Entry},
     fmt,
     num::NonZeroUsize,
     ops::{Deref, DerefMut, Not},
@@ -18,7 +18,6 @@ use mirrord_protocol::{
         InternalHttpBodyNew, InternalHttpRequest, InternalHttpResponse, LayerTcpSteal,
     },
 };
-use nohash_hasher::IntMap;
 use tokio::{sync::oneshot, time};
 
 pub use crate::client::tunnels::id::{TunnelId, TunnelType};
@@ -26,11 +25,8 @@ use crate::{
     client::{
         error::{TaskError, TaskResult},
         outbox::OutBox,
-        tunnels::{
-            id::TunnelTypeMap,
-            streams::{
-                AbortOnDrop, InternalResponseBody, InternalStreams, ResponseMode, StreamEvent,
-            },
+        tunnels::streams::{
+            AbortOnDrop, InternalResponseBody, InternalStreams, ResponseMode, StreamEvent,
         },
     },
     fifo::{Fifo, FifoClosedError, FifoSink},
@@ -48,14 +44,9 @@ mod test;
 /// Should be polled with [`Stream::poll_next`] for outbound [`ClientMessage`]s.
 #[derive(Debug)]
 pub struct TrafficTunnels {
-    /// Maps [`TunnelType`]s to (connection ID -> [`Tunnel`]) maps.
-    ///
-    /// Connections ID tracked separately per type,
-    /// and the double map allows us to use [`IntMap`].
-    ///
-    /// These maps store only half of the state of each traffic tunnel.
+    /// This map stores only half of the state of each traffic tunnel.
     /// The other half lives in [`Self::streams`] as concurrently polled streams.
-    tunnels: TunnelTypeMap<IntMap<u64, Tunnel>>,
+    tunnels: HashMap<TunnelId, Tunnel>,
     /// Stores internal event streams, which account for half of the state of each traffic tunnel.
     /// The other half lives in [`Self::tunnels`].
     ///
@@ -139,7 +130,7 @@ impl TrafficTunnels {
 
     /// Initializes state for a new connection from the [`mirrord_protocol`] server.
     pub fn server_connection(&mut self, id: TunnelId) -> TaskResult<TunneledData> {
-        let Entry::Vacant(e) = self.tunnels[id.0].entry(id.1) else {
+        let Entry::Vacant(e) = self.tunnels.entry(id) else {
             return Err(TaskError::ProtocolViolation(
                 format!("sent connection with duplicate id {id:?}").into(),
             ));
@@ -156,7 +147,7 @@ impl TrafficTunnels {
         port: u16,
         request: InternalHttpRequest<InternalHttpBodyNew>,
     ) -> TaskResult<TunneledRequest> {
-        let Entry::Vacant(e) = self.tunnels[id.0].entry(id.1) else {
+        let Entry::Vacant(e) = self.tunnels.entry(id) else {
             return Err(TaskError::ProtocolViolation(
                 format!("sent request with duplicate id {id:?}",).into(),
             ));
@@ -212,7 +203,7 @@ impl TrafficTunnels {
 
     /// Consumes data sent to a connection from the [`mirrord_protocol`] server.
     pub async fn server_data(&mut self, id: TunnelId, data: Bytes) -> OutBox {
-        let Entry::Occupied(mut e) = self.tunnels[id.0].entry(id.1) else {
+        let Entry::Occupied(mut e) = self.tunnels.entry(id) else {
             return Default::default();
         };
 
@@ -269,13 +260,13 @@ impl TrafficTunnels {
         }
 
         e.remove();
-        self.tunnels[id.0].smart_shrink();
+        self.tunnels.smart_shrink();
         id.close_message().into()
     }
 
     /// Consumes a connection shutdown from the [`mirrord_protocol`] server.
     pub fn server_shutdown(&mut self, id: TunnelId) -> OutBox {
-        let Entry::Occupied(mut e) = self.tunnels[id.0].entry(id.1) else {
+        let Entry::Occupied(mut e) = self.tunnels.entry(id) else {
             return Default::default();
         };
 
@@ -300,7 +291,7 @@ impl TrafficTunnels {
 
         if e.get().is_dead() {
             e.remove();
-            self.tunnels[id.0].smart_shrink();
+            self.tunnels.entry(id);
             id.close_message().into()
         } else {
             Default::default()
@@ -309,8 +300,8 @@ impl TrafficTunnels {
 
     /// Consumes a connection close from the [`mirrord_protocol`] server.
     pub fn server_close(&mut self, id: TunnelId) {
-        if self.tunnels[id.0].remove(&id.1).is_some() {
-            self.tunnels[id.0].smart_shrink();
+        if self.tunnels.remove(&id).is_some() {
+            self.tunnels.smart_shrink();
         }
     }
 
@@ -320,7 +311,7 @@ impl TrafficTunnels {
         id: TunnelId,
         body: InternalHttpBodyNew,
     ) -> TaskResult<OutBox> {
-        let Entry::Occupied(mut e) = self.tunnels[id.0].entry(id.1) else {
+        let Entry::Occupied(mut e) = self.tunnels.entry(id) else {
             return Ok(Default::default());
         };
         let Tunnel::Request {
@@ -369,7 +360,7 @@ impl TrafficTunnels {
 
         if do_close {
             e.remove();
-            self.tunnels[id.0].smart_shrink();
+            self.tunnels.smart_shrink();
             Ok(id.close_message().into())
         } else {
             Ok(Default::default())
@@ -382,7 +373,7 @@ impl TrafficTunnels {
         id: TunnelId,
         message: Option<String>,
     ) -> TaskResult<OutBox> {
-        let Entry::Occupied(mut e) = self.tunnels[id.0].entry(id.1) else {
+        let Entry::Occupied(mut e) = self.tunnels.entry(id) else {
             return Ok(Default::default());
         };
         let Tunnel::Request { body_sink, .. } = e.get_mut() else {
@@ -396,7 +387,7 @@ impl TrafficTunnels {
         }
 
         e.remove();
-        self.tunnels[id.0].smart_shrink();
+        self.tunnels.smart_shrink();
         Ok(id.close_message().into())
     }
 
@@ -407,7 +398,7 @@ impl TrafficTunnels {
 
     /// Consumes an internal stream event.
     pub fn handle_event(&mut self, id: TunnelId, event: StreamEvent) -> OutBox {
-        let Entry::Occupied(mut e) = self.tunnels[id.0].entry(id.1) else {
+        let Entry::Occupied(mut e) = self.tunnels.entry(id) else {
             return Default::default();
         };
 
@@ -419,7 +410,7 @@ impl TrafficTunnels {
                     tunnel.inbound = None;
                     if tunnel.is_dead() {
                         e.remove();
-                        self.tunnels[id.0].smart_shrink();
+                        self.tunnels.smart_shrink();
                         out.push(id.close_message());
                     }
                 }
@@ -430,7 +421,7 @@ impl TrafficTunnels {
                     tunnel.outbound = None;
                     if tunnel.is_dead() {
                         e.remove();
-                        self.tunnels[id.0].smart_shrink();
+                        self.tunnels.smart_shrink();
                         out.push(id.close_message());
                     } else {
                         out.extend(id.write_message(Default::default()));
@@ -536,7 +527,7 @@ impl TrafficTunnels {
 
                     if e.get().is_dead() {
                         e.remove();
-                        self.tunnels[id.0].smart_shrink();
+                        self.tunnels.smart_shrink();
                         out.push(id.close_message());
                     }
                 }
@@ -559,14 +550,14 @@ impl TrafficTunnels {
 
                     if e.get().is_dead() {
                         e.remove();
-                        self.tunnels[id.0].smart_shrink();
+                        self.tunnels.smart_shrink();
                         out.push(id.close_message());
                     }
                 }
 
                 StreamEvent::ResponseBodyError => {
                     e.remove();
-                    self.tunnels[id.0].smart_shrink();
+                    self.tunnels.smart_shrink();
                     out.push(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
                         ChunkedResponse::Error(ChunkedRequestErrorV1 {
                             connection_id: id.1,
@@ -580,7 +571,7 @@ impl TrafficTunnels {
                     *body_sink = None;
                     if e.get().is_dead() {
                         e.remove();
-                        self.tunnels[id.0].smart_shrink();
+                        self.tunnels.smart_shrink();
                         out.push(id.close_message());
                     }
                 }
@@ -592,7 +583,7 @@ impl TrafficTunnels {
                     tunnel.inbound = None;
                     if e.get().is_dead() {
                         e.remove();
-                        self.tunnels[id.0].smart_shrink();
+                        self.tunnels.smart_shrink();
                         out.push(id.close_message());
                     }
                 }
@@ -606,7 +597,7 @@ impl TrafficTunnels {
                     tunnel.outbound = None;
                     if e.get().is_dead() {
                         e.remove();
-                        self.tunnels[id.0].smart_shrink();
+                        self.tunnels.smart_shrink();
                         out.push(id.close_message());
                     } else {
                         out.extend(id.write_message(Default::default()));

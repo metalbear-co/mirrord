@@ -5209,7 +5209,6 @@ dependencies = [
  "http-body-util",
  "hyper 1.8.1",
  "mirrord-protocol",
- "nohash-hasher",
  "pin-project-lite",
  "rstest",
  "semver 1.0.27",

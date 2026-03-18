@@ -4,16 +4,12 @@ use mirrord_protocol::{
     outgoing::{LayerClose, LayerWrite, tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing},
     tcp::{LayerTcp, LayerTcpSteal, TcpData},
 };
-use strum::VariantArray;
 use strum_macros::VariantArray;
-
-use crate::client::enum_map::{EnumKey, EnumMap};
 
 /// Type of traffic tunnel.
 ///
 /// Within each type, connection ids are tracked independently.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, VariantArray)]
-#[repr(u8)]
 pub enum TunnelType {
     OutgoingTcp,
     OutgoingUdp,
@@ -32,15 +28,6 @@ impl TunnelType {
         }
     }
 }
-
-impl EnumKey for TunnelType {
-    fn into_index(self) -> usize {
-        self as usize
-    }
-}
-
-/// Inline map of `T` by [`TunnelType`].
-pub type TunnelTypeMap<T> = EnumMap<TunnelType, T, { TunnelType::VARIANTS.len() }>;
 
 /// Full ID of a tunneled connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

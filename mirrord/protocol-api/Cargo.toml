@@ -21,7 +21,6 @@ futures.workspace = true
 hyper.workspace = true
 http-body.workspace = true
 http-body-util.workspace = true
-nohash-hasher = "0.2"
 pin-project-lite = "0.2"
 semver.workspace = true
 smallvec = "1"

@@ -1,5 +1,5 @@
 use std::{
-    collections::{VecDeque, hash_map::Entry},
+    collections::{HashMap, VecDeque, hash_map::Entry},
     fmt,
     net::{Ipv4Addr, SocketAddr},
     num::NonZeroUsize,
@@ -20,7 +20,6 @@ use mirrord_protocol::{
         LayerTcpSteal, NewTcpConnectionV2, StealType,
     },
 };
-use nohash_hasher::IntMap;
 use strum::VariantArray;
 use strum_macros::VariantArray;
 use tokio::time;
@@ -97,7 +96,7 @@ struct Subscriptions {
     /// Pending and confirmed subscriptions, by port.
     ///
     /// Within a single [`IncomingMode`] and port we can only have one subscription.
-    by_port: IntMap<u16, Subscription>,
+    by_port: HashMap<u16, Subscription>,
     /// Queued port subscribe [`ClientMessage`]s.
     ///
     /// Each time we issue a port subscription, we [`VecDeque::push_back`] the port number here.

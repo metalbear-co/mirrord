@@ -25,7 +25,7 @@ const PAYLOAD: Bytes = Bytes::from_static(b"hello");
 
 async fn assert_tunnels_idle(tunnels: &mut TrafficTunnels) {
     assert_eq!(tunnels.next().await, None);
-    assert!(tunnels.tunnels.iter().all(|(_, map)| map.is_empty()));
+    assert!(tunnels.tunnels.is_empty());
 }
 
 /// Verifies that [`TrafficTunnels`] correctly handles raw connections' data and shutdowns.
