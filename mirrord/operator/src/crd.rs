@@ -14,6 +14,7 @@ use mirrord_config::{
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use strum_macros::EnumDiscriminants;
 
 #[cfg(feature = "client")]
 use crate::client::error::OperatorApiError;
@@ -594,12 +595,40 @@ pub struct SqsQueueDetails {
 }
 
 /// The details of a queue that should be split.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(tag = "queueType")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, EnumDiscriminants)]
+#[strum_discriminants(derive(Deserialize, Serialize, JsonSchema))]
+#[strum_discriminants(serde(rename_all = "SCREAMING_SNAKE_CASE"))]
+#[serde(tag = "queueType", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SplitQueue {
     /// Amazon SQS
-    #[serde(rename = "SQS")]
     Sqs(SqsQueueDetails),
+
+    /// Unknown, left for future compatibility.
+    ///
+    /// Solves issues when deserializing unknown variants returned in responses to list or watch
+    /// requests.
+    #[strum_discriminants(schemars(skip))]
+    Unknown,
+}
+
+impl JsonSchema for SplitQueue {
+    fn schema_name() -> String {
+        "SplitQueue".into()
+    }
+
+    /// [`SplitQueue`] is adjacently tagged. Because of this, its JSON schema is not valid according
+    /// to CRD standards.
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        struct Proxy {
+            #[serde(rename = "type")]
+            tag: SplitQueueDiscriminants,
+            #[serde(flatten)]
+            rest: HashMap<String, serde_json::Value>,
+        }
+
+        Proxy::json_schema(generator)
+    }
 }
 
 /// A workload that is a consumer of a queue that is being split.

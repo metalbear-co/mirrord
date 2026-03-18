@@ -6,6 +6,7 @@ use mirrord_config::feature::database_branches::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use strum_macros::EnumDiscriminants;
 
 use crate::crd::session::SessionOwner;
 
@@ -184,7 +185,9 @@ pub struct BranchDatabaseStatus {
 /// Environment variable sources follow the same pattern as `connection.url`:
 /// - `Env` - direct env var from pod spec
 /// - `EnvFrom` - from configMapRef/secretRef
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, EnumDiscriminants)]
+#[strum_discriminants(derive(Deserialize, Serialize, JsonSchema))]
+#[strum_discriminants(serde(rename_all = "snake_case"))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IamAuthConfig {
     /// AWS RDS/Aurora IAM authentication.
@@ -223,4 +226,24 @@ pub enum IamAuthConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project: Option<ConnectionSourceKind>,
     },
+}
+
+impl JsonSchema for IamAuthConfig {
+    fn schema_name() -> String {
+        "IamAuthConfig".into()
+    }
+
+    /// [`IamAuthConfig`] is adjacently tagged. Because of this, its JSON schema is not valid
+    /// according to CRD standards.
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        struct Proxy {
+            #[serde(rename = "type")]
+            tag: IamAuthConfigDiscriminants,
+            #[serde(flatten)]
+            rest: HashMap<String, serde_json::Value>,
+        }
+
+        Proxy::json_schema(generator)
+    }
 }
