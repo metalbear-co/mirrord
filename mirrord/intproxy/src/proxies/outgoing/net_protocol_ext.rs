@@ -148,7 +148,6 @@ pub enum PreparedSocket {
     /// There is no real listening/accepting here, see [`NetProtocol::Datagrams`] for more info.
     UdpSocket(UdpSocket),
     TcpListener(TcpListener),
-    TcpStream(TcpStream),
     #[cfg(not(target_os = "windows"))]
     UnixListener(UnixListener),
 }
@@ -174,7 +173,6 @@ impl PreparedSocket {
         let address = match self {
             Self::TcpListener(listener) => listener.local_addr()?.into(),
             Self::UdpSocket(socket) => socket.local_addr()?.into(),
-            Self::TcpStream(stream) => stream.local_addr()?.into(),
             #[cfg(not(target_os = "windows"))]
             Self::UnixListener(listener) => {
                 let addr = listener.local_addr()?;
@@ -187,8 +185,7 @@ impl PreparedSocket {
     }
 
     /// Accepts one connection on this socket and returns a new socket
-    /// for sending and receiving data. Does essentially nothing if
-    /// `self` is [`Self::TcpStream`] since we're connected already.
+    /// for sending and receiving data.
     pub async fn accept(self) -> io::Result<ConnectedSocket> {
         let (inner, is_really_connected) = match self {
             Self::TcpListener(listener) => {
@@ -196,7 +193,6 @@ impl PreparedSocket {
                 (InnerConnectedSocket::TcpStream(stream), true)
             }
             Self::UdpSocket(socket) => (InnerConnectedSocket::UdpSocket(socket), false),
-            Self::TcpStream(stream) => (InnerConnectedSocket::TcpStream(stream), true),
             #[cfg(not(target_os = "windows"))]
             Self::UnixListener(listener) => {
                 let (stream, _) = listener.accept().await?;

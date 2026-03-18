@@ -22,7 +22,7 @@ use mirrord_protocol::{
 };
 use semver::Version;
 use thiserror::Error;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tracing::Level;
 
 use self::interceptor::Interceptor;
@@ -97,7 +97,7 @@ impl From<AgentLostOutgoingResponse> for ToLayer {
 
 #[derive(Debug)]
 struct ConnectInProgress {
-    prepared_stream: Option<TcpStream>,
+    prepared_listener: Option<TcpListener>,
     remote_address: SocketAddress,
     requested_at: Instant,
     layer_id: LayerId,
@@ -349,7 +349,7 @@ impl OutgoingProxy {
                     "Outgoing connect request failed",
                 );
 
-                if in_progress.prepared_stream.is_none() {
+                if in_progress.prepared_listener.is_none() {
                     message_bus
                         .send(ToLayer {
                             message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(
@@ -369,8 +369,8 @@ impl OutgoingProxy {
             self.agent_local_addresses.insert(in_progress.id, *addr);
         }
 
-        let prepared_socket = match in_progress.prepared_stream {
-            Some(socket) => PreparedSocket::TcpStream(socket),
+        let prepared_socket = match in_progress.prepared_listener {
+            Some(listener) => PreparedSocket::TcpListener(listener),
             None => {
                 let prepared_socket = protocol.prepare_socket(remote_address).await?;
                 let layer_address = prepared_socket.local_address()?;
@@ -450,9 +450,7 @@ impl OutgoingProxy {
             };
             message_bus.send(to_layer).await;
 
-            // Layer should connect immediately
-            let (stream, _addr) = listener.accept().await?;
-            Some(stream)
+            Some(listener)
         } else {
             None
         };
@@ -466,7 +464,7 @@ impl OutgoingProxy {
             self.v2_reqs.insert(
                 (request_uid, request.protocol),
                 ConnectInProgress {
-                    prepared_stream,
+                    prepared_listener: prepared_stream,
                     remote_address: request.remote_address.clone(),
                     requested_at: Instant::now(),
                     layer_id: session_id,
@@ -481,7 +479,7 @@ impl OutgoingProxy {
                 session_id,
                 ConnectInProgress {
                     id: connection_id,
-                    prepared_stream,
+                    prepared_listener: prepared_stream,
                     remote_address: request.remote_address.clone(),
                     requested_at: Instant::now(),
                     layer_id: session_id,
