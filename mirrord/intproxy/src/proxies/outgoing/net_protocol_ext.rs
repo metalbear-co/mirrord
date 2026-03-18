@@ -31,7 +31,6 @@ use rand::distr::{Alphanumeric, SampleString};
 #[cfg(not(target_os = "windows"))]
 use tokio::net::{UnixListener, UnixStream};
 
-
 /// Trait for [`NetProtocol`] that handles differences in [`mirrord_protocol::outgoing`] between
 /// network protocols. Allows to unify logic.
 pub trait NetProtocolExt: Sized {
