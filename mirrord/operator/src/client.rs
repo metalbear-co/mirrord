@@ -1661,7 +1661,12 @@ impl OperatorApi<PreparedClientCert> {
         if use_unified_crd {
             let UnifiedDatabaseBranchParams {
                 branches: mut create_params,
-            } = UnifiedDatabaseBranchParams::new(&layer_config.feature.db_branches, &target)?;
+            } = UnifiedDatabaseBranchParams::new(
+                &layer_config.feature.db_branches,
+                &target,
+                layer_config.key.as_str(),
+                &subtask,
+            )?;
 
             if let Some(ref ns) = target_ns_annotation {
                 for params in create_params.values_mut() {
