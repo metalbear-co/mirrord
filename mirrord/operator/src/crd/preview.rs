@@ -14,6 +14,7 @@ use kube::{
 };
 use mirrord_config::{
     feature::{
+        env::EnvConfig,
         network::incoming::{IncomingConfig, IncomingMode},
         preview::PreviewTtlMins,
         split_queues::{QueueId, SplitQueuesConfig},
@@ -69,6 +70,10 @@ pub struct PreviewSessionSpec {
     /// Database branching configuration for this preview session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub db_branching: Option<PreviewDbBranchingConfig>,
+
+    /// User-configured environment variable settings for this preview session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<PreviewEnvVarsConfig>,
 }
 
 impl PreviewSessionSpec {
@@ -372,6 +377,61 @@ impl PreviewDbBranchingConfig {
                 mongodb_branch_names: branch_db_names.mongodb,
                 mssql_branch_names: branch_db_names.mssql,
             })
+        }
+    }
+}
+
+/// User-configured environment variable settings for preview environments.
+///
+/// Since preview environments have no layer (no local process), the CLI resolves the supported
+/// subset of `feature.env` into the CR so the operator can apply it directly to the pod spec
+/// before creation.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewEnvVarsConfig {
+    /// Glob patterns selecting which env vars to keep from the target pod spec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include: Option<Vec<String>>,
+
+    /// Glob patterns selecting which env vars to remove from the target pod spec.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<String>,
+
+    /// Env vars to set or replace in the target container.
+    ///
+    /// The CLI folds `feature.env.env_file` into this map before creating the CR, then applies
+    /// explicit `feature.env.override` values on top.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub overrides: BTreeMap<String, String>,
+}
+
+impl PreviewEnvVarsConfig {
+    /// Converts from the user's env config. Returns `None` when all fields are empty.
+    pub fn from_config(value: &EnvConfig) -> Result<Option<Self>, dotenvy::Error> {
+        let mut overrides = BTreeMap::new();
+
+        if let Some(file) = &value.env_file {
+            for entry in dotenvy::from_path_iter(file)? {
+                let (k, v) = entry?;
+                overrides.insert(k, v);
+            }
+        }
+
+        if let Some(user_overrides) = value.r#override.clone() {
+            overrides.extend(user_overrides);
+        }
+
+        let include = value.include.clone().map(Vec::from);
+        let exclude = value.exclude.clone().map(Vec::from).unwrap_or_default();
+
+        if include.is_none() && exclude.is_empty() && overrides.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(Self {
+                include,
+                exclude,
+                overrides,
+            }))
         }
     }
 }
