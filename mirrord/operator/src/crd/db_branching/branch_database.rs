@@ -72,6 +72,8 @@ pub enum DatabaseDialect {
     Mysql,
     Mongodb,
     Mssql,
+    #[serde(other)]
+    Unknown,
 }
 
 impl DatabaseDialect {
@@ -80,6 +82,8 @@ impl DatabaseDialect {
             Self::Postgres => "PostgreSQL",
             Self::Mysql => "MySQL",
             Self::Mongodb => "MongoDB",
+            Self::Mssql => "MSSQL",
+            Self::Unknown => "Unknown",
         }
     }
 }
