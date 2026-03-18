@@ -61,6 +61,13 @@ impl ResourceGuard {
 
         let deleter = async move {
             let dyntype = ApiResource::erase::<K>(&());
+            // `kube::Client` is a channel + background worker task bound to the runtime it was created on.
+            // When `Drop` runs, the test runtime is blocked waiting for the drop to finish, so reusing the original `Api`
+            // would deadlock: the deleter needs the worker to advance, but the worker lives on the blocked runtime.
+            // Creating a fresh client here gives the deleter its own worker on the new single-threaded runtime, avoiding the deadlock.
+            //
+            // Deletion only requires the resource name and GVK (group/version/kind), which `ApiResource::erase` captures from `K` at creation time.
+            // `DynamicObject` is sufficient here since the deleter doesn't need a typed representation of `K`.
             let client = kube_client().await;
             let api: Api<DynamicObject> = match K::scope() {
                 ResourceScope::Cluster => Api::all_with(client, &dyntype),
