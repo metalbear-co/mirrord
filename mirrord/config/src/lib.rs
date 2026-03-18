@@ -1270,6 +1270,7 @@ mod tests {
             ci: None,
             traceparent: None,
             baggage: None,
+            force_single_cluster: None,
         };
 
         assert_eq!(config, expect);

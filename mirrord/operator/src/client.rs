@@ -1286,6 +1286,7 @@ impl OperatorApi<PreparedClientCert> {
             is_default_cluster: None, // Only used in multi-cluster
             sqs_output_queues: Default::default(), // Only used in multi-cluster
             key: Some(key),
+            force_single_cluster: None,
         };
 
         if use_proxy {
@@ -2223,6 +2224,7 @@ mod test {
             is_default_cluster: None, // Only used in multi-cluster
             sqs_output_queues: Default::default(), // Only used in multi-cluster
             key,
+            force_single_cluster: None,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
@@ -2340,6 +2342,7 @@ mod test {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             key,
+            force_single_cluster: None,
         };
         let produced =
             OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);
