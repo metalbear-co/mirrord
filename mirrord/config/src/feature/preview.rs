@@ -53,7 +53,17 @@ pub struct PreviewConfig {
 }
 
 impl CollectAnalytics for &PreviewConfig {
-    fn collect_analytics(&self, _analytics: &mut mirrord_analytics::Analytics) {}
+    fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
+        let (ttl_mins, ttl_infinite) = match self.ttl_mins {
+            PreviewTtlMins::Finite(ttl_mins) => (ttl_mins, false),
+            PreviewTtlMins::Infinite(_) => (0, true),
+        };
+
+        analytics.add("image", self.image.is_some());
+        analytics.add("ttl_mins", ttl_mins);
+        analytics.add("ttl_infinite", ttl_infinite);
+        analytics.add("creation_timeout_secs", self.creation_timeout_secs);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
