@@ -930,7 +930,7 @@ pub enum UserCredentialKind {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf};
+    use std::{fs, path::Path};
 
     use kube::CustomResourceExt;
 
@@ -953,164 +953,19 @@ mod tests {
 
     fn write_crd_yaml<T: CustomResourceExt>() {
         let crd = T::crd();
-        let file_name = crd
-            .metadata
-            .name
-            .clone()
-            .unwrap_or_else(|| "crd".to_owned());
-
-        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        path.push("crds");
-        path.push(format!("{file_name}.yaml"));
-
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-
         let yaml = serde_yaml::to_string(&crd).unwrap();
-        fs::write(path, yaml).unwrap();
+        println!("{yaml}");
+
+        if let Some(out_path) = std::env::var_os("MIRRORD_TEST_DUMP_CRD_DIR") {
+            let path = Path::new(&out_path);
+            fs::create_dir_all(path).unwrap();
+            let filename = crd.metadata.name.as_ref().unwrap();
+            let filepath = path.join(filename);
+            fs::write(filepath, yaml).unwrap();
+        }
     }
 
     #[test]
-    #[ignore]
-    fn write_mirrord_operator_crd_yaml() {
-        write_crd_yaml::<MirrordOperatorCrd>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_session_crd_yaml() {
-        write_crd_yaml::<SessionCrd>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_workload_queue_registry_crd_yaml() {
-        write_crd_yaml::<MirrordWorkloadQueueRegistry>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_sqs_session_crd_yaml() {
-        write_crd_yaml::<MirrordSqsSession>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_cluster_operator_user_credential_crd_yaml() {
-        write_crd_yaml::<MirrordClusterOperatorUserCredential>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_preview_session_crd_yaml() {
-        write_crd_yaml::<PreviewSession>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_cluster_session_crd_yaml() {
-        write_crd_yaml::<MirrordClusterSession>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_multi_cluster_session_crd_yaml() {
-        write_crd_yaml::<MirrordMultiClusterSession>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_pg_branch_database_crd_yaml() {
-        write_crd_yaml::<PgBranchDatabase>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mysql_branch_database_crd_yaml() {
-        write_crd_yaml::<MysqlBranchDatabase>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mongodb_branch_database_crd_yaml() {
-        write_crd_yaml::<MongodbBranchDatabase>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_policy_crd_yaml() {
-        write_crd_yaml::<MirrordPolicy>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_cluster_policy_crd_yaml() {
-        write_crd_yaml::<MirrordClusterPolicy>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_cluster_external_resource_crd_yaml() {
-        write_crd_yaml::<MirrordClusterExternalResource>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_cluster_workload_patch_crd_yaml() {
-        write_crd_yaml::<MirrordClusterWorkloadPatch>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_cluster_workload_patch_request_crd_yaml() {
-        write_crd_yaml::<MirrordClusterWorkloadPatchRequest>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_kafka_client_config_crd_yaml() {
-        write_crd_yaml::<MirrordKafkaClientConfig>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_kafka_topics_consumer_crd_yaml() {
-        write_crd_yaml::<MirrordKafkaTopicsConsumer>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_kafka_ephemeral_topic_crd_yaml() {
-        write_crd_yaml::<MirrordKafkaEphemeralTopic>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_cluster_profile_crd_yaml() {
-        write_crd_yaml::<MirrordClusterProfile>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_profile_crd_yaml() {
-        write_crd_yaml::<MirrordProfile>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_tls_steal_config_crd_yaml() {
-        write_crd_yaml::<MirrordTlsStealConfig>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_cluster_tls_steal_config_crd_yaml() {
-        write_crd_yaml::<MirrordClusterTlsStealConfig>();
-    }
-
-    #[test]
-    #[ignore]
     fn write_all_crd_yamls() {
         write_crd_yaml::<MirrordOperatorCrd>();
         write_crd_yaml::<SessionCrd>();
