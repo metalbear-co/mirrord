@@ -297,10 +297,11 @@ impl Incoming {
                     Ok(Default::default())
                 }
                 ChunkedRequest::Body(body) => {
-                    assert_eq!(
-                        body.request_id, 0,
-                        "({mode:?}) received request body with deprecated non-zero request id {body:?}"
-                    );
+                    if body.request_id != 0 {
+                        return Err(TaskError::ProtocolViolation(
+                            "use non-zero request id".into(),
+                        ));
+                    }
                     tunnels
                         .server_request_body(
                             TunnelId(mode.into(), body.connection_id),
@@ -312,19 +313,21 @@ impl Incoming {
                         .await
                 }
                 ChunkedRequest::ErrorV1(error) => {
-                    assert_eq!(
-                        error.request_id, 0,
-                        "({mode:?}) received request error with deprecated non-zero request id {error:?}"
-                    );
+                    if error.request_id != 0 {
+                        return Err(TaskError::ProtocolViolation(
+                            "use non-zero request id".into(),
+                        ));
+                    }
                     tunnels
                         .server_request_body_error(TunnelId(mode.into(), error.connection_id), None)
                         .await
                 }
                 ChunkedRequest::ErrorV2(error) => {
-                    assert_eq!(
-                        error.request_id, 0,
-                        "({mode:?}) received request error with deprecated non-zero request id {error:?}"
-                    );
+                    if error.request_id != 0 {
+                        return Err(TaskError::ProtocolViolation(
+                            "use non-zero request id".into(),
+                        ));
+                    }
                     tunnels
                         .server_request_body_error(
                             TunnelId(mode.into(), error.connection_id),
@@ -399,10 +402,11 @@ impl Incoming {
         request: ChunkedRequestStartV2,
         tunnels: &mut TrafficTunnels,
     ) -> TaskResult<()> {
-        assert_eq!(
-            request.request_id, 0,
-            "({mode:?}) received a new request with deprecated non-zero request id {request:?}"
-        );
+        if request.request_id != 0 {
+            return Err(TaskError::ProtocolViolation(
+                "use non-zero request id".into(),
+            ));
+        }
 
         let HttpRequestMetadata::V1 {
             source,
