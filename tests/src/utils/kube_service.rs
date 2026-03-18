@@ -62,16 +62,15 @@ impl Drop for KubeService {
         let deleters = self
             .guards
             .iter_mut()
-            .map(ResourceGuard::take_deleter)
+            .flat_map(ResourceGuard::take_deleter)
             .collect::<Vec<_>>();
-
-        let deleters = deleters.into_iter().flatten().collect::<Vec<_>>();
 
         if deleters.is_empty() {
             return;
         }
 
         let _ = std::thread::spawn(move || {
+            println!("dropping kubeservice stuff");
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()

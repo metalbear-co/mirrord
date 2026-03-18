@@ -75,7 +75,7 @@ fn set_ipv6_only(service: &mut Service) {
     spec.ip_family_policy = Some("SingleStack".to_string());
 }
 
-fn default_env() -> Value {
+pub fn default_env() -> Value {
     json!(
         [
             {

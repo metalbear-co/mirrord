@@ -5274,6 +5274,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "mirrord-agent-env",
+ "mirrord-config",
  "mirrord-kube",
  "mirrord-operator",
  "mirrord-test-utils",

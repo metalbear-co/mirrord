@@ -90,6 +90,23 @@ pub async fn run_ls(namespace: &str, use_operator: bool) -> TestProcess {
     run_mirrord(mirrord_args, env).await
 }
 
+/// Runs `mirrord db-branches -n <namespace> status [names...]`.
+pub async fn run_db_branches_status(namespace: &str, names: &[&str]) -> TestProcess {
+    let mut args = vec!["db-branches", "--namespace", namespace, "status"];
+    args.extend_from_slice(names);
+    run_mirrord(args, Default::default()).await
+}
+
+/// Runs `mirrord db-branches -n <namespace> destroy [--all | names...]`.
+pub async fn run_db_branches_destroy(namespace: &str, all: bool, names: &[&str]) -> TestProcess {
+    let mut args = vec!["db-branches", "--namespace", namespace, "destroy"];
+    if all {
+        args.push("--all");
+    }
+    args.extend_from_slice(names);
+    run_mirrord(args, Default::default()).await
+}
+
 /// Runs `mirrord verify-config [--ide] "/path/config.json"`.
 ///
 /// ## Attention

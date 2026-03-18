@@ -1,12 +1,14 @@
-use std::fmt::Debug;
+use std::{any::{TypeId, type_name}, fmt::Debug};
 
 use futures::FutureExt;
 use futures_util::future::BoxFuture;
+use k8s_openapi::{ClusterResourceScope, NamespaceResourceScope};
 use kube::{
-    api::{DeleteParams, PostParams},
-    Api, Error, Resource,
+    Api, Error, Resource, api::{ApiResource, DeleteParams, DynamicObject, PostParams}
 };
 use serde::{de::DeserializeOwned, Serialize};
+
+use crate::utils::kube_client;
 
 /// RAII-style guard for deleting kube resources after tests.
 /// This guard deletes the kube resource when dropped.
@@ -18,22 +20,53 @@ pub struct ResourceGuard {
     pub deleter: Option<BoxFuture<'static, ()>>,
 }
 
+trait ResourceExt: Resource + 'static {
+    fn scope() -> ResourceScope {
+        match TypeId::of::<Self::Scope>() {
+            ty if ty == TypeId::of::<NamespaceResourceScope>() => ResourceScope::Namespaced,
+            ty if ty == TypeId::of::<ClusterResourceScope>() => ResourceScope::Cluster,
+            _ => ResourceScope::Unsupported(type_name::<Self::Scope>())
+        }
+    }
+}
+
+impl<K: Resource + 'static> ResourceExt for K{}
+
+#[derive(Debug)]
+enum ResourceScope {
+    Namespaced,
+    Cluster,
+    Unsupported(&'static str)
+}
+
+
 impl ResourceGuard {
     /// Create a kube resource and spawn a task to delete it when this guard is dropped.
     /// Return [`Error`] if creating the resource failed.
     pub async fn create<
-        K: Resource<DynamicType = ()> + Debug + Clone + DeserializeOwned + Serialize + 'static,
+        K: Resource<
+            DynamicType = (),
+        > + Debug + Clone + DeserializeOwned + Serialize + 'static,
     >(
         api: Api<K>,
         data: &K,
         delete_on_fail: bool,
     ) -> Result<(ResourceGuard, K), Error> {
         let name = data.meta().name.clone().unwrap();
+        let namespace = data.meta().namespace.clone().unwrap_or("default".to_string());
+
         println!("Creating {} `{name}`: {data:?}", K::kind(&()));
         let created = api.create(&PostParams::default(), data).await?;
         println!("Created {} `{name}`", K::kind(&()));
 
         let deleter = async move {
+            let dyntype = ApiResource::erase::<K>(&());
+            let client = kube_client().await;
+            let api: Api<DynamicObject> = match K::scope() {
+                ResourceScope::Cluster => Api::all_with(client, &dyntype),
+                ResourceScope::Namespaced => Api::namespaced_with(client, &namespace, &dyntype),
+                ResourceScope::Unsupported(ty) => panic!("unsupported resource type: {ty}"),
+            };
             println!("Deleting {} `{name}`", K::kind(&()));
             let delete_params = DeleteParams {
                 grace_period_seconds: Some(0),
@@ -76,11 +109,11 @@ impl Drop for ResourceGuard {
 
         if !std::thread::panicking() || self.delete_on_fail {
             let _ = std::thread::spawn(move || {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("failed to create tokio runtime")
-                    .block_on(deleter);
+                let _ = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("failed to create tokio runtime")
+                        .block_on(deleter);
             })
             .join();
         }
