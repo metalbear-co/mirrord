@@ -48,9 +48,9 @@ impl PartialEq<ClientMessage> for OutBox {
     }
 }
 
-impl PartialEq<[ClientMessage]> for OutBox {
-    fn eq(&self, other: &[ClientMessage]) -> bool {
-        self.as_slice() == other
+impl PartialEq<&[ClientMessage]> for OutBox {
+    fn eq(&self, other: &&[ClientMessage]) -> bool {
+        self.as_slice() == *other
     }
 }
 

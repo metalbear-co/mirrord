@@ -28,14 +28,13 @@ smallvec = "1"
 strum.workspace = true
 strum_macros.workspace = true
 tokio-stream.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
 thiserror.workspace = true
 tracing.workspace = true
 tokio-retry.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true
-tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]
 workspace = true

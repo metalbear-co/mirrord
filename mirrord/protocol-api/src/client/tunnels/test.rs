@@ -38,11 +38,8 @@ async fn assert_tunnels_idle(tunnels: &mut TrafficTunnels) {
 async fn raw_connection(#[case] tunnel_type: TunnelType, #[case] has_outbound: bool) {
     assert_eq!(tunnel_type.has_outbound(), has_outbound);
 
-    let mut tunnels = TrafficTunnels::new(
-        NonZeroUsize::MAX,
-        Duration::MAX,
-        &*mirrord_protocol::VERSION,
-    );
+    let mut tunnels =
+        TrafficTunnels::new(NonZeroUsize::MAX, Duration::MAX, &mirrord_protocol::VERSION);
     let id = TunnelId(tunnel_type, 0);
 
     let TunneledData {
@@ -86,11 +83,8 @@ async fn raw_connection(#[case] tunnel_type: TunnelType, #[case] has_outbound: b
 /// sends connection data, but the client is no longer receiving.
 #[tokio::test]
 async fn raw_connection_write_after_close() {
-    let mut tunnels = TrafficTunnels::new(
-        NonZeroUsize::MAX,
-        Duration::MAX,
-        &*mirrord_protocol::VERSION,
-    );
+    let mut tunnels =
+        TrafficTunnels::new(NonZeroUsize::MAX, Duration::MAX, &mirrord_protocol::VERSION);
     let id = TunnelId(TunnelType::IncomingSteal, 0);
 
     let tunnel = tunnels.server_connection(id).unwrap();
@@ -117,11 +111,8 @@ async fn simple_request(
     #[case] streaming_request_body: bool,
     #[case] streaming_response_body: bool,
 ) {
-    let mut tunnels = TrafficTunnels::new(
-        NonZeroUsize::MAX,
-        Duration::MAX,
-        &*mirrord_protocol::VERSION,
-    );
+    let mut tunnels =
+        TrafficTunnels::new(NonZeroUsize::MAX, Duration::MAX, &mirrord_protocol::VERSION);
     let tunnel_type = if stolen {
         TunnelType::IncomingSteal
     } else {
@@ -344,11 +335,8 @@ async fn http_upgrade_stolen(
     #[values(true, false)] early_data: bool,
     #[values(true, false)] early_shutdown: bool,
 ) {
-    let mut tunnels = TrafficTunnels::new(
-        NonZeroUsize::MAX,
-        Duration::MAX,
-        &*mirrord_protocol::VERSION,
-    );
+    let mut tunnels =
+        TrafficTunnels::new(NonZeroUsize::MAX, Duration::MAX, &mirrord_protocol::VERSION);
     let id = TunnelId(TunnelType::IncomingSteal, 0);
 
     let TunneledRequest {
@@ -388,45 +376,38 @@ async fn http_upgrade_stolen(
 
     let out = tunnels.next().await.unwrap();
 
-    assert_eq!(
-        &out.as_slice()[..2],
-        [
-            ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Start(
-                HttpResponse {
-                    port: 2137,
-                    request_id: 0,
-                    connection_id: 0,
-                    internal_response: InternalHttpResponse {
-                        status: if switching_protocols {
-                            StatusCode::SWITCHING_PROTOCOLS
-                        } else {
-                            StatusCode::OK
-                        },
-                        version: hyper::Version::HTTP_11,
-                        headers: Default::default(),
-                        body: vec![],
+    let mut expected = vec![
+        ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Start(
+            HttpResponse {
+                port: 2137,
+                request_id: 0,
+                connection_id: 0,
+                internal_response: InternalHttpResponse {
+                    status: if switching_protocols {
+                        StatusCode::SWITCHING_PROTOCOLS
+                    } else {
+                        StatusCode::OK
                     },
-                }
-            ))),
-            ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Body(
-                ChunkedRequestBodyV1 {
-                    request_id: 0,
-                    connection_id: 0,
-                    frames: Default::default(),
-                    is_last: true,
-                }
-            )))
-        ],
-    );
-
+                    version: hyper::Version::HTTP_11,
+                    headers: Default::default(),
+                    body: vec![],
+                },
+            },
+        ))),
+        ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Body(
+            ChunkedRequestBodyV1 {
+                request_id: 0,
+                connection_id: 0,
+                frames: Default::default(),
+                is_last: true,
+            },
+        ))),
+    ];
     if switching_protocols {
-        assert_eq!(out.len(), 2);
+        assert_eq!(out, expected.as_slice(),);
     } else {
-        assert_eq!(out.len(), 3);
-        assert_eq!(
-            out[2],
-            ClientMessage::TcpSteal(LayerTcpSteal::ConnectionUnsubscribe(0)),
-        );
+        expected.push(id.close_message());
+        assert_eq!(out, expected.as_slice());
         assert_tunnels_idle(&mut tunnels).await;
         return;
     }
@@ -467,11 +448,8 @@ async fn http_upgrade_stolen(
 #[rstest]
 #[tokio::test]
 async fn http_upgrade_mirror(#[values(0, 1, 2)] data_chunks: usize) {
-    let mut tunnels = TrafficTunnels::new(
-        NonZeroUsize::MAX,
-        Duration::MAX,
-        &*mirrord_protocol::VERSION,
-    );
+    let mut tunnels =
+        TrafficTunnels::new(NonZeroUsize::MAX, Duration::MAX, &mirrord_protocol::VERSION);
     let id = TunnelId(TunnelType::IncomingMirror, 0);
 
     let TunneledRequest { upgrade_rx, .. } = tunnels
@@ -501,9 +479,7 @@ async fn http_upgrade_mirror(#[values(0, 1, 2)] data_chunks: usize) {
     let received_data = tunnel.stream.collect::<Vec<_>>().await;
     assert_eq!(
         received_data,
-        std::iter::repeat(PAYLOAD.clone())
-            .take(data_chunks)
-            .collect::<Vec<_>>(),
+        std::iter::repeat_n(PAYLOAD.clone(), data_chunks).collect::<Vec<_>>(),
     );
 
     assert_tunnels_idle(&mut tunnels).await;
@@ -513,11 +489,8 @@ async fn http_upgrade_mirror(#[values(0, 1, 2)] data_chunks: usize) {
 #[rstest]
 #[tokio::test]
 async fn http_request_body_error(#[values(true, false)] stolen: bool) {
-    let mut tunnels = TrafficTunnels::new(
-        NonZeroUsize::MAX,
-        Duration::MAX,
-        &*mirrord_protocol::VERSION,
-    );
+    let mut tunnels =
+        TrafficTunnels::new(NonZeroUsize::MAX, Duration::MAX, &mirrord_protocol::VERSION);
     let tunnel_type = if stolen {
         TunnelType::IncomingSteal
     } else {
@@ -568,11 +541,8 @@ async fn http_request_body_error(#[values(true, false)] stolen: bool) {
 /// The server should still get the response.
 #[tokio::test]
 async fn http_request_body_after_close() {
-    let mut tunnels = TrafficTunnels::new(
-        NonZeroUsize::MAX,
-        Duration::MAX,
-        &*mirrord_protocol::VERSION,
-    );
+    let mut tunnels =
+        TrafficTunnels::new(NonZeroUsize::MAX, Duration::MAX, &mirrord_protocol::VERSION);
     let id = TunnelId(TunnelType::IncomingSteal, 0);
 
     let request = tunnels

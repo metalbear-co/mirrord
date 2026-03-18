@@ -626,11 +626,8 @@ mod test {
     /// 4. Client receives traffic
     #[tokio::test]
     async fn subscription_simple() {
-        let mut tunnels = TrafficTunnels::new(
-            NonZeroUsize::MAX,
-            Duration::MAX,
-            &*mirrord_protocol::VERSION,
-        );
+        let mut tunnels =
+            TrafficTunnels::new(NonZeroUsize::MAX, Duration::MAX, &mirrord_protocol::VERSION);
         let mut incoming = Incoming::new(NonZeroUsize::MAX, Duration::MAX);
 
         let (tx, rx) = oneshot::channel();
@@ -691,11 +688,8 @@ mod test {
     /// 7. Client receives traffic
     #[tokio::test]
     async fn subscription_overwrite() {
-        let mut tunnels = TrafficTunnels::new(
-            NonZeroUsize::MAX,
-            Duration::MAX,
-            &*mirrord_protocol::VERSION,
-        );
+        let mut tunnels =
+            TrafficTunnels::new(NonZeroUsize::MAX, Duration::MAX, &mirrord_protocol::VERSION);
         let mut incoming = Incoming::new(NonZeroUsize::MAX, Duration::MAX);
 
         let (tx, rx) = oneshot::channel();
@@ -776,11 +770,8 @@ mod test {
     /// 7. Client receives traffic
     #[tokio::test]
     async fn subscription_overwrite_rapid() {
-        let mut tunnels = TrafficTunnels::new(
-            NonZeroUsize::MAX,
-            Duration::MAX,
-            &*mirrord_protocol::VERSION,
-        );
+        let mut tunnels =
+            TrafficTunnels::new(NonZeroUsize::MAX, Duration::MAX, &mirrord_protocol::VERSION);
         let mut incoming = Incoming::new(NonZeroUsize::MAX, Duration::MAX);
 
         let (tx, rx_1) = oneshot::channel();

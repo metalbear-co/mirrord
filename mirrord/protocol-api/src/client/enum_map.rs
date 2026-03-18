@@ -8,6 +8,7 @@ use strum::VariantArray;
 
 /// Trait for a unit enum that can be used as a key in [`EnumMap`].
 pub trait EnumKey: VariantArray {
+    /// Returns the index of this value inside [`VariantArray::VARIANTS`].
     fn into_index(self) -> usize;
 }
 
@@ -41,12 +42,14 @@ impl<E: EnumKey, T: Default, const SIZE: usize> Default for EnumMap<E, T, SIZE> 
 impl<E: EnumKey, T, const SIZE: usize> Index<E> for EnumMap<E, T, SIZE> {
     type Output = T;
 
+    #[allow(clippy::indexing_slicing)]
     fn index(&self, index: E) -> &Self::Output {
         &self.values[index.into_index()]
     }
 }
 
 impl<E: EnumKey, T, const SIZE: usize> IndexMut<E> for EnumMap<E, T, SIZE> {
+    #[allow(clippy::indexing_slicing)]
     fn index_mut(&mut self, index: E) -> &mut Self::Output {
         &mut self.values[index.into_index()]
     }
