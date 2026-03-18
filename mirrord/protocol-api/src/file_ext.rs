@@ -100,33 +100,6 @@ impl FileRequestExt for FileRequest {
     }
 }
 
-/// Helper trait for [`impl_file_request_ext`].
-trait HasRemoteFd {
-    fn get_mut(&mut self) -> Option<&mut u64>;
-
-    fn get(self) -> Option<u64>;
-}
-
-impl HasRemoteFd for Option<u64> {
-    fn get_mut(&mut self) -> Option<&mut u64> {
-        self.as_mut()
-    }
-
-    fn get(self) -> Option<u64> {
-        self
-    }
-}
-
-impl HasRemoteFd for u64 {
-    fn get_mut(&mut self) -> Option<&mut u64> {
-        Some(self)
-    }
-
-    fn get(self) -> Option<u64> {
-        Some(self)
-    }
-}
-
 /// Implements [`FileRequestExt`] for a request.
 macro_rules! impl_file_request_ext {
     // No remote fd.
@@ -162,6 +135,33 @@ macro_rules! impl_file_request_ext {
             }
         }
     };
+}
+
+/// Helper trait for [`impl_file_request_ext`].
+trait HasRemoteFd {
+    fn get_mut(&mut self) -> Option<&mut u64>;
+
+    fn get(self) -> Option<u64>;
+}
+
+impl HasRemoteFd for Option<u64> {
+    fn get_mut(&mut self) -> Option<&mut u64> {
+        self.as_mut()
+    }
+
+    fn get(self) -> Option<u64> {
+        self
+    }
+}
+
+impl HasRemoteFd for u64 {
+    fn get_mut(&mut self) -> Option<&mut u64> {
+        Some(self)
+    }
+
+    fn get(self) -> Option<u64> {
+        Some(self)
+    }
 }
 
 impl_file_request_ext!(OpenFileRequest, Open);
