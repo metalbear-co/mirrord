@@ -14,18 +14,12 @@ use url::Url;
 
 use super::{QueueConsumer, QueueId, QueueMessageFilter, QueueNameUpdate, SplitQueueNameDetails};
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")] // Name -> name in yaml.
-pub enum MirrordRmqClusterRef {
-    Name(String),
-    Url(Url),
-}
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")] // name_source -> nameSource in yaml.
 pub struct RmqQueueDetails {
-    /// the name of `MirrordRmqCluster`
-    pub cluster_ref: MirrordRmqClusterRef,
+    /// the name of [`MirrordPropertyList`](crate::crd::properties::MirrordPropertyList) that
+    /// contains the RabbitMQ cluster definition.
+    pub cluster_ref: String,
 
     #[serde(flatten)]
     pub name_details: SplitQueueNameDetails,
@@ -45,108 +39,6 @@ pub struct RmqQueueDetails {
 }
 
 impl Eq for RmqQueueDetails {}
-
-#[derive(Clone, Debug)]
-pub struct Base64(pub Vec<u8>);
-
-impl JsonSchema for Base64 {
-    fn schema_name() -> String {
-        String::schema_name()
-    }
-
-    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::schema::Schema {
-        String::json_schema(generator)
-    }
-}
-
-impl ser::Serialize for Base64 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        general_purpose::STANDARD
-            .encode(&self.0)
-            .serialize(serializer)
-    }
-}
-
-impl<'de> de::Deserialize<'de> for Base64 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: de::Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        general_purpose::STANDARD
-            .decode(value)
-            .map(Base64)
-            .map_err(de::Error::custom)
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub enum MirrordRmqClusterTlsIdentity {
-    PKCS12 { der: Base64, password: String },
-    PKCS8 { pem: Base64, key: Base64 },
-}
-
-impl From<MirrordRmqClusterTlsIdentity> for OwnedIdentity {
-    fn from(identity: MirrordRmqClusterTlsIdentity) -> Self {
-        match identity {
-            MirrordRmqClusterTlsIdentity::PKCS12 {
-                der: Base64(der),
-                password,
-            } => OwnedIdentity::PKCS12 { der, password },
-            MirrordRmqClusterTlsIdentity::PKCS8 {
-                pem: Base64(pem),
-                key: Base64(key),
-            } => OwnedIdentity::PKCS8 { pem, key },
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")] // cert_chain -> certChain in yaml.
-pub struct MirrordRmqClusterTlsConfig {
-    pub identity: Option<MirrordRmqClusterTlsIdentity>,
-
-    pub cert_chain: Option<String>,
-}
-
-impl From<MirrordRmqClusterTlsConfig> for OwnedTLSConfig {
-    fn from(tls_config: MirrordRmqClusterTlsConfig) -> Self {
-        let MirrordRmqClusterTlsConfig {
-            identity,
-            cert_chain,
-        } = tls_config;
-
-        OwnedTLSConfig {
-            identity: identity.map(Into::into),
-            cert_chain,
-        }
-    }
-}
-
-#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[kube(
-    group = "queues.mirrord.metalbear.co",
-    version = "v1alpha",
-    kind = "MirrordRMQCluster",
-    root = "MirrordRmqCluster",
-    namespaced
-)]
-#[serde(rename_all = "camelCase")] // connection_url -> connectionUrl in yaml.
-pub struct MirrordRmqClusterSpec {
-    /// RabbitMQ's instance url
-    pub connection_url: Url,
-
-    /// Attributes passed to connection
-    #[serde(default)]
-    #[schemars(with = "Option::<serde_json::Map<String, serde_json::Value>>")]
-    pub connection_attributes: FieldTable,
-
-    /// Owned tls configuration if needed
-    pub tls: Option<MirrordRmqClusterTlsConfig>,
-}
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename = "RMQSplitDetails", rename_all = "camelCase")]
@@ -240,11 +132,17 @@ pub fn is_session_ready(session: Option<&MirrordRmqSession>) -> bool {
     version = "v1alpha",
     kind = "MirrordRMQSession",
     root = "MirrordRmqSession", // for Rust naming conventions (Rmq, not RMQ)
-    status = "RmqSessionStatus",
-    namespaced
+    status = "RmqSessionStatus"
 )]
 #[serde(rename_all = "camelCase")] // queue_filters -> queueFilters
 pub struct MirrordRmqSessionSpec {
+    /// The associated [`MirrordPropertyList`](crate::crd::properties::MirrordPropertyList) name
+    /// that contains the RabbitMQ cluster definition.
+    pub cluster_ref: String,
+
+    /// Kubernetes namespace for the session (in workload clusters)
+    pub namespace: String,
+
     /// For each queue_id, a mapping from attribute name, to attribute value regex.
     /// The queue_id for a queue is determined at the queue registry. It is not (necessarily)
     /// The name of the queue on AWS.
