@@ -19,12 +19,21 @@ use tokio_util::sync::CancellationToken;
 use super::MonitorTx;
 
 #[derive(Clone, Debug, Serialize)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub process_name: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct SessionInfo {
     pub session_id: String,
     pub target: String,
-    pub pid: u32,
     pub started_at: String,
     pub mirrord_version: String,
+    pub is_operator: bool,
+    pub processes: Vec<ProcessInfo>,
+    pub config: serde_json::Value,
+    pub filter: Option<String>,
 }
 
 struct AppState {

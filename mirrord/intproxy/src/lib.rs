@@ -87,6 +87,25 @@ fn file_request_operation_name(req: &FileRequest) -> &'static str {
     }
 }
 
+fn file_request_path(req: &FileRequest) -> Option<String> {
+    match req {
+        FileRequest::Open(r) => Some(r.path.to_string_lossy().into_owned()),
+        FileRequest::OpenRelative(r) => Some(r.path.to_string_lossy().into_owned()),
+        FileRequest::Access(r) => Some(r.pathname.to_string_lossy().into_owned()),
+        FileRequest::Xstat(r) => r.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        FileRequest::ReadLink(r) => Some(r.path.to_string_lossy().into_owned()),
+        FileRequest::MakeDir(r) => Some(r.pathname.to_string_lossy().into_owned()),
+        FileRequest::MakeDirAt(r) => Some(r.pathname.to_string_lossy().into_owned()),
+        FileRequest::RemoveDir(r) => Some(r.pathname.to_string_lossy().into_owned()),
+        FileRequest::Unlink(r) => Some(r.pathname.to_string_lossy().into_owned()),
+        FileRequest::UnlinkAt(r) => Some(r.pathname.to_string_lossy().into_owned()),
+        FileRequest::StatFs(r) => Some(r.path.to_string_lossy().into_owned()),
+        FileRequest::StatFsV2(r) => Some(r.path.to_string_lossy().into_owned()),
+        FileRequest::Rename(r) => Some(r.old_path.to_string_lossy().into_owned()),
+        _ => None,
+    }
+}
+
 /// [`TaskSender`]s for main background tasks. See [`MainTaskId`].
 struct TaskTxs {
     layers: HashMap<LayerId, TaskSender<LayerConnection>>,
@@ -378,7 +397,7 @@ impl IntProxy {
                 self.any_connection_accepted = true;
 
                 self.monitor_tx.emit(MonitorEvent::LayerConnected {
-                    pid: new_layer.process_info.pid,
+                    pid: new_layer.process_info.pid as u32,
                 });
                 self.connected_layers
                     .insert(new_layer.id, new_layer.process_info);
@@ -644,7 +663,7 @@ impl IntProxy {
         match message {
             LayerToProxyMessage::File(req) => {
                 self.monitor_tx.emit(MonitorEvent::FileOp {
-                    path: format!("{req:?}"),
+                    path: file_request_path(&req),
                     operation: file_request_operation_name(&req).to_owned(),
                 });
                 self.task_txs
@@ -690,7 +709,12 @@ impl IntProxy {
             }
             LayerToProxyMessage::GetEnv(req) => {
                 self.monitor_tx.emit(MonitorEvent::EnvVar {
-                    count: req.env_vars_select.len() + req.env_vars_filter.len(),
+                    vars: req
+                        .env_vars_select
+                        .iter()
+                        .chain(req.env_vars_filter.iter())
+                        .cloned()
+                        .collect(),
                 });
                 self.task_txs
                     .simple

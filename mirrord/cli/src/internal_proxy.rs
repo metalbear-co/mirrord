@@ -136,7 +136,7 @@ pub(crate) async fn proxy(
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
     #[cfg(unix)]
-    let monitor_tx = if config.experimental.session_monitor {
+    let monitor_tx = if config.api {
         let (tx, _rx) =
             tokio::sync::broadcast::channel::<mirrord_intproxy::session_monitor::MonitorEvent>(256);
         let proxy_monitor_tx = MonitorTx::from_sender(tx.clone());
@@ -152,15 +152,17 @@ pub(crate) async fn proxy(
             .map(|t| t.to_string())
             .unwrap_or_else(|| "unknown".to_owned());
 
+        let config_value = serde_json::to_value(&config).unwrap_or(serde_json::Value::Null);
+
         let session_info = mirrord_intproxy::session_monitor::api::SessionInfo {
             session_id: session_id.clone(),
             target: target_name,
-            pid: std::process::id(),
-            started_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs().to_string())
-                .unwrap_or_default(),
+            started_at: humantime::format_rfc3339(std::time::SystemTime::now()).to_string(),
             mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
+            is_operator: config.operator.unwrap_or(false),
+            processes: Vec::new(),
+            config: config_value,
+            filter: None,
         };
 
         let shutdown = CancellationToken::new();

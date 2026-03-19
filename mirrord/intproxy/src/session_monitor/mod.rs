@@ -4,12 +4,27 @@ use tokio::sync::broadcast;
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MonitorEvent {
-    FileOp { path: String, operation: String },
-    DnsQuery { host: String },
-    OutgoingConnection { address: String, port: u16 },
-    PortSubscription { port: u16, mode: String },
-    EnvVar { count: usize },
-    LayerConnected { pid: i32 },
+    FileOp {
+        path: Option<String>,
+        operation: String,
+    },
+    DnsQuery {
+        host: String,
+    },
+    OutgoingConnection {
+        address: String,
+        port: u16,
+    },
+    PortSubscription {
+        port: u16,
+        mode: String,
+    },
+    EnvVar {
+        vars: Vec<String>,
+    },
+    LayerConnected {
+        pid: u32,
+    },
     LayerDisconnected,
 }
 
