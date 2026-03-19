@@ -311,6 +311,9 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
         _ => (),
     };
 
+    config.experimental.non_blocking_tcp_connect =
+        config.experimental.non_blocking_tcp_connect.or(Some(true));
+
     Ok(())
 }
 
