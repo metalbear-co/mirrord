@@ -20,7 +20,7 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, OutgoingConnMetadataRequest, PortSubscribe,
 };
 use mirrord_layer_lib::{
-    detour::{Bypass, Detour, OptionExt},
+    detour::Detour,
     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
     setup::{LayerSetup, NetworkHookConfig, setup},
@@ -36,7 +36,7 @@ use mirrord_layer_lib::{
         hostname::remote_hostname_string,
         is_socket_managed,
         ops::{ConnectResult, get_last_error, send_to, socket},
-        sockets::socket_kind_from_type,
+        sockets::{SocketDescriptor, socket_kind_from_type},
     },
 };
 use socket2::SockAddr;
@@ -218,14 +218,13 @@ static CLOSE_SOCKET_ORIGINAL: OnceLock<&CloseSocketType> = OnceLock::new();
 unsafe extern "system" fn socket_detour(af: INT, type_: INT, protocol: INT) -> SOCKET {
     // Call the original function to create the socket
     let original = SOCKET_ORIGINAL.get().unwrap();
-    let call_original = || -> Detour<SOCKET> {
+    let call_original = || -> Detour<SocketDescriptor> {
         let socket_result = unsafe { original(af, type_, protocol) };
         if socket_result == INVALID_SOCKET {
-            Err(std::io::Error::from_raw_os_error(get_last_error()))
+            Detour::Error(std::io::Error::from_raw_os_error(get_last_error()).into())
         } else {
-            Ok(socket_result)
+            Detour::Success(socket_result)
         }
-        .into()
     };
     socket(call_original, af, type_, protocol)
         .unwrap_or_bypass_with(|_| unsafe { original(af, type_, protocol) })
@@ -242,15 +241,14 @@ unsafe extern "system" fn wsa_socket_detour(
     dwFlags: u32,
 ) -> SOCKET {
     let original = WSA_SOCKET_ORIGINAL.get().unwrap();
-    let call_original = || -> Detour<SOCKET> {
+    let call_original = || -> Detour<SocketDescriptor> {
         let socket_result =
             unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
         if socket_result == INVALID_SOCKET {
-            Err(std::io::Error::from_raw_os_error(get_last_error()))
+            Detour::Error(std::io::Error::from_raw_os_error(get_last_error()).into())
         } else {
-            Ok(socket_result)
+            Detour::Success(socket_result)
         }
-        .into()
     };
     socket(call_original, af, socket_type, protocol).unwrap_or_bypass_with(|_| unsafe {
         original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags)
@@ -271,11 +269,10 @@ unsafe extern "system" fn wsa_socket_w_detour(
         let socket_result =
             unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
         if socket_result == INVALID_SOCKET {
-            Err(std::io::Error::from_raw_os_error(get_last_error()))
+            Detour::Error(std::io::Error::from_raw_os_error(get_last_error()).into())
         } else {
-            Ok(socket_result)
+            Detour::Success(socket_result)
         }
-        .into()
     };
     socket(call_original, af, socket_type, protocol).unwrap_or_bypass_with(|_| unsafe {
         original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags)
@@ -712,11 +709,10 @@ unsafe extern "system" fn getsockname_detour(
         .lock()
         .expect("getsockname_detour -> failed to lock sockets for socket retrieval")
         .get(&s)
-        .bypass(Bypass::LocalFdNotFound(s))
     {
-        Ok(sock) => sock.clone(),
-        Err(err) => {
-            tracing::warn!("getsockname_detour -> failed to get socket: {}", err);
+        Some(sock) => sock.clone(),
+        None => {
+            tracing::warn!("getsockname_detour -> failed to get socket: {}", s);
             return getsockname_fn();
         }
     };
@@ -1494,12 +1490,15 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
     }
 
     // Check if we should resolve this hostname remotely using the DNS selector
-    if setup()
+    if let Detour::Bypass(reason) = setup()
         .dns_selector()
         .check_query(hostname_cstr.as_ref(), 0)
-        .is_err()
     {
-        tracing::debug!("DNS selector check returned local for '{}'", hostname_cstr,);
+        tracing::debug!(
+            ?reason,
+            "DNS selector check returned local for '{}'",
+            hostname_cstr,
+        );
         return fallback_to_original();
     }
 
@@ -1578,37 +1577,39 @@ unsafe extern "system" fn getaddrinfo_detour(
 
     let hints_ref = unsafe { raw_hints.as_ref() };
 
-    unsafe {
-        match getaddrinfo::<ADDRINFOA>(node_opt, service_opt, hints_ref) {
-            Ok(managed_addr_info) => {
-                // Store the managed result pointer and move the object to MANAGED_ADDRINFO
-                let addr_ptr = managed_addr_info.as_ptr();
-                let mut managed = match MANAGED_ADDRINFO.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => {
-                        tracing::warn!(
-                            "getaddrinfo: MANAGED_ADDRINFO was poisoned, attempting recovery"
-                        );
-                        poisoned.into_inner()
-                    }
-                };
-                managed.insert(addr_ptr as usize, ManagedAddrInfoAny::A(managed_addr_info));
-                *out_addr_info = addr_ptr;
-                // Success
-                ERROR_SUCCESS_I32
-            }
-            Err(_) => {
-                // Fall back to original Windows getaddrinfo
-                tracing::debug!("getaddrinfo: falling back to original Windows function");
+    // temporary Detour workaround until WIN-85
+    let managed_addr_info = match getaddrinfo::<ADDRINFOA>(node_opt, service_opt, hints_ref) {
+        Detour::Success(info) => info,
+        Detour::Bypass(bypass) => {
+            // Fall back to original Windows getaddrinfo
+            tracing::debug!(
+                ?bypass,
+                "getaddrinfo: falling back to original Windows function"
+            );
+            return unsafe {
                 GET_ADDR_INFO_ORIGINAL.get().unwrap()(
                     raw_node,
                     raw_service,
                     raw_hints,
                     out_addr_info,
                 )
-            }
+            };
         }
-    }
+        Detour::Error(err) => {
+            tracing::error!(?err, "getaddrinfo failed");
+            return err.into();
+        }
+    };
+
+    // Store the managed result pointer and move the object to MANAGED_ADDRINFO
+    let addr_ptr = managed_addr_info.as_ptr();
+    MANAGED_ADDRINFO
+        .lock()
+        .expect("getaddrinfo: MANAGED_ADDRINFO was poisoned")
+        .insert(addr_ptr as usize, ManagedAddrInfoAny::A(managed_addr_info));
+    unsafe { *out_addr_info = addr_ptr };
+
+    ERROR_SUCCESS_I32
 }
 
 /// Hook for GetAddrInfoW (Unicode version) to handle DNS resolution
@@ -1638,41 +1639,36 @@ unsafe extern "system" fn getaddrinfow_detour(
 
     let hints_ref = unsafe { hints.as_ref() };
 
-    // Use full windows_getaddrinfo approach with DNS selector logic and service/hints support
-    match getaddrinfo::<ADDRINFOW>(node_opt.clone(), service_opt, hints_ref) {
-        Ok(managed_result) => {
-            tracing::debug!("GetAddrInfoW: full resolution succeeded");
-            // Store the managed result pointer and move the object to MANAGED_ADDRINFO
-            let result_ptr = managed_result.as_ptr();
-            unsafe { *result = result_ptr };
-            let mut managed = match MANAGED_ADDRINFO.lock() {
-                Ok(guard) => guard,
-                Err(poisoned) => {
-                    tracing::warn!(
-                        "GetAddrInfoW: MANAGED_ADDRINFO was poisoned, attempting recovery"
-                    );
-                    poisoned.into_inner()
-                }
-            };
-            managed.insert(result_ptr as usize, ManagedAddrInfoAny::W(managed_result));
-            return ERROR_SUCCESS_I32;
-        }
-        Err(e) => {
-            tracing::warn!(
-                "GetAddrInfoW: resolution failed for '{:?}': {}",
-                node_opt,
-                e
+    // temporary Detour workaround until WIN-85
+    let managed_addr_info = match getaddrinfo::<ADDRINFOW>(node_opt.clone(), service_opt, hints_ref)
+    {
+        Detour::Success(info) => info,
+        Detour::Bypass(bypass) => {
+            // For all other hostnames or if conversion fails, call original function
+            tracing::debug!(
+                ?bypass,
+                "GetAddrInfoW: calling original function for hostname: {:?}",
+                node_opt
             );
-            // Fall through to original function
+            return unsafe {
+                GET_ADDR_INFO_W_ORIGINAL.get().unwrap()(node_name, service_name, hints, result)
+            };
         }
-    }
+        Detour::Error(err) => {
+            tracing::error!(?err, "GetAddrInfoW failed");
+            return err.into();
+        }
+    };
 
-    // For all other hostnames or if conversion fails, call original function
-    tracing::debug!(
-        "GetAddrInfoW: calling original function for hostname: {:?}",
-        node_opt
-    );
-    unsafe { GET_ADDR_INFO_W_ORIGINAL.get().unwrap()(node_name, service_name, hints, result) }
+    // Store the managed result pointer and move the object to MANAGED_ADDRINFO
+    let addr_ptr = managed_addr_info.as_ptr();
+    MANAGED_ADDRINFO
+        .lock()
+        .expect("getaddrinfo: MANAGED_ADDRINFO was poisoned")
+        .insert(addr_ptr as usize, ManagedAddrInfoAny::W(managed_addr_info));
+    unsafe { *result = addr_ptr };
+
+    ERROR_SUCCESS_I32
 }
 
 /// Deallocates ADDRINFOA structures that were allocated by our getaddrinfo_detour.

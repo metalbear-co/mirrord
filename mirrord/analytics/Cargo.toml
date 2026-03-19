@@ -25,6 +25,7 @@ tokio.workspace = true
 drain.workspace = true
 uuid.workspace = true
 ci_info.workspace = true
+sha2 = "0.10"
 
 [dev-dependencies]
 serde_json.workspace = true

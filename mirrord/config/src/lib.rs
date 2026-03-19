@@ -169,7 +169,7 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 ///       "incoming": {
 ///         "mode": "steal",
 ///         "http_filter": {
-///           "header_filter": "host: api\\..+"
+///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -411,7 +411,8 @@ pub struct LayerConfig {
     /// An identifier for a mirrord session.
     ///
     /// This key can be referenced in your configuration using the `{{ key }}` template variable.
-    /// For example, you can use it in HTTP filters: `"header_filter": "x-session: key-{{ key }}"`.
+    /// The recommended use is to propagate it in W3C `baggage` or `tracestate`, then filter on
+    /// `mirrord-session={{ key }}` in `feature.network.incoming.http_filter`.
     ///
     /// Priority (highest to lowest):
     /// 1. CLI argument: `mirrord exec --key my-key`
@@ -425,7 +426,7 @@ pub struct LayerConfig {
     ///     "network": {
     ///       "incoming": {
     ///         "http_filter": {
-    ///           "header_filter": "x-session: key-{{ key }}"
+    ///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
     ///         }
     ///       }
     ///     }

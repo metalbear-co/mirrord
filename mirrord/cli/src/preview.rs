@@ -22,7 +22,10 @@ use kube::{
         watcher::{self, Event, watcher},
     },
 };
-use mirrord_analytics::NullReporter;
+use mirrord_analytics::{
+    NullReporter,
+    preview::{PreviewEvent, PreviewEventKind},
+};
 use mirrord_config::{
     LayerConfig,
     config::ConfigContext,
@@ -31,7 +34,7 @@ use mirrord_config::{
 };
 use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
-    client::OperatorApi,
+    client::{NoClientCert, OperatorApi},
     crd::{
         NewOperatorFeature,
         preview::{PreviewIncomingConfig, PreviewSession, PreviewSessionPhase, PreviewSessionSpec},
@@ -40,20 +43,24 @@ use mirrord_operator::{
     types::OPERATOR_OWNERSHIP_LABEL,
 };
 use mirrord_progress::{Progress, ProgressTracker};
-use oci_spec::distribution::Reference;
 use tracing::Level;
 use uuid::Uuid;
 
 use crate::{
     config::{PreviewArgs, PreviewCommand, PreviewStartArgs, PreviewStatusArgs, PreviewStopArgs},
     error::{CliError, CliResult},
+    user_data::UserData,
 };
 
 /// Handle commands related to preview environments: `mirrord preview ...`
-pub(crate) async fn preview_command(args: PreviewArgs) -> CliResult<()> {
+pub(crate) async fn preview_command(
+    args: PreviewArgs,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
     match args.command {
         PreviewCommand::Start(start_args) => preview_start(start_args).await,
-        PreviewCommand::Status(status_args) => preview_status(status_args).await,
+        PreviewCommand::Status(status_args) => preview_status(status_args, watch, user_data).await,
         PreviewCommand::Stop(stop_args) => preview_stop(stop_args).await,
     }
 }
@@ -75,7 +82,7 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
 
     let layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
 
-    let (client, api) = create_preview_api(&layer_config, false, &progress).await?;
+    let (operator_api, api) = create_preview_api(&layer_config, false, &progress).await?;
 
     // Create the `PreviewSession` resource in the cluster. The CR name is derived from
     // the target with a short random suffix to avoid collisions (e.g.
@@ -96,7 +103,7 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
 
     let session_target = resolve_config_target(
         config_target,
-        &client,
+        operator_api.client(),
         layer_config.target.namespace.as_deref(),
     )
     .await
@@ -115,50 +122,41 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
         .into_iter()
         .filter(|session| session.spec.target == session_target)
     {
-        let phase = session.status.as_ref().map(|s| s.phase);
-        // Check if we're replacing a failed/stale session or updating the config/image of an
-        // active session
-        if matches!(phase, None | Some(PreviewSessionPhase::Failed))
-            || images_match(&session.spec.image, image)?
-        {
-            let name = session.name_any();
-
-            subtask.warning(&format!(
-                "replacing existing session '{name}' with updated parameters",
-            ));
-
-            // Delete and wait for the existing session to be fully removed.
-            match tokio::time::timeout(
-                Duration::from_secs(60),
-                delete::delete_and_finalize(api.clone(), &name, &DeleteParams::default()),
-            )
-            .await
-            {
-                Err(_) => {
-                    subtask.failure(None);
-                    return Err(CliError::PreviewDeleteFailed {
-                        name: name.clone(),
-                        reason: "timed out waiting for previous session to be deleted".to_owned(),
-                    });
-                }
-                Ok(Err(e)) => {
-                    subtask.failure(None);
-                    return Err(CliError::PreviewDeleteFailed {
-                        name,
-                        reason: e.to_string(),
-                    });
-                }
-                _ => continue,
-            };
+        if !args.force {
+            subtask.failure(None);
+            return Err(CliError::PreviewDuplicateSession {
+                key: key.to_owned(),
+                target: config_target.to_string(),
+            });
         }
 
-        // Reaching this point means we're not replacing an existing session, so we're trying to
-        // create a duplicate one.
-        subtask.failure(None);
-        return Err(CliError::PreviewDuplicateSession {
-            key: key.to_owned(),
-            target: config_target.to_string(),
-        });
+        let name = session.name_any();
+
+        subtask.warning(&format!("replacing existing session '{name}' (--force)",));
+
+        // Delete and wait for the existing session to be fully removed.
+        match tokio::time::timeout(
+            Duration::from_secs(60),
+            delete::delete_and_finalize(api.clone(), &name, &DeleteParams::default()),
+        )
+        .await
+        {
+            Err(_) => {
+                subtask.failure(None);
+                return Err(CliError::PreviewDeleteFailed {
+                    name: name.clone(),
+                    reason: "timed out waiting for previous session to be deleted".to_owned(),
+                });
+            }
+            Ok(Err(e)) => {
+                subtask.failure(None);
+                return Err(CliError::PreviewDeleteFailed {
+                    name,
+                    reason: e.to_string(),
+                });
+            }
+            _ => continue,
+        };
     }
 
     let session_name = {
@@ -319,19 +317,22 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
         .target
         .namespace
         .as_deref()
-        .unwrap_or(client.default_namespace());
+        .unwrap_or(operator_api.client().default_namespace());
 
     progress.success(None);
 
     let key = layer_config.key.as_str();
 
-    println!(
-        r#"
-  info:
-    * key: {key}
-    * namespace: {namespace}
-    * pod: {pod_name}"#
-    );
+    // This line is parsed by the github action to generate an output,
+    // so please update it as well if you're gonna change this line.
+    // We're doing this weird .subtask().success() stuff because
+    // otherwise it messes up the ordering or looks weird in some
+    // other way :'(
+    progress.subtask(&format!("key: {key}")).success(None);
+    progress
+        .subtask(&format!("namespace: {namespace}"))
+        .success(None);
+    progress.subtask(&format!("pod: {pod_name}")).success(None);
 
     Ok(())
 }
@@ -340,7 +341,11 @@ async fn preview_start(args: PreviewStartArgs) -> CliResult<()> {
 ///
 /// Lists preview environments, optionally filtered by key and namespace.
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
-async fn preview_status(args: PreviewStatusArgs) -> CliResult<()> {
+async fn preview_status(
+    args: PreviewStatusArgs,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview status");
 
     let layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
@@ -444,6 +449,17 @@ async fn preview_status(args: PreviewStatusArgs) -> CliResult<()> {
                 session.metadata.namespace.as_deref().unwrap_or("<unknown>"),
                 status
             );
+
+            PreviewEvent::new(
+                &session.spec.key,
+                session.runtime_secs(),
+                PreviewEventKind::Status,
+            )
+            .report_analytics(
+                layer_config.telemetry,
+                watch.clone(),
+                user_data.machine_id(),
+            );
         }
     }
 
@@ -468,7 +484,7 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
 
     // Default to all namespaces when no namespace is configured, same as `status`.
     let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
-    let (client, api) = create_preview_api(&layer_config, all_namespaces, &progress).await?;
+    let (operator_api, api) = create_preview_api(&layer_config, all_namespaces, &progress).await?;
 
     let mut subtask = progress.subtask("finding preview sessions");
 
@@ -479,7 +495,7 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
         Some(config_target) => {
             let session_target = resolve_config_target(
                 config_target,
-                &client,
+                operator_api.client(),
                 layer_config.target.namespace.as_deref(),
             )
             .await
@@ -540,7 +556,8 @@ async fn preview_stop(args: PreviewStopArgs) -> CliResult<()> {
             .as_deref()
             .expect("preview session should have a namespace");
 
-        let namespaced_api = Api::<PreviewSession>::namespaced(client.clone(), namespace);
+        let namespaced_api =
+            Api::<PreviewSession>::namespaced(operator_api.client().clone(), namespace);
 
         if let Err(e) =
             delete::delete_and_finalize(namespaced_api.clone(), name, &DeleteParams::default())
@@ -602,13 +619,13 @@ fn load_preview_config(
 }
 
 /// Connects to the operator, validates the license and checks that the `PreviewEnv` feature is
-/// supported, then returns a Kubernetes client and a `PreviewSession` API handle scoped to
-/// the appropriate namespace(s).
+/// supported, then returns the operator API and a `PreviewSession` API handle scoped to the
+/// appropriate namespace(s).
 async fn create_preview_api(
     config: &LayerConfig,
     all_namespaces: bool,
     progress: &ProgressTracker,
-) -> CliResult<(kube::Client, Api<PreviewSession>)> {
+) -> CliResult<(OperatorApi<NoClientCert>, Api<PreviewSession>)> {
     let mut subtask = progress.subtask("connecting to operator");
 
     let operator_api = OperatorApi::try_new(config, &mut NullReporter::default(), progress)
@@ -639,36 +656,5 @@ async fn create_preview_api(
         Api::default_namespaced(client.clone())
     };
 
-    Ok((client, api))
-}
-
-/// Returns `true` when two OCI image references point at the same repository, ignoring any tag or
-/// digest difference. Used to determine whether we should redeploy/update an existing preview env.
-fn images_match(a: &str, b: &str) -> CliResult<bool> {
-    let a: Reference = a
-        .parse()
-        .map_err(|e| CliError::PreviewInvalidImage(format!("{a}: {e}")))?;
-    let b: Reference = b
-        .parse()
-        .map_err(|e| CliError::PreviewInvalidImage(format!("{b}: {e}")))?;
-    Ok(a.registry() == b.registry() && a.repository() == b.repository())
-}
-
-#[cfg(test)]
-mod tests {
-    use rstest::rstest;
-
-    use super::images_match;
-
-    #[rstest]
-    #[case("myapp:v1", "myapp:v2", true)]
-    #[case("myapp:v1", "myapp:v1", true)]
-    #[case("myapp", "myapp:latest", true)]
-    #[case("ghcr.io/org/app:v1", "ghcr.io/org/app:v2", true)]
-    #[case("registry:5000/app:v1", "registry:5000/app:v2", true)]
-    #[case("myapp:v1", "otherapp:v1", false)]
-    #[case("ghcr.io/org/app:v1", "docker.io/org/app:v1", false)]
-    fn test_images_same_name(#[case] a: &str, #[case] b: &str, #[case] expected: bool) {
-        assert_eq!(images_match(a, b).unwrap(), expected);
-    }
+    Ok((operator_api, api))
 }

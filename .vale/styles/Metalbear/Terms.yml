@@ -1,0 +1,33 @@
+extends: substitution
+message: "Use '%s' instead of '%s'."
+level: error
+ignorecase: false
+action:
+  name: replace
+swap:
+  # mirrord is always lowercase, even at the start of a sentence
+  Mirrord: mirrord
+  MirrorD: mirrord
+  MIRRORD: mirrord
+
+  # MetalBear capitalization
+  Metalbear: MetalBear
+  metalbear: MetalBear
+  METALBEAR: MetalBear
+  metal bear: MetalBear
+
+  # GitHub (not Github)
+  Github: GitHub
+
+  # macOS capitalization
+  MacOS: macOS
+  MACOS: macOS
+  macos: macOS
+  OSX: macOS
+
+  # VS Code (Microsoft's official two-word branding)
+  VSCode: VS Code
+  VScode: VS Code
+
+  # Kubernetes always capitalized in prose
+  kubernetes: Kubernetes

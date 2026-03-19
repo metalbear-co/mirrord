@@ -114,7 +114,7 @@ pub struct Connection<Type: ProtocolEndpoint> {
 impl<Type: ProtocolEndpoint> Connection<Type> {
     /// Create a new connection running over a byte stream, i.e.
     /// `AsyncRead` + `AsyncWrite`.
-    pub async fn from_stream<IO>(inner: IO) -> Result<Self, ProtocolError>
+    pub async fn from_stream<IO>(inner: IO) -> Self
     where
         IO: AsyncIO,
     {
@@ -130,10 +130,10 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
             inbound_tx,
         ));
 
-        Ok(Self {
+        Self {
             rx: inbound_rx,
             shared_state,
-        })
+        }
     }
 
     /// Create a new connection, running over a `Sink` + `Stream` of `Vec<u8>`s.

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use kube::CustomResource;
 use mirrord_config::{feature::split_queues::SplitQueuesConfig, target::Target};
 use schemars::JsonSchema;
@@ -26,7 +28,7 @@ pub struct CopyTargetSpec {
     /// Ignored if [`Target`] is [`Target::Pod`].
     pub scale_down: bool,
     /// Split queues client side configuration.
-    #[schemars(with = "Option::<serde_json::Map<String, serde_json::Value>>")]
+    #[schemars(schema_with = "split_queues_schema")]
     pub split_queues: Option<SplitQueuesConfig>,
     /// Containers that are ignored by copy target.
     #[serde(default)]
@@ -58,4 +60,11 @@ impl CopyTargetStatus {
     pub const PHASE_IN_PROGRESS: &'static str = "InProgress";
     pub const PHASE_READY: &'static str = "Ready";
     pub const PHASE_FAILED: &'static str = "Failed";
+}
+
+/// Generates a dummy schema for [`CopyTargetSpec::split_queues`].
+///
+/// The original schema is invalid per CRD standards.
+fn split_queues_schema(generator: &mut schemars::SchemaGenerator) -> schemars::schema::Schema {
+    Option::<BTreeMap<String, serde_json::Value>>::json_schema(generator)
 }

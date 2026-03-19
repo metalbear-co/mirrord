@@ -6,6 +6,7 @@ use mirrord_config::feature::database_branches::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use strum_macros::EnumDiscriminants;
 
 use crate::crd::session::SessionOwner;
 
@@ -184,9 +185,8 @@ pub struct BranchDatabaseStatus {
 /// Environment variable sources follow the same pattern as `connection.url`:
 /// - `Env` - direct env var from pod spec
 /// - `EnvFrom` - from configMapRef/secretRef
-#[derive(Clone, Debug, Deserialize, Serialize, strum_macros::EnumDiscriminants)]
-#[strum_discriminants(name(IamAuthConfigVariant))]
-#[strum_discriminants(derive(JsonSchema))]
+#[derive(Clone, Debug, Deserialize, Serialize, EnumDiscriminants)]
+#[strum_discriminants(derive(Deserialize, Serialize, JsonSchema))]
 #[strum_discriminants(serde(rename_all = "snake_case"))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IamAuthConfig {
@@ -233,41 +233,22 @@ impl JsonSchema for IamAuthConfig {
         "IamAuthConfig".into()
     }
 
-    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::schema::Schema {
-        IamAuthConfigSchemaUnionSchemarsProxy::json_schema(generator)
+    /// [`IamAuthConfig`] is adjacently tagged. Because of this, its JSON schema is not valid
+    /// according to CRD standards.
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        struct Proxy {
+            // We verify the tag.
+            #[serde(rename = "type")]
+            tag: IamAuthConfigDiscriminants,
+            // Other fields can be whatever.
+            //
+            // Generated CRD has `x-kubernetes-preserve-unknown-fields`,
+            // so everything is all right.
+            #[serde(flatten)]
+            rest: HashMap<String, serde_json::Value>,
+        }
+
+        Proxy::json_schema(generator)
     }
-}
-
-#[allow(dead_code)]
-#[derive(JsonSchema)]
-struct IamAuthConfigSchemaUnionSchemarsProxy {
-    /// AWS region.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    region: Option<ConnectionSourceKind>,
-
-    /// AWS Access Key ID.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    access_key_id: Option<ConnectionSourceKind>,
-
-    /// AWS Secret Access Key.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    secret_access_key: Option<ConnectionSourceKind>,
-
-    /// AWS Session Token (for temporary credentials).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    session_token: Option<ConnectionSourceKind>,
-
-    /// Inline service account JSON key content.
-    /// Specify the env var that contains the raw JSON content of the service account key.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    credentials_json: Option<ConnectionSourceKind>,
-
-    /// Path to service account JSON key file.
-    /// Specify the env var that contains the file path to the service account key.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    credentials_path: Option<ConnectionSourceKind>,
-
-    /// GCP project ID.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    project: Option<ConnectionSourceKind>,
 }
