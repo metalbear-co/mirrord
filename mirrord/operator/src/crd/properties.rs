@@ -37,7 +37,7 @@ pub struct Property {
     pub value: PropertyValue,
 }
 
-/// Specifies how to load a property value from some resource.
+/// Specifies property value.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub enum PropertyValue {
@@ -77,7 +77,7 @@ pub struct PropertiesFrom {
     /// Optional prefix to be added to the names of all loaded properties.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub prefix: String,
-    /// Load properties from some other resource.
+    /// Properties source.
     #[serde(flatten)]
     pub from: PropertiesFromRef,
 }
