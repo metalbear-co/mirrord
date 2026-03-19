@@ -94,6 +94,11 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
         SipPatchOptions {
             patch: patch_binaries,
             skip: skip_patch_binaries,
+            sip_binaries_dir: crate::setup()
+                .layer_config()
+                .experimental
+                .sip_utils
+                .then(|| mirrord_sip::MIRRORD_BINARIES_DIR_PATH_BUF.as_path()),
         },
         log_info,
     ) {

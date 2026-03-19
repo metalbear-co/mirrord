@@ -46,7 +46,7 @@ mod main {
         env,
         ffi::{OsStr, OsString},
         fs::{File, OpenOptions},
-        io::{self, BufRead, ErrorKind, Write},
+        io::{self, BufRead, Cursor, ErrorKind, Write},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
         str::from_utf8,
@@ -110,6 +110,17 @@ mod main {
     pub static MIRRORD_TEMP_BIN_DIR_STRING: Lazy<String> =
         Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_TEMP_BIN_DIR_PATH_BUF));
 
+    /// Path to `~/.mirrord/binaries` where pre-built SIP utility binaries are stored.
+    pub static MIRRORD_BINARIES_DIR_PATH_BUF: Lazy<PathBuf> = Lazy::new(|| {
+        PathBuf::from(env::var("HOME").unwrap_or_default())
+            .join(".mirrord")
+            .join("binaries")
+    });
+
+    /// String version of [`MIRRORD_BINARIES_DIR_PATH_BUF`], without a trailing `/`.
+    pub static MIRRORD_BINARIES_DIR_STRING: Lazy<String> =
+        Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_BINARIES_DIR_PATH_BUF));
+
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
     /// main cpu type is arm64. We only consider the lowest byte in the check.
     fn is_cpu_subtype_arm64e(subtype: u32) -> bool {
@@ -142,6 +153,8 @@ mod main {
         pub patch: &'a [String],
         /// A list of binaries to skip patching.
         pub skip: &'a [String],
+        /// If `Some`, check this dir for a binary with the same filename before SIP-patching.
+        pub sip_binaries_dir: Option<&'a Path>,
     }
 
     /// Info for logging to `config.experimental.sip_log_destination`
@@ -539,8 +552,11 @@ mod main {
         Ok(MIRRORD_TEMP_BIN_DIR_PATH_BUF
             .canonicalize()
             .map(|x| canonical_path.starts_with(x))
-            // path might be non-existent yet.
-            .unwrap_or_default())
+            .unwrap_or_default()
+            || MIRRORD_BINARIES_DIR_PATH_BUF
+                .canonicalize()
+                .map(|x| canonical_path.starts_with(x))
+                .unwrap_or_default())
     }
 
     /// Checks the SF_RESTRICTED flags on a file (there might be a better check, feel free to
@@ -715,6 +731,15 @@ mod main {
             None
         };
 
+        if let Some(binaries_dir) = opts.sip_binaries_dir {
+            if let Some(binary_name) = Path::new(binary_path).file_name() {
+                let candidate = binaries_dir.join(binary_name);
+                if candidate.exists() {
+                    return Ok(Some(candidate.to_string_lossy().to_string()));
+                }
+            }
+        }
+
         let status = get_sip_status(binary_path, opts);
         if let (Some(log_info), Some(log_file)) = (log_info, log_file.as_mut()) {
             try_write_start_log_to_file(log_file, binary_path, &status, &log_info);
@@ -791,6 +816,27 @@ mod main {
         }
 
         patch_result
+    }
+
+    const APPLE_UTILS_URL: &str =
+        "https://github.com/metalbear-co/appleutils/releases/download/v1/apple-utils-v1.tar.gz";
+
+    /// Downloads and extracts the apple utils bundle into [`MIRRORD_BINARIES_DIR_PATH_BUF`].
+    /// No-op if the directory already exists and is non-empty.
+    pub async fn download_sip_binaries() -> Result<()> {
+        let binaries_dir = &*MIRRORD_BINARIES_DIR_PATH_BUF;
+        if binaries_dir.exists() && std::fs::read_dir(binaries_dir)?.next().is_some() {
+            return Ok(());
+        }
+        std::fs::create_dir_all(binaries_dir)?;
+        let response = reqwest::get(APPLE_UTILS_URL)
+            .await
+            .map_err(SipError::DownloadFailed)?;
+        let bytes = response.bytes().await.map_err(SipError::DownloadFailed)?;
+        let gz = flate2::read::GzDecoder::new(Cursor::new(bytes));
+        let mut archive = tar::Archive::new(gz);
+        archive.unpack(binaries_dir)?;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -1151,7 +1197,8 @@ mod main {
                     signed_temp_file_path,
                     SipPatchOptions {
                         patch: &[],
-                        skip: &[signed_temp_file_path.to_string()]
+                        skip: &[signed_temp_file_path.to_string()],
+                        sip_binaries_dir: None,
                     }
                 )
                 .unwrap(),
