@@ -115,6 +115,7 @@ pub struct MirrordPropertyListCompat {
 }
 
 #[derive(Deserialize, Clone, Debug)]
+#[serde(untagged)]
 pub enum MirrordPropertyListSpecCompat {
     Known(MirrordPropertyListSpec),
     Unknown(serde_json::Value),
