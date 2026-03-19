@@ -133,10 +133,6 @@ pub fn is_session_ready(session: Option<&MirrordRmqSession>) -> bool {
 )]
 #[serde(rename_all = "camelCase")] // queue_filters -> queueFilters
 pub struct MirrordRmqSessionSpec {
-    /// The associated [`MirrordPropertyList`](crate::crd::properties::MirrordPropertyList) name
-    /// that contains the RabbitMQ cluster definition.
-    pub cluster_ref: String,
-
     /// Kubernetes namespace for the session (in workload clusters)
     pub namespace: String,
 
