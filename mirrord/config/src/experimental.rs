@@ -167,6 +167,14 @@ pub struct ExperimentalConfig {
     ///
     /// Configuration for inspecting and modifying apple variables. macOS only.
     pub applev: Option<AppleVariablesConfig>,
+
+    /// ### _experimental_ sip_utils {#experimental-sip_utils}
+    ///
+    /// Downloads pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses
+    /// them in place of SIP-patching the originals.
+    /// This shouldn't be used unless someone from MetalBear/mirrord tells you to.
+    #[config(default = false)]
+    pub sip_utils: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -191,6 +199,7 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("latency_transmit_delay", self.latency.transmit_delay);
         analytics.add("latency_receive_delay", self.latency.receive_delay);
         analytics.add("applev", self.applev.is_some());
+        analytics.add("sip_utils", self.sip_utils);
     }
 }
 
