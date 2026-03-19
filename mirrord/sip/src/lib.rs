@@ -821,7 +821,6 @@ mod main {
         patch_result
     }
 
-
     /// Downloads and extracts the apple utils bundle into [`MIRRORD_BINARIES_DIR_PATH_BUF`].
     /// No-op if the directory already exists and is non-empty.
     pub async fn download_sip_binaries() -> Result<()> {
