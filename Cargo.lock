@@ -5148,6 +5148,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "serde_yaml",
+ "strum 0.27.2",
  "strum_macros 0.27.2",
  "thiserror 2.0.18",
  "tokio",
