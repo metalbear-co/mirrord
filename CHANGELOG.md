@@ -13,7 +13,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Added
 
-- Added interactive configuration wizard frontend for generating `mirrord.json`
+- Revamped the interactive configuration wizard frontend for generating `mirrord.json`
   files, with cluster-aware target selection, traffic mode configuration, and
   JSON export. [#3994](https://github.com/metalbear-co/mirrord/issues/3994)
 - Added Windows installation via Chocolatey (`choco install --pre mirrord`)
