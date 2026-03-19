@@ -5,12 +5,9 @@ use std::{
 };
 
 use amq_protocol_types::FieldTable;
-use base64::{Engine, engine::general_purpose};
 use kube::CustomResource;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize, de, ser};
-use tcp_stream::{OwnedIdentity, OwnedTLSConfig};
-use url::Url;
+use serde::{Deserialize, Serialize};
 
 use super::{QueueConsumer, QueueId, QueueMessageFilter, QueueNameUpdate, SplitQueueNameDetails};
 

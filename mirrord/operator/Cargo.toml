@@ -53,8 +53,6 @@ crd = [
   "dep:strum",
   "dep:strum_macros",
   "dep:thiserror",
-  "dep:tcp-stream",
-  "dep:url",
 ]
 
 [dependencies]
@@ -90,9 +88,7 @@ thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tower = { workspace = true, features = ["retry"], optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
-tcp-stream = { version = "0.34", optional = true }
 tracing = { workspace = true, optional = true }
-url = { version = "2.0", optional = true, features = ["serde"] }
 uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
