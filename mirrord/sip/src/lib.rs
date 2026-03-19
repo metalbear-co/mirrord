@@ -731,15 +731,6 @@ mod main {
             None
         };
 
-        if let Some(binaries_dir) = opts.sip_binaries_dir {
-            if let Some(binary_name) = Path::new(binary_path).file_name() {
-                let candidate = binaries_dir.join(binary_name);
-                if candidate.exists() {
-                    return Ok(Some(candidate.to_string_lossy().to_string()));
-                }
-            }
-        }
-
         let status = get_sip_status(binary_path, opts);
         if let (Some(log_info), Some(log_file)) = (log_info, log_file.as_mut()) {
             try_write_start_log_to_file(log_file, binary_path, &status, &log_info);
@@ -770,6 +761,12 @@ mod main {
                 Some(patched_script).transpose()
             }
             Ok(SipBinary(binary)) => {
+                if let Some(binaries_dir) = opts.sip_binaries_dir {
+                    let candidate = binaries_dir.join(binary.strip_prefix("/").unwrap_or(&binary));
+                    if candidate.exists() {
+                        return Ok(Some(candidate.to_string_lossy().to_string()));
+                    }
+                }
                 let patched_binary =
                     patch_binary(&binary).map(|path| path.to_string_lossy().to_string());
                 Some(patched_binary).transpose()
