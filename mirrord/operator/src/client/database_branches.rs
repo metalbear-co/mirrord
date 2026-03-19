@@ -812,7 +812,6 @@ pub async fn create_branches<P: Progress>(
     }
 
     let has_reused = !reused_branches.is_empty();
-    let has_created = !created_branches.is_empty();
     created_branches.extend(reused_branches);
 
     let branch_names = created_branches
