@@ -608,6 +608,7 @@ pub enum SplitQueue {
     /// Solves issues when deserializing unknown variants returned in responses to list or watch
     /// requests.
     #[strum_discriminants(schemars(skip))]
+    #[serde(other)]
     Unknown,
 }
 
@@ -941,7 +942,7 @@ mod tests {
 
     use crate::crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
-        MirrordWorkloadQueueRegistry, SessionCrd,
+        MirrordWorkloadQueueRegistry, QueueNameSource, SessionCrd, SplitQueue, SqsQueueDetails,
         db_branching::{
             mongodb::MongodbBranchDatabase, mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
         },
@@ -995,5 +996,45 @@ mod tests {
         write_crd_yaml::<MirrordProfile>();
         write_crd_yaml::<MirrordTlsStealConfig>();
         write_crd_yaml::<MirrordClusterTlsStealConfig>();
+    }
+
+    #[test]
+    fn deserialize_split_queue() {
+        let valid_sqs = serde_json::json!({
+            "queueType": "SQS",
+            "nameSource": {
+                "envVar": "TEST_ENV",
+            },
+        });
+        let deserialized = serde_json::from_value::<SplitQueue>(valid_sqs).unwrap();
+        assert_eq!(
+            deserialized,
+            SplitQueue::Sqs(SqsQueueDetails {
+                name_source: QueueNameSource::EnvVar("TEST_ENV".into()),
+                fallback_name: None,
+                names_from_json_map: None,
+                tags: None,
+                sns: None,
+            }),
+        );
+
+        let invalid_sqs = serde_json::json!({
+            "queueType": "SQS",
+            "nameSource": {
+                "ENV_VAR": "TEST_ENV",
+            },
+        });
+        serde_json::from_value::<SplitQueue>(invalid_sqs).unwrap_err();
+
+        let unknown_queue_type = serde_json::json!({
+            "queueType": "I_DO_NOT_EXIST",
+            "nameSource": {
+                "envVar": {
+                    "variable": "TEST_ENV",
+                },
+            },
+        });
+        let deserialized = serde_json::from_value::<SplitQueue>(unknown_queue_type).unwrap();
+        assert_eq!(deserialized, SplitQueue::Unknown,);
     }
 }
