@@ -115,11 +115,11 @@ impl DialectConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum DialectValidationError {
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, or mongodbOptions must be set, but none were"
+        "exactly one of postgresOptions, mysqlOptions, mongodbOptions, or mssqlOptions must be set, but none were"
     )]
     NoneSet,
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, or mongodbOptions must be set, but multiple were"
+        "exactly one of postgresOptions, mysqlOptions, mongodbOptions, or mssqlOptions must be set, but multiple were"
     )]
     MultipleSet,
 }
@@ -183,6 +183,9 @@ impl BranchDatabaseSpec {
             self.mongodb_options
                 .as_ref()
                 .map(|v| DialectConfig::Mongodb(Box::new(v.clone()))),
+            self.mssql_options
+                .as_ref()
+                .map(|v| DialectConfig::Mssql(Box::new(v.clone()))),
         ]
         .into_iter()
         .flatten();
