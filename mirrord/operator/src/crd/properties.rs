@@ -1,4 +1,4 @@
-use kube::CustomResource;
+use kube::{CustomResource, Resource, api::ObjectMeta};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -101,4 +101,21 @@ pub struct ResourceRef {
     /// Determines how we handle the case when the resource is not found.
     #[serde(default)]
     pub optional: bool,
+}
+
+/// Forward compatibility wrapper for [`MirrordPropertyList`], inherits its [`Resource`]
+/// implementation.
+///
+/// Should be used for all list/watch requests.
+#[derive(Resource, Deserialize, Clone, Debug)]
+#[resource(inherit = "MirrordPropertyList")]
+pub struct MirrordPropertyListCompat {
+    pub metadata: ObjectMeta,
+    pub spec: MirrordPropertyListSpecCompat,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub enum MirrordPropertyListSpecCompat {
+    Known(MirrordPropertyListSpec),
+    Unknown(serde_json::Value),
 }
