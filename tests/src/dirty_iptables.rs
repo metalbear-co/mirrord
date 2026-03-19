@@ -144,7 +144,7 @@ async fn dirty_iptables_test_inner(kube_client: Client) -> DirtyIptablesTest {
 /// `IPTABLES_TABLE_NAME`
 #[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(120))]
 pub async fn agent_exits_on_dirty_tables(
     #[future] oss_only_dirty_iptables_test: Option<DirtyIptablesTest>,
@@ -193,7 +193,7 @@ pub async fn agent_exits_on_dirty_tables(
 /// iptables and starts, instead of erroring out.
 #[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(120))]
 pub async fn agent_cleans_up_and_starts_on_dirty_tables(
     #[future] dirty_iptables_test: DirtyIptablesTest,
