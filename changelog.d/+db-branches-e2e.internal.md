@@ -1,1 +1,1 @@
-Introduce e2e tests for db-branches cli command.
+Introduce e2e tests for db-branches CLI command.
