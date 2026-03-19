@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt,
+    ops::Not,
 };
 
 use amq_protocol_types::FieldTable;
@@ -28,6 +29,15 @@ pub struct RmqQueueDetails {
 
     #[serde(flatten)]
     pub name_details: SplitQueueNameDetails,
+
+    #[serde(default, skip_serializing_if = "Not::not")]
+    pub durable: bool,
+
+    #[serde(default, skip_serializing_if = "Not::not")]
+    pub exclusive: bool,
+
+    #[serde(default, skip_serializing_if = "Not::not")]
+    pub auto_delete: bool,
 
     /// RabbitMQ specific arguments that will be used during for the cosume call.
     #[serde(default)]

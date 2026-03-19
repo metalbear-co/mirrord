@@ -234,13 +234,13 @@ impl JsonSchema for IamAuthConfig {
     }
 
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::schema::Schema {
-        IamAuthConfigSchemaUnionProxy::json_schema(generator)
+        IamAuthConfigSchemaUnionSchemarsProxy::json_schema(generator)
     }
 }
 
 #[allow(dead_code)]
 #[derive(JsonSchema)]
-struct IamAuthConfigSchemaUnionProxy {
+struct IamAuthConfigSchemaUnionSchemarsProxy {
     /// AWS region.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     region: Option<ConnectionSourceKind>,
