@@ -731,7 +731,6 @@ pub mod labels {
     pub(crate) const MIRRORD_MONGODB_BRANCH_ID_LABEL: &str = "mirrord-mongodb-branch-id";
     pub(crate) const MIRRORD_MYSQL_BRANCH_ID_LABEL: &str = "mirrord-mysql-branch-id";
     pub(crate) const MIRRORD_PG_BRANCH_ID_LABEL: &str = "mirrord-pg-branch-id";
-    pub(crate) const MIRRORD_MSSQL_BRANCH_ID_LABEL: &str = "mirrord-mssql-branch-id";
     pub const MIRRORD_BRANCH_ID_LABEL: &str = "mirrord-branch-id";
 }
 
@@ -752,6 +751,7 @@ pub async fn create_branches<P: Progress>(
 
     let mut subtask = progress.subtask("creating new branch databases");
     let mut created_branches = HashMap::new();
+    let mut reused_branches = HashMap::new();
 
     for (id, params) in params {
         let name_prefix = params.name_prefix;
@@ -760,9 +760,21 @@ pub async fn create_branches<P: Progress>(
         } else {
             Some(params.annotations)
         };
+
+        let (name, generate_name) = match &id {
+            BranchDatabaseId::Specified(branch_id) => {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                branch_id.hash(&mut hasher);
+                (Some(format!("{name_prefix}{:x}", hasher.finish())), None)
+            }
+            BranchDatabaseId::Generated(_) => (None, Some(name_prefix)),
+        };
+
         let branch = BranchDatabase {
             metadata: ObjectMeta {
-                generate_name: Some(name_prefix),
+                name: name.clone(),
+                generate_name,
                 labels: Some(params.labels),
                 annotations,
                 ..Default::default()
@@ -772,7 +784,24 @@ pub async fn create_branches<P: Progress>(
         };
 
         match api.create(&kube::api::PostParams::default(), &branch).await {
-            Ok(branch) => created_branches.insert(id, branch),
+            Ok(branch) => {
+                created_branches.insert(id, branch);
+            }
+            Err(kube::Error::Api(ref err)) if err.code == 409 => {
+                if let Some(ref deterministic_name) = name {
+                    tracing::info!(
+                        name = %deterministic_name,
+                        "Branch already exists, reusing"
+                    );
+                    let existing = api.get(deterministic_name).await.map_err(|e| {
+                        OperatorApiError::KubeError {
+                            error: e,
+                            operation: OperatorOperation::DbBranching,
+                        }
+                    })?;
+                    reused_branches.insert(id, existing);
+                }
+            }
             Err(e) => {
                 return Err(OperatorApiError::KubeError {
                     error: e,
@@ -781,7 +810,10 @@ pub async fn create_branches<P: Progress>(
             }
         };
     }
-    subtask.info("databases created");
+
+    let has_reused = !reused_branches.is_empty();
+    let has_created = !created_branches.is_empty();
+    created_branches.extend(reused_branches);
 
     let branch_names = created_branches
         .values()
@@ -834,7 +866,11 @@ pub async fn create_branches<P: Progress>(
         }
     }
 
-    subtask.success(Some("new branch databases ready"));
+    if has_reused {
+        subtask.success(Some("reusing existing branch databases"));
+    } else {
+        subtask.success(Some("new branch databases ready"));
+    }
 
     Ok(created_branches)
 }
