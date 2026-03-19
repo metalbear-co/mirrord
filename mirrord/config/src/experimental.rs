@@ -141,7 +141,9 @@ pub struct ExperimentalConfig {
 
     /// ### _experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
     ///
-    /// Enables better support for outgoing connections using non-blocking TCP sockets.
+    /// Enables better support for outgoing connections using
+    /// non-blocking TCP sockets. For technical reasons, enabling this
+    /// will cause `getsockname` to always return a localhost address.
     ///
     /// Defaults to `false`.
     #[config(default = false)]
