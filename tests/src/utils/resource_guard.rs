@@ -1,10 +1,14 @@
-use std::{any::{TypeId, type_name}, fmt::Debug};
+use std::{
+    any::{type_name, TypeId},
+    fmt::Debug,
+};
 
 use futures::FutureExt;
 use futures_util::future::BoxFuture;
 use k8s_openapi::{ClusterResourceScope, NamespaceResourceScope};
 use kube::{
-    Api, Error, Resource, api::{ApiResource, DeleteParams, DynamicObject, PostParams}
+    api::{ApiResource, DeleteParams, DynamicObject, PostParams},
+    Api, Error, Resource,
 };
 use serde::{de::DeserializeOwned, Serialize};
 
