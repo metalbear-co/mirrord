@@ -1,2 +1,2 @@
-mod sanity;
 mod db_branches;
+mod sanity;

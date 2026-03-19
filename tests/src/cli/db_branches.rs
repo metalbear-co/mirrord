@@ -40,7 +40,10 @@ pub async fn db_branch_service(#[future] kube_client: Client) -> KubeService {
 
 fn make_pg_branch(name: &str, pod_name: &str) -> PgBranchDatabase {
     PgBranchDatabase {
-        metadata: ObjectMeta { name: Some(name.to_owned()), ..Default::default() },
+        metadata: ObjectMeta {
+            name: Some(name.to_owned()),
+            ..Default::default()
+        },
         spec: PgBranchDatabaseSpec {
             id: name.to_owned(),
             connection_source: ConnectionSource::Url(Box::new(ConnectionSourceKind::Env {
@@ -48,7 +51,10 @@ fn make_pg_branch(name: &str, pod_name: &str) -> PgBranchDatabase {
                 variable: "DATABASE_URL".to_owned(),
             })),
             database_name: Some("testdb".to_owned()),
-            target: Target::Pod(PodTarget { pod: pod_name.to_owned(), container: None }),
+            target: Target::Pod(PodTarget {
+                pod: pod_name.to_owned(),
+                container: None,
+            }),
             ttl_secs: 300,
             postgres_version: None,
             copy: BranchCopyConfig::default(),
@@ -60,7 +66,10 @@ fn make_pg_branch(name: &str, pod_name: &str) -> PgBranchDatabase {
 
 fn make_mysql_branch(name: &str, pod_name: &str) -> MysqlBranchDatabase {
     MysqlBranchDatabase {
-        metadata: ObjectMeta { name: Some(name.to_owned()), ..Default::default() },
+        metadata: ObjectMeta {
+            name: Some(name.to_owned()),
+            ..Default::default()
+        },
         spec: MysqlBranchDatabaseSpec {
             id: name.to_owned(),
             connection_source: ConnectionSource::Url(Box::new(ConnectionSourceKind::Env {
@@ -68,7 +77,10 @@ fn make_mysql_branch(name: &str, pod_name: &str) -> MysqlBranchDatabase {
                 variable: "DATABASE_URL".to_owned(),
             })),
             database_name: Some("testdb".to_owned()),
-            target: Target::Pod(PodTarget { pod: pod_name.to_owned(), container: None }),
+            target: Target::Pod(PodTarget {
+                pod: pod_name.to_owned(),
+                container: None,
+            }),
             ttl_secs: 300,
             mysql_version: None,
             copy: MysqlBranchCopyConfig::default(),
@@ -79,7 +91,10 @@ fn make_mysql_branch(name: &str, pod_name: &str) -> MysqlBranchDatabase {
 
 fn make_mongodb_branch(name: &str, pod_name: &str) -> MongodbBranchDatabase {
     MongodbBranchDatabase {
-        metadata: ObjectMeta { name: Some(name.to_owned()), ..Default::default() },
+        metadata: ObjectMeta {
+            name: Some(name.to_owned()),
+            ..Default::default()
+        },
         spec: MongodbBranchDatabaseSpec {
             id: name.to_owned(),
             connection_source: ConnectionSource::Url(Box::new(ConnectionSourceKind::Env {
@@ -87,7 +102,10 @@ fn make_mongodb_branch(name: &str, pod_name: &str) -> MongodbBranchDatabase {
                 variable: "DATABASE_URL".to_owned(),
             })),
             database_name: Some("testdb".to_owned()),
-            target: Target::Pod(PodTarget { pod: pod_name.to_owned(), container: None }),
+            target: Target::Pod(PodTarget {
+                pod: pod_name.to_owned(),
+                container: None,
+            }),
             ttl_secs: 300,
             mongodb_version: None,
             copy: MongodbBranchCopyConfig::default(),
@@ -130,10 +148,13 @@ pub async fn db_branches_lifecycle(#[future] db_branch_service: KubeService) {
     let mysql_name = format!("test-mysql-branch-{}", random_string());
     //let mongodb_name = format!("test-mongodb-branch-{}", random_string());
 
-    let (_pg_guard, _) =
-        ResourceGuard::create(pg_api.clone(), &make_pg_branch(&pg_name, pod), delete_after_fail)
-            .await
-            .expect("failed to create PgBranchDatabase");
+    let (_pg_guard, _) = ResourceGuard::create(
+        pg_api.clone(),
+        &make_pg_branch(&pg_name, pod),
+        delete_after_fail,
+    )
+    .await
+    .expect("failed to create PgBranchDatabase");
     let (_mysql_guard, _) = ResourceGuard::create(
         mysql_api.clone(),
         &make_mysql_branch(&mysql_name, pod),
@@ -141,14 +162,14 @@ pub async fn db_branches_lifecycle(#[future] db_branch_service: KubeService) {
     )
     .await
     .expect("failed to create MysqlBranchDatabase");
-  //let (_mongodb_guard, _) = ResourceGuard::create(
-  //    mongodb_api.clone(),
-  //    &make_mongodb_branch(&mongodb_name, pod),
-  //    delete_after_fail,
-  //)
-  //.await
-  //.expect("failed to create MongodbBranchDatabase");
-    
+    //let (_mongodb_guard, _) = ResourceGuard::create(
+    //    mongodb_api.clone(),
+    //    &make_mongodb_branch(&mongodb_name, pod),
+    //    delete_after_fail,
+    //)
+    //.await
+    //.expect("failed to create MongodbBranchDatabase");
+
     // 3. Status lists all DB types with their labels.
     let mut process = run_db_branches_status(ns, &[]).await;
     process.wait_assert_success().await;
@@ -156,26 +177,26 @@ pub async fn db_branches_lifecycle(#[future] db_branch_service: KubeService) {
     process.assert_stdout_contains("PostgreSQL").await;
     process.assert_stdout_contains(&mysql_name).await;
     process.assert_stdout_contains("MySQL").await;
- // process.assert_stdout_contains(&mongodb_name).await;
- // process.assert_stdout_contains("MongoDB").await;
+    // process.assert_stdout_contains(&mongodb_name).await;
+    // process.assert_stdout_contains("MongoDB").await;
 
     // 4. Status filters by name.
     let mut process = run_db_branches_status(ns, &[&pg_name]).await;
     process.wait_assert_success().await;
     process.assert_stdout_contains(&pg_name).await;
     process.assert_stdout_doesnt_contain(&mysql_name).await;
- // process.assert_stdout_doesnt_contain(&mongodb_name).await;
+    // process.assert_stdout_doesnt_contain(&mongodb_name).await;
 
     // 5. Destroy one branch by name; the other two must survive.
     let mut destroy = run_db_branches_destroy(ns, false, &[&pg_name]).await;
     destroy.wait_assert_success().await;
-  //destroy.assert_stdout_contains(&pg_name).await;
+    //destroy.assert_stdout_contains(&pg_name).await;
 
     let mut status = run_db_branches_status(ns, &[]).await;
     status.wait_assert_success().await;
     status.assert_stdout_doesnt_contain(&pg_name).await;
     status.assert_stdout_contains(&mysql_name).await;
-//  status.assert_stdout_contains(&mongodb_name).await;
+    //  status.assert_stdout_contains(&mongodb_name).await;
 
     // 6. Destroy all remaining branches.
     let mut destroy = run_db_branches_destroy(ns, true, &[]).await;
@@ -184,5 +205,5 @@ pub async fn db_branches_lifecycle(#[future] db_branch_service: KubeService) {
     let mut status = run_db_branches_status(ns, &[]).await;
     status.wait_assert_success().await;
     status.assert_stdout_doesnt_contain(&mysql_name).await;
-//  status.assert_stdout_doesnt_contain(&mongodb_name).await;
+    //  status.assert_stdout_doesnt_contain(&mongodb_name).await;
 }
