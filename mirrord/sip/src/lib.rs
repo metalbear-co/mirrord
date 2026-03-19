@@ -816,7 +816,7 @@ mod main {
     }
 
     const APPLE_UTILS_URL: &str =
-        "https://github.com/metalbear-co/appleutils/releases/download/v1/apple-utils-v1.tar.gz";
+        "https://github.com/metalbear-co/appleutils/releases/download/v2/apple-utils-v2.tar.gz";
 
     /// Downloads and extracts the apple utils bundle into [`MIRRORD_BINARIES_DIR_PATH_BUF`].
     /// No-op if the directory already exists and is non-empty.
