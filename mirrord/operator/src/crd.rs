@@ -34,6 +34,7 @@ pub mod patch;
 pub mod policy;
 pub mod preview;
 pub mod profile;
+pub mod properties;
 pub mod session;
 pub mod steal_tls;
 
@@ -953,6 +954,7 @@ mod tests {
         policy::{MirrordClusterPolicy, MirrordPolicy},
         preview::PreviewSession,
         profile::{MirrordClusterProfile, MirrordProfile},
+        properties::MirrordPropertyList,
         session::MirrordClusterSession,
         steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig},
     };
@@ -996,6 +998,7 @@ mod tests {
         write_crd_yaml::<MirrordProfile>();
         write_crd_yaml::<MirrordTlsStealConfig>();
         write_crd_yaml::<MirrordClusterTlsStealConfig>();
+        write_crd_yaml::<MirrordPropertyList>();
     }
 
     #[test]
