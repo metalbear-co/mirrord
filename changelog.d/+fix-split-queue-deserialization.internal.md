@@ -1,1 +1,1 @@
-Fixed an unreleased bug in CRD deserialisation.
+Fixed an unreleased bug in CRD.
