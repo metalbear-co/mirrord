@@ -90,6 +90,12 @@ mod main {
 
     pub const FRAMEWORKS_ENV_VAR_NAME: &str = "DYLD_FALLBACK_FRAMEWORK_PATH";
 
+    /// Where to download system utilities from to use instead of patching.
+    /// Removes need for emulation on arm64 and fixes cases where AV doesn't like
+    /// our ad-hoc signing
+    const APPLE_UTILS_URL: &str =
+        "https://github.com/metalbear-co/appleutils/releases/download/v2/apple-utils-v2.tar.gz";
+
     /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
     /// scripts. Uses `temp_dir()`/mirrord/ because this is where the layer is extracted
     pub static MIRRORD_TEMP_BIN_DIR_PATH_BUF: Lazy<PathBuf> =
@@ -815,8 +821,6 @@ mod main {
         patch_result
     }
 
-    const APPLE_UTILS_URL: &str =
-        "https://github.com/metalbear-co/appleutils/releases/download/v2/apple-utils-v2.tar.gz";
 
     /// Downloads and extracts the apple utils bundle into [`MIRRORD_BINARIES_DIR_PATH_BUF`].
     /// No-op if the directory already exists and is non-empty.
