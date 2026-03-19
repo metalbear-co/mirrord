@@ -89,6 +89,7 @@ fn make_mysql_branch(name: &str, pod_name: &str) -> MysqlBranchDatabase {
     }
 }
 
+#[allow(dead_code)]
 fn make_mongodb_branch(name: &str, pod_name: &str) -> MongodbBranchDatabase {
     MongodbBranchDatabase {
         metadata: ObjectMeta {
@@ -134,6 +135,7 @@ pub async fn db_branches_lifecycle(#[future] db_branch_service: KubeService) {
 
     let pg_api: Api<PgBranchDatabase> = Api::namespaced(client.clone(), ns);
     let mysql_api: Api<MysqlBranchDatabase> = Api::namespaced(client.clone(), ns);
+    #[allow(dead_code)]
     let mongodb_api: Api<MongodbBranchDatabase> = Api::namespaced(client.clone(), ns);
 
     // 1. Empty namespace.
