@@ -950,11 +950,11 @@ mod tests {
     use crate::crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
         MirrordWorkloadQueueRegistry, SessionCrd, SplitQueue, SqsQueueDetails,
-        db_branching::branch_database::BranchDatabase,
-        external::MirrordClusterExternalResource,
         db_branching::{
-            mongodb::MongodbBranchDatabase, mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
+            branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
+            mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
         },
+        external::MirrordClusterExternalResource,
         kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
         multi_cluster::MirrordMultiClusterSession,
         patch::{MirrordClusterWorkloadPatch, MirrordClusterWorkloadPatchRequest},
