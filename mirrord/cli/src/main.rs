@@ -323,6 +323,9 @@ mod wsl;
 #[cfg(feature = "wizard")]
 mod wizard;
 
+#[cfg(feature = "ui")]
+mod ui;
+
 mod fix;
 
 pub(crate) use error::{CliError, CliResult};
@@ -1061,6 +1064,8 @@ fn main() -> miette::Result<()> {
                 .await?
             }
             Commands::Fix(args) => fix::fix_command(args).await?,
+            #[cfg(feature = "ui")]
+            Commands::Ui(args) => ui::ui_command(args).await?,
         };
 
         Ok(())

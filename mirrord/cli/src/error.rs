@@ -588,6 +588,12 @@ pub(crate) enum CliError {
         "Image must be a valid OCI image reference (e.g. 'myregistry.io/myimage:tag')."
     ))]
     PreviewInvalidImage(String),
+
+    /// Errors produced by the `mirrord ui` command.
+    #[cfg(feature = "ui")]
+    #[error("Session monitor UI error: {0}")]
+    #[diagnostic(help("Check that no other process is using the port and try again."))]
+    UiError(String),
 }
 
 impl CliError {

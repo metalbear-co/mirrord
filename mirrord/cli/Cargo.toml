@@ -80,6 +80,11 @@ itertools = { workspace = true, optional = true }
 yamlpatch.workspace = true
 yamlpath.workspace = true
 oci-spec.workspace = true
+rust-embed = { version = "8", optional = true }
+notify = { version = "7", features = ["macos_fsevent"], optional = true }
+hyper = { workspace = true, features = ["full"], optional = true }
+hyper-util = { workspace = true, features = ["client-legacy", "tokio"], optional = true }
+http-body-util = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 rand.workspace = true
@@ -115,3 +120,4 @@ tempfile.workspace = true
 [features]
 windows_build = []
 wizard = ["dep:axum", "dep:tower-http", "dep:tar", "dep:flate2", "dep:tempfile", "dep:itertools"]
+ui = ["dep:axum", "axum/ws", "dep:rust-embed", "dep:notify", "dep:hyper", "dep:hyper-util", "dep:http-body-util"]
