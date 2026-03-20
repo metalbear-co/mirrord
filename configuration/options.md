@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-03-05T00:00:00.000Z
+lastmod: 2026-03-20T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -220,6 +220,10 @@ Possible values for the header:
   didn't match the filters)
 
 - `forwarded-to-client`: set when the request was sent to the local app
+
+### agent.jaq_time_limit {#agent-jaq_time_limit}
+
+Time limit for running jaq queries, in milliseconds. Defaults to 500ms.
 
 ### agent.json_log {#agent-json_log}
 
@@ -503,7 +507,7 @@ This should be useful if your host machine is exposed with a different IP addres
 one bound as host.
 
 - If you're running inside WSL, and encountering problems, try setting
-  `external_proxy.host_ip` T `0.0.0.0`, and this to the internal container runtime address
+  `external_proxy.host_ip` to `0.0.0.0`, and this to the internal container runtime address
   (for docker, this  would be what `host.docker.internal` resolved to, which by default is
   `192.168.65.254`). You can find this ip by resolving it from inside a running container,
   e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`
@@ -634,14 +638,23 @@ Defaults to `0` (no delay).
 
 ### _experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
 
-Enables better support for outgoing connections using non-blocking TCP sockets.
+Enables better support for outgoing connections using
+non-blocking TCP sockets. For technical reasons, enabling this
+will cause `getsockname` to always return a localhost address.
 
-Defaults to `false`.
+Defaults to `true` in OSS.
+Defaults to `false` in mfT.
 
 ### _experimental_ sip_log_destination {#experimental-sip_log_destination}
 
 Writes basic fork-safe SIP patching logs to a destination file.
 Useful for seeing the state of SIP when `stdout` may be affected by another process.
+
+### _experimental_ sip_utils {#experimental-sip_utils}
+
+Downloads pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses
+them in place of SIP-patching the originals.
+This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 
 ### _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
 
@@ -774,7 +787,7 @@ have support for a shortened version, that you can see [here](#root-shortened).
       "incoming": {
         "mode": "steal",
         "http_filter": {
-          "header_filter": "host: api\\..+"
+          "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
         },
         "port_mapping": [[ 7777, 8888 ]],
         "ignore_localhost": false,
@@ -1627,14 +1640,14 @@ Case insensitive.
 1. `"read_write"` - List of patterns that should be read/write remotely.
 2. `"read_only"` - List of patterns that should be read only remotely.
 3. `"local"` - List of patterns that should be read locally.
-4. `"not_found"` - List of patters that should never be read nor written. These files should be
+4. `"not_found"` - List of patterns that should never be read nor written. These files should be
    treated as non-existent.
 4. `"mapping"` - Map of patterns and their corresponding replacers. The replacement happens before any specific behavior as defined above or mode (uses [`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace))
 
 The logic for choosing the behavior is as follows:
 
 
-1. Check agains "mapping" if path needs to be replaced, if matched then continue to next step
+1. Check against "mapping" if path needs to be replaced, if matched then continue to next step
    with new path after replacements otherwise continue as usual.
 2. Check if one of the patterns match the file path, do the corresponding action. There's no
    specified order if two lists match the same path, we will use the first one (and we do not
@@ -1644,18 +1657,16 @@ The logic for choosing the behavior is as follows:
    behaviour.
 
 3. There are pre-defined exceptions to the set FS mode.
-  1. Paths that match the pre-defined patterns
-     [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_local_by_default.rs) or
-     [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_local_by_default.rs)
+  1. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_local_by_default.rs)
+     or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_local_by_default.rs)
      are read locally by default.
-  2. Paths that match the pre-defined patterns
-     [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_remote_by_default.rs) or
-     [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_remote_by_default.rs)
+  2. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_remote_by_default.rs)
+     or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_remote_by_default.rs)
      are read remotely by default when the mode is `localwithoverrides`.
-  3. Paths that match the pre-defined patterns
-     [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/not_found_by_default.rs) or
-     [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/not_found_by_default.rs)
-     under the running user's home directory will not be found by the application when the mode is not `local`.
+  3. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/not_found_by_default.rs)
+     or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/not_found_by_default.rs)
+     under the running user's home directory will not be found by the application when the mode
+     is not `local`.
 
   In order to override that default setting for a path, or a pattern, include it the
   appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even
@@ -1698,7 +1709,7 @@ Example:
   "^/home/(?<user>\\S+)/dev/config/(?<app>\\S+)": "/mnt/configs/${user}-$app"
 }
 ```
-Will do the next replacements for any io operaton
+Will do the next replacements for any io operation
 
 `/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml`
 `/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`
@@ -1712,13 +1723,13 @@ Will do the next replacements for any io operaton
 
 Configuration for enabling read-only or read-write file operations.
 
-These options are overriden by user specified overrides and mirrord default overrides.
+These options are overridden by user specified overrides and mirrord default overrides.
 
 If you set [`"localwithoverrides"`](#feature-fs-mode-localwithoverrides) then some files
 can be read/write remotely based on our default/user specified.
 Default option for general file configuration.
 
-The accepted values are: `"local"`, `"localwithoverrides`, `"read"`, or `"write`.
+The accepted values are: `"local"`, `"localwithoverrides"`, `"read"`, or `"write"`.
 
 #### feature.fs.mode.local {#feature-fs-mode-local}
 
@@ -1813,7 +1824,7 @@ for more details.
       "incoming": {
         "mode": "steal",
         "http_filter": {
-          "header_filter": "host: api\\..+"
+          "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
         },
         "port_mapping": [[ 7777, 8888 ]],
         "ignore_localhost": false,
@@ -1875,8 +1886,8 @@ Takes a list of values, such as:
 }
 ```
 
-- Only queries for addresses in subnet `1.1.1.0/24` with service port `1337`` will go through
-  the remote pod.
+- Only queries for addresses in subnet `1.1.1.0/24` with service port `1337` will go through the
+  remote pod.
 
 ```json
 {
@@ -1976,7 +1987,7 @@ Steal only traffic that matches the
       "incoming": {
         "mode": "steal",
         "http_filter": {
-          "header_filter": "host: api\\..+"
+          "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
         },
         "port_mapping": [[ 7777, 8888 ]],
         "ignore_localhost": false,
@@ -1999,14 +2010,25 @@ requests to their original destinations.
 Only does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is
 set as `"steal"`, ignored otherwise.
 
-For example, to filter based on header:
+The recommended way to filter a single developer session is to propagate a W3C `baggage` or
+`tracestate` entry such as `mirrord-session={{ key }}` from the caller, and match that value
+here. This works well across proxies, service meshes, and tracing-aware clients.
+
+For example, to filter on a `baggage` header:
 ```json
 {
-  "header_filter": "host: api\\..+"
+  "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
 }
 ```
-Setting that filter will make mirrord only steal requests with the `host` header set to hosts
-that start with "api", followed by a dot, and then at least one more character.
+Setting that filter will make mirrord only steal requests whose `baggage` header contains
+`mirrord-session={{ key }}`.
+
+If your traffic already propagates `tracestate`, you can filter on it the same way:
+```json
+{
+  "header_filter": "^tracestate: .*mirrord-session={{ key }}.*$"
+}
+```
 
 For example, to filter based on path:
 ```json
@@ -2039,25 +2061,26 @@ Setting this filter will make mirrord only steal requests to URIs that do not st
 With `all_of` and `any_of`, you can use multiple HTTP filters at the same time.
 
 If you want to steal HTTP requests that match **every** pattern specified, use `all_of`.
-For example, this filter steals only HTTP requests to endpoint `/api/my-endpoint` that contain
-header `x-debug-session` with value `121212`.
+For example, this filter steals only `POST` requests to endpoint `/api/my-endpoint` whose
+`baggage` header contains `mirrord-session={{ key }}`.
 ```json
 {
   "all_of": [
-    { "header": "^x-debug-session: 121212$" },
-    { "path": "^/api/my-endpoint$" }
+    { "header": "^baggage: .*mirrord-session={{ key }}.*$" },
+    { "path": "^/api/my-endpoint$" },
+    { "method": "POST" }
   ]
 }
 ```
 
 If you want to steal HTTP requests that match **any** of the patterns specified, use `any_of`.
-For example, this filter steals HTTP requests to endpoint `/api/my-endpoint`
-**and** HTTP requests that contain header `x-debug-session` with value `121212`.
+For example, this filter steals HTTP requests to `/api/my-endpoint`, or requests whose
+`baggage` header contains `mirrord-session={{ key }}`.
 ```json
 {
  "any_of": [
-   { "path": "^/api/my-endpoint$"},
-   { "header": "^x-debug-session: 121212$" }
+   { "header": "^baggage: .*mirrord-session={{ key }}.*$" },
+   { "path": "^/api/my-endpoint$" }
  ]
 }
 ```
@@ -2066,7 +2089,7 @@ For example, this filter steals HTTP requests to endpoint `/api/my-endpoint`
 
 An array of HTTP filters.
 
-Each inner filter specifies either header or path regex.
+Each inner filter specifies a header, path, method, body, or jq filter.
 Requests must match all of the filters to be stolen.
 
 Cannot be an empty list.
@@ -2075,9 +2098,9 @@ Example:
 ```json
 {
   "all_of": [
-    { "header": "x-user: my-user$" },
-    { "path": "^/api/v1/my-endpoint" }
-    { "method": "post" }
+    { "header": "^baggage: .*mirrord-session={{ key }}.*$" },
+    { "path": "^/api/v1/my-endpoint$" },
+    { "method": "POST" }
   ]
 }
 ```
@@ -2086,7 +2109,7 @@ Example:
 
 An array of HTTP filters.
 
-Each inner filter specifies either header or path regex.
+Each inner filter specifies a header, path, method, body, or jq filter.
 Requests must match at least one of the filters to be stolen.
 
 Cannot be an empty list.
@@ -2095,9 +2118,9 @@ Example:
 ```json
 {
   "any_of": [
-    { "header": "^x-user: my-user$" },
-    { "path": "^/api/v1/my-endpoint" }
-    { "method": "post" }
+    { "header": "^baggage: .*mirrord-session={{ key }}.*$" },
+    { "header": "^tracestate: .*mirrord-session={{ key }}.*$" },
+    { "path": "^/api/v1/my-endpoint$" }
   ]
 }
 ```
@@ -2185,7 +2208,7 @@ but not
 
 
 
-To use with with `all_of` or `any_of`, use the following syntax:
+To use with `all_of` or `any_of`, use the following syntax:
 ```json
 "http_filter": {
   "all_of": [
@@ -2209,6 +2232,15 @@ Supports regexes validated by the
 
 The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
 case-insensitive.
+
+The recommended pattern is to match a W3C `baggage` or `tracestate` entry such as
+`mirrord-session={{ key }}`.
+
+##### feature.network.incoming.http_filter.header_filter_jq {#feature-network-incoming-http-header-filter-jq}
+
+Supports jq expressions, matches when the expression returns
+`true`. The expression is evaluated on each present header in
+the request, in `HeaderKey: HeaderValue` format.
 
 ##### feature.network.incoming.http_filter.method_filter {#feature-network-incoming-http-method-filter}
 
@@ -2351,7 +2383,7 @@ The value of `port_mapping` doesn't affect this.
 
 ##### feature.network.incoming.mode {#feature-network-incoming-mode}
 
-Allows selecting between mirrorring or stealing traffic.
+Allows selecting between mirroring or stealing traffic.
 
 Can be set to either `"mirror"` (default), `"steal"` or `"off"`.
 
@@ -2497,20 +2529,19 @@ Tunnel outgoing network operations through mirrord.
 See the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic/#outgoing) for more
 details.
 
-You can use either the `remote` or `local` value to turn outgoing traffic tunneling on or off.
+You can use either the `true` or `false` values to turn outgoing traffic tunneling on or off.
 
 ```json
 {
   "feature": {
     "network": {
-      "outgoing": "remote"
+      "outgoing": true
     }
   }
 }
 ```
 
-Alternatively, you can use more fine-grained configuration. The `remote` and `local` config for
-this feature are **mutually** exclusive.
+Alternatively, you can use more fine-grained configuration.
 
 ```json
 {
@@ -2560,7 +2591,7 @@ Takes a list of values, such as:
 ```
 
 - Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will be
-  emmited remotely in the cluster.
+  emitted remotely in the cluster.
 
 ```json
 {
@@ -2652,6 +2683,14 @@ If you don't specify any filter for a queue that is however declared in the
 `MirrordWorkloadQueueRegistry` of the target you're using, a match-nothing filter
 will be used, and your local application will not receive any messages from that queue.
 
+A mapping from queue ids to their filters. Each queue filter defines which messages from the
+original queue will be made available to the local application, based on message attributes
+or headers, and possibly on jq filters (for SQS).
+
+The queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` or
+`MirrordKafkaTopicsConsumer` for SQS or Kafka respectively.
+
+
 ```json
 {
   "feature": {
@@ -2665,9 +2704,7 @@ will be used, and your local application will not receive any messages from that
       },
       "second-queue": {
         "queue_type": "SQS",
-        "message_filter": {
-          "who": "you$"
-        }
+        "jq_filter": ".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"
       },
       "third-queue": {
         "queue_type": "Kafka",
@@ -2687,12 +2724,32 @@ will be used, and your local application will not receive any messages from that
 }
 ```
 
-Amazon Simple Queue Service and Kafka are supported.
+### feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}
 
-More queue types might be added in the future.
+For each queue, `message_filter` is a mapping between message attribute names and regexes they
+should match. The local application will only receive messages that match **all** of the given
+patterns. This means, only messages that have **all** of the attributes in the
+filter, with values of those attributes matching the respective patterns.
 
-When a newer client sends a new filter kind to an older operator, that does not yet know
-about that filter type, the filter will be deserialized to unknown.
+### feature.split_queues.{}.queue_type {#feature-split_queues-queue_id-queue_type}
+
+The type of queue to be split, currently `SQS` and `Kafka` are supported. More queue types might
+be added in the future.
+
+### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
+Only supported with `queue_type` of `SQS`.
+When this field is specified, for each SQS message, the jq filter runs on a JSON
+representation of the SQS `Message` object. If the jq program outputs `true`, that
+message is considered as matching the filter.
+
+See [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).
+
+This can be used to filter messages based on their body content, for example.
+
+
+This filter, for example, will tell mirrord to only make available to this local application
+messages with a json in the message body, with a `customer_email` field that contains
+"metalbear.com": `".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"`
 
 ## internal_proxy {#root-internal_proxy}
 
@@ -2789,7 +2846,8 @@ on process execution, delaying the layer startup and connection to proxy.
 An identifier for a mirrord session.
 
 This key can be referenced in your configuration using the `{{ key }}` template variable.
-For example, you can use it in HTTP filters: `"header_filter": "x-session: key-{{ key }}"`.
+The recommended use is to propagate it in W3C `baggage` or `tracestate`, then filter on
+`mirrord-session={{ key }}` in `feature.network.incoming.http_filter`.
 
 Priority (highest to lowest):
 1. CLI argument: `mirrord exec --key my-key`
@@ -2803,7 +2861,7 @@ Priority (highest to lowest):
     "network": {
       "incoming": {
         "http_filter": {
-          "header_filter": "x-session: key-{{ key }}"
+          "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
         }
       }
     }

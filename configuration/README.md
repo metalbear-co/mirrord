@@ -1,7 +1,7 @@
 ---
 title: Configuration Examples
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-03-05T00:00:00.000Z
+lastmod: 2026-03-20T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -114,7 +114,7 @@ configuration file containing all fields.
       "incoming": {
         "mode": "steal",
         "http_filter": {
-          "header_filter": "host: api\\..+"
+          "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
         },
         "port_mapping": [[ 7777, 8888 ]],
         "ignore_localhost": false,
