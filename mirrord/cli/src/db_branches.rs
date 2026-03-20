@@ -20,7 +20,7 @@ use crate::{
     kube::{kube_client_from_layer_config, list_resource_if_defined},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct BranchInfo {
     name: String,
     db_type: String,
@@ -233,7 +233,7 @@ async fn collect_per_dialect_branches<P: Progress>(
 }
 
 async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()> {
-    let names: HashSet<_> = names.iter().collect();
+    let names: HashSet<_> = names.iter().map(|s| s.as_str()).collect();
 
     let mut progress = ProgressTracker::from_env("DB Branches Status");
     let mut status_progress = progress.subtask("fetching branches");
@@ -268,6 +268,25 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
     status_progress.success(Some("fetched status"));
     progress.success(None);
 
+    let branches_iter = mysql_branches
+        .into_iter()
+        .map(Into::into)
+        .chain(pg_branches.into_iter().map(Into::into));
+
+    build_status_table(branches_iter, names)
+        .printstd();
+
+    Ok(())
+}
+
+/// Builds a status table from the given branches.
+fn build_status_table(
+    branches_iter: impl Iterator<Item = BranchInfo>,
+    names: HashSet<&str>,
+) -> Table {
+    let branches_iter =
+        branches_iter.filter(|b| names.is_empty() || names.contains(b.name.as_str()));
+
     let mut table = Table::new();
     table.add_row(row![
         "Name",
@@ -279,16 +298,19 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
         "Expires At"
     ]);
 
-    for info in all_infos {
-        if !names.is_empty() && !names.contains(&info.name) {
-            continue;
-        }
-        add_to_table(&mut table, info);
+    for branch in branches_iter {
+        table.add_row(row![
+            branch.name,
+            branch.db_type,
+            branch.phase.unwrap_or_else(|| "Unknown".to_owned()),
+            branch.ttl,
+            branch.database.unwrap_or_else(|| "<none>".to_owned()),
+            branch.users.unwrap_or_else(|| "none".to_owned()),
+            branch.expire_time.unwrap_or_else(|| "Unknown".to_owned())
+        ]);
     }
 
-    table.printstd();
-
-    Ok(())
+    table
 }
 
 /// Delete resources by (name, namespace) pairs, creating a namespaced API for each.
@@ -486,4 +508,77 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &[String]) -> 
     progress.success(None);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use prettytable::Row;
+
+    use super::{BranchInfo, build_status_table, Table, row, HashSet};
+
+    fn branch_info(name: &str, db_type: &'static str) -> BranchInfo {
+        BranchInfo {
+            name: name.to_owned(),
+            db_type,
+            phase: None,
+            ttl: 3600,
+            database: None,
+            users: None,
+            expire_time: None,
+        }
+    }
+    
+    fn build_expected_table(rows: Vec<Row>) -> Table {
+        let mut table = Table::from_iter([
+            row!["Name", "DB Type", "Phase", "TTL (sec)", "Database", "Users", "Expires At"],
+        ]);
+        rows.into_iter().for_each(|row| { table.add_row(row); });
+        table
+    }
+
+    #[test]
+    fn test_build_status_table() {
+        let branches = [
+            branch_info("branch-a", "Db1"),
+            branch_info("branch-b", "Db2"),
+            branch_info("branch-c", "Db3"),
+        ];
+
+        // No names filter - all branches rendered.
+        let table = build_status_table(branches.iter().cloned(), HashSet::new());
+        let expected = build_expected_table(vec![
+            row!["branch-a", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"],
+            row!["branch-b", "Db2", "Unknown", "3600", "<none>", "none", "Unknown"],
+            row!["branch-c", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"],
+        ]);
+        assert_eq!(
+            expected,
+            table,
+            "\n\nexpected:\n{}got:\n{}", expected, table
+        );
+            
+        // Names filter - only matching branches rendered.
+        let names = HashSet::from(["branch-a", "branch-c"]);
+        let table = build_status_table(branches.iter().cloned(), names);
+        let expected = build_expected_table(vec![
+            row!["branch-a", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"],
+            row!["branch-c", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"],
+        ]);
+        assert_eq!(
+            expected,
+            table,
+            "\n\nexpected:\n{}got:\n{}", expected, table
+        );
+
+        // All branches filtered out - None returned.
+        let names: HashSet<&str> = ["nonexistent"].into_iter().collect();
+        let table = build_status_table(branches.iter().cloned(), names);
+        let expected = build_expected_table(vec![]);
+        assert_eq!(
+            expected,
+            table,
+            "\n\nexpected:\n{}got:\n{}", expected, table
+        );
+
+    }
 }
