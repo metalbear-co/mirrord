@@ -145,9 +145,10 @@ pub struct ExperimentalConfig {
     /// non-blocking TCP sockets. For technical reasons, enabling this
     /// will cause `getsockname` to always return a localhost address.
     ///
-    /// Defaults to `false`.
-    #[config(default = false)]
-    pub non_blocking_tcp_connect: bool,
+    /// Defaults to `true` in OSS.
+    /// Defaults to `false` in mfT.
+    #[config(default = None)]
+    pub non_blocking_tcp_connect: Option<bool>,
 
     /// ### _experimental_ dlopen_cgo {#experimental-dlopen_cgo}
     ///
@@ -194,7 +195,9 @@ impl CollectAnalytics for &ExperimentalConfig {
             self.dns_permission_error_fatal,
         );
         analytics.add("force_hook_connect", self.force_hook_connect);
-        analytics.add("non_blocking_tcp_connect", self.non_blocking_tcp_connect);
+        if let Some(non_blocking_tcp_connect) = self.non_blocking_tcp_connect {
+            analytics.add("non_blocking_tcp_connect", non_blocking_tcp_connect);
+        }
         analytics.add("dlopen_cgo", self.dlopen_cgo);
         analytics.add("latency_transmit_delay", self.latency.transmit_delay);
         analytics.add("latency_receive_delay", self.latency.receive_delay);
