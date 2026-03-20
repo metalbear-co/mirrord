@@ -13,7 +13,7 @@ use crate::utils::services::service_for_mirrord_ls;
 /// Test for the `mirrord ls` command.
 #[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 pub async fn mirrord_ls() {
     let namespace = format!("test-namespace-{:x}", rand::random::<u32>());
     // This function is implemented differently when the `operator` feature is enabled and when it
