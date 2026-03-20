@@ -31,7 +31,7 @@ mod steal_tests {
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn steal_http_traffic(
         #[future] basic_service: KubeService,
@@ -83,7 +83,7 @@ mod steal_tests {
 
     #[ignore] // Needs special cluster setup, so ignore by default.
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn steal_http_ipv6_traffic(
         #[future] ipv6_service: KubeService,
@@ -129,7 +129,7 @@ mod steal_tests {
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[cfg(target_os = "linux")]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn steal_http_traffic_with_flush_connections(
         #[future] basic_service: KubeService,
@@ -182,7 +182,7 @@ mod steal_tests {
     /// closes a socket.
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn close_socket(#[future] basic_service: KubeService, #[future] kube_client: Client) {
         let application = Application::PythonCloseSocket;
@@ -292,7 +292,7 @@ mod steal_tests {
     /// application closes a socket, we stop stealing existing connections.
     #[ignore]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn close_socket_keep_connection(
         #[future] basic_service: KubeService,
@@ -381,7 +381,7 @@ mod steal_tests {
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_only_matching_requests(
         #[future] basic_service: KubeService,
@@ -431,7 +431,7 @@ mod steal_tests {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_only_matching_requests_new(
         config_dir: &Path,
@@ -479,7 +479,7 @@ mod steal_tests {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_requests_by_path(
         config_dir: &Path,
@@ -566,7 +566,7 @@ mod steal_tests {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn test_filter_with_single_client_and_only_matching_requests_http2(
         #[future] http2_service: KubeService,
@@ -642,7 +642,7 @@ mod steal_tests {
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_some_matching_requests(
         #[future] basic_service: KubeService,
@@ -714,7 +714,7 @@ mod steal_tests {
     /// app does not see the traffic.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn complete_passthrough(
         #[future] tcp_echo_service: KubeService,
@@ -785,7 +785,7 @@ mod steal_tests {
     /// app does not see the traffic.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(60))]
     async fn websocket_upgrade_no_filter_match(
         #[future] websocket_service: KubeService,
@@ -876,7 +876,7 @@ mod steal_tests {
     ///
     /// We verify that the traffic is handled by the local app.
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(60))]
     async fn websocket_upgrade_filter_match(
         #[future] websocket_service: KubeService,

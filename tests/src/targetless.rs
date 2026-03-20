@@ -28,7 +28,7 @@ mod targetless_tests {
     #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "targetless"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(30))]
     pub async fn connect_to_kubernetes_api_service_with_targetless_agent() {
         let app = Application::CurlToKubeApi;
@@ -43,7 +43,7 @@ mod targetless_tests {
     #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "targetless"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     pub async fn targetless_agent_with_priority_class(#[future] kube_client: Client) {
         let kube_client = kube_client.await;
         if operator_installed(&kube_client).await.unwrap() {
