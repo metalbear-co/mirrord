@@ -1,6 +1,7 @@
 name: Release
 on:
   push:
+    branches: [main]
     tags:
       - "*.*.*"
   # Running from workflow dispatch (AKA manual) will not publish anything.
