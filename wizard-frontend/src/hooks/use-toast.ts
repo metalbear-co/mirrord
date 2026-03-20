@@ -1,15 +1,19 @@
 import * as React from "react";
-import type { ToastActionElement, ToastProps } from "../components/ui/toast";
 
 const TOAST_LIMIT = 1;
 const TOAST_REMOVE_DELAY = 1000000;
 
-type ToasterToast = ToastProps & {
+export type ToastVariant = "default" | "destructive";
+
+export interface ToastData {
   id: string;
   title?: React.ReactNode;
   description?: React.ReactNode;
-  action?: ToastActionElement;
-};
+  variant?: ToastVariant;
+  open?: boolean;
+  duration?: number;
+  onOpenChange?: (open: boolean) => void;
+}
 
 let count = 0;
 
@@ -28,23 +32,23 @@ interface ActionType {
 type Action =
   | {
       type: ActionType["ADD_TOAST"];
-      toast: ToasterToast;
+      toast: ToastData;
     }
   | {
       type: ActionType["UPDATE_TOAST"];
-      toast: Partial<ToasterToast>;
+      toast: Partial<ToastData>;
     }
   | {
       type: ActionType["DISMISS_TOAST"];
-      toastId?: ToasterToast["id"];
+      toastId?: ToastData["id"];
     }
   | {
       type: ActionType["REMOVE_TOAST"];
-      toastId?: ToasterToast["id"];
+      toastId?: ToastData["id"];
     };
 
 interface State {
-  toasts: ToasterToast[];
+  toasts: ToastData[];
 }
 
 const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
@@ -84,8 +88,6 @@ export const reducer = (state: State, action: Action): State => {
     case "DISMISS_TOAST": {
       const { toastId } = action;
 
-      // ! Side effects ! - This could be extracted into a dismissToast() action,
-      // but I'll keep it here for simplicity
       if (toastId) {
         addToRemoveQueue(toastId);
       } else {
@@ -131,12 +133,12 @@ function dispatch(action: Action) {
   });
 }
 
-type Toast = Omit<ToasterToast, "id">;
+type Toast = Omit<ToastData, "id">;
 
 function toast({ ...props }: Toast) {
   const id = genId();
 
-  const update = (props: ToasterToast) =>
+  const update = (props: ToastData) =>
     dispatch({
       type: "UPDATE_TOAST",
       toast: { ...props, id },

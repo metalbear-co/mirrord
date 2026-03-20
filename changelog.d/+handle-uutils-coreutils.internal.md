@@ -1,1 +1,0 @@
-Correctly handle uutils coreutils.

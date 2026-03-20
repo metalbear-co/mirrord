@@ -237,6 +237,10 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
             mirrord_sip::SipPatchOptions {
                 patch: &patch_binaries,
                 skip: &skip_patch_binaries,
+                sip_binaries_dir: config
+                    .experimental
+                    .sip_utils
+                    .then(|| mirrord_sip::MIRRORD_BINARIES_DIR_PATH_BUF.as_path()),
             },
             log_info,
         ) {

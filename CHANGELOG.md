@@ -8,6 +8,72 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.194.0](https://github.com/metalbear-co/mirrord/tree/3.194.0) - 2026-03-19
+
+
+### Added
+
+- Revamped the interactive configuration wizard frontend for generating `mirrord.json`
+  files, with cluster-aware target selection, traffic mode configuration, and
+  JSON export. [#3994](https://github.com/metalbear-co/mirrord/issues/3994)
+- Added Windows installation via Chocolatey (`choco install --pre mirrord`)
+- Added header filtering using jaq for more complex queries, removed safejaq
+  crate
+- Experimental flag 'experimental.sip_utils' that uses our own built binaries
+  instead of patching
+- Preview environment's usage is now collected through our telemetry system
+
+
+### Changed
+
+- HTTP filter docs now instruct users to use W3C baggage/tracestate
+- Modified non-blocking TCP connect mechanism to eliminate delays.
+- `mirrord preview start` no longer replaces an existing session automatically
+  when giving it the same image registry, image repository, target and key. To
+  replace an existing session use the new `--force` argument, which will
+  replace it regardless of whether the images "match" or not.
+
+
+### Fixed
+
+- Fixed the example in the documentation for outgoing traffic.
+- Preview env will now respect `MIRRORD_PROGRESS_MODE` when printing info.
+
+
+### Internal
+
+- Add Vale prose linter to CI to enforce Google style guide and write-good
+  rules on markdown files. Fix prose issues found in `CONTRIBUTING.md`,
+  `TELEMETRY.md`, and changelog entries.
+- Add typos linter to spellcheck markdown files and user facing documentation
+  from mirrord/config.
+  Fix typos found in the changelog. Fix typos in `mirrord/config` and
+  `mirrord/operator`.
+  Regenerate mirrord schema.
+- Added `"peer": true` to some entries in the wizard's `package-lock.json`,
+  caused by running `npm install` with a newer node version
+- Added definition of `MirrordPropertyList` CRD.
+- Align usages of `Detour` for windows usages by getting rid of
+  `HookError::Bypass`
+- Correctly handle uutils coreutils.
+- DB Branching now works when running with a locally running isolated operator
+  and an in-cluster operator simultaneously.
+- Expose more docs for the `split_queues` configuration field, that were not
+  being included in the generated docs. Also, add examples for using `jq`
+  filters for splitting SQS queues.
+- Fix a flaky agent test by loosening the connection teardown assertions.
+- Fix broken links to pre-defined FS filter files in doc comments.
+- Fixed an unreleased bug in CRD.
+- Fixed definitions of CRDs with bad schemas.
+- Harden DNS resolution.
+- Introduced `mirrord exec`-based test harness
+- Made some intproxy types public so that the operator can re-use them for
+  preview environments.
+- Send IDE upgrade CTA via IdeMessage for operator-required errors.
+- Trigger operator e2e on mirrord release PRs.
+- Update `wizard-frontend/package-lock.json` to match dependencies introduced
+  in #3994.
+
 ## [1.193.0](https://github.com/metalbear-co/mirrord/tree/1.193.0) - 2026-03-05
 
 

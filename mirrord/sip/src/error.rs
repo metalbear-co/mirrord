@@ -48,6 +48,9 @@ pub enum SipError {
 
     #[error("Code sign failed with {0}, stderr: `{1}`")]
     Sign(ExitStatus, String),
+
+    #[error("Failed to download SIP utilities: {0}")]
+    DownloadFailed(reqwest::Error),
 }
 
 /// NOTE(gabriela): this was introduced in https://github.com/metalbear-co/mirrord/pull/3687

@@ -1,13 +1,13 @@
 import { Plus } from "lucide-react";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
 import {
+  Button,
+  Input,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select";
+} from "@metalbear/ui";
 import {
   readCurrentFilters,
   regexificationRay,
@@ -54,9 +54,11 @@ export const AddNewFilter = ({
   };
 
   return (
-    <div key="addfilter" className="border rounded-lg p-3 space-y-3">
+    <div
+      key="addfilter"
+      className="border border-[var(--border)] rounded-lg p-3 space-y-3"
+    >
       <form onSubmit={handleOnSubmit} className="flex items-center gap-3">
-        {/* Choose exact string matching (will cause input string to be transformed when form is submitted) or regex matching (no change to input string) */}
         <Select
           value={inputMatching}
           onValueChange={(value: "exact" | "regex") => {
@@ -66,7 +68,7 @@ export const AddNewFilter = ({
           <SelectTrigger className="w-40">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="bg-[var(--card)] border border-[var(--border)]">
             <SelectItem value="exact">Exact Match</SelectItem>
             <SelectItem value="regex">Regex Match</SelectItem>
           </SelectContent>
@@ -88,7 +90,6 @@ export const AddNewFilter = ({
           />
         </div>
 
-        {/* Add button */}
         <Button type="submit" variant="outline" size="sm">
           <Plus className="h-4 w-4" /> Add
         </Button>
