@@ -27,7 +27,7 @@ mod file_ops_tests {
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[trace]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn file_ops(
         #[future]
@@ -60,7 +60,7 @@ mod file_ops_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[trace]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn file_ops_ro(
         #[future]
@@ -96,7 +96,7 @@ mod file_ops_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[trace]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn file_ops_unlink(
         #[future]
@@ -152,7 +152,7 @@ mod file_ops_tests {
     #[ignore]
     #[cfg(target_os = "linux")]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn bash_file_exists(#[future] basic_service: KubeService) {
         let service = basic_service.await;
@@ -178,7 +178,7 @@ mod file_ops_tests {
     #[ignore]
     #[cfg(target_os = "linux")]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn bash_file_read(#[future] basic_service: KubeService) {
         let service = basic_service.await;
@@ -201,7 +201,7 @@ mod file_ops_tests {
     #[ignore]
     #[cfg(target_os = "linux")]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn bash_file_write(#[future] basic_service: KubeService) {
         let service = basic_service.await;
@@ -229,7 +229,7 @@ mod file_ops_tests {
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[trace]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn go_dir(
         #[future]
@@ -302,7 +302,7 @@ mod file_ops_tests {
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[cfg(target_os = "linux")]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn go_statfs(
         #[future] go_statfs_service: KubeService,

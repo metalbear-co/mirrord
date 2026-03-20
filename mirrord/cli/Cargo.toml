@@ -74,12 +74,11 @@ opener = "0.8.3"
 tempfile = { workspace = true, optional = true }
 axum = { version = "0.8.4", optional = true }
 tower-http = { version = "0.6.6", features = ["fs", "set-header"], optional = true }
-tar = { version = "0.4.44", optional = true }
-flate2 = { version = "1.1.2", optional = true }
+tar = { workspace = true, optional = true }
+flate2 = { workspace = true, optional = true }
 itertools = { workspace = true, optional = true }
 yamlpatch.workspace = true
 yamlpath.workspace = true
-oci-spec.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 rand.workspace = true

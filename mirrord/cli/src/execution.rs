@@ -16,7 +16,9 @@ use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel};
 use mirrord_protocol_io::{Client, Connection};
 #[cfg(target_os = "macos")]
-use mirrord_sip::{SipError, SipPatchOptions, sip_patch};
+use mirrord_sip::{
+    MIRRORD_BINARIES_DIR_PATH_BUF, SipError, SipPatchOptions, download_sip_binaries, sip_patch,
+};
 use mirrord_tls_util::SecureChannelSetup;
 use semver::Version;
 use serde::Serialize;
@@ -278,6 +280,10 @@ impl MirrordExecution {
                             args,
                             load_type: None,
                         });
+                if config.experimental.sip_utils {
+                    download_sip_binaries().await?;
+                }
+
                 executable
                     .and_then(|exe| {
                         sip_patch(
@@ -289,6 +295,10 @@ impl MirrordExecution {
                                     .map(|x| x.to_vec())
                                     .unwrap_or_default(),
                                 skip: &config.skip_sip,
+                                sip_binaries_dir: config
+                                    .experimental
+                                    .sip_utils
+                                    .then(|| MIRRORD_BINARIES_DIR_PATH_BUF.as_path()),
                             },
                             log_info,
                         )

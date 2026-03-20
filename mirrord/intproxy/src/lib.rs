@@ -52,7 +52,7 @@ mod failover_strategy;
 mod layer_conn;
 mod layer_initializer;
 pub mod main_tasks;
-mod ping_pong;
+pub mod ping_pong;
 pub mod proxies;
 mod remote_resources;
 mod request_queue;
@@ -162,7 +162,7 @@ impl IntProxy {
         );
         let outgoing = background_tasks.register(
             OutgoingProxy::new(
-                experimental.non_blocking_tcp_connect,
+                experimental.non_blocking_tcp_connect.unwrap_or_default(),
                 experimental.latency.receive_delay,
                 experimental.latency.transmit_delay,
             ),
