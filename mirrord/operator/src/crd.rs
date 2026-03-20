@@ -949,7 +949,7 @@ mod tests {
 
     use crate::crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
-        MirrordWorkloadQueueRegistry, SessionCrd, SplitQueue, SqsQueueDetails,
+        MirrordWorkloadQueueRegistry, QueueNameSource, SessionCrd, SplitQueue, SqsQueueDetails,
         db_branching::{
             branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
