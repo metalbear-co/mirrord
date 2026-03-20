@@ -218,6 +218,7 @@ impl IntProxy {
                 experimental.non_blocking_tcp_connect,
                 experimental.latency.receive_delay,
                 experimental.latency.transmit_delay,
+                monitor_tx.clone(),
             ),
             MainTaskId::OutgoingProxy,
             Self::CHANNEL_SIZE,
@@ -226,6 +227,7 @@ impl IntProxy {
             IncomingProxy::new(
                 Duration::from_millis(experimental.idle_local_http_connection_timeout),
                 https_delivery,
+                monitor_tx.clone(),
             ),
             MainTaskId::IncomingProxy,
             Self::CHANNEL_SIZE,

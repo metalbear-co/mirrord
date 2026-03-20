@@ -33,6 +33,7 @@ use crate::{
     },
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
+    session_monitor::{MonitorEvent, MonitorTx, try_parse_http_request},
 };
 
 mod busy_tcp_listener;
@@ -201,6 +202,13 @@ pub struct OutgoingProxy {
     connections_in_layers: RemoteResources<u128>,
     /// Maps outgoing connection local IDs to local addresses of corresponding agent sockets.
     agent_local_addresses: HashMap<u128, SocketAddr>,
+
+    /// Session monitor event sender.
+    monitor_tx: MonitorTx,
+    /// TCP connections that have not yet sent their first bytes to the agent.
+    /// Used to sniff HTTP requests from the first data chunk.
+    /// Stores the remote address so we can report the port in the event.
+    http_sniff_pending: HashMap<InterceptorId, SocketAddress>,
 }
 
 impl OutgoingProxy {
@@ -214,10 +222,12 @@ impl OutgoingProxy {
     /// * `non_blocking_tcp_connect` - see struct level docs
     /// * `receive_delay_ms` - delay in milliseconds for receive operations (Agent → Layer)
     /// * `transmit_delay_ms` - delay in milliseconds for transmit operations (Layer → Agent)
+    /// * `monitor_tx` - session monitor event sender
     pub fn new(
         non_blocking_tcp_connect: bool,
         receive_delay_ms: u64,
         transmit_delay_ms: u64,
+        monitor_tx: MonitorTx,
     ) -> Self {
         if non_blocking_tcp_connect {
             // First call to `get_working_method` might take a while.
@@ -237,6 +247,8 @@ impl OutgoingProxy {
             transmit_delay_ms,
             connections_in_layers: Default::default(),
             agent_local_addresses: Default::default(),
+            monitor_tx,
+            http_sniff_pending: Default::default(),
         }
     }
 
@@ -407,6 +419,12 @@ impl OutgoingProxy {
             Self::CHANNEL_SIZE,
         );
         self.txs.insert(id, interceptor);
+
+        // Register for HTTP sniffing on TCP connections.
+        if protocol == NetProtocol::Stream {
+            self.http_sniff_pending
+                .insert(id, in_progress.remote_address);
+        }
 
         Ok(())
     }
@@ -682,6 +700,25 @@ impl BackgroundTask for OutgoingProxy {
                             tokio::time::sleep(std::time::Duration::from_millis(self.transmit_delay_ms)).await;
                         }
 
+                        // On the first non-empty data chunk from a TCP connection, try to
+                        // detect an HTTP/1.x request and emit a monitor event.
+                        if !bytes.is_empty() {
+                            if let Some(remote_addr) = self.http_sniff_pending.remove(&id) {
+                                if let Some((method, path, host)) = try_parse_http_request(&bytes) {
+                                    let port = match &remote_addr {
+                                        SocketAddress::Ip(addr) => addr.port(),
+                                        _ => 0,
+                                    };
+                                    self.monitor_tx.emit(MonitorEvent::HttpRequest {
+                                        method,
+                                        path,
+                                        host,
+                                        port,
+                                    });
+                                }
+                            }
+                        }
+
                         let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
                         message_bus.send_agent(msg).await;
                     }
@@ -695,6 +732,8 @@ impl BackgroundTask for OutgoingProxy {
                                 tracing::error!(%id, "Interceptor panicked");
                             }
                         }
+
+                        self.http_sniff_pending.remove(&id);
 
                         if self.txs.remove(&id).is_some() {
                             tracing::trace!(%id, "Local connection closed, notifying the agent");
@@ -741,7 +780,11 @@ mod test {
 
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, OutgoingProxyError> =
             BackgroundTasks::new(connection.tx_handle());
-        let outgoing = background_tasks.register(OutgoingProxy::new(false, 0, 0), (), 8);
+        let outgoing = background_tasks.register(
+            OutgoingProxy::new(false, 0, 0, MonitorTx::disabled()),
+            (),
+            8,
+        );
 
         for i in 0..=1 {
             // Layer wants to make an outgoing connection.
