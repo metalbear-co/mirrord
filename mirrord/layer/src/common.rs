@@ -53,17 +53,27 @@ impl CheckedInto<String> for *const c_char {
 
 #[cfg(target_os = "macos")]
 pub fn strip_mirrord_path(path_str: &str) -> Option<&str> {
-    use mirrord_sip::MIRRORD_PATCH_DIR;
+    use mirrord_sip::{MIRRORD_BINARIES_DIR_STRING, MIRRORD_PATCH_DIR};
 
     // SAFETY: We only slice after we find the string in the path
     // so it must be valid
     #[allow(clippy::indexing_slicing)]
-    path_str.find(MIRRORD_PATCH_DIR).map(|index| {
-        let remain = &path_str[(MIRRORD_PATCH_DIR.len() + index)..];
-        // if the case is lstat(MIRRORD_PATCH_DIR) the result would be lstat("") which ofc is very
-        // sad. which is in that case we automatically insert "/"
-        if remain.is_empty() { ROOT_DIR } else { remain }
-    })
+    path_str
+        .find(MIRRORD_PATCH_DIR)
+        .map(|index| {
+            let remain = &path_str[(MIRRORD_PATCH_DIR.len() + index)..];
+            // if the case is lstat(MIRRORD_PATCH_DIR) the result would be lstat("") which ofc is
+            // very sad. which is in that case we automatically insert "/"
+            if remain.is_empty() { ROOT_DIR } else { remain }
+        })
+        .or_else(|| {
+            path_str
+                .find(MIRRORD_BINARIES_DIR_STRING.as_str())
+                .map(|index| {
+                    let remain = &path_str[(MIRRORD_BINARIES_DIR_STRING.len() + index)..];
+                    if remain.is_empty() { ROOT_DIR } else { remain }
+                })
+        })
 }
 
 impl CheckedInto<PathBuf> for *const c_char {

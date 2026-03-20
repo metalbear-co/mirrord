@@ -1,1 +1,0 @@
-Fixed definitions of CRDs with bad schemas.

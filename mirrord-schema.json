@@ -1725,7 +1725,7 @@
         },
         "non_blocking_tcp_connect": {
           "title": "_experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}",
-          "description": "Enables better support for outgoing connections using non-blocking TCP sockets.\n\nDefaults to `false`.",
+          "description": "Enables better support for outgoing connections using non-blocking TCP sockets. For technical reasons, enabling this will cause `getsockname` to always return a localhost address.\n\nDefaults to `true` in OSS. Defaults to `false` in mfT.",
           "type": [
             "boolean",
             "null"
@@ -1736,6 +1736,14 @@
           "description": "Writes basic fork-safe SIP patching logs to a destination file. Useful for seeing the state of SIP when `stdout` may be affected by another process.",
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "sip_utils": {
+          "title": "_experimental_ sip_utils {#experimental-sip_utils}",
+          "description": "Downloads pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses them in place of SIP-patching the originals. This shouldn't be used unless someone from MetalBear/mirrord tells you to.",
+          "type": [
+            "boolean",
             "null"
           ]
         },
