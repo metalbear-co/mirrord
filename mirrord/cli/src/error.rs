@@ -2,7 +2,10 @@ use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
 #[cfg(feature = "wizard")]
 use axum::response::{IntoResponse, Response};
-use kube::{self, core::ErrorResponse};
+use kube::{
+    self,
+    core::{Status, response::StatusSummary},
+};
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
 use mirrord_config::config::ConfigError;
@@ -653,9 +656,11 @@ impl From<OperatorApiError> for CliError {
             }
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::KubeError {
-                error: Error::Api(ErrorResponse { message, code, .. }),
+                error: Error::Api(status),
                 operation,
-            } if code == StatusCode::FORBIDDEN => Self::OperatorApiForbidden(operation, message),
+            } if status.code == StatusCode::FORBIDDEN => {
+                Self::OperatorApiForbidden(operation, status.message)
+            }
             OperatorApiError::KubeError {
                 error: Error::Auth(AuthError::AuthExecStart(error)),
                 ..
@@ -672,12 +677,13 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorApiForbidden(operation, status.message)
             }
             OperatorApiError::StatusFailure { operation, status } => {
-                let error = kube::Error::Api(ErrorResponse {
-                    status: "Failure".to_string(),
+                let error = kube::Error::Api(Box::new(Status {
+                    status: Some(StatusSummary::Failure),
                     message: status.message,
                     reason: status.reason,
                     code: status.code,
-                });
+                    ..Default::default()
+                }));
 
                 Self::OperatorApiFailed(operation, error)
             }

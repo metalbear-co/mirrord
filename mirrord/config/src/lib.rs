@@ -948,7 +948,7 @@ mod tests {
     };
 
     use rstest::*;
-    use schemars::schema::RootSchema;
+    use schemars::Schema;
     use tempfile::NamedTempFile;
 
     use super::*;
@@ -1286,10 +1286,10 @@ mod tests {
 
     /// <!--${internal}-->
     /// Writes the config schema to a file (uploaded to the schema store).
-    fn write_schema_to_file(schema: &RootSchema) -> File {
+    fn write_schema_to_file(schema: &Schema) -> File {
         println!("Writing schema to file.");
 
-        let content = serde_json::to_string_pretty(&schema).expect("Failed generating schema!");
+        let content = serde_json::to_string_pretty(schema).expect("Failed generating schema!");
         let mut file = OpenOptions::new()
             .create(true)
             .write(true)
