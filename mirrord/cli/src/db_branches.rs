@@ -96,6 +96,89 @@ impl From<MysqlBranchDatabase> for BranchInfo {
     }
 }
 
+//impl From<&MongodbBranchDatabase> for BranchInfo {
+//    fn from(branch: &MongodbBranchDatabase) -> Self {
+//        Self {
+//            name: branch.metadata.name.clone().unwrap_or_default(),
+//            db_type: "MongoDB",
+//            phase: branch.status.as_ref().map(|s| s.phase.to_string()),
+//            ttl: branch.spec.ttl_secs,
+//            database: branch.spec.database_name.clone(),
+//            users: branch.status.as_ref().and_then(|s| {
+//                if s.session_info.is_empty() {
+//                    None
+//                } else {
+//                    let mut user_list: Vec<_> = s
+//                        .session_info
+//                        .values()
+//                        .map(|session| session.owner.k8s_username.clone())
+//                        .collect();
+//                    user_list.sort();
+//                    Some(user_list.join("\n"))
+//                }
+//            }),
+//            expire_time: branch.status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
+//        }
+//    }
+//}
+//
+//impl From<MongodbBranchDatabase> for BranchInfo {
+//    fn from(
+//        MongodbBranchDatabase {
+//            metadata,
+//            spec,
+//            mut status,
+//        }: MongodbBranchDatabase,
+//    ) -> Self {
+//        Self {
+//            name: metadata.name.unwrap_or_default(),
+//            db_type: "MongoDB",
+//            phase: status.as_ref().map(|s| s.phase.to_string()),
+//            ttl: spec.ttl_secs,
+//            database: spec.database_name,
+//            users: status.as_mut().and_then(|s| {
+//                if s.session_info.is_empty() {
+//                    None
+//                } else {
+//                    let mut user_list: Vec<_> = std::mem::take(&mut s.session_info)
+//                        .into_values()
+//                        .map(|session| session.owner.k8s_username)
+//                        .collect();
+//                    user_list.sort();
+//                    Some(user_list.join("\n"))
+//                }
+//            }),
+//            expire_time: status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
+//        }
+//    }
+//}
+//
+//impl From<&PgBranchDatabase> for BranchInfo {
+//    fn from(branch: &PgBranchDatabase) -> Self {
+//        Self {
+//            name: branch.metadata.name.clone().unwrap_or_default(),
+//            db_type: "PostgreSQL",
+//            phase: branch.status.as_ref().map(|s| s.phase.to_string()),
+//            ttl: branch.spec.ttl_secs,
+//            database: branch.spec.database_name.clone(),
+//            users: branch.status.as_ref().and_then(|s| {
+//                if s.session_info.is_empty() {
+//                    None
+//                } else {
+//                    let mut user_list: Vec<_> = s
+//                        .session_info
+//                        .values()
+//                        .map(|session| session.owner.k8s_username.clone())
+//                        .collect();
+//                    user_list.sort();
+//                    Some(user_list.join("\n"))
+//                }
+//            }),
+//            expire_time: branch.status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
+//        }
+//    }
+//}
+
 impl From<PgBranchDatabase> for BranchInfo {
     fn from(
         PgBranchDatabase {
@@ -271,7 +354,8 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
     let branches_iter = mysql_branches
         .into_iter()
         .map(Into::into)
-        .chain(pg_branches.into_iter().map(Into::into));
+        .chain(pg_branches.into_iter().map(Into::into))
+        .chain(mongodb_branches.into_iter().map(Into::into));
 
     build_status_table(branches_iter, names)
         .printstd();
