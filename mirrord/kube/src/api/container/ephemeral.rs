@@ -111,8 +111,7 @@ where
             "ephemeralcontainers",
             &runtime_data.pod_name,
             &PostParams::default(),
-            &serde_json::to_vec(&ephemeral_containers_subresource)
-                .expect("serialization to vector never fails"),
+            &ephemeral_containers_subresource,
         )
         .await
         .map_err(KubeApiError::KubeError)?;
