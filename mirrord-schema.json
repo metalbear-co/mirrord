@@ -718,7 +718,7 @@
       ]
     },
     "BranchItemCopyConfig": {
-      "description": "Shared copy config for individual items (tables, collections, etc.). All database engines use this same struct for per-item copy configuration.",
+      "description": "Shared copy config for individual items (tables, collections, etc.).\nAll database engines use this same struct for per-item copy configuration.",
       "type": "object",
       "properties": {
         "filter": {
@@ -1023,83 +1023,19 @@
           ]
         },
         {
-          "description": "When configuring a branch for MSSQL, set `type` to `mssql`.",
           "type": "object",
-          "required": [
-            "connection",
-            "type"
-          ],
           "properties": {
-            "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
-              "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/DbBranchingConnectionSource"
-                }
-              ]
-            },
-            "copy": {
-              "default": {
-                "mode": "empty",
-                "tables": null
-              },
-              "allOf": [
-                {
-                  "$ref": "#/definitions/MssqlBranchCopyConfig"
-                }
-              ]
-            },
-            "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
-              "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
-              "default": 60,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
-            },
-            "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
-              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
-              "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
-              "default": 300,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
-            },
             "type": {
               "type": "string",
-              "enum": [
-                "mssql"
-              ]
-            },
-            "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
-              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "const": "mssql"
             }
-          }
+          },
+          "$ref": "#/$defs/MssqlBranchConfig",
+          "required": [
+            "type"
+          ]
         },
         {
-          "description": "When configuring a branch for MySQL, set `type` to `mysql`.",
           "type": "object",
           "properties": {
             "type": {
@@ -1115,70 +1051,6 @@
         {
           "type": "object",
           "properties": {
-            "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
-              "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/DbBranchingConnectionSource"
-                }
-              ]
-            },
-            "copy": {
-              "default": {
-                "mode": "empty",
-                "tables": null
-              },
-              "allOf": [
-                {
-                  "$ref": "#/definitions/PgBranchCopyConfig"
-                }
-              ]
-            },
-            "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
-              "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
-              "default": 60,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
-            },
-            "iam_auth": {
-              "title": "feature.db_branches[].iam_auth (type: pg) {#feature-db_branches-pg-iam_auth}",
-              "description": "IAM authentication for the source database. Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication instead of password-based authentication.",
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/IamAuthConfig"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
-              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
-              "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
-              "default": 300,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
-            },
             "type": {
               "type": "string",
               "const": "pg"
@@ -1980,19 +1852,16 @@
       "additionalProperties": false
     },
     "IamAuthConfig": {
-      "description": "IAM authentication for the source database. Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication instead of password-based authentication.\n\nEnvironment variable sources follow the same pattern as `connection.url`: - `{ \"type\": \"env\", \"variable\": \"VAR_NAME\" }` - direct env var from pod spec - `{ \"type\": \"env_from\", \"variable\": \"VAR_NAME\" }` - from configMapRef/secretRef",
+      "description": "IAM authentication for the source database.\nUse this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication\ninstead of password-based authentication.\n\nEnvironment variable sources follow the same pattern as `connection.url`:\n- `{ \"type\": \"env\", \"variable\": \"VAR_NAME\" }` - direct env var from pod spec\n- `{ \"type\": \"env_from\", \"variable\": \"VAR_NAME\" }` - from configMapRef/secretRef",
       "oneOf": [
         {
-          "description": "For AWS RDS/Aurora IAM authentication, set `type` to `\"aws_rds\"`.\n\nExample: ```json { \"iam_auth\": { \"type\": \"aws_rds\", \"region\": { \"type\": \"env\", \"variable\": \"MY_AWS_REGION\" }, \"access_key_id\": { \"type\": \"env_from\", \"variable\": \"AWS_KEY\" } } } ```\n\nThe init container must have AWS credentials (via IRSA, instance profile, or env vars).\n\nParameters: - `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION. - `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID. - `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY. - `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses AWS_SESSION_TOKEN.",
+          "description": "For AWS RDS/Aurora IAM authentication, set `type` to `\"aws_rds\"`.\n\nExample:\n```json\n{\n  \"iam_auth\": {\n    \"type\": \"aws_rds\",\n    \"region\": { \"type\": \"env\", \"variable\": \"MY_AWS_REGION\" },\n    \"access_key_id\": { \"type\": \"env_from\", \"variable\": \"AWS_KEY\" }\n  }\n}\n```\n\nThe init container must have AWS credentials (via IRSA, instance profile, or env vars).\n\nParameters:\n- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.\n- `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.\n- `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.\n- `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses\n  AWS_SESSION_TOKEN.",
           "type": "object",
-          "required": [
-            "type"
-          ],
           "properties": {
             "access_key_id": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                  "$ref": "#/$defs/DbBranchingConnectionSourceKind"
                 },
                 {
                   "type": "null"
@@ -2002,7 +1871,7 @@
             "region": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                  "$ref": "#/$defs/DbBranchingConnectionSourceKind"
                 },
                 {
                   "type": "null"
@@ -2012,7 +1881,7 @@
             "secret_access_key": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                  "$ref": "#/$defs/DbBranchingConnectionSourceKind"
                 },
                 {
                   "type": "null"
@@ -2022,7 +1891,7 @@
             "session_token": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                  "$ref": "#/$defs/DbBranchingConnectionSourceKind"
                 },
                 {
                   "type": "null"
@@ -2031,23 +1900,21 @@
             },
             "type": {
               "type": "string",
-              "enum": [
-                "aws_rds"
-              ]
+              "const": "aws_rds"
             }
-          }
-        },
-        {
-          "description": "For GCP Cloud SQL IAM authentication, set `type` to `\"gcp_cloud_sql\"`.\n\nExample for GCP Cloud SQL with credentials from a secret: ```json { \"iam_auth\": { \"type\": \"gcp_cloud_sql\", \"credentials_json\": { \"type\": \"env_from\", \"variable\": \"GOOGLE_APPLICATION_CREDENTIALS_JSON\" } } } ```\n\nThe init container must have GCP credentials (via Workload Identity or service account key). Use either `credentials_json` OR `credentials_path`, not both.\n\nParameters: - `credentials_json`: Inline service account JSON key content. Specify the env var that contains the raw JSON content of the service account key. Example: ` { \"type\": \"env\", \"variable\": \"GOOGLE_APPLICATION_CREDENTIALS_JSON\" } `. - `credentials_path`: Path to service account JSON key file. Specify the env var that contains the file path to the service account key. The file must be accessible from the init container. Example: `{\"type\": \"env\", \"variable\": \"GOOGLE_APPLICATION_CREDENTIALS\"}`. - `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.",
-          "type": "object",
+          },
           "required": [
             "type"
-          ],
+          ]
+        },
+        {
+          "description": "For GCP Cloud SQL IAM authentication, set `type` to `\"gcp_cloud_sql\"`.\n\nExample for GCP Cloud SQL with credentials from a secret:\n```json\n{\n  \"iam_auth\": {\n    \"type\": \"gcp_cloud_sql\",\n    \"credentials_json\": { \"type\": \"env_from\", \"variable\": \"GOOGLE_APPLICATION_CREDENTIALS_JSON\" }\n  }\n}\n```\n\nThe init container must have GCP credentials (via Workload Identity or service account key).\nUse either `credentials_json` OR `credentials_path`, not both.\n\nParameters:\n- `credentials_json`: Inline service account JSON key content. Specify the env var that\n  contains the raw JSON content of the service account key. Example: ` { \"type\": \"env\",\n  \"variable\": \"GOOGLE_APPLICATION_CREDENTIALS_JSON\" } `.\n- `credentials_path`: Path to service account JSON key file. Specify the env var that\n  contains the file path to the service account key. The file must be accessible from the\n  init container. Example: `{\"type\": \"env\", \"variable\": \"GOOGLE_APPLICATION_CREDENTIALS\"}`.\n- `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.",
+          "type": "object",
           "properties": {
             "credentials_json": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                  "$ref": "#/$defs/DbBranchingConnectionSourceKind"
                 },
                 {
                   "type": "null"
@@ -2057,7 +1924,7 @@
             "credentials_path": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                  "$ref": "#/$defs/DbBranchingConnectionSourceKind"
                 },
                 {
                   "type": "null"
@@ -2067,7 +1934,7 @@
             "project": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                  "$ref": "#/$defs/DbBranchingConnectionSourceKind"
                 },
                 {
                   "type": "null"
@@ -2076,11 +1943,12 @@
             },
             "type": {
               "type": "string",
-              "enum": [
-                "gcp_cloud_sql"
-              ]
+              "const": "gcp_cloud_sql"
             }
-          }
+          },
+          "required": [
+            "type"
+          ]
         }
       ]
     },
@@ -2510,6 +2378,67 @@
       },
       "additionalProperties": false
     },
+    "MongodbBranchConfig": {
+      "description": "When configuring a branch for MongoDB, set `type` to `mongodb`.",
+      "type": "object",
+      "properties": {
+        "connection": {
+          "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
+          "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+          "$ref": "#/$defs/DbBranchingConnectionSource"
+        },
+        "copy": {
+          "$ref": "#/$defs/MongodbBranchCopyConfig",
+          "default": {
+            "collections": null,
+            "mode": "empty"
+          }
+        },
+        "creation_timeout_secs": {
+          "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
+          "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 60,
+          "minimum": 0
+        },
+        "id": {
+          "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
+          "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
+          "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ttl_secs": {
+          "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
+          "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 300,
+          "minimum": 0
+        },
+        "version": {
+          "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
+          "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "connection"
+      ]
+    },
     "MongodbBranchCopyConfig": {
       "description": "Users can choose from the following copy mode to bootstrap their MongoDB branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- All\n\n  Copies both schema and data of all collections. Supports optional collection filters\n  to copy only specific collections or filter documents within collections.",
       "oneOf": [
@@ -2522,7 +2451,7 @@
                 "null"
               ],
               "additionalProperties": {
-                "$ref": "#/definitions/BranchItemCopyConfig"
+                "$ref": "#/$defs/BranchItemCopyConfig"
               }
             },
             "mode": {
@@ -2544,7 +2473,7 @@
                 "null"
               ],
               "additionalProperties": {
-                "$ref": "#/definitions/BranchItemCopyConfig"
+                "$ref": "#/$defs/BranchItemCopyConfig"
               }
             },
             "mode": {
@@ -2558,73 +2487,69 @@
         }
       ]
     },
-    "MssqlBranchCopyConfig": {
-      "description": "Users can choose from the following copy mode to bootstrap their MSSQL branch database:\n\n- Empty\n\nCreates an empty database. If the source DB connection options are found from the chosen target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord operator looks for the `name` field from the branch DB config object. This option is useful for users that run DB migrations themselves before starting the application.\n\n- Schema\n\nCreates an empty database and copies schema of all tables.\n\n- All\n\nCopies both schema and data of all tables. This option shall only be used when the data volume of the source database is minimal.",
-      "oneOf": [
-        {
-          "type": "object",
-          "required": [
-            "mode"
-          ],
-          "properties": {
-            "mode": {
-              "type": "string",
-              "enum": [
-                "empty"
-              ]
-            },
-            "tables": {
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "$ref": "#/definitions/BranchItemCopyConfig"
-              }
-            }
+    "MssqlBranchConfig": {
+      "description": "When configuring a branch for MSSQL, set `type` to `mssql`.",
+      "type": "object",
+      "properties": {
+        "connection": {
+          "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
+          "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+          "$ref": "#/$defs/DbBranchingConnectionSource"
+        },
+        "copy": {
+          "$ref": "#/$defs/MssqlBranchCopyConfig",
+          "default": {
+            "mode": "empty",
+            "tables": null
           }
         },
-        {
-          "type": "object",
-          "required": [
-            "mode"
-          ],
-          "properties": {
-            "mode": {
-              "type": "string",
-              "enum": [
-                "schema"
-              ]
-            },
-            "tables": {
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "$ref": "#/definitions/BranchItemCopyConfig"
-              }
-            }
-          }
+        "creation_timeout_secs": {
+          "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
+          "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 60,
+          "minimum": 0
         },
-        {
-          "type": "object",
-          "required": [
-            "mode"
-          ],
-          "properties": {
-            "mode": {
-              "type": "string",
-              "enum": [
-                "all"
-              ]
-            }
-          }
+        "id": {
+          "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
+          "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
+          "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ttl_secs": {
+          "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
+          "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 300,
+          "minimum": 0
+        },
+        "version": {
+          "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
+          "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
+      },
+      "required": [
+        "connection"
       ]
     },
-    "MysqlBranchCopyConfig": {
-      "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used\n  when the data volume of the source database is minimal.",
+    "MssqlBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their MSSQL branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used\n  when the data volume of the source database is minimal.",
       "oneOf": [
         {
           "type": "object",
@@ -2639,7 +2564,7 @@
                 "null"
               ],
               "additionalProperties": {
-                "$ref": "#/definitions/BranchItemCopyConfig"
+                "$ref": "#/$defs/BranchItemCopyConfig"
               }
             }
           },
@@ -2660,7 +2585,127 @@
                 "null"
               ],
               "additionalProperties": {
-                "$ref": "#/definitions/BranchItemCopyConfig"
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "all"
+            }
+          },
+          "required": [
+            "mode"
+          ]
+        }
+      ]
+    },
+    "MysqlBranchConfig": {
+      "description": "When configuring a branch for MySQL, set `type` to `mysql`.",
+      "type": "object",
+      "properties": {
+        "connection": {
+          "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
+          "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+          "$ref": "#/$defs/DbBranchingConnectionSource"
+        },
+        "copy": {
+          "$ref": "#/$defs/MysqlBranchCopyConfig",
+          "default": {
+            "mode": "empty",
+            "tables": null
+          }
+        },
+        "creation_timeout_secs": {
+          "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
+          "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 60,
+          "minimum": 0
+        },
+        "id": {
+          "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
+          "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
+          "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ttl_secs": {
+          "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
+          "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 300,
+          "minimum": 0
+        },
+        "version": {
+          "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
+          "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "connection"
+      ]
+    },
+    "MysqlBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used\n  when the data volume of the source database is minimal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "schema"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
               }
             }
           },
@@ -2868,7 +2913,7 @@
           "description": "IAM authentication for the source database.\nUse this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication\ninstead of password-based authentication.",
           "anyOf": [
             {
-              "$ref": "#/$defs/PgIamAuthConfig"
+              "$ref": "#/$defs/IamAuthConfig"
             },
             {
               "type": "null"
@@ -2928,7 +2973,7 @@
                 "null"
               ],
               "additionalProperties": {
-                "$ref": "#/definitions/BranchItemCopyConfig"
+                "$ref": "#/$defs/BranchItemCopyConfig"
               }
             }
           },
@@ -2949,7 +2994,7 @@
                 "null"
               ],
               "additionalProperties": {
-                "$ref": "#/definitions/BranchItemCopyConfig"
+                "$ref": "#/$defs/BranchItemCopyConfig"
               }
             }
           },
