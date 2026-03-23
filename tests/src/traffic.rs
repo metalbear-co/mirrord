@@ -3,7 +3,7 @@ mod steal;
 
 #[cfg(test)]
 mod traffic_tests {
-    use std::{net::UdpSocket, ops::Not, path::PathBuf, time::Duration};
+    use std::{ops::Not, path::PathBuf, time::Duration};
 
     use futures::{stream, StreamExt};
     use futures_util::{stream::TryStreamExt, AsyncBufReadExt};
@@ -459,10 +459,10 @@ mod traffic_tests {
         let service = basic_service.await;
         // Binding specific port, because if we bind 0 then we get a  port that is bypassed by
         // mirrord and then the tested crash is not prevented by the fix but by the bypassed port.
-        let socket = UdpSocket::bind("127.0.0.1:31415").unwrap();
-        socket
-            .set_read_timeout(Some(Duration::from_secs(30)))
-            .expect("failed to configure UDP socket read timeout");
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:31415")
+            .await
+            .unwrap();
+
         let port = socket.local_addr().unwrap().port().to_string();
 
         let node_command = [
@@ -489,9 +489,11 @@ mod traffic_tests {
         const BUF_SIZE: usize = 27;
 
         let mut buf = [0; BUF_SIZE];
-        let amt = socket
-            .recv(&mut buf)
-            .expect("Failed to receive UDP message within timeout");
+        let amt = tokio::time::timeout(Duration::from_secs(30), socket.recv(&mut buf))
+            .await
+            .expect("Timed out waiting for UDP message")
+            .expect("Failed to receive UDP message");
+
         assert_eq!(amt, BUF_SIZE);
 
         let expected_str = {
