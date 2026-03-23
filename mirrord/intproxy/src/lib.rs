@@ -43,6 +43,7 @@ use crate::{
     error::{ProxyRuntimeError, ProxyStartupError},
     failover_strategy::FailoverStrategy,
     main_tasks::{ConnectionRefresh, LayerClosed},
+    session_monitor::MonitorTx,
 };
 
 pub mod agent_conn;
@@ -56,6 +57,7 @@ pub mod ping_pong;
 pub mod proxies;
 mod remote_resources;
 mod request_queue;
+pub mod session_monitor;
 
 /// [`TaskSender`]s for main background tasks. See [`MainTaskId`].
 struct TaskTxs {
@@ -102,6 +104,9 @@ pub struct IntProxy {
 
     /// Send handle for the agent connection
     agent_tx: TxHandle<Client>,
+
+    /// Session monitor event sender
+    monitor_tx: MonitorTx,
 }
 
 impl IntProxy {
@@ -125,6 +130,7 @@ impl IntProxy {
         https_delivery: LocalTlsDelivery,
         process_logging_interval: Duration,
         experimental: &ExperimentalConfig,
+        monitor_tx: MonitorTx,
     ) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
             BackgroundTasks::new(agent_conn.connection.tx_handle());
@@ -218,6 +224,7 @@ impl IntProxy {
             connected_layers: HashMap::new(),
             process_logging_interval,
             agent_tx,
+            monitor_tx,
         }
     }
 
@@ -764,7 +771,7 @@ mod test {
     };
 
     use crate::{
-        IntProxy,
+        IntProxy, MonitorTx,
         agent_conn::{
             AgentConnectInfo, AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow,
         },
@@ -799,6 +806,7 @@ mod test {
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
+            MonitorTx::disabled(),
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
@@ -917,6 +925,7 @@ mod test {
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
+            MonitorTx::disabled(),
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
@@ -1010,6 +1019,7 @@ mod test {
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
+            MonitorTx::disabled(),
         );
         tokio::time::timeout(
             Duration::from_millis(200),
@@ -1081,6 +1091,7 @@ mod test {
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
+            MonitorTx::disabled(),
         );
         tokio::spawn(proxy.run(Duration::from_millis(100), Duration::ZERO));
 

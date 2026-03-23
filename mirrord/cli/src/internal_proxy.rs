@@ -145,6 +145,7 @@ pub(crate) async fn proxy(
             .unwrap_or_default(),
         process_logging_interval,
         &config.experimental,
+        mirrord_intproxy::session_monitor::MonitorTx::disabled(),
     )
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await

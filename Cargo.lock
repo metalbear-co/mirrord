@@ -4941,8 +4941,10 @@ dependencies = [
 name = "mirrord-intproxy"
 version = "3.194.0"
 dependencies = [
+ "axum 0.8.8",
  "bytes",
  "futures",
+ "home",
  "http-body-util",
  "hyper 1.8.1",
  "hyper-util",
@@ -4961,6 +4963,7 @@ dependencies = [
  "rustls 0.23.37",
  "semver 1.0.27",
  "serde",
+ "serde_json",
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "thiserror 2.0.18",
