@@ -23,6 +23,10 @@ use uuid::Uuid;
 use crate::{
     client::error::{OperatorApiError, OperatorOperation},
     crd::db_branching::{
+        branch_database::{
+            BranchDatabase, BranchDatabaseSpec, MongodbOptions, MssqlOptions, MysqlOptions,
+            PostgresOptions, SqlBranchCopyConfig,
+        },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
             IamAuthConfig as CrdIamAuthConfig,
@@ -543,7 +547,7 @@ impl DatabaseBranchParams {
                     let params = PgBranchParams::new(id.as_ref(), pg_config, target);
                     pg.insert(id, params);
                 }
-                DatabaseBranchConfig::Redis(_) => {}
+                DatabaseBranchConfig::Mssql(_) | DatabaseBranchConfig::Redis(_) => {}
             };
         }
 
@@ -760,7 +764,624 @@ pub mod labels {
     pub(crate) const MIRRORD_MONGODB_BRANCH_ID_LABEL: &str = "mirrord-mongodb-branch-id";
     pub(crate) const MIRRORD_MYSQL_BRANCH_ID_LABEL: &str = "mirrord-mysql-branch-id";
     pub(crate) const MIRRORD_PG_BRANCH_ID_LABEL: &str = "mirrord-pg-branch-id";
+    pub const MIRRORD_BRANCH_ID_LABEL: &str = "mirrord-branch-id";
 }
 
-// Re-export for convenience
 pub use crate::crd::TARGET_NAMESPACE_ANNOTATION;
+use crate::crd::session::SessionTarget;
+
+/// Create unified branch databases and wait for their readiness.
+#[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
+pub async fn create_branches<P: Progress>(
+    api: &Api<BranchDatabase>,
+    params: HashMap<BranchDatabaseId, UnifiedBranchParams>,
+    timeout: Duration,
+    progress: &P,
+) -> Result<HashMap<BranchDatabaseId, BranchDatabase>, OperatorApiError> {
+    if params.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut subtask = progress.subtask("creating new branch databases");
+    let mut created_branches = HashMap::new();
+    let mut reused_branches = HashMap::new();
+
+    for (id, params) in params {
+        let name_prefix = params.name_prefix;
+        let annotations = if params.annotations.is_empty() {
+            None
+        } else {
+            Some(params.annotations)
+        };
+
+        let (name, generate_name) = match &id {
+            BranchDatabaseId::Specified(branch_id) => {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                branch_id.hash(&mut hasher);
+                (Some(format!("{name_prefix}{:x}", hasher.finish())), None)
+            }
+            BranchDatabaseId::Generated(_) => (None, Some(name_prefix)),
+        };
+
+        let branch = BranchDatabase {
+            metadata: ObjectMeta {
+                name: name.clone(),
+                generate_name,
+                labels: Some(params.labels),
+                annotations,
+                ..Default::default()
+            },
+            spec: params.spec,
+            status: None,
+        };
+
+        match api.create(&kube::api::PostParams::default(), &branch).await {
+            Ok(branch) => {
+                created_branches.insert(id, branch);
+            }
+            Err(kube::Error::Api(ref err)) if err.code == 409 => {
+                if let Some(ref deterministic_name) = name {
+                    tracing::info!(
+                        name = %deterministic_name,
+                        "Branch already exists, reusing"
+                    );
+                    let existing = api.get(deterministic_name).await.map_err(|e| {
+                        OperatorApiError::KubeError {
+                            error: e,
+                            operation: OperatorOperation::DbBranching,
+                        }
+                    })?;
+                    reused_branches.insert(id, existing);
+                }
+            }
+            Err(e) => {
+                return Err(OperatorApiError::KubeError {
+                    error: e,
+                    operation: OperatorOperation::DbBranching,
+                });
+            }
+        };
+    }
+
+    let has_reused = !reused_branches.is_empty();
+    created_branches.extend(reused_branches);
+
+    let branch_names = created_branches
+        .values()
+        .map(|branch| {
+            branch
+                .meta()
+                .name
+                .clone()
+                .ok_or(KubeApiError::missing_field(branch, ".metadata.name"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let ready_or_failed = branch_names
+        .iter()
+        .map(|name| {
+            await_condition(api.clone(), name, |db: Option<&BranchDatabase>| {
+                db.and_then(|db| {
+                    db.status.as_ref().map(|status| {
+                        status.phase == BranchDatabasePhase::Ready
+                            || status.phase == BranchDatabasePhase::Failed
+                    })
+                })
+                .unwrap_or(false)
+            })
+        })
+        .collect::<Vec<_>>();
+
+    subtask.info("waiting for readiness");
+    let results = tokio::time::timeout(timeout, futures::future::join_all(ready_or_failed))
+        .await
+        .map_err(|_| OperatorApiError::OperationTimeout {
+            operation: OperatorOperation::DbBranching,
+        })?;
+
+    for result in results {
+        let Ok(Some(db)) = result else {
+            continue;
+        };
+        if let Some(status) = &db.status
+            && status.phase == BranchDatabasePhase::Failed
+        {
+            let error_msg = status
+                .error
+                .clone()
+                .unwrap_or_else(|| "Branch database creation failed".to_string());
+            return Err(OperatorApiError::BranchCreationFailed {
+                operation: OperatorOperation::DbBranching,
+                message: error_msg,
+            });
+        }
+    }
+
+    if has_reused {
+        subtask.success(Some("reusing existing branch databases"));
+    } else {
+        subtask.success(Some("new branch databases ready"));
+    }
+
+    Ok(created_branches)
+}
+
+/// Branches found by ID that can be reused or waited on.
+pub struct ExistingBranches {
+    /// Branches already in Ready phase, can be used immediately.
+    pub ready: HashMap<BranchDatabaseId, BranchDatabase>,
+    /// Branches still being created (not Ready, not Failed). The caller should wait
+    /// for these instead of creating duplicates.
+    pub pending: HashMap<BranchDatabaseId, BranchDatabase>,
+}
+
+/// List existing branch databases that match user-specified IDs.
+///
+/// Returns branches split into two groups:
+/// - `ready`: branches in Ready phase that can be reused immediately
+/// - `pending`: branches still initializing that the caller should wait for
+///
+/// Failed branches are ignored so a fresh one can be created.
+pub async fn list_existing_branches<P: Progress>(
+    api: &Api<BranchDatabase>,
+    params: &HashMap<BranchDatabaseId, UnifiedBranchParams>,
+    progress: &P,
+) -> Result<ExistingBranches, OperatorApiError> {
+    let specified_ids = params
+        .iter()
+        .filter(|&(id, _)| matches!(id, BranchDatabaseId::Specified(_)))
+        .map(|(id, _)| id.as_ref())
+        .collect::<Vec<_>>();
+    let label_selector = if specified_ids.is_empty() {
+        return Ok(ExistingBranches {
+            ready: HashMap::new(),
+            pending: HashMap::new(),
+        });
+    } else {
+        Some(format!(
+            "{} in ({})",
+            labels::MIRRORD_BRANCH_ID_LABEL,
+            specified_ids.join(",")
+        ))
+    };
+
+    let mut subtask = progress.subtask("listing existing branch databases");
+
+    let list_params = ListParams {
+        label_selector,
+        ..Default::default()
+    };
+    let all_branches: Vec<BranchDatabase> = api
+        .list(&list_params)
+        .await
+        .map_err(|e| OperatorApiError::KubeError {
+            error: e,
+            operation: OperatorOperation::DbBranching,
+        })?
+        .into_iter()
+        .collect();
+
+    let mut ready = HashMap::new();
+    let mut pending = HashMap::new();
+
+    for db in all_branches {
+        let id: BranchDatabaseId = db.spec.id.clone().into();
+        match db.status.as_ref().map(|s| &s.phase) {
+            Some(&BranchDatabasePhase::Ready) => {
+                ready.insert(id, db);
+            }
+            Some(&BranchDatabasePhase::Failed) => {
+                // Skip failed branches so a new one will be created
+            }
+            _ => {
+                // Initializing, Pending, or no status yet -- still being created
+                pending.insert(id, db);
+            }
+        }
+    }
+
+    subtask.success(Some(&format!(
+        "{} ready, {} pending",
+        ready.len(),
+        pending.len()
+    )));
+    Ok(ExistingBranches { ready, pending })
+}
+
+/// Wait for pending branch databases to become Ready or Failed.
+///
+/// Returns the branches that reached Ready. Returns an error if any branch failed.
+pub async fn wait_for_pending_branches<P: Progress>(
+    api: &Api<BranchDatabase>,
+    pending: &HashMap<BranchDatabaseId, BranchDatabase>,
+    timeout: Duration,
+    progress: &P,
+) -> Result<HashMap<BranchDatabaseId, BranchDatabase>, OperatorApiError> {
+    if pending.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut subtask = progress.subtask("waiting for in-progress branch databases");
+
+    let branch_names: Vec<(BranchDatabaseId, String)> = pending
+        .iter()
+        .filter_map(|(id, db)| db.meta().name.clone().map(|name| (id.clone(), name)))
+        .collect();
+
+    let wait_futures = branch_names
+        .iter()
+        .map(|(_, name)| {
+            await_condition(api.clone(), name, |db: Option<&BranchDatabase>| {
+                db.and_then(|db| {
+                    db.status.as_ref().map(|status| {
+                        status.phase == BranchDatabasePhase::Ready
+                            || status.phase == BranchDatabasePhase::Failed
+                    })
+                })
+                .unwrap_or(false)
+            })
+        })
+        .collect::<Vec<_>>();
+
+    subtask.info("waiting for readiness");
+    let results = tokio::time::timeout(timeout, futures::future::join_all(wait_futures))
+        .await
+        .map_err(|_| OperatorApiError::OperationTimeout {
+            operation: OperatorOperation::DbBranching,
+        })?;
+
+    let mut ready_branches = HashMap::new();
+    for (result, (id, _name)) in results.into_iter().zip(branch_names.iter()) {
+        let Ok(Some(db)) = result else {
+            continue;
+        };
+
+        if let Some(status) = &db.status
+            && status.phase == BranchDatabasePhase::Failed
+        {
+            let error_msg = status
+                .error
+                .clone()
+                .unwrap_or_else(|| "Branch database creation failed".to_owned());
+            return Err(OperatorApiError::BranchCreationFailed {
+                operation: OperatorOperation::DbBranching,
+                message: error_msg,
+            });
+        }
+
+        ready_branches.insert(id.clone(), db);
+    }
+
+    subtask.success(Some(&format!(
+        "{} pending branches now ready",
+        ready_branches.len()
+    )));
+    Ok(ready_branches)
+}
+
+/// Resolve a branch database ID from the user config and session key.
+///
+/// `{{key}}` expansion in the config is already handled by Tera before this point,
+/// so `config_id` (if present) is the fully-rendered value.
+///
+/// - No `id` in config: uses the session key directly (enables automatic reuse)
+/// - `id` contains the session key: user likely used `{{key}}` in their template
+/// - `id` without the session key: uses the custom ID as-is, warns that the key is unused
+fn resolve_branch_id<P: Progress>(
+    config_id: &Option<String>,
+    session_key: &str,
+    progress: &P,
+) -> BranchDatabaseId {
+    match config_id {
+        None => BranchDatabaseId::specified(session_key.to_string()),
+        Some(id) if id.contains(session_key) => BranchDatabaseId::specified(id.clone()),
+        Some(id) => {
+            progress.warning(
+                "Custom branch ID does not contain the session key. \
+                 Use {{ key }} in your config to include it for automatic branch reuse.",
+            );
+            BranchDatabaseId::specified(id.clone())
+        }
+    }
+}
+
+pub struct UnifiedDatabaseBranchParams {
+    pub branches: HashMap<BranchDatabaseId, UnifiedBranchParams>,
+}
+
+impl UnifiedDatabaseBranchParams {
+    /// Create unified branch database parameters from user config.
+    ///
+    /// When no branch `id` is provided, the session key is used as the branch ID so that
+    /// sessions sharing the same key automatically reuse the same branch.
+    pub fn new<P: Progress>(
+        config: &DatabaseBranchesConfig,
+        target: &Target,
+        session_key: &str,
+        progress: &P,
+    ) -> Result<Self, OperatorApiError> {
+        let mut target_with_container = target.clone();
+        if target_with_container.container().is_none() {
+            target_with_container.set_container(String::new());
+        }
+        let target_display = target_with_container.to_string();
+        let session_target = SessionTarget::from_config(target_with_container)
+            .ok_or_else(|| OperatorApiError::TargetResolutionFailed(target_display))?;
+
+        let mut branches = HashMap::new();
+        for branch_db_config in config.0.iter() {
+            match branch_db_config {
+                DatabaseBranchConfig::Mongodb(mongodb_config) => {
+                    let id = resolve_branch_id(&mongodb_config.base.id, session_key, progress);
+                    let params = UnifiedBranchParams::from_mongodb(
+                        id.as_ref(),
+                        mongodb_config,
+                        target,
+                        &session_target,
+                    );
+                    branches.insert(id, params);
+                }
+                DatabaseBranchConfig::Mysql(mysql_config) => {
+                    let id = resolve_branch_id(&mysql_config.base.id, session_key, progress);
+                    let params = UnifiedBranchParams::from_mysql(
+                        id.as_ref(),
+                        mysql_config,
+                        target,
+                        &session_target,
+                    );
+                    branches.insert(id, params);
+                }
+                DatabaseBranchConfig::Pg(pg_config) => {
+                    let id = resolve_branch_id(&pg_config.base.id, session_key, progress);
+                    let params = UnifiedBranchParams::from_pg(
+                        id.as_ref(),
+                        pg_config,
+                        target,
+                        &session_target,
+                    );
+                    branches.insert(id, params);
+                }
+                DatabaseBranchConfig::Mssql(mssql_config) => {
+                    let id = resolve_branch_id(&mssql_config.base.id, session_key, progress);
+                    let params = UnifiedBranchParams::from_mssql(
+                        id.as_ref(),
+                        mssql_config,
+                        target,
+                        &session_target,
+                    );
+                    branches.insert(id, params);
+                }
+                DatabaseBranchConfig::Redis(_) => {}
+            };
+        }
+        Ok(Self { branches })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UnifiedBranchParams {
+    pub name_prefix: String,
+    pub labels: BTreeMap<String, String>,
+    pub annotations: BTreeMap<String, String>,
+    pub spec: BranchDatabaseSpec,
+}
+
+impl UnifiedBranchParams {
+    pub fn from_pg(
+        id: &str,
+        config: &PgBranchConfig,
+        target: &Target,
+        session_target: &SessionTarget,
+    ) -> Self {
+        let name_prefix = format!("{}-pg-branch-", target.name());
+        let connection_source = convert_connection_source(&config.base.connection);
+        let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
+        tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
+
+        let spec = BranchDatabaseSpec {
+            id: id.to_string(),
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.ttl_secs,
+            version: config.base.version.clone(),
+            postgres_options: Some(PostgresOptions {
+                copy: SqlBranchCopyConfig::from(config.copy.clone()),
+                iam_auth,
+            }),
+            mysql_options: None,
+            mongodb_options: None,
+            mssql_options: None,
+        };
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        Self {
+            name_prefix,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+        }
+    }
+
+    pub fn from_mysql(
+        id: &str,
+        config: &MysqlBranchConfig,
+        target: &Target,
+        session_target: &SessionTarget,
+    ) -> Self {
+        let name_prefix = format!("{}-mysql-branch-", target.name());
+        let connection_source = convert_connection_source(&config.base.connection);
+        let spec = BranchDatabaseSpec {
+            id: id.to_string(),
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.ttl_secs,
+            version: config.base.version.clone(),
+            postgres_options: None,
+            mysql_options: Some(MysqlOptions {
+                copy: SqlBranchCopyConfig::from(config.copy.clone()),
+            }),
+            mongodb_options: None,
+            mssql_options: None,
+        };
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        Self {
+            name_prefix,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+        }
+    }
+
+    pub fn from_mongodb(
+        id: &str,
+        config: &MongodbBranchConfig,
+        target: &Target,
+        session_target: &SessionTarget,
+    ) -> Self {
+        let name_prefix = format!("{}-mongodb-branch-", target.name());
+        let connection_source = convert_connection_source(&config.base.connection);
+        let spec = BranchDatabaseSpec {
+            id: id.to_string(),
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.ttl_secs,
+            version: config.base.version.clone(),
+            postgres_options: None,
+            mysql_options: None,
+            mongodb_options: Some(MongodbOptions {
+                copy: config.copy.clone().into(),
+            }),
+            mssql_options: None,
+        };
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        Self {
+            name_prefix,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+        }
+    }
+
+    pub fn from_mssql(
+        id: &str,
+        config: &mirrord_config::feature::database_branches::MssqlBranchConfig,
+        target: &Target,
+        session_target: &SessionTarget,
+    ) -> Self {
+        let name_prefix = format!("{}-mssql-branch-", target.name());
+        let connection_source = convert_connection_source(&config.base.connection);
+        let spec = BranchDatabaseSpec {
+            id: id.to_string(),
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.ttl_secs,
+            version: config.base.version.clone(),
+            postgres_options: None,
+            mysql_options: None,
+            mongodb_options: None,
+            mssql_options: Some(MssqlOptions {
+                copy: config.copy.clone().into(),
+            }),
+        };
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        Self {
+            name_prefix,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use mirrord_progress::NullProgress;
+
+    use super::{BranchDatabaseId, resolve_branch_id};
+
+    #[test]
+    fn no_id_uses_session_key() {
+        let id = resolve_branch_id(&None, "my-session-key", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("my-session-key".to_string())
+        );
+    }
+
+    #[test]
+    fn custom_id_containing_session_key_is_recognized() {
+        // Simulates Tera having already expanded `{{key}}` in "branch-{{key}}-db"
+        let config_id = Some("branch-abc123-db".to_string());
+        let id = resolve_branch_id(&config_id, "abc123", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("branch-abc123-db".to_string())
+        );
+    }
+
+    #[test]
+    fn custom_id_equal_to_session_key() {
+        // Simulates Tera having expanded a config id that was just `{{key}}`
+        let config_id = Some("full-key".to_string());
+        let id = resolve_branch_id(&config_id, "full-key", &NullProgress);
+        assert_eq!(id, BranchDatabaseId::Specified("full-key".to_string()));
+    }
+
+    #[test]
+    fn custom_id_without_session_key_used_as_is() {
+        let config_id = Some("fixed-branch-id".to_string());
+        let id = resolve_branch_id(&config_id, "ignored-key", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("fixed-branch-id".to_string())
+        );
+    }
+
+    #[test]
+    fn custom_id_with_key_as_substring() {
+        // Key appears as a substring, e.g. user wrote "prefix-{{key}}-suffix"
+        // and Tera expanded it to "prefix-mykey-suffix"
+        let config_id = Some("prefix-mykey-suffix".to_string());
+        let id = resolve_branch_id(&config_id, "mykey", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("prefix-mykey-suffix".to_string())
+        );
+    }
+
+    #[test]
+    fn session_key_with_special_characters() {
+        let id = resolve_branch_id(&None, "key/with:special@chars", &NullProgress);
+        assert_eq!(
+            id,
+            BranchDatabaseId::Specified("key/with:special@chars".to_string())
+        );
+    }
+
+    #[test]
+    fn all_branches_produce_specified_variant() {
+        let cases: Vec<(Option<String>, &str)> = vec![
+            (None, "session-key"),
+            (
+                Some("id-with-session-key-inside".to_string()),
+                "session-key",
+            ),
+            (Some("static-id".to_string()), "session-key"),
+        ];
+        for (config_id, key) in cases {
+            let id = resolve_branch_id(&config_id, key, &NullProgress);
+            assert!(
+                matches!(id, BranchDatabaseId::Specified(_)),
+                "expected Specified variant for config_id={config_id:?}, key={key}"
+            );
+        }
+    }
+}

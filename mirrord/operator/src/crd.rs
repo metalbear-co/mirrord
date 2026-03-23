@@ -492,6 +492,11 @@ pub enum NewOperatorFeature {
 
     PreviewEnv,
 
+    /// The operator supports the unified `BranchDatabase` CRD with per-dialect options
+    /// (`postgresOptions`, `mysqlOptions`, `mongodbOptions`) instead of the old separate
+    /// `PgBranchDatabase`, `MysqlBranchDatabase`, `MongodbBranchDatabase` CRDs.
+    UnifiedBranchDbCrd,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -528,6 +533,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SqsQueueSplittingWithJqFilter => {
                 "Splitting SQS queues with a jq filter"
             }
+            NewOperatorFeature::UnifiedBranchDbCrd => "unified branch database CRD",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -945,7 +951,8 @@ mod tests {
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
         MirrordWorkloadQueueRegistry, QueueNameSource, SessionCrd, SplitQueue, SqsQueueDetails,
         db_branching::{
-            mongodb::MongodbBranchDatabase, mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
+            branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
+            mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
         },
         external::MirrordClusterExternalResource,
         kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
@@ -986,6 +993,7 @@ mod tests {
         write_crd_yaml::<PgBranchDatabase>();
         write_crd_yaml::<MysqlBranchDatabase>();
         write_crd_yaml::<MongodbBranchDatabase>();
+        write_crd_yaml::<BranchDatabase>();
         write_crd_yaml::<MirrordPolicy>();
         write_crd_yaml::<MirrordClusterPolicy>();
         write_crd_yaml::<MirrordClusterExternalResource>();
