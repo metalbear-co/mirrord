@@ -4,10 +4,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use mirrord_config::feature::database_branches::{
     ConnectionParamsConfig, ConnectionSourceType, ParamSource, TargetEnvironmentVariableSource,
 };
-use schemars::{
-    JsonSchema,
-    schema::{InstanceType, ObjectValidation, Schema, SchemaObject},
-};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum_macros::EnumDiscriminants;
 
@@ -231,39 +228,27 @@ pub enum IamAuthConfig {
     },
 }
 
-/// Manual JsonSchema because schemars' derive for internally-tagged enums
-/// (`#[serde(tag = "type")]`) produces `oneOf` subschemas where the `type`
-/// property has different enum values per variant. kube-rs's CRD generator
-/// cannot merge these conflicting schemas. We produce a simple discriminated
-/// schema instead: an object with a required `type` string and no further
-/// validation, which Kubernetes accepts.
 impl JsonSchema for IamAuthConfig {
     fn schema_name() -> String {
         "IamAuthConfig".into()
     }
 
-    fn json_schema(_gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
-        let mut type_prop = schemars::Map::new();
-        type_prop.insert(
-            "type".into(),
-            SchemaObject {
-                instance_type: Some(InstanceType::String.into()),
-                enum_values: Some(vec!["aws_rds".into(), "gcp_cloud_sql".into()]),
-                ..Default::default()
-            }
-            .into(),
-        );
-
-        SchemaObject {
-            instance_type: Some(InstanceType::Object.into()),
-            object: Some(Box::new(ObjectValidation {
-                properties: type_prop,
-                required: std::iter::once("type".to_owned()).collect(),
-                additional_properties: Some(Box::new(Schema::Bool(true))),
-                ..Default::default()
-            })),
-            ..Default::default()
+    /// [`IamAuthConfig`] is adjacently tagged. Because of this, its JSON schema is not valid
+    /// according to CRD standards.
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        struct Proxy {
+            // We verify the tag.
+            #[serde(rename = "type")]
+            tag: IamAuthConfigDiscriminants,
+            // Other fields can be whatever.
+            //
+            // Generated CRD has `x-kubernetes-preserve-unknown-fields`,
+            // so everything is all right.
+            #[serde(flatten)]
+            rest: HashMap<String, serde_json::Value>,
         }
-        .into()
+
+        Proxy::json_schema(generator)
     }
 }
