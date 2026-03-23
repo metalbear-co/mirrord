@@ -480,6 +480,15 @@ pub(super) struct CiStartArgs {
     pub triggered_by: Option<String>,
 }
 
+#[derive(Args, Debug)]
+pub(super) struct CiContainerArgs {
+    #[clap(flatten)]
+    pub ci_args: Box<CiStartArgs>,
+
+    #[clap(flatten)]
+    pub container_args: Box<ContainerArgs>,
+}
+
 /// Target-related parameters, present in more than one command.
 #[derive(Args, Debug)]
 pub(super) struct TargetParams {
@@ -1082,6 +1091,8 @@ pub(super) enum CiCommand {
     ///
     /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
     Stop,
+
+    Container(Box<CiContainerArgs>),
 }
 
 #[derive(Args, Debug)]

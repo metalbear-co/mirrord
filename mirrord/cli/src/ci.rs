@@ -26,6 +26,7 @@ use crate::{
     CiArgs, CiCommand, CiStartArgs, CliError, CliResult, ci::error::CiError, user_data::UserData,
 };
 
+pub(crate) mod container;
 pub(crate) mod error;
 pub(super) mod start;
 pub(crate) mod stop;
@@ -58,6 +59,14 @@ pub(crate) async fn ci_command(
             .handle()
             .await
             .map(|_| ())?),
+        CiCommand::Container(container_args) => {
+            Ok(
+                container::CiContainerCommandHandler::new(container_args, watch, user_data)
+                    .await?
+                    .handle()
+                    .await?,
+            )
+        }
     }
 }
 
