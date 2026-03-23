@@ -53,7 +53,7 @@ use winapi::{
         winsock2::{
             HOSTENT, INVALID_SOCKET, IPPORT_RESERVED, LPWSAOVERLAPPED_COMPLETION_ROUTINE, SOCKET,
             SOCKET_ERROR, WSA_IO_PENDING, WSAEACCES, WSAECONNABORTED, WSAECONNREFUSED, WSAEFAULT,
-            WSAGetLastError, WSAOVERLAPPED, WSASend, WSASetLastError,
+            WSAGetLastError, WSAHOST_NOT_FOUND, WSAOVERLAPPED, WSASend, WSASetLastError,
         },
     },
 };
@@ -542,6 +542,10 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
 
     match ops::connect(s, name, namelen, "connect_detour", connect_fn) {
         Err(HookError::ConnectError(ConnectError::AddressUnreachable(_))) => {
+            return SOCKET_ERROR;
+        }
+        Err(HookError::DNSNoName) => {
+            unsafe { WSASetLastError(WSAHOST_NOT_FOUND) };
             return SOCKET_ERROR;
         }
         Err(e) => {
@@ -1122,6 +1126,10 @@ unsafe extern "system" fn wsa_connect_detour(
                 raw_addr,
                 e
             );
+            return SOCKET_ERROR;
+        }
+        Err(HookError::DNSNoName) => {
+            unsafe { WSASetLastError(WSAHOST_NOT_FOUND) };
             return SOCKET_ERROR;
         }
         Err(_) => {
