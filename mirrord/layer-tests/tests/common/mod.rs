@@ -23,7 +23,7 @@ pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
 pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
 
 /// Initializes tracing for the current thread, allowing us to have multiple tracing subscribers
-/// writin logs to different files.
+/// writing logs to different files.
 ///
 /// We take advantage of how Rust's thread naming scheme for tests to create the log files,
 /// and if we have no thread name, then we just write the logs to `stderr`.
