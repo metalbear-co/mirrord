@@ -1280,6 +1280,13 @@ pub(super) struct PreviewStartArgs {
     /// If the session hasn't reached `Ready` within this time, the CLI deletes it.
     #[arg(long)]
     pub timeout: Option<u64>,
+
+    /// Replace an existing preview session with the same key and target.
+    ///
+    /// Without this flag, the CLI will refuse to create a session if one already exists
+    /// for the same key+target combination.
+    #[arg(long)]
+    pub force: bool,
 }
 
 impl PreviewStartArgs {

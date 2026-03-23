@@ -18,7 +18,7 @@ use crate::utils::{
 /// Only requests with matching headers should be mirrored.
 /// All requests (matching and non-matching) should still reach the original server.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(240))]
 async fn mirror_with_http_header_filter(
     #[future] basic_service: KubeService,

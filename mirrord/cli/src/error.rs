@@ -575,7 +575,8 @@ pub(crate) enum CliError {
 
     #[error("A preview environment with key \"{key}\" already exists for target \"{target}\"")]
     #[diagnostic(help(
-        "Use `mirrord preview stop` to stop the existing session first, \
+        "Use `--force` to replace the existing session, \
+         `mirrord preview stop` to stop it first, \
          or choose a different key with `--key`."
     ))]
     PreviewDuplicateSession { key: String, target: String },
@@ -594,12 +595,6 @@ pub(crate) enum CliError {
         Please check that the target exists and has running pods.{GENERAL_HELP}"
     ))]
     RuntimeDataResolution(KubeApiError),
-
-    #[error("Invalid image reference: {0}")]
-    #[diagnostic(help(
-        "Image must be a valid OCI image reference (e.g. 'myregistry.io/myimage:tag')."
-    ))]
-    PreviewInvalidImage(String),
 }
 
 impl CliError {

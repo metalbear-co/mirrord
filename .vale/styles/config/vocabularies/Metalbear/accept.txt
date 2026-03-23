@@ -3,6 +3,7 @@ mirrord
 MetalBear
 
 # Kubernetes ecosystem
+kube
 kubectl
 kubeconfig
 Kubernetes

@@ -26,14 +26,25 @@ use crate::{
 /// Only does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is
 /// set as `"steal"`, ignored otherwise.
 ///
-/// For example, to filter based on header:
+/// The recommended way to filter a single developer session is to propagate a W3C `baggage` or
+/// `tracestate` entry such as `mirrord-session={{ key }}` from the caller, and match that value
+/// here. This works well across proxies, service meshes, and tracing-aware clients.
+///
+/// For example, to filter on a `baggage` header:
 /// ```json
 /// {
-///   "header_filter": "host: api\\..+"
+///   "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
 /// }
 /// ```
-/// Setting that filter will make mirrord only steal requests with the `host` header set to hosts
-/// that start with "api", followed by a dot, and then at least one more character.
+/// Setting that filter will make mirrord only steal requests whose `baggage` header contains
+/// `mirrord-session={{ key }}`.
+///
+/// If your traffic already propagates `tracestate`, you can filter on it the same way:
+/// ```json
+/// {
+///   "header_filter": "^tracestate: .*mirrord-session={{ key }}.*$"
+/// }
+/// ```
 ///
 /// For example, to filter based on path:
 /// ```json
@@ -66,25 +77,26 @@ use crate::{
 /// With `all_of` and `any_of`, you can use multiple HTTP filters at the same time.
 ///
 /// If you want to steal HTTP requests that match **every** pattern specified, use `all_of`.
-/// For example, this filter steals only HTTP requests to endpoint `/api/my-endpoint` that contain
-/// header `x-debug-session` with value `121212`.
+/// For example, this filter steals only `POST` requests to endpoint `/api/my-endpoint` whose
+/// `baggage` header contains `mirrord-session={{ key }}`.
 /// ```json
 /// {
 ///   "all_of": [
-///     { "header": "^x-debug-session: 121212$" },
-///     { "path": "^/api/my-endpoint$" }
+///     { "header": "^baggage: .*mirrord-session={{ key }}.*$" },
+///     { "path": "^/api/my-endpoint$" },
+///     { "method": "POST" }
 ///   ]
 /// }
 /// ```
 ///
 /// If you want to steal HTTP requests that match **any** of the patterns specified, use `any_of`.
-/// For example, this filter steals HTTP requests to endpoint `/api/my-endpoint`
-/// **and** HTTP requests that contain header `x-debug-session` with value `121212`.
+/// For example, this filter steals HTTP requests to `/api/my-endpoint`, or requests whose
+/// `baggage` header contains `mirrord-session={{ key }}`.
 /// ```json
 /// {
 ///  "any_of": [
-///    { "path": "^/api/my-endpoint$"},
-///    { "header": "^x-debug-session: 121212$" }
+///    { "header": "^baggage: .*mirrord-session={{ key }}.*$" },
+///    { "path": "^/api/my-endpoint$" }
 ///  ]
 /// }
 /// ```
@@ -100,6 +112,9 @@ pub struct HttpFilterConfig {
     ///
     /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
     /// case-insensitive.
+    ///
+    /// The recommended pattern is to match a W3C `baggage` or `tracestate` entry such as
+    /// `mirrord-session={{ key }}`.
     #[config(env = "MIRRORD_HTTP_HEADER_FILTER")]
     pub header_filter: Option<String>,
 
@@ -140,7 +155,7 @@ pub struct HttpFilterConfig {
     ///
     /// An array of HTTP filters.
     ///
-    /// Each inner filter specifies either header or path regex.
+    /// Each inner filter specifies a header, path, method, body, or jq filter.
     /// Requests must match all of the filters to be stolen.
     ///
     /// Cannot be an empty list.
@@ -149,9 +164,9 @@ pub struct HttpFilterConfig {
     /// ```json
     /// {
     ///   "all_of": [
-    ///     { "header": "x-user: my-user$" },
-    ///     { "path": "^/api/v1/my-endpoint" }
-    ///     { "method": "post" }
+    ///     { "header": "^baggage: .*mirrord-session={{ key }}.*$" },
+    ///     { "path": "^/api/v1/my-endpoint$" },
+    ///     { "method": "POST" }
     ///   ]
     /// }
     /// ```
@@ -161,7 +176,7 @@ pub struct HttpFilterConfig {
     ///
     /// An array of HTTP filters.
     ///
-    /// Each inner filter specifies either header or path regex.
+    /// Each inner filter specifies a header, path, method, body, or jq filter.
     /// Requests must match at least one of the filters to be stolen.
     ///
     /// Cannot be an empty list.
@@ -170,9 +185,9 @@ pub struct HttpFilterConfig {
     /// ```json
     /// {
     ///   "any_of": [
-    ///     { "header": "^x-user: my-user$" },
-    ///     { "path": "^/api/v1/my-endpoint" }
-    ///     { "method": "post" }
+    ///     { "header": "^baggage: .*mirrord-session={{ key }}.*$" },
+    ///     { "header": "^tracestate: .*mirrord-session={{ key }}.*$" },
+    ///     { "path": "^/api/v1/my-endpoint$" }
     ///   ]
     /// }
     /// ```
@@ -430,6 +445,9 @@ pub enum InnerFilter {
     ///
     /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
     /// case-insensitive.
+    ///
+    /// Prefer matching W3C `baggage` or `tracestate` entries such as
+    /// `mirrord-session={{ key }}` when you want to isolate one developer session.
     Header {
         header: String,
     },

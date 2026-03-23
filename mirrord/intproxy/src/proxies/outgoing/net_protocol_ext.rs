@@ -31,8 +31,6 @@ use rand::distr::{Alphanumeric, SampleString};
 #[cfg(not(target_os = "windows"))]
 use tokio::net::{UnixListener, UnixStream};
 
-use crate::proxies::outgoing::busy_tcp_listener::BusyTcpListener;
-
 /// Trait for [`NetProtocol`] that handles differences in [`mirrord_protocol::outgoing`] between
 /// network protocols. Allows to unify logic.
 pub trait NetProtocolExt: Sized {
@@ -150,7 +148,6 @@ pub enum PreparedSocket {
     /// There is no real listening/accepting here, see [`NetProtocol::Datagrams`] for more info.
     UdpSocket(UdpSocket),
     TcpListener(TcpListener),
-    BusyTcpListener(BusyTcpListener),
     #[cfg(not(target_os = "windows"))]
     UnixListener(UnixListener),
 }
@@ -175,7 +172,6 @@ impl PreparedSocket {
     pub fn local_address(&self) -> io::Result<SocketAddress> {
         let address = match self {
             Self::TcpListener(listener) => listener.local_addr()?.into(),
-            Self::BusyTcpListener(socket) => socket.local_addr()?.into(),
             Self::UdpSocket(socket) => socket.local_addr()?.into(),
             #[cfg(not(target_os = "windows"))]
             Self::UnixListener(listener) => {
@@ -188,16 +184,12 @@ impl PreparedSocket {
         Ok(address)
     }
 
-    /// Accepts one connection on this socket and returns a new socket for sending and receiving
-    /// data.
+    /// Accepts one connection on this socket and returns a new socket
+    /// for sending and receiving data.
     pub async fn accept(self) -> io::Result<ConnectedSocket> {
         let (inner, is_really_connected) = match self {
             Self::TcpListener(listener) => {
                 let (stream, _) = listener.accept().await?;
-                (InnerConnectedSocket::TcpStream(stream), true)
-            }
-            Self::BusyTcpListener(socket) => {
-                let stream = socket.accept().await?;
                 (InnerConnectedSocket::TcpStream(stream), true)
             }
             Self::UdpSocket(socket) => (InnerConnectedSocket::UdpSocket(socket), false),

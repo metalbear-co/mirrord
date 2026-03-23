@@ -14,7 +14,7 @@ mod env_tests {
 
     #[cfg_attr(any(not(feature = "job"), target_os = "windows"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn bash_remote_env_vars(
         #[future] basic_service: KubeService,
@@ -25,7 +25,7 @@ mod env_tests {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     pub async fn remote_env_vars_works(
         #[future] basic_service: KubeService,

@@ -1,508 +1,256 @@
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { type WizardStep } from "../Wizard";
-import mirrordArchitecture from "@/assets/mirrord-architecture.svg";
-import flowDiagram from "@/assets/flow-diagram.png";
+import { useState } from "react";
+import { ChevronLeft, ChevronRight, CheckCircle } from "lucide-react";
+import { Button, Card, CardContent, CardFooter } from "@metalbear/ui";
+import mirrordArchitecture from "../../assets/mirrord-architecture.svg";
+import flowDiagram from "../../assets/flow-diagram.png";
 
-const learningStep1NewUser: WizardStep = {
-  id: "wizard-1-intro",
-  title: "What is mirrord?",
-  content: (
-    <div className="space-y-4 max-w-3xl mx-auto">
-      <Card className="bg-gradient-card border-border/50 shadow-glow">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">What is mirrord?</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <p className="text-foreground text-sm leading-relaxed mb-4">
-            mirrord lets you run your local code in the context of your cloud
-            environment. Unlike traditional development tools, you can test your
-            code with real cloud dependencies, data, and configuration without
-            deploying anything.
-          </p>
+interface LearningStepsProps {
+  onComplete: () => void;
+  onSkip: () => void;
+}
 
-          <div className="bg-muted/30 rounded-lg p-4">
-            <h4 className="font-semibold mb-3 text-accent-foreground text-sm">
-              Why mirrord vs. Other Solutions?
-            </h4>
-            <div className="grid gap-2">
-              <div className="flex items-start gap-2">
-                <span className="text-red-500 mt-0.5 text-sm">×</span>
-                <span className="text-muted-foreground text-xs">
-                  <strong>Port forwarding:</strong> Only gives you database
-                  access, no real environment context
-                </span>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="text-red-500 mt-0.5 text-sm">×</span>
-                <span className="text-muted-foreground text-xs">
-                  <strong>Local clusters:</strong> Resource-heavy, doesn't match
-                  production environment
-                </span>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="text-red-500 mt-0.5 text-sm">×</span>
-                <span className="text-muted-foreground text-xs">
-                  <strong>Deploy to dev cluster:</strong> Slow feedback loop,
-                  complex CI/CD setup
-                </span>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="text-green-500 mt-0.5 text-sm">✓</span>
-                <span className="text-foreground text-xs">
-                  <strong>mirrord:</strong> Run locally with full cloud context
-                  in seconds
-                </span>
-              </div>
+interface Step {
+  title: string;
+  content: React.ReactNode;
+}
+
+const steps: Step[] = [
+  {
+    title: "What is mirrord?",
+    content: (
+      <div className="space-y-4">
+        <p className="text-sm text-[var(--foreground)] leading-relaxed">
+          <strong>mirrord</strong> lets you run your local process in the
+          context of a Kubernetes cluster. Instead of deploying your code to
+          test it, you can develop and debug locally while connected to your
+          cloud environment.
+        </p>
+        <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">
+          This means faster development cycles, real environment testing, and no
+          need to set up complex local infrastructure.
+        </p>
+      </div>
+    ),
+  },
+  {
+    title: "How does it work?",
+    content: (
+      <div className="space-y-4">
+        <p className="text-sm text-[var(--foreground)] leading-relaxed">
+          mirrord intercepts system calls from your local process and forwards
+          them to a remote pod in your Kubernetes cluster.
+        </p>
+        <img
+          src={mirrordArchitecture}
+          alt="mirrord architecture"
+          className="w-full rounded-lg border border-[var(--border)]"
+        />
+        <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">
+          Your local process sees the remote file system, environment variables,
+          and network traffic as if it were running in the cluster.
+        </p>
+      </div>
+    ),
+  },
+  {
+    title: "Traffic Modes",
+    content: (
+      <div className="space-y-4">
+        <p className="text-sm text-[var(--foreground)] leading-relaxed">
+          mirrord supports three ways to handle incoming traffic:
+        </p>
+        <ul className="space-y-3">
+          <li className="flex gap-3 text-sm">
+            <span className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
+            <div>
+              <strong className="text-[var(--foreground)]">Mirror</strong>
+              <span className="text-[var(--muted-foreground)]">
+                {" "}
+                — Copy traffic without affecting the remote service
+              </span>
             </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  ),
-};
-
-const learningStep2NewUser: WizardStep = {
-  id: "wizard-2-architecture",
-  title: "How mirrord Works",
-  content: (
-    <div className="space-y-4 max-w-3xl mx-auto">
-      <Card className="bg-gradient-card border-border/50 shadow-glow">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Architecture Overview</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <p className="text-muted-foreground mb-4 leading-relaxed text-sm">
-            mirrord runs in two places - in the memory of your local process
-            (mirrord-layer), and as a pod in your cloud environment
-            (mirrord-agent).
-          </p>
-
-          <div className="bg-muted/30 rounded-lg p-4 mb-4">
-            <h5 className="font-semibold mb-3 text-accent-foreground text-sm">
-              mirrord - Basic Architecture
-            </h5>
-            <p className="text-muted-foreground mb-3 text-xs">
-              When you start your local process with mirrord, it creates a pod
-              in your cloud environment, which listens in on the pod you've
-              passed as an argument. mirrord-layer then does the following:
-            </p>
-
-            <div className="ml-3 space-y-2">
-              <p className="font-medium text-foreground text-xs">
-                Override the process' syscalls to:
-              </p>
-              <ul className="space-y-1 ml-3 text-muted-foreground text-xs">
-                <li>
-                  • Listen to incoming traffic from the agent, instead of local
-                  sockets
-                </li>
-                <li>
-                  • Intercept outgoing traffic and send it out from the remote
-                  pod, instead of locally
-                </li>
-                <li>• Read and write files to the remote file system</li>
-                <li>
-                  • Merge the process' environment variables with those of the
-                  remote pod
-                </li>
-              </ul>
+          </li>
+          <li className="flex gap-3 text-sm">
+            <span className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
+            <div>
+              <strong className="text-[var(--foreground)]">
+                Steal (Filter)
+              </strong>
+              <span className="text-[var(--muted-foreground)]">
+                {" "}
+                — Redirect specific traffic based on headers or paths
+              </span>
             </div>
-          </div>
-
-          <div className="bg-background border border-border rounded-lg p-2">
-            <img
-              src={mirrordArchitecture}
-              alt="mirrord Architecture Diagram"
-              className="w-full max-w-full mx-auto rounded"
-            />
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  ),
-};
-
-const learningStep3NewUser: WizardStep = {
-  id: "wizard-3-filtering",
-  title: "Filtering Mode",
-  content: (
-    <div className="space-y-4 max-w-3xl mx-auto">
-      <Card className="bg-gradient-card border-border/50 shadow-glow">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Filtering Mode</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <p className="text-muted-foreground mb-4 leading-relaxed text-sm">
-            Your local service only handles matching traffic based on HTTP
-            Headers/Path (This includes gRPC). This allows you to control what
-            flows in the system you want to affect.
-          </p>
-          <div className="bg-muted/30 rounded-lg p-4">
-            <h5 className="font-semibold mb-3 text-foreground text-sm">
-              Process Overview:
-            </h5>
-            <ol className="space-y-2 text-muted-foreground list-decimal ml-4 mb-3 text-xs">
-              <li>Remote traffic is stolen selectively</li>
-              <li>
-                Remote resources such as databases and other services are used.
-              </li>
-            </ol>
-            <p className="text-muted-foreground mb-3 text-xs">
-              Queues are still shared unless using queue splitting as well.
-            </p>
-            <p className="font-medium text-primary text-xs">
-              Best for: Testing against shared environment
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  ),
-};
-
-const learningStep4NewUser: WizardStep = {
-  id: "wizard-4-mirror",
-  title: "Mirror mode",
-  content: (
-    <div className="space-y-4 max-w-3xl mx-auto">
-      <Card className="bg-gradient-card border-border/50 shadow-glow">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Mirror Mode</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <p className="text-muted-foreground mb-4 leading-relaxed text-sm">
-            Mirror traffic to you local service without disruption
-          </p>
-          <div className="bg-muted/30 rounded-lg p-4">
-            <p className="text-muted-foreground mb-3 leading-relaxed text-xs">
-              Your local service receives a copy of the incoming traffic sent to
-              the targeted remote service. The response will come from the
-              remote service and your local service will handle the same request
-              but it's response will be discarded. By default, you will connect
-              to the remote dependencies so you can have side effects (i.e
-              writing to same database)
-            </p>
-            <p className="font-medium text-primary text-xs">
-              Best for: Debugging existing traffic, understanding how APIs
-              behave without deploying/changing logic in the environment.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  ),
-};
-
-const learningStep5NewUser: WizardStep = {
-  id: "wizard-5-replace",
-  title: "Replace Mode",
-  content: (
-    <div className="space-y-4 max-w-3xl mx-auto">
-      <Card className="bg-gradient-card border-border/50 shadow-glow">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Replace Mode</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <p className="text-muted-foreground mb-4 leading-relaxed text-sm">
-            Completely substitute the remote service
-          </p>
-          <div className="bg-muted/30 rounded-lg p-4">
-            <p className="text-muted-foreground leading-relaxed text-xs">
-              Replace mode completely substitutes the remote service's traffic
-              and queues. Useful when Queue Splitting isn't available and you
-              want to work against queues.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  ),
-};
-
-const learningStep6NewUser: WizardStep = {
-  id: "wizard-6-feedback",
-  title: "Development Feedback Loop",
-  content: (
-    <div className="space-y-4 max-w-3xl mx-auto">
-      <Card className="bg-gradient-card border-border/50 shadow-glow">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">
-            Fast Development Feedback Loop
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <p className="text-muted-foreground mb-4 leading-relaxed text-sm">
-            See how mirrord accelerates your development cycle
-          </p>
-          <p className="text-foreground text-sm leading-relaxed mb-4">
-            mirrord creates a fast feedback loop that dramatically speeds up
-            cloud-native development by eliminating the need for deployments
-            during development.
-          </p>
-
-          <div className="bg-background border border-border rounded-lg p-2 mb-4">
-            <img
-              src={flowDiagram}
-              alt="Development Feedback Loop with mirrord"
-              className="w-full max-w-full mx-auto rounded"
-            />
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  ),
-};
-
-export const LearningStepsNewUser: WizardStep[] = [
-  learningStep1NewUser,
-  learningStep2NewUser,
-  learningStep3NewUser,
-  learningStep4NewUser,
-  learningStep5NewUser,
-  learningStep6NewUser,
+          </li>
+          <li className="flex gap-3 text-sm">
+            <span className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
+            <div>
+              <strong className="text-[var(--foreground)]">Replace</strong>
+              <span className="text-[var(--muted-foreground)]">
+                {" "}
+                — Fully replace the remote service with your local process
+              </span>
+            </div>
+          </li>
+        </ul>
+      </div>
+    ),
+  },
+  {
+    title: "The Development Loop",
+    content: (
+      <div className="space-y-4">
+        <p className="text-sm text-[var(--foreground)] leading-relaxed">
+          With mirrord, your development workflow becomes:
+        </p>
+        <img
+          src={flowDiagram}
+          alt="Development flow"
+          className="w-full rounded-lg border border-[var(--border)]"
+        />
+        <ol className="space-y-2 text-sm">
+          <li className="flex gap-2">
+            <span className="text-primary font-semibold">1.</span>
+            <span className="text-[var(--foreground)]">Write code locally</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-primary font-semibold">2.</span>
+            <span className="text-[var(--foreground)]">
+              Run with mirrord to test in cluster context
+            </span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-primary font-semibold">3.</span>
+            <span className="text-[var(--foreground)]">
+              Debug and iterate instantly
+            </span>
+          </li>
+        </ol>
+      </div>
+    ),
+  },
+  {
+    title: "Configuration File",
+    content: (
+      <div className="space-y-4">
+        <p className="text-sm text-[var(--foreground)] leading-relaxed">
+          mirrord uses a JSON configuration file to define how it connects to
+          your cluster and handles traffic.
+        </p>
+        <div className="bg-[var(--muted)] rounded-lg p-4 font-mono text-xs">
+          <pre className="text-[var(--foreground)] overflow-x-auto">{`{
+  "target": {
+    "path": "deployment/my-app",
+    "namespace": "default"
+  },
+  "feature": {
+    "network": {
+      "incoming": { "mode": "steal" }
+    }
+  }
+}`}</pre>
+        </div>
+        <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">
+          This wizard will help you create this configuration file step by step.
+        </p>
+      </div>
+    ),
+  },
+  {
+    title: "Ready to Configure!",
+    content: (
+      <div className="space-y-4 text-center">
+        <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
+          <CheckCircle className="h-8 w-8 text-primary" />
+        </div>
+        <p className="text-base font-medium text-[var(--foreground)]">
+          You now understand the basics of mirrord!
+        </p>
+        <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">
+          Let's create your configuration file. Click "Start Configuration" to
+          begin selecting your target and traffic mode.
+        </p>
+      </div>
+    ),
+  },
 ];
 
-const learningStep1Returning: WizardStep = {
-  id: "wizard-1-intro",
-  title: "What is mirrord?",
-  content: (
-    <div className="space-y-4 max-w-3xl mx-auto">
-      <Card className="bg-gradient-card border-border/50 shadow-glow">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">What is mirrord?</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <p className="text-foreground text-sm leading-relaxed mb-4">
-            mirrord lets you run your local code in the context of your cloud
-            environment. Unlike traditional development tools, you can test your
-            code with real cloud dependencies, data, and configuration without
-            deploying anything.
-          </p>
+const LearningSteps = ({ onComplete, onSkip }: LearningStepsProps) => {
+  const [currentStep, setCurrentStep] = useState(0);
+  const isLastStep = currentStep === steps.length - 1;
+  const isFirstStep = currentStep === 0;
 
-          <div className="bg-muted/30 rounded-lg p-4">
-            <h4 className="font-semibold mb-3 text-accent-foreground text-sm">
-              Why mirrord vs. Other Solutions?
-            </h4>
-            <div className="grid gap-2">
-              <div className="flex items-start gap-2">
-                <span className="text-red-500 mt-0.5 text-sm">×</span>
-                <span className="text-muted-foreground text-xs">
-                  <strong>Port forwarding:</strong> Only gives you database
-                  access, no real environment context
-                </span>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="text-red-500 mt-0.5 text-sm">×</span>
-                <span className="text-muted-foreground text-xs">
-                  <strong>Local clusters:</strong> Resource-heavy, doesn't match
-                  production environment
-                </span>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="text-red-500 mt-0.5 text-sm">×</span>
-                <span className="text-muted-foreground text-xs">
-                  <strong>Deploy to dev cluster:</strong> Slow feedback loop,
-                  complex CI/CD setup
-                </span>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="text-green-500 mt-0.5 text-sm">✓</span>
-                <span className="text-foreground text-xs">
-                  <strong>mirrord:</strong> Run locally with full cloud context
-                  in seconds
-                </span>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  ),
-};
+  const next = () => {
+    if (isLastStep) {
+      onComplete();
+    } else {
+      setCurrentStep((s) => s + 1);
+    }
+  };
 
-const learningStep2Returning: WizardStep = {
-  id: "wizard-2-architecture",
-  title: "How mirrord Works",
-  content: (
-    <div className="space-y-4 max-w-3xl mx-auto">
-      <Card className="bg-gradient-card border-border/50 shadow-glow">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Architecture Overview</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <p className="text-muted-foreground mb-4 leading-relaxed text-sm">
-            mirrord runs in two places - in the memory of your local process
-            (mirrord-layer), and as a pod in your cloud environment
-            (mirrord-agent).
-          </p>
+  const prev = () => {
+    if (!isFirstStep) {
+      setCurrentStep((s) => s - 1);
+    }
+  };
 
-          <div className="bg-muted/30 rounded-lg p-4 mb-4">
-            <h5 className="font-semibold mb-3 text-accent-foreground text-sm">
-              mirrord - Basic Architecture
-            </h5>
-            <p className="text-muted-foreground mb-3 text-xs">
-              When you start your local process with mirrord, it creates a pod
-              in your cloud environment, which listens in on the pod you've
-              passed as an argument. mirrord-layer then does the following:
-            </p>
-
-            <div className="ml-3 space-y-2">
-              <p className="font-medium text-foreground text-xs">
-                Override the process' syscalls to:
-              </p>
-              <ul className="space-y-1 ml-3 text-muted-foreground text-xs">
-                <li>
-                  • Listen to incoming traffic from the agent, instead of local
-                  sockets
-                </li>
-                <li>
-                  • Intercept outgoing traffic and send it out from the remote
-                  pod, instead of locally
-                </li>
-                <li>• Read and write files to the remote file system</li>
-                <li>
-                  • Merge the process' environment variables with those of the
-                  remote pod
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="bg-background border border-border rounded-lg p-2">
-            <img
-              src={mirrordArchitecture}
-              alt="mirrord Architecture Diagram"
-              className="w-full max-w-full mx-auto rounded"
+  return (
+    <Card className="border-[var(--border)]">
+      <CardContent className="pt-6 space-y-5">
+        {/* Progress indicator */}
+        <div className="flex items-center justify-center gap-1.5">
+          {steps.map((_, index) => (
+            <button
+              key={index}
+              onClick={() => setCurrentStep(index)}
+              className={`
+                h-1.5 rounded-full transition-all duration-300 hover:opacity-80
+                ${index === currentStep ? "w-6 bg-primary" : "w-1.5 bg-[var(--muted)]"}
+                ${index < currentStep ? "bg-primary/50" : ""}
+              `}
             />
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  ),
+          ))}
+        </div>
+
+        {/* Step title */}
+        <h3 className="text-lg font-semibold text-[var(--foreground)] text-center">
+          {steps[currentStep].title}
+        </h3>
+
+        {/* Step content */}
+        <div>{steps[currentStep].content}</div>
+      </CardContent>
+
+      <CardFooter className="flex items-center justify-between">
+        <div>
+          {!isFirstStep && (
+            <Button variant="outline" onClick={prev} className="gap-2">
+              <ChevronLeft className="h-4 w-4" />
+              Previous
+            </Button>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {!isLastStep && (
+            <Button
+              variant="ghost"
+              onClick={onSkip}
+              className="text-[var(--muted-foreground)]"
+            >
+              Skip
+            </Button>
+          )}
+          <Button
+            onClick={next}
+            className="gap-2 text-white shadow-brand hover:shadow-brand-hover"
+          >
+            {isLastStep ? "Start Configuration" : "Next"}
+            {!isLastStep && <ChevronRight className="h-4 w-4" />}
+          </Button>
+        </div>
+      </CardFooter>
+    </Card>
+  );
 };
 
-const learningStep3Returning: WizardStep = {
-  id: "wizard-3-filtering",
-  title: "Filtering Mode",
-  content: (
-    <div className="space-y-4 max-w-3xl mx-auto">
-      <Card className="bg-gradient-card border-border/50 shadow-glow">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">How Filtering Mode Works</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <div className="bg-muted/30 rounded-lg p-4">
-            <h5 className="font-semibold mb-3 text-foreground text-sm">
-              Process Overview:
-            </h5>
-            <ol className="space-y-2 text-muted-foreground list-decimal ml-4 mb-3 text-xs">
-              <li>Remote traffic is stolen selectively</li>
-              <li>
-                Remote resources such as databases and other services are used.
-              </li>
-            </ol>
-            <p className="text-muted-foreground mb-3 text-xs">
-              Queues are still shared unless using queue splitting as well.
-            </p>
-            <p className="font-medium text-primary text-xs">
-              Best for: Testing against shared environment
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  ),
-};
-
-const learningStep4Returning: WizardStep = {
-  id: "wizard-4-mirror",
-  title: "Mirror mode",
-  content: (
-    <div className="space-y-4 max-w-3xl mx-auto">
-      <Card className="bg-gradient-card border-border/50 shadow-glow">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">How Mirror Mode Works</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <div className="bg-muted/30 rounded-lg p-4">
-            <p className="text-muted-foreground mb-3 leading-relaxed text-xs">
-              Your local service receives a copy of the incoming traffic sent to
-              the targeted remote service. The response will come from the
-              remote service and your local service will handle the same request
-              but it's response will be discarded. By default, you will connect
-              to the remote dependencies so you can have side effects (i.e
-              writing to same database)
-            </p>
-            <p className="font-medium text-primary text-xs">
-              Best for: Debugging existing traffic, understanding how APIs
-              behave without deploying/changing logic in the environment.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  ),
-};
-
-const learningStep5Returning: WizardStep = {
-  id: "wizard-5-replace",
-  title: "Replace Mode",
-  content: (
-    <div className="space-y-4 max-w-3xl mx-auto">
-      <Card className="bg-gradient-card border-border/50 shadow-glow">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">How Replace Mode Works</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <div className="bg-muted/30 rounded-lg p-4">
-            <p className="text-muted-foreground leading-relaxed text-xs">
-              Replace mode completely substitutes the remote service's traffic
-              and queues. Useful when Queue Splitting isn't available and you
-              want to work against queues.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  ),
-};
-
-const learningStep6Returning: WizardStep = {
-  id: "wizard-6-feedback",
-  title: "Development Feedback Loop",
-  content: (
-    <div className="space-y-4 max-w-3xl mx-auto">
-      <Card className="bg-gradient-card border-border/50 shadow-glow">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">
-            Fast Development Feedback Loop
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <p className="text-foreground text-sm leading-relaxed mb-4 text-center">
-            mirrord creates a fast feedback loop that dramatically speeds up
-            cloud-native development by eliminating the need for deployments
-            during development.
-          </p>
-
-          <div className="bg-background border border-border rounded-lg mb-4">
-            <img
-              src={flowDiagram}
-              alt="Development Feedback Loop with mirrord"
-              className="w-full max-w-full mx-auto rounded"
-            />
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  ),
-};
-
-export const LearningStepsReturning: WizardStep[] = [
-  learningStep1Returning,
-  learningStep2Returning,
-  learningStep3Returning,
-  learningStep4Returning,
-  learningStep5Returning,
-  learningStep6Returning,
-];
+export default LearningSteps;
