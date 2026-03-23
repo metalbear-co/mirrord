@@ -472,18 +472,6 @@ pub(crate) enum CliError {
     ))]
     AgentPodDeleted,
 
-    #[error(
-        "The target node `{node_name}` has no capacity for a new agent pod (currently running {pod_count} pods)"
-    )]
-    #[diagnostic(help(
-        "The Kubernetes node where the target pod runs has reached its pod limit. You can either:
-        1. Free up pod capacity on the node by deleting unused pods.
-        2. Use ephemeral containers instead, which do not count toward the node's pod limit.
-           Set `\"agent\": {{ \"ephemeral\": true }}` in your mirrord config file,
-           or set the environment variable MIRRORD_EPHEMERAL_CONTAINER=true.{GENERAL_HELP}"
-    ))]
-    NodeOutOfPods { node_name: String, pod_count: usize },
-
     #[error("Detected mirrord being run within mirrord")]
     #[diagnostic(help(
         "Running mirrord within mirrord is likely to fail or introduce severe slowness. \
@@ -575,8 +563,7 @@ pub(crate) enum CliError {
 
     #[error("A preview environment with key \"{key}\" already exists for target \"{target}\"")]
     #[diagnostic(help(
-        "Use `--force` to replace the existing session, \
-         `mirrord preview stop` to stop it first, \
+        "Use `mirrord preview stop` to stop the existing session first, \
          or choose a different key with `--key`."
     ))]
     PreviewDuplicateSession { key: String, target: String },
@@ -595,6 +582,17 @@ pub(crate) enum CliError {
         Please check that the target exists and has running pods.{GENERAL_HELP}"
     ))]
     RuntimeDataResolution(KubeApiError),
+
+    #[error("Invalid image reference: {0}")]
+    #[diagnostic(help(
+        "Image must be a valid OCI image reference (e.g. 'myregistry.io/myimage:tag')."
+    ))]
+    PreviewInvalidImage(String),
+
+    /// Errors produced by the `mirrord ui` command.
+    #[error("Session monitor UI error: {0}")]
+    #[diagnostic(help("Check that no other process is using the port and try again."))]
+    UiError(String),
 }
 
 impl CliError {
@@ -621,13 +619,6 @@ impl CliError {
                 Self::InvalidCertificate(error)
             }
             KubeApiError::AgentPodDeleted => Self::AgentPodDeleted,
-            KubeApiError::NodeOutOfPods {
-                node_name,
-                pod_count,
-            } => Self::NodeOutOfPods {
-                node_name,
-                pod_count,
-            },
             error => fallback(error),
         }
     }
