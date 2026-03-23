@@ -13,6 +13,7 @@ use std::{
 };
 
 use futures::StreamExt;
+use k8s_openapi::jiff::Timestamp;
 use kube::{
     Api, ResourceExt,
     api::{DeleteParams, ListParams, ObjectMeta, PostParams},
@@ -420,17 +421,10 @@ async fn preview_status(
                             .as_ref()
                             .and_then(|s| s.expires_at.as_ref())
                             .and_then(|expires_at| {
-                                let now_secs = k8s_openapi::jiff::Timestamp::now().as_second();
-                                let remaining_secs =
-                                    expires_at.0.as_second().saturating_sub(now_secs);
-                                if remaining_secs > 0 {
-                                    Some(Duration::from_secs(
-                                        remaining_secs.try_into().unwrap_or(u64::MAX),
-                                    ))
-                                } else {
-                                    None
-                                }
-                            });
+                                Duration::try_from(expires_at.0.duration_since(Timestamp::now()))
+                                    .ok()
+                            })
+                            .map(|d| Duration::from_secs(d.as_secs()));
                         match remaining {
                             Some(d) => {
                                 format!("running ({} remaining)", humantime::format_duration(d))
