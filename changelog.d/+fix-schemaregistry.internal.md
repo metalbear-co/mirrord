@@ -1,0 +1,1 @@
+Fixed an unreleased bug in CRD schema.
