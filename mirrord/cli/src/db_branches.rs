@@ -357,8 +357,7 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
         .chain(pg_branches.into_iter().map(Into::into))
         .chain(mongodb_branches.into_iter().map(Into::into));
 
-    build_status_table(branches_iter, names)
-        .printstd();
+    build_status_table(branches_iter, names).printstd();
 
     Ok(())
 }
@@ -598,7 +597,7 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &[String]) -> 
 mod tests {
     use prettytable::Row;
 
-    use super::{BranchInfo, build_status_table, Table, row, HashSet};
+    use super::{BranchInfo, HashSet, Table, build_status_table, row};
 
     fn branch_info(name: &str, db_type: &'static str) -> BranchInfo {
         BranchInfo {
@@ -611,12 +610,20 @@ mod tests {
             expire_time: None,
         }
     }
-    
+
     fn build_expected_table(rows: Vec<Row>) -> Table {
-        let mut table = Table::from_iter([
-            row!["Name", "DB Type", "Phase", "TTL (sec)", "Database", "Users", "Expires At"],
-        ]);
-        rows.into_iter().for_each(|row| { table.add_row(row); });
+        let mut table = Table::from_iter([row![
+            "Name",
+            "DB Type",
+            "Phase",
+            "TTL (sec)",
+            "Database",
+            "Users",
+            "Expires At"
+        ]]);
+        rows.into_iter().for_each(|row| {
+            table.add_row(row);
+        });
         table
     }
 
@@ -631,27 +638,37 @@ mod tests {
         // No names filter - all branches rendered.
         let table = build_status_table(branches.iter().cloned(), HashSet::new());
         let expected = build_expected_table(vec![
-            row!["branch-a", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"],
-            row!["branch-b", "Db2", "Unknown", "3600", "<none>", "none", "Unknown"],
-            row!["branch-c", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"],
+            row![
+                "branch-a", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"
+            ],
+            row![
+                "branch-b", "Db2", "Unknown", "3600", "<none>", "none", "Unknown"
+            ],
+            row![
+                "branch-c", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"
+            ],
         ]);
         assert_eq!(
-            expected,
-            table,
-            "\n\nexpected:\n{}got:\n{}", expected, table
+            expected, table,
+            "\n\nexpected:\n{}got:\n{}",
+            expected, table
         );
-            
+
         // Names filter - only matching branches rendered.
         let names = HashSet::from(["branch-a", "branch-c"]);
         let table = build_status_table(branches.iter().cloned(), names);
         let expected = build_expected_table(vec![
-            row!["branch-a", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"],
-            row!["branch-c", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"],
+            row![
+                "branch-a", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"
+            ],
+            row![
+                "branch-c", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"
+            ],
         ]);
         assert_eq!(
-            expected,
-            table,
-            "\n\nexpected:\n{}got:\n{}", expected, table
+            expected, table,
+            "\n\nexpected:\n{}got:\n{}",
+            expected, table
         );
 
         // All branches filtered out - None returned.
@@ -659,10 +676,9 @@ mod tests {
         let table = build_status_table(branches.iter().cloned(), names);
         let expected = build_expected_table(vec![]);
         assert_eq!(
-            expected,
-            table,
-            "\n\nexpected:\n{}got:\n{}", expected, table
+            expected, table,
+            "\n\nexpected:\n{}got:\n{}",
+            expected, table
         );
-
     }
 }
