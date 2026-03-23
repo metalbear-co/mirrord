@@ -128,3 +128,36 @@ ls ~/.mirrord/sessions/*.sock 2>/dev/null && echo "FAIL: socket not cleaned" || 
 - [ ] API server crash does not affect intproxy (session continues)
 - [ ] No SSE clients connected: events silently dropped, no memory growth
 - [ ] Port conflict gives clear error message
+
+## Known bugs
+
+### Socket not cleaned up on SIGTERM
+The `SocketCleanup` drop guard in `api.rs` does not run when the intproxy
+process receives SIGTERM. This is because the API server runs in a
+`tokio::spawn` task, and tokio cancels spawned tasks on shutdown without
+running their drop guards. The socket persists at `~/.mirrord/sessions/<id>.sock`
+until manually deleted or `mirrord ui` cleans it on startup.
+
+**Fix options:**
+1. Register a signal handler that removes the socket before exit
+2. Use `tokio::select!` with a shutdown signal instead of relying on Drop
+3. Accept the leak and rely on `mirrord ui` stale socket cleanup (current behavior)
+
+## Integration test results (2026-03-23)
+
+### Passing
+- [x] Socket created at `~/.mirrord/sessions/<uuid>.sock` with `0600` perms
+- [x] `/health` returns `{"status":"ok"}`
+- [x] `/info` returns correct session JSON (target, version, config, api: true)
+- [x] `mirrord ui` serves frontend HTML, CSS, JS assets (all 200)
+- [x] `/api/sessions` returns `[]` when no sessions active
+- [x] `--dev` mode: API works, static files not served (proxied)
+- [x] `--no-open` prevents browser launch
+- [x] Sessions dir created with `0700` permissions
+
+### Blocked
+- Event streaming (SSE): layer config decode error on staging prevents
+  target app from running. Not a session monitor bug.
+- `mirrord ui` session discovery: needs working exec session to test.
+  The `mirrord ui` code correctly watches the sessions dir and connects
+  to sockets, but we couldn't generate a live session with events.
