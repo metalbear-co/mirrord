@@ -42,7 +42,6 @@ jobs:
   resolve_trigger_context:
     runs-on: ubuntu-24.04
     outputs:
-      should_run: ${{ steps.resolve.outputs.should_run }}
       mirrord_commit: ${{ steps.resolve.outputs.mirrord_commit }}
       mirrord_branch: ${{ steps.resolve.outputs.mirrord_branch }}
       operator_branch: ${{ steps.resolve.outputs.operator_branch }}
@@ -54,21 +53,17 @@ jobs:
             manual_commit="${{ inputs.mirrord_commit }}"
             manual_branch="${{ inputs.mirrord_branch }}"
             operator_branch="${{ inputs.operator_branch || 'main' }}"
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
             echo "mirrord_commit=$manual_commit" >> "$GITHUB_OUTPUT"
             echo "mirrord_branch=$manual_branch" >> "$GITHUB_OUTPUT"
             echo "operator_branch=$operator_branch" >> "$GITHUB_OUTPUT"
-            exit 0
+          else
+            echo "mirrord_commit=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            echo "mirrord_branch=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "operator_branch=main" >> "$GITHUB_OUTPUT"
           fi
-
-          echo "should_run=true" >> "$GITHUB_OUTPUT"
-          echo "mirrord_commit=${{ github.sha }}" >> "$GITHUB_OUTPUT"
-          echo "mirrord_branch=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-          echo "operator_branch=main" >> "$GITHUB_OUTPUT"
 
   trigger-operator-e2e:
     needs: [resolve_trigger_context]
-    if: ${{ needs.resolve_trigger_context.outputs.should_run == 'true' }}
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
