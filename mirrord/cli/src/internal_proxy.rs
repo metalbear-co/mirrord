@@ -23,11 +23,14 @@ use mirrord_config::LayerConfig;
 use mirrord_intproxy::{
     IntProxy,
     agent_conn::{AgentConnectInfo, AgentConnection},
+    session_monitor::MonitorTx,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 #[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
 use tokio::net::TcpListener;
+#[cfg(unix)]
+use tokio_util::sync::CancellationToken;
 use tracing::Level;
 #[cfg(not(target_os = "windows"))]
 use tracing::warn;
@@ -132,6 +135,59 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
+    #[cfg(unix)]
+    let monitor_tx = if config.api {
+        let (tx, _rx) =
+            tokio::sync::broadcast::channel::<mirrord_intproxy::session_monitor::MonitorEvent>(256);
+        let proxy_monitor_tx = MonitorTx::from_sender(tx.clone());
+        let api_monitor_tx = MonitorTx::from_sender(tx);
+
+        let session_id =
+            env::var("MIRRORD_SESSION_ID").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+
+        let target_name = config
+            .target
+            .path
+            .as_ref()
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| "unknown".to_owned());
+
+        let config_value = serde_json::to_value(&config).unwrap_or(serde_json::Value::Null);
+
+        let session_info = mirrord_intproxy::session_monitor::api::SessionInfo {
+            session_id: session_id.clone(),
+            target: target_name,
+            started_at: humantime::format_rfc3339(std::time::SystemTime::now()).to_string(),
+            mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
+            is_operator: config.operator.unwrap_or(false),
+            processes: Vec::new(),
+            config: config_value,
+            filter: None,
+        };
+
+        let shutdown = CancellationToken::new();
+
+        tokio::spawn(async move {
+            if let Err(error) = mirrord_intproxy::session_monitor::api::start_api_server(
+                session_info.session_id.clone(),
+                session_info,
+                api_monitor_tx,
+                shutdown,
+            )
+            .await
+            {
+                tracing::warn!(%error, "Session monitor API server failed");
+            }
+        });
+
+        proxy_monitor_tx
+    } else {
+        MonitorTx::disabled()
+    };
+
+    #[cfg(not(unix))]
+    let monitor_tx = MonitorTx::disabled();
+
     IntProxy::new_with_connection(
         agent_conn,
         listener,
@@ -145,7 +201,7 @@ pub(crate) async fn proxy(
             .unwrap_or_default(),
         process_logging_interval,
         &config.experimental,
-        mirrord_intproxy::session_monitor::MonitorTx::disabled(),
+        monitor_tx,
     )
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await
