@@ -13,6 +13,7 @@ use mirrord_intproxy::{
 };
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
+use mirrord_protocol::{DaemonMessage, ResponseError};
 use mirrord_protocol_io::ProtocolError;
 use mirrord_tls_util::SecureChannelError;
 use mirrord_vpn::error::VpnError;
@@ -153,6 +154,9 @@ pub(crate) enum InternalProxyError {
     #[error("Initial ping pong with the agent failed: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     InitialPingPongFailed(String),
+
+    #[error("Setting up DB branch portforwards failed: {0}")]
+    DbBranchPortforwardsFailed(String)
 }
 
 /// Errors that can occur when executing the `mirrord operator setup` command.

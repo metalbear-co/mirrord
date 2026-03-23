@@ -11,6 +11,7 @@
 //! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
 
 use std::{
+    collections::HashSet,
     env, io,
     net::{Ipv4Addr, SocketAddr},
     time::Duration,
@@ -19,12 +20,18 @@ use std::{
 use std::{ops::Not, os::unix::ffi::OsStrExt};
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
-use mirrord_config::LayerConfig;
+use mirrord_config::{
+    LayerConfig,
+    feature::database_branches::{
+        ConnectionParamsVars, ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig,
+        MysqlBranchConfig, TargetEnvironmentVariableSource, secret_env_var_name,
+    },
+};
 use mirrord_intproxy::{
     IntProxy,
     agent_conn::{AgentConnectInfo, AgentConnection},
 };
-use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
+use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogLevel, LogMessage};
 #[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
 use tokio::net::TcpListener;
@@ -35,6 +42,7 @@ use tracing::warn;
 #[cfg(not(target_os = "windows"))]
 use crate::util::detach_io;
 use crate::{
+    CliError,
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
@@ -115,7 +123,11 @@ pub(crate) async fn proxy(
     // **before** this happens to ensure that the agent does not prematurely exit.
     // We also perform initial ping pong round to ensure that k8s runtime actually made connection
     // with the agent (it's a must, because port forwarding may be done lazily).
-    let agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
+    let mut agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
+
+    if config.feature.db_branches.is_empty().not() {
+        setup_db_portforwards(&config.feature.db_branches, &mut agent_conn).await;
+    }
 
     // Let it assign address for us then print it for the user.
     let listener = create_listen_socket(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), listen_port))
@@ -212,4 +224,100 @@ pub(crate) async fn connect_and_ping(
             }
         }
     }
+}
+
+async fn setup_db_portforwards(
+    config: &DatabaseBranchesConfig,
+    conn: &mut AgentConnection,
+) -> Result<(), String> {
+    let mut required_envs = HashSet::new();
+
+    #[derive(PartialEq, Eq, Hash, Clone, Debug)]
+    enum Portforward {
+        Uri(String),
+        Params { host: String, port: String },
+    }
+
+    for branch in config.iter() {
+        let base = match branch {
+            DatabaseBranchConfig::Mongodb(db) => &db.base,
+            DatabaseBranchConfig::Mysql(db) => &db.base,
+            DatabaseBranchConfig::Pg(db) => &db.base,
+            DatabaseBranchConfig::Redis(_) => unimplemented!("Havent done redis yet"),
+        };
+        match &base.connection {
+            ConnectionSource::Url { url } => match url {
+                TargetEnvironmentVariableSource::Env { variable, .. }
+                | TargetEnvironmentVariableSource::EnvFrom { variable, .. } => {
+                    required_envs.insert(Portforward::Uri(variable.clone()));
+                }
+                TargetEnvironmentVariableSource::Secret { name, key } => {
+                    required_envs.insert(Portforward::Uri(secret_env_var_name(&name, &key)));
+                }
+            },
+            ConnectionSource::FlatUrl { url, .. } => {
+                required_envs.insert(Portforward::Uri(url.clone()));
+            }
+            ConnectionSource::Params(config) => {
+                let ConnectionParamsVars {
+                    host: Some(host),
+                    port: Some(port),
+                    ..
+                } = &config.params
+                else {
+                    continue;
+                };
+
+                tracing::debug!(?host, ?port);
+
+                required_envs.insert(Portforward::Params {
+                    host: host.as_variable().into_owned(),
+                    port: port.as_variable().into_owned(),
+                });
+            }
+        };
+    }
+    let env_vars_select = required_envs
+        .iter()
+        .cloned()
+        .flat_map(|e| match e {
+            Portforward::Uri(u) => [Some(u), None],
+            Portforward::Params { host, port } => [Some(host), Some(port)],
+        })
+        .flatten()
+        .collect();
+
+    conn.connection
+        .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
+            env_vars_filter: Default::default(),
+            env_vars_select,
+        }))
+        .await;
+
+    let vars = match conn.connection.recv().await {
+        Some(DaemonMessage::GetEnvVarsResponse(Ok(env_vars))) => env_vars,
+        Some(DaemonMessage::GetEnvVarsResponse(Err(err))) => {
+            return Err(format!("Error response from agent: {err}"));
+        }
+        Some(other) => return Err(format!("Unexpected message received from agent: {other:?}")),
+        None => return Err("Agent connection dropped unexpectedly".into()),
+    };
+
+    tracing::debug!(?required_envs, vars = ?vars.0);
+
+    for var in required_envs
+        .iter()
+        .flat_map(|e| match e {
+            Portforward::Uri(u) => [Some(u), None],
+            Portforward::Params { host, port } => [Some(host), Some(port)],
+        })
+        .flatten()
+    {
+        match vars.get(var) {
+            Some(value) => tracing::info!(?var, ?value, "got var"),
+            None => tracing::warn!(?var, "failed to get var"),
+        }
+    }
+
+    Ok(())
 }

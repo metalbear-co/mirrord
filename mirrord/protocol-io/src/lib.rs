@@ -227,11 +227,59 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
     pub fn is_closed(&self) -> bool {
         self.rx.is_closed()
     }
+
+    /// Splits incoming messages on this connection using `splitter`.
+    /// For a given message, if `splitter` returns `false`, it will be
+    /// directed to `self`, otherwise into the [`Connection`] object
+    /// returned by this function. Sending on both channels behaves
+    /// identically.
+    ///
+    /// Works by spawning a background task, and running the filter
+    /// function on received messages in it. The messages are then
+    /// forwarded to the appropriate [`Connection`] object using tokio
+    /// channels.
+    ///
+    /// Note that since a single background task is used, it will get
+    /// blocked once one of the channels fills up. Therefore, one
+    /// channel filling up will cause the other (free) one to not
+    /// receive messages, regardless of the free capacity in the free
+    /// channel.
+    #[tracing::instrument(skip_all)]
+    pub fn split_incoming<F>(&mut self, channel_size: usize, mut splitter: F) -> Self
+    where
+        F: FnMut(&mut Type::InMsg) -> bool + Send + 'static,
+    {
+        let (tx_this, rx_this) = mpsc::channel(channel_size);
+        let (tx_other, rx_other) = mpsc::channel(channel_size);
+
+        let mut real_rx = std::mem::replace(&mut self.rx, rx_this);
+        tokio::spawn(async move {
+            while let Some(mut next) = real_rx.recv().await {
+                let destination = if splitter(&mut next) {
+                    &tx_other
+                } else {
+                    &tx_this
+                };
+                if let Err(_err) = destination.send(next).await {
+                    tracing::debug!("Receiving Connection object of a redirected Connection has been dropped");
+                }
+            }
+        });
+
+        self.shared_state.refcount.fetch_add(1, Ordering::Relaxed);
+
+        Self {
+            rx: rx_other,
+            shared_state: self.shared_state.clone(),
+        }
+    }
 }
 
 impl<Type: ProtocolEndpoint> Drop for Connection<Type> {
     fn drop(&mut self) {
-        self.shared_state.cancel.cancel();
+        if self.shared_state.refcount.fetch_sub(1, Ordering::Relaxed) == 0 {
+            self.shared_state.cancel.cancel();
+        }
     }
 }
 
@@ -349,6 +397,9 @@ struct SharedState<Type: ProtocolEndpoint> {
 
     /// Used for telling the io task to shut down.
     cancel: CancellationToken,
+
+    /// Number of [`Connection`] objects that point to this [`SharedState`].
+    refcount: AtomicUsize,
 }
 
 impl<Type: ProtocolEndpoint> fmt::Debug for SharedState<Type> {
@@ -378,6 +429,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
             // 0 is reserved for the Connection struct
             next_queue_id: 1.into(),
             cancel: CancellationToken::new(),
+            refcount: AtomicUsize::new(1),
         }
     }
 
