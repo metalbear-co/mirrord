@@ -419,12 +419,17 @@ async fn preview_status(
                             .status
                             .as_ref()
                             .and_then(|s| s.expires_at.as_ref())
-                            .map(|expires_at| {
+                            .and_then(|expires_at| {
                                 let now_secs = k8s_openapi::jiff::Timestamp::now().as_second();
                                 let remaining_secs =
-                                    expires_at.0.as_second().saturating_sub(now_secs).max(0);
-
-                                Duration::from_secs(remaining_secs.try_into().unwrap_or(u64::MAX))
+                                    expires_at.0.as_second().saturating_sub(now_secs);
+                                if remaining_secs > 0 {
+                                    Some(Duration::from_secs(
+                                        remaining_secs.try_into().unwrap_or(u64::MAX),
+                                    ))
+                                } else {
+                                    None
+                                }
                             });
                         match remaining {
                             Some(d) => {
