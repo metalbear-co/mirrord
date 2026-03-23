@@ -630,7 +630,7 @@ impl JsonSchema for SplitQueue {
         #[derive(Serialize, Deserialize, JsonSchema)]
         struct Proxy {
             // We verify the tag.
-            #[serde(rename = "type")]
+            #[serde(rename = "queueType")]
             tag: SplitQueueDiscriminants,
             // Other fields can be whatever.
             //
