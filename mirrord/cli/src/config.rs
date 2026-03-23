@@ -209,6 +209,13 @@ pub(super) enum Commands {
 
     /// Fix issues related to mirrord.
     Fix(FixArgs),
+
+    /// Launch the session monitor UI.
+    ///
+    /// Watches active mirrord sessions and displays a web dashboard showing
+    /// real-time events (file operations, DNS queries, HTTP requests, etc.)
+    /// from all running mirrord sessions.
+    Ui(UiArgs),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -1413,6 +1420,22 @@ impl PreviewStopArgs {
 
         envs
     }
+}
+
+/// Arguments for the `mirrord ui` command.
+#[derive(Args, Debug)]
+pub struct UiArgs {
+    /// Port to serve the UI on.
+    #[arg(short = 'p', long, default_value_t = 59281)]
+    pub port: u16,
+
+    /// Dev mode: skip serving static files, use Vite dev server instead.
+    #[arg(long)]
+    pub dev: bool,
+
+    /// Do not open the browser automatically.
+    #[arg(long)]
+    pub no_open: bool,
 }
 
 #[cfg(test)]
