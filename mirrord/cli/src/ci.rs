@@ -125,9 +125,16 @@ MIRRORD_CI_API_KEY environment variable.
 ///
 /// - Note that it does **not** store the [`CiApiKey`], this one lives only as an env var.
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 struct MirrordCiStore {
     /// pid of the intproxy, stored when the intproxy starts.
     intproxy_pids: HashSet<u32>,
+
+    /// pid of the extproxy, stored when `mirrord ci container` starts it.
+    extproxy_pids: HashSet<u32>,
+
+    /// pid of the sidecar runtime attach client, stored when `mirrord ci container` starts it.
+    sidecar_pids: HashSet<u32>,
 
     /// pid of the user process, stored when we spawn the user binary with mirrord.
     user_pids: HashSet<Option<u32>>,
@@ -189,7 +196,10 @@ impl MirrordCiStore {
     /// should've `kill`ed everything already on the 1st run.
     #[cfg_attr(windows, allow(unused))]
     fn is_empty(&self) -> bool {
-        self.intproxy_pids.is_empty() && self.user_pids.is_empty()
+        self.intproxy_pids.is_empty()
+            && self.extproxy_pids.is_empty()
+            && self.sidecar_pids.is_empty()
+            && self.user_pids.is_empty()
     }
 }
 
@@ -208,6 +218,38 @@ pub(super) struct MirrordCi {
 }
 
 impl MirrordCi {
+    #[cfg(not(target_os = "windows"))]
+    async fn create_run_output_dir<P: Progress>(
+        progress: &P,
+        binary_path: &Path,
+        CiConfig { output_dir }: &CiConfig,
+    ) -> CiResult<PathBuf> {
+        let binary = binary_path
+            .file_name()
+            .unwrap_or_else(|| binary_path.as_os_str())
+            .to_string_lossy();
+
+        let parent_dir = output_dir
+            .clone()
+            .unwrap_or_else(|| temp_dir().join("mirrord"));
+
+        let random_name: String = Alphanumeric.sample_string(&mut rand::rng(), 7);
+        let timestamp = SystemTime::UNIX_EPOCH
+            .elapsed()
+            .expect("system time should not be earlier than UNIX EPOCH")
+            .as_secs();
+        let ci_run_output_dir = parent_dir.join(format!("{binary}-{timestamp}-{random_name}"));
+
+        create_dir_all(&ci_run_output_dir).await?;
+
+        progress.info(&format!(
+            "mirrord ci files will be stored in {}",
+            ci_run_output_dir.display()
+        ));
+
+        Ok(ci_run_output_dir)
+    }
+
     /// Helper to access the [`CiApiKey`] when preparing the kube request headers.
     pub(super) fn api_key(&self) -> Option<&CiApiKey> {
         self.ci_api_key.as_ref()
@@ -248,28 +290,14 @@ impl MirrordCi {
             .to_string_lossy();
         let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
 
-        // Create a dir like `/tmp/mirrord/node-1234-cool` where we dump ci related files.
-        let ci_run_output_dir = {
-            let parent_dir = output_dir
-                .clone()
-                .unwrap_or_else(|| temp_dir().join("mirrord"));
-
-            let random_name: String = Alphanumeric.sample_string(&mut rand::rng(), 7);
-            let timestamp = SystemTime::UNIX_EPOCH
-                .elapsed()
-                .expect("system time should not be earlier than UNIX EPOCH")
-                .as_secs();
-            let ci_run_output_dir = parent_dir.join(format!("{binary}-{timestamp}-{random_name}"));
-
-            create_dir_all(&ci_run_output_dir).await?;
-
-            ci_run_output_dir
-        };
-
-        progress.info(&format!(
-            "mirrord ci files will be stored in {}",
-            ci_run_output_dir.display()
-        ));
+        let ci_run_output_dir = Self::create_run_output_dir(
+            progress,
+            binary_path,
+            &CiConfig {
+                output_dir: output_dir.clone(),
+            },
+        )
+        .await?;
 
         let mut child = match tokio::process::Command::new(binary_path)
             .args(binary_args.iter().skip(1))
@@ -326,6 +354,112 @@ impl MirrordCi {
         } else {
             progress.success(Some(&format!("child pid: {child_pid}")));
             Ok::<_, CiError>(())
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[tracing::instrument(level = Level::TRACE, skip(progress), err)]
+    pub(super) async fn prepare_container_command<P: Progress>(
+        self,
+        progress: &mut P,
+        binary_path: &str,
+        binary_args: &[String],
+        extproxy_pid: Option<u32>,
+        sidecar_pid: Option<u32>,
+        ci_config: &CiConfig,
+    ) -> CiResult<i32> {
+        use nix::libc::{SIGINT, SIGKILL, SIGTERM};
+
+        let binary_path = Path::new(binary_path);
+        let binary = binary_path
+            .file_name()
+            .unwrap_or_else(|| binary_path.as_os_str())
+            .to_string_lossy();
+        let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
+
+        if let Some(extproxy_pid) = extproxy_pid {
+            mirrord_ci_store.extproxy_pids.insert(extproxy_pid);
+        }
+
+        if let Some(sidecar_pid) = sidecar_pid {
+            mirrord_ci_store.sidecar_pids.insert(sidecar_pid);
+        }
+
+        mirrord_ci_store.write_to_file().await?;
+
+        let ci_run_output_dir = if self.ci_common_args.foreground {
+            None
+        } else {
+            Some(Self::create_run_output_dir(progress, binary_path, ci_config).await?)
+        };
+
+        let mut command = tokio::process::Command::new(binary_path);
+        command.args(binary_args).kill_on_drop(false);
+
+        if let Some(ci_run_output_dir) = ci_run_output_dir.as_ref() {
+            command
+                .stdin(Stdio::null())
+                .stdout(File::create(ci_run_output_dir.join("stdout"))?)
+                .stderr(File::create(ci_run_output_dir.join("stderr"))?);
+        } else {
+            command
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit());
+        }
+
+        let mut child = match command.spawn() {
+            Ok(child) => {
+                mirrord_ci_store.user_pids.insert(child.id());
+                mirrord_ci_store.write_to_file().await?;
+                child
+            }
+            Err(fail) => {
+                progress.failure(Some(&fail.to_string()));
+                return Err(CiError::BinaryExecuteFailed(
+                    binary.to_string(),
+                    binary_args.to_vec(),
+                ));
+            }
+        };
+
+        let child_pid = child
+            .id()
+            .map(|pid| pid.to_string())
+            .unwrap_or("unknown".to_string());
+
+        if self.ci_common_args.foreground {
+            progress.info(&format!("waiting for child with pid {child_pid}"));
+            match child.wait().await {
+                Ok(status) => {
+                    if status.success() {
+                        progress.success(None);
+                        Ok::<_, CiError>(status.code().unwrap_or_default())
+                    } else if let Some(signal) = status.signal() {
+                        match signal {
+                            SIGKILL => progress.success(Some("process killed by SIGKILL")),
+                            SIGTERM => progress.success(Some("process terminated by SIGTERM")),
+                            SIGINT => progress.success(Some("process interrupted by SIGINT")),
+                            _ => progress
+                                .failure(Some(&format!("process exited with status: {}", status))),
+                        };
+                        Ok::<_, CiError>(-1)
+                    } else {
+                        progress.failure(Some(&format!("process exited with status: {}", status)));
+                        Ok::<_, CiError>(status.code().unwrap_or_default())
+                    }
+                }
+                Err(fail) => {
+                    progress.failure(Some(&fail.to_string()));
+                    Err(CiError::BinaryExecuteFailed(
+                        binary.to_string(),
+                        binary_args.to_vec(),
+                    ))
+                }
+            }
+        } else {
+            progress.success(Some(&format!("child pid: {child_pid}")));
+            Ok::<_, CiError>(0)
         }
     }
 

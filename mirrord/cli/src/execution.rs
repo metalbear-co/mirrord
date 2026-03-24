@@ -152,6 +152,10 @@ where
 }
 
 impl MirrordExecution {
+    pub(crate) fn child_id(&self) -> Option<u32> {
+        self.child.as_ref().and_then(|child| child.id())
+    }
+
     /// Makes the agent connection and starts the internal proxy child process.
     ///
     /// # Internal proxy

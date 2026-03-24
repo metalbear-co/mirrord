@@ -10,14 +10,14 @@ use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, config::ConfigContext,
     external_proxy::MIRRORD_EXTPROXY_TLS_SERVER_NAME,
 };
-use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
+use mirrord_progress::Progress;
 use mirrord_tls_util::SecureChannelSetup;
 pub use sidecar::IntproxySidecarError;
 use tokio::process::Command;
 use tracing::Level;
 
 use crate::{
-    MirrordCi,
+    CliError, MirrordCi,
     config::{ContainerRuntime, ExecParams, RuntimeArgs},
     container::{command_builder::RuntimeCommandBuilder, sidecar::IntproxySidecar},
     ensure_not_nested,
@@ -144,6 +144,7 @@ async fn prepare_proxies<P: Progress>(
     RuntimeCommandBuilder,
     MirrordExecution,
     Option<SecureChannelSetup>,
+    Option<u32>,
 )> {
     let tls_setup = config
         .external_proxy
@@ -194,6 +195,7 @@ async fn prepare_proxies<P: Progress>(
     }
 
     let (sidecar_intproxy_address, sidecar_intproxy_logs) = sidecar.start().await?;
+    let sidecar_pid = sidecar_intproxy_logs.pid();
     let intproxy_logs_pipe =
         pipe_intproxy_sidecar_logs(config, sidecar_intproxy_logs.into_merged_lines()).await?;
     tokio::spawn(intproxy_logs_pipe);
@@ -204,7 +206,7 @@ async fn prepare_proxies<P: Progress>(
         &sidecar_intproxy_address.to_string(),
     );
 
-    Ok((runtime_command, execution_info, tls_setup))
+    Ok((runtime_command, execution_info, tls_setup, sidecar_pid))
 }
 
 /// Main entry point for the `mirrord container` command.
@@ -239,7 +241,7 @@ pub(crate) async fn container_command<P: Progress>(
 
     adjust_container_config_for_wsl(runtime_args.runtime, &mut config);
 
-    let (runtime_command, _execution_info, _tls_setup) = prepare_proxies(
+    let (runtime_command, execution_info, _tls_setup, sidecar_pid) = prepare_proxies(
         &mut analytics,
         progress,
         &mut config,
@@ -248,37 +250,62 @@ pub(crate) async fn container_command<P: Progress>(
     )
     .await?;
 
-    progress.success(None);
-
     let (binary, binary_args) = runtime_command
         .with_command(runtime_args.command)
         .into_command_args();
+    let binary_args = binary_args.collect::<Vec<_>>();
 
-    let mut runtime_command = Command::new(binary);
-    runtime_command
-        .args(binary_args)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
+    let extproxy_pid = execution_info.child_id();
 
-    tracing::info!(?runtime_command, "Le runtime command!");
+    let exit_code = match mirrord_for_ci {
+        Some(mirrord_ci) => mirrord_ci
+            .prepare_container_command(
+                progress,
+                &binary,
+                &binary_args,
+                extproxy_pid,
+                sidecar_pid,
+                &config.ci,
+            )
+            .await
+            .map_err(CliError::from)?,
+        None => {
+            progress.success(None);
 
-    let status = runtime_command.status().await.map_err(|error| {
-        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+            let mut runtime_command = Command::new(&binary);
+            runtime_command
+                .args(&binary_args)
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit());
 
-        ContainerError::CommandExec {
-            error,
-            command: runtime_command.display(),
+            tracing::info!(?runtime_command, "Le runtime command!");
+
+            let status = runtime_command.status().await.map_err(|error| {
+                analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+
+                ContainerError::CommandExec {
+                    error,
+                    command: runtime_command.display(),
+                }
+            })?;
+
+            #[cfg(not(target_os = "windows"))]
+            if let Some(signal) = status.signal() {
+                tracing::warn!("Container command was terminated by signal {signal}");
+                -1
+            } else {
+                status.code().unwrap_or_default()
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                status.code().unwrap_or_default()
+            }
         }
-    })?;
+    };
 
-    #[cfg(not(target_os = "windows"))]
-    if let Some(signal) = status.signal() {
-        tracing::warn!("Container command was terminated by signal {signal}");
-        return Ok(-1);
-    }
-
-    Ok(status.code().unwrap_or_default())
+    Ok(exit_code)
 }
 
 /// Main entry point for the `mirrord container` command.
@@ -310,7 +337,7 @@ pub async fn container_ext_command<P: Progress>(
 
     adjust_container_config_for_wsl(container_runtime, &mut config);
 
-    let (runtime_command, execution_info, _tls_setup) = prepare_proxies(
+    let (runtime_command, execution_info, _tls_setup, _sidecar_pid) = prepare_proxies(
         &mut analytics,
         progress,
         &mut config,

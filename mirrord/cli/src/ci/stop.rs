@@ -79,6 +79,18 @@ impl CiStopCommandHandler {
             .map(try_kill)
             .collect::<Vec<_>>();
 
+        let extproxies_killed = store
+            .extproxy_pids
+            .into_iter()
+            .map(try_kill)
+            .collect::<Vec<_>>();
+
+        let sidecars_killed = store
+            .sidecar_pids
+            .into_iter()
+            .map(try_kill)
+            .collect::<Vec<_>>();
+
         let users_killed = store
             .user_pids
             .into_iter()
@@ -92,6 +104,8 @@ impl CiStopCommandHandler {
         intproxies_killed
             .into_iter()
             .try_collect::<()>()
+            .and(extproxies_killed.into_iter().try_collect::<()>())
+            .and(sidecars_killed.into_iter().try_collect::<()>())
             .and(users_killed.into_iter().try_collect::<()>())
     }
 

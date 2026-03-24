@@ -27,7 +27,7 @@ use mirrord_config::{
 };
 use thiserror::Error;
 
-use crate::config::ci::{CiArgs, CiCommand};
+use crate::config::ci::CiArgs;
 
 pub(crate) mod ci;
 
