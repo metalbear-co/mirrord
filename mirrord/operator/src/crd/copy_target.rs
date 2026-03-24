@@ -36,6 +36,11 @@ pub struct CopyTargetSpec {
     /// Init containers that are ignored by copy target.
     #[serde(default)]
     pub exclude_init_containers: Vec<String>,
+    /// When set to false, skip multi-cluster session creation even if the operator
+    /// is configured as a multi-cluster primary. The copy pod is created and managed
+    /// on the primary cluster directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multi_cluster: Option<bool>,
 }
 
 /// This is the `status` field for [`CopyTargetCrd`].

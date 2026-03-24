@@ -131,16 +131,20 @@ where
 
     user_cert_subtask.success(Some("user credentials prepared"));
 
-    let is_multi_cluster = api
+    let is_mc_primary = api
         .operator()
         .spec
         .supported_features()
         .contains(&NewOperatorFeature::MultiClusterPrimary);
 
+    let use_multi_cluster = if layer_config.multi_cluster == Some(false) {
+        false
+    } else {
+        is_mc_primary
+    };
+
     let mut session_subtask = operator_subtask.subtask("starting session");
-    let connection = if is_multi_cluster {
-        // Multi-cluster: CLI connects to Primary, which routes to the workload cluster
-        // where the target is resolved and the session is created
+    let connection = if use_multi_cluster {
         let target_config = layer_config
             .target
             .path
@@ -156,7 +160,6 @@ where
         )
         .await?
     } else {
-        // Single-cluster: CLI resolves target of the connected cluster
         let target = ResolvedTarget::new(
             api.client(),
             &layer_config

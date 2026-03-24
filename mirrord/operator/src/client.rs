@@ -766,6 +766,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_db_names.clone(),
                 session_ci_info.clone(),
                 layer_config.key.as_str(),
+                layer_config.multi_cluster,
             );
             let session = self.make_operator_session(
                 id,
@@ -858,6 +859,7 @@ impl OperatorApi<PreparedClientCert> {
                     branch_db_names,
                     session_ci_info.clone(),
                     layer_config.key.as_str(),
+                    layer_config.multi_cluster,
                 );
                 let session_id = copied
                     .status
@@ -961,6 +963,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_db_names.clone(),
                 session_ci_info.clone(),
                 layer_config.key.as_str(),
+                layer_config.multi_cluster,
             );
 
             let session = self.make_operator_session(
@@ -1297,6 +1300,7 @@ impl OperatorApi<PreparedClientCert> {
         branch_db_names: BranchDbNames,
         session_ci_info: Option<SessionCiInfo>,
         key: &str,
+        multi_cluster: Option<bool>,
     ) -> String {
         let name = crd
             .meta()
@@ -1328,6 +1332,7 @@ impl OperatorApi<PreparedClientCert> {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             key: Some(key),
+            multi_cluster,
         };
 
         if use_proxy {
@@ -1401,6 +1406,7 @@ impl OperatorApi<PreparedClientCert> {
             split_queues,
             exclude_containers,
             exclude_init_containers,
+            multi_cluster: layer_config.multi_cluster,
         };
 
         let copied = copy_target_api
@@ -1460,6 +1466,7 @@ impl OperatorApi<PreparedClientCert> {
             split_queues,
             exclude_containers,
             exclude_init_containers,
+            multi_cluster: layer_config.multi_cluster,
         };
 
         let existing = copy_target_api
@@ -2168,6 +2175,7 @@ mod test {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             key,
+            multi_cluster: None,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
@@ -2286,6 +2294,7 @@ mod test {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             key,
+            multi_cluster: None,
         };
         let produced =
             OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);

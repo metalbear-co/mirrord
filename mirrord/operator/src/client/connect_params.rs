@@ -73,6 +73,11 @@ pub struct ConnectParams<'a> {
     /// Key for this session
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<&'a str>,
+
+    /// When set to false, forces a single-cluster session on a multi-cluster primary,
+    /// bypassing multi-cluster routing. The target must exist on the primary cluster.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multi_cluster: Option<bool>,
 }
 
 /// Per-dialect branch database names, used to keep the connect params
@@ -118,6 +123,7 @@ impl<'a> ConnectParams<'a> {
             is_default_cluster: None,
             sqs_output_queues: HashMap::new(),
             key: Some(key),
+            multi_cluster: config.multi_cluster,
         }
     }
 }

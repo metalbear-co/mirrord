@@ -274,6 +274,16 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_OPERATOR_ENABLE")]
     pub operator: Option<bool>,
 
+    /// ## multi_cluster {#root-multi_cluster}
+    ///
+    /// Controls whether this session uses multi-cluster routing.
+    /// Only relevant when the operator is configured as a multi-cluster primary.
+    /// Set to `false` to force a single-cluster session that targets a workload on the
+    /// primary cluster directly, bypassing multi-cluster routing.
+    /// If not set, auto-detected from operator capabilities.
+    #[config(env = "MIRRORD_MULTI_CLUSTER")]
+    pub multi_cluster: Option<bool>,
+
     /// ## profile {#root-profile}
     ///
     /// Name of the mirrord profile to use.
