@@ -8,7 +8,10 @@
 use std::time::Duration;
 
 use k8s_openapi::{apimachinery::pkg::apis::meta::v1::MicroTime, jiff::Timestamp};
-use kube::CustomResource;
+use kube::{
+    Api, Client, CustomResource,
+    api::{Patch, PatchParams},
+};
 use mirrord_config::{
     feature::{
         network::incoming::{IncomingConfig, IncomingMode},
@@ -18,6 +21,7 @@ use mirrord_config::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use super::session::SessionTarget;
 
@@ -130,6 +134,82 @@ pub enum PreviewSessionPhase {
     /// For future compatibility.
     #[serde(other)]
     Unknown,
+}
+
+/// `status` sub-resource update for a preview session CR.
+///
+/// Only fields that are set are included in the merge patch, allowing partial updates
+/// without replacing the full status object.
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewStatusUpdate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    phase: Option<PreviewSessionPhase>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    started_at: Option<MicroTime>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pod_name: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure_message: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expires_at: Option<MicroTime>,
+}
+
+impl PreviewStatusUpdate {
+    /// Creates an empty status update.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets `.status.phase`.
+    pub fn phase(mut self, phase: PreviewSessionPhase) -> Self {
+        self.phase = Some(phase);
+        self
+    }
+
+    /// Sets `.status.startedAt`.
+    pub fn started_at(mut self, started_at: MicroTime) -> Self {
+        self.started_at = Some(started_at);
+        self
+    }
+
+    /// Sets `.status.podName`.
+    pub fn pod_name(mut self, pod_name: String) -> Self {
+        self.pod_name = Some(pod_name);
+        self
+    }
+
+    /// Sets `.status.failureMessage`.
+    pub fn failure_message(mut self, failure_message: String) -> Self {
+        self.failure_message = Some(failure_message);
+        self
+    }
+
+    /// Sets `.status.expiresAt`.
+    pub fn expires_at(mut self, expires_at: MicroTime) -> Self {
+        self.expires_at = Some(expires_at);
+        self
+    }
+
+    /// Patches the status sub-resource with a merge patch.
+    pub async fn patch(
+        self,
+        client: &Client,
+        name: &str,
+        namespace: &str,
+    ) -> Result<(), kube::Error> {
+        let api = Api::<PreviewSession>::namespaced(client.clone(), namespace);
+        let data = json!({ "status": self });
+
+        api.patch_status(name, &PatchParams::default(), &Patch::Merge(data))
+            .await?;
+
+        Ok(())
+    }
 }
 
 /// Incoming traffic configuration for preview environments.
