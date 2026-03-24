@@ -74,9 +74,10 @@ k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, features = ["derive", "ws"], optional = true }
 futures = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
-schemars = { workspace = true, features = ["chrono"] }
+schemars = { workspace = true, features = ["chrono04"] }
 semver = { workspace = true, features = ["serde"], optional = true }
 strum_macros = { workspace = true }
+strum = { workspace = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 serde_urlencoded = { version = "0.7", optional = true }

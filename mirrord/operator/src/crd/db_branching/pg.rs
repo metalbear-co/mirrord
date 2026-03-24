@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use kube::CustomResource;
 use mirrord_config::{
-    feature::database_branches::{PgBranchCopyConfig, PgBranchTableCopyConfig, PgIamAuthConfig},
+    feature::database_branches::{PgBranchCopyConfig, PgBranchTableCopyConfig},
     target::Target,
 };
 use schemars::JsonSchema;
@@ -42,33 +42,6 @@ pub struct PgBranchDatabaseSpec {
     /// Use this when the source database (RDS, Cloud SQL) requires IAM auth instead of passwords.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iam_auth: Option<IamAuthConfig>,
-}
-
-impl From<&PgIamAuthConfig> for IamAuthConfig {
-    fn from(config: &PgIamAuthConfig) -> Self {
-        match config {
-            PgIamAuthConfig::AwsRds {
-                region,
-                access_key_id,
-                secret_access_key,
-                session_token,
-            } => IamAuthConfig::AwsRds {
-                region: region.as_ref().map(Into::into),
-                access_key_id: access_key_id.as_ref().map(Into::into),
-                secret_access_key: secret_access_key.as_ref().map(Into::into),
-                session_token: session_token.as_ref().map(Into::into),
-            },
-            PgIamAuthConfig::GcpCloudSql {
-                credentials_json,
-                credentials_path,
-                project,
-            } => IamAuthConfig::GcpCloudSql {
-                credentials_json: credentials_json.as_ref().map(Into::into),
-                credentials_path: credentials_path.as_ref().map(Into::into),
-                project: project.as_ref().map(Into::into),
-            },
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
