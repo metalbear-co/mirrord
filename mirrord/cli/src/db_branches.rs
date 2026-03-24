@@ -96,89 +96,6 @@ impl From<MysqlBranchDatabase> for BranchInfo {
     }
 }
 
-//impl From<&MongodbBranchDatabase> for BranchInfo {
-//    fn from(branch: &MongodbBranchDatabase) -> Self {
-//        Self {
-//            name: branch.metadata.name.clone().unwrap_or_default(),
-//            db_type: "MongoDB",
-//            phase: branch.status.as_ref().map(|s| s.phase.to_string()),
-//            ttl: branch.spec.ttl_secs,
-//            database: branch.spec.database_name.clone(),
-//            users: branch.status.as_ref().and_then(|s| {
-//                if s.session_info.is_empty() {
-//                    None
-//                } else {
-//                    let mut user_list: Vec<_> = s
-//                        .session_info
-//                        .values()
-//                        .map(|session| session.owner.k8s_username.clone())
-//                        .collect();
-//                    user_list.sort();
-//                    Some(user_list.join("\n"))
-//                }
-//            }),
-//            expire_time: branch.status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
-//        }
-//    }
-//}
-//
-//impl From<MongodbBranchDatabase> for BranchInfo {
-//    fn from(
-//        MongodbBranchDatabase {
-//            metadata,
-//            spec,
-//            mut status,
-//        }: MongodbBranchDatabase,
-//    ) -> Self {
-//        Self {
-//            name: metadata.name.unwrap_or_default(),
-//            db_type: "MongoDB",
-//            phase: status.as_ref().map(|s| s.phase.to_string()),
-//            ttl: spec.ttl_secs,
-//            database: spec.database_name,
-//            users: status.as_mut().and_then(|s| {
-//                if s.session_info.is_empty() {
-//                    None
-//                } else {
-//                    let mut user_list: Vec<_> = std::mem::take(&mut s.session_info)
-//                        .into_values()
-//                        .map(|session| session.owner.k8s_username)
-//                        .collect();
-//                    user_list.sort();
-//                    Some(user_list.join("\n"))
-//                }
-//            }),
-//            expire_time: status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
-//        }
-//    }
-//}
-//
-//impl From<&PgBranchDatabase> for BranchInfo {
-//    fn from(branch: &PgBranchDatabase) -> Self {
-//        Self {
-//            name: branch.metadata.name.clone().unwrap_or_default(),
-//            db_type: "PostgreSQL",
-//            phase: branch.status.as_ref().map(|s| s.phase.to_string()),
-//            ttl: branch.spec.ttl_secs,
-//            database: branch.spec.database_name.clone(),
-//            users: branch.status.as_ref().and_then(|s| {
-//                if s.session_info.is_empty() {
-//                    None
-//                } else {
-//                    let mut user_list: Vec<_> = s
-//                        .session_info
-//                        .values()
-//                        .map(|session| session.owner.k8s_username.clone())
-//                        .collect();
-//                    user_list.sort();
-//                    Some(user_list.join("\n"))
-//                }
-//            }),
-//            expire_time: branch.status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
-//        }
-//    }
-//}
-
 impl From<PgBranchDatabase> for BranchInfo {
     fn from(
         PgBranchDatabase {
@@ -277,18 +194,6 @@ async fn operator_supports_unified_crd(client: &kube::Client) -> bool {
     }
 }
 
-fn add_to_table(table: &mut Table, info: BranchInfo) {
-    table.add_row(row![
-        info.name,
-        info.db_type,
-        info.phase.unwrap_or_else(|| "Unknown".to_string()),
-        info.ttl,
-        info.database.unwrap_or_else(|| "<none>".to_string()),
-        info.users.unwrap_or_else(|| "none".to_string()),
-        info.expire_time.unwrap_or_else(|| "Unknown".to_string())
-    ]);
-}
-
 /// Collect branches from per-dialect CRDs (old operator without unified BranchDatabase).
 async fn collect_per_dialect_branches<P: Progress>(
     args: &DbBranchesArgs,
@@ -351,24 +256,15 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
     status_progress.success(Some("fetched status"));
     progress.success(None);
 
-    let branches_iter = mysql_branches
-        .into_iter()
-        .map(Into::into)
-        .chain(pg_branches.into_iter().map(Into::into))
-        .chain(mongodb_branches.into_iter().map(Into::into));
-
-    build_status_table(branches_iter, names).printstd();
-
+    build_status_table(all_infos, names).printstd();
     Ok(())
 }
 
 /// Builds a status table from the given branches.
-fn build_status_table(
-    branches_iter: impl Iterator<Item = BranchInfo>,
-    names: HashSet<&str>,
-) -> Table {
-    let branches_iter =
-        branches_iter.filter(|b| names.is_empty() || names.contains(b.name.as_str()));
+fn build_status_table(all_infos: Vec<BranchInfo>, names: HashSet<&str>) -> Table {
+    let all_infos_iter = all_infos
+        .into_iter()
+        .filter(|b| names.is_empty() || names.contains(b.name.as_str()));
 
     let mut table = Table::new();
     table.add_row(row![
@@ -381,15 +277,15 @@ fn build_status_table(
         "Expires At"
     ]);
 
-    for branch in branches_iter {
+    for info in all_infos_iter {
         table.add_row(row![
-            branch.name,
-            branch.db_type,
-            branch.phase.unwrap_or_else(|| "Unknown".to_owned()),
-            branch.ttl,
-            branch.database.unwrap_or_else(|| "<none>".to_owned()),
-            branch.users.unwrap_or_else(|| "none".to_owned()),
-            branch.expire_time.unwrap_or_else(|| "Unknown".to_owned())
+            info.name,
+            info.db_type,
+            info.phase.unwrap_or_else(|| "Unknown".to_owned()),
+            info.ttl,
+            info.database.unwrap_or_else(|| "<none>".to_owned()),
+            info.users.unwrap_or_else(|| "none".to_owned()),
+            info.expire_time.unwrap_or_else(|| "Unknown".to_owned())
         ]);
     }
 
@@ -602,7 +498,7 @@ mod tests {
     fn branch_info(name: &str, db_type: &'static str) -> BranchInfo {
         BranchInfo {
             name: name.to_owned(),
-            db_type,
+            db_type: db_type.to_string(),
             phase: None,
             ttl: 3600,
             database: None,
@@ -629,14 +525,14 @@ mod tests {
 
     #[test]
     fn test_build_status_table() {
-        let branches = [
+        let branches = vec![
             branch_info("branch-a", "Db1"),
             branch_info("branch-b", "Db2"),
             branch_info("branch-c", "Db3"),
         ];
 
         // No names filter - all branches rendered.
-        let table = build_status_table(branches.iter().cloned(), HashSet::new());
+        let table = build_status_table(branches.clone(), HashSet::new());
         let expected = build_expected_table(vec![
             row![
                 "branch-a", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"
@@ -656,7 +552,7 @@ mod tests {
 
         // Names filter - only matching branches rendered.
         let names = HashSet::from(["branch-a", "branch-c"]);
-        let table = build_status_table(branches.iter().cloned(), names);
+        let table = build_status_table(branches.clone(), names);
         let expected = build_expected_table(vec![
             row![
                 "branch-a", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"
@@ -673,7 +569,7 @@ mod tests {
 
         // All branches filtered out - None returned.
         let names: HashSet<&str> = ["nonexistent"].into_iter().collect();
-        let table = build_status_table(branches.iter().cloned(), names);
+        let table = build_status_table(branches.clone(), names);
         let expected = build_expected_table(vec![]);
         assert_eq!(
             expected, table,
