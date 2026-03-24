@@ -22,8 +22,7 @@ use tokio::{
     pin, select,
     sync::{Notify, futures::OwnedNotified, mpsc},
 };
-use tokio_util::sync::CancellationToken;
-use tracing::{Level, instrument};
+use tracing::{Instrument, Level, instrument};
 
 pub trait AsyncIO: AsyncWrite + AsyncRead + Send + 'static {}
 impl<T: AsyncWrite + AsyncRead + Send + 'static> AsyncIO for T {}
@@ -230,14 +229,12 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
 
     /// Splits incoming messages on this connection using `splitter`.
     /// For a given message, if `splitter` returns `false`, it will be
-    /// directed to `self`, otherwise into the [`Connection`] object
-    /// returned by this function. Sending on both channels behaves
-    /// identically.
+    /// directed to `self`, otherwise into the returned [`Receiver`].
     ///
     /// Works by spawning a background task, and running the filter
-    /// function on received messages in it. The messages are then
-    /// forwarded to the appropriate [`Connection`] object using tokio
-    /// channels.
+    /// function on received messages in it. The receiver in `self` is
+    /// moved into the background task, and is replaced with another
+    /// one downstream from it.
     ///
     /// Note that since a single background task is used, it will get
     /// blocked once one of the channels fills up. Therefore, one
@@ -245,7 +242,11 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
     /// receive messages, regardless of the free capacity in the free
     /// channel.
     #[tracing::instrument(skip_all)]
-    pub fn split_incoming<F>(&mut self, channel_size: usize, mut splitter: F) -> Self
+    pub fn split_incoming<F>(
+        &mut self,
+        channel_size: usize,
+        mut splitter: F,
+    ) -> mpsc::Receiver<Type::InMsg>
     where
         F: FnMut(&mut Type::InMsg) -> bool + Send + 'static,
     {
@@ -261,25 +262,26 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
                     &tx_this
                 };
                 if let Err(_err) = destination.send(next).await {
-                    tracing::debug!("Receiving Connection object of a redirected Connection has been dropped");
+                    tracing::debug!(
+                        "Receiving Connection object of a redirected Connection has been dropped"
+                    );
                 }
             }
-        });
+        }.instrument(tracing::debug_span!("connection redirector io task")));
 
-        self.shared_state.refcount.fetch_add(1, Ordering::Relaxed);
-
-        Self {
-            rx: rx_other,
-            shared_state: self.shared_state.clone(),
-        }
+        rx_other
     }
-}
 
-impl<Type: ProtocolEndpoint> Drop for Connection<Type> {
-    fn drop(&mut self) {
-        if self.shared_state.refcount.fetch_sub(1, Ordering::Relaxed) == 0 {
-            self.shared_state.cancel.cancel();
-        }
+    /// Destructure `self` into a `(TxHandle, Receiver)` pair
+    #[inline]
+    pub fn destructure(self) -> (TxHandle<Type>, mpsc::Receiver<Type::InMsg>) {
+        (
+            TxHandle {
+                shared_state: self.shared_state,
+                id: QueueId(0),
+            },
+            self.rx,
+        )
     }
 }
 
@@ -348,8 +350,8 @@ async fn io_task<Channel, Type>(
                     },
                 }
             }
-            _ = queues.cancel.cancelled() => {
-                tracing::info!("Cancellation token triggered, shutting down after flushing all remaining messages");
+            _ = tx.closed() => {
+                tracing::info!("Receiver closed, shutting down after flushing all remaining messages");
                 break;
             }
         }
@@ -394,12 +396,6 @@ struct SharedState<Type: ProtocolEndpoint> {
     out_filter: Option<Box<FilterFn<Type::InMsg, Type::OutMsg>>>,
 
     next_queue_id: AtomicUsize,
-
-    /// Used for telling the io task to shut down.
-    cancel: CancellationToken,
-
-    /// Number of [`Connection`] objects that point to this [`SharedState`].
-    refcount: AtomicUsize,
 }
 
 impl<Type: ProtocolEndpoint> fmt::Debug for SharedState<Type> {
@@ -428,8 +424,6 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
             out_filter,
             // 0 is reserved for the Connection struct
             next_queue_id: 1.into(),
-            cancel: CancellationToken::new(),
-            refcount: AtomicUsize::new(1),
         }
     }
 

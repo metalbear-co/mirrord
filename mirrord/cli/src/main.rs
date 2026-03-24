@@ -916,7 +916,9 @@ async fn port_forward(
     let _ = tokio::try_join!(
         async {
             if !args.port_mapping.is_empty() {
-                let mut port_forward = PortForwarder::new(connection, port_mappings).await?;
+                let (agent_tx, agent_rx) = connection.destructure();
+                let mut port_forward =
+                    PortForwarder::new(agent_tx, agent_rx, port_mappings).await?;
                 port_forward.run().await.map_err(|error| error.into())
             } else {
                 Ok::<(), CliError>(())

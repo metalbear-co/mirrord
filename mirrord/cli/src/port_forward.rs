@@ -20,12 +20,13 @@ use mirrord_protocol::{
     CLIENT_READY_FOR_LOGS, ClientMessage, ConnectionId, DaemonMessage, LogLevel, Payload, Port,
     dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse, LookupRecord},
     outgoing::{
-        LayerClose, LayerConnect, LayerWrite, SocketAddress,
+        DaemonConnectV2, LayerClose, LayerConnectV2, LayerWrite, SocketAddress,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
     tcp::{HttpFilter, MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType},
+    uid::Uid,
 };
-use mirrord_protocol_io::{Client, Connection};
+use mirrord_protocol_io::{Client, Connection, TxHandle};
 use semver::Version;
 use thiserror::Error;
 use tokio::{
@@ -63,14 +64,16 @@ struct ConnectionPortMapping {
 
 pub struct PortForwarder {
     /// communicates with the agent (only TCP supported)
-    agent_connection: Connection<Client>,
+    agent_tx: TxHandle<Client>,
+    agent_rx: Receiver<DaemonMessage>,
+
     /// associates local ports with destination ports
     /// destinations may contain unresolved hostnames
     raw_mappings: HashMap<SocketAddr, (RemoteAddr, u16)>,
     /// accepts connections from the user app in the form of a stream
     listeners: StreamMap<SocketAddr, TcpListenerStream>,
     /// oneshot channels for sending connection IDs to tasks and the associated address pair
-    id_oneshots: VecDeque<(ConnectionSocketPair, oneshot::Sender<ConnectionId>)>,
+    id_oneshots: HashMap<Uid, (ConnectionSocketPair, oneshot::Sender<ConnectionId>)>,
     /// oneshot channels for sending resolved hostnames to tasks and the associated address pair
     dns_oneshots: VecDeque<(ConnectionSocketPair, oneshot::Sender<IpAddr>)>,
     /// identifies a pair of mapped socket addresses by their corresponding connection ID
@@ -90,7 +93,8 @@ pub struct PortForwarder {
 
 impl PortForwarder {
     pub(crate) async fn new(
-        agent_connection: Connection<Client>,
+        agent_tx: TxHandle<Client>,
+        agent_rx: Receiver<DaemonMessage>,
         mappings: HashMap<SocketAddr, (RemoteAddr, u16)>,
     ) -> Result<Self, PortForwardError> {
         // open tcp listener for local addrs
@@ -109,10 +113,11 @@ impl PortForwarder {
         let (internal_msg_tx, internal_msg_rx) = mpsc::channel(1024);
 
         Ok(Self {
-            agent_connection,
+            agent_tx,
+            agent_rx,
             raw_mappings: mappings,
             listeners,
-            id_oneshots: VecDeque::new(),
+            id_oneshots: HashMap::new(),
             dns_oneshots: VecDeque::new(),
             sockets: HashMap::new(),
             task_txs: HashMap::new(),
@@ -125,35 +130,34 @@ impl PortForwarder {
 
     pub(crate) async fn run(&mut self) -> Result<(), PortForwardError> {
         // setup agent connection
-        self.agent_connection
+        self.agent_tx
             .send(ClientMessage::SwitchProtocolVersion(
                 mirrord_protocol::VERSION.clone(),
             ))
             .await;
-        match self.agent_connection.recv().await {
+        match self.agent_rx.recv().await {
             Some(DaemonMessage::SwitchProtocolVersionResponse(version))
                 if CLIENT_READY_FOR_LOGS.matches(&version) =>
             {
-                self.agent_connection
-                    .send(ClientMessage::ReadyForLogs)
-                    .await;
+                self.agent_tx.send(ClientMessage::ReadyForLogs).await;
             }
             _ => return Err(PortForwardError::AgentConnectionFailed),
         }
 
         loop {
             select! {
+                // TODO(areg) disable pings when not necessary
                 _ = tokio::time::sleep_until(self.ping_pong_timeout.into()) => {
                     if self.waiting_for_pong {
                         // no pong received before timeout
                         break Err(PortForwardError::AgentError("agent failed to respond to Ping".into()));
                     }
-                    self.agent_connection.send(ClientMessage::Ping).await;
+                    self.agent_tx.send(ClientMessage::Ping).await;
                     self.waiting_for_pong = true;
                     self.ping_pong_timeout = Instant::now() + Duration::from_secs(30);
                 },
 
-                message = self.agent_connection.recv() => match message {
+                message = self.agent_rx.recv() => match message {
                     Some(message) => self.handle_msg_from_agent(message).await?,
                     None => {
                         break Err(PortForwardError::AgentError("unexpected end of connection with agent".into()));
@@ -180,56 +184,62 @@ impl PortForwarder {
     ) -> Result<(), PortForwardError> {
         match message {
             DaemonMessage::TcpOutgoing(message) => match message {
-                DaemonTcpOutgoing::Connect(res) => match res {
-                    Ok(res) => {
-                        let connection_id = res.connection_id;
-                        let SocketAddress::Ip(remote_socket) = res.remote_address else {
-                            return Err(PortForwardError::ConnectionError(
-                                "unexpectedly received Unix address for socket during setup".into(),
-                            ));
-                        };
-                        let Some((socket_pair, channel)) = self.id_oneshots.pop_front() else {
-                            return Err(PortForwardError::ReadyTaskNotFound(
-                                remote_socket,
-                                connection_id,
-                            ));
-                        };
-                        let port_map = ConnectionPortMapping {
-                            pair: socket_pair.clone(),
-                            remote: remote_socket,
-                        };
-                        self.sockets.insert(connection_id, port_map);
-                        match channel.send(connection_id) {
-                            Ok(_) => (),
-                            Err(_) => {
-                                self.agent_connection
-                                    .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(
-                                        LayerClose { connection_id },
-                                    )))
-                                    .await;
-                                self.task_txs.remove(&socket_pair);
-                                self.sockets.remove(&connection_id);
-                                tracing::warn!(
-                                    "failed to send connection ID {connection_id} to task on oneshot channel"
-                                );
-                            }
-                        };
-                        tracing::trace!(
-                            "successful connection to remote address {remote_socket}, connection ID is {}",
-                            connection_id
-                        );
-                    }
-                    Err(error) => {
-                        tracing::error!("failed to connect to a remote address: {error}");
-                        // LocalConnectionTask will fail when oneshot is dropped and handle cleanup
-                        let _ = self.id_oneshots.pop_front();
-                    }
-                },
-                DaemonTcpOutgoing::ConnectV2(..) => {
-                    // Port forwarder does not use connect v2 variants.
+                DaemonTcpOutgoing::Connect(..) => {
+                    // Port forwarder does not use connect v1 variants.
                     return Err(PortForwardError::AgentError(format!(
                         "unexpected message from agent: {message:?}"
                     )));
+                }
+                DaemonTcpOutgoing::ConnectV2(v2) => {
+                    let DaemonConnectV2 { uid, connect } = v2;
+                    match connect {
+                        Ok(res) => {
+                            let SocketAddress::Ip(remote_socket) = res.remote_address else {
+                                return Err(PortForwardError::ConnectionError(
+                                    "unexpectedly received Unix address for socket during setup"
+                                        .into(),
+                                ));
+                            };
+                            let Some((socket_pair, channel)) = self.id_oneshots.remove(&uid) else {
+                                return Err(PortForwardError::ReadyTaskNotFound(
+                                    remote_socket,
+                                    uid,
+                                ));
+                            };
+                            let port_map = ConnectionPortMapping {
+                                pair: socket_pair.clone(),
+                                remote: remote_socket,
+                            };
+                            self.sockets.insert(res.connection_id, port_map);
+                            match channel.send(res.connection_id) {
+                                Ok(_) => (),
+                                Err(_) => {
+                                    self.agent_tx
+                                        .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(
+                                            LayerClose {
+                                                connection_id: res.connection_id,
+                                            },
+                                        )))
+                                        .await;
+                                    self.task_txs.remove(&socket_pair);
+                                    self.sockets.remove(&res.connection_id);
+                                    tracing::warn!(
+                                        "failed to send connection ID {uid} to task on oneshot channel"
+                                    );
+                                }
+                            };
+                            tracing::trace!(
+                                "successful connection to remote address {remote_socket}, connection ID is {}",
+                                uid
+                            );
+                        }
+                        Err(error) => {
+                            tracing::error!("failed to connect to a remote address: {error}");
+                            // LocalConnectionTask will fail when oneshot is dropped and handle
+                            // cleanup
+                            let _ = self.id_oneshots.remove(&uid);
+                        }
+                    }
                 }
                 DaemonTcpOutgoing::Read(res) => match res {
                     Ok(res) => {
@@ -249,7 +259,7 @@ impl PortForwarder {
                             Err(_) => {
                                 self.task_txs.remove(socket_pair);
                                 self.sockets.remove(&res.connection_id);
-                                self.agent_connection
+                                self.agent_tx
                                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(
                                         LayerClose {
                                             connection_id: res.connection_id,
@@ -339,9 +349,7 @@ impl PortForwarder {
                 self.waiting_for_pong = false;
             }
             DaemonMessage::OperatorPing(id) => {
-                self.agent_connection
-                    .send(ClientMessage::OperatorPong(id))
-                    .await
+                self.agent_tx.send(ClientMessage::OperatorPong(id)).await
             }
             message @ (DaemonMessage::File(..)
             | DaemonMessage::Pong
@@ -403,6 +411,7 @@ impl PortForwarder {
 
         let (response_tx, response_rx) = mpsc::channel(256);
         self.task_txs.insert(socket_pair, response_tx);
+        let task_tx = self.agent_tx.another();
 
         tokio::spawn(async move {
             let mut task = LocalConnectionTask::new(
@@ -412,6 +421,7 @@ impl PortForwarder {
                 remote_socket,
                 task_internal_tx,
                 response_rx,
+                task_tx,
             );
             task.run().await
         });
@@ -427,27 +437,20 @@ impl PortForwarder {
         match message {
             PortForwardMessage::Lookup(socket_pair, node, oneshot) => {
                 self.dns_oneshots.push_back((socket_pair, oneshot));
-                self.agent_connection
+                self.agent_tx
                     .send(ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
                         node,
                     }))
                     .await;
             }
-            PortForwardMessage::Connect(port_mapping, oneshot) => {
+            PortForwardMessage::Connect(uid, port_mapping, oneshot) => {
                 let remote_address = SocketAddress::Ip(port_mapping.remote);
-                self.id_oneshots.push_back((port_mapping.pair, oneshot));
-                self.agent_connection
-                    .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
-                        LayerConnect { remote_address },
-                    )))
-                    .await;
-            }
-            PortForwardMessage::Send(connection_id, bytes) => {
-                self.agent_connection
-                    .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(
-                        LayerWrite {
-                            connection_id,
-                            bytes,
+                self.id_oneshots.insert(uid, (port_mapping.pair, oneshot));
+                self.agent_tx
+                    .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(
+                        LayerConnectV2 {
+                            uid,
+                            remote_address,
                         },
                     )))
                     .await;
@@ -455,7 +458,7 @@ impl PortForwarder {
             PortForwardMessage::Close(socket_pair, connection_id) => {
                 self.task_txs.remove(&socket_pair);
                 if let Some(connection_id) = connection_id {
-                    self.agent_connection
+                    self.agent_tx
                         .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(
                             LayerClose { connection_id },
                         )))
@@ -682,10 +685,7 @@ enum PortForwardMessage {
     /// Sent by the task only after receiving first batch of data from the user and after hostname
     /// resolution (if applicable). The task waits for [`ConnectionId`] on the other end of the
     /// [`oneshot`] channel.
-    Connect(ConnectionPortMapping, oneshot::Sender<ConnectionId>),
-
-    /// Data received from the user in the connection with the given id.
-    Send(ConnectionId, Payload),
+    Connect(Uid, ConnectionPortMapping, oneshot::Sender<ConnectionId>),
 
     /// A request to close the remote connection with the given id, if it exists, and the local
     /// socket.
@@ -705,6 +705,8 @@ struct LocalConnectionTask {
     task_internal_tx: Sender<PortForwardMessage>,
     /// rx for receiving data from the main loop
     data_rx: Receiver<Vec<u8>>,
+    /// tx for sending data to agent
+    agent_tx: TxHandle<Client>,
 }
 
 impl LocalConnectionTask {
@@ -715,6 +717,7 @@ impl LocalConnectionTask {
         remote_socket: (RemoteAddr, u16),
         task_internal_tx: Sender<PortForwardMessage>,
         response_rx: Receiver<Vec<u8>>,
+        agent_tx: TxHandle<Client>,
     ) -> Self {
         let (read, write) = stream.into_split();
         let read_stream = ReaderStream::with_capacity(read, 64 * 1024);
@@ -729,6 +732,7 @@ impl LocalConnectionTask {
             port_mapping,
             task_internal_tx,
             data_rx: response_rx,
+            agent_tx,
         }
     }
 
@@ -785,9 +789,15 @@ impl LocalConnectionTask {
             remote: resolved_remote,
         };
 
+        let uid = Uid::new_v4();
+
         match self
             .task_internal_tx
-            .send(PortForwardMessage::Connect(resolved_mapping, id_oneshot_tx))
+            .send(PortForwardMessage::Connect(
+                uid,
+                resolved_mapping,
+                id_oneshot_tx,
+            ))
             .await
         {
             Ok(_) => (),
@@ -815,15 +825,12 @@ impl LocalConnectionTask {
             select! {
                 message = self.read_stream.next() => match message {
                     Some(Ok(message)) => {
-                        match self.task_internal_tx
-                            .send(PortForwardMessage::Send(connection_id, message.into()))
-                            .await
-                        {
-                            Ok(_) => (),
-                            Err(error) => {
-                                tracing::warn!("failed to send data to main loop: {error}");
-                            }
-                        };
+                        self.agent_tx.send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(
+                            LayerWrite {
+                                connection_id,
+                                bytes: Payload(message),
+                            },
+                        ))).await;
                     },
                     Some(Err(error)) => {
                         tracing::warn!(
@@ -997,7 +1004,7 @@ pub enum PortForwardError {
     TcpListenerError(std::io::Error),
 
     #[error("no task for socket {0} ready to receive connection ID: `{1}`")]
-    ReadyTaskNotFound(SocketAddr, ConnectionId),
+    ReadyTaskNotFound(SocketAddr, Uid),
 
     #[error("no task ready to receive resolved ip: `{0}`")]
     LookupReqNotFound(IpAddr),
@@ -1014,6 +1021,7 @@ impl From<mpsc::error::SendError<ClientMessage>> for PortForwardError {
 
 #[cfg(test)]
 mod test {
+    use core::assert_matches;
     use std::{
         collections::HashMap,
         io::ErrorKind::WouldBlock,
@@ -1025,7 +1033,8 @@ mod test {
     use mirrord_protocol::{
         ClientMessage, DaemonMessage, ToPayload,
         outgoing::{
-            DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
+            DaemonConnect, DaemonConnectV2, DaemonRead, LayerConnect, LayerConnectV2, LayerWrite,
+            SocketAddress,
             tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         },
         tcp::{
@@ -1132,8 +1141,10 @@ mod test {
         let remote_destination = (RemoteAddr::Ip(remote_ip), 3038);
         let mappings = HashMap::from([(local_destination, remote_destination.clone())]);
 
+        let (agent_tx, agent_rx) = agent_connection.destructure();
+
         // Prepare listeners before sending work to the background task.
-        let mut port_forwarder = PortForwarder::new(agent_connection, mappings)
+        let mut port_forwarder = PortForwarder::new(agent_tx, agent_rx, mappings)
             .await
             .unwrap();
         tokio::spawn(async move { port_forwarder.run().await.unwrap() });
@@ -1144,21 +1155,28 @@ mod test {
         stream.write_all(b"data-my-beloved").await.unwrap();
 
         // Expect a connection request
-        let remote_address = SocketAddress::Ip(SocketAddr::new(remote_ip.into(), 3038));
-        let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
-            remote_address: remote_address.clone(),
-        }));
-        assert_eq!(test_connection.recv().await, expected,);
+        let expected_remote_address = SocketAddress::Ip(SocketAddr::new(remote_ip.into(), 3038));
+
+        let uid = match test_connection.recv().await {
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
+                uid,
+                remote_address,
+            })) if remote_address == expected_remote_address => uid,
+            other => panic!("Unexpected message received from portforwarder: {other:?}"),
+        };
 
         // Reply with successful on daemon_msg_tx
         test_connection
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
-                DaemonConnect {
-                    connection_id: 1,
-                    remote_address,
-                    local_address: "1.2.3.4:2137".parse::<SocketAddr>().unwrap().into(),
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(
+                DaemonConnectV2 {
+                    uid,
+                    connect: Ok(DaemonConnect {
+                        connection_id: 1,
+                        remote_address: expected_remote_address,
+                        local_address: "1.2.3.4:2137".parse::<SocketAddr>().unwrap().into(),
+                    }),
                 },
-            ))))
+            )))
             .await;
 
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
@@ -1225,9 +1243,10 @@ mod test {
             (local_destination_1, remote_destination_1.clone()),
             (local_destination_2, remote_destination_2.clone()),
         ]);
+        let (agent_tx, agent_rx) = agent_connection.destructure();
 
         // Prepare listeners before sending work to the background task.
-        let mut port_forwarder = PortForwarder::new(agent_connection, mappings)
+        let mut port_forwarder = PortForwarder::new(agent_tx, agent_rx, mappings)
             .await
             .unwrap();
         tokio::spawn(async move { port_forwarder.run().await.unwrap() });
@@ -1241,59 +1260,82 @@ mod test {
         let RemoteAddr::Ip(ip) = remote_destination_1.0 else {
             unreachable!()
         };
-        let remote_address_1 =
+        let expected_remote_address_1 =
             SocketAddress::Ip(SocketAddr::new(IpAddr::V4(ip), remote_destination_1.1));
-        let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
-            remote_address: remote_address_1.clone(),
-        }));
-        assert_eq!(test_connection.recv().await, expected);
+
+        let uid_1 = match test_connection.recv().await {
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
+                uid,
+                remote_address,
+            })) if remote_address == expected_remote_address_1 => uid,
+            other => panic!("Unexpected message received from portforwarder: {other:?}"),
+        };
 
         // send data to second socket
         let mut stream_2 = TcpStream::connect(local_destination_2).await.unwrap();
         let RemoteAddr::Ip(ip) = remote_destination_2.0 else {
             unreachable!()
         };
-        let remote_address_2 =
+        let expected_remote_address_2 =
             SocketAddress::Ip(SocketAddr::new(IpAddr::V4(ip), remote_destination_2.1));
         stream_2.write_all(b"data-from-2").await.unwrap();
 
-        let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
-            remote_address: remote_address_2.clone(),
-        }));
-        assert_eq!(test_connection.recv().await, expected);
+        let uid_2 = match test_connection.recv().await {
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
+                uid,
+                remote_address,
+            })) if remote_address == expected_remote_address_2 => uid,
+            other => panic!("Unexpected message received from portforwarder: {other:?}"),
+        };
 
-        // reply with successful on each daemon_msg_tx
+        // reply with successful on each daemon_msg_tx, out of order
         test_connection
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
-                DaemonConnect {
-                    connection_id: 1,
-                    remote_address: remote_address_1.clone(),
-                    local_address: remote_address_1,
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(
+                DaemonConnectV2 {
+                    uid: uid_2,
+                    connect: Ok(DaemonConnect {
+                        connection_id: 2,
+                        remote_address: expected_remote_address_2.clone(),
+                        local_address: expected_remote_address_2,
+                    }),
                 },
-            ))))
+            )))
             .await;
         test_connection
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
-                DaemonConnect {
-                    connection_id: 2,
-                    remote_address: remote_address_2.clone(),
-                    local_address: remote_address_2,
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(
+                DaemonConnectV2 {
+                    uid: uid_1,
+                    connect: Ok(DaemonConnect {
+                        connection_id: 1,
+                        remote_address: expected_remote_address_1.clone(),
+                        local_address: expected_remote_address_1,
+                    }),
                 },
-            ))))
+            )))
             .await;
 
-        // expect data to be received
-        let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
-            connection_id: 1,
-            bytes: b"data-from-1".to_payload(),
-        }));
-        assert_eq!(test_connection.recv().await, expected);
+        let mut expected_data = vec![
+            (1, b"data-from-1".to_payload()),
+            (2, b"data-from-2".to_payload()),
+        ];
 
-        let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
-            connection_id: 2,
-            bytes: b"data-from-2".to_payload(),
-        }));
-        assert_eq!(test_connection.recv().await, expected);
+        for _ in 0..2 {
+            match test_connection.recv().await {
+                ref msg @ ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
+                    connection_id,
+                    ref bytes,
+                })) => {
+                    let position = expected_data
+                        .iter()
+                        .position(|(cid, pl)| connection_id == *cid && bytes == pl)
+                        .expect(&format!(
+                            "Unexpected message received from portforwarder: {msg:?}"
+                        ));
+                    expected_data.swap_remove(position);
+                }
+                other => panic!("Unexpected message received from portforwarder: {other:?}"),
+            }
+        }
 
         // send each data response from agent on daemon_msg_tx
         test_connection
