@@ -14,6 +14,7 @@ use std::{
     collections::HashSet,
     env, io,
     net::{Ipv4Addr, SocketAddr},
+    sync::Arc,
     time::Duration,
 };
 #[cfg(not(target_os = "windows"))]
@@ -24,7 +25,7 @@ use mirrord_config::{
     LayerConfig,
     feature::database_branches::{
         ConnectionParamsVars, ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig,
-        MysqlBranchConfig, TargetEnvironmentVariableSource, secret_env_var_name,
+        TargetEnvironmentVariableSource, secret_env_var_name,
     },
 };
 use mirrord_intproxy::{
@@ -42,10 +43,10 @@ use tracing::warn;
 #[cfg(not(target_os = "windows"))]
 use crate::util::detach_io;
 use crate::{
-    CliError,
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
+    port_forward,
     user_data::UserData,
     util::create_listen_socket,
 };
@@ -126,7 +127,9 @@ pub(crate) async fn proxy(
     let mut agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
 
     if config.feature.db_branches.is_empty().not() {
-        setup_db_portforwards(&config.feature.db_branches, &mut agent_conn).await;
+        setup_db_portforwards(&config.feature.db_branches, &mut agent_conn)
+            .await
+            .map_err(InternalProxyError::DbBranchPortforwardsFailed)?;
     }
 
     // Let it assign address for us then print it for the user.
@@ -303,8 +306,6 @@ async fn setup_db_portforwards(
         None => return Err("Agent connection dropped unexpectedly".into()),
     };
 
-    tracing::debug!(?required_envs, vars = ?vars.0);
-
     for var in required_envs
         .iter()
         .flat_map(|e| match e {
@@ -318,6 +319,18 @@ async fn setup_db_portforwards(
             None => tracing::warn!(?var, "failed to get var"),
         }
     }
+
+    let connections_state = Arc::new(port_forward::ConnectionsState::default());
+    let pf_rx = conn.connection.split_incoming(64, |inc| true);
+
+    let portforwarder = port_forward::PortForwarder::new(
+        conn.connection.tx_handle(),
+        pf_rx,
+        todo!(),
+        Some(connections_state),
+    )
+    .await
+    .map_err(|e| format!("Error setting up PortForwarder: {e}"));
 
     Ok(())
 }

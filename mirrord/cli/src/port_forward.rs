@@ -100,6 +100,7 @@ pub struct PortForwarder {
 /// an instance of this struct. This is useful for agent connection
 /// proxy tasks that filter messages depending on whether or not they
 /// belong to the [`PortForwarder`] or not.
+#[derive(Default)]
 pub struct ConnectionsState {
     pub pending: Mutex<HashSet<Uid>>,
     pub ongoing: Mutex<HashSet<ConnectionId>>,
