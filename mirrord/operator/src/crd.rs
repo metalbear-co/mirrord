@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap},
     fmt::{Display, Formatter},
 };
@@ -256,11 +257,11 @@ pub enum CopyTargetEntryCompat {
 }
 
 impl JsonSchema for CopyTargetEntryCompat {
-    fn schema_name() -> String {
-        "CopyTargetEntry".to_owned()
+    fn schema_name() -> Cow<'static, str> {
+        "CopyTargetEntry".into()
     }
 
-    fn json_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(schema_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
         // Only expose the modern schema in OpenAPI
         CopyTargetEntry::json_schema(schema_gen)
     }
@@ -388,11 +389,11 @@ pub enum LockedPortCompat {
 }
 
 impl JsonSchema for LockedPortCompat {
-    fn schema_name() -> String {
-        "LockedPort".to_owned()
+    fn schema_name() -> Cow<'static, str> {
+        "LockedPort".into()
     }
 
-    fn json_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(schema_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
         // Only expose the modern schema in OpenAPI
         LockedPort::json_schema(schema_gen)
     }
@@ -492,6 +493,11 @@ pub enum NewOperatorFeature {
 
     PreviewEnv,
 
+    /// The operator supports the unified `BranchDatabase` CRD with per-dialect options
+    /// (`postgresOptions`, `mysqlOptions`, `mongodbOptions`) instead of the old separate
+    /// `PgBranchDatabase`, `MysqlBranchDatabase`, `MongodbBranchDatabase` CRDs.
+    UnifiedBranchDbCrd,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -528,6 +534,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SqsQueueSplittingWithJqFilter => {
                 "Splitting SQS queues with a jq filter"
             }
+            NewOperatorFeature::UnifiedBranchDbCrd => "unified branch database CRD",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -614,13 +621,13 @@ pub enum SplitQueue {
 }
 
 impl JsonSchema for SplitQueue {
-    fn schema_name() -> String {
+    fn schema_name() -> Cow<'static, str> {
         "SplitQueue".into()
     }
 
     /// [`SplitQueue`] is adjacently tagged. Because of this, its JSON schema is not valid according
     /// to CRD standards.
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         #[derive(Serialize, Deserialize, JsonSchema)]
         struct Proxy {
             // We verify the tag.
@@ -945,7 +952,8 @@ mod tests {
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
         MirrordWorkloadQueueRegistry, QueueNameSource, SessionCrd, SplitQueue, SqsQueueDetails,
         db_branching::{
-            mongodb::MongodbBranchDatabase, mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
+            branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
+            mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
         },
         external::MirrordClusterExternalResource,
         kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
@@ -986,6 +994,7 @@ mod tests {
         write_crd_yaml::<PgBranchDatabase>();
         write_crd_yaml::<MysqlBranchDatabase>();
         write_crd_yaml::<MongodbBranchDatabase>();
+        write_crd_yaml::<BranchDatabase>();
         write_crd_yaml::<MirrordPolicy>();
         write_crd_yaml::<MirrordClusterPolicy>();
         write_crd_yaml::<MirrordClusterExternalResource>();

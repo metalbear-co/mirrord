@@ -5,17 +5,17 @@ use serde::{Deserialize, Serialize};
 
 use super::DatabaseBranchBaseConfig;
 
-/// When configuring a branch for MySQL, set `type` to `mysql`.
+/// When configuring a branch for MSSQL, set `type` to `mssql`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-pub struct MysqlBranchConfig {
+pub struct MssqlBranchConfig {
     #[serde(flatten)]
     pub base: DatabaseBranchBaseConfig,
 
     #[serde(default)]
-    pub copy: MysqlBranchCopyConfig,
+    pub copy: MssqlBranchCopyConfig,
 }
 
-/// Users can choose from the following copy mode to bootstrap their MySQL branch database:
+/// Users can choose from the following copy mode to bootstrap their MSSQL branch database:
 ///
 /// - Empty
 ///
@@ -34,24 +34,24 @@ pub struct MysqlBranchConfig {
 ///   when the data volume of the source database is minimal.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "lowercase")]
-pub enum MysqlBranchCopyConfig {
+pub enum MssqlBranchCopyConfig {
     Empty {
-        tables: Option<BTreeMap<String, MysqlBranchTableCopyConfig>>,
+        tables: Option<BTreeMap<String, MssqlBranchTableCopyConfig>>,
     },
 
     Schema {
-        tables: Option<BTreeMap<String, MysqlBranchTableCopyConfig>>,
+        tables: Option<BTreeMap<String, MssqlBranchTableCopyConfig>>,
     },
 
     All,
 }
 
-impl Default for MysqlBranchCopyConfig {
+impl Default for MssqlBranchCopyConfig {
     fn default() -> Self {
-        MysqlBranchCopyConfig::Empty {
+        MssqlBranchCopyConfig::Empty {
             tables: Default::default(),
         }
     }
 }
 
-pub type MysqlBranchTableCopyConfig = super::BranchItemCopyConfig;
+pub type MssqlBranchTableCopyConfig = super::BranchItemCopyConfig;
