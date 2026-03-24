@@ -9,6 +9,12 @@
 //!
 //! Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
 //! including if you only made documentation changes.
+// Benchmark dependencies used by benches/config_parse.rs
+#[cfg(test)]
+use codspeed_criterion_compat as _;
+#[cfg(test)]
+use criterion as _;
+
 pub mod agent;
 pub mod ci;
 pub mod config;

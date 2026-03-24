@@ -61,6 +61,12 @@
 #![cfg_attr(target_os = "windows", feature(windows_change_time))]
 #![cfg_attr(target_os = "windows", feature(windows_by_handle))]
 
+// Benchmark dependencies used by benches/codec.rs
+#[cfg(test)]
+use codspeed_criterion_compat as _;
+#[cfg(test)]
+use criterion as _;
+
 pub mod batched_body;
 pub mod codec;
 pub mod dns;

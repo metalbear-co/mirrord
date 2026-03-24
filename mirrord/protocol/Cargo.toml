@@ -55,3 +55,11 @@ nix = { workspace = true, features = ["fs"] }
 
 [features]
 windows_build = []
+
+[dev-dependencies]
+codspeed-criterion-compat = "2"
+criterion = "0.5"
+
+[[bench]]
+name = "codec"
+harness = false

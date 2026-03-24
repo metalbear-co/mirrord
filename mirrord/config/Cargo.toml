@@ -50,3 +50,9 @@ uuid.workspace = true
 [dev-dependencies]
 rstest.workspace = true
 tempfile.workspace = true
+codspeed-criterion-compat = "2"
+criterion = "0.5"
+
+[[bench]]
+name = "config_parse"
+harness = false

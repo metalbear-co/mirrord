@@ -1,0 +1,44 @@
+name: CodSpeed
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # `workflow_dispatch` allows CodSpeed to trigger backtest
+  # performance analysis in order to generate initial data.
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
+jobs:
+  benchmarks:
+    name: Run benchmarks
+    runs-on: codspeed-macro
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup rust toolchain and cargo-codspeed
+        uses: moonrepo/setup-rust@v0
+        with:
+          channel: nightly-2026-02-24
+          cache-target: release
+          bins: cargo-codspeed
+
+      - name: Build the benchmark targets
+        run: cargo codspeed build -p mirrord-protocol -p mirrord-config
+
+      - name: Run the benchmarks
+        uses: CodSpeedHQ/action@v4
+        with:
+          mode: simulation
+          run: cargo codspeed run
