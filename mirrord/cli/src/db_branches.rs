@@ -60,7 +60,7 @@ impl From<BranchDatabase> for BranchInfo {
                     Some(user_list.join("\n"))
                 }
             }),
-            expire_time: status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
+            expire_time: status.as_ref().map(|s| s.expire_time.0.to_string()),
         }
     }
 }
@@ -91,7 +91,7 @@ impl From<MysqlBranchDatabase> for BranchInfo {
                     Some(user_list.join("\n"))
                 }
             }),
-            expire_time: status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
+            expire_time: status.as_ref().map(|s| s.expire_time.0.to_string()),
         }
     }
 }
@@ -122,7 +122,7 @@ impl From<PgBranchDatabase> for BranchInfo {
                     Some(user_list.join("\n"))
                 }
             }),
-            expire_time: status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
+            expire_time: status.as_ref().map(|s| s.expire_time.0.to_string()),
         }
     }
 }
@@ -153,7 +153,7 @@ impl From<MongodbBranchDatabase> for BranchInfo {
                     Some(user_list.join("\n"))
                 }
             }),
-            expire_time: status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
+            expire_time: status.as_ref().map(|s| s.expire_time.0.to_string()),
         }
     }
 }

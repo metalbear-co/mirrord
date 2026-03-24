@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap},
     fmt::{Display, Formatter},
 };
@@ -256,11 +257,11 @@ pub enum CopyTargetEntryCompat {
 }
 
 impl JsonSchema for CopyTargetEntryCompat {
-    fn schema_name() -> String {
-        "CopyTargetEntry".to_owned()
+    fn schema_name() -> Cow<'static, str> {
+        "CopyTargetEntry".into()
     }
 
-    fn json_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(schema_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
         // Only expose the modern schema in OpenAPI
         CopyTargetEntry::json_schema(schema_gen)
     }
@@ -388,11 +389,11 @@ pub enum LockedPortCompat {
 }
 
 impl JsonSchema for LockedPortCompat {
-    fn schema_name() -> String {
-        "LockedPort".to_owned()
+    fn schema_name() -> Cow<'static, str> {
+        "LockedPort".into()
     }
 
-    fn json_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(schema_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
         // Only expose the modern schema in OpenAPI
         LockedPort::json_schema(schema_gen)
     }
@@ -620,13 +621,13 @@ pub enum SplitQueue {
 }
 
 impl JsonSchema for SplitQueue {
-    fn schema_name() -> String {
+    fn schema_name() -> Cow<'static, str> {
         "SplitQueue".into()
     }
 
     /// [`SplitQueue`] is adjacently tagged. Because of this, its JSON schema is not valid according
     /// to CRD standards.
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         #[derive(Serialize, Deserialize, JsonSchema)]
         struct Proxy {
             // We verify the tag.
