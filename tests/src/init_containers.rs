@@ -3,9 +3,10 @@
 mod init_containers_tests {
     use std::time::Duration;
 
+    use mirrord_test_utils::run_command::run_exec_with_target;
     use rstest::*;
 
-    use crate::utils::{kube_client, kube_service::KubeService, run_command::run_exec_with_target};
+    use crate::utils::{kube_client, kube_service::KubeService};
 
     /// Creates a pod with a native sidecar (init container with restartPolicy: Always).
     /// Native sidecars are a Kubernetes 1.28+ feature that allows init containers to run
