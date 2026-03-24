@@ -1,0 +1,29 @@
+#![cfg(target_family = "unix")]
+#![warn(clippy::indexing_slicing)]
+
+use std::{path::Path, time::Duration};
+
+use rstest::rstest;
+
+mod common;
+pub use common::*;
+
+#[rstest]
+#[tokio::test]
+#[timeout(Duration::from_secs(20))]
+async fn port_mapping(
+    #[values(Application::RustIssue2058)] application: Application,
+    config_dir: &Path,
+) {
+    let (mut test_process, mut intproxy) = application
+        .start_process_with_port(vec![], Some(&config_dir.join("port_mapping.json")))
+        .await;
+
+    println!("Application subscribed to port, sending data.");
+
+    intproxy
+        .send_connection_then_data("HELLO", application.get_app_port())
+        .await;
+
+    test_process.wait_assert_success().await;
+}
