@@ -918,7 +918,7 @@ async fn port_forward(
             if !args.port_mapping.is_empty() {
                 let (agent_tx, agent_rx) = connection.destructure();
                 let mut port_forward =
-                    PortForwarder::new(agent_tx, agent_rx, port_mappings).await?;
+                    PortForwarder::new(agent_tx, agent_rx, port_mappings, None).await?;
                 port_forward.run().await.map_err(|error| error.into())
             } else {
                 Ok::<(), CliError>(())

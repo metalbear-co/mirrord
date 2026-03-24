@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     ops::Not,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -89,6 +90,19 @@ pub struct PortForwarder {
     /// true if Ping has been sent to agent
     waiting_for_pong: bool,
     ping_pong_timeout: Instant,
+
+    /// Optional reference to a [`ConnectionsState`]. If `Some`, ids
+    /// of pending and ongoing connections will be published here.
+    connections_state: Option<Arc<ConnectionsState>>,
+}
+
+/// [`PortForwarder`] will publish a subset of its internal state into
+/// an instance of this struct. This is useful for agent connection
+/// proxy tasks that filter messages depending on whether or not they
+/// belong to the [`PortForwarder`] or not.
+pub struct ConnectionsState {
+    pub pending: Mutex<HashSet<Uid>>,
+    pub ongoing: Mutex<HashSet<ConnectionId>>,
 }
 
 impl PortForwarder {
@@ -96,6 +110,7 @@ impl PortForwarder {
         agent_tx: TxHandle<Client>,
         agent_rx: Receiver<DaemonMessage>,
         mappings: HashMap<SocketAddr, (RemoteAddr, u16)>,
+        connections_state: Option<Arc<ConnectionsState>>,
     ) -> Result<Self, PortForwardError> {
         // open tcp listener for local addrs
         let mut listeners = StreamMap::with_capacity(mappings.len());
@@ -125,6 +140,7 @@ impl PortForwarder {
             internal_msg_rx,
             waiting_for_pong: false,
             ping_pong_timeout: Instant::now(),
+            connections_state,
         })
     }
 
@@ -200,7 +216,7 @@ impl PortForwarder {
                                         .into(),
                                 ));
                             };
-                            let Some((socket_pair, channel)) = self.id_oneshots.remove(&uid) else {
+                            let Some((socket_pair, channel)) = self.remove_pending(&uid) else {
                                 return Err(PortForwardError::ReadyTaskNotFound(
                                     remote_socket,
                                     uid,
@@ -210,7 +226,7 @@ impl PortForwarder {
                                 pair: socket_pair.clone(),
                                 remote: remote_socket,
                             };
-                            self.sockets.insert(res.connection_id, port_map);
+                            self.insert_ongoing(res.connection_id, port_map);
                             match channel.send(res.connection_id) {
                                 Ok(_) => (),
                                 Err(_) => {
@@ -222,7 +238,7 @@ impl PortForwarder {
                                         )))
                                         .await;
                                     self.task_txs.remove(&socket_pair);
-                                    self.sockets.remove(&res.connection_id);
+                                    self.remove_ongoing(&res.connection_id);
                                     tracing::warn!(
                                         "failed to send connection ID {uid} to task on oneshot channel"
                                     );
@@ -237,7 +253,7 @@ impl PortForwarder {
                             tracing::error!("failed to connect to a remote address: {error}");
                             // LocalConnectionTask will fail when oneshot is dropped and handle
                             // cleanup
-                            let _ = self.id_oneshots.remove(&uid);
+                            self.remove_pending(&uid);
                         }
                     }
                 }
@@ -258,7 +274,7 @@ impl PortForwarder {
                             Ok(_) => (),
                             Err(_) => {
                                 self.task_txs.remove(socket_pair);
-                                self.sockets.remove(&res.connection_id);
+                                self.remove_ongoing(&res.connection_id);
                                 self.agent_tx
                                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(
                                         LayerClose {
@@ -282,7 +298,7 @@ impl PortForwarder {
                     let Some(ConnectionPortMapping {
                         pair: socket_pair,
                         remote: remote_socket,
-                    }) = self.sockets.remove(&connection_id)
+                    }) = self.remove_ongoing(&connection_id)
                     else {
                         // ignore unknown connection IDs
                         return Ok(());
@@ -445,7 +461,7 @@ impl PortForwarder {
             }
             PortForwardMessage::Connect(uid, port_mapping, oneshot) => {
                 let remote_address = SocketAddress::Ip(port_mapping.remote);
-                self.id_oneshots.insert(uid, (port_mapping.pair, oneshot));
+                self.insert_pending(uid, (port_mapping.pair, oneshot));
                 self.agent_tx
                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(
                         LayerConnectV2 {
@@ -463,11 +479,46 @@ impl PortForwarder {
                             LayerClose { connection_id },
                         )))
                         .await;
-                    self.sockets.remove(&connection_id);
+                    self.remove_ongoing(&connection_id);
                 }
             }
         }
         Ok(())
+    }
+
+    fn insert_pending(
+        &mut self,
+        id: Uid,
+        pair: (ConnectionSocketPair, oneshot::Sender<ConnectionId>),
+    ) {
+        self.id_oneshots.insert(id, pair);
+        if let Some(conns_state) = &self.connections_state {
+            conns_state.pending.lock().unwrap().insert(id);
+        }
+    }
+
+    fn remove_pending(
+        &mut self,
+        id: &Uid,
+    ) -> Option<(ConnectionSocketPair, oneshot::Sender<ConnectionId>)> {
+        if let Some(conns_state) = &self.connections_state {
+            conns_state.pending.lock().unwrap().remove(&id);
+        }
+        self.id_oneshots.remove(id)
+    }
+
+    fn insert_ongoing(&mut self, id: ConnectionId, map: ConnectionPortMapping) {
+        self.sockets.insert(id, map);
+        if let Some(conns_state) = &self.connections_state {
+            conns_state.ongoing.lock().unwrap().insert(id);
+        }
+    }
+
+    fn remove_ongoing(&mut self, id: &ConnectionId) -> Option<ConnectionPortMapping> {
+        if let Some(conns_state) = &self.connections_state {
+            conns_state.ongoing.lock().unwrap().remove(&id);
+        }
+        self.sockets.remove(id)
     }
 }
 
@@ -1021,7 +1072,6 @@ impl From<mpsc::error::SendError<ClientMessage>> for PortForwardError {
 
 #[cfg(test)]
 mod test {
-    use core::assert_matches;
     use std::{
         collections::HashMap,
         io::ErrorKind::WouldBlock,
@@ -1033,8 +1083,7 @@ mod test {
     use mirrord_protocol::{
         ClientMessage, DaemonMessage, ToPayload,
         outgoing::{
-            DaemonConnect, DaemonConnectV2, DaemonRead, LayerConnect, LayerConnectV2, LayerWrite,
-            SocketAddress,
+            DaemonConnect, DaemonConnectV2, DaemonRead, LayerConnectV2, LayerWrite, SocketAddress,
             tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         },
         tcp::{
@@ -1144,7 +1193,7 @@ mod test {
         let (agent_tx, agent_rx) = agent_connection.destructure();
 
         // Prepare listeners before sending work to the background task.
-        let mut port_forwarder = PortForwarder::new(agent_tx, agent_rx, mappings)
+        let mut port_forwarder = PortForwarder::new(agent_tx, agent_rx, mappings, None)
             .await
             .unwrap();
         tokio::spawn(async move { port_forwarder.run().await.unwrap() });
@@ -1246,7 +1295,7 @@ mod test {
         let (agent_tx, agent_rx) = agent_connection.destructure();
 
         // Prepare listeners before sending work to the background task.
-        let mut port_forwarder = PortForwarder::new(agent_tx, agent_rx, mappings)
+        let mut port_forwarder = PortForwarder::new(agent_tx, agent_rx, mappings, None)
             .await
             .unwrap();
         tokio::spawn(async move { port_forwarder.run().await.unwrap() });
