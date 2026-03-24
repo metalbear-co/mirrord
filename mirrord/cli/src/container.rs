@@ -17,6 +17,7 @@ use tokio::process::Command;
 use tracing::Level;
 
 use crate::{
+    MirrordCi,
     config::{ContainerRuntime, ExecParams, RuntimeArgs},
     container::{command_builder::RuntimeCommandBuilder, sidecar::IntproxySidecar},
     ensure_not_nested,
@@ -97,6 +98,7 @@ fn resolve_library_path(config: &LayerConfig) -> CliResult<String> {
 /// Uses [`ExecutionKind::Container`] to create the [`AnalyticsReporter`].
 ///
 /// Uses the given `progress` to pass warnings from [`LayerConfig`] verification.
+#[tracing::instrument(level = Level::DEBUG, skip(progress, cfg_context, watch), ret)]
 async fn create_config_and_analytics<P: Progress>(
     progress: &mut P,
     mut cfg_context: ConfigContext,
@@ -131,11 +133,13 @@ async fn create_config_and_analytics<P: Progress>(
 /// 1. Prepared command to run the user container.
 /// 2. Handle to the external proxy.
 /// 3. Handle to temporary files containing intproxy-extproxy TLS configs.
+#[tracing::instrument(level = Level::DEBUG, skip(analytics, progress), ret)]
 async fn prepare_proxies<P: Progress>(
     analytics: &mut AnalyticsReporter,
     progress: &P,
     config: &mut LayerConfig,
     runtime: ContainerRuntime,
+    mirrord_for_ci: Option<&MirrordCi>,
 ) -> CliResult<(
     RuntimeCommandBuilder,
     MirrordExecution,
@@ -149,9 +153,14 @@ async fn prepare_proxies<P: Progress>(
         .map_err(ContainerError::from)?;
 
     let mut sub_progress = progress.subtask("preparing to launch process");
-    let (execution_info, extproxy_addr) =
-        MirrordExecution::start_external(config, &mut sub_progress, analytics, tls_setup.as_ref())
-            .await?;
+    let (execution_info, extproxy_addr) = MirrordExecution::start_external(
+        config,
+        &mut sub_progress,
+        analytics,
+        tls_setup.as_ref(),
+        mirrord_for_ci,
+    )
+    .await?;
     sub_progress.success(None);
 
     let extproxy_addr = config
@@ -203,16 +212,16 @@ async fn prepare_proxies<P: Progress>(
 /// 1. Spawns the agent (cluster), mirrord-extproxy (natively), and mirrord-intproxy (sidecar).
 /// 2. Adds additional env, volume, and network to the user container command.
 /// 3. Executes the user container command.
-#[tracing::instrument(level = Level::DEBUG, skip(watch), ret, err(level = Level::DEBUG, Debug))]
-pub async fn container_command(
+#[tracing::instrument(level = Level::DEBUG, skip(watch, progress), ret, err(level = Level::DEBUG))]
+pub(crate) async fn container_command<P: Progress>(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,
     watch: drain::Watch,
     user_data: &UserData,
+    progress: &mut P,
+    mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<i32> {
     ensure_not_nested()?;
-
-    let mut progress = ProgressTracker::from_env("mirrord container");
 
     if runtime_args.command.has_publish() {
         progress.warning(
@@ -226,12 +235,18 @@ pub async fn container_command(
 
     let cfg_context = ConfigContext::default().override_envs(exec_params.as_env_vars());
     let (mut config, mut analytics) =
-        create_config_and_analytics(&mut progress, cfg_context, watch, user_data).await?;
+        create_config_and_analytics(progress, cfg_context, watch, user_data).await?;
 
     adjust_container_config_for_wsl(runtime_args.runtime, &mut config);
 
-    let (runtime_command, _execution_info, _tls_setup) =
-        prepare_proxies(&mut analytics, &progress, &mut config, runtime_args.runtime).await?;
+    let (runtime_command, _execution_info, _tls_setup) = prepare_proxies(
+        &mut analytics,
+        progress,
+        &mut config,
+        runtime_args.runtime,
+        mirrord_for_ci.as_ref(),
+    )
+    .await?;
 
     progress.success(None);
 
@@ -245,6 +260,8 @@ pub async fn container_command(
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
+
+    tracing::info!(?runtime_command, "Le runtime command!");
 
     let status = runtime_command.status().await.map_err(|error| {
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
@@ -271,21 +288,20 @@ pub async fn container_command(
 /// 3. Outputs the [`ExtensionRuntimeCommand`](command_builder::ExtensionRuntimeCommand) for the
 ///    extension.
 /// 4. Waits for mirrord-extproxy exit.
-#[tracing::instrument(level = Level::DEBUG, skip(watch), ret, err(level = Level::DEBUG, Debug))]
-pub async fn container_ext_command(
+#[tracing::instrument(level = Level::DEBUG, skip(watch, progress), ret, err(level = Level::DEBUG, Debug))]
+pub async fn container_ext_command<P: Progress>(
     config_file: Option<PathBuf>,
     target: Option<String>,
     watch: drain::Watch,
     user_data: &UserData,
+    progress: &mut P,
+    mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<()> {
-    let mut progress = ProgressTracker::try_from_env("mirrord preparing to launch")
-        .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
-
     let cfg_context = ConfigContext::default()
         .override_env_opt(LayerConfig::FILE_PATH_ENV, config_file)
         .override_env_opt("MIRRORD_IMPERSONATED_TARGET", target);
     let (mut config, mut analytics) =
-        create_config_and_analytics(&mut progress, cfg_context, watch, user_data).await?;
+        create_config_and_analytics(progress, cfg_context, watch, user_data).await?;
 
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")
         .ok()
@@ -294,8 +310,14 @@ pub async fn container_ext_command(
 
     adjust_container_config_for_wsl(container_runtime, &mut config);
 
-    let (runtime_command, execution_info, _tls_setup) =
-        prepare_proxies(&mut analytics, &progress, &mut config, container_runtime).await?;
+    let (runtime_command, execution_info, _tls_setup) = prepare_proxies(
+        &mut analytics,
+        progress,
+        &mut config,
+        container_runtime,
+        mirrord_for_ci.as_ref(),
+    )
+    .await?;
 
     let output = serde_json::to_string(&runtime_command.into_command_extension_params())?;
     progress.success(Some(&output));

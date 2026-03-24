@@ -278,7 +278,7 @@ use mirrord_config::{
     },
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
-use mirrord_progress::{Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
+use mirrord_progress::{JsonProgress, Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
 use operator::operator_command;
@@ -1022,17 +1022,37 @@ fn main() -> miette::Result<()> {
             }
             Commands::Diagnose(args) => diagnose_command(*args).await?,
             Commands::Container(args) => windows_unsupported!(args, "container", {
+                let mut progress = ProgressTracker::from_env("mirrord container");
+
                 let (runtime_args, exec_params) = args.into_parts();
 
-                let exit_code =
-                    container_command(runtime_args, exec_params, watch, &user_data).await?;
+                let exit_code = container_command(
+                    runtime_args,
+                    exec_params,
+                    watch,
+                    &user_data,
+                    &mut progress,
+                    None,
+                )
+                .await?;
 
                 if exit_code != 0 {
                     std::process::exit(exit_code);
                 }
             }),
             Commands::ExtensionContainer(args) => windows_unsupported!(args, "container-ext", {
-                container_ext_command(args.config_file, args.target, watch, &user_data).await?
+                let mut progress = ProgressTracker::try_from_env("mirrord preparing to launch")
+                    .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
+
+                container_ext_command(
+                    args.config_file,
+                    args.target,
+                    watch,
+                    &user_data,
+                    &mut progress,
+                    None,
+                )
+                .await?
             }),
             Commands::ExternalProxy { port, .. } => windows_unsupported!(port, "extproxy", {
                 let config = mirrord_config::util::read_resolved_config()?;

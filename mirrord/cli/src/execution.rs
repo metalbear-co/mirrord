@@ -348,12 +348,13 @@ impl MirrordExecution {
     /// The address should be accessible from the internal proxy sidecar.
     ///
     /// Returned [`MirrordExecution::environment`] contains *only* remote environment.
-    #[tracing::instrument(level = Level::TRACE, skip_all)]
+    #[tracing::instrument(level = Level::DEBUG, skip_all)]
     pub(crate) async fn start_external<P>(
         config: &mut LayerConfig,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
         tls: Option<&SecureChannelSetup>,
+        mirrord_for_ci: Option<&MirrordCi>,
     ) -> CliResult<(Self, SocketAddr)>
     where
         P: Progress,
@@ -365,7 +366,7 @@ impl MirrordExecution {
         let branch_name = get_user_git_branch().await;
 
         let (connect_info, mut connection) =
-            create_and_connect(config, progress, analytics, branch_name, None)
+            create_and_connect(config, progress, analytics, branch_name, mirrord_for_ci)
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 

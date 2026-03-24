@@ -22,9 +22,7 @@ use tokio::fs::create_dir_all;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Level;
 
-use crate::{
-    CiArgs, CiCommand, CiStartArgs, CliError, CliResult, ci::error::CiError, user_data::UserData,
-};
+use crate::{CliError, CliResult, ci::error::CiError, config::ci::*, user_data::UserData};
 
 pub(crate) mod container;
 pub(crate) mod error;
@@ -64,8 +62,20 @@ pub(crate) async fn ci_command(
                 container::CiContainerCommandHandler::new(container_args, watch, user_data)
                     .await?
                     .handle()
-                    .await?,
+                    .await
+                    .map(|_| ())?,
             )
+        }
+        CiCommand::ExtensionContainer(extension_container_args) => {
+            Ok(container::CiExtensionContainerCommandHandler::new(
+                *extension_container_args,
+                watch,
+                user_data,
+            )
+            .await?
+            .handle()
+            .await
+            .map(|_| ())?)
         }
     }
 }
@@ -194,7 +204,7 @@ pub(super) struct MirrordCi {
 
     /// Arguments that are specific to `mirrord ci start`.
     #[cfg_attr(windows, allow(unused))]
-    start_args: StartArgs,
+    ci_common_args: CiCommonArgs,
 }
 
 impl MirrordCi {
@@ -288,7 +298,7 @@ impl MirrordCi {
             .id()
             .map(|pid| pid.to_string())
             .unwrap_or("unknown".to_string());
-        if self.start_args.foreground {
+        if self.ci_common_args.foreground {
             progress.info(&format!("waiting for child with pid {child_pid}"));
             match child.wait().await {
                 Ok(status) => {
@@ -334,10 +344,9 @@ impl MirrordCi {
 
     /// Reads the [`MirrordCiStore`], and the env var [`MIRRORD_CI_API_KEY`] to return a valid
     /// [`MirrordCi`].
-    #[tracing::instrument(level = Level::TRACE, ret, err)]
-    pub(super) async fn new(args: &CiStartArgs) -> CiResult<Self> {
+    #[tracing::instrument(level = Level::DEBUG, ret, err)]
+    pub(super) async fn new(ci_common_args: CiCommonArgs) -> CiResult<Self> {
         MirrordCiStore::read_from_file_or_default().await?;
-        let start_args = args.into();
 
         let ci_api_key = match std::env::var(MIRRORD_CI_API_KEY) {
             Ok(api_key) => Some(CiApiKey::decode(&api_key)?),
@@ -349,7 +358,7 @@ impl MirrordCi {
 
         Ok(Self {
             ci_api_key,
-            start_args,
+            ci_common_args,
         })
     }
 
@@ -357,59 +366,18 @@ impl MirrordCi {
     pub(super) fn info(&self) -> SessionCiInfo {
         let CiInfo { name, .. } = ci_info::get();
 
-        let StartArgs {
+        let CiCommonArgs {
             foreground: _,
             environment,
             pipeline,
             triggered_by,
-        } = self.start_args.clone();
+        } = self.ci_common_args.clone();
 
         SessionCiInfo {
             provider: name,
             environment,
             pipeline,
             triggered_by,
-        }
-    }
-}
-
-/// Similar to [`CiStartArgs`], except here we don't need [`CiStartArgs::exec_args`].
-///
-/// Used instead of `CiStartArgs` so we can `Clone` it around, (we don't need the `ExecArgs` where
-/// this is used).
-#[cfg_attr(windows, allow(dead_code))]
-#[derive(Debug, Default, Clone)]
-struct StartArgs {
-    /// Runs mirrord ci in the foreground (the default behaviour is to run it as a background
-    /// task).
-    #[cfg_attr(windows, allow(unused))]
-    foreground: bool,
-
-    /// CI environment, e.g. "staging", "production", "testing", etc.
-    environment: Option<String>,
-
-    /// CI pipeline or job name, e.g. "e2e-tests".
-    pipeline: Option<String>,
-
-    /// CI pipeline trigger, e.g. "push", "pull request", "manual", etc.
-    triggered_by: Option<String>,
-}
-
-impl From<&CiStartArgs> for StartArgs {
-    fn from(
-        CiStartArgs {
-            exec_args: _,
-            foreground,
-            environment,
-            pipeline,
-            triggered_by,
-        }: &CiStartArgs,
-    ) -> Self {
-        Self {
-            foreground: *foreground,
-            environment: environment.clone(),
-            pipeline: pipeline.clone(),
-            triggered_by: triggered_by.clone(),
         }
     }
 }
