@@ -149,10 +149,10 @@ impl DnsWorker {
             let resolv_conf_path = etc_path.join("resolv.conf");
             let hosts_path = etc_path.join("hosts");
 
-            let resolv_conf = fs::read(resolv_conf_path).await?;
-            let hosts_conf = fs::read(hosts_path).await?;
+            let resolv_conf = fs::read(resolv_conf_path).await.map_err(From::from)?;
+            let hosts_conf = fs::read(hosts_path).await.map_err(From::from)?;
 
-            let (config, mut options) = parse_resolv_conf(resolv_conf)?;
+            let (config, mut options) = parse_resolv_conf(resolv_conf).map_err(From::from)?;
             tracing::debug!(?config, ?options, "Parsed resolv configuration");
 
             options.server_ordering_strategy = ServerOrderingStrategy::UserProvidedOrder;
@@ -177,7 +177,10 @@ impl DnsWorker {
             let mut resolver = TokioAsyncResolver::tokio(config, options);
             tracing::debug!(?resolver, "Build a DNS resolver");
 
-            let hosts = Hosts::default().read_hosts_conf(hosts_conf.as_slice())?;
+            let hosts = Hosts::default()
+                .read_hosts_conf(hosts_conf.as_slice())
+                .map_err(From::from)?;
+
             resolver.set_hosts(Some(hosts));
 
             resolver

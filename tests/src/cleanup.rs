@@ -4,11 +4,12 @@ use std::time::Duration;
 
 use k8s_openapi::api::core::v1::Pod;
 use kube::{runtime::watcher::Config, Api, Client};
+use mirrord_test_utils::run_command::run_exec_with_target;
 use rstest::*;
 
 use crate::utils::{
-    application::env::EnvApp, kube_client, kube_service::KubeService,
-    run_command::run_exec_with_target, services::basic_service, watch::Watcher,
+    application::env::EnvApp, kube_client, kube_service::KubeService, services::basic_service,
+    watch::Watcher,
 };
 
 /// Verifies that the agent container correctly exits after all clients are gone.
@@ -17,7 +18,7 @@ use crate::utils::{
 /// (it's always part of the target pod status).
 #[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(240))]
 #[cfg_attr(not(feature = "ephemeral"), ignore)]
 async fn agent_container_exits(

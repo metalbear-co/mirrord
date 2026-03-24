@@ -59,7 +59,7 @@ async fn send_and_verify(
 /// as it gives us more control over the underlying TCP connections.
 #[cfg_attr(not(any(feature = "job", feature = "ephemeral")), ignore)]
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(360))]
 async fn mirror_http_traffic(
     #[future]
@@ -137,7 +137,7 @@ async fn mirror_http_traffic(
 /// This test requires that the operator's agents use passthrough mirroring and connection flushing.
 #[cfg_attr(any(not(feature = "operator"), target_os = "windows"), ignore)]
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(240))]
 async fn concurrent_mirror_and_steal(
     #[future]

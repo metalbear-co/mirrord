@@ -477,6 +477,12 @@ pub struct AgentConfig {
     #[config(default = true)]
     pub disable_mesh_sidecar_injection: bool,
 
+    /// ### agent.jaq_time_limit {#agent-jaq_time_limit}
+    ///
+    /// Time limit for running jaq queries, in milliseconds. Defaults to 500ms.
+    #[config(default = 1)]
+    pub jaq_time_limit: u64,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).

@@ -1,4 +1,4 @@
-﻿Set-StrictMode -Version Latest
+Set-StrictMode -Version Latest
 
 function Update-Environment {   
     $locations = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
@@ -96,9 +96,9 @@ function Build-GoE2EApps {
     param(
         [string]$TestsDir,
         [array]$GoTargets = @(
-            @{ Output = '23.go_test_app.exe'; Toolchain = 'go1.23.12' },
             @{ Output = '24.go_test_app.exe'; Toolchain = 'go1.24.7' },
-            @{ Output = '25.go_test_app.exe'; Toolchain = 'go1.25.1' }
+            @{ Output = '25.go_test_app.exe'; Toolchain = 'go1.25.1' },
+            @{ Output = '26.go_test_app.exe'; Toolchain = 'go1.26.0' }
         )
     )
 

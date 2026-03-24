@@ -6,13 +6,13 @@ use std::time::Duration;
 
 use k8s_openapi::api::core::v1::{Namespace, Pod};
 use kube::{api::PostParams, Api, Client};
+use mirrord_test_utils::run_command::run_exec_with_target;
 use rstest::*;
 use serde_json::json;
 
 use crate::utils::{
     application::env::EnvApp, kube_client, operator_installed, random_string,
-    resource_guard::ResourceGuard, run_command::run_exec_with_target, watch,
-    PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
+    resource_guard::ResourceGuard, watch, PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
 };
 
 struct DirtyIptablesTest {
@@ -144,7 +144,7 @@ async fn dirty_iptables_test_inner(kube_client: Client) -> DirtyIptablesTest {
 /// `IPTABLES_TABLE_NAME`
 #[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(120))]
 pub async fn agent_exits_on_dirty_tables(
     #[future] oss_only_dirty_iptables_test: Option<DirtyIptablesTest>,
@@ -193,7 +193,7 @@ pub async fn agent_exits_on_dirty_tables(
 /// iptables and starts, instead of erroring out.
 #[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(120))]
 pub async fn agent_cleans_up_and_starts_on_dirty_tables(
     #[future] dirty_iptables_test: DirtyIptablesTest,

@@ -56,7 +56,7 @@ use http_filter::*;
 ///       "incoming": {
 ///         "mode": "steal",
 ///         "http_filter": {
-///           "header_filter": "host: api\\..+"
+///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -163,7 +163,7 @@ impl MirrordToggleableConfig for IncomingFileConfig {
     }
 }
 
-// Change to manual deserializtion to prevent usless untagged enum errors
+// Change to manual deserialization to prevent useless untagged enum errors
 impl<'de> Deserialize<'de> for IncomingFileConfig {
     fn deserialize<D>(deserializer: D) -> Result<IncomingFileConfig, D::Error>
     where
@@ -246,7 +246,7 @@ impl<'de> de::Visitor<'de> for IncomingFileConfigVisitor {
 pub struct IncomingAdvancedFileConfig {
     /// ### mode
     ///
-    /// Allows selecting between mirrorring or stealing traffic.
+    /// Allows selecting between mirroring or stealing traffic.
     ///
     /// See [`mode`](##mode (incoming)) for details.
     pub mode: Option<IncomingMode>,
@@ -406,7 +406,7 @@ where
 ///       "incoming": {
 ///         "mode": "steal",
 ///         "http_filter": {
-///           "header_filter": "host: api\\..+"
+///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -532,7 +532,7 @@ impl IncomingConfig {
     }
 }
 
-/// Allows selecting between mirrorring or stealing traffic.
+/// Allows selecting between mirroring or stealing traffic.
 ///
 /// Can be set to either `"mirror"` (default), `"steal"` or `"off"`.
 ///
@@ -576,6 +576,12 @@ pub enum IncomingMode {
     ///
     /// Disables the incoming network feature.
     Off,
+}
+
+impl IncomingMode {
+    pub fn is_off(&self) -> bool {
+        matches!(self, Self::Off)
+    }
 }
 
 #[derive(Error, Debug)]

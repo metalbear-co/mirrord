@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -36,11 +36,11 @@ pub struct MysqlBranchConfig {
 #[serde(tag = "mode", rename_all = "lowercase")]
 pub enum MysqlBranchCopyConfig {
     Empty {
-        tables: Option<HashMap<String, MysqlBranchTableCopyConfig>>,
+        tables: Option<BTreeMap<String, MysqlBranchTableCopyConfig>>,
     },
 
     Schema {
-        tables: Option<HashMap<String, MysqlBranchTableCopyConfig>>,
+        tables: Option<BTreeMap<String, MysqlBranchTableCopyConfig>>,
     },
 
     All,
@@ -54,25 +54,4 @@ impl Default for MysqlBranchCopyConfig {
     }
 }
 
-/// In addition to copying an empty database or all tables' schema, mirrord operator
-/// will copy data from the source DB when an array of table configs are specified.
-///
-/// Example:
-///
-/// ```json
-/// {
-///   "users": {
-///     "filter": "my_db.users.name = 'alice' OR my_db.users.name = 'bob'"
-///   },
-///   "orders": {
-///     "filter": "my_db.orders.created_at > 1759948761"
-///   }
-/// }
-/// ```
-///
-/// With the config above, only alice and bob from the `users` table and orders
-/// created after the given timestamp will be copied.
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-pub struct MysqlBranchTableCopyConfig {
-    pub filter: Option<String>,
-}
+pub type MysqlBranchTableCopyConfig = super::BranchItemCopyConfig;

@@ -1,9 +1,9 @@
-use std::{fmt, str::FromStr};
+use std::{borrow::Cow, fmt, str::FromStr};
 
 use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
 use replica_set::ReplicaSetTarget;
-use schemars::{JsonSchema, r#gen::SchemaGenerator, schema::SchemaObject};
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumDiscriminants, EnumString};
 
@@ -52,24 +52,18 @@ pub enum TargetFileConfig {
     },
 }
 
-fn make_simple_target_custom_schema(r#gen: &mut SchemaGenerator) -> schemars::schema::Schema {
+fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Schema {
     // generate the schema for the Option<Target> like usual, then just push a string type to the
     // any_of.
-    let mut schema: SchemaObject = <Option<Target>>::json_schema(r#gen).into();
-    let subschema = schema.subschemas();
+    let mut schema = <Option<Target>>::json_schema(generator);
+    let schema_obj = schema.ensure_object();
 
-    let mut any_ofs = subschema.any_of.clone().unwrap();
-    any_ofs.push(
+    if let Some(serde_json::Value::Array(any_ofs)) = schema_obj.get_mut("anyOf") {
         // There's a small gap here for the string to be _anything_, not just k8s objects.
-        schemars::schema::SchemaObject {
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            ..Default::default()
-        }
-        .into(),
-    );
-    subschema.any_of = Some(any_ofs);
+        any_ofs.push(serde_json::json!({ "type": "string" }));
+    }
 
-    schema.into()
+    schema
 }
 
 /// Specifies the target and namespace to target.
@@ -323,29 +317,38 @@ pub enum Target {
 }
 
 impl JsonSchema for Target {
-    fn schema_name() -> String {
-        "Target".to_owned()
+    fn schema_name() -> Cow<'static, str> {
+        "Target".into()
     }
 
-    fn json_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        let mut schema = schemars::schema::SchemaObject::default();
+    fn json_schema(schema_gen: &mut SchemaGenerator) -> Schema {
+        let one_of = vec![
+            schema_gen
+                .subschema_for::<deployment::DeploymentTarget>()
+                .to_value(),
+            schema_gen.subschema_for::<pod::PodTarget>().to_value(),
+            schema_gen
+                .subschema_for::<rollout::RolloutTarget>()
+                .to_value(),
+            schema_gen.subschema_for::<job::JobTarget>().to_value(),
+            schema_gen
+                .subschema_for::<cron_job::CronJobTarget>()
+                .to_value(),
+            schema_gen
+                .subschema_for::<stateful_set::StatefulSetTarget>()
+                .to_value(),
+            schema_gen
+                .subschema_for::<service::ServiceTarget>()
+                .to_value(),
+            schema_gen
+                .subschema_for::<replica_set::ReplicaSetTarget>()
+                .to_value(),
+            serde_json::json!({ "enum": ["targetless"] }),
+        ];
 
-        schema.subschemas().one_of = Some(vec![
-            schema_gen.subschema_for::<deployment::DeploymentTarget>(),
-            schema_gen.subschema_for::<pod::PodTarget>(),
-            schema_gen.subschema_for::<rollout::RolloutTarget>(),
-            schema_gen.subschema_for::<job::JobTarget>(),
-            schema_gen.subschema_for::<cron_job::CronJobTarget>(),
-            schema_gen.subschema_for::<stateful_set::StatefulSetTarget>(),
-            schema_gen.subschema_for::<service::ServiceTarget>(),
-            schema_gen.subschema_for::<replica_set::ReplicaSetTarget>(),
-            schemars::schema::Schema::Object(schemars::schema::SchemaObject {
-                enum_values: Some(vec![serde_json::Value::String("targetless".to_string())]),
-                ..Default::default()
-            }),
-        ]);
-
-        schema.into()
+        let mut schema = schemars::json_schema!({});
+        schema.insert("oneOf".to_owned(), serde_json::Value::Array(one_of));
+        schema
     }
 }
 
@@ -383,6 +386,21 @@ impl Target {
     /// `true` if this [`Target`] is only supported when the copy target feature is enabled.
     pub(super) fn requires_copy(&self) -> bool {
         matches!(self, Target::Job(_) | Target::CronJob(_))
+    }
+
+    /// Set the container on this target. No-op for [`Target::Targetless`].
+    pub fn set_container(&mut self, container: String) {
+        match self {
+            Target::Deployment(t) => t.container = Some(container),
+            Target::Pod(t) => t.container = Some(container),
+            Target::Rollout(t) => t.container = Some(container),
+            Target::StatefulSet(t) => t.container = Some(container),
+            Target::Service(t) => t.container = Some(container),
+            Target::ReplicaSet(t) => t.container = Some(container),
+            Target::Job(t) => t.container = Some(container),
+            Target::CronJob(t) => t.container = Some(container),
+            Target::Targetless => {}
+        }
     }
 
     /// `true` if this [`Target`] is only supported when the operator is enabled.

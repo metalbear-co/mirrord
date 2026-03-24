@@ -1,15 +1,19 @@
-Thank you for contributing to mirrord!
+<!-- Thank you for contributing to mirrord! -->
+<!-- Please use the checklist below as a guide for docs, tests and admin tasks for your PR -->
+<!-- Feel free to ~strikethrough~ any items that you don't think apply -->
 
-Please make sure you add a changelog file in `changelog.d/` named `<identifier>.<category>.md`
+### Quality Checklist:
 
-**Examples:**
-- `1054.changed.md` (with GitHub issue)
-- `+some-name.added.md` (without issue)
+- [ ] I have documented new code sufficiently
+- [ ] I have checked and updated the relevant existing docs in code, including removing outdated material
+- [ ] I have written user-facing website docs for new features, or opened a (sub)issue to do so
+- [ ] I have checked and updated existing website docs for changed features
+- [ ] I have tested this change and know it succeeds and fails as expected
+- [ ] I have written unit tests or purposefully omitted them
+- [ ] I have written e2e tests or purposefully omitted them
+- [ ] I have explained what this PR introduces and why, and linked to relevant context (e.g. linear issues, related PRs,
+  documentation)
+- [ ] I have introduced a short, clear and well-formatted changelog entry
 
-**Identifier:**
-- If a GitHub issue exists, use the issue number from the public [mirrord repo](https://github.com/metalbear-co/mirrord)
-- Use `+some-name` if no issue exists
-- Don't use Linear issues or private repo issue numbers
-
-**Category:**
-Check `towncrier.toml` for available categories (`added`, `changed`, `fixed`, etc.) and choose the one that fits your change.
+<!-- need help with the changelog? see ../CONTRIBUTING.md#submitting-a-pull-request -->
+<!-- Add more details of your changes below if needed -->

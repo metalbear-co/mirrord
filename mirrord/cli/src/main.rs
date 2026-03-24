@@ -311,6 +311,7 @@ mod logging;
 mod newsletter;
 mod operator;
 mod port_forward;
+mod preview;
 mod profile;
 mod teams;
 mod user_data;
@@ -330,8 +331,10 @@ use mirrord_layer_lib::process::windows::{console, execution::LayerManagedProces
 use verify_config::verify_config;
 
 use crate::{
-    ci::MirrordCi, newsletter::suggest_newsletter_signup, user_data::UserData,
-    util::get_user_git_branch,
+    ci::MirrordCi,
+    newsletter::suggest_newsletter_signup,
+    user_data::UserData,
+    util::{apply_test_env_overrides, get_user_git_branch},
 };
 
 async fn exec_process<P>(
@@ -687,7 +690,13 @@ pub(crate) fn print_config<P>(
         config.internal_proxy.log_destination.display()
     ));
 
-    progress.info(&format!("key: {}", config.key.as_str()));
+    if operator_used {
+        progress.info(&format!(
+            "Session key: {}\nIf enabled, a `mirrord-key` header with this value will be injected \
+into redirected HTTP requests before they're routed to the target.",
+            config.key.as_str()
+        ));
+    }
 }
 
 async fn exec(
@@ -720,6 +729,7 @@ async fn exec(
     }
 
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
+    cfg_context = apply_test_env_overrides(cfg_context);
     let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
 
@@ -1041,6 +1051,7 @@ fn main() -> miette::Result<()> {
             Commands::Ci(args) => windows_unsupported!(args, "ci", {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
+            Commands::Preview(args) => preview::preview_command(*args, watch, &user_data).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             #[cfg(feature = "wizard")]
             Commands::Wizard(args) => {
@@ -1093,7 +1104,8 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
         let result: Result<(), Box<dyn std::error::Error>> = try {
             let client = reqwest::Client::builder()
                 .user_agent(format!("mirrord-cli/{CURRENT_VERSION}"))
-                .build()?;
+                .build()
+                .map_err(From::from)?;
 
             let sent = client
                 .get(format!(
@@ -1102,9 +1114,9 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                     platform = std::env::consts::OS,
                 ))
                 .timeout(Duration::from_secs(1))
-                .send().await?;
+                .send().await.map_err(From::from)?;
 
-            let latest_version = Version::parse(&sent.text().await.unwrap())?;
+            let latest_version = Version::parse(&sent.text().await.unwrap()).map_err(From::from)?;
 
             if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
                 let is_homebrew = which("mirrord")

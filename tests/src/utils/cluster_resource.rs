@@ -1,10 +1,10 @@
 use k8s_openapi::{
     api::{
-        apps::v1::Deployment,
+        apps::v1::{Deployment, StatefulSet},
         core::v1::{EnvFromSource, Probe, Service, TCPSocketAction},
     },
     apimachinery::pkg::util::intstr::IntOrString,
-    Resource,
+    DeepMerge, Resource,
 };
 use kube::runtime::reflector::Lookup;
 use mirrord_kube::api::kubernetes::rollout::Rollout;
@@ -191,4 +191,101 @@ pub(super) fn argo_rollout_from_json(name: &str, spec_source: SpecSource) -> Rol
         }
     }))
     .expect("Failed creating `rollout` from json spec!")
+}
+
+pub fn stateful_set_from_json(name: &str, image: &str, has_pvc: bool) -> StatefulSet {
+    let mut set: StatefulSet = serde_json::from_value(json!({
+        "apiVersion": "apps/v1",
+        "kind": "StatefulSet",
+        "metadata": {
+            "name": name,
+            "labels": {
+                "app": name,
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                "test-label-for-statefulsets": format!("statefulset-{name}")
+            }
+        },
+        "spec": {
+            "replicas": 1,
+            "selector": {
+                "matchLabels": {
+                    "app": &name
+                }
+            },
+            "template": {
+                "metadata": {
+                    "labels": {
+                        "app": &name,
+                        "test-label-for-pods": format!("pod-{name}"),
+                        format!("test-label-for-pods-{name}"): &name
+                    }
+                },
+                "spec": {
+                    "containers": [
+                        {
+                            "name": &CONTAINER_NAME,
+                            "image": image,
+                            "ports": [
+                                {
+                                    "containerPort": 80
+                                }
+                            ],
+                            "env": [
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_FIRST",
+                                  "value": "mirrord.is.running"
+                                },
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_SECOND",
+                                  "value": "7777"
+                                },
+                                {
+                                    "name": "MIRRORD_FAKE_VAR_THIRD",
+                                    "value": "foo=bar"
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        }
+    }))
+    .expect("Failed creating `statefulset` from json spec!");
+    if has_pvc {
+        let volume_claims = serde_json::from_value(json!({
+            "spec": {
+                "containers": [
+                    {
+                        "name": &CONTAINER_NAME,
+                        "volumeMounts": [
+                            {
+                                "name": "data",
+                                "mountPath": "/data"
+                            }
+                        ]
+                    }
+                ],
+                "volumeClaimTemplates": [
+                {
+                    "metadata": {
+                        "name": "data"
+                    },
+                    "spec": {
+                        "accessModes": [
+                            "ReadWriteOnce"
+                        ],
+                        "resources": {
+                            "requests": {
+                                "storage": "1Ki"
+                            }
+                        }
+                    }
+                }
+            ]
+            }
+        }))
+        .expect("Failed creating `statefulset.spec` with `volumeClaimTemplates` from json spec!");
+        set.merge_from(volume_claims);
+    }
+    set
 }

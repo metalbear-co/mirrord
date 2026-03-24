@@ -10,6 +10,14 @@ use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig};
 
 pub type QueueId = String;
 
+/// A mapping from queue ids to their filters. Each queue filter defines which messages from the
+/// original queue will be made available to the local application, based on message attributes
+/// or headers, and possibly on jq filters (for SQS).
+///
+/// The queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` or
+/// `MirrordKafkaTopicsConsumer` for SQS or Kafka respectively.
+///
+///
 /// ```json
 /// {
 ///   "feature": {
@@ -23,9 +31,7 @@ pub type QueueId = String;
 ///       },
 ///       "second-queue": {
 ///         "queue_type": "SQS",
-///         "message_filter": {
-///           "who": "you$"
-///         }
+///         "jq_filter": ".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"
 ///       },
 ///       "third-queue": {
 ///         "queue_type": "Kafka",
@@ -53,10 +59,32 @@ impl SplitQueuesConfig {
         !self.0.is_empty()
     }
 
-    /// Out of the whole queue splitting config, get only the sqs queues.
+    /// Get all the SQS queue ids from the config.
+    pub fn sqs_queues(&self) -> impl '_ + Iterator<Item = &'_ str> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::Sqs { .. } => Some(name.as_str()),
+            _ => None,
+        })
+    }
+
+    /// Out of the whole queue splitting config, get only the sqs message attribute filters.
     pub fn sqs(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ QueueMessageFilter)> {
         self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Sqs { message_filter } => Some((name.as_str(), message_filter)),
+            QueueFilter::Sqs {
+                message_filter: Some(message_filter),
+                ..
+            } => Some((name.as_str(), message_filter)),
+            _ => None,
+        })
+    }
+
+    /// Out of the whole queue splitting config, get only the sqs jq filters.
+    pub fn sqs_jq_filters(&self) -> impl '_ + Iterator<Item = (&'_ str, &str)> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::Sqs {
+                jq_filter: Some(jq),
+                ..
+            } => Some((name.as_str(), jq.as_str())),
             _ => None,
         })
     }
@@ -64,8 +92,36 @@ impl SplitQueuesConfig {
     /// Out of the whole queue splitting config, get only the kafka topics.
     pub fn kafka(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ QueueMessageFilter)> {
         self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Kafka { message_filter } => Some((name.as_str(), message_filter)),
+            QueueFilter::Kafka { message_filter, .. } => Some((name.as_str(), message_filter)),
             _ => None,
+        })
+    }
+
+    fn verify_message_attribute_filter(
+        queue_id: &QueueId,
+        filter: &QueueMessageFilter,
+    ) -> Result<(), QueueSplittingVerificationError> {
+        for (name, pattern) in filter {
+            Regex::new(pattern).map_err(|error| {
+                QueueSplittingVerificationError::InvalidRegex(
+                    queue_id.clone(),
+                    name.clone(),
+                    error.into(),
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    fn verify_jq_program(
+        queue_id: &str,
+        jq_code: &str,
+    ) -> Result<(), QueueSplittingVerificationError> {
+        mirrord_jaq::compile_jq(jq_code).map(|_| ()).map_err(|err| {
+            QueueSplittingVerificationError::InvalidJqProgram {
+                queue_name: queue_id.to_string(),
+                jq_compile_errors: err.to_string(),
+            }
         })
     }
 
@@ -74,25 +130,26 @@ impl SplitQueuesConfig {
         _context: &mut ConfigContext,
     ) -> Result<(), QueueSplittingVerificationError> {
         for (queue_name, filter) in &self.0 {
-            let filter = match filter {
-                QueueFilter::Sqs { message_filter } | QueueFilter::Kafka { message_filter } => {
-                    message_filter
+            match filter {
+                QueueFilter::Sqs {
+                    message_filter,
+                    jq_filter,
+                } => {
+                    if let Some(filter) = message_filter {
+                        Self::verify_message_attribute_filter(queue_name, filter)?;
+                    }
+                    if let Some(jq_filter) = jq_filter {
+                        Self::verify_jq_program(queue_name, jq_filter)?;
+                    }
+                }
+                QueueFilter::Kafka { message_filter } => {
+                    Self::verify_message_attribute_filter(queue_name, message_filter)?;
                 }
                 QueueFilter::Unknown => {
                     return Err(QueueSplittingVerificationError::UnknownQueueType(
                         queue_name.clone(),
                     ));
                 }
-            };
-
-            for (name, pattern) in filter {
-                Regex::new(pattern).map_err(|error| {
-                    QueueSplittingVerificationError::InvalidRegex(
-                        queue_name.clone(),
-                        name.clone(),
-                        error.into(),
-                    )
-                })?;
             }
         }
 
@@ -117,19 +174,53 @@ impl FromMirrordConfig for SplitQueuesConfig {
 
 pub type QueueMessageFilter = BTreeMap<String, String>;
 
-/// Amazon Simple Queue Service and Kafka are supported.
+/// ### feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}
 ///
-/// More queue types might be added in the future.
+/// For each queue, `message_filter` is a mapping between message attribute names and regexes they
+/// should match. The local application will only receive messages that match **all** of the given
+/// patterns. This means, only messages that have **all** of the attributes in the
+/// filter, with values of those attributes matching the respective patterns.
+///
+/// ### feature.split_queues.{}.queue_type {#feature-split_queues-queue_id-queue_type}
+///
+/// The type of queue to be split, currently `SQS` and `Kafka` are supported. More queue types might
+/// be added in the future.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
 #[serde(tag = "queue_type")]
 pub enum QueueFilter {
+    /// ### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
+    /// Only supported with `queue_type` of `SQS`.
+    /// When this field is specified, for each SQS message, the jq filter runs on a JSON
+    /// representation of the SQS `Message` object. If the jq program outputs `true`, that
+    /// message is considered as matching the filter.
+    ///
+    /// See [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).
+    ///
+    /// This can be used to filter messages based on their body content, for example.
+    ///
+    ///
+    /// This filter, for example, will tell mirrord to only make available to this local application
+    /// messages with a json in the message body, with a `customer_email` field that contains
+    /// "metalbear.com": `".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"`
     #[serde(rename = "SQS")]
     Sqs {
         /// A filter is a mapping between message attribute names and regexes they should match.
         /// The local application will only receive messages that match **all** of the given
         /// patterns. This means, only messages that have **all** of the attributes in the
         /// filter, with values of those attributes matching the respective patterns.
-        message_filter: QueueMessageFilter,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message_filter: Option<QueueMessageFilter>,
+
+        /// A jq filter.
+        ///
+        /// When this is specified, for each SQS message, the jq filter runs on a JSON
+        /// representation of the SQS `Message` object.
+        ///
+        /// See [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).
+        ///
+        /// If the jq program outputs `true`, that message is considered as matching the filter.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        jq_filter: Option<String>,
     },
 
     #[serde(rename = "Kafka")]
@@ -141,8 +232,8 @@ pub enum QueueFilter {
         message_filter: QueueMessageFilter,
     },
 
-    /// When a newer client sends a new filter kind to an older operator, that does not yet know
-    /// about that filter type, the filter will be deserialized to unknown.
+    // When a newer client sends a new filter kind to an older operator, that does not yet know
+    // about that filter type, the filter will be deserialized to unknown.
     #[schemars(skip)]
     #[serde(other, skip_serializing)]
     Unknown,
@@ -150,7 +241,11 @@ pub enum QueueFilter {
 
 impl CollectAnalytics for &SplitQueuesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
-        analytics.add("sqs_queue_count", self.sqs().count());
+        analytics.add("sqs_queue_count", self.sqs_queues().count());
+        // The number of SQS queues filtered with message attribute filters.
+        analytics.add("sqs_message_attr_filter_queue_count", self.sqs().count());
+        // The number of SQS queues filtered with jq filters.
+        analytics.add("sqs_jq_filter_count", self.sqs_jq_filters().count());
         analytics.add("kafka_queue_count", self.kafka().count());
     }
 }
@@ -166,11 +261,16 @@ pub enum QueueSplittingVerificationError {
         // without `Box`, clippy complains when `ConfigError` is used in `Err`
         Box<fancy_regex::Error>,
     ),
+    #[error("Invalid jq program in filter for queue {queue_name}. Errors:\n{jq_compile_errors}")]
+    InvalidJqProgram {
+        queue_name: String,
+        jq_compile_errors: String,
+    },
 }
 
 #[cfg(test)]
 mod test {
-    use super::QueueFilter;
+    use super::{QueueFilter, SplitQueuesConfig};
 
     #[test]
     fn deserialize_known_queue_types() {
@@ -200,7 +300,8 @@ mod test {
         assert_eq!(
             filter,
             QueueFilter::Sqs {
-                message_filter: [("key".to_string(), "value".to_string())].into()
+                message_filter: Some([("key".to_string(), "value".to_string())].into()),
+                jq_filter: None,
             }
         );
     }
@@ -216,5 +317,57 @@ mod test {
 
         let filter = serde_json::from_value::<QueueFilter>(value).unwrap();
         assert_eq!(filter, QueueFilter::Unknown);
+    }
+
+    #[test]
+    fn deserialize_sqs_jq_filter() {
+        let value = serde_json::json!({
+            "queue_type": "SQS",
+            "jq_filter": "whatever"
+        });
+
+        let filter = serde_json::from_value::<QueueFilter>(value).unwrap();
+        assert_eq!(
+            filter,
+            QueueFilter::Sqs {
+                jq_filter: Some("whatever".to_string()),
+                message_filter: None
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_sqs_with_both_jq_filter_and_attribute_filter() {
+        let value = serde_json::json!({
+            "queue_type": "SQS",
+            "jq_filter": "whatever",
+            "message_filter": {
+                "who": "me",
+            }
+        });
+
+        let filter = serde_json::from_value::<QueueFilter>(value).unwrap();
+        assert_eq!(
+            filter,
+            QueueFilter::Sqs {
+                jq_filter: Some("whatever".to_string()),
+                message_filter: Some([("who".to_string(), "me".to_string())].into()),
+            }
+        );
+    }
+
+    #[test]
+    fn jq_verification_valid_programs() {
+        SplitQueuesConfig::verify_jq_program("_", ".snow").unwrap();
+        SplitQueuesConfig::verify_jq_program("_", "{snow, wind}").unwrap();
+        SplitQueuesConfig::verify_jq_program("_", ".[]").unwrap();
+        SplitQueuesConfig::verify_jq_program("_", ".[] | select(.snow > 25)").unwrap();
+    }
+
+    #[test]
+    fn jq_verification_fails_on_invalid_programs() {
+        SplitQueuesConfig::verify_jq_program("_", "snow").unwrap_err();
+        SplitQueuesConfig::verify_jq_program("_", "").unwrap_err();
+        SplitQueuesConfig::verify_jq_program("_", "idk | whatever").unwrap_err();
     }
 }

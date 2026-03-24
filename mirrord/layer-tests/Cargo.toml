@@ -1,0 +1,59 @@
+[package]
+name = "mirrord-layer-tests"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+mirrord-config = { path = "../config" }
+mirrord-intproxy = { path = "../intproxy" }
+mirrord-protocol = { path = "../protocol" }
+
+actix-codec.workspace = true
+futures.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "macros", "fs", "rt-multi-thread"] }
+
+# used for `run_command` wraper of mirrord cli for exec-based test harness
+# By default, we use the `build-cli` feature for mirrord compilation via build dependancy
+# In CI context, we can prevent this by running with --no-default-features and 
+#   specifying existing binary in `MIRRORD_TESTS_USE_BINARY` env var
+mirrord-test-utils = { path = "../../test-utils", default-features = false}
+
+[features]
+# on by default, can be disabled via `--no-default-features`
+default = ["build-cli"]
+build-cli = ["mirrord-test-utils/build-cli"]
+
+[dev-dependencies]
+actix-codec.workspace = true
+futures.workspace = true
+rstest.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "fs"] }
+tracing-subscriber.workspace = true
+
+libc.workspace = true
+mirrord-intproxy = { path = "../intproxy" }
+mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
+rand.workspace = true
+tracing.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+mirrord-sip = { path = "../sip" }
+apple-codesign = { version = "0.29", default-features = false }

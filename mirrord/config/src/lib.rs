@@ -64,9 +64,15 @@ use crate::{
 /// Environment variable we use to pass the internal proxy address to the layer.
 pub const MIRRORD_LAYER_INTPROXY_ADDR: &str = "MIRRORD_LAYER_INTPROXY_ADDR";
 
+/// Environment variable we use to pass an already-running internal proxy address to the layer
+/// during exec-based tests.
+pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";
+
 /// Environment variable to indicate towards layer to wait for debugger.
 pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGGER";
 
+/// # Getting Started
+///
 /// mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
 ///
@@ -80,6 +86,8 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 /// To use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag.
 /// Or if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file
 /// or use the UI.
+///
+/// ## Examples
 ///
 /// To help you get started, here are examples of a basic configuration file, and a complete
 /// configuration file containing all fields.
@@ -161,7 +169,7 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 ///       "incoming": {
 ///         "mode": "steal",
 ///         "http_filter": {
-///           "header_filter": "host: api\\..+"
+///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -403,7 +411,8 @@ pub struct LayerConfig {
     /// An identifier for a mirrord session.
     ///
     /// This key can be referenced in your configuration using the `{{ key }}` template variable.
-    /// For example, you can use it in HTTP filters: `"header_filter": "x-session: key-{{ key }}"`.
+    /// The recommended use is to propagate it in W3C `baggage` or `tracestate`, then filter on
+    /// `mirrord-session={{ key }}` in `feature.network.incoming.http_filter`.
     ///
     /// Priority (highest to lowest):
     /// 1. CLI argument: `mirrord exec --key my-key`
@@ -417,7 +426,7 @@ pub struct LayerConfig {
     ///     "network": {
     ///       "incoming": {
     ///         "http_filter": {
-    ///           "header_filter": "x-session: key-{{ key }}"
+    ///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
     ///         }
     ///       }
     ///     }
@@ -497,13 +506,41 @@ impl LayerConfig {
     /// This function **does not** use [`LayerConfig::RESOLVED_CONFIG_ENV`] nor
     /// [`LayerConfig::decode`]. It resolves the config from scratch.
     pub fn resolve(context: &mut ConfigContext) -> Result<Self, ConfigError> {
-        if let Ok(path) = context.get_env(Self::FILE_PATH_ENV) {
-            LayerFileConfig::from_path(path, context)?.generate_config(context)
+        let mut config = if let Ok(path) = context.get_env(Self::FILE_PATH_ENV) {
+            LayerFileConfig::from_path(path, context)?.generate_config(context)?
         } else {
-            LayerFileConfig::default().generate_config(context)
-        }
+            LayerFileConfig::default().generate_config(context)?
+        };
+        config.apply_magic();
+        Ok(config)
     }
 
+    /// Applies the presets in `feature.magic` to the config, modifying it in-place.
+    fn apply_magic(&mut self) {
+        if self.feature.magic.aws {
+            let mut unset: Vec<String> = self
+                .feature
+                .env
+                .unset
+                .take()
+                .map(Vec::from)
+                .unwrap_or_default();
+            unset.push("AWS_PROFILE".to_owned());
+            self.feature.env.unset = Some(VecOrSingle::Multiple(unset));
+
+            if let Ok(home) = std::env::var("HOME") {
+                let tmpdir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_owned());
+                let pattern = format!("^{home}/\\.aws(/.*)?");
+                let replacement = format!("{tmpdir}/.aws$1");
+                self.feature
+                    .fs
+                    .mapping
+                    .get_or_insert_with(HashMap::new)
+                    .entry(pattern)
+                    .or_insert(replacement);
+            }
+        }
+    }
     /// Verifies that there are no conflicting settings in this config.
     ///
     /// Fills the given [`ConfigContext`] with warnings.
@@ -911,7 +948,7 @@ mod tests {
     };
 
     use rstest::*;
-    use schemars::schema::RootSchema;
+    use schemars::Schema;
     use tempfile::NamedTempFile;
 
     use super::*;
@@ -1208,6 +1245,8 @@ mod tests {
                 hostname: None,
                 split_queues: None,
                 db_branches: None,
+                magic: None,
+                preview: None,
             }),
             container: None,
             operator: None,
@@ -1247,10 +1286,10 @@ mod tests {
 
     /// <!--${internal}-->
     /// Writes the config schema to a file (uploaded to the schema store).
-    fn write_schema_to_file(schema: &RootSchema) -> File {
+    fn write_schema_to_file(schema: &Schema) -> File {
         println!("Writing schema to file.");
 
-        let content = serde_json::to_string_pretty(&schema).expect("Failed generating schema!");
+        let content = serde_json::to_string_pretty(schema).expect("Failed generating schema!");
         let mut file = OpenOptions::new()
             .create(true)
             .write(true)

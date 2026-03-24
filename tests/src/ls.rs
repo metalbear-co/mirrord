@@ -1,18 +1,19 @@
 #![cfg(test)]
 
 use fancy_regex::Regex;
+use mirrord_test_utils::run_command::run_ls;
 use rstest::rstest;
 
+use crate::utils::kube_client;
 #[cfg(feature = "operator")]
 use crate::utils::services::operator::service_for_mirrord_ls;
 #[cfg(not(feature = "operator"))]
 use crate::utils::services::service_for_mirrord_ls;
-use crate::utils::{kube_client, run_command::run_ls};
 
 /// Test for the `mirrord ls` command.
 #[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 pub async fn mirrord_ls() {
     let namespace = format!("test-namespace-{:x}", rand::random::<u32>());
     // This function is implemented differently when the `operator` feature is enabled and when it
@@ -27,7 +28,7 @@ pub async fn mirrord_ls() {
     )
     .await;
 
-    let mut process = run_ls(&namespace).await;
+    let mut process = run_ls(&namespace, cfg!(feature = "operator")).await;
     let res = process.wait().await;
     assert!(res.success(), "mirrord ls command failed");
 

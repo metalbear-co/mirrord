@@ -10,6 +10,7 @@ use str_win::path_to_unix_path;
 pub fn regex_set_builder() -> RegexSetBuilder {
     let mut patterns: Vec<String> = [
         r".\.dll$",
+        r".\.pdb$",
         r".\.so$",
         r".\.d$",
         r".\.pyc$",
@@ -19,9 +20,12 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r".\.js$",
         r".\.pth$",
         r".\.plist$",
+        r".\.nls$",
         r"venv\.cfg$",
         // Python folder on Windows.
-        r"^/Users/[^/]+/AppData/Local/Programs/Python/",
+        r"^(?i)^\/Users\/[^/]+\/AppData\/Local\/Programs\/Python",
+        r"^(?i)^\/windows\/system32",
+        r"^(?i)^\/Program Files",
     ]
     .iter()
     .map(|s| s.to_string())

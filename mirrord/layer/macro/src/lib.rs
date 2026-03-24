@@ -83,8 +83,8 @@ pub fn hook_fn(
 
         // `pub(crate) static FN_CLOSE: HookFn<FnClose> = HookFn::default()`
         let original_fn = quote! {
-            #visibility static #static_name: crate::detour::HookFn<#type_name> =
-                crate::detour::HookFn::default_const()
+            #visibility static #static_name: mirrord_layer_lib::detour::HookFn<#type_name> =
+                mirrord_layer_lib::detour::HookFn::default_const()
         };
 
         let output = quote! {
@@ -178,15 +178,15 @@ pub fn hook_guard_fn(
 
         // `pub(crate) static FN_CLOSE: HookFn<FnClose> = HookFn::default()`
         let original_fn = quote! {
-            #visibility static #static_name: crate::detour::HookFn<#type_name> =
-                crate::detour::HookFn::default_const()
+            #visibility static #static_name: mirrord_layer_lib::detour::HookFn<#type_name> =
+                mirrord_layer_lib::detour::HookFn::default_const()
         };
 
         let statements = proper_function.block.stmts.to_vec();
         let mut modified_function = proper_function;
         modified_function.block.stmts = Block::parse_within
             .parse2(quote!(
-                let __bypass = crate::detour::DetourGuard::new();
+                let __bypass = mirrord_layer_lib::detour::DetourGuard::new();
                 if __bypass.is_none() {
                     return #static_name (#fn_arg_names);
                 }

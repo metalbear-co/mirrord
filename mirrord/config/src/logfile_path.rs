@@ -10,7 +10,7 @@ use std::{
 };
 
 use rand::distr::{Alphanumeric, SampleString};
-use schemars::{JsonSchema, SchemaGenerator, schema::Schema};
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::config::{ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig};
@@ -110,11 +110,11 @@ impl<S> Hash for LogDestinationConfig<S> {
 }
 
 impl<S> JsonSchema for LogDestinationConfig<S> {
-    fn is_referenceable() -> bool {
-        PathBuf::is_referenceable()
+    fn inline_schema() -> bool {
+        PathBuf::inline_schema()
     }
 
-    fn schema_name() -> String {
+    fn schema_name() -> Cow<'static, str> {
         PathBuf::schema_name()
     }
 

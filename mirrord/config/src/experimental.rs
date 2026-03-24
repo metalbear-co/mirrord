@@ -100,7 +100,12 @@ pub struct ExperimentalConfig {
     ///
     /// Useful if you need file remapping and your application uses `rename`, i.e. `php-fpm`,
     /// `twig`, to create and rename temporary files.
-    #[config(default = true)]
+    ///
+    /// DEPRECATED, WILL BE REMOVED
+    #[config(
+        default = true,
+        deprecated = "`hook_rename` is deprecated and is default to true."
+    )]
     pub hook_rename: bool,
 
     /// ### _experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}
@@ -111,7 +116,12 @@ pub struct ExperimentalConfig {
     /// enabled.
     ///
     /// Defaults to `true`
-    #[config(default = true)]
+    ///
+    /// DEPRECATED, WILL BE REMOVED
+    #[config(
+        default = true,
+        deprecated = "`dns_permission_error_fatal` is deprecated and is default to true."
+    )]
     pub dns_permission_error_fatal: bool,
 
     /// ### _experimental_ force_hook_connect {#experimental-force_hook_connect}
@@ -119,16 +129,26 @@ pub struct ExperimentalConfig {
     /// Forces hooking all instances of the connect function.
     /// In very niche cases the connect function has multiple exports and this flag
     /// makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>
-    #[config(default = true)]
+    ///
+    /// Defaults to `true`
+    ///
+    /// DEPRECATED, WILL BE REMOVED
+    #[config(
+        default = true,
+        deprecated = "`force_hook_connect` is deprecated and is default to true."
+    )]
     pub force_hook_connect: bool,
 
     /// ### _experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
     ///
-    /// Enables better support for outgoing connections using non-blocking TCP sockets.
+    /// Enables better support for outgoing connections using
+    /// non-blocking TCP sockets. For technical reasons, enabling this
+    /// will cause `getsockname` to always return a localhost address.
     ///
-    /// Defaults to `false`.
-    #[config(default = false)]
-    pub non_blocking_tcp_connect: bool,
+    /// Defaults to `true` in OSS.
+    /// Defaults to `false` in mfT.
+    #[config(default = None)]
+    pub non_blocking_tcp_connect: Option<bool>,
 
     /// ### _experimental_ dlopen_cgo {#experimental-dlopen_cgo}
     ///
@@ -148,6 +168,14 @@ pub struct ExperimentalConfig {
     ///
     /// Configuration for inspecting and modifying apple variables. macOS only.
     pub applev: Option<AppleVariablesConfig>,
+
+    /// ### _experimental_ sip_utils {#experimental-sip_utils}
+    ///
+    /// Downloads pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses
+    /// them in place of SIP-patching the originals.
+    /// This shouldn't be used unless someone from MetalBear/mirrord tells you to.
+    #[config(default = false)]
+    pub sip_utils: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -167,11 +195,14 @@ impl CollectAnalytics for &ExperimentalConfig {
             self.dns_permission_error_fatal,
         );
         analytics.add("force_hook_connect", self.force_hook_connect);
-        analytics.add("non_blocking_tcp_connect", self.non_blocking_tcp_connect);
+        if let Some(non_blocking_tcp_connect) = self.non_blocking_tcp_connect {
+            analytics.add("non_blocking_tcp_connect", non_blocking_tcp_connect);
+        }
         analytics.add("dlopen_cgo", self.dlopen_cgo);
         analytics.add("latency_transmit_delay", self.latency.transmit_delay);
         analytics.add("latency_receive_delay", self.latency.receive_delay);
         analytics.add("applev", self.applev.is_some());
+        analytics.add("sip_utils", self.sip_utils);
     }
 }
 

@@ -2,9 +2,9 @@
 //!
 //! Just like original [`Client::connect`] function, [`connect_ws`] creates a
 //! WebSockets connection. However, original function swallows
-//! [`ErrorResponse`] sent by the operator and returns flat
+//! [`Status`] sent by the operator and returns flat
 //! [`UpgradeConnectionError`]. [`connect_ws`] attempts to
-//! recover the [`ErrorResponse`] - if operator response code is not
+//! recover the [`Status`] - if operator response code is not
 //! [`StatusCode::SWITCHING_PROTOCOLS`], it tries to read
 //! response body and deserialize it.
 
@@ -15,7 +15,7 @@ use hyper_util::rt::TokioIo;
 use kube::{
     Client, Error, Result,
     client::{Body, UpgradeConnectionError},
-    core::ErrorResponse,
+    core::Status,
 };
 use tokio_tungstenite::{WebSocketStream, tungstenite::protocol::Role};
 
@@ -34,10 +34,10 @@ async fn verify_response(res: Response<Body>, key: &HeaderValue) -> Result<Respo
                 .await
                 .ok()
                 .map(|body| body.to_bytes())
-                .and_then(|body_bytes| serde_json::from_slice::<ErrorResponse>(&body_bytes).ok());
+                .and_then(|body_bytes| serde_json::from_slice::<Status>(&body_bytes).ok());
 
             if let Some(error_response) = error_response {
-                return Err(Error::Api(error_response));
+                return Err(Error::Api(Box::new(error_response)));
             }
         }
 

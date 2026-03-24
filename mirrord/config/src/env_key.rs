@@ -57,6 +57,14 @@ impl EnvKey {
         matches!(self, EnvKey::Generated(_))
     }
 
+    /// Returns the key value if it was provided by the user, `None` if auto-generated.
+    pub fn provided(&self) -> Option<&str> {
+        match self {
+            EnvKey::Provided(s) => Some(s),
+            EnvKey::Generated(_) => None,
+        }
+    }
+
     /// Returns the length to report in analytics.
     ///
     /// - 0 for auto-generated keys

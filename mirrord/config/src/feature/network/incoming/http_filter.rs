@@ -1,13 +1,16 @@
-use std::{ops::Not, sync::LazyLock};
+use std::{ops::Not, str::FromStr, sync::LazyLock};
 
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use mirrord_protocol::tcp::{
-    HTTP_BODY_JSON_FILTER_VERSION, HTTP_COMPOSITE_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION,
+    Filter, HTTP_BODY_JSON_FILTER_VERSION, HTTP_COMPOSITE_FILTER_VERSION,
+    HTTP_HEADER_JQ_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION, HttpBodyFilter, HttpFilter,
+    HttpMethodFilter, JqQuery, JsonPathQuery,
 };
 use schemars::JsonSchema;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::{
     config::{ConfigContext, ConfigError, from_env::FromEnv, source::MirrordConfigSource},
@@ -23,14 +26,25 @@ use crate::{
 /// Only does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is
 /// set as `"steal"`, ignored otherwise.
 ///
-/// For example, to filter based on header:
+/// The recommended way to filter a single developer session is to propagate a W3C `baggage` or
+/// `tracestate` entry such as `mirrord-session={{ key }}` from the caller, and match that value
+/// here. This works well across proxies, service meshes, and tracing-aware clients.
+///
+/// For example, to filter on a `baggage` header:
 /// ```json
 /// {
-///   "header_filter": "host: api\\..+"
+///   "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
 /// }
 /// ```
-/// Setting that filter will make mirrord only steal requests with the `host` header set to hosts
-/// that start with "api", followed by a dot, and then at least one more character.
+/// Setting that filter will make mirrord only steal requests whose `baggage` header contains
+/// `mirrord-session={{ key }}`.
+///
+/// If your traffic already propagates `tracestate`, you can filter on it the same way:
+/// ```json
+/// {
+///   "header_filter": "^tracestate: .*mirrord-session={{ key }}.*$"
+/// }
+/// ```
 ///
 /// For example, to filter based on path:
 /// ```json
@@ -63,25 +77,26 @@ use crate::{
 /// With `all_of` and `any_of`, you can use multiple HTTP filters at the same time.
 ///
 /// If you want to steal HTTP requests that match **every** pattern specified, use `all_of`.
-/// For example, this filter steals only HTTP requests to endpoint `/api/my-endpoint` that contain
-/// header `x-debug-session` with value `121212`.
+/// For example, this filter steals only `POST` requests to endpoint `/api/my-endpoint` whose
+/// `baggage` header contains `mirrord-session={{ key }}`.
 /// ```json
 /// {
 ///   "all_of": [
-///     { "header": "^x-debug-session: 121212$" },
-///     { "path": "^/api/my-endpoint$" }
+///     { "header": "^baggage: .*mirrord-session={{ key }}.*$" },
+///     { "path": "^/api/my-endpoint$" },
+///     { "method": "POST" }
 ///   ]
 /// }
 /// ```
 ///
 /// If you want to steal HTTP requests that match **any** of the patterns specified, use `any_of`.
-/// For example, this filter steals HTTP requests to endpoint `/api/my-endpoint`
-/// **and** HTTP requests that contain header `x-debug-session` with value `121212`.
+/// For example, this filter steals HTTP requests to `/api/my-endpoint`, or requests whose
+/// `baggage` header contains `mirrord-session={{ key }}`.
 /// ```json
 /// {
 ///  "any_of": [
-///    { "path": "^/api/my-endpoint$"},
-///    { "header": "^x-debug-session: 121212$" }
+///    { "header": "^baggage: .*mirrord-session={{ key }}.*$" },
+///    { "path": "^/api/my-endpoint$" }
 ///  ]
 /// }
 /// ```
@@ -97,6 +112,9 @@ pub struct HttpFilterConfig {
     ///
     /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
     /// case-insensitive.
+    ///
+    /// The recommended pattern is to match a W3C `baggage` or `tracestate` entry such as
+    /// `mirrord-session={{ key }}`.
     #[config(env = "MIRRORD_HTTP_HEADER_FILTER")]
     pub header_filter: Option<String>,
 
@@ -125,11 +143,19 @@ pub struct HttpFilterConfig {
     /// Matches the request based on the contents of its body.
     pub body_filter: Option<BodyFilter>,
 
+    /// ##### feature.network.incoming.http_filter.header_filter_jq {#feature-network-incoming-http-header-filter-jq}
+    ///
+    /// Supports jq expressions, matches when the expression returns
+    /// `true`. The expression is evaluated on each present header in
+    /// the request, in `HeaderKey: HeaderValue` format.
+    #[config(env = "MIRRORD_HTTP_HEADER_FILTER_JQ")]
+    pub header_filter_jq: Option<String>,
+
     /// ##### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
     ///
     /// An array of HTTP filters.
     ///
-    /// Each inner filter specifies either header or path regex.
+    /// Each inner filter specifies a header, path, method, body, or jq filter.
     /// Requests must match all of the filters to be stolen.
     ///
     /// Cannot be an empty list.
@@ -138,9 +164,9 @@ pub struct HttpFilterConfig {
     /// ```json
     /// {
     ///   "all_of": [
-    ///     { "header": "x-user: my-user$" },
-    ///     { "path": "^/api/v1/my-endpoint" }
-    ///     { "method": "post" }
+    ///     { "header": "^baggage: .*mirrord-session={{ key }}.*$" },
+    ///     { "path": "^/api/v1/my-endpoint$" },
+    ///     { "method": "POST" }
     ///   ]
     /// }
     /// ```
@@ -150,7 +176,7 @@ pub struct HttpFilterConfig {
     ///
     /// An array of HTTP filters.
     ///
-    /// Each inner filter specifies either header or path regex.
+    /// Each inner filter specifies a header, path, method, body, or jq filter.
     /// Requests must match at least one of the filters to be stolen.
     ///
     /// Cannot be an empty list.
@@ -159,9 +185,9 @@ pub struct HttpFilterConfig {
     /// ```json
     /// {
     ///   "any_of": [
-    ///     { "header": "^x-user: my-user$" },
-    ///     { "path": "^/api/v1/my-endpoint" }
-    ///     { "method": "post" }
+    ///     { "header": "^baggage: .*mirrord-session={{ key }}.*$" },
+    ///     { "header": "^tracestate: .*mirrord-session={{ key }}.*$" },
+    ///     { "path": "^/api/v1/my-endpoint$" }
     ///   ]
     /// }
     /// ```
@@ -183,6 +209,7 @@ impl HttpFilterConfig {
             || self.all_of.is_some()
             || self.any_of.is_some()
             || self.body_filter.is_some()
+            || self.header_filter_jq.is_some()
     }
 
     pub fn ensure_usable_with(
@@ -190,7 +217,7 @@ impl HttpFilterConfig {
         agent_protocol_version: Option<Version>,
     ) -> Result<(), ConfigError> {
         #![allow(clippy::type_complexity)]
-        static REQUIREMENTS: [(fn(&HttpFilterConfig) -> bool, &LazyLock<VersionReq>, &str); 3] = [
+        static REQUIREMENTS: [(fn(&HttpFilterConfig) -> bool, &LazyLock<VersionReq>, &str); 4] = [
             (
                 HttpFilterConfig::is_composite,
                 &HTTP_COMPOSITE_FILTER_VERSION,
@@ -205,6 +232,11 @@ impl HttpFilterConfig {
                 HttpFilterConfig::has_json_body_filter,
                 &HTTP_BODY_JSON_FILTER_VERSION,
                 "JSON body filters",
+            ),
+            (
+                HttpFilterConfig::has_header_jq_filter,
+                &HTTP_HEADER_JQ_FILTER_VERSION,
+                "JQ header filters",
             ),
         ];
 
@@ -245,6 +277,20 @@ impl HttpFilterConfig {
             })
     }
 
+    fn has_header_jq_filter(&self) -> bool {
+        self.header_filter_jq.is_some()
+            || self.all_of.as_ref().is_some_and(|composite| {
+                composite
+                    .iter()
+                    .any(|f| matches!(f, InnerFilter::HeaderJq { .. }))
+            })
+            || self.any_of.as_ref().is_some_and(|composite| {
+                composite
+                    .iter()
+                    .any(|f| matches!(f, InnerFilter::HeaderJq { .. }))
+            })
+    }
+
     fn has_json_body_filter(&self) -> bool {
         matches!(self.body_filter, Some(BodyFilter::Json { .. }))
             || self.all_of.as_ref().is_some_and(|composite| {
@@ -271,6 +317,121 @@ impl HttpFilterConfig {
             }
         }
     }
+
+    /// Converts this config into the protocol-level [`HttpFilter`].
+    ///
+    /// Returns an error if a filter expression is invalid. Panics if no filter is set
+    /// (call [`is_filter_set`](Self::is_filter_set) first).
+    pub fn as_protocol_http_filter(&self) -> Result<HttpFilter, HttpFilterParseError> {
+        match self {
+            HttpFilterConfig {
+                path_filter: Some(path),
+                header_filter: None,
+                method_filter: None,
+                body_filter: None,
+                header_filter_jq: None,
+                all_of: None,
+                any_of: None,
+                ports: _,
+            } => Ok(HttpFilter::Path(Filter::new(path.into())?)),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: Some(header),
+                method_filter: None,
+                body_filter: None,
+                header_filter_jq: None,
+                all_of: None,
+                any_of: None,
+                ports: _,
+            } => Ok(HttpFilter::Header(Filter::new(header.into())?)),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: Some(method),
+                body_filter: None,
+                header_filter_jq: None,
+                all_of: None,
+                any_of: None,
+                ports: _,
+            } => Ok(HttpFilter::Method(HttpMethodFilter::from_str(method)?)),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                body_filter: Some(filter),
+                header_filter_jq: None,
+                all_of: None,
+                any_of: None,
+                ports: _,
+            } => Ok(HttpFilter::Body(filter.as_protocol_http_body_filter()?)),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                body_filter: None,
+                header_filter_jq: Some(filter),
+                all_of: None,
+                any_of: None,
+                ports: _,
+            } => Ok(HttpFilter::HeaderJq(
+                JqQuery::new(filter).map_err(HttpFilterParseError::Jq)?,
+            )),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                body_filter: None,
+                header_filter_jq: None,
+                all_of: Some(filters),
+                any_of: None,
+                ports: _,
+            } => Self::make_composite_filter(true, filters),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                body_filter: None,
+                header_filter_jq: None,
+                all_of: None,
+                any_of: Some(filters),
+                ports: _,
+            } => Self::make_composite_filter(false, filters),
+
+            _ => panic!("No HTTP filters specified, this should have been caught earlier"),
+        }
+    }
+
+    fn make_composite_filter(
+        all: bool,
+        filters: &[InnerFilter],
+    ) -> Result<HttpFilter, HttpFilterParseError> {
+        let filters = filters
+            .iter()
+            .map(|filter| match filter {
+                InnerFilter::Path { path } => Ok(HttpFilter::Path(Filter::new(path.clone())?)),
+                InnerFilter::Header { header } => {
+                    Ok(HttpFilter::Header(Filter::new(header.clone())?))
+                }
+                InnerFilter::Method { method } => {
+                    Ok(HttpFilter::Method(HttpMethodFilter::from_str(method)?))
+                }
+                InnerFilter::Body(body_filter) => Ok(HttpFilter::Body(
+                    body_filter.as_protocol_http_body_filter()?,
+                )),
+                InnerFilter::HeaderJq { query } => Ok(HttpFilter::HeaderJq(
+                    JqQuery::new(query).map_err(HttpFilterParseError::Jq)?,
+                )),
+            })
+            .collect::<Result<Vec<_>, HttpFilterParseError>>()?;
+
+        Ok(HttpFilter::Composite { all, filters })
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
@@ -284,6 +445,9 @@ pub enum InnerFilter {
     ///
     /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
     /// case-insensitive.
+    ///
+    /// Prefer matching W3C `baggage` or `tracestate` entries such as
+    /// `mirrord-session={{ key }}` when you want to isolate one developer session.
     Header {
         header: String,
     },
@@ -309,6 +473,16 @@ pub enum InnerFilter {
     /// Matches the request based on the contents of its body. Currently only JSON body filtering is
     /// supported.
     Body(BodyFilter),
+
+    /// ##### feature.network.incoming.inner_filter.header_filter_jq
+    /// ##### {#feature-network-incoming-inner-header-filter-jq}
+    ///
+    /// Supports jq expressions, matches when the expression returns
+    /// `true`. The expression is evaluated on each present header in
+    /// the request, in `HeaderKey: HeaderValue` format.
+    HeaderJq {
+        query: String,
+    },
 }
 
 /// Currently only JSON body filtering is supported.
@@ -393,7 +567,7 @@ pub enum BodyFilter {
     ///
     ///
     ///
-    /// To use with with `all_of` or `any_of`, use the following syntax:
+    /// To use with `all_of` or `any_of`, use the following syntax:
     /// ```json
     /// "http_filter": {
     ///   "all_of": [
@@ -411,6 +585,18 @@ pub enum BodyFilter {
     Json { query: String, matches: String },
 }
 
+impl BodyFilter {
+    /// Converts this config into the protocol-level [`HttpBodyFilter`].
+    pub fn as_protocol_http_body_filter(&self) -> Result<HttpBodyFilter, Box<fancy_regex::Error>> {
+        match self {
+            BodyFilter::Json { query, matches } => Ok(HttpBodyFilter::Json {
+                query: JsonPathQuery::new_unchecked(query.clone()),
+                matches: Filter::new(matches.clone())?,
+            }),
+        }
+    }
+}
+
 impl MirrordToggleableConfig for HttpFilterFileConfig {
     fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
         let header_filter = FromEnv::new("MIRRORD_HTTP_HEADER_FILTER")
@@ -422,6 +608,10 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
             .transpose()?;
 
         let method_filter = FromEnv::new("MIRRORD_HTTP_METHOD_FILTER")
+            .source_value(context)
+            .transpose()?;
+
+        let header_filter_jq = FromEnv::new("MIRRORD_HTTP_HEADER_FILTER_JQ")
             .source_value(context)
             .transpose()?;
 
@@ -439,6 +629,7 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
             path_filter,
             method_filter,
             body_filter,
+            header_filter_jq,
             all_of,
             any_of,
             ports,
@@ -452,4 +643,17 @@ impl CollectAnalytics for &HttpFilterConfig {
         analytics.add("path_filter", self.path_filter.is_some());
         analytics.add("ports", self.count_filtered_ports());
     }
+}
+
+/// Error returned when converting an [`HttpFilterConfig`] into an [`HttpFilter`].
+#[derive(Error, Debug)]
+pub enum HttpFilterParseError {
+    #[error(transparent)]
+    Regex(#[from] Box<fancy_regex::Error>),
+
+    #[error(transparent)]
+    Method(#[from] strum::ParseError),
+
+    #[error("error while compiling jq expression: {0}")]
+    Jq(String),
 }

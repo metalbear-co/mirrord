@@ -13,9 +13,10 @@ Make sure to take a look at the project's [style guide](STYLE.md).
 - [Getting Started](#getting-started)
 - [Debugging mirrord](#debugging-mirrord)
 - [New Hook Guidelines](#new-hook-guidelines)
-- [Compiling on MacOS](#compiling-on-macos)
+- [Compiling on macOS](#compiling-on-macos)
 - [Adding new target types](#adding-new-target-types)
 - [Testing the release workflow](#testing-the-release-workflow)
+- [Submitting a Pull Request](#submitting-a-pull-request)
 - [Architecture](#architecture)
 - [Release mirrord](#release-mirrord)
 
@@ -27,10 +28,11 @@ The following guide details the steps to setup a local development environment f
 
 - [GCC](https://gcc.gnu.org/) - only on Linux, GCC is needed for Go dynamic linking
 - [Rust](https://www.rust-lang.org/)
-- [NodeJS](https://nodejs.org/en/), [ExpressJS](https://expressjs.com/)
+- [NodeJS](https://nodejs.org/en/), [ExpressJS](https://expressjs.com/), [portfinder](https://www.npmjs.com/package/portfinder)
 - [Python](https://www.python.org/), [Flask](https://flask.palletsprojects.com/en/2.1.x/), [FastAPI](https://fastapi.tiangolo.com/), [Uvicorn](https://www.uvicorn.org/)
 - [Go](https://go.dev/)
 - Kubernetes Cluster (local/remote)
+- [Argo Rollouts CRD](https://argoproj.github.io/argo-rollouts/) - required for rollout-related E2E tests (`kubectl create namespace argo-rollouts && kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml`)
 
 ### Setup a Kubernetes cluster
 
@@ -106,7 +108,12 @@ The basic command to run the E2E tests is:
 cargo test --package mirrord-tests
 ```
 
-However, when running on macOS a universal binary has to be created first:
+However, when running on macOS a universal binary has to be created first. You can use xtask:
+```bash
+cargo xtask build-cli
+```
+
+Or the build script:
 ```bash
 scripts/build_fat_mac.sh
 ```
@@ -189,24 +196,35 @@ Some test apps need to be compiled before they can be used in the tests
 
 The basic command to run the integration tests is:
 ```bash
-cargo test --package mirrord-layer
+cargo test --package mirrord-layer-tests
 ```
 
-However, when running on macOS a dylib has to be created first:
+#### Running the Integration Tests using pre-compiled Binaries (Optional)
+If you want to avoid building the CLI as a build dependency (or speed up iteration), you can run the integration tests against prebuilt artifacts. This requires `--no-default-features` and pointing to the CLI binary and layer library.
+
+```bash
+MIRRORD_TESTS_USE_BINARY=../../target/x86_64-unknown-linux-gnu/debug/mirrord \
+MIRRORD_LAYER_FILE=../../target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so \
+cargo test -p mirrord-layer-tests --no-default-features
+```
+Swap `x86_64-unknown-linux-gnu` with your target triplet, or omit the triplet if you built for the host default.
+Paths use `../..` because `cargo test -p mirrord-layer-tests` runs tests with `mirrord/layer-tests` as the working directory.
+
+For macOS with pre-compiled binaries, build the universal CLI (which embeds both arch compilations):
+```bash
+cargo xtask build-cli --platform macos-universal
+```
+
+Or the build script:
 ```bash
 scripts/build_fat_mac.sh
 ```
 
-And then in order to use that dylib in the tests, run the tests like this:
+And then use it in the tests as follows:
 ```bash
-MIRRORD_TEST_USE_EXISTING_LIB=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib cargo test -p mirrord-layer
-```
-
-On Apple Silicon, set `MIRRORD_MACOS_ARM64_LIBRARY` additionally to use the arm64 layer lib as well:
-```bash
-MIRRORD_TEST_USE_EXISTING_LIB=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib \
-MIRRORD_MACOS_ARM64_LIBRARY=../../target/aarch64-apple-darwin/debug/libmirrord_layer.dylib \
-cargo test -p mirrord-layer
+MIRRORD_TESTS_USE_BINARY=../../target/universal-apple-darwin/debug/mirrord \
+MIRRORD_LAYER_FILE=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib \
+cargo test -p mirrord-layer-tests --no-default-features
 ```
 
 ### Integration Tests logs and you
@@ -299,6 +317,24 @@ py-serv-deployment-ff89b5974-x9tjx   1/1     Running   0          3h8m
 
 To build this project, you will first need a [Protocol Buffer Compiler](https://grpc.io/docs/protoc-installation/) installed.
 
+We recommend using `xtask` for building mirrord, which handles all platform-specific requirements:
+
+```bash
+# Debug build for your platform (auto-detected)
+cargo xtask build-cli
+
+# Release build
+cargo xtask build-cli --release
+
+# Build for specific platform
+cargo xtask build-cli --release --platform macos-universal
+cargo xtask build-cli --release --platform linux-x86_64
+```
+
+See [xtask/README.md](xtask/README.md) for complete documentation.
+
+**Alternative (platform-specific methods):**
+
 #### macOS
 ```bash
 scripts/build_fat_mac.sh
@@ -313,7 +349,7 @@ The binary is created at `./target/<platform>/debug/mirrord`
 
 #### Run mirrord with a local process
 
-Sample web server - `app.js` (present at `sample/node/app.mjs` in the repo)
+Sample web server - `app.js` (present at `sample/node/app.mjs` in the repository)
 
 <details>
   <summary>sample/node/app.mjs</summary>
@@ -482,10 +518,10 @@ To debug it with a debugger:
        tokio::time::sleep(Duration::from_secs(20)).await;
    ```
    to [somewhere](https://github.com/metalbear-co/mirrord/blob/fa2af7f1e77a9254fb0908be40b0dae5da53d298/mirrord/cli/src/internal_proxy.rs#L145) in the start of the intproxy code.
-2. Set breakpoints in vscode in the relevant lines of the intproxy code.
+2. Set breakpoints in VS Code in the relevant lines of the intproxy code.
 3. Build mirrord.
 4. Run mirrord.
-5. Attach a debugger in vscode to the inproxy process. On macOS you can do that with `Cmd` + `Shift` + `P` -> `LLDB: Attach to Process...` -> type `intproxy` and choose the `mirrord intproxy` process. The sleep you added at the start of the intproxy is time for you to attach the debugger.
+5. Attach a debugger in VS Code to the intproxy process. On macOS you can do that with `Cmd` + `Shift` + `P` -> `LLDB: Attach to Process...` -> type `intproxy` and choose the `mirrord intproxy` process. The sleep you added at the start of the intproxy is time for you to attach the debugger.
 
 ## Retrieving Agent Logs
 
@@ -525,6 +561,16 @@ kubectl logs <YOUR_POD_NAME> | less -R
 
 where you would replace `<YOUR_POD_NAME>` with the name of the pod.
 
+## Operator Isolation Marker
+
+When multiple operator instances share the same cluster, each uses an isolation marker to avoid
+reconciling resources created by the other. The marker is set via the `OPERATOR_ISOLATION_MARKER`
+environment variable and defaults to `mirrord-operator`. Its value is used as a special label on
+operator-managed resources (agents, copy-targets, preview sessions, etc.).
+
+The operator reads this env var at **compile time** (via `option_env!`), while the CLI reads it at
+**runtime** (via `std::env::var`).
+
 # New Hook Guidelines
 
 Adding a feature to mirrord that introduces a new hook (file system, network) can be tricky and there are a lot of edge cases we might need to cover.
@@ -538,7 +584,7 @@ In order to have a more structured approach, here's the flow you should follow w
     1. To implement use case "App needs to read credentials from a file*"
     2. I will hook `open` and `read` handling calls only with flags O_RDONLY.
     3. Once `open` is called, I'll send a blocking request to the agent to open the remote file, returning the return code of the operation.
-    4. Create an fd using `memfd`. The result will be returned to the local app, and if successful we'll save that fd into a HashMap that matches between local fd and remote fd/identifier.
+    4. Create an fd using `memfd`. The result will be returned to the local app, and if successful we'll save that fd into a hashmap that matches between local fd and remote fd/identifier.
     5. When `read` is called, I will check if the fd being read was previously opened by us, and if it is we'll send a blocking `read` request to the agent. The result will be sent back to the caller.
     6. And so on.
 5. This doc should go later on to our mirrord docs for advanced developers so people can understand how stuff works
@@ -549,19 +595,19 @@ In order to have a more structured approach, here's the flow you should follow w
     2. A call that should be bypassed. Make sure the result of the operation proves it happened locally. Please test
        different reasons for bypassing. E.g. for file operations, make a call with a relative path, and make a call
        with a path that is configured to be local. If it's easier for you, you can test bypassing in an integration
-       test of mirrord-layer (under mirrord/layer/tests).
+       test of mirrord-layer (under mirrord/layer-tests/tests).
     3. If the configuration supports mappings that are relevant for this hook, add test cases with those mappings,
        and test that the mappings take effect correctly. E.g. for file operations test with a path mapping.
 
 
-# Compiling on MacOS
+# Compiling on macOS
 
-`mirrord` is cross-platform and natively supports compiling from a MacOS host, with one exception: `mirrord-agent` - the component/crate that runs inside of the kubernetes cluster.
+`mirrord` is cross-platform and natively supports compiling from a macOS host, with one exception: `mirrord-agent` - the component/crate that runs inside of the Kubernetes cluster.
 
-`mirrord-agent` feature-gates dependencies, modules and its entrypoint to allow compilation on MacOS, but produces a binary that does nothing.
-To be able to properly compile and work on the code (using rust-analyzer) you need to be able to cross-compile to linux, which requires the following steps:
+`mirrord-agent` feature-gates dependencies, modules and its entrypoint to allow compilation on macOS, but produces a binary that does nothing.
+To be able to properly compile and work on the code (using rust-analyzer) you need to be able to cross-compile to Linux, which requires the following steps:
 
-1. Install the x86 linux target
+1. Install the x86 Linux target
 ```sh
 rustup target add x86_64-unknown-linux-gnu
 ```
@@ -576,7 +622,7 @@ Usually the builtin clang compiler can handle this, if you use GCC you'll need a
 export CC_x86_64_unknown_linux_gnu=(C compiler from step 2)
 ```
 
-Now you can pass the linux target to `cargo` commands:
+Now you can pass the Linux target to `cargo` commands:
 ```sh
 cargo check -p mirrord-agent --target x86_64-unknown-linux-gnu
 ```
@@ -608,18 +654,73 @@ From [the release workflow definition](/.github/workflows/release.yaml):
 
 To test the release workflow:
 
-1. Push your changes to a branch on the main mirrord repo (not a fork)
-2. Go to [the release workflow section under the Actions tab on the mirrord repo](https://github.com/metalbear-co/mirrord/actions/workflows/release.yaml)
+1. Push your changes to a branch on the main mirrord repository (not a fork)
+2. Go to [the release workflow section under the Actions tab on the mirrord repository](https://github.com/metalbear-co/mirrord/actions/workflows/release.yaml)
 3. On the right of the "This workflow has a `workflow_dispatch` event trigger." banner, select the dropdown labelled "Run workflow"
 4. Select the branch with your changes and run
 
 You can check the run as it progresses and download the completed artifacts from the "Summary" tab in the sidebar.
 
-## Changing the release on MacOS
+## Changing the release on macOS
 
-If you're making changes to the release and/or CI workflows for MacOS specifically - for example changing how the universal binary is created, you need to ensure that [the script for building the universal binary](/scripts/build_fat_mac.sh) that is run manually when developing has also been updated if necessary.
+If you're making changes to the release and/or CI workflows for macOS specifically - for example changing how the universal binary is created, you need to update the build logic in both:
+- [xtask/](/xtask/) - the recommended build automation tool
+- [scripts/build_fat_mac.sh](/scripts/build_fat_mac.sh) - the legacy build script (still supported)
+
+The xtask approach is preferred for new development as it provides better error messages, type safety, and consistency across platforms. See [xtask/README.md](xtask/README.md) for details.
 
 # Submitting a Pull Request
+
+## Typo Checks
+
+mirrord uses [`typos`](https://github.com/crate-ci/typos) to catch typos in CI. If the pipeline fails
+due to a false positive (e.g. a domain-specific term, identifier, or intentional spelling), you can add
+an exception in the [typos configuration file](typos.toml) at the root of the repository:
+
+- **Identifiers** (variable names, type names, etc.) — add to `[default.extend-identifiers]`:
+  ```toml
+  [default.extend-identifiers]
+  MyTerm = "MyTerm"
+  ```
+
+- **Words** (plain words in prose or strings) — add to `[default.extend-words]`:
+  ```toml
+  [default.extend-words]
+  myword = "myword"
+  ```
+
+- **Regex patterns** (e.g. to ignore URLs or structured text) — add to `extend-ignore-re` under `[default]`:
+  ```toml
+  [default]
+  extend-ignore-re = ["<your-pattern>"]
+  ```
+
+
+## Prose Checks (Vale)
+
+mirrord uses [Vale](https://vale.sh) to enforce writing style in Markdown files and Rust doc comments. It runs in CI on changed files. To run it locally:
+
+```bash
+vale .
+```
+
+If Vale reports a false positive, you have two options depending on the type of issue:
+
+- **Unknown word** (spelling error on a valid technical term) - add it to the vocabulary file at [.vale/styles/config/vocabularies/Metalbear/accept.txt](.vale/styles/config/vocabularies/Metalbear/accept.txt), one word per line.
+
+- **Wrong term** (Vale flags a correct capitalization or spelling as wrong) - add a substitution rule to [.vale/styles/Metalbear/Terms.yml](.vale/styles/Metalbear/Terms.yml):
+  ```yaml
+  swap:
+    WrongForm: CorrectForm
+  ```
+
+- **Inline suppression** (single occurrence that shouldn't be a global exception) — wrap the text with Vale's disable/enable comments:
+  ```markdown
+  <!-- vale off -->
+  Text that should not be checked.
+  <!-- vale on -->
+  ```
+
 
 ## Changelog Entry
 
@@ -630,9 +731,9 @@ Add a changelog file in `changelog.d/` named `<identifier>.<category>.md`
 - `+some-name.added.md` (without issue)
 
 **Identifier:**
-- If a GitHub issue exists, use the issue number from the public [mirrord repo](https://github.com/metalbear-co/mirrord)
+- If a GitHub issue exists, use the issue number from the public [mirrord repository](https://github.com/metalbear-co/mirrord)
 - Use `+some-name` if no issue exists
-- Don't use Linear issues or private repo issue numbers
+- Don't use Linear issues or private repository issue numbers
 
 **Category:**
 - `added` for new functionality

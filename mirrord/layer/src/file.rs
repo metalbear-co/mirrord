@@ -5,6 +5,7 @@ use std::{
 };
 
 use libc::{O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY, c_int};
+use mirrord_layer_lib::mutex::Mutex;
 use mirrord_protocol::file::{
     AccessFileRequest, CloseFileRequest, FdOpenDirRequest, OpenDirResponse, OpenOptionsInternal,
     OpenRelativeFileRequest, ReadFileRequest, ReadLimitedFileRequest, SeekFileRequest,
@@ -21,8 +22,6 @@ use mirrord_protocol::file::{
 /// `[FsConfig]`.
 #[cfg(target_os = "linux")]
 use mirrord_protocol::file::{GetDEnts64Request, GetDEnts64Response};
-
-use crate::mutex::Mutex;
 
 pub(crate) mod hooks;
 pub(crate) mod open_dirs;

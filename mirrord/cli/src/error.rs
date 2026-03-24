@@ -2,7 +2,10 @@ use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
 #[cfg(feature = "wizard")]
 use axum::response::{IntoResponse, Response};
-use kube::{self, core::ErrorResponse};
+use kube::{
+    self,
+    core::{Status, response::StatusSummary},
+};
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
 use mirrord_config::config::ConfigError;
@@ -246,6 +249,9 @@ pub(crate) enum CliError {
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
     ConfigError(#[from] mirrord_config::config::ConfigError),
 
+    #[error("Failed to run command `{command}` due to missing argument `{arg}`")]
+    MissingArg { command: String, arg: String },
+
     #[error("Failed to access env file at `{0}`: {1}")]
     #[diagnostic(help(
         "Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"
@@ -319,7 +325,7 @@ pub(crate) enum CliError {
     #[error("Feature `{0}` requires using mirrord operator")]
     #[diagnostic(help(
         "The mirrord operator is part of mirrord for Teams. \
-        You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=errreqop&utm_medium=cli"
+        You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=requiresoperator&utm_medium=cli"
     ))]
     FeatureRequiresOperatorError(String),
 
@@ -412,7 +418,7 @@ pub(crate) enum CliError {
     "))]
     KubeAuthExecFailed(io::Error),
 
-    #[error("Failed while resolving target while using the mirrord-operator: {0}")]
+    #[error("Failed resolving target while using the mirrord-operator: {0}")]
     #[diagnostic(help(
         "
         mirrord failed to resolve or validate a target.
@@ -465,9 +471,21 @@ pub(crate) enum CliError {
     #[diagnostic(help(
         "This likely means that you don't have the required permissions to spawn it.
         Look into your namespace's Pod Security admission controllers and try mirrord for Teams if the issue persists.
-        You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=errreqop&utm_medium=cli"
+        You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=noperm&utm_medium=cli"
     ))]
     AgentPodDeleted,
+
+    #[error(
+        "The target node `{node_name}` has no capacity for a new agent pod (currently running {pod_count} pods)"
+    )]
+    #[diagnostic(help(
+        "The Kubernetes node where the target pod runs has reached its pod limit. You can either:
+        1. Free up pod capacity on the node by deleting unused pods.
+        2. Use ephemeral containers instead, which do not count toward the node's pod limit.
+           Set `\"agent\": {{ \"ephemeral\": true }}` in your mirrord config file,
+           or set the environment variable MIRRORD_EPHEMERAL_CONTAINER=true.{GENERAL_HELP}"
+    ))]
+    NodeOutOfPods { node_name: String, pod_count: usize },
 
     #[error("Detected mirrord being run within mirrord")]
     #[diagnostic(help(
@@ -493,6 +511,93 @@ pub(crate) enum CliError {
 
     #[error("error while fixing kubeconfig")]
     FixKubeconfig(#[from] FixKubeconfigError),
+
+    #[error("No image specified for preview environment")]
+    #[diagnostic(help(
+        "Specify the image using `-i <image>` or set `feature.preview.image` in your mirrord config file."
+    ))]
+    PreviewImageRequired,
+
+    #[error("No target specified for preview environment")]
+    #[diagnostic(help(
+        "Specify the target using `-t <target>` or set `target.path` in your mirrord config file."
+    ))]
+    PreviewTargetRequired,
+
+    #[error("Failed to resolve target `{0}` for preview environment")]
+    #[diagnostic(help(
+        "Targetless mode is not supported for preview environments. \
+         Please check that the target exists and has running pods.{GENERAL_HELP}"
+    ))]
+    PreviewTargetResolutionFailed(String),
+
+    #[error("Failed to create preview session resource: {0}")]
+    #[diagnostic(help(
+        "Please check that the operator is running and that you have sufficient permissions \
+        to create PreviewSession resources in the target namespace.{GENERAL_HELP}"
+    ))]
+    PreviewSessionRejected(String),
+
+    #[error("Preview session failed: {0}")]
+    #[diagnostic(help(
+        "The operator reported a failure while setting up the preview environment. \
+        Check the operator logs for more details.{GENERAL_HELP}"
+    ))]
+    PreviewSessionFailed(String),
+
+    #[error("Preview session was unexpectedly deleted while waiting for it to become ready")]
+    #[diagnostic(help(
+        "Something in your cluster deleted the PreviewSession resource before it became ready. \
+        Check for external controllers, admission webhooks, or resource quotas that may \
+        be removing custom resources.{GENERAL_HELP}"
+    ))]
+    PreviewSessionDeleted,
+
+    #[error("Failed to watch preview session status: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    PreviewWatchFailed(String),
+
+    #[error("Preview environment creation timed out")]
+    #[diagnostic(help(
+        "The preview pod did not become ready within the configured timeout. \
+        You can increase the timeout with `feature.preview.creation_timeout_secs` in your config file. \
+        Check the operator logs for more details.{GENERAL_HELP}"
+    ))]
+    PreviewTimeout,
+
+    #[error("Failed to list preview sessions: {0}")]
+    #[diagnostic(help(
+        "Please check that you have permissions to list PreviewSession resources \
+        and that the operator CRD is installed.{GENERAL_HELP}"
+    ))]
+    PreviewListFailed(String),
+
+    #[error("Failed to delete preview session `{name}`: {reason}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    PreviewDeleteFailed { name: String, reason: String },
+
+    #[error("A preview environment with key \"{key}\" already exists for target \"{target}\"")]
+    #[diagnostic(help(
+        "Use `--force` to replace the existing session, \
+         `mirrord preview stop` to stop it first, \
+         or choose a different key with `--key`."
+    ))]
+    PreviewDuplicateSession { key: String, target: String },
+
+    #[error("No preview sessions found matching key `{0}`")]
+    #[diagnostic(help("Use `mirrord preview status` to see available preview environments."))]
+    PreviewNotFound(String),
+
+    #[error("Environment key is required for this command")]
+    #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
+    PreviewKeyRequired,
+
+    #[error("Failed to resolve target container: {0}")]
+    #[diagnostic(help(
+        "mirrord was unable to resolve the target container from the cluster. \
+        Please check that the target exists and has running pods.{GENERAL_HELP}"
+    ))]
+    RuntimeDataResolution(KubeApiError),
 }
 
 impl CliError {
@@ -519,6 +624,13 @@ impl CliError {
                 Self::InvalidCertificate(error)
             }
             KubeApiError::AgentPodDeleted => Self::AgentPodDeleted,
+            KubeApiError::NodeOutOfPods {
+                node_name,
+                pod_count,
+            } => Self::NodeOutOfPods {
+                node_name,
+                pod_count,
+            },
             error => fallback(error),
         }
     }
@@ -544,9 +656,11 @@ impl From<OperatorApiError> for CliError {
             }
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::KubeError {
-                error: Error::Api(ErrorResponse { message, code, .. }),
+                error: Error::Api(status),
                 operation,
-            } if code == StatusCode::FORBIDDEN => Self::OperatorApiForbidden(operation, message),
+            } if status.code == StatusCode::FORBIDDEN => {
+                Self::OperatorApiForbidden(operation, status.message)
+            }
             OperatorApiError::KubeError {
                 error: Error::Auth(AuthError::AuthExecStart(error)),
                 ..
@@ -563,12 +677,13 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorApiForbidden(operation, status.message)
             }
             OperatorApiError::StatusFailure { operation, status } => {
-                let error = kube::Error::Api(ErrorResponse {
-                    status: "Failure".to_string(),
+                let error = kube::Error::Api(Box::new(Status {
+                    status: Some(StatusSummary::Failure),
                     message: status.message,
                     reason: status.reason,
                     code: status.code,
-                });
+                    ..Default::default()
+                }));
 
                 Self::OperatorApiFailed(operation, error)
             }
@@ -589,6 +704,9 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::ProtocolError(error) => Self::from(error),
             OperatorApiError::ApiKey(fail) => Self::ApiKey(fail),
             OperatorApiError::SerdeJson(fail) => Self::JsonSerializeError(fail),
+            OperatorApiError::TargetResolutionFailed(msg) => {
+                Self::OperatorTargetResolution(KubeApiError::MalformedResource(msg))
+            }
         }
     }
 }

@@ -18,6 +18,7 @@ use mirrord_operator::{
 use mirrord_progress::{
     IdeAction, IdeMessage, NotificationLevel, Progress,
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
+    utm_medium,
 };
 use mirrord_protocol_io::{Client, Connection};
 use tracing::Level;
@@ -25,6 +26,32 @@ use tracing::Level;
 use crate::{CliError, CliResult, MirrordCi, ci::error::CiError};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
+
+/// Sends a "Sign up for mirrord for Teams" upgrade CTA to the IDE via the [`IdeMessage`] protocol.
+///
+/// Only has an effect when running inside an IDE (`MIRRORD_PROGRESS_MODE=json`).
+/// In CLI mode, [`Progress::ide`] is a no-op.
+fn send_upgrade_ide_message<P: Progress>(
+    progress: &P,
+    text: &str,
+    utm_source: &str,
+) -> CliResult<()> {
+    let mut actions = HashSet::new();
+    actions.insert(IdeAction::Link {
+        label: "Sign up for mirrord for Teams".to_owned(),
+        link: format!(
+            "https://app.metalbear.com/?utm_source={utm_source}&utm_medium={}",
+            utm_medium()
+        ),
+    });
+    progress.ide(serde_json::to_value(IdeMessage {
+        id: "upgrade_cta".to_owned(),
+        level: NotificationLevel::Warning,
+        text: text.to_owned(),
+        actions,
+    })?);
+    Ok(())
+}
 
 /// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
 ///    with the target using the mirrord-operator.
@@ -51,6 +78,11 @@ where
     let api = match OperatorApi::try_new(layer_config, analytics, progress).await? {
         Some(api) => api,
         None if layer_config.operator == Some(true) => {
+            send_upgrade_ide_message(
+                progress,
+                "mirrord operator was not found in the cluster.",
+                "operatornotinstalled",
+            )?;
             return Err(CliError::OperatorNotInstalled);
         }
         None => {
@@ -66,6 +98,11 @@ where
             license_subtask.failure(Some("operator license expired"));
 
             if layer_config.operator == Some(true) {
+                send_upgrade_ide_message(
+                    progress,
+                    "mirrord operator license expired.",
+                    "licenseexpired",
+                )?;
                 return Err(error.into());
             } else {
                 operator_subtask.failure(Some("proceeding without operator"));
@@ -211,7 +248,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
                 CliError::friendlier_error_or_else(error, CliError::AgentConnectionFailed)
             })?,
     )
-    .await?;
+    .await;
 
     Ok((AgentConnectInfo::DirectKubernetes(agent_connect_info), conn))
 }
@@ -223,6 +260,14 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
     if let Some(target) = config.target.path.as_ref()
         && Target::requires_operator(target)
     {
+        send_upgrade_ide_message(
+            progress,
+            &format!(
+                "Target type {} requires the mirrord operator, which is part of mirrord for Teams.",
+                target.type_()
+            ),
+            "requiresoperator",
+        )?;
         return Err(CliError::FeatureRequiresOperatorError(format!(
             "target type {}",
             target.type_()
@@ -230,6 +275,11 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
     }
 
     if config.feature.copy_target.enabled {
+        send_upgrade_ide_message(
+            progress,
+            "copy_target requires the mirrord operator, which is part of mirrord for Teams.",
+            "requiresoperator",
+        )?;
         return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
     }
 
@@ -261,6 +311,9 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
         _ => (),
     };
 
+    config.experimental.non_blocking_tcp_connect =
+        config.experimental.non_blocking_tcp_connect.or(Some(true));
+
     Ok(())
 }
 
@@ -284,27 +337,24 @@ where
 {
     // Send to IDEs that we're in multi-pod without operator.
     progress.ide(serde_json::to_value(IdeMessage {
-            id: MULTIPOD_WARNING.0.to_string(),
-            level: NotificationLevel::Warning,
-            text: MULTIPOD_WARNING.1.to_string(),
-            actions: {
-                let mut actions = HashSet::new();
-                actions.insert(IdeAction::Link {
-                    label: "Get started (read the docs)".to_string(),
-                    link: "https://metalbear.com/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=plugin".to_string(),
-                });
-                actions.insert(IdeAction::Link {
-                    label: "Try it now".to_string(),
-                    link: "https://app.metalbear.com/".to_string(),
-                });
+        id: MULTIPOD_WARNING.0.to_string(),
+        level: NotificationLevel::Warning,
+        text: MULTIPOD_WARNING.1.to_string(),
+        actions: {
+            let mut actions = HashSet::new();
+            actions.insert(IdeAction::Link {
+                label: "Try mirrord for Teams".to_string(),
+                link: "https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=plugin"
+                    .to_string(),
+            });
 
-                actions
-            },
-        })?);
+            actions
+        },
+    })?);
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
     progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
-    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=cli");
+    progress.print("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=cli");
     Ok(())
 }
 
@@ -320,12 +370,9 @@ where
         actions: {
             let mut actions = HashSet::new();
             actions.insert(IdeAction::Link {
-                label: "Get started (read the docs)".to_string(),
-                link: "https://metalbear.com/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=plugin".to_string(),
-            });
-            actions.insert(IdeAction::Link {
-                label: "Try it now".to_string(),
-                link: "https://app.metalbear.com/".to_string(),
+                label: "Try mirrord for Teams".to_string(),
+                link: "https://app.metalbear.com/?utm_source=httpfilter&utm_medium=plugin"
+                    .to_string(),
             });
 
             actions
@@ -334,7 +381,7 @@ where
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("You're using an HTTP filter, which generally indicates the use of a shared environment. If so, we recommend");
     progress.print("considering mirrord for Teams, which is better suited to shared environments.");
-    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=cli");
+    progress.print("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=httpfilter&utm_medium=cli");
     Ok(())
 }
 
