@@ -94,6 +94,13 @@ fn main() {
         if !std::fs::exists(&frontend_path).unwrap_or(false) {
             std::fs::write(frontend_path, "").unwrap();
         };
+
+        // Ensure monitor-frontend/dist exists for rust-embed during clippy
+        let monitor_dist = std::path::Path::new("../../monitor-frontend/dist");
+        if !monitor_dist.exists() {
+            std::fs::create_dir_all(monitor_dist).ok();
+        }
+
         return;
     }
     // Make sure `MIRRORD_LAYER_FILE` is provided either by user, or computed.
@@ -102,6 +109,15 @@ fn main() {
     // Build the wizard frontend
     #[cfg(feature = "wizard")]
     build_wizard_frontend();
+
+    // Ensure monitor-frontend/dist exists for rust-embed (ui feature)
+    #[cfg(feature = "ui")]
+    {
+        let dist_dir = std::path::Path::new("../../monitor-frontend/dist");
+        if !dist_dir.exists() {
+            std::fs::create_dir_all(dist_dir).ok();
+        }
+    }
 
     // this check uses cargo env vars instead of conditional compilation due to cfg! not respecting
     // the target flag on a build
