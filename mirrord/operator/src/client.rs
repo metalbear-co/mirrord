@@ -1141,10 +1141,10 @@ impl OperatorApi<PreparedClientCert> {
         Ok((true, Some("empty deployment")))
     }
 
-    /// Multi-cluster variant of [`should_copy_target`]. In MC mode the target is not
-    /// resolved locally (operator resolves it on the workload cluster), so we cannot
-    /// do replica-count heuristics. We check explicit opt-in and queue-splitting
-    /// conditions that are available from the client config alone.
+    /// Multi-cluster variant of [`should_copy_target`]. The client cannot check
+    /// replica count because the target lives on a remote cluster. Instead we
+    /// only look at things we know on the cluster we are conencted to: 
+    /// explicit opt-in and queue-splitting config.
     fn should_copy_target_mc(&self, config: &LayerConfig) -> bool {
         if config.feature.copy_target.enabled {
             return true;
