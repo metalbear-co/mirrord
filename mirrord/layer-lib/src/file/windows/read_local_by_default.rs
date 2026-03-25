@@ -25,6 +25,7 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         // Python folder on Windows.
         r"^(?i)^\/Users\/[^/]+\/AppData\/Local\/Programs\/Python",
         r"^(?i)^\/windows\/system32",
+        r"^(?i)^\/Program Files",
     ]
     .iter()
     .map(|s| s.to_string())

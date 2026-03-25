@@ -22,7 +22,10 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
 
     // NOTE(gabriela): currently I believe the ideal way to handle this is
     // through hook-level checks
-    tracing::info!("Enabling file system hooks");
+    tracing::info!(
+        "Enabling file system hooks (flag:{})",
+        setup.fs_hooks_enabled()
+    );
     files::initialize_hooks(guard)?;
 
     // Conditionally enable socket hooks
