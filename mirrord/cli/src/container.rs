@@ -270,6 +270,7 @@ pub(crate) async fn container_command<P: Progress>(
     let extproxy_pid = execution_info.child_id();
 
     let exit_code = match mirrord_for_ci {
+        #[cfg(unix)]
         Some(mirrord_ci) => mirrord_ci
             .prepare_container_command(
                 progress,
@@ -282,6 +283,15 @@ pub(crate) async fn container_command<P: Progress>(
             )
             .await
             .map_err(CliError::from)?,
+        #[cfg(windows)]
+        Some(_) => {
+            progress.failure(Some("Command not supported on windows!"));
+            return Err(CliError::UnsupportedOnWindows(
+                "BUG: somehow `mirrord ci container` was started on windows! \
+                Please report this bug to us!"
+                    .to_string(),
+            ));
+        }
         None => {
             progress.success(None);
 

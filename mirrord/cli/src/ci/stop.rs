@@ -1,4 +1,3 @@
-use futures::{StreamExt, stream};
 #[cfg_attr(windows, allow(unused))]
 use mirrord_progress::{Progress, ProgressTracker};
 #[cfg(not(target_os = "windows"))]
@@ -7,8 +6,10 @@ use tracing::Level;
 
 use super::CiResult;
 #[cfg(unix)]
+use crate::ci::MirrordCiManagedContainer;
+use crate::ci::MirrordCiStore;
+#[cfg(unix)]
 use crate::ci::error::CiError;
-use crate::ci::{MirrordCiManagedContainer, MirrordCiStore};
 
 /// Kills the sidecars that were started by `mirrord ci container`.
 ///
@@ -81,6 +82,7 @@ impl CiStopCommandHandler {
     #[cfg(not(target_os = "windows"))]
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub(super) async fn handle(self) -> CiResult<()> {
+        use futures::{StreamExt, stream};
         use nix::{
             errno::Errno,
             sys::signal::{Signal, kill},
