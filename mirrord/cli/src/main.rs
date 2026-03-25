@@ -42,6 +42,9 @@
 //! and finally run the user binary with the mirrord lib loaded, but this time we use `execve`,
 //! instead of [`tokio::process::Command`].
 //!
+//! - When the env var `MIRRORD_CI_API_KEY` is set, `exec` actually becomes `mirrord ci start
+//!   --foreground`.
+//!
 //! #### operator vs no operator `exec`
 //!
 //! Target resolution is performed the same, regardless of operator usage, but
