@@ -39,6 +39,14 @@ const MIRRORD_CI_API_KEY: &str = "MIRRORD_CI_API_KEY";
 /// Alias for mirrord-for-ci results.
 type CiResult<T> = Result<T, crate::ci::error::CiError>;
 
+pub(crate) fn ci_api_key_available() -> CiResult<Option<CiApiKey>> {
+    match std::env::var(MIRRORD_CI_API_KEY) {
+        Ok(api_key) => Ok(Some(CiApiKey::decode(&api_key)?)),
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(fail @ env::VarError::NotUnicode(..)) => Err(CiError::EnvVar(MIRRORD_CI_API_KEY, fail)),
+    }
+}
+
 /// Handle commands related to CI `mirrord ci ...`
 pub(crate) async fn ci_command(
     args: CiArgs,
@@ -330,13 +338,7 @@ impl MirrordCi {
         MirrordCiStore::read_from_file_or_default().await?;
         let start_args = args.into();
 
-        let ci_api_key = match std::env::var(MIRRORD_CI_API_KEY) {
-            Ok(api_key) => Some(CiApiKey::decode(&api_key)?),
-            Err(env::VarError::NotPresent) => None,
-            Err(fail @ env::VarError::NotUnicode(..)) => {
-                return Err(CiError::EnvVar(MIRRORD_CI_API_KEY, fail));
-            }
-        };
+        let ci_api_key = ci_api_key_available()?;
 
         Ok(Self {
             ci_api_key,
