@@ -941,7 +941,9 @@ mod main {
 
             settings.set_code_signature_flags(
                 apple_codesign::SettingsScope::Main,
-                CodeSignatureFlags::ADHOC | CodeSignatureFlags::RUNTIME,
+                CodeSignatureFlags::ADHOC
+                    | CodeSignatureFlags::RUNTIME
+                    | CodeSignatureFlags::RESTRICT,
             );
             settings.set_binary_identifier(
                 apple_codesign::SettingsScope::Main,
