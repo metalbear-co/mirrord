@@ -439,7 +439,10 @@ impl MirrordCi {
 
         if self.ci_common_args.foreground {
             progress.info(&format!("waiting for child with pid {child_pid}"));
+
+            // If we don't stop progress here, it keeps looping forever when `--foreground` is used.
             progress.success(None);
+
             match child.wait().await {
                 Ok(status) => {
                     if status.success() {
@@ -453,7 +456,7 @@ impl MirrordCi {
                             _ => progress
                                 .failure(Some(&format!("process exited with status: {}", status))),
                         };
-                        Ok::<_, CiError>(-1)
+                        Ok::<_, CiError>(status.code().unwrap_or_default())
                     } else {
                         progress.failure(Some(&format!("process exited with status: {}", status)));
                         Ok::<_, CiError>(status.code().unwrap_or_default())
