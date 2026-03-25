@@ -285,6 +285,10 @@ pub(crate) async fn container_command<P: Progress>(
             .map_err(CliError::from)?,
         #[cfg(windows)]
         Some(_) => {
+            let _ = sidecar_pid;
+            let _ = sidecar_container;
+            let _ = extproxy_pid;
+
             progress.failure(Some("Command not supported on windows!"));
             return Err(CliError::UnsupportedOnWindows(
                 "BUG: somehow `mirrord ci container` was started on windows! \

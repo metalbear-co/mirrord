@@ -41,6 +41,7 @@ pub(crate) enum CiError {
     ))]
     NixErrno(#[from] nix::errno::Errno),
 
+    #[cfg(not(target_os = "windows"))]
     #[error("`mirrord ci container` runtime command `{command}` failed with {message}")]
     ContainerRuntimeCommand { command: String, message: String },
 }
