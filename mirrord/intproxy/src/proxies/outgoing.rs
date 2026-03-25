@@ -254,6 +254,30 @@ impl OutgoingProxy {
         }
     }
 
+    /// If `id` has a pending HTTP sniff and `bytes` contains a valid HTTP/1.x request,
+    /// emits a [`MonitorEvent::HttpRequest`].
+    fn try_sniff_http(&mut self, id: &InterceptorId, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+        let Some(remote_addr) = self.http_sniff_pending.remove(id) else {
+            return;
+        };
+        let Some((method, path, host)) = try_parse_http_request(bytes) else {
+            return;
+        };
+        let port = match &remote_addr {
+            SocketAddress::Ip(addr) => addr.port(),
+            _ => 0,
+        };
+        self.monitor_tx.emit(MonitorEvent::HttpRequest {
+            method,
+            path,
+            host,
+            port,
+        });
+    }
+
     /// Retrieves correct [`RequestQueue`] for the given [`NetProtocol`].
     fn queue(&mut self, protocol: NetProtocol) -> &mut RequestQueue<ConnectInProgress> {
         match protocol {
@@ -701,22 +725,7 @@ impl BackgroundTask for OutgoingProxy {
 
                         // On the first non-empty data chunk from a TCP connection, try to
                         // detect an HTTP/1.x request and emit a monitor event.
-                        if !bytes.is_empty() {
-                            if let Some(remote_addr) = self.http_sniff_pending.remove(&id) {
-                                if let Some((method, path, host)) = try_parse_http_request(&bytes) {
-                                    let port = match &remote_addr {
-                                        SocketAddress::Ip(addr) => addr.port(),
-                                        _ => 0,
-                                    };
-                                    self.monitor_tx.emit(MonitorEvent::HttpRequest {
-                                        method,
-                                        path,
-                                        host,
-                                        port,
-                                    });
-                                }
-                            }
-                        }
+                        self.try_sniff_http(&id, &bytes);
 
                         let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
                         message_bus.send_agent(msg).await;
