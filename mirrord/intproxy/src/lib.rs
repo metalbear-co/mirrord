@@ -17,7 +17,8 @@ use mirrord_config::{
     experimental::ExperimentalConfig, feature::network::incoming::tls_delivery::LocalTlsDelivery,
 };
 use mirrord_intproxy_protocol::{
-    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProcessInfo,
+    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, OutgoingRequest,
+    ProcessInfo,
 };
 use mirrord_protocol::{
     CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
@@ -43,6 +44,7 @@ use crate::{
     error::{ProxyRuntimeError, ProxyStartupError},
     failover_strategy::FailoverStrategy,
     main_tasks::{ConnectionRefresh, LayerClosed},
+    session_monitor::{MonitorEvent, MonitorTx},
 };
 
 pub mod agent_conn;
@@ -56,6 +58,53 @@ pub mod ping_pong;
 pub mod proxies;
 mod remote_resources;
 mod request_queue;
+pub mod session_monitor;
+
+/// Returns a short string describing the type of file operation.
+fn file_request_operation_name(req: &FileRequest) -> &'static str {
+    match req {
+        FileRequest::Open(..) | FileRequest::OpenRelative(..) => "open",
+        FileRequest::Read(..) | FileRequest::ReadLimited(..) => "read",
+        FileRequest::Seek(..) => "seek",
+        FileRequest::Write(..) | FileRequest::WriteLimited(..) => "write",
+        FileRequest::Close(..) => "close",
+        FileRequest::Access(..) => "access",
+        FileRequest::Xstat(..) | FileRequest::XstatFs(..) | FileRequest::XstatFsV2(..) => "stat",
+        FileRequest::FdOpenDir(..) => "opendir",
+        FileRequest::ReadDir(..) | FileRequest::ReadDirBatch(..) => "readdir",
+        FileRequest::CloseDir(..) => "closedir",
+        FileRequest::GetDEnts64(..) => "getdents64",
+        FileRequest::ReadLink(..) => "readlink",
+        FileRequest::MakeDir(..) | FileRequest::MakeDirAt(..) => "mkdir",
+        FileRequest::RemoveDir(..) => "rmdir",
+        FileRequest::Unlink(..) | FileRequest::UnlinkAt(..) => "unlink",
+        FileRequest::StatFs(..) | FileRequest::StatFsV2(..) => "statfs",
+        FileRequest::Rename(..) => "rename",
+        FileRequest::Ftruncate(..) => "ftruncate",
+        FileRequest::Futimens(..) => "futimens",
+        FileRequest::Fchown(..) => "fchown",
+        FileRequest::Fchmod(..) => "fchmod",
+    }
+}
+
+fn file_request_path(req: &FileRequest) -> Option<String> {
+    match req {
+        FileRequest::Open(r) => Some(r.path.to_string_lossy().into_owned()),
+        FileRequest::OpenRelative(r) => Some(r.path.to_string_lossy().into_owned()),
+        FileRequest::Access(r) => Some(r.pathname.to_string_lossy().into_owned()),
+        FileRequest::Xstat(r) => r.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        FileRequest::ReadLink(r) => Some(r.path.to_string_lossy().into_owned()),
+        FileRequest::MakeDir(r) => Some(r.pathname.to_string_lossy().into_owned()),
+        FileRequest::MakeDirAt(r) => Some(r.pathname.to_string_lossy().into_owned()),
+        FileRequest::RemoveDir(r) => Some(r.pathname.to_string_lossy().into_owned()),
+        FileRequest::Unlink(r) => Some(r.pathname.to_string_lossy().into_owned()),
+        FileRequest::UnlinkAt(r) => Some(r.pathname.to_string_lossy().into_owned()),
+        FileRequest::StatFs(r) => Some(r.path.to_string_lossy().into_owned()),
+        FileRequest::StatFsV2(r) => Some(r.path.to_string_lossy().into_owned()),
+        FileRequest::Rename(r) => Some(r.old_path.to_string_lossy().into_owned()),
+        _ => None,
+    }
+}
 
 /// [`TaskSender`]s for main background tasks. See [`MainTaskId`].
 struct TaskTxs {
@@ -102,6 +151,9 @@ pub struct IntProxy {
 
     /// Send handle for the agent connection
     agent_tx: TxHandle<Client>,
+
+    /// Session monitor event sender
+    monitor_tx: MonitorTx,
 }
 
 impl IntProxy {
@@ -125,6 +177,7 @@ impl IntProxy {
         https_delivery: LocalTlsDelivery,
         process_logging_interval: Duration,
         experimental: &ExperimentalConfig,
+        monitor_tx: MonitorTx,
     ) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
             BackgroundTasks::new(agent_conn.connection.tx_handle());
@@ -165,6 +218,7 @@ impl IntProxy {
                 experimental.non_blocking_tcp_connect.unwrap_or_default(),
                 experimental.latency.receive_delay,
                 experimental.latency.transmit_delay,
+                monitor_tx.clone(),
             ),
             MainTaskId::OutgoingProxy,
             Self::CHANNEL_SIZE,
@@ -173,6 +227,7 @@ impl IntProxy {
             IncomingProxy::new(
                 Duration::from_millis(experimental.idle_local_http_connection_timeout),
                 https_delivery,
+                monitor_tx.clone(),
             ),
             MainTaskId::IncomingProxy,
             Self::CHANNEL_SIZE,
@@ -218,6 +273,7 @@ impl IntProxy {
             connected_layers: HashMap::new(),
             process_logging_interval,
             agent_tx,
+            monitor_tx,
         }
     }
 
@@ -342,6 +398,9 @@ impl IntProxy {
             ProxyMessage::NewLayer(new_layer) => {
                 self.any_connection_accepted = true;
 
+                self.monitor_tx.emit(MonitorEvent::LayerConnected {
+                    pid: new_layer.process_info.pid as u32,
+                });
                 self.connected_layers
                     .insert(new_layer.id, new_layer.process_info);
                 let tx = self.background_tasks.register(
@@ -419,6 +478,8 @@ impl IntProxy {
                         tracing::error!(layer_id = id, %error, "Layer connection failed");
                     }
                 }
+
+                self.monitor_tx.emit(MonitorEvent::LayerDisconnected);
 
                 let msg = LayerClosed { id: LayerId(id) };
 
@@ -603,24 +664,48 @@ impl IntProxy {
 
         match message {
             LayerToProxyMessage::File(req) => {
+                self.monitor_tx.emit(MonitorEvent::FileOp {
+                    path: file_request_path(&req),
+                    operation: file_request_operation_name(&req).to_owned(),
+                });
                 self.task_txs
                     .files
                     .send(FilesProxyMessage::FileReq(message_id, layer_id, req))
                     .await;
             }
             LayerToProxyMessage::GetAddrInfo(req) => {
+                self.monitor_tx.emit(MonitorEvent::DnsQuery {
+                    host: req.node.clone(),
+                });
                 self.task_txs
                     .simple
                     .send(SimpleProxyMessage::AddrInfoReq(message_id, layer_id, req))
                     .await
             }
             LayerToProxyMessage::Outgoing(req) => {
+                if let OutgoingRequest::Connect(ref connect_req) = req {
+                    let port = connect_req.remote_address.get_port().unwrap_or(0);
+                    self.monitor_tx.emit(MonitorEvent::OutgoingConnection {
+                        address: format!("{}", connect_req.remote_address),
+                        port,
+                    });
+                }
                 self.task_txs
                     .outgoing
                     .send(OutgoingProxyMessage::Layer(req, message_id, layer_id))
                     .await
             }
             LayerToProxyMessage::Incoming(req) => {
+                if let IncomingRequest::PortSubscribe(ref sub) = req {
+                    let mode = match &sub.subscription {
+                        mirrord_intproxy_protocol::PortSubscription::Steal(_) => "steal",
+                        mirrord_intproxy_protocol::PortSubscription::Mirror(_) => "mirror",
+                    };
+                    self.monitor_tx.emit(MonitorEvent::PortSubscription {
+                        port: sub.listening_on.port(),
+                        mode: mode.to_owned(),
+                    });
+                }
                 self.task_txs
                     .incoming
                     .send(IncomingProxyMessage::LayerRequest(
@@ -629,6 +714,14 @@ impl IntProxy {
                     .await
             }
             LayerToProxyMessage::GetEnv(req) => {
+                self.monitor_tx.emit(MonitorEvent::EnvVar {
+                    vars: req
+                        .env_vars_select
+                        .iter()
+                        .chain(req.env_vars_filter.iter())
+                        .cloned()
+                        .collect(),
+                });
                 self.task_txs
                     .simple
                     .send(SimpleProxyMessage::GetEnvReq(message_id, layer_id, req))
@@ -768,6 +861,7 @@ mod test {
         agent_conn::{
             AgentConnectInfo, AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow,
         },
+        session_monitor::MonitorTx,
     };
 
     /// Verifies that [`IntProxy`] waits with processing layers' requests
@@ -799,6 +893,7 @@ mod test {
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
+            MonitorTx::disabled(),
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
@@ -917,6 +1012,7 @@ mod test {
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
+            MonitorTx::disabled(),
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
@@ -1010,6 +1106,7 @@ mod test {
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
+            MonitorTx::disabled(),
         );
         tokio::time::timeout(
             Duration::from_millis(200),
@@ -1081,6 +1178,7 @@ mod test {
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
+            MonitorTx::disabled(),
         );
         tokio::spawn(proxy.run(Duration::from_millis(100), Duration::ZERO));
 

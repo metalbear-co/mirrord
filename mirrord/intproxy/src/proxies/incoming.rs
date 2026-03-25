@@ -7,7 +7,7 @@
 //! 2. HttpSender -
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
@@ -19,6 +19,7 @@ use bound_socket::BoundTcpSocket;
 use futures::future::Either;
 use http::{ClientStore, ResponseMode, StreamingBody};
 use http_gateway::HttpGatewayTask;
+use hyper::{HeaderMap, Method, Uri};
 use metadata_store::MetadataStore;
 use mirrord_config::feature::network::incoming::tls_delivery::LocalTlsDelivery;
 use mirrord_intproxy_protocol::{
@@ -49,6 +50,7 @@ use crate::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
     main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
+    session_monitor::{MonitorEvent, MonitorTx, try_parse_http_request},
 };
 
 mod bound_socket;
@@ -205,6 +207,28 @@ pub struct IncomingProxy {
     protocol_version: Option<Version>,
 
     restore_subscriptions_on_protocol_version_switch: bool,
+
+    /// Session monitor event sender.
+    monitor_tx: MonitorTx,
+
+    /// Connection IDs whose first data chunk we haven't sniffed yet for HTTP.
+    http_sniff_pending: HashSet<ConnectionId>,
+}
+
+/// Extracts HTTP metadata from request headers, method, and URI for session monitor events.
+fn extract_http_metadata(
+    headers: &HeaderMap,
+    method: &Method,
+    uri: &Uri,
+) -> (String, String, String) {
+    let method_str = method.to_string();
+    let path_str = uri.path().to_owned();
+    let host_str = headers
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_owned();
+    (method_str, path_str, host_str)
 }
 
 impl IncomingProxy {
@@ -214,6 +238,7 @@ impl IncomingProxy {
     pub fn new(
         idle_local_http_connection_timeout: Duration,
         https_delivery: LocalTlsDelivery,
+        monitor_tx: MonitorTx,
     ) -> Self {
         let tls_setup = LocalTlsSetup::from_config(https_delivery);
         Self {
@@ -230,6 +255,8 @@ impl IncomingProxy {
             tasks: None,
             protocol_version: None,
             restore_subscriptions_on_protocol_version_switch: false,
+            monitor_tx,
+            http_sniff_pending: Default::default(),
         }
     }
 
@@ -421,6 +448,13 @@ impl IncomingProxy {
     ) {
         match request {
             ChunkedRequest::StartV1(request) => {
+                let (method, path, host) = extract_http_metadata(
+                    &request.internal_request.headers,
+                    &request.internal_request.method,
+                    &request.internal_request.uri,
+                );
+                self.monitor_tx
+                    .emit(MonitorEvent::IncomingRequest { method, path, host });
                 let (body_tx, body_rx) = mpsc::channel(128);
                 let request = request.map_body(|frames| StreamingBody::new(body_rx, frames));
                 self.start_http_gateway(
@@ -434,6 +468,14 @@ impl IncomingProxy {
             }
 
             ChunkedRequest::StartV2(request) => {
+                let (method, path, host) = extract_http_metadata(
+                    &request.request.headers,
+                    &request.request.method,
+                    &request.request.uri,
+                );
+                self.monitor_tx
+                    .emit(MonitorEvent::IncomingRequest { method, path, host });
+
                 let (body, body_tx) = if request.request.body.is_last {
                     (StreamingBody::from(request.request.body.frames), None)
                 } else {
@@ -575,6 +617,14 @@ impl IncomingProxy {
             }
 
             DaemonTcp::Data(data) => {
+                // Sniff first data chunk of each new connection for HTTP.
+                if self.http_sniff_pending.remove(&data.connection_id) {
+                    if let Some((method, path, host)) = try_parse_http_request(&data.bytes) {
+                        self.monitor_tx
+                            .emit(MonitorEvent::IncomingRequest { method, path, host });
+                    }
+                }
+
                 let tx = self.tcp_proxies.get(is_steal).get(&data.connection_id);
 
                 if let Some(tx) = tx {
@@ -590,6 +640,13 @@ impl IncomingProxy {
             }
 
             DaemonTcp::HttpRequest(request) => {
+                let (method, path, host) = extract_http_metadata(
+                    &request.internal_request.headers,
+                    &request.internal_request.method,
+                    &request.internal_request.uri,
+                );
+                self.monitor_tx
+                    .emit(MonitorEvent::IncomingRequest { method, path, host });
                 self.start_http_gateway(
                     request.map_body(From::from),
                     None,
@@ -601,6 +658,13 @@ impl IncomingProxy {
             }
 
             DaemonTcp::HttpRequestFramed(request) => {
+                let (method, path, host) = extract_http_metadata(
+                    &request.internal_request.headers,
+                    &request.internal_request.method,
+                    &request.internal_request.uri,
+                );
+                self.monitor_tx
+                    .emit(MonitorEvent::IncomingRequest { method, path, host });
                 self.start_http_gateway(
                     request.map_body(From::from),
                     None,
@@ -617,6 +681,7 @@ impl IncomingProxy {
             }
 
             DaemonTcp::NewConnectionV1(connection) => {
+                self.http_sniff_pending.insert(connection.connection_id);
                 self.handle_new_connection(
                     NewTcpConnectionV2 {
                         connection,
@@ -629,6 +694,8 @@ impl IncomingProxy {
             }
 
             DaemonTcp::NewConnectionV2(connection) => {
+                self.http_sniff_pending
+                    .insert(connection.connection.connection_id);
                 self.handle_new_connection(connection, is_steal, message_bus)
                     .await?;
             }
