@@ -39,6 +39,7 @@ const MIRRORD_CI_API_KEY: &str = "MIRRORD_CI_API_KEY";
 /// Alias for mirrord-for-ci results.
 type CiResult<T> = Result<T, crate::ci::error::CiError>;
 
+/// Try to load and decode the [`MIRRORD_CI_API_KEY`] env var.
 pub(crate) fn ci_api_key_available() -> CiResult<Option<CiApiKey>> {
     match std::env::var(MIRRORD_CI_API_KEY) {
         Ok(api_key) => Ok(Some(CiApiKey::decode(&api_key)?)),
