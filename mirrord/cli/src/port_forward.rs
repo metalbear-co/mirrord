@@ -93,6 +93,9 @@ pub struct PortForwarder {
 
     /// Optional reference to a [`ConnectionsState`]. If `Some`, ids
     /// of pending and ongoing connections will be published here.
+    /// Additionally, when this is `Some`, the portforwarder assumes
+    /// that it does not own the agent connection, and thus some
+    /// messages (e.g. protocol negotiations, pings) will not be sent.
     connections_state: Option<Arc<ConnectionsState>>,
 }
 
@@ -147,24 +150,26 @@ impl PortForwarder {
 
     pub(crate) async fn run(&mut self) -> Result<(), PortForwardError> {
         // setup agent connection
-        self.agent_tx
-            .send(ClientMessage::SwitchProtocolVersion(
-                mirrord_protocol::VERSION.clone(),
-            ))
-            .await;
-        match self.agent_rx.recv().await {
-            Some(DaemonMessage::SwitchProtocolVersionResponse(version))
-                if CLIENT_READY_FOR_LOGS.matches(&version) =>
-            {
-                self.agent_tx.send(ClientMessage::ReadyForLogs).await;
+        // See [`Self::connections_state`] docs.
+        if self.connections_state.is_none() {
+            self.agent_tx
+                .send(ClientMessage::SwitchProtocolVersion(
+                    mirrord_protocol::VERSION.clone(),
+                ))
+                .await;
+            match self.agent_rx.recv().await {
+                Some(DaemonMessage::SwitchProtocolVersionResponse(version))
+                    if CLIENT_READY_FOR_LOGS.matches(&version) =>
+                {
+                    self.agent_tx.send(ClientMessage::ReadyForLogs).await;
+                }
+                _ => return Err(PortForwardError::AgentConnectionFailed),
             }
-            _ => return Err(PortForwardError::AgentConnectionFailed),
         }
 
         loop {
             select! {
-                // TODO(areg) disable pings when not necessary
-                _ = tokio::time::sleep_until(self.ping_pong_timeout.into()) => {
+                _ = tokio::time::sleep_until(self.ping_pong_timeout.into()), if self.connections_state.is_none() => {
                     if self.waiting_for_pong {
                         // no pong received before timeout
                         break Err(PortForwardError::AgentError("agent failed to respond to Ping".into()));
@@ -520,6 +525,23 @@ impl PortForwarder {
             conns_state.ongoing.lock().unwrap().remove(&id);
         }
         self.sockets.remove(id)
+    }
+
+    /// Returns an iterator over the local:remote mappings of this portforwarder.
+    pub(crate) fn listeners(&self) -> impl Iterator<Item = (SocketAddr, &(RemoteAddr, u16))> {
+        self.listeners.iter().map(|(k, v)| {
+            let local = v
+                .as_ref()
+                .local_addr()
+                .expect("failed to get local address for portforward listener");
+
+            let remote = self
+                .raw_mappings
+                .get(k)
+                .expect("raw_mappings does not contain started listener address");
+
+            (local, remote)
+        })
     }
 }
 

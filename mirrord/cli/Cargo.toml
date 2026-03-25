@@ -79,6 +79,7 @@ flate2 = { workspace = true, optional = true }
 itertools = { workspace = true, optional = true }
 yamlpatch.workspace = true
 yamlpath.workspace = true
+url.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 rand.workspace = true

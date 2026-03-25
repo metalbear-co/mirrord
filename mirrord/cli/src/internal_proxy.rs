@@ -13,7 +13,7 @@
 use std::{
     collections::HashSet,
     env, io,
-    net::{Ipv4Addr, SocketAddr},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6},
     sync::Arc,
     time::Duration,
 };
@@ -32,17 +32,22 @@ use mirrord_intproxy::{
     IntProxy,
     agent_conn::{AgentConnectInfo, AgentConnection},
 };
-use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogLevel, LogMessage};
+use mirrord_protocol::{
+    ClientMessage, DaemonMessage, GetEnvVarsRequest, LogLevel, LogMessage,
+    outgoing::tcp::DaemonTcpOutgoing,
+};
 #[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
 use tokio::net::TcpListener;
 use tracing::Level;
 #[cfg(not(target_os = "windows"))]
 use tracing::warn;
+use url::Url;
 
 #[cfg(not(target_os = "windows"))]
 use crate::util::detach_io;
 use crate::{
+    config::RemoteAddr,
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
@@ -237,7 +242,7 @@ async fn setup_db_portforwards(
 
     #[derive(PartialEq, Eq, Hash, Clone, Debug)]
     enum Portforward {
-        Uri(String),
+        Url(String),
         Params { host: String, port: String },
     }
 
@@ -252,14 +257,14 @@ async fn setup_db_portforwards(
             ConnectionSource::Url { url } => match url {
                 TargetEnvironmentVariableSource::Env { variable, .. }
                 | TargetEnvironmentVariableSource::EnvFrom { variable, .. } => {
-                    required_envs.insert(Portforward::Uri(variable.clone()));
+                    required_envs.insert(Portforward::Url(variable.clone()));
                 }
                 TargetEnvironmentVariableSource::Secret { name, key } => {
-                    required_envs.insert(Portforward::Uri(secret_env_var_name(&name, &key)));
+                    required_envs.insert(Portforward::Url(secret_env_var_name(&name, &key)));
                 }
             },
             ConnectionSource::FlatUrl { url, .. } => {
-                required_envs.insert(Portforward::Uri(url.clone()));
+                required_envs.insert(Portforward::Url(url.clone()));
             }
             ConnectionSource::Params(config) => {
                 let ConnectionParamsVars {
@@ -270,8 +275,6 @@ async fn setup_db_portforwards(
                 else {
                     continue;
                 };
-
-                tracing::debug!(?host, ?port);
 
                 required_envs.insert(Portforward::Params {
                     host: host.as_variable().into_owned(),
@@ -284,7 +287,7 @@ async fn setup_db_portforwards(
         .iter()
         .cloned()
         .flat_map(|e| match e {
-            Portforward::Uri(u) => [Some(u), None],
+            Portforward::Url(u) => [Some(u), None],
             Portforward::Params { host, port } => [Some(host), Some(port)],
         })
         .flatten()
@@ -306,31 +309,101 @@ async fn setup_db_portforwards(
         None => return Err("Agent connection dropped unexpectedly".into()),
     };
 
-    for var in required_envs
-        .iter()
-        .flat_map(|e| match e {
-            Portforward::Uri(u) => [Some(u), None],
-            Portforward::Params { host, port } => [Some(host), Some(port)],
-        })
-        .flatten()
-    {
-        match vars.get(var) {
-            Some(value) => tracing::info!(?var, ?value, "got var"),
-            None => tracing::warn!(?var, "failed to get var"),
+    let localhost_ephemeral_port = (Ipv6Addr::UNSPECIFIED, 0).into();
+    let port_mappings = required_envs.into_iter().filter_map(|pf| -> Option<_> {
+        match pf {
+            Portforward::Url(url) => {
+                let url = url
+                    .parse::<Url>()
+                    .inspect_err(|e| tracing::warn!(?e, env_var = %url, "failed to parse url for db branch connection string, portforward will not be made"))
+                    .ok()?;
+
+                let host = url.host_str()?;
+
+                // Try parsing as ip, fallback to hostname if not possible
+                let host = host
+                    .parse()
+                    .map(RemoteAddr::Ip)
+                    .unwrap_or_else(|_| RemoteAddr::Hostname(host.to_string()));
+
+                let port = url.port()?;
+
+                Some((host, port))
+            },
+            Portforward::Params { host, port } => {
+                let port: u16 = vars
+                    .get(&port)?
+                    .parse()
+                    .inspect_err(|e| tracing::warn!(env_var = %port, ?e, "failed to parse u16 from db branch port env var, portforward wil not be made"))
+                    .ok()?;
+
+                // Try parsing as ip, fallback to hostname if not possible
+                let host = vars
+                    .get(&host)?
+                    .parse()
+                    .map(RemoteAddr::Ip)
+                    .unwrap_or_else(|_| RemoteAddr::Hostname(host.to_owned()));
+
+                Some((host, port))
+            }
         }
-    }
+    })
+    .map(|rmt| (localhost_ephemeral_port, rmt))
+    .collect();
 
     let connections_state = Arc::new(port_forward::ConnectionsState::default());
-    let pf_rx = conn.connection.split_incoming(64, |inc| true);
+    let connections_state_2 = Arc::clone(&connections_state);
 
-    let portforwarder = port_forward::PortForwarder::new(
+    let pf_rx = conn.connection.split_incoming(64, move |inc| {
+        let DaemonMessage::TcpOutgoing(tcp) = inc else {
+            return false;
+        };
+        match tcp {
+            DaemonTcpOutgoing::Connect(_) => false, // Portforwarder doesn't use V1
+            DaemonTcpOutgoing::Read(read) => match read {
+                Ok(read) => connections_state
+                    .ongoing
+                    .lock()
+                    .unwrap()
+                    .contains(&read.connection_id),
+                Err(err) => {
+                    // As of writing this, the agent never sends any
+                    // `DaemonTcpOutgoing::Read(Err)` messages. I
+                    // don't even think it would make any sense, since
+                    // it would contain no associated connection id.
+                    // Both intproxy and port_forwarder handle it by
+                    // just erroring out and quitting, so passing it
+                    // to intproxy unconditionally should be
+                    // acceptable.
+                    tracing::error!(?err, "Received DaemonTcpOutgoing::Read with Err");
+                    false
+                }
+            },
+            DaemonTcpOutgoing::Close(id) => connections_state.ongoing.lock().unwrap().contains(id),
+            DaemonTcpOutgoing::ConnectV2(cv2) => {
+                connections_state.pending.lock().unwrap().contains(&cv2.uid)
+            }
+        }
+    });
+
+    let mut portforwarder = port_forward::PortForwarder::new(
         conn.connection.tx_handle(),
         pf_rx,
-        todo!(),
-        Some(connections_state),
+        port_mappings,
+        Some(connections_state_2),
     )
     .await
-    .map_err(|e| format!("Error setting up PortForwarder: {e}"));
+    .map_err(|e| format!("Error setting up PortForwarder: {e}"))?;
+
+    let mappings: Vec<_> = portforwarder.listeners().collect();
+
+    tracing::info!(?mappings, "Starting portforwards to DB branches");
+
+    tokio::spawn(async move {
+        if let Err(err) = portforwarder.run().await {
+            tracing::error!(?err, "DB branch portforwarding failed");
+        }
+    });
 
     Ok(())
 }

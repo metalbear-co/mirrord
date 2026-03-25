@@ -4692,6 +4692,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
  "which",
  "xmas-elf",
