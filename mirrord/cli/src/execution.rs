@@ -554,6 +554,14 @@ impl MirrordExecution {
             serde_json::to_string(&connect_info)?,
         );
 
+        // Use the operator session ID when available, otherwise generate a local UUID.
+        // This ensures a single consistent session ID for both the operator and the local API.
+        let session_id = match &connect_info {
+            AgentConnectInfo::Operator(session) => format!("{:X}", session.id()),
+            _ => uuid::Uuid::new_v4().to_string(),
+        };
+        proxy_command.env("MIRRORD_SESSION_ID", &session_id);
+
         #[cfg(unix)]
         unsafe {
             proxy_command.pre_exec(|| reparent_to_init().map_err(Into::into));

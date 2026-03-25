@@ -153,6 +153,13 @@ pub struct OperatorSession {
     baggage: Option<String>,
 }
 
+impl OperatorSession {
+    /// Returns the operator session ID.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}
+
 impl fmt::Debug for OperatorSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("OperatorSession");
