@@ -37,13 +37,23 @@ default = ["build-cli"]
 build-cli = ["mirrord-test-utils/build-cli"]
 
 [dev-dependencies]
-mirrord-intproxy = { path = "../intproxy" }
-mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
 actix-codec.workspace = true
 futures.workspace = true
-serde_json.workspace = true
 rstest.workspace = true
-tokio = { workspace = true, features = ["rt", "macros", "fs"] }
+serde_json.workspace = true
 tempfile.workspace = true
-rand.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "fs"] }
 tracing-subscriber.workspace = true
+
+libc.workspace = true
+mirrord-intproxy = { path = "../intproxy" }
+mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
+rand.workspace = true
+tracing.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+mirrord-sip = { path = "../sip" }
+apple-codesign = { version = "0.29", default-features = false }

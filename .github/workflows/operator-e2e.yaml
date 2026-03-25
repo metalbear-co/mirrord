@@ -1,5 +1,23 @@
 name: Operator E2E Test
 
+# This workflow supports two entry points:
+# 1. `workflow_dispatch` for manual testing.
+# 2. `push` for release branches in the main `metalbear-co/mirrord`
+#    repository.
+#
+# Release PRs are expected to come from branches named
+# `release/<major>.<minor>.<patch>` in this repository. Automatic runs happen
+# when commits are pushed to those branches in `metalbear-co/mirrord`, so fork
+# PRs do not trigger this workflow.
+#
+# `OPERATOR_E2E_PAT` requirements for the remote operator workflow:
+# - Classic PAT: `repo`
+# - Fine-grained PAT:
+#   - `metalbear-co/operator`: `Actions: read` and `Actions: write`
+#
+# Automatic runs only proceed when the pushed branch matches
+# `release/<major>.<minor>.<patch>`.
+#
 on:
   workflow_dispatch:
     inputs:
@@ -16,26 +34,36 @@ on:
         required: false
         type: string
         default: "main"
-  pull_request_review:
-    branches: [main]
-    types: [submitted]
+  push:
+    branches:
+      - "release/[0-9]+.[0-9]+.[0-9]+"
 
 jobs:
-  check_if_release_branch:
+  resolve_trigger_context:
     runs-on: ubuntu-24.04
     outputs:
-      release_branch: ${{ steps.release-branch.outputs.branch }}
+      mirrord_commit: ${{ steps.resolve.outputs.mirrord_commit }}
+      mirrord_branch: ${{ steps.resolve.outputs.mirrord_branch }}
+      operator_branch: ${{ steps.resolve.outputs.operator_branch }}
     steps:
-      - id: release-branch
+      - name: Resolve workflow context
+        id: resolve
         run: |
-          echo "branch=$([[ "${{ github.event.pull_request.head.ref || github.head_ref || github.ref_name }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
-      - name: output test
-        run: |
-          echo ${{ steps.release-branch.outputs.branch }}
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            manual_commit="${{ inputs.mirrord_commit }}"
+            manual_branch="${{ inputs.mirrord_branch }}"
+            operator_branch="${{ inputs.operator_branch || 'main' }}"
+            echo "mirrord_commit=$manual_commit" >> "$GITHUB_OUTPUT"
+            echo "mirrord_branch=$manual_branch" >> "$GITHUB_OUTPUT"
+            echo "operator_branch=$operator_branch" >> "$GITHUB_OUTPUT"
+          else
+            echo "mirrord_commit=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            echo "mirrord_branch=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "operator_branch=main" >> "$GITHUB_OUTPUT"
+          fi
 
   trigger-operator-e2e:
-    needs: [check_if_release_branch]
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.review.state == 'approved' && needs.check_if_release_branch.outputs.release_branch == 'true') }}
+    needs: [resolve_trigger_context]
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -44,15 +72,17 @@ jobs:
         uses: metalbear-co/return-dispatch@main
         continue-on-error: true
         with:
+          # This PAT is only used to dispatch the workflow in
+          # `metalbear-co/operator`.
           token: ${{ secrets.OPERATOR_E2E_PAT }}
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.operator_branch || 'main' }}
+          ref: ${{ needs.resolve_trigger_context.outputs.operator_branch }}
           repo: operator
           owner: metalbear-co
           workflow: operator-e2e.yaml
           workflow_inputs: |
             {
-              "mirrord_commit": "${{ github.event_name == 'workflow_dispatch' && inputs.mirrord_commit || github.event.pull_request.head.sha }}",
-              "mirrord_branch": "${{ github.event_name == 'workflow_dispatch' && inputs.mirrord_branch || github.event.pull_request.head.ref }}"
+              "mirrord_commit": "${{ needs.resolve_trigger_context.outputs.mirrord_commit }}",
+              "mirrord_branch": "${{ needs.resolve_trigger_context.outputs.mirrord_branch }}"
             }
           workflow_timeout_seconds: 7200
           workflow_job_steps_retry_seconds: 30
@@ -65,6 +95,8 @@ jobs:
       - name: Await Run ID ${{ steps.trigger-e2e.outputs.run_id }}
         uses: metalbear-co/await-remote-run@main
         with:
+          # This PAT is only used to read workflow runs in
+          # `metalbear-co/operator`.
           token: ${{ secrets.OPERATOR_E2E_PAT }}
           repo: operator
           owner: metalbear-co
