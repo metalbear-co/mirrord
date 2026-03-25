@@ -1,5 +1,4 @@
 use serde::Serialize;
-use tracing::Level;
 
 use crate::config::{ContainerRuntime, ContainerRuntimeCommand};
 
@@ -102,7 +101,6 @@ impl RuntimeCommandBuilder {
         }
     }
 
-    #[tracing::instrument(level = Level::DEBUG, ret)]
     pub fn with_command(
         self,
         command: ContainerRuntimeCommand,
@@ -139,7 +137,6 @@ impl RuntimeCommandBuilder<WithCommand> {
     /// Return completed command with updated arguments.
     ///
     /// To be used when mirrord CLI executes the command.
-    #[tracing::instrument(level = Level::DEBUG, ret)]
     pub fn into_command_args(self) -> (String, impl Iterator<Item = String>) {
         let RuntimeCommandBuilder {
             runtime,

@@ -487,7 +487,7 @@ impl MirrordCi {
 
     /// Reads the [`MirrordCiStore`], and the env var [`MIRRORD_CI_API_KEY`] to return a valid
     /// [`MirrordCi`].
-    #[tracing::instrument(level = Level::DEBUG, ret, err)]
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     pub(super) async fn new(ci_common_args: CiCommonArgs) -> CiResult<Self> {
         MirrordCiStore::read_from_file_or_default().await?;
 

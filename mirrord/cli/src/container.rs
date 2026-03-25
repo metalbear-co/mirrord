@@ -99,7 +99,6 @@ fn resolve_library_path(config: &LayerConfig) -> CliResult<String> {
 /// Uses [`ExecutionKind::Container`] to create the [`AnalyticsReporter`].
 ///
 /// Uses the given `progress` to pass warnings from [`LayerConfig`] verification.
-#[tracing::instrument(level = Level::DEBUG, skip(progress, cfg_context, watch), ret)]
 async fn create_config_and_analytics<P: Progress>(
     progress: &mut P,
     mut cfg_context: ConfigContext,
@@ -134,7 +133,6 @@ async fn create_config_and_analytics<P: Progress>(
 /// 1. Prepared command to run the user container.
 /// 2. Handle to the external proxy.
 /// 3. Handle to temporary files containing intproxy-extproxy TLS configs.
-#[tracing::instrument(level = Level::DEBUG, skip(analytics, progress), ret)]
 async fn prepare_proxies<P: Progress>(
     analytics: &mut AnalyticsReporter,
     progress: &P,
@@ -227,7 +225,7 @@ async fn prepare_proxies<P: Progress>(
 /// 1. Spawns the agent (cluster), mirrord-extproxy (natively), and mirrord-intproxy (sidecar).
 /// 2. Adds additional env, volume, and network to the user container command.
 /// 3. Executes the user container command.
-#[tracing::instrument(level = Level::DEBUG, skip(watch, progress), ret, err(level = Level::DEBUG))]
+#[tracing::instrument(level = Level::DEBUG, skip(watch, progress), ret, err(level = Level::DEBUG, Debug))]
 pub(crate) async fn container_command<P: Progress>(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,
@@ -293,8 +291,6 @@ pub(crate) async fn container_command<P: Progress>(
                 .stdin(Stdio::inherit())
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit());
-
-            tracing::info!(?runtime_command, "Le runtime command!");
 
             let status = runtime_command.status().await.map_err(|error| {
                 analytics.set_error(AnalyticsError::BinaryExecuteFailed);

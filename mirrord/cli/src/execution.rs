@@ -152,6 +152,9 @@ where
 }
 
 impl MirrordExecution {
+    /// Gets the child id of [`MirrordExecution`].
+    ///
+    /// Used so we can store the `external proxy` pid when running `mirrord ci container`.
     pub(crate) fn child_id(&self) -> Option<u32> {
         self.child.as_ref().and_then(|child| child.id())
     }
@@ -184,7 +187,7 @@ impl MirrordExecution {
     ///
     /// Returned [`MirrordExecution::environment`] contains everything that the user application
     /// might need, including [`INJECTION_ENV_VAR`] and [`LayerConfig::RESOLVED_CONFIG_ENV`].
-    #[tracing::instrument(level = Level::DEBUG, skip_all, ret, err(level = Level::DEBUG))]
+    #[tracing::instrument(level = Level::TRACE, skip_all, ret, err(level = Level::DEBUG))]
     pub(crate) async fn start_internal<P>(
         config: &mut LayerConfig,
         // We only need the executable and args on macos, for SIP handling.
