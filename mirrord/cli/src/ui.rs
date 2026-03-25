@@ -520,13 +520,7 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
         .route("/ws", get(ws_handler))
         .with_state(state.clone());
 
-    if args.dev {
-        // Intentional CLI output for the user.
-        eprintln!("Dev mode: not serving static files.");
-        eprintln!("Run `npm run dev` in monitor-frontend/ for the frontend.");
-    } else {
-        app = app.fallback(static_handler);
-    }
+    app = app.fallback(static_handler);
 
     let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), args.port);
     let listener = tokio::net::TcpListener::bind(&addr)
@@ -537,10 +531,8 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
     // Intentional CLI output: the URL is the primary user-facing information.
     eprintln!("mirrord session monitor: {url}");
 
-    if !args.no_open && !args.dev {
-        if let Err(err) = opener::open(&url) {
-            warn!(?err, "Failed to open browser");
-        }
+    if let Err(err) = opener::open(&url) {
+        warn!(?err, "Failed to open browser");
     }
 
     axum::serve(listener, app)

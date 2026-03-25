@@ -1430,14 +1430,6 @@ pub struct UiArgs {
     /// Port to serve the UI on.
     #[arg(short = 'p', long, default_value_t = 59281)]
     pub port: u16,
-
-    /// Dev mode: skip serving static files, use Vite dev server instead.
-    #[arg(long)]
-    pub dev: bool,
-
-    /// Do not open the browser automatically.
-    #[arg(long)]
-    pub no_open: bool,
 }
 
 #[cfg(test)]
