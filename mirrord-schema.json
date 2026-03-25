@@ -1487,7 +1487,7 @@
         },
         "sip_utils": {
           "title": "_experimental_ sip_utils {#experimental-sip_utils}",
-          "description": "Downloads pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses\nthem in place of SIP-patching the originals.\nThis shouldn't be used unless someone from MetalBear/mirrord tells you to.",
+          "description": "Extract pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses\nthem in place of SIP-patching the originals.\nThis shouldn't be used unless someone from MetalBear/mirrord tells you to.",
           "type": [
             "boolean",
             "null"

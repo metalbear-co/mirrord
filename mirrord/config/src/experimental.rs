@@ -171,7 +171,7 @@ pub struct ExperimentalConfig {
 
     /// ### _experimental_ sip_utils {#experimental-sip_utils}
     ///
-    /// Downloads pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses
+    /// Extract pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses
     /// them in place of SIP-patching the originals.
     /// This shouldn't be used unless someone from MetalBear/mirrord tells you to.
     #[config(default = false)]
