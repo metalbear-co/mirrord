@@ -11,7 +11,9 @@ use drain::Watch;
 use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credentials::CiApiKey;
-use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
+use mirrord_config::{
+    LayerConfig, ci::CiConfig, config::ConfigContext, container::ContainerRuntime,
+};
 use mirrord_operator::{client::OperatorApi, crd::session::SessionCiInfo};
 use mirrord_progress::{Progress, ProgressTracker};
 #[cfg(unix)]
@@ -66,17 +68,6 @@ pub(crate) async fn ci_command(
                     .map(|_| ())?,
             )
         }
-        CiCommand::ExtensionContainer(extension_container_args) => {
-            Ok(container::CiExtensionContainerCommandHandler::new(
-                *extension_container_args,
-                watch,
-                user_data,
-            )
-            .await?
-            .handle()
-            .await
-            .map(|_| ())?)
-        }
     }
 }
 
@@ -124,6 +115,12 @@ MIRRORD_CI_API_KEY environment variable.
 /// Stores the [`MirrordCi`] information we need to execute commands like `mirrord ci start|stop`.
 ///
 /// - Note that it does **not** store the [`CiApiKey`], this one lives only as an env var.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub(crate) struct MirrordCiManagedContainer {
+    pub(crate) runtime: ContainerRuntime,
+    pub(crate) container_id: String,
+}
+
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 struct MirrordCiStore {
@@ -135,6 +132,10 @@ struct MirrordCiStore {
 
     /// pid of the sidecar runtime attach client, stored when `mirrord ci container` starts it.
     sidecar_pids: HashSet<u32>,
+
+    /// Sidecar containers started by `mirrord ci container` that should be stopped via the
+    /// container runtime.
+    sidecar_containers: HashSet<MirrordCiManagedContainer>,
 
     /// pid of the user process, stored when we spawn the user binary with mirrord.
     user_pids: HashSet<Option<u32>>,
@@ -199,6 +200,7 @@ impl MirrordCiStore {
         self.intproxy_pids.is_empty()
             && self.extproxy_pids.is_empty()
             && self.sidecar_pids.is_empty()
+            && self.sidecar_containers.is_empty()
             && self.user_pids.is_empty()
     }
 }
@@ -366,6 +368,7 @@ impl MirrordCi {
         binary_args: &[String],
         extproxy_pid: Option<u32>,
         sidecar_pid: Option<u32>,
+        sidecar_container: Option<MirrordCiManagedContainer>,
         ci_config: &CiConfig,
     ) -> CiResult<i32> {
         use nix::libc::{SIGINT, SIGKILL, SIGTERM};
@@ -373,7 +376,7 @@ impl MirrordCi {
         let binary_path = Path::new(binary_path);
         let binary = binary_path
             .file_name()
-            .unwrap_or_else(|| binary_path.as_os_str())
+            .expect("failed to get file name of binary path")
             .to_string_lossy();
         let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
 
@@ -385,27 +388,33 @@ impl MirrordCi {
             mirrord_ci_store.sidecar_pids.insert(sidecar_pid);
         }
 
-        mirrord_ci_store.write_to_file().await?;
+        if let Some(sidecar_container) = sidecar_container {
+            mirrord_ci_store
+                .sidecar_containers
+                .insert(sidecar_container);
+        }
 
-        let ci_run_output_dir = if self.ci_common_args.foreground {
-            None
-        } else {
-            Some(Self::create_run_output_dir(progress, binary_path, ci_config).await?)
-        };
+        // external proxy and sidecar already have started, so we want to record these and be able
+        // to delete them with `mirrord ci stop` even if the following code fails.
+        mirrord_ci_store.write_to_file().await?;
 
         let mut command = tokio::process::Command::new(binary_path);
         command.args(binary_args).kill_on_drop(false);
 
-        if let Some(ci_run_output_dir) = ci_run_output_dir.as_ref() {
-            command
-                .stdin(Stdio::null())
-                .stdout(File::create(ci_run_output_dir.join("stdout"))?)
-                .stderr(File::create(ci_run_output_dir.join("stderr"))?);
-        } else {
+        // If `--foreground` don't write stdio to file.
+        if self.ci_common_args.foreground {
             command
                 .stdin(Stdio::inherit())
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit());
+        } else {
+            let ci_output_dir =
+                Self::create_run_output_dir(progress, binary_path, ci_config).await?;
+
+            command
+                .stdin(Stdio::null())
+                .stdout(File::create(ci_output_dir.join("stdout"))?)
+                .stderr(File::create(ci_output_dir.join("stderr"))?);
         }
 
         let mut child = match command.spawn() {

@@ -18,6 +18,7 @@ use tracing::Level;
 
 use crate::{
     CliError, MirrordCi,
+    ci::MirrordCiManagedContainer,
     config::{ContainerRuntime, ExecParams, RuntimeArgs},
     container::{command_builder::RuntimeCommandBuilder, sidecar::IntproxySidecar},
     ensure_not_nested,
@@ -145,6 +146,7 @@ async fn prepare_proxies<P: Progress>(
     MirrordExecution,
     Option<SecureChannelSetup>,
     Option<u32>,
+    MirrordCiManagedContainer,
 )> {
     let tls_setup = config
         .external_proxy
@@ -194,6 +196,11 @@ async fn prepare_proxies<P: Progress>(
         runtime_command.add_platform(platform);
     }
 
+    let sidecar_container = MirrordCiManagedContainer {
+        runtime,
+        container_id: sidecar.container_id().to_string(),
+    };
+
     let (sidecar_intproxy_address, sidecar_intproxy_logs) = sidecar.start().await?;
     let sidecar_pid = sidecar_intproxy_logs.pid();
     let intproxy_logs_pipe =
@@ -206,7 +213,13 @@ async fn prepare_proxies<P: Progress>(
         &sidecar_intproxy_address.to_string(),
     );
 
-    Ok((runtime_command, execution_info, tls_setup, sidecar_pid))
+    Ok((
+        runtime_command,
+        execution_info,
+        tls_setup,
+        sidecar_pid,
+        sidecar_container,
+    ))
 }
 
 /// Main entry point for the `mirrord container` command.
@@ -241,14 +254,15 @@ pub(crate) async fn container_command<P: Progress>(
 
     adjust_container_config_for_wsl(runtime_args.runtime, &mut config);
 
-    let (runtime_command, execution_info, _tls_setup, sidecar_pid) = prepare_proxies(
-        &mut analytics,
-        progress,
-        &mut config,
-        runtime_args.runtime,
-        mirrord_for_ci.as_ref(),
-    )
-    .await?;
+    let (runtime_command, execution_info, _tls_setup, sidecar_pid, sidecar_container) =
+        prepare_proxies(
+            &mut analytics,
+            progress,
+            &mut config,
+            runtime_args.runtime,
+            mirrord_for_ci.as_ref(),
+        )
+        .await?;
 
     let (binary, binary_args) = runtime_command
         .with_command(runtime_args.command)
@@ -265,6 +279,7 @@ pub(crate) async fn container_command<P: Progress>(
                 &binary_args,
                 extproxy_pid,
                 sidecar_pid,
+                Some(sidecar_container),
                 &config.ci,
             )
             .await
@@ -337,14 +352,15 @@ pub async fn container_ext_command<P: Progress>(
 
     adjust_container_config_for_wsl(container_runtime, &mut config);
 
-    let (runtime_command, execution_info, _tls_setup, _sidecar_pid) = prepare_proxies(
-        &mut analytics,
-        progress,
-        &mut config,
-        container_runtime,
-        mirrord_for_ci.as_ref(),
-    )
-    .await?;
+    let (runtime_command, execution_info, _tls_setup, _sidecar_pid, _sidecar_container) =
+        prepare_proxies(
+            &mut analytics,
+            progress,
+            &mut config,
+            container_runtime,
+            mirrord_for_ci.as_ref(),
+        )
+        .await?;
 
     let output = serde_json::to_string(&runtime_command.into_command_extension_params())?;
     progress.success(Some(&output));
