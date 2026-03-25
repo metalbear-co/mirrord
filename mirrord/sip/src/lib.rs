@@ -90,12 +90,6 @@ mod main {
 
     pub const FRAMEWORKS_ENV_VAR_NAME: &str = "DYLD_FALLBACK_FRAMEWORK_PATH";
 
-    /// Where to download system utilities from to use instead of patching.
-    /// Removes need for emulation on arm64 and fixes cases where AV doesn't like
-    /// our ad-hoc signing
-    const APPLE_UTILS_URL: &str =
-        "https://github.com/metalbear-co/appleutils/releases/download/v2/apple-utils-v2.tar.gz";
-
     /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
     /// scripts. Uses `temp_dir()`/mirrord/ because this is where the layer is extracted
     pub static MIRRORD_TEMP_BIN_DIR_PATH_BUF: Lazy<PathBuf> =
@@ -819,19 +813,14 @@ mod main {
         patch_result
     }
 
-    /// Downloads and extracts the apple utils bundle into [`MIRRORD_BINARIES_DIR_PATH_BUF`].
+    /// Extracts the bundled apple utils archive into `binaries_dir`.
     /// No-op if the directory already exists and is non-empty.
-    pub async fn download_sip_binaries() -> Result<()> {
-        let binaries_dir = &*MIRRORD_BINARIES_DIR_PATH_BUF;
+    pub fn extract_sip_binaries(binaries_dir: &Path, archive_bytes: &[u8]) -> Result<()> {
         if binaries_dir.exists() && std::fs::read_dir(binaries_dir)?.next().is_some() {
             return Ok(());
         }
         std::fs::create_dir_all(binaries_dir)?;
-        let response = reqwest::get(APPLE_UTILS_URL)
-            .await
-            .map_err(SipError::DownloadFailed)?;
-        let bytes = response.bytes().await.map_err(SipError::DownloadFailed)?;
-        let gz = flate2::read::GzDecoder::new(Cursor::new(bytes));
+        let gz = flate2::read::GzDecoder::new(Cursor::new(archive_bytes));
         let mut archive = tar::Archive::new(gz);
         archive.unpack(binaries_dir)?;
         Ok(())

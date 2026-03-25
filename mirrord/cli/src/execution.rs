@@ -17,7 +17,7 @@ use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 use mirrord_protocol_io::{Client, Connection};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{
-    MIRRORD_BINARIES_DIR_PATH_BUF, SipError, SipPatchOptions, download_sip_binaries, sip_patch,
+    MIRRORD_BINARIES_DIR_PATH_BUF, SipError, SipPatchOptions, extract_sip_binaries, sip_patch,
 };
 use mirrord_tls_util::SecureChannelSetup;
 use semver::Version;
@@ -42,6 +42,10 @@ use crate::{
     extract::extract_library,
     util::{get_user_git_branch, remove_proxy_env},
 };
+
+#[cfg(target_os = "macos")]
+const COMPRESSED_SIP_BINARIES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/apple-utils.tar.gz"));
 
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
@@ -281,7 +285,7 @@ impl MirrordExecution {
                             load_type: None,
                         });
                 if config.experimental.sip_utils {
-                    download_sip_binaries().await?;
+                    extract_sip_binaries(&MIRRORD_BINARIES_DIR_PATH_BUF, COMPRESSED_SIP_BINARIES)?;
                 }
 
                 executable

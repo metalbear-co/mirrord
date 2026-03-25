@@ -30,7 +30,6 @@ fs4 = { version = "0.12" }
 tracing.workspace = true
 thiserror.workspace = true
 which.workspace = true
-reqwest.workspace = true
 flate2.workspace = true
 tar.workspace = true
 
