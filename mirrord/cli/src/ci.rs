@@ -439,6 +439,7 @@ impl MirrordCi {
 
         if self.ci_common_args.foreground {
             progress.info(&format!("waiting for child with pid {child_pid}"));
+            progress.success(None);
             match child.wait().await {
                 Ok(status) => {
                     if status.success() {
