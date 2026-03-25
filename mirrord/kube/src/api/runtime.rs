@@ -161,11 +161,22 @@ impl RuntimeData {
             })
             .collect();
 
-        let container_statuses = pod
+        let main_container_statuses = pod
             .status
             .as_ref()
             .and_then(|status| status.container_statuses.as_ref())
             .ok_or_else(|| KubeApiError::missing_field(pod, ".status.containerStatuses"))?;
+        let init_container_statuses = pod
+            .status
+            .as_ref()
+            .and_then(|status| status.init_container_statuses.as_deref())
+            .unwrap_or_default();
+        let container_statuses = main_container_statuses
+            .iter()
+            .chain(init_container_statuses.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+
         let default_container_name = pod
             .metadata
             .annotations
@@ -519,6 +530,8 @@ impl RuntimeDataProvider for ResolvedTarget<true> {
 
 #[cfg(test)]
 mod tests {
+    use k8s_openapi::api::core::v1::{Container, ContainerStatus, Pod, PodIP, PodSpec, PodStatus};
+    use kube::api::ObjectMeta;
     use mirrord_config::target::{
         deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, service::ServiceTarget,
     };
@@ -556,5 +569,42 @@ mod tests {
                 container: None
             })
         )
+    }
+
+    #[test]
+    fn runtime_data_allows_pods_without_init_container_statuses() {
+        let pod = Pod {
+            metadata: ObjectMeta {
+                name: Some("target".into()),
+                namespace: Some("default".into()),
+                ..Default::default()
+            },
+            spec: Some(PodSpec {
+                node_name: Some("node-a".into()),
+                containers: vec![Container {
+                    name: "app".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            status: Some(PodStatus {
+                phase: Some("Running".into()),
+                pod_ips: Some(vec![PodIP {
+                    ip: "10.0.0.1".into(),
+                }]),
+                container_statuses: Some(vec![ContainerStatus {
+                    name: "app".into(),
+                    ready: true,
+                    container_id: Some("containerd://abcd1234".into()),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }),
+        };
+
+        let runtime_data = RuntimeData::from_pod(&pod, None).expect("pod should resolve");
+
+        assert_eq!(runtime_data.container_name, "app");
+        assert_eq!(runtime_data.container_id, "abcd1234");
     }
 }

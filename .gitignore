@@ -23,7 +23,7 @@ build/
 
 ### other test apps ###
 *.test_app
-mirrord/layer/tests/apps/*/target
+mirrord/layer-tests/tests/apps/*/target
 
 ### VSCode ###
 vscode-ext/bin

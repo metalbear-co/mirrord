@@ -19,9 +19,10 @@ pub enum OperatorOperation {
     GettingStatus,
     SessionManagement,
     ListingTargets,
-    MongodbBranching,
-    MysqlBranching,
+    DbBranching,
     PgBranching,
+    MysqlBranching,
+    MongodbBranching,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -34,9 +35,10 @@ impl fmt::Display for OperatorOperation {
             Self::GettingStatus => "getting status",
             Self::SessionManagement => "session management",
             Self::ListingTargets => "listing targets",
-            Self::MongodbBranching => "mongodb branching",
-            Self::MysqlBranching => "mysql branching",
-            Self::PgBranching => "postgresql branching",
+            Self::DbBranching => "database branching",
+            Self::PgBranching => "PostgreSQL branching",
+            Self::MysqlBranching => "MySQL branching",
+            Self::MongodbBranching => "MongoDB branching",
         };
 
         f.write_str(as_str)
@@ -95,6 +97,9 @@ pub enum OperatorApiError {
         operation: OperatorOperation,
         message: String,
     },
+
+    #[error("failed to resolve target: {0}")]
+    TargetResolutionFailed(String),
 
     #[error(transparent)]
     InvalidBackoff(#[from] InvalidBackoff),

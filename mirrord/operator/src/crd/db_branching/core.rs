@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Formatter};
+use std::{borrow::Cow, collections::HashMap, fmt::Formatter};
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use mirrord_config::feature::database_branches::{
@@ -229,13 +229,13 @@ pub enum IamAuthConfig {
 }
 
 impl JsonSchema for IamAuthConfig {
-    fn schema_name() -> String {
+    fn schema_name() -> Cow<'static, str> {
         "IamAuthConfig".into()
     }
 
     /// [`IamAuthConfig`] is adjacently tagged. Because of this, its JSON schema is not valid
     /// according to CRD standards.
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         #[derive(Serialize, Deserialize, JsonSchema)]
         struct Proxy {
             // We verify the tag.

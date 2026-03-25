@@ -1,0 +1,1 @@
+mirrord can now target any container in a pod, whether it's a regular application container or an init/sidecar container. This is particularly useful when working with service meshes, authentication sidecars, or other patterns that rely on long-running init containers.

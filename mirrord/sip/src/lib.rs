@@ -46,7 +46,7 @@ mod main {
         env,
         ffi::{OsStr, OsString},
         fs::{File, OpenOptions},
-        io::{self, BufRead, ErrorKind, Write},
+        io::{self, BufRead, Cursor, ErrorKind, Write},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
         str::from_utf8,
@@ -90,6 +90,12 @@ mod main {
 
     pub const FRAMEWORKS_ENV_VAR_NAME: &str = "DYLD_FALLBACK_FRAMEWORK_PATH";
 
+    /// Where to download system utilities from to use instead of patching.
+    /// Removes need for emulation on arm64 and fixes cases where AV doesn't like
+    /// our ad-hoc signing
+    const APPLE_UTILS_URL: &str =
+        "https://github.com/metalbear-co/appleutils/releases/download/v2/apple-utils-v2.tar.gz";
+
     /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
     /// scripts. Uses `temp_dir()`/mirrord/ because this is where the layer is extracted
     pub static MIRRORD_TEMP_BIN_DIR_PATH_BUF: Lazy<PathBuf> =
@@ -109,6 +115,17 @@ mod main {
     /// scripts, without a trailing `/`.
     pub static MIRRORD_TEMP_BIN_DIR_STRING: Lazy<String> =
         Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_TEMP_BIN_DIR_PATH_BUF));
+
+    /// Path to `~/.mirrord/binaries` where pre-built SIP utility binaries are stored.
+    pub static MIRRORD_BINARIES_DIR_PATH_BUF: Lazy<PathBuf> = Lazy::new(|| {
+        PathBuf::from(env::var("HOME").unwrap_or_default())
+            .join(".mirrord")
+            .join("binaries")
+    });
+
+    /// String version of [`MIRRORD_BINARIES_DIR_PATH_BUF`], without a trailing `/`.
+    pub static MIRRORD_BINARIES_DIR_STRING: Lazy<String> =
+        Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_BINARIES_DIR_PATH_BUF));
 
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
     /// main cpu type is arm64. We only consider the lowest byte in the check.
@@ -142,6 +159,8 @@ mod main {
         pub patch: &'a [String],
         /// A list of binaries to skip patching.
         pub skip: &'a [String],
+        /// If `Some`, check this dir for a binary with the same filename before SIP-patching.
+        pub sip_binaries_dir: Option<&'a Path>,
     }
 
     /// Info for logging to `config.experimental.sip_log_destination`
@@ -493,16 +512,14 @@ mod main {
         NoSip,
     }
 
-    /// Checks if binary is signed with either `RUNTIME` or `RESTRICTED` flags.
+    /// Checks if binary is signed with `RESTRICTED` flags.
     /// The code ignores error to allow smoother fallbacks.
     fn is_code_signed(data: &[u8]) -> bool {
         if let Ok(mach) = MachFile::parse(data) {
             for macho in mach.into_iter() {
                 if let Ok(Some(signature)) = macho.code_signature()
                     && let Ok(Some(blob)) = signature.code_directory()
-                    && blob
-                        .flags
-                        .intersects(CodeSignatureFlags::RESTRICT | CodeSignatureFlags::RUNTIME)
+                    && blob.flags.intersects(CodeSignatureFlags::RESTRICT)
                 {
                     return true;
                 }
@@ -539,8 +556,11 @@ mod main {
         Ok(MIRRORD_TEMP_BIN_DIR_PATH_BUF
             .canonicalize()
             .map(|x| canonical_path.starts_with(x))
-            // path might be non-existent yet.
-            .unwrap_or_default())
+            .unwrap_or_default()
+            || MIRRORD_BINARIES_DIR_PATH_BUF
+                .canonicalize()
+                .map(|x| canonical_path.starts_with(x))
+                .unwrap_or_default())
     }
 
     /// Checks the SF_RESTRICTED flags on a file (there might be a better check, feel free to
@@ -745,6 +765,12 @@ mod main {
                 Some(patched_script).transpose()
             }
             Ok(SipBinary(binary)) => {
+                if let Some(binaries_dir) = opts.sip_binaries_dir {
+                    let candidate = binaries_dir.join(binary.strip_prefix("/").unwrap_or(&binary));
+                    if candidate.exists() {
+                        return Ok(Some(candidate.to_string_lossy().to_string()));
+                    }
+                }
                 let patched_binary =
                     patch_binary(&binary).map(|path| path.to_string_lossy().to_string());
                 Some(patched_binary).transpose()
@@ -791,6 +817,24 @@ mod main {
         }
 
         patch_result
+    }
+
+    /// Downloads and extracts the apple utils bundle into [`MIRRORD_BINARIES_DIR_PATH_BUF`].
+    /// No-op if the directory already exists and is non-empty.
+    pub async fn download_sip_binaries() -> Result<()> {
+        let binaries_dir = &*MIRRORD_BINARIES_DIR_PATH_BUF;
+        if binaries_dir.exists() && std::fs::read_dir(binaries_dir)?.next().is_some() {
+            return Ok(());
+        }
+        std::fs::create_dir_all(binaries_dir)?;
+        let response = reqwest::get(APPLE_UTILS_URL)
+            .await
+            .map_err(SipError::DownloadFailed)?;
+        let bytes = response.bytes().await.map_err(SipError::DownloadFailed)?;
+        let gz = flate2::read::GzDecoder::new(Cursor::new(bytes));
+        let mut archive = tar::Archive::new(gz);
+        archive.unpack(binaries_dir)?;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -897,7 +941,9 @@ mod main {
 
             settings.set_code_signature_flags(
                 apple_codesign::SettingsScope::Main,
-                CodeSignatureFlags::ADHOC | CodeSignatureFlags::RUNTIME,
+                CodeSignatureFlags::ADHOC
+                    | CodeSignatureFlags::RUNTIME
+                    | CodeSignatureFlags::RESTRICT,
             );
             settings.set_binary_identifier(
                 apple_codesign::SettingsScope::Main,
@@ -1151,7 +1197,8 @@ mod main {
                     signed_temp_file_path,
                     SipPatchOptions {
                         patch: &[],
-                        skip: &[signed_temp_file_path.to_string()]
+                        skip: &[signed_temp_file_path.to_string()],
+                        sip_binaries_dir: None,
                     }
                 )
                 .unwrap(),

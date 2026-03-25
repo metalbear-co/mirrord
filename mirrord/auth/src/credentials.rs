@@ -320,7 +320,7 @@ pub mod client {
                     "certificate",
                     "operator",
                     &PostParams::default(),
-                    certificate_request.into(),
+                    &certificate_request,
                 )
                 .await?;
 
@@ -425,7 +425,7 @@ pub mod client {
                     "certificate",
                     "operator",
                     &PostParams::default(),
-                    certificate_request.into(),
+                    &certificate_request,
                 )
                 .await?
             };

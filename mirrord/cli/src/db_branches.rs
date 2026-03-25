@@ -3,7 +3,13 @@ use std::{collections::HashSet, fmt::Debug};
 use k8s_openapi::NamespaceResourceScope;
 use kube::{Api, Resource, api::DeleteParams};
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_operator::crd::db_branching::{mysql::MysqlBranchDatabase, pg::PgBranchDatabase};
+use mirrord_operator::crd::{
+    MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME,
+    db_branching::{
+        branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
+        mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
+    },
+};
 use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{Table, row};
 use serde::de::DeserializeOwned;
@@ -14,10 +20,10 @@ use crate::{
     kube::{kube_client_from_layer_config, list_resource_if_defined},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct BranchInfo {
     name: String,
-    db_type: &'static str,
+    db_type: String,
     phase: Option<String>,
     ttl: u64,
     database: Option<String>,
@@ -25,28 +31,36 @@ struct BranchInfo {
     expire_time: Option<String>,
 }
 
-impl From<&MysqlBranchDatabase> for BranchInfo {
-    fn from(branch: &MysqlBranchDatabase) -> Self {
+impl From<BranchDatabase> for BranchInfo {
+    fn from(
+        BranchDatabase {
+            metadata,
+            spec,
+            mut status,
+        }: BranchDatabase,
+    ) -> Self {
         Self {
-            name: branch.metadata.name.clone().unwrap_or_default(),
-            db_type: "MySQL",
-            phase: branch.status.as_ref().map(|s| s.phase.to_string()),
-            ttl: branch.spec.ttl_secs,
-            database: branch.spec.database_name.clone(),
-            users: branch.status.as_ref().and_then(|s| {
+            name: metadata.name.unwrap_or_default(),
+            db_type: spec
+                .dialect()
+                .map(|d| d.to_string())
+                .unwrap_or_else(|_| "Unknown".to_string()),
+            phase: status.as_ref().map(|s| s.phase.to_string()),
+            ttl: spec.ttl_secs,
+            database: spec.database_name,
+            users: status.as_mut().and_then(|s| {
                 if s.session_info.is_empty() {
                     None
                 } else {
-                    let mut user_list: Vec<_> = s
-                        .session_info
-                        .values()
-                        .map(|session| session.owner.k8s_username.clone())
+                    let mut user_list: Vec<_> = std::mem::take(&mut s.session_info)
+                        .into_values()
+                        .map(|session| session.owner.k8s_username)
                         .collect();
                     user_list.sort();
                     Some(user_list.join("\n"))
                 }
             }),
-            expire_time: branch.status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
+            expire_time: status.as_ref().map(|s| s.expire_time.0.to_string()),
         }
     }
 }
@@ -61,7 +75,7 @@ impl From<MysqlBranchDatabase> for BranchInfo {
     ) -> Self {
         Self {
             name: metadata.name.unwrap_or_default(),
-            db_type: "MySQL",
+            db_type: "MySQL".to_string(),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
             database: spec.database_name,
@@ -77,33 +91,7 @@ impl From<MysqlBranchDatabase> for BranchInfo {
                     Some(user_list.join("\n"))
                 }
             }),
-            expire_time: status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
-        }
-    }
-}
-
-impl From<&PgBranchDatabase> for BranchInfo {
-    fn from(branch: &PgBranchDatabase) -> Self {
-        Self {
-            name: branch.metadata.name.clone().unwrap_or_default(),
-            db_type: "PostgreSQL",
-            phase: branch.status.as_ref().map(|s| s.phase.to_string()),
-            ttl: branch.spec.ttl_secs,
-            database: branch.spec.database_name.clone(),
-            users: branch.status.as_ref().and_then(|s| {
-                if s.session_info.is_empty() {
-                    None
-                } else {
-                    let mut user_list: Vec<_> = s
-                        .session_info
-                        .values()
-                        .map(|session| session.owner.k8s_username.clone())
-                        .collect();
-                    user_list.sort();
-                    Some(user_list.join("\n"))
-                }
-            }),
-            expire_time: branch.status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
+            expire_time: status.as_ref().map(|s| s.expire_time.0.to_string()),
         }
     }
 }
@@ -118,7 +106,7 @@ impl From<PgBranchDatabase> for BranchInfo {
     ) -> Self {
         Self {
             name: metadata.name.unwrap_or_default(),
-            db_type: "PostgreSQL",
+            db_type: "PostgreSQL".to_string(),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
             database: spec.database_name,
@@ -134,7 +122,38 @@ impl From<PgBranchDatabase> for BranchInfo {
                     Some(user_list.join("\n"))
                 }
             }),
-            expire_time: status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
+            expire_time: status.as_ref().map(|s| s.expire_time.0.to_string()),
+        }
+    }
+}
+
+impl From<MongodbBranchDatabase> for BranchInfo {
+    fn from(
+        MongodbBranchDatabase {
+            metadata,
+            spec,
+            mut status,
+        }: MongodbBranchDatabase,
+    ) -> Self {
+        Self {
+            name: metadata.name.unwrap_or_default(),
+            db_type: "MongoDB".to_string(),
+            phase: status.as_ref().map(|s| s.phase.to_string()),
+            ttl: spec.ttl_secs,
+            database: spec.database_name,
+            users: status.as_mut().and_then(|s| {
+                if s.session_info.is_empty() {
+                    None
+                } else {
+                    let mut user_list: Vec<_> = std::mem::take(&mut s.session_info)
+                        .into_values()
+                        .map(|session| session.owner.k8s_username)
+                        .collect();
+                    user_list.sort();
+                    Some(user_list.join("\n"))
+                }
+            }),
+            expire_time: status.as_ref().map(|s| s.expire_time.0.to_string()),
         }
     }
 }
@@ -162,8 +181,47 @@ fn get_api<T: Resource<DynamicType = (), Scope = NamespaceResourceScope>>(
     }
 }
 
+/// Check if the operator supports the unified BranchDatabase CRD by fetching its status
+/// and looking for the UnifiedBranchDbCrd feature flag.
+async fn operator_supports_unified_crd(client: &kube::Client) -> bool {
+    let api: Api<MirrordOperatorCrd> = Api::all(client.clone());
+    match api.get(OPERATOR_STATUS_NAME).await {
+        Ok(crd) => crd
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::UnifiedBranchDbCrd),
+        Err(_) => false,
+    }
+}
+
+/// Collect branches from per-dialect CRDs (old operator without unified BranchDatabase).
+async fn collect_per_dialect_branches<P: Progress>(
+    args: &DbBranchesArgs,
+    client: &kube::Client,
+    layer_config: &LayerConfig,
+    progress: &mut P,
+) -> CliResult<Vec<BranchInfo>> {
+    let mut all = Vec::new();
+
+    let pg_api: Api<PgBranchDatabase> = get_api(args, client, layer_config);
+    let mysql_api: Api<MysqlBranchDatabase> = get_api(args, client, layer_config);
+    let mongodb_api: Api<MongodbBranchDatabase> = get_api(args, client, layer_config);
+
+    if let Some(pgs) = list_resource_if_defined(&pg_api, progress).await? {
+        all.extend(pgs.into_iter().map(BranchInfo::from));
+    }
+    if let Some(mysqls) = list_resource_if_defined(&mysql_api, progress).await? {
+        all.extend(mysqls.into_iter().map(BranchInfo::from));
+    }
+    if let Some(mongos) = list_resource_if_defined(&mongodb_api, progress).await? {
+        all.extend(mongos.into_iter().map(BranchInfo::from));
+    }
+
+    Ok(all)
+}
+
 async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()> {
-    let names: HashSet<_> = names.iter().collect();
+    let names: HashSet<_> = names.iter().map(|s| s.as_str()).collect();
 
     let mut progress = ProgressTracker::from_env("DB Branches Status");
     let mut status_progress = progress.subtask("fetching branches");
@@ -176,25 +234,37 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
 
     let client = kube_client_from_layer_config(&layer_config).await?;
 
-    let mysql_api: Api<MysqlBranchDatabase> = get_api(args, &client, &layer_config);
+    let use_unified = operator_supports_unified_crd(&client).await;
 
-    let pg_api: Api<PgBranchDatabase> = get_api(args, &client, &layer_config);
+    let all_infos: Vec<BranchInfo> = if use_unified {
+        let branch_api: Api<BranchDatabase> = get_api(args, &client, &layer_config);
+        list_resource_if_defined(&branch_api, &mut status_progress)
+            .await?
+            .unwrap_or_default()
+            .into_iter()
+            .map(BranchInfo::from)
+            .collect()
+    } else {
+        collect_per_dialect_branches(args, &client, &layer_config, &mut status_progress).await?
+    };
 
-    let mysql_branches = list_resource_if_defined(&mysql_api, &mut status_progress)
-        .await?
-        .unwrap_or_default();
-
-    let pg_branches = list_resource_if_defined(&pg_api, &mut status_progress)
-        .await?
-        .unwrap_or_default();
-
-    if mysql_branches.is_empty() && pg_branches.is_empty() {
+    if all_infos.is_empty() {
         progress.success(Some("No active DB branch found"));
         return Ok(());
     }
 
     status_progress.success(Some("fetched status"));
     progress.success(None);
+
+    build_status_table(all_infos, names).printstd();
+    Ok(())
+}
+
+/// Builds a status table from the given branches.
+fn build_status_table(all_infos: Vec<BranchInfo>, names: HashSet<&str>) -> Table {
+    let all_infos_iter = all_infos
+        .into_iter()
+        .filter(|b| names.is_empty() || names.contains(b.name.as_str()));
 
     let mut table = Table::new();
     table.add_row(row![
@@ -207,67 +277,55 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
         "Expires At"
     ]);
 
-    // When names are provided, only show matching branches.
-    // When no names are given, show all branches (empty set means no filter).
-    fn get_iter<T: Resource + Into<BranchInfo>>(
-        vec: Vec<T>,
-        names: &HashSet<&String>,
-    ) -> impl Iterator<Item = BranchInfo> {
-        vec.into_iter()
-            .filter(|branch| {
-                if names.is_empty() {
-                    return true;
-                }
-
-                branch
-                    .meta()
-                    .name
-                    .as_ref()
-                    .map(|name| names.contains(name))
-                    .unwrap_or_default()
-            })
-            .map(Into::into)
-    }
-
-    let mysql_iter = get_iter(mysql_branches, &names);
-    let pg_iter = get_iter(pg_branches, &names);
-    let branch_iter = mysql_iter.chain(pg_iter);
-
-    for branch in branch_iter {
+    for info in all_infos_iter {
         table.add_row(row![
-            branch.name,
-            branch.db_type,
-            branch.phase.unwrap_or_else(|| "Unknown".to_string()),
-            branch.ttl,
-            branch.database.unwrap_or_else(|| "<none>".to_string()),
-            branch.users.unwrap_or_else(|| "none".to_string()),
-            branch.expire_time.unwrap_or_else(|| "Unknown".to_string())
+            info.name,
+            info.db_type,
+            info.phase.unwrap_or_else(|| "Unknown".to_owned()),
+            info.ttl,
+            info.database.unwrap_or_else(|| "<none>".to_owned()),
+            info.users.unwrap_or_else(|| "none".to_owned()),
+            info.expire_time.unwrap_or_else(|| "Unknown".to_owned())
         ]);
     }
 
-    table.printstd();
-
-    Ok(())
+    table
 }
 
+/// Delete resources by (name, namespace) pairs, creating a namespaced API for each.
 async fn delete_branches<I, R, P>(
-    branch_names: I,
-    api: &kube::Api<R>,
+    branches: I,
+    client: &kube::Client,
     progress: &P,
     delete_params: &DeleteParams,
 ) where
-    I: Iterator<Item = String>,
-    R: Resource<DynamicType = ()> + Clone + DeserializeOwned + Debug,
+    I: Iterator<Item = (String, String)>,
+    R: Resource<DynamicType = (), Scope = NamespaceResourceScope>
+        + Clone
+        + DeserializeOwned
+        + Debug,
     P: Progress,
 {
-    for branch in branch_names {
-        let mut branch_progress =
-            progress.subtask(&format!("destroying {} {branch}", R::kind(&())));
-        match api.delete(&branch, delete_params).await {
-            Ok(_) => branch_progress.success(Some(&format!("destroyed {branch}"))),
+    for (name, namespace) in branches {
+        let mut branch_progress = progress.subtask(&format!("destroying {} {name}", R::kind(&())));
+        let api: Api<R> = Api::namespaced(client.clone(), &namespace);
+        match api.delete(&name, delete_params).await {
+            Ok(_) => branch_progress.success(Some(&format!("destroyed {name}"))),
             Err(e) => branch_progress.failure(Some(&format!("failed: {e}"))),
         }
     }
+}
+
+/// Extract (name, namespace) from a resource's metadata, using a fallback namespace
+/// for resources that don't have one set (e.g. listed from default namespace).
+fn name_and_ns<R: Resource>(resource: &R, fallback_ns: &str) -> Option<(String, String)> {
+    let name = resource.meta().name.clone()?;
+    let ns = resource
+        .meta()
+        .namespace
+        .clone()
+        .unwrap_or_else(|| fallback_ns.to_string());
+    Some((name, ns))
 }
 
 async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &[String]) -> CliResult<()> {
@@ -281,71 +339,242 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &[String]) -> 
     let layer_config = LayerConfig::resolve(&mut cfg_context)?;
 
     let client = kube_client_from_layer_config(&layer_config).await?;
+    let default_ns = layer_config
+        .target
+        .namespace
+        .as_deref()
+        .unwrap_or_else(|| client.default_namespace());
 
-    let mysql_api: Api<MysqlBranchDatabase> = get_api(args, &client, &layer_config);
+    let use_unified = operator_supports_unified_crd(&client).await;
+    let d_params = DeleteParams::default();
 
-    let pg_api: Api<PgBranchDatabase> = get_api(args, &client, &layer_config);
+    if use_unified {
+        let branch_api: Api<BranchDatabase> = get_api(args, &client, &layer_config);
+        let branches = list_resource_if_defined(&branch_api, &mut destroy_progress)
+            .await?
+            .unwrap_or_default();
 
-    if all {
-        // List all branches first to check if any exist
+        let all_pairs: Vec<_> = branches
+            .iter()
+            .filter_map(|b| name_and_ns(b, default_ns))
+            .collect();
 
-        let mysql_branches = list_resource_if_defined(&mysql_api, &mut destroy_progress).await?;
-
-        let pg_branches = list_resource_if_defined(&pg_api, &mut destroy_progress).await?;
-
-        if mysql_branches.as_ref().is_none_or(|vec| vec.is_empty())
-            && pg_branches.as_ref().is_none_or(|vec| vec.is_empty())
-        {
-            destroy_progress.success(Some("No active DB branch found."));
+        if all {
+            if all_pairs.is_empty() {
+                destroy_progress.success(Some("No active DB branch found."));
+            } else {
+                delete_branches::<_, BranchDatabase, _>(
+                    all_pairs.into_iter(),
+                    &client,
+                    &destroy_progress,
+                    &d_params,
+                )
+                .await;
+                destroy_progress.success(None);
+            }
         } else {
-            // Delete all MySQL branches
-            let d_params = DeleteParams::default();
-            let my_branch_names = mysql_branches
+            let mut wanted: HashSet<_> = names.iter().collect();
+            let matching = all_pairs
                 .into_iter()
-                .flatten()
-                .filter_map(|b| b.metadata.name);
-            delete_branches(my_branch_names, &mysql_api, &destroy_progress, &d_params).await;
+                .filter(|(name, _)| wanted.remove(name));
+            delete_branches::<_, BranchDatabase, _>(
+                matching,
+                &client,
+                &destroy_progress,
+                &d_params,
+            )
+            .await;
 
-            // Delete all Postgres branches
-            let pg_branch_names = pg_branches
-                .into_iter()
-                .flatten()
-                .filter_map(|b| b.metadata.name);
-            delete_branches(pg_branch_names, &pg_api, &destroy_progress, &d_params).await;
-
+            for name in wanted {
+                destroy_progress.failure(Some(&format!("branch not found: {name}")));
+            }
             destroy_progress.success(None);
         }
     } else {
-        // First, list all branches to determine their types
+        let pg_api: Api<PgBranchDatabase> = get_api(args, &client, &layer_config);
+        let mysql_api: Api<MysqlBranchDatabase> = get_api(args, &client, &layer_config);
+        let mongodb_api: Api<MongodbBranchDatabase> = get_api(args, &client, &layer_config);
+
         let mysql_branches = list_resource_if_defined(&mysql_api, &mut destroy_progress).await?;
-
         let pg_branches = list_resource_if_defined(&pg_api, &mut destroy_progress).await?;
+        let mongodb_branches =
+            list_resource_if_defined(&mongodb_api, &mut destroy_progress).await?;
 
-        let mut names: HashSet<_> = names.iter().collect();
-        let d_params = DeleteParams::default();
-
-        let mysql_names = mysql_branches
-            .into_iter()
+        let mysql_pairs: Vec<_> = mysql_branches
+            .iter()
             .flatten()
-            .filter_map(|b| b.metadata.name)
-            .filter(|name| names.remove(name));
-        delete_branches(mysql_names, &mysql_api, &destroy_progress, &d_params).await;
-
-        let pg_names = pg_branches
-            .into_iter()
+            .filter_map(|b| name_and_ns(b, default_ns))
+            .collect();
+        let pg_pairs: Vec<_> = pg_branches
+            .iter()
             .flatten()
-            .filter_map(|b| b.metadata.name)
-            .filter(|name| names.remove(name));
-        delete_branches(pg_names, &pg_api, &destroy_progress, &d_params).await;
+            .filter_map(|b| name_and_ns(b, default_ns))
+            .collect();
+        let mongo_pairs: Vec<_> = mongodb_branches
+            .iter()
+            .flatten()
+            .filter_map(|b| name_and_ns(b, default_ns))
+            .collect();
 
-        for name in names {
-            destroy_progress.failure(Some(&format!("branch not found: {name}")));
+        if all {
+            if mysql_pairs.is_empty() && pg_pairs.is_empty() && mongo_pairs.is_empty() {
+                destroy_progress.success(Some("No active DB branch found."));
+            } else {
+                delete_branches::<_, MysqlBranchDatabase, _>(
+                    mysql_pairs.into_iter(),
+                    &client,
+                    &destroy_progress,
+                    &d_params,
+                )
+                .await;
+                delete_branches::<_, PgBranchDatabase, _>(
+                    pg_pairs.into_iter(),
+                    &client,
+                    &destroy_progress,
+                    &d_params,
+                )
+                .await;
+                delete_branches::<_, MongodbBranchDatabase, _>(
+                    mongo_pairs.into_iter(),
+                    &client,
+                    &destroy_progress,
+                    &d_params,
+                )
+                .await;
+                destroy_progress.success(None);
+            }
+        } else {
+            let mut wanted: HashSet<_> = names.iter().collect();
+
+            let mysql_matching = mysql_pairs
+                .into_iter()
+                .filter(|(name, _)| wanted.remove(name));
+            delete_branches::<_, MysqlBranchDatabase, _>(
+                mysql_matching,
+                &client,
+                &destroy_progress,
+                &d_params,
+            )
+            .await;
+
+            let pg_matching = pg_pairs.into_iter().filter(|(name, _)| wanted.remove(name));
+            delete_branches::<_, PgBranchDatabase, _>(
+                pg_matching,
+                &client,
+                &destroy_progress,
+                &d_params,
+            )
+            .await;
+
+            let mongo_matching = mongo_pairs
+                .into_iter()
+                .filter(|(name, _)| wanted.remove(name));
+            delete_branches::<_, MongodbBranchDatabase, _>(
+                mongo_matching,
+                &client,
+                &destroy_progress,
+                &d_params,
+            )
+            .await;
+
+            for name in wanted {
+                destroy_progress.failure(Some(&format!("branch not found: {name}")));
+            }
+            destroy_progress.success(None);
         }
-
-        destroy_progress.success(None);
     }
 
     progress.success(None);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use prettytable::Row;
+
+    use super::{BranchInfo, HashSet, Table, build_status_table, row};
+
+    fn branch_info(name: &str, db_type: &'static str) -> BranchInfo {
+        BranchInfo {
+            name: name.to_owned(),
+            db_type: db_type.to_string(),
+            phase: None,
+            ttl: 3600,
+            database: None,
+            users: None,
+            expire_time: None,
+        }
+    }
+
+    fn build_expected_table(rows: Vec<Row>) -> Table {
+        let mut table = Table::from_iter([row![
+            "Name",
+            "DB Type",
+            "Phase",
+            "TTL (sec)",
+            "Database",
+            "Users",
+            "Expires At"
+        ]]);
+        rows.into_iter().for_each(|row| {
+            table.add_row(row);
+        });
+        table
+    }
+
+    #[test]
+    fn test_build_status_table() {
+        let branches = vec![
+            branch_info("branch-a", "Db1"),
+            branch_info("branch-b", "Db2"),
+            branch_info("branch-c", "Db3"),
+        ];
+
+        // No names filter - all branches rendered.
+        let table = build_status_table(branches.clone(), HashSet::new());
+        let expected = build_expected_table(vec![
+            row![
+                "branch-a", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"
+            ],
+            row![
+                "branch-b", "Db2", "Unknown", "3600", "<none>", "none", "Unknown"
+            ],
+            row![
+                "branch-c", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"
+            ],
+        ]);
+        assert_eq!(
+            expected, table,
+            "\n\nexpected:\n{}got:\n{}",
+            expected, table
+        );
+
+        // Names filter - only matching branches rendered.
+        let names = HashSet::from(["branch-a", "branch-c"]);
+        let table = build_status_table(branches.clone(), names);
+        let expected = build_expected_table(vec![
+            row![
+                "branch-a", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"
+            ],
+            row![
+                "branch-c", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"
+            ],
+        ]);
+        assert_eq!(
+            expected, table,
+            "\n\nexpected:\n{}got:\n{}",
+            expected, table
+        );
+
+        // All branches filtered out - None returned.
+        let names: HashSet<&str> = ["nonexistent"].into_iter().collect();
+        let table = build_status_table(branches.clone(), names);
+        let expected = build_expected_table(vec![]);
+        assert_eq!(
+            expected, table,
+            "\n\nexpected:\n{}got:\n{}",
+            expected, table
+        );
+    }
 }

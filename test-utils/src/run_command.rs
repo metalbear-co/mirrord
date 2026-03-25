@@ -121,6 +121,11 @@ pub async fn run_mirrord(args: Vec<&str>, env: HashMap<&str, &str>) -> TestProce
         .unwrap();
     let temp_dir = tempdir().unwrap();
 
+    // Print the mirrord path used to ease MIRRORD_TESTS_USE_BINARY possible misuse investigation
+    // efforts
+    println!("CWD: {:?}", std::env::current_dir().unwrap());
+    println!("Using mirrord path: {path:?}");
+
     // Used for debugging with breakpoint on `let server` to debug mirrord execution
     println!("executing mirrord with args {args:?}",);
     let server = Command::new(path)

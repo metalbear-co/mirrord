@@ -5,7 +5,9 @@
 //! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Failed`), which
 //! the CLI watches to report progress back to the user.
 
-use k8s_openapi::{apimachinery::pkg::apis::meta::v1::MicroTime, chrono::Utc};
+use std::time::Duration;
+
+use k8s_openapi::{apimachinery::pkg::apis::meta::v1::MicroTime, jiff::Timestamp};
 use kube::CustomResource;
 use mirrord_config::{
     feature::{
@@ -71,10 +73,7 @@ impl PreviewSession {
         self.status
             .as_ref()
             .and_then(|status| {
-                Utc::now()
-                    .signed_duration_since(status.started_at.0)
-                    .to_std()
-                    .ok()
+                Duration::try_from(Timestamp::now().duration_since(status.started_at.0)).ok()
             })
             .map(|runtime| runtime.as_secs().try_into().unwrap_or(u32::MAX))
             .unwrap_or_default()
