@@ -11,7 +11,8 @@ use crate::{
 /// Behaves in a similar way to `mirrord container`, except that we `spawn` the user's binary with
 /// mirrord, letting them live after the mirrord cli has died.
 ///
-/// The fields in here are passed to [`exec`], since we re-use that to start mirrord in ci.
+/// The fields in here are passed to [`container_command`], since we re-use that to start mirrord in
+/// CI.
 pub(super) struct CiContainerCommandHandler<'a> {
     /// Used to tell [`container_command`] that we're running in ci.
     mirrord_for_ci: MirrordCi,

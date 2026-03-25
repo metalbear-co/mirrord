@@ -228,7 +228,7 @@ impl MirrordCi {
     ) -> CiResult<PathBuf> {
         let binary = binary_path
             .file_name()
-            .unwrap_or_else(|| binary_path.as_os_str())
+            .unwrap_or(binary_path.as_os_str())
             .to_string_lossy();
 
         let parent_dir = output_dir
@@ -360,6 +360,7 @@ impl MirrordCi {
     }
 
     #[cfg(not(target_os = "windows"))]
+    #[allow(clippy::too_many_arguments)]
     #[tracing::instrument(level = Level::TRACE, skip(progress), err)]
     pub(super) async fn prepare_container_command<P: Progress>(
         self,

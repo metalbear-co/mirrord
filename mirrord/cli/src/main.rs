@@ -129,6 +129,16 @@
 //! `mirrord container`, so you can run something like `mirrord exec -- docker run {image}` from an
 //! IDE plugin.
 //!
+//! ### `mirrord ci container [OPTIONS] [EXEC]`
+//!
+//! - [`ci::ci_command`], [`ci::container`]
+//!
+//! > Runs the equivalent of `mirrord container ...`, but with using mirrord for CI.
+//!
+//! Pretty much the same thing as the regular `mirrord container` command, but this one uses
+//! the mirrord for CI handling of the various backend things. It also has to store pids and
+//! container ids so it can be stopped with `mirrord ci stop`.
+//!
 //! ### `mirrord extract <PATH>`
 //!
 //! - [`extract_library`]
