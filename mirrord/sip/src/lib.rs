@@ -512,16 +512,14 @@ mod main {
         NoSip,
     }
 
-    /// Checks if binary is signed with either `RUNTIME` or `RESTRICTED` flags.
+    /// Checks if binary is signed with `RESTRICTED` flags.
     /// The code ignores error to allow smoother fallbacks.
     fn is_code_signed(data: &[u8]) -> bool {
         if let Ok(mach) = MachFile::parse(data) {
             for macho in mach.into_iter() {
                 if let Ok(Some(signature)) = macho.code_signature()
                     && let Ok(Some(blob)) = signature.code_directory()
-                    && blob
-                        .flags
-                        .intersects(CodeSignatureFlags::RESTRICT | CodeSignatureFlags::RUNTIME)
+                    && blob.flags.intersects(CodeSignatureFlags::RESTRICT)
                 {
                     return true;
                 }
@@ -943,7 +941,9 @@ mod main {
 
             settings.set_code_signature_flags(
                 apple_codesign::SettingsScope::Main,
-                CodeSignatureFlags::ADHOC | CodeSignatureFlags::RUNTIME,
+                CodeSignatureFlags::ADHOC
+                    | CodeSignatureFlags::RUNTIME
+                    | CodeSignatureFlags::RESTRICT,
             );
             settings.set_binary_identifier(
                 apple_codesign::SettingsScope::Main,
