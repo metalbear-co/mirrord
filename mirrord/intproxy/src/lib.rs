@@ -400,6 +400,7 @@ impl IntProxy {
 
                 self.monitor_tx.emit(MonitorEvent::LayerConnected {
                     pid: new_layer.process_info.pid as u32,
+                    process_name: new_layer.process_info.name.clone(),
                 });
                 self.connected_layers
                     .insert(new_layer.id, new_layer.process_info);
@@ -479,7 +480,11 @@ impl IntProxy {
                     }
                 }
 
-                self.monitor_tx.emit(MonitorEvent::LayerDisconnected);
+                if let Some(info) = self.connected_layers.get(&LayerId(id)) {
+                    self.monitor_tx.emit(MonitorEvent::LayerDisconnected {
+                        pid: info.pid as u32,
+                    });
+                }
 
                 let msg = LayerClosed { id: LayerId(id) };
 

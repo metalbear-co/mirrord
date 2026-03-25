@@ -12,11 +12,11 @@ use axum::{
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
-use tokio::net::UnixListener;
+use tokio::{net::UnixListener, sync::RwLock};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use tokio_util::sync::CancellationToken;
 
-use super::MonitorTx;
+use super::{MonitorEvent, MonitorTx};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessInfo {
@@ -36,7 +36,7 @@ pub struct SessionInfo {
 }
 
 struct AppState {
-    session_info: SessionInfo,
+    session_info: RwLock<SessionInfo>,
     monitor_tx: MonitorTx,
     shutdown: CancellationToken,
 }
@@ -56,7 +56,8 @@ async fn health() -> impl IntoResponse {
 }
 
 async fn info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    Json(state.session_info.clone())
+    let info = state.session_info.read().await;
+    Json(info.clone())
 }
 
 async fn events(
@@ -90,6 +91,35 @@ async fn kill(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     Json(serde_json::json!({"status": "shutting_down"}))
 }
 
+/// Subscribes to monitor events and updates session_info.processes on
+/// LayerConnected/LayerDisconnected events.
+async fn update_processes_from_events(state: Arc<AppState>) {
+    let mut rx = match state.monitor_tx.subscribe() {
+        Some(rx) => rx,
+        None => return,
+    };
+
+    loop {
+        match rx.recv().await {
+            Ok(MonitorEvent::LayerConnected { pid, process_name }) => {
+                let mut info = state.session_info.write().await;
+                if !info.processes.iter().any(|p| p.pid == pid) {
+                    info.processes.push(ProcessInfo { pid, process_name });
+                }
+            }
+            Ok(MonitorEvent::LayerDisconnected { pid }) => {
+                let mut info = state.session_info.write().await;
+                info.processes.retain(|p| p.pid != pid);
+            }
+            Ok(_) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                tracing::warn!(n, "Process tracker lagged, dropped events");
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        }
+    }
+}
+
 pub async fn start_api_server(
     session_info: SessionInfo,
     monitor_tx: MonitorTx,
@@ -117,10 +147,13 @@ pub async fn start_api_server(
     };
 
     let state = Arc::new(AppState {
-        session_info,
+        session_info: RwLock::new(session_info),
         monitor_tx,
         shutdown: shutdown.clone(),
     });
+
+    // Spawn background task to update processes from monitor events
+    tokio::spawn(update_processes_from_events(state.clone()));
 
     let app = Router::new()
         .route("/health", get(health))

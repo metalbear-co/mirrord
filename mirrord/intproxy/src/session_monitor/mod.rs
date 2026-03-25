@@ -35,8 +35,11 @@ pub enum MonitorEvent {
     },
     LayerConnected {
         pid: u32,
+        process_name: String,
     },
-    LayerDisconnected,
+    LayerDisconnected {
+        pid: u32,
+    },
 }
 
 /// Wrapper around an optional broadcast sender for session monitor events.

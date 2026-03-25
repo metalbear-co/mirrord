@@ -456,6 +456,16 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
 
     scan_existing_sessions(&sessions_dir, &state).await;
 
+    // Periodic rescan as fallback (filesystem watchers can miss events on macOS)
+    let rescan_state = state.clone();
+    let rescan_dir = sessions_dir.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            scan_existing_sessions(&rescan_dir, &rescan_state).await;
+        }
+    });
+
     // Set up filesystem watcher
     let watcher_state = state.clone();
     let (watcher_tx, mut watcher_rx) = mpsc::channel::<notify::Event>(100);
