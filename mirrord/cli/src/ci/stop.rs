@@ -4,7 +4,11 @@ use tokio::process::Command;
 use tracing::Level;
 
 use super::CiResult;
-use crate::ci::{MirrordCiManagedContainer, MirrordCiStore, error::CiError};
+#[cfg(unix)]
+use crate::ci::MirrordCiManagedContainer;
+use crate::ci::MirrordCiStore;
+#[cfg(unix)]
+use crate::ci::error::CiError;
 
 /// Kills the sidecars that were started by `mirrord ci container`.
 ///
