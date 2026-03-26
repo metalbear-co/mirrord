@@ -140,9 +140,9 @@ pub(crate) async fn proxy(
     // with the agent (it's a must, because port forwarding may be done lazily).
     let mut agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
 
-    if config.feature.db_branches.is_empty().not() {
-        let session_id = operator_session_id
-            .expect("Have DB branches but not using operator connection. This should have been caught earlier.");
+    if config.feature.db_branches.is_empty().not()
+        && let Some(session_id) = operator_session_id
+    {
         setup_db_portforwards(
             &config.feature.db_branches,
             &mut agent_conn,
@@ -277,7 +277,7 @@ async fn setup_db_portforwards(
             DatabaseBranchConfig::Mysql(db) => &db.base,
             DatabaseBranchConfig::Pg(db) => &db.base,
             DatabaseBranchConfig::Mssql(db) => &db.base,
-            DatabaseBranchConfig::Redis(_) => unimplemented!("Havent done redis yet"),
+            DatabaseBranchConfig::Redis(_) => continue,
         };
         let envs = match &base.connection {
             ConnectionSource::Url { url } => match url {
@@ -417,7 +417,9 @@ async fn setup_db_portforwards(
     let mut portforwarder = port_forward::PortForwarder::new(
         conn.connection.tx_handle(),
         pf_rx,
-        port_mappings.keys().map(|rmt| (localhost_ephemeral_port, rmt.clone()))
+        port_mappings
+            .keys()
+            .map(|rmt| (localhost_ephemeral_port, rmt.clone()))
             .collect(),
         Some(connections_state_2),
     )

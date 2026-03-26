@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt::Debug, net::SocketAddr, path::PathBuf};
+use std::{collections::HashSet, fmt::Debug, net::SocketAddr, ops::Not, path::PathBuf};
 
 use k8s_openapi::NamespaceResourceScope;
 use kube::{Api, Resource, api::DeleteParams};
@@ -220,7 +220,7 @@ async fn connections_command() -> CliResult<()> {
         };
 
         // Check if the process is still alive.
-        if !is_pid_alive(pid) {
+        if is_pid_alive(pid).not() {
             // Stale file, clean it up.
             let _ = tokio::fs::remove_file(&path).await;
             continue;
@@ -269,7 +269,7 @@ fn is_pid_alive(pid: u32) -> bool {
 
 #[cfg(windows)]
 fn is_pid_alive(pid: u32) -> bool {
-    // AI slop
+    // Untested AI slop
     std::process::Command::new("tasklist")
         .args(["/FI", &format!("PID eq {pid}"), "/NH"])
         .output()
