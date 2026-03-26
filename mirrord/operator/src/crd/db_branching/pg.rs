@@ -51,9 +51,13 @@ pub struct BranchCopyConfig {
     pub mode: BranchCopyMode,
 
     /// An optional list of tables whose schema and data will be copied based on their
-    /// table level copy config. Only compatible with `Empty` and `Schema` copy mode.
+    /// table level copy config. Only compatible with `Empty`, `Schema`, and `Subset` copy mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tables: Option<BTreeMap<String, TableCopyConfig>>,
+
+    /// How many levels of foreign key relationships to follow when mode is `subset`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_relation_depth: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -66,6 +70,9 @@ pub enum BranchCopyMode {
     /// Create a database and copy all tables' schema and data from the source database.
     /// With this copy mode, all table specific copy configs are ignored.
     All,
+    /// Copy schema and only the data reachable through foreign key relationships
+    /// from the seed tables specified in the `tables` field.
+    Subset,
 }
 
 impl Default for BranchCopyConfig {
@@ -73,6 +80,7 @@ impl Default for BranchCopyConfig {
         BranchCopyConfig {
             mode: BranchCopyMode::Empty,
             tables: Default::default(),
+            max_relation_depth: None,
         }
     }
 }
@@ -87,6 +95,7 @@ impl From<PgBranchCopyConfig> for BranchCopyConfig {
                         .map(|(name, config)| (name, config.into()))
                         .collect()
                 }),
+                max_relation_depth: None,
             },
             PgBranchCopyConfig::Schema { tables } => BranchCopyConfig {
                 mode: BranchCopyMode::Schema,
@@ -95,10 +104,24 @@ impl From<PgBranchCopyConfig> for BranchCopyConfig {
                         .map(|(name, config)| (name, config.into()))
                         .collect()
                 }),
+                max_relation_depth: None,
             },
             PgBranchCopyConfig::All => BranchCopyConfig {
                 mode: BranchCopyMode::All,
                 tables: None,
+                max_relation_depth: None,
+            },
+            PgBranchCopyConfig::Subset {
+                tables,
+                max_relation_depth,
+            } => BranchCopyConfig {
+                mode: BranchCopyMode::Subset,
+                tables: tables.map(|t| {
+                    t.into_iter()
+                        .map(|(name, config)| (name, config.into()))
+                        .collect()
+                }),
+                max_relation_depth,
             },
         }
     }

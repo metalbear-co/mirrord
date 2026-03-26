@@ -44,6 +44,11 @@ pub enum MssqlBranchCopyConfig {
     },
 
     All,
+
+    Subset {
+        tables: Option<BTreeMap<String, MssqlBranchTableCopyConfig>>,
+        max_relation_depth: Option<u32>,
+    },
 }
 
 impl Default for MssqlBranchCopyConfig {

@@ -44,6 +44,11 @@ pub enum MysqlBranchCopyConfig {
     },
 
     All,
+
+    Subset {
+        tables: Option<BTreeMap<String, MysqlBranchTableCopyConfig>>,
+        max_relation_depth: Option<u32>,
+    },
 }
 
 impl Default for MysqlBranchCopyConfig {

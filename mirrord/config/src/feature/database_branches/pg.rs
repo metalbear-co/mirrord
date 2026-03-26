@@ -52,6 +52,11 @@ pub enum PgBranchCopyConfig {
     },
 
     All,
+
+    Subset {
+        tables: Option<BTreeMap<String, PgBranchTableCopyConfig>>,
+        max_relation_depth: Option<u32>,
+    },
 }
 
 impl Default for PgBranchCopyConfig {

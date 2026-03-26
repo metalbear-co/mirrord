@@ -213,9 +213,13 @@ impl BranchDatabaseSpec {
 #[serde(rename_all = "camelCase")]
 pub struct SqlBranchCopyConfig {
     pub mode: SqlBranchCopyMode,
-    /// Per-table copy filters. Only compatible with Empty and Schema modes.
+    /// Per-table copy filters. Compatible with Empty, Schema, and Subset modes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub items: Option<BTreeMap<String, ItemCopyConfig>>,
+    /// How many levels of foreign key relationships to follow when mode is `subset`.
+    /// Defaults to 3 when not specified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_relation_depth: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
@@ -225,6 +229,7 @@ pub enum SqlBranchCopyMode {
     Empty,
     Schema,
     All,
+    Subset,
 }
 
 impl Default for SqlBranchCopyConfig {
@@ -232,6 +237,7 @@ impl Default for SqlBranchCopyConfig {
         Self {
             mode: SqlBranchCopyMode::Empty,
             items: None,
+            max_relation_depth: None,
         }
     }
 }
@@ -303,14 +309,25 @@ impl From<PgBranchCopyConfig> for SqlBranchCopyConfig {
             PgBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
+                max_relation_depth: None,
             },
             PgBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
+                max_relation_depth: None,
             },
             PgBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
+                max_relation_depth: None,
+            },
+            PgBranchCopyConfig::Subset {
+                tables,
+                max_relation_depth,
+            } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Subset,
+                items: convert_item_copy_configs(tables),
+                max_relation_depth,
             },
         }
     }
@@ -322,14 +339,25 @@ impl From<MysqlBranchCopyConfig> for SqlBranchCopyConfig {
             MysqlBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
+                max_relation_depth: None,
             },
             MysqlBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
+                max_relation_depth: None,
             },
             MysqlBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
+                max_relation_depth: None,
+            },
+            MysqlBranchCopyConfig::Subset {
+                tables,
+                max_relation_depth,
+            } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Subset,
+                items: convert_item_copy_configs(tables),
+                max_relation_depth,
             },
         }
     }
@@ -341,14 +369,25 @@ impl From<MssqlBranchCopyConfig> for SqlBranchCopyConfig {
             MssqlBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
+                max_relation_depth: None,
             },
             MssqlBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
+                max_relation_depth: None,
             },
             MssqlBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
+                max_relation_depth: None,
+            },
+            MssqlBranchCopyConfig::Subset {
+                tables,
+                max_relation_depth,
+            } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Subset,
+                items: convert_item_copy_configs(tables),
+                max_relation_depth,
             },
         }
     }
