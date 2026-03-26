@@ -508,7 +508,7 @@ impl PortForwarder {
         id: &Uid,
     ) -> Option<(ConnectionSocketPair, oneshot::Sender<ConnectionId>)> {
         if let Some(conns_state) = &self.connections_state {
-            conns_state.pending.lock().unwrap().remove(&id);
+            conns_state.pending.lock().unwrap().remove(id);
         }
         self.id_oneshots.remove(id)
     }
@@ -522,7 +522,7 @@ impl PortForwarder {
 
     fn remove_ongoing(&mut self, id: &ConnectionId) -> Option<ConnectionPortMapping> {
         if let Some(conns_state) = &self.connections_state {
-            conns_state.ongoing.lock().unwrap().remove(&id);
+            conns_state.ongoing.lock().unwrap().remove(id);
         }
         self.sockets.remove(id)
     }

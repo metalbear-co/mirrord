@@ -13,7 +13,7 @@
 use std::{
     collections::{HashMap, HashSet},
     env, io,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
     time::Duration,
 };
@@ -286,7 +286,7 @@ async fn setup_db_portforwards(
                     Envs::Url(variable.clone())
                 }
                 TargetEnvironmentVariableSource::Secret { name, key } => {
-                    Envs::Url(secret_env_var_name(&name, &key))
+                    Envs::Url(secret_env_var_name(name, key))
                 }
             },
             ConnectionSource::FlatUrl { url, .. } => Envs::Url(url.clone()),
@@ -417,9 +417,7 @@ async fn setup_db_portforwards(
     let mut portforwarder = port_forward::PortForwarder::new(
         conn.connection.tx_handle(),
         pf_rx,
-        port_mappings
-            .iter()
-            .map(|(rmt, _id)| (localhost_ephemeral_port, rmt.clone()))
+        port_mappings.keys().map(|rmt| (localhost_ephemeral_port, rmt.clone()))
             .collect(),
         Some(connections_state_2),
     )
@@ -431,7 +429,7 @@ async fn setup_db_portforwards(
         .filter_map(|(local, remote)| {
             Some(Portforward {
                 local_addr: local,
-                db_id: port_mappings.get(&remote)?.clone(),
+                db_id: port_mappings.get(remote)?.clone(),
             })
         })
         .collect();

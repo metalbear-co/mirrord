@@ -40,7 +40,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use tokio_tungstenite::tungstenite;
 use tower::{buffer::BufferLayer, retry::RetryLayer};
-use tracing::{Level, instrument::WithSubscriber};
+use tracing::Level;
 
 use crate::{
     client::database_branches::{

@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
     CliResult,
-    config::{DbBranchesArgs, DbBranchesCommand, RemoteAddr},
+    config::{DbBranchesArgs, DbBranchesCommand},
     kube::{kube_client_from_layer_config, list_resource_if_defined},
 };
 
