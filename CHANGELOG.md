@@ -8,6 +8,55 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.195.0](https://github.com/metalbear-co/mirrord/tree/3.195.0) - 2026-03-25
+
+
+### Added
+
+- mirrord can now target any container in a pod, whether it's a regular
+  application container or an init/sidecar container. This is particularly
+  useful when working with service meshes, authentication sidecars, or other
+  patterns that rely on long-running init containers.
+
+
+### Changed
+
+- Apple binary bundle is now included in mirrord CLI binary.
+- Using pre-built Apple utility binaries is on by default for OSS users.
+
+
+### Fixed
+
+- Fixed a misleading "invalid state" error shown when the target node has
+  reached its pod limit: mirrord now explains the real cause and suggests
+  freeing pod capacity or using ephemeral containers.
+  [#3037](https://github.com/metalbear-co/mirrord/issues/3037)
+- SIP no longer needlessly patches binaries that allow DYLD side loading like
+  Node but are runtime-protected
+
+
+### Internal
+
+- Added tests for db-branches status command table rendering
+- Db Branching unify CRDs, changing it so we have 1 common CRD instead of per
+  database.
+- Fixed `mirrord-protocol`'s version in the lock file
+- Fixed an unreleased bug in CRD schema.
+- Migrated Layer Integration Tests to layer-tests for cross platform support
+  (for windows)
+- Restrict the Release workflow to only run on the `main` branch.
+- Revamped the CLAUDE.md files
+- Revert release workflow mistaken for AND instead of ANY making release on
+  every push to main.
+- Trigger operator e2e from release PRs of mirrord that are made from a
+  `release/` branch (not fork).
+- Update resource guard to use own instance of kube client to avoid deadlock on
+  drop.
+- Updated kube-rs to the latest.
+- Use a tokio socket in the `outgoing_disabled_udp` task to avoid blocking the
+  (now single) tokio thread.
+- Bumped dependencies
+
 ## [3.194.0](https://github.com/metalbear-co/mirrord/tree/3.194.0) - 2026-03-19
 
 
