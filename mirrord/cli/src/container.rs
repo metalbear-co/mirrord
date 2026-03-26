@@ -125,12 +125,23 @@ async fn create_config_and_analytics<P: Progress>(
     Ok((config, analytics))
 }
 
+/// Helper type for [`prepare_proxies`] return type.
 #[derive(Debug)]
 struct PreparedProxies {
+    /// The command to run the user container.
     runtime_command: RuntimeCommandBuilder,
+
+    /// `mirrord exec` stuff, see [`MirrordExecution`].
     execution_info: MirrordExecution,
+
+    /// TLS setup.
+    #[allow(unused)]
     tls_setup: Option<SecureChannelSetup>,
+
+    /// PID of the sidecar container.
     sidecar_pid: Option<u32>,
+
+    /// Id of the sidecar container.
     sidecar_container: MirrordCiManagedContainer,
 }
 
