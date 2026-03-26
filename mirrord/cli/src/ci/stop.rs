@@ -4,11 +4,7 @@ use tokio::process::Command;
 use tracing::Level;
 
 use super::CiResult;
-#[cfg(not(target_os = "windows"))]
-use crate::ci::MirrordCiManagedContainer;
 use crate::ci::MirrordCiStore;
-#[cfg(not(target_os = "windows"))]
-use crate::ci::error::CiError;
 
 /// Kills the sidecars that were started by `mirrord ci container`.
 ///
@@ -16,7 +12,9 @@ use crate::ci::error::CiError;
 /// won't be able to kill it with `mirrord ci stop`, and thus we need to use something
 /// like `docker rm` to stop it.
 #[cfg(not(target_os = "windows"))]
-async fn runtime_remove_container(container: MirrordCiManagedContainer) -> CiResult<()> {
+async fn runtime_remove_container(container: crate::ci::MirrordCiManagedContainer) -> CiResult<()> {
+    use crate::ci::error::CiError;
+
     let runtime = container.runtime.command();
     let command = format!("{runtime} rm -f {}", container.container_id);
 
@@ -58,10 +56,8 @@ async fn runtime_remove_container(container: MirrordCiManagedContainer) -> CiRes
 pub(super) struct CiStopCommandHandler {
     /// The [`MirrordCiStore`] we retrieve from the user's environment (env var and temp files) so
     /// we can kill the intproxy and the user's process.
-    #[cfg_attr(windows, allow(unused))]
     pub(crate) store: MirrordCiStore,
 
-    #[cfg_attr(windows, allow(unused))]
     progress: ProgressTracker,
 }
 
@@ -87,6 +83,8 @@ impl CiStopCommandHandler {
             sys::signal::{Signal, kill},
             unistd::Pid,
         };
+
+        use crate::ci::CiError;
 
         let Self {
             store,
