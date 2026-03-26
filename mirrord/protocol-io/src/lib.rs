@@ -230,7 +230,7 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
 
     /// Splits incoming messages on this connection using `splitter`.
     /// For a given message, if `splitter` returns `false`, it will be
-    /// directed to `self`, otherwise into the returned [`Receiver`].
+    /// directed to `self`, otherwise into the returned [`mpsc::Receiver`].
     ///
     /// Works by spawning a background task, and running the filter
     /// function on received messages in it. The receiver in `self` is
