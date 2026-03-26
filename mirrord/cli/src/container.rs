@@ -225,6 +225,7 @@ async fn prepare_proxies<P: Progress>(
 /// 1. Spawns the agent (cluster), mirrord-extproxy (natively), and mirrord-intproxy (sidecar).
 /// 2. Adds additional env, volume, and network to the user container command.
 /// 3. Executes the user container command.
+#[cfg_attr(windows, allow(unused))]
 #[tracing::instrument(level = Level::DEBUG, skip(watch, progress), ret, err(level = Level::DEBUG, Debug))]
 pub(crate) async fn container_command<P: Progress>(
     runtime_args: RuntimeArgs,
@@ -270,7 +271,7 @@ pub(crate) async fn container_command<P: Progress>(
     let extproxy_pid = execution_info.child_id();
 
     let exit_code = match mirrord_for_ci {
-        #[cfg(unix)]
+        #[cfg(not(target_os = "windows"))]
         Some(mirrord_ci) => mirrord_ci
             .prepare_container_command(
                 progress,
@@ -283,12 +284,8 @@ pub(crate) async fn container_command<P: Progress>(
             )
             .await
             .map_err(CliError::from)?,
-        #[cfg(windows)]
+        #[cfg(target_os = "windows")]
         Some(_) => {
-            let _ = sidecar_pid;
-            let _ = sidecar_container;
-            let _ = extproxy_pid;
-
             progress.failure(Some("Command not supported on windows!"));
             return Err(CliError::UnsupportedOnWindows(
                 "BUG: somehow `mirrord ci container` was started on windows! \

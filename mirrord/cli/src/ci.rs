@@ -3,7 +3,7 @@ use std::{
     env::{self, temp_dir},
     path::{Path, PathBuf},
 };
-#[cfg(unix)]
+#[cfg(not(target_os = "windows"))]
 use std::{fs::File, os::unix::process::ExitStatusExt, process::Stdio, time::SystemTime};
 
 use ci_info::types::CiInfo;
@@ -16,10 +16,10 @@ use mirrord_config::{
 };
 use mirrord_operator::{client::OperatorApi, crd::session::SessionCiInfo};
 use mirrord_progress::{Progress, ProgressTracker};
-#[cfg(unix)]
+#[cfg(not(target_os = "windows"))]
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
-#[cfg(unix)]
+#[cfg(not(target_os = "windows"))]
 use tokio::fs::create_dir_all;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Level;
