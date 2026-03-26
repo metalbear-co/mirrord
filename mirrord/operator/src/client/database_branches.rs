@@ -35,7 +35,9 @@ use crate::{
         mysql::{MysqlBranchDatabase, MysqlBranchDatabaseSpec},
         pg::{PgBranchDatabase, PgBranchDatabaseSpec},
     },
-    types::{OPERATOR_ISOLATION_MARKER_ENV, OPERATOR_OWNERSHIP_LABEL},
+    types::{
+        MULTI_CLUSTER_SKIP_SYNC_LABEL, OPERATOR_ISOLATION_MARKER_ENV, OPERATOR_OWNERSHIP_LABEL,
+    },
 };
 
 /// Create MySQL branch databases and wait for their readiness.
@@ -514,7 +516,8 @@ impl DatabaseBranchParams {
     /// Create branch database parameters.
     ///
     /// We generate unique database IDs unless the user explicitly specifies them.
-    pub fn new(config: &DatabaseBranchesConfig, target: &Target) -> Self {
+    /// When `skip_sync` is true, the skip-sync label is set on every CR.
+    pub fn new(config: &DatabaseBranchesConfig, target: &Target, skip_sync: bool) -> Self {
         let mut mongodb = HashMap::new();
         let mut mysql = HashMap::new();
         let mut pg = HashMap::new();
@@ -566,6 +569,19 @@ impl DatabaseBranchParams {
                 params
                     .labels
                     .insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker.clone());
+            }
+        }
+
+        if skip_sync {
+            let label = (MULTI_CLUSTER_SKIP_SYNC_LABEL.to_owned(), "true".to_owned());
+            for params in mongodb.values_mut() {
+                params.labels.insert(label.0.clone(), label.1.clone());
+            }
+            for params in mysql.values_mut() {
+                params.labels.insert(label.0.clone(), label.1.clone());
+            }
+            for params in pg.values_mut() {
+                params.labels.insert(label.0.clone(), label.1.clone());
             }
         }
 
@@ -1095,10 +1111,14 @@ impl UnifiedDatabaseBranchParams {
     ///
     /// When no branch `id` is provided, the session key is used as the branch ID so that
     /// sessions sharing the same key automatically reuse the same branch.
+    ///
+    /// When `skip_sync` is true, the skip-sync label is added to every CR so the
+    /// sync controller on the primary ignores it and the local controller picks it up.
     pub fn new<P: Progress>(
         config: &DatabaseBranchesConfig,
         target: &Target,
         session_key: &str,
+        skip_sync: bool,
         progress: &P,
     ) -> Result<Self, OperatorApiError> {
         let mut target_with_container = target.clone();
@@ -1111,49 +1131,40 @@ impl UnifiedDatabaseBranchParams {
 
         let mut branches = HashMap::new();
         for branch_db_config in config.0.iter() {
-            match branch_db_config {
-                DatabaseBranchConfig::Mongodb(mongodb_config) => {
-                    let id = resolve_branch_id(&mongodb_config.base.id, session_key, progress);
-                    let params = UnifiedBranchParams::from_mongodb(
-                        id.as_ref(),
-                        mongodb_config,
-                        target,
-                        &session_target,
-                    );
-                    branches.insert(id, params);
+            let (id, mut params) = match branch_db_config {
+                DatabaseBranchConfig::Mongodb(c) => {
+                    let id = resolve_branch_id(&c.base.id, session_key, progress);
+                    let p =
+                        UnifiedBranchParams::from_mongodb(id.as_ref(), c, target, &session_target);
+                    (id, p)
                 }
-                DatabaseBranchConfig::Mysql(mysql_config) => {
-                    let id = resolve_branch_id(&mysql_config.base.id, session_key, progress);
-                    let params = UnifiedBranchParams::from_mysql(
-                        id.as_ref(),
-                        mysql_config,
-                        target,
-                        &session_target,
-                    );
-                    branches.insert(id, params);
+                DatabaseBranchConfig::Mysql(c) => {
+                    let id = resolve_branch_id(&c.base.id, session_key, progress);
+                    let p =
+                        UnifiedBranchParams::from_mysql(id.as_ref(), c, target, &session_target);
+                    (id, p)
                 }
-                DatabaseBranchConfig::Pg(pg_config) => {
-                    let id = resolve_branch_id(&pg_config.base.id, session_key, progress);
-                    let params = UnifiedBranchParams::from_pg(
-                        id.as_ref(),
-                        pg_config,
-                        target,
-                        &session_target,
-                    );
-                    branches.insert(id, params);
+                DatabaseBranchConfig::Pg(c) => {
+                    let id = resolve_branch_id(&c.base.id, session_key, progress);
+                    let p = UnifiedBranchParams::from_pg(id.as_ref(), c, target, &session_target);
+                    (id, p)
                 }
-                DatabaseBranchConfig::Mssql(mssql_config) => {
-                    let id = resolve_branch_id(&mssql_config.base.id, session_key, progress);
-                    let params = UnifiedBranchParams::from_mssql(
-                        id.as_ref(),
-                        mssql_config,
-                        target,
-                        &session_target,
-                    );
-                    branches.insert(id, params);
+                DatabaseBranchConfig::Mssql(c) => {
+                    let id = resolve_branch_id(&c.base.id, session_key, progress);
+                    let p =
+                        UnifiedBranchParams::from_mssql(id.as_ref(), c, target, &session_target);
+                    (id, p)
                 }
-                DatabaseBranchConfig::Redis(_) => {}
+                DatabaseBranchConfig::Redis(_) => continue,
             };
+
+            if skip_sync {
+                params.labels.insert(
+                    MULTI_CLUSTER_SKIP_SYNC_LABEL.to_string(),
+                    "true".to_string(),
+                );
+            }
+            branches.insert(id, params);
         }
         Ok(Self { branches })
     }

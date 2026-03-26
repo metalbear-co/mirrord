@@ -1146,7 +1146,7 @@ impl OperatorApi<PreparedClientCert> {
 
     /// Multi-cluster variant of [`should_copy_target`]. The client cannot check
     /// replica count because the target lives on a remote cluster. Instead we
-    /// only look at things we know on the cluster we are conencted to: 
+    /// only look at things we know on the cluster we are conencted to:
     /// explicit opt-in and queue-splitting config.
     fn should_copy_target_mc(&self, config: &LayerConfig) -> bool {
         if config.feature.copy_target.enabled {
@@ -1744,6 +1744,8 @@ impl OperatorApi<PreparedClientCert> {
             .supported_features()
             .contains(&NewOperatorFeature::UnifiedBranchDbCrd);
 
+        let skip_sync = layer_config.multi_cluster == Some(false);
+
         if use_unified_crd {
             let UnifiedDatabaseBranchParams {
                 branches: mut create_params,
@@ -1751,6 +1753,7 @@ impl OperatorApi<PreparedClientCert> {
                 &layer_config.feature.db_branches,
                 &target,
                 layer_config.key.as_str(),
+                skip_sync,
                 &subtask,
             )?;
 
@@ -1809,7 +1812,7 @@ impl OperatorApi<PreparedClientCert> {
                 mongodb: mut create_mongodb_params,
                 mysql: mut create_mysql_params,
                 pg: mut create_pg_params,
-            } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+            } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target, skip_sync);
 
             if let Some(ref ns) = target_ns_annotation {
                 for params in create_pg_params.values_mut() {

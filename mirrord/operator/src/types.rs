@@ -56,3 +56,11 @@ pub const OPERATOR_ISOLATION_MARKER_ENV: &str = "OPERATOR_ISOLATION_MARKER";
 /// Default value for the [`OPERATOR_OWNERSHIP_LABEL`] when
 /// [`OPERATOR_ISOLATION_MARKER_ENV`] is not set.
 pub const DEFAULT_OPERATOR_ISOLATION_MARKER: &str = "mirrord-operator";
+
+/// Label that prevents the sync controller from copying a CR to the default cluster.
+///
+/// When a user forces a single-cluster session (`multi_cluster: false`), the CLI sets
+/// this label on the created CR (e.g. `BranchDatabase`). The sync controller checks for
+/// it and skips the CR, while the local controller (with a matching label selector) picks
+/// it up and handles it on the primary cluster instead.
+pub const MULTI_CLUSTER_SKIP_SYNC_LABEL: &str = "operator.metalbear.co/multi-cluster-skip-sync";
