@@ -1,3 +1,4 @@
+#![cfg_attr(windows, allow(unused))]
 use std::{
     collections::{HashMap, HashSet},
     env::{self, temp_dir},
@@ -191,7 +192,6 @@ impl MirrordCiStore {
     }
 
     /// Removes the [`MirrordCiStore`] file at [`Self::MIRRORD_FOR_CI_TMP_FILE_PATH`].
-    #[cfg_attr(windows, allow(unused))]
     async fn remove_file() -> CiResult<()> {
         match tokio::fs::remove_file(temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH)).await {
             Ok(_) => Ok(()),
@@ -204,7 +204,6 @@ impl MirrordCiStore {
     ///
     /// Used to avoid errors when calling `mirrord ci stop` multiple times, since that command
     /// should've `kill`ed everything already on the 1st run.
-    #[cfg_attr(windows, allow(unused))]
     fn is_empty(&self) -> bool {
         self.intproxy_pids.is_empty()
             && self.extproxy_pids.is_empty()
@@ -223,8 +222,9 @@ pub(super) struct MirrordCi {
     /// Used as the `Credentials` (certificate) for the `mirrord ci` operations.
     ci_api_key: Option<CiApiKey>,
 
-    /// Arguments that are specific to `mirrord ci start`.
-    #[cfg_attr(windows, allow(unused))]
+    /// Arguments for the mirrord for CI operations that involve starting something:
+    /// - `mirrord ci start`
+    /// - `mirrord ci container`
     ci_common_args: CiCommonArgs,
 }
 
@@ -486,7 +486,6 @@ impl MirrordCi {
         }
     }
 
-    #[cfg_attr(windows, allow(unused))]
     #[cfg(target_os = "windows")]
     pub(super) async fn prepare_command<P: Progress>(
         self,
