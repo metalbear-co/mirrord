@@ -5,6 +5,7 @@ use std::{
     fmt,
     io::{self},
     marker::PhantomData,
+    ops::Not,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -254,20 +255,21 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         let (tx_other, rx_other) = mpsc::channel(channel_size);
 
         let mut real_rx = std::mem::replace(&mut self.rx, rx_this);
-        tokio::spawn(async move {
-            while let Some(mut next) = real_rx.recv().await {
-                let destination = if splitter(&mut next) {
-                    &tx_other
-                } else {
-                    &tx_this
-                };
-                if let Err(_err) = destination.send(next).await {
-                    tracing::debug!(
-                        "Receiving Connection object of a redirected Connection has been dropped"
-                    );
+        tokio::spawn(
+            async move {
+                while (tx_this.is_closed() && tx_other.is_closed()).not()
+                    && let Some(mut next) = real_rx.recv().await
+                {
+                    let destination = if splitter(&mut next) {
+                        &tx_other
+                    } else {
+                        &tx_this
+                    };
+                    let _ = destination.send(next).await;
                 }
             }
-        }.instrument(tracing::debug_span!("connection redirector io task")));
+            .instrument(tracing::debug_span!("connection splitter task")),
+        );
 
         rx_other
     }
