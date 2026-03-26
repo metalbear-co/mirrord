@@ -125,6 +125,15 @@ async fn create_config_and_analytics<P: Progress>(
     Ok((config, analytics))
 }
 
+#[derive(Debug)]
+struct PreparedProxies {
+    runtime_command: RuntimeCommandBuilder,
+    execution_info: MirrordExecution,
+    tls_setup: Option<SecureChannelSetup>,
+    sidecar_pid: Option<u32>,
+    sidecar_container: MirrordCiManagedContainer,
+}
+
 /// Makes the agent connection, spawns the native `mirrord-extproxy` process,
 /// and starts the `mirrord-intproxy` sidecar container.
 ///
@@ -139,13 +148,7 @@ async fn prepare_proxies<P: Progress>(
     config: &mut LayerConfig,
     runtime: ContainerRuntime,
     mirrord_for_ci: Option<&MirrordCi>,
-) -> CliResult<(
-    RuntimeCommandBuilder,
-    MirrordExecution,
-    Option<SecureChannelSetup>,
-    Option<u32>,
-    MirrordCiManagedContainer,
-)> {
+) -> CliResult<PreparedProxies> {
     let tls_setup = config
         .external_proxy
         .tls_enable
@@ -211,13 +214,13 @@ async fn prepare_proxies<P: Progress>(
         &sidecar_intproxy_address.to_string(),
     );
 
-    Ok((
+    Ok(PreparedProxies {
         runtime_command,
         execution_info,
         tls_setup,
         sidecar_pid,
         sidecar_container,
-    ))
+    })
 }
 
 /// Main entry point for the `mirrord container` command.
@@ -253,15 +256,20 @@ pub(crate) async fn container_command<P: Progress>(
 
     adjust_container_config_for_wsl(runtime_args.runtime, &mut config);
 
-    let (runtime_command, execution_info, _tls_setup, sidecar_pid, sidecar_container) =
-        prepare_proxies(
-            &mut analytics,
-            progress,
-            &mut config,
-            runtime_args.runtime,
-            mirrord_for_ci.as_ref(),
-        )
-        .await?;
+    let PreparedProxies {
+        runtime_command,
+        execution_info,
+        tls_setup: _,
+        sidecar_pid,
+        sidecar_container,
+    } = prepare_proxies(
+        &mut analytics,
+        progress,
+        &mut config,
+        runtime_args.runtime,
+        mirrord_for_ci.as_ref(),
+    )
+    .await?;
 
     let (binary, binary_args) = runtime_command
         .with_command(runtime_args.command)
@@ -359,15 +367,20 @@ pub async fn container_ext_command<P: Progress>(
 
     adjust_container_config_for_wsl(container_runtime, &mut config);
 
-    let (runtime_command, execution_info, _tls_setup, _sidecar_pid, _sidecar_container) =
-        prepare_proxies(
-            &mut analytics,
-            progress,
-            &mut config,
-            container_runtime,
-            mirrord_for_ci.as_ref(),
-        )
-        .await?;
+    let PreparedProxies {
+        runtime_command,
+        execution_info,
+        tls_setup: _,
+        sidecar_pid: _,
+        sidecar_container: _,
+    } = prepare_proxies(
+        &mut analytics,
+        progress,
+        &mut config,
+        container_runtime,
+        mirrord_for_ci.as_ref(),
+    )
+    .await?;
 
     let output = serde_json::to_string(&runtime_command.into_command_extension_params())?;
     progress.success(Some(&output));
