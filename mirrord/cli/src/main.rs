@@ -345,6 +345,7 @@ use verify_config::verify_config;
 
 use crate::{
     ci::{MirrordCi, ci_api_key_available},
+    config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
     newsletter::suggest_newsletter_signup,
     user_data::UserData,
     util::{apply_test_env_overrides, get_user_git_branch},
@@ -1002,10 +1003,12 @@ fn main() -> miette::Result<()> {
                     let ci_args = CiArgs {
                         command: CiCommand::Start(Box::new(CiStartArgs {
                             exec_args: args,
-                            foreground: true,
-                            environment: None,
-                            pipeline: None,
-                            triggered_by: None,
+                            ci_common_args: CiCommonArgs {
+                                foreground: true,
+                                environment: None,
+                                pipeline: None,
+                                triggered_by: None,
+                            },
                         })),
                     };
                     windows_unsupported!(args, "ci", {
