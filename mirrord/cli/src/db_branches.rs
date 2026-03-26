@@ -182,8 +182,99 @@ impl From<MongodbBranchDatabase> for BranchInfo {
 pub async fn db_branches_command(args: DbBranchesArgs) -> CliResult<()> {
     match &args.command {
         DbBranchesCommand::Status { names } => status_command(&args, names.as_slice()).await,
+        DbBranchesCommand::Connections => connections_command().await,
         DbBranchesCommand::Destroy { all, names } => destroy_command(&args, *all, names).await,
     }
+}
+
+async fn connections_command() -> CliResult<()> {
+    let pf_dir = portforward_session_dir();
+
+    let mut entries = match tokio::fs::read_dir(&pf_dir).await {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            println!("No active portforward sessions.");
+            return Ok(());
+        }
+        Err(err) => {
+            tracing::warn!(?err, "failed to read portforward session directory");
+            println!("No active portforward sessions.");
+            return Ok(());
+        }
+    };
+
+    let mut table = Table::new();
+    table.add_row(row!["DB ID", "LOCAL ADDRESS", "KEY", "SESSION ID"]);
+    let mut has_rows = false;
+
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+
+        let pid: u32 = match path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.parse().ok())
+        {
+            Some(pid) => pid,
+            None => continue,
+        };
+
+        // Check if the process is still alive.
+        if !is_pid_alive(pid) {
+            // Stale file, clean it up.
+            let _ = tokio::fs::remove_file(&path).await;
+            continue;
+        }
+
+        let contents = match tokio::fs::read(&path).await {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let session: PortforwardSession = match serde_json::from_slice(&contents) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+
+        for pf in &session.portforwards {
+            table.add_row(row![
+                pf.db_id,
+                pf.local_addr,
+                session.key,
+                format!("{:X}", session.session_id)
+            ]);
+            has_rows = true;
+        }
+    }
+
+    if has_rows {
+        table.printstd();
+    } else {
+        println!("No active portforward sessions.");
+    }
+
+    Ok(())
+}
+
+#[cfg(unix)]
+fn is_pid_alive(pid: u32) -> bool {
+    use nix::{sys::signal::kill, unistd::Pid};
+
+    match kill(Pid::from_raw(pid as i32), None) {
+        Ok(()) => true,
+        Err(nix::errno::Errno::ESRCH) => false,
+        // EPERM means the process exists but we can't signal it.
+        Err(_) => true,
+    }
+}
+
+#[cfg(windows)]
+fn is_pid_alive(pid: u32) -> bool {
+    // AI slop
+    std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+        .unwrap_or(false)
 }
 
 fn get_api<T: Resource<DynamicType = (), Scope = NamespaceResourceScope>>(
