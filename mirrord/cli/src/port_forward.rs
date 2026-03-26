@@ -1400,9 +1400,9 @@ mod test {
                     let position = expected_data
                         .iter()
                         .position(|(cid, pl)| connection_id == *cid && bytes == pl)
-                        .expect(&format!(
-                            "Unexpected message received from portforwarder: {msg:?}"
-                        ));
+                        .unwrap_or_else(|| {
+                            panic!("Unexpected message received from portforwarder: {msg:?}")
+                        });
                     expected_data.swap_remove(position);
                 }
                 other => panic!("Unexpected message received from portforwarder: {other:?}"),
