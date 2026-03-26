@@ -583,7 +583,7 @@ where
     }
 
     /// Check the operator supports all the operator features required by the user's configuration.
-    fn check_feature_support(&self, layer_config: &LayerConfig) -> OperatorApiResult<()> {
+    pub fn check_feature_support(&self, layer_config: &LayerConfig) -> OperatorApiResult<()> {
         if layer_config.feature.copy_target.enabled {
             self.operator
                 .spec
@@ -1601,7 +1601,7 @@ impl OperatorApi<PreparedClientCert> {
     /// 2. Create new ones if any missing.
     /// 3. Wait for all new databases to be ready.
     #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
-    async fn prepare_branch_dbs<P: Progress>(
+    pub async fn prepare_branch_dbs<P: Progress>(
         &self,
         layer_config: &LayerConfig,
         progress: &P,
