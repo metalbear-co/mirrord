@@ -10,15 +10,16 @@
 //! The proxy will either directly connect to an existing agent (currently only used for tests),
 //! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
 
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStrExt;
 use std::{
     collections::{HashMap, HashSet},
     env, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    ops::Not,
     sync::Arc,
     time::Duration,
 };
-#[cfg(not(target_os = "windows"))]
-use std::{ops::Not, os::unix::ffi::OsStrExt};
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::{
