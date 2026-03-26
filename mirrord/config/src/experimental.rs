@@ -174,8 +174,11 @@ pub struct ExperimentalConfig {
     /// Extract pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses
     /// them in place of SIP-patching the originals.
     /// This shouldn't be used unless someone from MetalBear/mirrord tells you to.
-    #[config(default = false)]
-    pub sip_utils: bool,
+    ///
+    /// Defaults to `true` in OSS.
+    /// Defaults to `false` in mfT.
+    #[config(default = None)]
+    pub sip_utils: Option<bool>,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -202,7 +205,9 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("latency_transmit_delay", self.latency.transmit_delay);
         analytics.add("latency_receive_delay", self.latency.receive_delay);
         analytics.add("applev", self.applev.is_some());
-        analytics.add("sip_utils", self.sip_utils);
+        if let Some(sip_utils) = self.sip_utils {
+            analytics.add("sip_utils", sip_utils);
+        }
     }
 }
 
