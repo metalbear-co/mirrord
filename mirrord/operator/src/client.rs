@@ -632,6 +632,12 @@ where
                 .require_feature(NewOperatorFeature::SqsQueueSplittingWithJqFilter)?;
         }
 
+        if layer_config.feature.split_queues.rmq().next().is_some() {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::RmqQueueSplitting)?;
+        }
+
         Ok(())
     }
 
