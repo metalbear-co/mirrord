@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-03-20T00:00:00.000Z
+lastmod: 2026-03-26T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -652,9 +652,12 @@ Useful for seeing the state of SIP when `stdout` may be affected by another proc
 
 ### _experimental_ sip_utils {#experimental-sip_utils}
 
-Downloads pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses
+Extract pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses
 them in place of SIP-patching the originals.
 This shouldn't be used unless someone from MetalBear/mirrord tells you to.
+
+Defaults to `true` in OSS.
+Defaults to `false` in mfT.
 
 ### _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
 
@@ -988,45 +991,98 @@ Users can choose from the following copy mode to bootstrap their MongoDB branch 
   Copies both schema and data of all collections. Supports optional collection filters
   to copy only specific collections or filter documents within collections.
 
-Configuration for copying a specific collection.
+When configuring a branch for MSSQL, set `type` to `mssql`.
 
-Example:
+MySQL and Postgres database branch config objects share the following fields.
 
+#### feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}
+
+`connection` describes how to get the connection information to the source database.
+When the branch database is ready for use, Mirrord operator will replace the connection
+information with the branch database's.
+
+Different ways of connecting to the source database.
+
+Accepts three formats:
+
+Legacy URL (backward compatible):
 ```json
-{
-  "users": {
-    "filter": "{\"name\": {\"$in\": [\"alice\", \"bob\"]}}"
-  },
-  "orders": {
-    "filter": "{\"created_at\": {\"$gt\": 1759948761}}"
-  }
-}
+{ "url": { "type": "env", "variable": "DB_CONNECTION_URL" } }
 ```
 
-With the config above, only alice and bob from the `users` collection and orders
-created after the given timestamp will be copied.
-
-A MongoDB query filter in JSON format. Documents matching this filter will be copied.
-
-Configuration for copying a specific collection.
-
-Example:
-
+Flat URL:
 ```json
-{
-  "users": {
-    "filter": "{\"name\": {\"$in\": [\"alice\", \"bob\"]}}"
-  },
-  "orders": {
-    "filter": "{\"created_at\": {\"$gt\": 1759948761}}"
-  }
-}
+{ "type": "env", "url": "DB_CONNECTION_URL" }
 ```
 
-With the config above, only alice and bob from the `users` collection and orders
-created after the given timestamp will be copied.
+Individual connection params:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
+```
 
-A MongoDB query filter in JSON format. Documents matching this filter will be copied.
+Individual connection params with password from a Kubernetes Secret:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
+```
+
+The type of environment variable source for connection params.
+
+Connection parameters specified as individual environment variable names.
+The `type` field is optional - when omitted, the operator auto-detects
+whether the variable comes from `env` or `envFrom` on the target pod.
+
+Individual database connection parameter sources.
+At least one parameter must be specified.
+Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
+
+The type of environment variable source for connection params.
+
+#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
+
+The timeout in seconds to wait for a database branch to become ready after creation.
+Defaults to 60 seconds. Adjust this value based on your database size and cluster
+performance.
+
+#### feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}
+
+Users can choose to specify a unique `id`. This is useful for reusing or sharing
+the same database branch among Kubernetes users.
+
+#### feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}
+
+When source database connection detail is not accessible to mirrord operator, users
+can specify the database `name` so it is included in the connection options mirrord
+uses as the override.
+
+#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}
+
+Mirrord operator starts counting the TTL when a branch is no longer used by any session.
+The time-to-live (TTL) for the branch database is set to 300 seconds by default.
+Users can set `ttl_secs` to customize this value according to their need. Please note
+that longer TTL paired with frequent mirrord session turnover can result in increased
+resource usage. For this reason, branch database TTL caps out at 15 min.
+
+#### feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}
+
+Mirrord operator uses a default version of the database image unless `version` is given.
+
+Users can choose from the following copy mode to bootstrap their MSSQL branch database:
+
+- Empty
+
+  Creates an empty database. If the source DB connection options are found from the chosen
+  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord
+  operator looks for the `name` field from the branch DB config object. This option is useful
+  for users that run DB migrations themselves before starting the application.
+
+- Schema
+
+  Creates an empty database and copies schema of all tables.
+
+- All
+
+  Copies both schema and data of all tables. This option shall only be used
+  when the data volume of the source database is minimal.
 
 When configuring a branch for MySQL, set `type` to `mysql`.
 
@@ -1121,44 +1177,6 @@ Users can choose from the following copy mode to bootstrap their MySQL branch da
   Copies both schema and data of all tables. This option shall only be used
   when the data volume of the source database is minimal.
 
-In addition to copying an empty database or all tables' schema, mirrord operator
-will copy data from the source DB when an array of table configs are specified.
-
-Example:
-
-```json
-{
-  "users": {
-    "filter": "my_db.users.name = 'alice' OR my_db.users.name = 'bob'"
-  },
-  "orders": {
-    "filter": "my_db.orders.created_at > 1759948761"
-  }
-}
-```
-
-With the config above, only alice and bob from the `users` table and orders
-created after the given timestamp will be copied.
-
-In addition to copying an empty database or all tables' schema, mirrord operator
-will copy data from the source DB when an array of table configs are specified.
-
-Example:
-
-```json
-{
-  "users": {
-    "filter": "my_db.users.name = 'alice' OR my_db.users.name = 'bob'"
-  },
-  "orders": {
-    "filter": "my_db.orders.created_at > 1759948761"
-  }
-}
-```
-
-With the config above, only alice and bob from the `users` table and orders
-created after the given timestamp will be copied.
-
 When configuring a branch for PostgreSQL, set `type` to `pg`.
 
 MySQL and Postgres database branch config objects share the following fields.
@@ -1252,45 +1270,11 @@ Users can choose from the following copy mode to bootstrap their PostgreSQL bran
   Copies both schema and data of all tables. This option shall only be used
   when the data volume of the source database is minimal.
 
-In addition to copying an empty database or all tables' schema, mirrord operator
-will copy data from the source DB when an array of table configs are specified.
-
-Example:
-
-```json
-{
-  "users": {
-    "filter": "name = 'alice' OR name = 'bob'"
-  },
-  "orders": {
-    "filter": "created_at > '2025-01-01'"
-  }
-}
-```
-
-With the config above, only alice and bob from the `users` table and orders
-created after the given timestamp will be copied.
-
-In addition to copying an empty database or all tables' schema, mirrord operator
-will copy data from the source DB when an array of table configs are specified.
-
-Example:
-
-```json
-{
-  "users": {
-    "filter": "name = 'alice' OR name = 'bob'"
-  },
-  "orders": {
-    "filter": "created_at > '2025-01-01'"
-  }
-}
-```
-
-With the config above, only alice and bob from the `users` table and orders
-created after the given timestamp will be copied.
-
 #### feature.db_branches[].iam_auth (type: pg) {#feature-db_branches-pg-iam_auth}
+
+IAM authentication for the source database.
+Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication
+instead of password-based authentication.
 
 IAM authentication for the source database.
 Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication
