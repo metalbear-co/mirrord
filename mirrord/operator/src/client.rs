@@ -40,7 +40,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use tokio_tungstenite::tungstenite;
 use tower::{buffer::BufferLayer, retry::RetryLayer};
-use tracing::Level;
+use tracing::{Level, instrument::WithSubscriber};
 
 use crate::{
     client::database_branches::{
@@ -148,6 +148,12 @@ pub struct OperatorSession {
     /// OpenTelemetry (OTel) / W3C baggage propagator.
     /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
     baggage: Option<String>,
+}
+
+impl OperatorSession {
+    pub fn id(&self) -> u64 {
+        self.id
+    }
 }
 
 impl fmt::Debug for OperatorSession {

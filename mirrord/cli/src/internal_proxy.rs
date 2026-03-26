@@ -123,6 +123,12 @@ pub(crate) async fn proxy(
     };
     (&config).collect_analytics(analytics.get_mut());
 
+    let operator_session_id = if let AgentConnectInfo::Operator(session) = &agent_connect_info {
+        Some(session.id())
+    } else {
+        None
+    };
+
     // The agent is spawned and our parent process already established a connection.
     // However, the parent process (`exec` or `ext` command) is free to exec/exit as soon as it
     // reads the TCP listener address from our stdout. We open our own connection with the agent
@@ -132,7 +138,9 @@ pub(crate) async fn proxy(
     let mut agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
 
     if config.feature.db_branches.is_empty().not() {
-        setup_db_portforwards(&config.feature.db_branches, &mut agent_conn)
+        let session_id = operator_session_id
+            .expect("Have DB branches but not using operator connection. This should have been caught earlier.");
+        setup_db_portforwards(&config.feature.db_branches, &mut agent_conn, session_id)
             .await
             .map_err(InternalProxyError::DbBranchPortforwardsFailed)?;
     }
@@ -237,13 +245,20 @@ pub(crate) async fn connect_and_ping(
 async fn setup_db_portforwards(
     config: &DatabaseBranchesConfig,
     conn: &mut AgentConnection,
+    session_id: u64,
+    key: String,
 ) -> Result<(), String> {
-    let mut required_envs = HashSet::new();
+    let mut portforwards = HashSet::new();
 
     #[derive(PartialEq, Eq, Hash, Clone, Debug)]
-    enum Portforward {
+    enum Envs {
         Url(String),
         Params { host: String, port: String },
+    }
+
+    struct Pf {
+        envs: Envs,
+        db_id: String,
     }
 
     for branch in config.iter() {
@@ -253,19 +268,17 @@ async fn setup_db_portforwards(
             DatabaseBranchConfig::Pg(db) => &db.base,
             DatabaseBranchConfig::Redis(_) => unimplemented!("Havent done redis yet"),
         };
-        match &base.connection {
+        let envs = match &base.connection {
             ConnectionSource::Url { url } => match url {
                 TargetEnvironmentVariableSource::Env { variable, .. }
                 | TargetEnvironmentVariableSource::EnvFrom { variable, .. } => {
-                    required_envs.insert(Portforward::Url(variable.clone()));
+                    Envs::Url(variable.clone())
                 }
                 TargetEnvironmentVariableSource::Secret { name, key } => {
-                    required_envs.insert(Portforward::Url(secret_env_var_name(&name, &key)));
+                    Envs::Url(secret_env_var_name(&name, &key))
                 }
             },
-            ConnectionSource::FlatUrl { url, .. } => {
-                required_envs.insert(Portforward::Url(url.clone()));
-            }
+            ConnectionSource::FlatUrl { url, .. } => Envs::Url(url.clone()),
             ConnectionSource::Params(config) => {
                 let ConnectionParamsVars {
                     host: Some(host),
@@ -276,19 +289,23 @@ async fn setup_db_portforwards(
                     continue;
                 };
 
-                required_envs.insert(Portforward::Params {
+                Envs::Params {
                     host: host.as_variable().into_owned(),
                     port: port.as_variable().into_owned(),
-                });
+                }
             }
         };
+        portforwards.insert(Pf {
+            envs,
+            db_id: base.id
+        })
     }
-    let env_vars_select = required_envs
+    let env_vars_select = portforwards
         .iter()
         .cloned()
         .flat_map(|e| match e {
-            Portforward::Url(u) => [Some(u), None],
-            Portforward::Params { host, port } => [Some(host), Some(port)],
+            Envs::Url(u) => [Some(u), None],
+            Envs::Params { host, port } => [Some(host), Some(port)],
         })
         .flatten()
         .collect();
@@ -310,9 +327,9 @@ async fn setup_db_portforwards(
     };
 
     let localhost_ephemeral_port = (Ipv6Addr::UNSPECIFIED, 0).into();
-    let port_mappings = required_envs.into_iter().filter_map(|pf| -> Option<_> {
+    let port_mappings = portforwards.into_iter().filter_map(|pf| -> Option<_> {
         match pf {
-            Portforward::Url(url) => {
+            Envs::Url(url) => {
                 let url = url
                     .parse::<Url>()
                     .inspect_err(|e| tracing::warn!(?e, env_var = %url, "failed to parse url for db branch connection string, portforward will not be made"))
@@ -330,7 +347,7 @@ async fn setup_db_portforwards(
 
                 Some((host, port))
             },
-            Portforward::Params { host, port } => {
+            Envs::Params { host, port } => {
                 let port: u16 = vars
                     .get(&port)?
                     .parse()
