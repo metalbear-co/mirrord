@@ -13,7 +13,7 @@ use std::{
 };
 
 use futures::StreamExt;
-use k8s_openapi::chrono::Utc;
+use k8s_openapi::jiff::Timestamp;
 use kube::{
     Api, ResourceExt,
     api::{DeleteParams, ListParams, ObjectMeta, PostParams},
@@ -420,7 +420,10 @@ async fn preview_status(
                             .status
                             .as_ref()
                             .and_then(|s| s.expires_at.as_ref())
-                            .and_then(|expires_at| (expires_at.0 - Utc::now()).to_std().ok())
+                            .and_then(|expires_at| {
+                                Duration::try_from(expires_at.0.duration_since(Timestamp::now()))
+                                    .ok()
+                            })
                             .map(|d| Duration::from_secs(d.as_secs()));
                         match remaining {
                             Some(d) => {

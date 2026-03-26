@@ -17,7 +17,7 @@ use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 use mirrord_protocol_io::{Client, Connection};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{
-    MIRRORD_BINARIES_DIR_PATH_BUF, SipError, SipPatchOptions, download_sip_binaries, sip_patch,
+    MIRRORD_BINARIES_DIR_PATH_BUF, SipError, SipPatchOptions, extract_sip_binaries, sip_patch,
 };
 use mirrord_tls_util::SecureChannelSetup;
 use semver::Version;
@@ -42,6 +42,10 @@ use crate::{
     extract::extract_library,
     util::{get_user_git_branch, remove_proxy_env},
 };
+
+#[cfg(target_os = "macos")]
+const COMPRESSED_SIP_BINARIES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/apple-utils.tar.gz"));
 
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
@@ -280,8 +284,8 @@ impl MirrordExecution {
                             args,
                             load_type: None,
                         });
-                if config.experimental.sip_utils {
-                    download_sip_binaries().await?;
+                if config.experimental.sip_utils.unwrap_or_default() {
+                    extract_sip_binaries(&MIRRORD_BINARIES_DIR_PATH_BUF, COMPRESSED_SIP_BINARIES)?;
                 }
 
                 executable
@@ -298,6 +302,7 @@ impl MirrordExecution {
                                 sip_binaries_dir: config
                                     .experimental
                                     .sip_utils
+                                    .unwrap_or_default()
                                     .then(|| MIRRORD_BINARIES_DIR_PATH_BUF.as_path()),
                             },
                             log_info,
@@ -472,7 +477,7 @@ impl MirrordExecution {
                 "invalid {MIRRORD_TEST_INTPROXY_ADDR} value: {e}"
             ))
         })?;
-        warn!("{MIRRORD_TEST_INTPROXY_ADDR} was set, Using existing intproxy {intproxy_address}");
+        debug!("{MIRRORD_TEST_INTPROXY_ADDR} was set, Using existing intproxy {intproxy_address}");
 
         let mut env_vars: HashMap<String, String> = Default::default();
         env_vars.insert(LayerConfig::RESOLVED_CONFIG_ENV.into(), config.encode()?);

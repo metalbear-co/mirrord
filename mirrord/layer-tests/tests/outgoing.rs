@@ -1,19 +1,93 @@
 #![warn(clippy::indexing_slicing)]
 
-use std::{net::SocketAddr, path::Path, time::Duration};
+use std::{
+    net::{Ipv4Addr, SocketAddr},
+    path::Path,
+    time::Duration,
+};
 
+#[cfg(unix)]
+use mirrord_protocol::outgoing::udp::{DaemonUdpOutgoing, LayerUdpOutgoing};
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
     outgoing::{
-        DaemonRead, LayerWrite,
+        DaemonRead, LayerConnectV2, LayerWrite, SocketAddress,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
 };
 use rstest::rstest;
 
 mod common;
-
 pub use common::*;
+use tokio::net::TcpListener;
+
+// TODO: add a test for when DNS lookup is unsuccessful, to make sure the layer returns a valid
+//      error to the user application.
+
+/// Test outgoing UDP.
+/// Application, for each remote peer in [`RUST_OUTGOING_PEERS`]:
+/// 1. Opens a UDP port at [`RUST_OUTGOING_LOCAL`]
+/// 2. Connects to the remote peer
+/// 3. Sends some data
+/// 4. Expects the peer to send the same data back
+/// Note: windows excluded because UDP recvfrom hook not yet implemented (WIN-82)
+#[cfg(unix)]
+#[rstest]
+#[tokio::test]
+#[timeout(Duration::from_secs(15))]
+async fn outgoing_udp() {
+    let (mut test_process, mut intproxy) = Application::RustOutgoingUdp
+        .start_process(vec![], None)
+        .await;
+
+    let peers = RUST_OUTGOING_PEERS
+        .split(',')
+        .map(|s| s.parse::<SocketAddr>().unwrap())
+        .collect::<Vec<_>>();
+
+    for (connection_id, peer) in peers.into_iter().enumerate() {
+        let connection_id = connection_id as u64;
+
+        let (uid, addr) = intproxy.recv_udp_connect().await;
+        assert_eq!(addr, peer);
+        intproxy
+            .send_udp_connect_ok(
+                uid,
+                connection_id,
+                addr,
+                RUST_OUTGOING_LOCAL.parse().unwrap(),
+            )
+            .await;
+
+        let msg = intproxy.recv().await;
+        let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
+            connection_id: response_connection_id,
+            bytes,
+        })) = msg
+        else {
+            panic!("Invalid message received from layer: {msg:?}");
+        };
+
+        assert_eq!(response_connection_id, connection_id);
+
+        intproxy
+            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
+                DaemonRead {
+                    connection_id,
+                    bytes,
+                },
+            ))))
+            .await;
+
+        intproxy
+            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(
+                connection_id,
+            )))
+            .await;
+    }
+
+    test_process.wait_assert_success().await;
+}
 
 /// Test outgoing TCP.
 /// Application, for each remote peer in [`RUST_OUTGOING_PEERS`]:
@@ -101,4 +175,125 @@ async fn outgoing_tcp_from_the_local_app_broken(
     config_dir: &Path,
 ) {
     outgoing_tcp_logic(with_config, config_dir).await;
+}
+
+/// Tests that outgoing connections are properly handled on sockets that were bound by the user
+/// application.
+/// Note: windows-excluded because dependancy Application::RustIssue2438 is unix only
+#[cfg(unix)]
+#[rstest]
+#[tokio::test]
+#[timeout(Duration::from_secs(25))]
+async fn outgoing_tcp_bound_socket() {
+    let (mut test_process, mut intproxy) =
+        Application::RustIssue2438.start_process(vec![], None).await;
+
+    let expected_peer_address = "1.1.1.1:4567".parse::<SocketAddr>().unwrap();
+
+    // Test apps runs logic twice for 2 bind addresses.
+    for _ in 0..2 {
+        let (uid, addr) = intproxy.recv_tcp_connect().await;
+        assert_eq!(addr, expected_peer_address);
+        intproxy
+            .send_tcp_connect_ok(uid, 0, addr, "1.2.3.4:6000".parse().unwrap())
+            .await;
+
+        let msg = intproxy.recv().await;
+        let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
+            connection_id: 0,
+            bytes,
+        })) = msg
+        else {
+            panic!("Invalid message received from layer: {msg:?}");
+        };
+
+        intproxy
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
+                DaemonRead {
+                    connection_id: 0,
+                    bytes,
+                },
+            ))))
+            .await;
+
+        intproxy
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(0)))
+            .await;
+    }
+
+    test_process.wait_assert_success().await;
+}
+
+/// Verifies that issue <https://github.com/metalbear-co/mirrord/issues/3212> is fixed.
+#[rstest]
+#[tokio::test]
+#[timeout(Duration::from_secs(15))]
+async fn outgoing_tcp_high_port() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener_addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _conn = listener.accept().await;
+        std::future::pending::<()>().await;
+    });
+    assert!(
+        listener_addr.port() >= 1000,
+        "should be a high port: {listener_addr}"
+    );
+
+    let peers = [
+        // Should be bypassed as a debugger port.
+        // The listener will accept the connection in the background task we spawn above.
+        listener_addr,
+        // This should be remote, even though it's localhost,
+        // and the port is in the debugger ports range.
+        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 50000),
+        // This should be remote, even though it's localhost,
+        // and the port is in the debugger ports range.
+        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 50001),
+        // This should be remote, because the `outgoing.ignore_localhost` is `false` by default.
+        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 80),
+    ];
+
+    let (mut test_process, mut intproxy) = Application::NodeMakeConnections
+        .start_process(
+            vec![
+                ("TO_HOSTS", &peers.map(|p| p.to_string()).join(",")),
+                ("MIRRORD_IGNORE_DEBUGGER_PORTS", "1000-65535"),
+            ],
+            None,
+        )
+        .await;
+
+    let mut got_connect_requests = 0;
+
+    while got_connect_requests < 3 {
+        let (addr, uid) = match intproxy.recv().await {
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
+                remote_address: SocketAddress::Ip(addr),
+                uid,
+            })) => (addr, uid),
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(..)) => continue,
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(..)) => continue,
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(..)) => continue,
+            other => panic!("Received an unexpected message from the test app: {other:?}"),
+        };
+
+        assert!(
+            addr == peers[1] || addr == peers[2] || addr == peers[3],
+            "Receved a connect request for an unexpected host: {addr}"
+        );
+
+        got_connect_requests += 1;
+
+        intproxy
+            .send_tcp_connect_ok(
+                uid,
+                got_connect_requests,
+                addr,
+                "127.0.0.1:0".parse().unwrap(),
+            )
+            .await;
+    }
+
+    test_process.wait_assert_success().await;
 }

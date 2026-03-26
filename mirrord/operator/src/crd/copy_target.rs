@@ -65,6 +65,6 @@ impl CopyTargetStatus {
 /// Generates a dummy schema for [`CopyTargetSpec::split_queues`].
 ///
 /// The original schema is invalid per CRD standards.
-fn split_queues_schema(generator: &mut schemars::SchemaGenerator) -> schemars::schema::Schema {
+fn split_queues_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
     Option::<BTreeMap<String, serde_json::Value>>::json_schema(generator)
 }

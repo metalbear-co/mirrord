@@ -324,7 +324,8 @@ mod traffic_tests {
 
     /// Very similar to [`outgoing_traffic_udp_with_connect`], but it uses the outgoing traffic
     /// filter to resolve the remote host names.
-    #[cfg_attr(not(feature = "job"), ignore)]
+    /// Note: Windows excluded due to change in dns resolution behavior, should be fixed in WIN-94
+    #[cfg_attr(any(not(feature = "job"), windows), ignore)]
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(240))]
