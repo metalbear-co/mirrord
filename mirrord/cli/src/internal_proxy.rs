@@ -11,7 +11,7 @@
 //! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     env, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6},
     sync::Arc,
@@ -32,6 +32,8 @@ use mirrord_intproxy::{
     IntProxy,
     agent_conn::{AgentConnectInfo, AgentConnection},
 };
+use mirrord_operator::client::database_branches::resolve_branch_id;
+use mirrord_progress::NullProgress;
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, GetEnvVarsRequest, LogLevel, LogMessage,
     outgoing::tcp::DaemonTcpOutgoing,
@@ -49,6 +51,7 @@ use crate::util::detach_io;
 use crate::{
     config::RemoteAddr,
     connection::AGENT_CONNECT_INFO_ENV_KEY,
+    db_branches::{Portforward, PortforwardSession, portforward_session_dir},
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     port_forward,
@@ -140,9 +143,14 @@ pub(crate) async fn proxy(
     if config.feature.db_branches.is_empty().not() {
         let session_id = operator_session_id
             .expect("Have DB branches but not using operator connection. This should have been caught earlier.");
-        setup_db_portforwards(&config.feature.db_branches, &mut agent_conn, session_id)
-            .await
-            .map_err(InternalProxyError::DbBranchPortforwardsFailed)?;
+        setup_db_portforwards(
+            &config.feature.db_branches,
+            &mut agent_conn,
+            session_id,
+            config.key.as_str(),
+        )
+        .await
+        .map_err(InternalProxyError::DbBranchPortforwardsFailed)?;
     }
 
     // Let it assign address for us then print it for the user.
@@ -246,26 +254,29 @@ async fn setup_db_portforwards(
     config: &DatabaseBranchesConfig,
     conn: &mut AgentConnection,
     session_id: u64,
-    key: String,
+    key: &str,
 ) -> Result<(), String> {
     let mut portforwards = HashSet::new();
 
-    #[derive(PartialEq, Eq, Hash, Clone, Debug)]
+    #[derive(PartialEq, Eq, Hash, Debug, Clone)]
     enum Envs {
         Url(String),
         Params { host: String, port: String },
     }
 
+    #[derive(PartialEq, Eq, Hash, Debug)]
     struct Pf {
         envs: Envs,
         db_id: String,
     }
 
+    // Extract out the envs we want to fetch
     for branch in config.iter() {
         let base = match branch {
             DatabaseBranchConfig::Mongodb(db) => &db.base,
             DatabaseBranchConfig::Mysql(db) => &db.base,
             DatabaseBranchConfig::Pg(db) => &db.base,
+            DatabaseBranchConfig::Mssql(db) => &db.base,
             DatabaseBranchConfig::Redis(_) => unimplemented!("Havent done redis yet"),
         };
         let envs = match &base.connection {
@@ -295,21 +306,19 @@ async fn setup_db_portforwards(
                 }
             }
         };
-        portforwards.insert(Pf {
-            envs,
-            db_id: base.id
-        })
+        let db_id = resolve_branch_id(&base.id, key, &NullProgress).into();
+        portforwards.insert(Pf { envs, db_id });
     }
     let env_vars_select = portforwards
         .iter()
-        .cloned()
-        .flat_map(|e| match e {
+        .flat_map(|pf| match pf.envs.clone() {
             Envs::Url(u) => [Some(u), None],
             Envs::Params { host, port } => [Some(host), Some(port)],
         })
         .flatten()
         .collect();
 
+    // Fetch envs
     conn.connection
         .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
             env_vars_filter: Default::default(),
@@ -326,9 +335,9 @@ async fn setup_db_portforwards(
         None => return Err("Agent connection dropped unexpectedly".into()),
     };
 
-    let localhost_ephemeral_port = (Ipv6Addr::UNSPECIFIED, 0).into();
-    let port_mappings = portforwards.into_iter().filter_map(|pf| -> Option<_> {
-        match pf {
+    // Build db_id, host, port mappings from the envs
+    let port_mappings: HashMap<_, _> = portforwards.into_iter().filter_map(|pf| -> Option<_> {
+        let (host, port) = match pf.envs {
             Envs::Url(url) => {
                 let url = url
                     .parse::<Url>()
@@ -345,7 +354,7 @@ async fn setup_db_portforwards(
 
                 let port = url.port()?;
 
-                Some((host, port))
+                (host, port)
             },
             Envs::Params { host, port } => {
                 let port: u16 = vars
@@ -361,16 +370,16 @@ async fn setup_db_portforwards(
                     .map(RemoteAddr::Ip)
                     .unwrap_or_else(|_| RemoteAddr::Hostname(host.to_owned()));
 
-                Some((host, port))
+                (host, port)
             }
-        }
-    })
-    .map(|rmt| (localhost_ephemeral_port, rmt))
-    .collect();
+        };
+        Some(((host, port), pf.db_id))
+    }).collect();
 
     let connections_state = Arc::new(port_forward::ConnectionsState::default());
     let connections_state_2 = Arc::clone(&connections_state);
 
+    // Split agent connection, redirect relevant messages to portforwarder
     let pf_rx = conn.connection.split_incoming(64, move |inc| {
         let DaemonMessage::TcpOutgoing(tcp) = inc else {
             return false;
@@ -403,20 +412,66 @@ async fn setup_db_portforwards(
         }
     });
 
+    let localhost_ephemeral_port = (Ipv6Addr::UNSPECIFIED, 0).into();
+
     let mut portforwarder = port_forward::PortForwarder::new(
         conn.connection.tx_handle(),
         pf_rx,
-        port_mappings,
+        port_mappings
+            .iter()
+            .map(|(rmt, _id)| (localhost_ephemeral_port, rmt.clone()))
+            .collect(),
         Some(connections_state_2),
     )
     .await
     .map_err(|e| format!("Error setting up PortForwarder: {e}"))?;
 
-    let mappings: Vec<_> = portforwarder.listeners().collect();
+    let portforward_mappings: Vec<_> = portforwarder
+        .listeners()
+        .filter_map(|(local, remote)| {
+            Some(Portforward {
+                local_addr: local,
+                db_id: port_mappings.get(&remote)?.clone(),
+            })
+        })
+        .collect();
 
-    tracing::info!(?mappings, "Starting portforwards to DB branches");
+    struct PortforwardFileGuard {
+        path: std::path::PathBuf,
+    }
+
+    impl Drop for PortforwardFileGuard {
+        fn drop(&mut self) {
+            if let Err(err) = std::fs::remove_file(&self.path) {
+                tracing::warn!(?err, path = %self.path.display(), "failed to remove portforward session file");
+            }
+        }
+    }
+
+    let pf_guard = {
+        let session = PortforwardSession {
+            portforwards: portforward_mappings,
+            key: key.to_owned(),
+            session_id,
+        };
+
+        let pf_dir = portforward_session_dir();
+        tokio::fs::create_dir_all(&pf_dir)
+            .await
+            .map_err(|e| format!("Failed to create portforward directory: {e}"))?;
+
+        let pf_path = pf_dir.join(format!("{}.json", std::process::id()));
+        let json = serde_json::to_vec(&session)
+            .map_err(|e| format!("Failed to serialize portforward session: {e}"))?;
+        tokio::fs::write(&pf_path, json)
+            .await
+            .map_err(|e| format!("Failed to write portforward session file: {e}"))?;
+
+        PortforwardFileGuard { path: pf_path }
+    };
 
     tokio::spawn(async move {
+        let _pf_guard = pf_guard;
         if let Err(err) = portforwarder.run().await {
             tracing::error!(?err, "DB branch portforwarding failed");
         }

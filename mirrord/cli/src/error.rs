@@ -159,7 +159,7 @@ pub(crate) enum InternalProxyError {
     InitialPingPongFailed(String),
 
     #[error("Setting up DB branch portforwards failed: {0}")]
-    DbBranchPortforwardsFailed(String)
+    DbBranchPortforwardsFailed(String),
 }
 
 /// Errors that can occur when executing the `mirrord operator setup` command.

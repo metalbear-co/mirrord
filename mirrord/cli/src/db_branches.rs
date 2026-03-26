@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt::Debug, net::SocketAddr};
+use std::{collections::HashSet, fmt::Debug, net::SocketAddr, path::PathBuf};
 
 use k8s_openapi::NamespaceResourceScope;
 use kube::{Api, Resource, api::DeleteParams};
@@ -16,21 +16,29 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
     CliResult,
-    config::{DbBranchesArgs, DbBranchesCommand},
+    config::{DbBranchesArgs, DbBranchesCommand, RemoteAddr},
     kube::{kube_client_from_layer_config, list_resource_if_defined},
 };
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Portforward {
-    db_id: String,
-    local_addr: SocketAddr,
+    pub db_id: String,
+    pub local_addr: SocketAddr,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PortforwardSession {
-    portforwards: Vec<Portforward>,
-    key: String,
-    session: u64,
+    pub portforwards: Vec<Portforward>,
+    pub key: String,
+    pub session_id: u64,
+}
+
+/// Directory where portforward session files are stored (`~/.mirrord/db_branch_portforwards/`).
+pub fn portforward_session_dir() -> PathBuf {
+    home::home_dir()
+        .unwrap_or_else(|| PathBuf::from("~"))
+        .join(".mirrord")
+        .join("db_branch_portforwards")
 }
 
 #[derive(Debug, Clone)]
