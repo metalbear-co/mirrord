@@ -1002,16 +1002,6 @@ impl OperatorApi<PreparedClientCert> {
             return Ok((true, Some("Kafka splitting")));
         }
 
-        if config.feature.split_queues.rmq().next().is_some()
-            && self
-                .operator()
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::RmqQueueSplitting)
-                .not() {
-
-        }
-
         let ResolvedTarget::Deployment(ResolvedResource { resource, .. }) = target else {
             // We do replicas checks only for deployments.
             return Ok((false, None));
