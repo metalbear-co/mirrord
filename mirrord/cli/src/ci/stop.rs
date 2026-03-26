@@ -1,15 +1,10 @@
-#[cfg_attr(windows, allow(unused))]
+#![cfg_attr(windows, allow(unused))]
 use mirrord_progress::{Progress, ProgressTracker};
-#[cfg(not(target_os = "windows"))]
 use tokio::process::Command;
 use tracing::Level;
 
 use super::CiResult;
-#[cfg(unix)]
-use crate::ci::MirrordCiManagedContainer;
-use crate::ci::MirrordCiStore;
-#[cfg(unix)]
-use crate::ci::error::CiError;
+use crate::ci::{MirrordCiManagedContainer, MirrordCiStore, error::CiError};
 
 /// Kills the sidecars that were started by `mirrord ci container`.
 ///
