@@ -116,15 +116,20 @@ MIRRORD_CI_API_KEY environment variable.
     Ok(())
 }
 
-/// Stores the [`MirrordCi`] information we need to execute commands like `mirrord ci start|stop`.
-///
-/// - Note that it does **not** store the [`CiApiKey`], this one lives only as an env var.
+/// Sidecar container that is started as part of `mirrord ci container`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub(crate) struct MirrordCiManagedContainer {
+    /// Container runtimes that we support (e.g. `docker`), see [`ContainerRuntime`].
     pub(crate) runtime: ContainerRuntime,
+
+    /// Id of the container, so we can `{runtime} rm {container_id}` to kill it from `mirrord ci
+    /// stop`.
     pub(crate) container_id: String,
 }
 
+/// Stores the [`MirrordCi`] information we need to execute commands like `mirrord ci start|stop`.
+///
+/// - Note that it does **not** store the [`CiApiKey`], this one lives only as an env var.
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 struct MirrordCiStore {
