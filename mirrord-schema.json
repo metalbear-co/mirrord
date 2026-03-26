@@ -3145,6 +3145,24 @@
             "queue_type",
             "message_filter"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "header_filter": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "RMQ"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
         }
       ]
     },
