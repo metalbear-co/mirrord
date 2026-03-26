@@ -60,7 +60,7 @@ impl<'a> CiContainerCommandHandler<'a> {
     }
 
     /// Calls [`container_command`] with [`MirrordCi`]
-    pub(super) async fn handle(self) -> CliResult<i32> {
+    pub(super) async fn handle(self) -> CliResult<()> {
         let Self {
             mirrord_for_ci,
             runtime_args,
@@ -79,5 +79,6 @@ impl<'a> CiContainerCommandHandler<'a> {
             Some(mirrord_for_ci),
         )
         .await
+        .map(|_| ())
     }
 }

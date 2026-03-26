@@ -63,18 +63,13 @@ pub(crate) async fn ci_command(
         .await?
         .handle()
         .await?),
-        CiCommand::Stop => Ok(stop::CiStopCommandHandler::new()
-            .await?
-            .handle()
-            .await
-            .map(|_| ())?),
+        CiCommand::Stop => Ok(stop::CiStopCommandHandler::new().await?.handle().await?),
         CiCommand::Container(container_args) => {
             Ok(
                 container::CiContainerCommandHandler::new(container_args, watch, user_data)
                     .await?
                     .handle()
-                    .await
-                    .map(|_| ())?,
+                    .await?,
             )
         }
     }
