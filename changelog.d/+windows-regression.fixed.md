@@ -1,0 +1,1 @@
+Fixed regression using `mirrord.exe exec` without an already existing `MIRRORD_LAYER_FILE` environment variable.

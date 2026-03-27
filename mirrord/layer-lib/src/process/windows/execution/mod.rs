@@ -327,7 +327,11 @@ impl LayerManagedProcess {
         F: FnOnce(DWORD, LPVOID, &mut STARTUPINFOW) -> LayerResult<PROCESS_INFORMATION>,
         P: mirrord_progress::Progress,
     {
-        let dll_path = std::env::var("MIRRORD_LAYER_FILE").map_err(LayerError::VarError)?;
+        let dll_path = caller_env_vars
+            .get(MIRRORD_LAYER_FILE_ENV)
+            .cloned()
+            .or_else(|| std::env::var(MIRRORD_LAYER_FILE_ENV).ok())
+            .ok_or(LayerError::VarError(std::env::VarError::NotPresent))?;
         if !std::path::Path::new(&dll_path).exists() {
             return Err(LayerError::DllInjection(format!(
                 "DLL file not found: {}",

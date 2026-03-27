@@ -50,6 +50,9 @@ const COMPRESSED_SIP_BINARIES: &[u8] =
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
 
+/// Environment variable pointing to the mirrord layer DLL/dylib/so path.
+const MIRRORD_LAYER_FILE_ENV: &str = "MIRRORD_LAYER_FILE";
+
 /// Alias to "LD_PRELOAD" enviromnent variable used to mount mirrord-layer on linux targets and as
 /// part of the `mirrord container` command.
 pub(crate) const LINUX_INJECTION_ENV_VAR: &str = "LD_PRELOAD";
@@ -201,16 +204,16 @@ impl MirrordExecution {
     {
         // Extract Layer from exe, or use existing file if MIRRORD_LAYER_FILE env var is set (for
         // debugging)
-        let lib_path = match std::env::var("MIRRORD_LAYER_FILE") {
+        let lib_path = match std::env::var(MIRRORD_LAYER_FILE_ENV) {
             Ok(existing_path) => {
                 tracing::debug!(
-                    "Using existing library file from MIRRORD_LAYER_FILE: {}",
+                    "Using existing library file from {MIRRORD_LAYER_FILE_ENV}: {}",
                     existing_path
                 );
                 std::path::PathBuf::from(existing_path)
             }
             Err(_) => {
-                tracing::debug!("MIRRORD_LAYER_FILE not set, extracting library from binary");
+                tracing::debug!("{MIRRORD_LAYER_FILE_ENV} not set, extracting library from binary");
                 extract_library(None, progress, true)?
             }
         };
@@ -264,7 +267,7 @@ impl MirrordExecution {
         }
         #[cfg(windows)]
         {
-            env_vars.insert("MIRRORD_LAYER_FILE".to_string(), lib_path);
+            env_vars.insert(MIRRORD_LAYER_FILE_ENV.to_string(), lib_path);
         }
 
         let patched_path = {
