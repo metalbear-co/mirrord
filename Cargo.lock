@@ -5151,6 +5151,7 @@ dependencies = [
  "base64",
  "bincode",
  "chrono",
+ "dotenvy",
  "futures",
  "http 1.4.0",
  "http-body-util",

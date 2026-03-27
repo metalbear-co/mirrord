@@ -38,8 +38,8 @@ use mirrord_operator::{
     crd::{
         NewOperatorFeature,
         preview::{
-            PreviewDbBranchingConfig, PreviewIncomingConfig, PreviewQueueSplittingConfig,
-            PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
+            PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIncomingConfig,
+            PreviewQueueSplittingConfig, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
         },
         session::SessionTarget,
     },
@@ -213,6 +213,17 @@ async fn preview_start(
             &layer_config.feature.split_queues,
         ),
         db_branching: PreviewDbBranchingConfig::from_db_names(branch_db_names),
+        env: PreviewEnvVarsConfig::from_config(&layer_config.feature.env).map_err(|error| {
+            CliError::EnvFileAccessError(
+                layer_config
+                    .feature
+                    .env
+                    .env_file
+                    .clone()
+                    .unwrap_or_default(),
+                error,
+            )
+        })?,
     };
 
     let session = PreviewSession {
@@ -659,6 +670,12 @@ fn load_preview_config(
     let config = LayerConfig::resolve(&mut cfg_context).inspect_err(|_| {
         subtask.failure(None);
     })?;
+
+    let result = config.verify_for_preview_env(&mut cfg_context);
+    for warning in cfg_context.into_warnings() {
+        subtask.warning(&warning);
+    }
+    result?;
 
     subtask.success(Some("configuration loaded"));
 
