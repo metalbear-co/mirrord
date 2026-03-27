@@ -42,6 +42,9 @@
 //! and finally run the user binary with the mirrord lib loaded, but this time we use `execve`,
 //! instead of [`tokio::process::Command`].
 //!
+//! - When the env var `MIRRORD_CI_API_KEY` is set, `exec` actually becomes `mirrord ci start
+//!   --foreground`.
+//!
 //! #### operator vs no operator `exec`
 //!
 //! Target resolution is performed the same, regardless of operator usage, but
@@ -331,7 +334,7 @@ use mirrord_layer_lib::process::windows::{console, execution::LayerManagedProces
 use verify_config::verify_config;
 
 use crate::{
-    ci::MirrordCi,
+    ci::{MirrordCi, ci_api_key_available},
     newsletter::suggest_newsletter_signup,
     user_data::UserData,
     util::{apply_test_env_overrides, get_user_git_branch},
@@ -974,8 +977,34 @@ fn main() -> miette::Result<()> {
 
         match cli.commands {
             Commands::Exec(args) => {
-                let mut progress = ProgressTracker::from_env("mirrord exec");
-                exec(&args, watch, &mut user_data, &mut progress, None).await?
+                if ci_api_key_available()?.is_some() {
+                    let mut progress = ProgressTracker::from_env("mirrord exec");
+                    progress.warning("Detected `mirrord exec` running with a CI token.");
+                    progress.info(
+                        "This run is being handled as a mirrord CI session. \
+                        For future compatibility, please migrate to: `mirrord ci start` \
+                        More details can be found here: \
+                        https://metalbear.com/mirrord/docs/using-mirrord/mirrord-for-ci",
+                    );
+                    progress.success(None);
+                    drop(progress);
+
+                    let ci_args = CiArgs {
+                        command: CiCommand::Start(Box::new(CiStartArgs {
+                            exec_args: args,
+                            foreground: true,
+                            environment: None,
+                            pipeline: None,
+                            triggered_by: None,
+                        })),
+                    };
+                    windows_unsupported!(args, "ci", {
+                        ci::ci_command(ci_args, watch, &mut user_data).await?
+                    });
+                } else {
+                    let mut progress = ProgressTracker::from_env("mirrord exec");
+                    exec(&args, watch, &mut user_data, &mut progress, None).await?
+                }
             }
             Commands::Dump(args) => windows_unsupported!(args, "dump", {
                 dump_command(&args, watch, &user_data).await?

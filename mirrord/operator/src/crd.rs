@@ -1008,6 +1008,7 @@ mod tests {
         write_crd_yaml::<MirrordTlsStealConfig>();
         write_crd_yaml::<MirrordClusterTlsStealConfig>();
         write_crd_yaml::<MirrordPropertyList>();
+        write_crd_yaml::<PreviewSession>();
     }
 
     #[test]
