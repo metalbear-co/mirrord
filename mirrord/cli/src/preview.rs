@@ -671,6 +671,12 @@ fn load_preview_config(
         subtask.failure(None);
     })?;
 
+    let result = config.verify_for_preview_env(&mut cfg_context);
+    for warning in cfg_context.into_warnings() {
+        subtask.warning(&warning);
+    }
+    result?;
+
     subtask.success(Some("configuration loaded"));
 
     Ok(config)
