@@ -22,7 +22,7 @@ async fn exec_extracts_layer_without_env() {
         .collect();
 
     let executable = Application::get_python3_executable().await;
-    let cmdline: Vec<String> = [executable, "-c".to_string(), "\"print('hi')\"".to_string()]
+    let cmdline: Vec<String> = [executable, "-c".to_string(), "print('hi')".to_string()]
         .into_iter()
         .collect();
 
