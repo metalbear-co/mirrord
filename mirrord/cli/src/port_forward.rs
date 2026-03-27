@@ -110,7 +110,6 @@ pub struct ConnectionsState {
 }
 
 impl PortForwarder {
-
     /// The keys in `mappings` must be unique (save port=0, for
     /// ephemeral connections)
     #[inline]
