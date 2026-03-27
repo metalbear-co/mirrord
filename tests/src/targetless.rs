@@ -138,7 +138,7 @@ mod targetless_tests {
     }
 
     /// Ensures that `mirrord exec` extracts the layer when `MIRRORD_LAYER_FILE` is not set.
-    #[cfg_attr(not(feature = "targetless"), ignore)]
+    #[cfg_attr(any(not(feature = "targetless"), target_os = "windows"), ignore)]
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(60))]
