@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ops::Deref};
+use std::ops::Deref;
 
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use mirrord_config_derive::MirrordConfig;
@@ -380,21 +380,12 @@ pub enum ParamSource {
 }
 
 impl ParamSource {
-    pub fn as_variable(&self) -> Cow<'_, str> {
+    pub fn as_variable(&self) -> Option<&str> {
         match self {
-            Self::Variable(v) => Cow::Borrowed(v),
-            Self::Secret { name, key } => Cow::Owned(secret_env_var_name(name, key)),
+            Self::Variable(v) => Some(v),
+            Self::Secret { .. } => None,
         }
     }
-}
-
-pub fn secret_env_var_name(name: &str, key: &str) -> String {
-    fn sanitize(s: &str) -> String {
-        s.replace(|c: char| !c.is_ascii_alphanumeric(), "_")
-            .to_uppercase()
-    }
-
-    format!("SECRET_{}_{}", sanitize(name), sanitize(key))
 }
 
 /// Individual database connection parameter sources.

@@ -26,7 +26,7 @@ use mirrord_config::{
     LayerConfig,
     feature::database_branches::{
         ConnectionParamsVars, ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig,
-        TargetEnvironmentVariableSource, secret_env_var_name,
+        ParamSource, TargetEnvironmentVariableSource,
     },
 };
 use mirrord_intproxy::{
@@ -286,8 +286,8 @@ async fn setup_db_portforwards(
                 | TargetEnvironmentVariableSource::EnvFrom { variable, .. } => {
                     Envs::Url(variable.clone())
                 }
-                TargetEnvironmentVariableSource::Secret { name, key } => {
-                    Envs::Url(secret_env_var_name(name, key))
+                TargetEnvironmentVariableSource::Secret { .. } => {
+                    continue;
                 }
             },
             ConnectionSource::FlatUrl { url, .. } => Envs::Url(url.clone()),
@@ -301,10 +301,16 @@ async fn setup_db_portforwards(
                     continue;
                 };
 
-                Envs::Params {
-                    host: host.as_variable().into_owned(),
-                    port: port.as_variable().into_owned(),
-                }
+                let (host, port) = match (host, port) {
+                    (ParamSource::Variable(host), ParamSource::Variable(port)) => {
+                        (host.clone(), port.clone())
+                    }
+                    // Listing the secret case explicitly so variants
+                    // added in the future are not silently discarded.
+                    (ParamSource::Secret { .. }, _) | (_, ParamSource::Secret { .. }) => continue,
+                };
+
+                Envs::Params { host, port }
             }
         };
         let db_id = resolve_branch_id(&base.id, key, &NullProgress).into();
