@@ -21,14 +21,9 @@ async fn exec_extracts_layer_without_env() {
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
 
-    let application = Application::DynamicApp(
-        "python3".to_string(),
-        vec!["-c".to_string(), "\"print('hi')\"".to_string()],
-    );
-    let executable = application.get_executable().await;
-    let cmdline: Vec<String> = [executable]
+    let executable = Application::get_python3_executable().await;
+    let cmdline: Vec<String> = [executable, "-c".to_string(), "\"print('hi')\"".to_string()]
         .into_iter()
-        .chain(application.get_args())
         .collect();
 
     let mut process = run_exec(
