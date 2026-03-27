@@ -340,7 +340,7 @@ async fn setup_db_portforwards(
     let port_mappings: HashMap<_, _> = portforwards.into_iter().filter_map(|pf| -> Option<_> {
         let (host, port) = match pf.envs {
             Envs::Url(url) => {
-                let url = url
+                let url = vars.get(&url)?
                     .parse::<Url>()
                     .inspect_err(|e| tracing::warn!(?e, env_var = %url, "failed to parse url for db branch connection string, portforward will not be made"))
                     .ok()?;
