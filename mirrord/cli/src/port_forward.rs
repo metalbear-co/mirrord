@@ -110,23 +110,32 @@ pub struct ConnectionsState {
 }
 
 impl PortForwarder {
+
+    /// The keys in `mappings` must be unique (save port=0, for
+    /// ephemeral connections)
+    #[inline]
     pub(crate) async fn new(
         agent_tx: TxHandle<Client>,
         agent_rx: Receiver<DaemonMessage>,
-        mappings: HashMap<SocketAddr, (RemoteAddr, u16)>,
+        mappings: impl IntoIterator<Item = (SocketAddr, (RemoteAddr, u16))>,
         connections_state: Option<Arc<ConnectionsState>>,
     ) -> Result<Self, PortForwardError> {
         // open tcp listener for local addrs
-        let mut listeners = StreamMap::with_capacity(mappings.len());
+        let mappings = mappings.into_iter();
+        let mut listeners = StreamMap::with_capacity(mappings.size_hint().0);
+        let mut real_mappings = HashMap::new();
 
-        for &local_socket in mappings.keys() {
-            let listener = TcpListener::bind(local_socket).await;
-            match listener {
-                Ok(listener) => {
-                    listeners.insert(local_socket, TcpListenerStream::new(listener));
-                }
-                Err(error) => return Err(PortForwardError::TcpListenerError(error)),
-            }
+        for (local_socket, remote_addr) in mappings {
+            let listener = TcpListener::bind(local_socket)
+                .await
+                .map_err(PortForwardError::TcpListenerError)?;
+
+            let local_addr = listener
+                .local_addr()
+                .map_err(PortForwardError::TcpListenerError)?;
+
+            real_mappings.insert(local_addr, remote_addr);
+            listeners.insert(local_addr, TcpListenerStream::new(listener));
         }
 
         let (internal_msg_tx, internal_msg_rx) = mpsc::channel(1024);
@@ -134,7 +143,7 @@ impl PortForwarder {
         Ok(Self {
             agent_tx,
             agent_rx,
-            raw_mappings: mappings,
+            raw_mappings: real_mappings,
             listeners,
             id_oneshots: HashMap::new(),
             dns_oneshots: VecDeque::new(),
@@ -1211,7 +1220,7 @@ mod test {
 
         let remote_ip = "152.37.40.40".parse::<Ipv4Addr>().unwrap();
         let remote_destination = (RemoteAddr::Ip(remote_ip), 3038);
-        let mappings = HashMap::from([(local_destination, remote_destination.clone())]);
+        let mappings = [(local_destination, remote_destination.clone())];
 
         let (agent_tx, agent_rx) = agent_connection.destructure();
 
@@ -1311,10 +1320,10 @@ mod test {
         drop(listener);
 
         let (mut test_connection, agent_connection) = TestAgentConnection::new();
-        let mappings = HashMap::from([
+        let mappings = [
             (local_destination_1, remote_destination_1.clone()),
             (local_destination_2, remote_destination_2.clone()),
-        ]);
+        ];
         let (agent_tx, agent_rx) = agent_connection.destructure();
 
         // Prepare listeners before sending work to the background task.

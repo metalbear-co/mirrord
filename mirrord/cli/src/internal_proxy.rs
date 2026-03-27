@@ -413,15 +413,14 @@ async fn setup_db_portforwards(
         }
     });
 
-    let localhost_ephemeral_port = (Ipv6Addr::UNSPECIFIED, 0).into();
+    let localhost_ephemeral_port = SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0));
 
     let mut portforwarder = port_forward::PortForwarder::new(
         conn.connection.tx_handle(),
         pf_rx,
         port_mappings
             .keys()
-            .map(|rmt| (localhost_ephemeral_port, rmt.clone()))
-            .collect(),
+            .map(|rmt| (localhost_ephemeral_port, rmt.clone())),
         Some(connections_state_2),
     )
     .await
