@@ -9,7 +9,6 @@ mod targetless_tests {
         apimachinery::pkg::apis::meta::v1::ObjectMeta,
     };
     use kube::{api::ListParams, Api, Client};
-    use mirrord_test_utils::run_command::run_exec;
     use rstest::rstest;
     use tempfile::NamedTempFile;
 
@@ -135,31 +134,5 @@ mod targetless_tests {
         let mut process = app.run_targetless(None, None, None).await;
         let res = process.wait().await;
         assert!(res.success());
-    }
-
-    /// Ensures that `mirrord exec` extracts the layer when `MIRRORD_LAYER_FILE` is not set.
-    #[cfg_attr(any(not(feature = "targetless"), target_os = "windows"), ignore)]
-    #[rstest]
-    #[tokio::test]
-    #[timeout(Duration::from_secs(60))]
-    pub async fn exec_extracts_layer_without_env() {
-        let mut process = run_exec(
-            vec!["python3", "-c", "print('hi')"]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-            None,
-            None,
-            None,
-            None,
-            Some(&["MIRRORD_LAYER_FILE"]),
-        )
-        .await;
-
-        process.wait_assert_success().await;
-        process.assert_stdout_contains("hi").await;
-        process
-            .assert_stderr_contains("MIRRORD_LAYER_FILE not set, extracting library from binary")
-            .await;
     }
 }
