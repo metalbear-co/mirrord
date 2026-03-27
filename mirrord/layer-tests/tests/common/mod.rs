@@ -632,7 +632,7 @@ impl Application {
             .collect();
 
         let cmdline: Vec<String> = [executable].into_iter().chain(self.get_args()).collect();
-        run_exec(cmdline, None, None, cli_args, Some(env_refs)).await
+        run_exec(cmdline, None, None, cli_args, Some(env_refs), None).await
     }
 
     pub async fn start_process(
