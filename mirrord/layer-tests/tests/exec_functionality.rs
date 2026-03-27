@@ -42,16 +42,13 @@ async fn exec_extracts_layer_without_env() {
     .await;
 
     let mut intproxy = TestIntProxy::new(listener, None).await;
-    let intproxy_task = tokio::spawn(async move {
-        while let Some(message) = intproxy.try_recv().await {
-            panic!("unexpected message from layer: {message:?}");
-        }
-    });
 
     process.wait_assert_success().await;
     process.assert_stdout_contains("hi").await;
     process
         .assert_stderr_contains("MIRRORD_LAYER_FILE not set, extracting library from binary")
         .await;
-    intproxy_task.await.unwrap();
+    if let Some(message) = intproxy.try_recv().await {
+        panic!("unexpected message from layer: {message:?}");
+    }
 }
