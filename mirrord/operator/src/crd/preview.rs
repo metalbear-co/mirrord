@@ -238,8 +238,16 @@ impl PreviewStatusUpdate {
 pub struct PreviewIncomingConfig {
     /// Explicit list of ports to steal/mirror. When `None`, the operator discovers ports from
     /// the preview pod's container port declarations.
+    ///
+    /// Mutually exclusive with `ignore_ports`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ports: Option<Vec<u16>>,
+
+    /// Ports to ignore while preview traffic interception is enabled.
+    ///
+    /// Mutually exclusive with `ports`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore_ports: Vec<u16>,
 
     /// Whether to steal (`true`) or mirror (`false`) traffic from the target.
     pub steal: bool,
@@ -258,6 +266,7 @@ impl PreviewIncomingConfig {
             IncomingMode::Off => None,
             IncomingMode::Mirror | IncomingMode::Steal => Some(Self {
                 ports: value.ports.as_ref().map(|p| p.iter().copied().collect()),
+                ignore_ports: value.ignore_ports.iter().copied().collect(),
                 steal: matches!(value.mode, IncomingMode::Steal),
                 http_filter: value
                     .http_filter
