@@ -106,6 +106,17 @@ jobs:
           "MIRRORD_EXE=$exe" | Out-File -Append -FilePath $env:GITHUB_ENV
           "MIRRORD_LAYER_FILE=$dll" | Out-File -Append -FilePath $env:GITHUB_ENV
 
+      - name: Run Windows E2E Tests (targetless)
+        run: |
+          $ErrorActionPreference = "Stop"
+          
+          # 1. Verify Connection
+          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE ".github\workflows\scripts"
+          & "$ScriptsDir\verify_k3s_connectivity.ps1"
+
+          Write-Host "Running E2E tests (targetless)..."
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests --no-default-features --features targetless -- --test-threads=6 targetless
+
       - name: Run Windows E2E Tests
         run: |
           $ErrorActionPreference = "Stop"
