@@ -1143,7 +1143,7 @@ impl OperatorApi<PreparedClientCert> {
 
     /// Multi-cluster variant of [`should_copy_target`]. The client cannot check
     /// replica count because the target lives on a remote cluster. Instead we
-    /// only look at things we know on the cluster we are conencted to: 
+    /// only look at things we know on the cluster we are conencted to:
     /// explicit opt-in and queue-splitting config.
     fn should_copy_target_mc(&self, config: &LayerConfig) -> bool {
         if config.feature.copy_target.enabled {
