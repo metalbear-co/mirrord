@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-03-26T00:00:00.000Z
+lastmod: 2026-03-28T00:00:00.000Z
 draft: false
 images: []
 menu:
