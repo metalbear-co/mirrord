@@ -939,11 +939,11 @@ impl OperatorApi<PreparedClientCert> {
         if do_copy_target {
             let mut copy_subtask = progress.subtask("preparing target copy");
 
-            let (copied, _reused) = {
+            let copied = {
                 let reused = self.try_reuse_copy_target(layer_config, progress).await?;
                 match reused {
-                    Some(reused) => (reused, true),
-                    None => (self.copy_target(layer_config, progress).await?, false),
+                    Some(reused) => true,
+                    None => self.copy_target(layer_config, progress).await?,
                 }
             };
             copy_subtask.success(None);
