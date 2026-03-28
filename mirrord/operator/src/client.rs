@@ -942,7 +942,7 @@ impl OperatorApi<PreparedClientCert> {
             let copied = {
                 let reused = self.try_reuse_copy_target(layer_config, progress).await?;
                 match reused {
-                    Some(reused) => true,
+                    Some(reused) => reused,
                     None => self.copy_target(layer_config, progress).await?,
                 }
             };
