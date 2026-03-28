@@ -1141,7 +1141,7 @@ impl OperatorApi<PreparedClientCert> {
         Ok((true, Some("empty deployment")))
     }
 
-    /// Multi-cluster variant of [`should_copy_target`]. The client cannot check
+    /// Multi-cluster variant of [`OperatorApi::should_copy_target`]. The client cannot check
     /// replica count because the target lives on a remote cluster. Instead we
     /// only look at things we know on the cluster we are conencted to:
     /// explicit opt-in and queue-splitting config.
