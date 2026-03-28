@@ -36,7 +36,7 @@ use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
     client::{OperatorApi, PreparedClientCert},
     crd::{
-        NewOperatorFeature,
+        NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION,
         preview::{
             PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIncomingConfig,
             PreviewQueueSplittingConfig, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
@@ -96,7 +96,7 @@ async fn preview_start(
         user_data.machine_id(),
     );
 
-    let (operator_api, api) =
+    let (operator_api, api, target_ns_annotation) =
         create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
     operator_api.check_feature_support(&layer_config)?;
 
@@ -226,10 +226,14 @@ async fn preview_start(
         })?,
     };
 
+    let annotations = target_ns_annotation
+        .map(|ns| BTreeMap::from([(TARGET_NAMESPACE_ANNOTATION.to_string(), ns)]));
+
     let session = PreviewSession {
         metadata: ObjectMeta {
             name: Some(session_name),
             labels: Some(session_labels),
+            annotations,
             ..Default::default()
         },
         spec: session_spec,
@@ -395,7 +399,7 @@ async fn preview_status(
     // Default to all namespaces when no namespace is configured, so `mirrord preview status`
     // with no flags shows everything.
     let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
-    let (_, api) =
+    let (_, api, _) =
         create_preview_api(&layer_config, all_namespaces, &progress, &mut analytics).await?;
 
     // List and filter sessions.
@@ -541,7 +545,7 @@ async fn preview_stop(
 
     // Default to all namespaces when no namespace is configured, same as `status`.
     let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
-    let (operator_api, api) =
+    let (operator_api, api, _) =
         create_preview_api(&layer_config, all_namespaces, &progress, &mut analytics).await?;
 
     let mut subtask = progress.subtask("finding preview sessions");
@@ -685,12 +689,22 @@ fn load_preview_config(
 /// Connects to the operator, validates the license and checks that the `PreviewEnv` feature is
 /// supported, then returns the operator API and a `PreviewSession` API handle scoped to the
 /// appropriate namespace(s).
+/// Returns `(operator_api, session_api, target_ns_annotation)`.
+///
+/// In management-only mode (`operator_namespace` is set), CRs are created in the
+/// operator's namespace with a `TARGET_NAMESPACE_ANNOTATION` pointing to the real
+/// target namespace. The sync controller reads this annotation to place the copy
+/// in the correct namespace on the default cluster.
 async fn create_preview_api(
     config: &LayerConfig,
     all_namespaces: bool,
     progress: &ProgressTracker,
     analytics: &mut AnalyticsReporter,
-) -> CliResult<(OperatorApi<PreparedClientCert>, Api<PreviewSession>)> {
+) -> CliResult<(
+    OperatorApi<PreparedClientCert>,
+    Api<PreviewSession>,
+    Option<String>,
+)> {
     let mut subtask = progress.subtask("connecting to operator");
 
     let operator_api = OperatorApi::try_new(config, analytics, progress)
@@ -721,13 +735,25 @@ async fn create_preview_api(
     subtask.success(Some("connected to operator"));
 
     let client = operator_api.client().clone();
-    let api = if all_namespaces {
-        Api::all(client.clone())
+    let operator_namespace = operator_api.operator().spec.operator_namespace.as_deref();
+
+    let (api, target_ns_annotation) = if all_namespaces {
+        (Api::all(client.clone()), None)
+    } else if let Some(op_ns) = operator_namespace {
+        let target_namespace = config
+            .target
+            .namespace
+            .as_deref()
+            .unwrap_or(client.default_namespace());
+        (
+            Api::namespaced(client.clone(), op_ns),
+            Some(target_namespace.to_string()),
+        )
     } else if let Some(namespace) = config.target.namespace.as_deref() {
-        Api::namespaced(client.clone(), namespace)
+        (Api::namespaced(client.clone(), namespace), None)
     } else {
-        Api::default_namespaced(client.clone())
+        (Api::default_namespaced(client.clone()), None)
     };
 
-    Ok((operator_api, api))
+    Ok((operator_api, api, target_ns_annotation))
 }
