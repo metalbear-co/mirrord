@@ -1,1 +1,0 @@
-Support for Copy Target for Multi Cluster.
