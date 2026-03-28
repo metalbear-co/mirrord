@@ -42,6 +42,7 @@ client = [
   "dep:tower",
 ]
 crd = [
+  "dep:dotenvy",
   "dep:k8s-openapi",
   "dep:kube",
   "dep:mirrord-agent-env",
@@ -64,6 +65,7 @@ mirrord-protocol-io = { path = "../protocol-io", optional = true}
 
 
 base64 = { workspace = true, optional = true }
+dotenvy = { workspace = true, optional = true }
 bincode = { workspace = true, features = ["serde"], optional = true }
 chrono = { workspace = true, features = ["clock", "serde"] }
 http = { workspace = true, optional = true }

@@ -194,7 +194,7 @@ impl Application {
     /// This is to help tests that run python with mirrord work locally on systems with pyenv.
     /// If we run `python3` on a system with pyenv the first executed is not python but bash. On mac
     /// that prevents the layer from loading because of SIP.
-    async fn get_python3_executable() -> String {
+    pub(crate) async fn get_python3_executable() -> String {
         let mut python = Command::new("python3")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -632,7 +632,7 @@ impl Application {
             .collect();
 
         let cmdline: Vec<String> = [executable].into_iter().chain(self.get_args()).collect();
-        run_exec(cmdline, None, None, cli_args, Some(env_refs)).await
+        run_exec(cmdline, None, None, cli_args, Some(env_refs), None).await
     }
 
     pub async fn start_process(

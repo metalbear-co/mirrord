@@ -1,9 +1,10 @@
+#![cfg_attr(windows, allow(unused))]
 use std::{
     collections::{HashMap, HashSet},
     env::{self, temp_dir},
     path::{Path, PathBuf},
 };
-#[cfg(unix)]
+#[cfg(not(target_os = "windows"))]
 use std::{fs::File, os::unix::process::ExitStatusExt, process::Stdio, time::SystemTime};
 
 use ci_info::types::CiInfo;
@@ -11,21 +12,22 @@ use drain::Watch;
 use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credentials::CiApiKey;
-use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
+use mirrord_config::{
+    LayerConfig, ci::CiConfig, config::ConfigContext, container::ContainerRuntime,
+};
 use mirrord_operator::{client::OperatorApi, crd::session::SessionCiInfo};
 use mirrord_progress::{Progress, ProgressTracker};
-#[cfg(unix)]
+#[cfg(not(target_os = "windows"))]
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
-#[cfg(unix)]
+#[cfg(not(target_os = "windows"))]
 use tokio::fs::create_dir_all;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Level;
 
-use crate::{
-    CiArgs, CiCommand, CiStartArgs, CliError, CliResult, ci::error::CiError, user_data::UserData,
-};
+use crate::{CliError, CliResult, ci::error::CiError, config::ci::*, user_data::UserData};
 
+pub(crate) mod container;
 pub(crate) mod error;
 pub(super) mod start;
 pub(crate) mod stop;
@@ -62,11 +64,15 @@ pub(crate) async fn ci_command(
         .await?
         .handle()
         .await?),
-        CiCommand::Stop => Ok(stop::CiStopCommandHandler::new()
-            .await?
-            .handle()
-            .await
-            .map(|_| ())?),
+        CiCommand::Stop => Ok(stop::CiStopCommandHandler::new().await?.handle().await?),
+        CiCommand::Container(container_args) => {
+            Ok(
+                container::CiContainerCommandHandler::new(container_args, watch, user_data)
+                    .await?
+                    .handle()
+                    .await?,
+            )
+        }
     }
 }
 
@@ -111,13 +117,35 @@ MIRRORD_CI_API_KEY environment variable.
     Ok(())
 }
 
+/// Sidecar container that is started as part of `mirrord ci container`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub(crate) struct MirrordCiManagedContainer {
+    /// Container runtimes that we support (e.g. `docker`), see [`ContainerRuntime`].
+    pub(crate) runtime: ContainerRuntime,
+
+    /// Id of the container, so we can `{runtime} rm {container_id}` to kill it from `mirrord ci
+    /// stop`.
+    pub(crate) container_id: String,
+}
+
 /// Stores the [`MirrordCi`] information we need to execute commands like `mirrord ci start|stop`.
 ///
 /// - Note that it does **not** store the [`CiApiKey`], this one lives only as an env var.
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 struct MirrordCiStore {
     /// pid of the intproxy, stored when the intproxy starts.
     intproxy_pids: HashSet<u32>,
+
+    /// pid of the extproxy, stored when `mirrord ci container` starts it.
+    extproxy_pids: HashSet<u32>,
+
+    /// pid of the sidecar runtime attach client, stored when `mirrord ci container` starts it.
+    sidecar_pids: HashSet<u32>,
+
+    /// Sidecar containers started by `mirrord ci container` that should be stopped via the
+    /// container runtime.
+    sidecar_containers: HashSet<MirrordCiManagedContainer>,
 
     /// pid of the user process, stored when we spawn the user binary with mirrord.
     user_pids: HashSet<Option<u32>>,
@@ -164,7 +192,6 @@ impl MirrordCiStore {
     }
 
     /// Removes the [`MirrordCiStore`] file at [`Self::MIRRORD_FOR_CI_TMP_FILE_PATH`].
-    #[cfg_attr(windows, allow(unused))]
     async fn remove_file() -> CiResult<()> {
         match tokio::fs::remove_file(temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH)).await {
             Ok(_) => Ok(()),
@@ -177,9 +204,12 @@ impl MirrordCiStore {
     ///
     /// Used to avoid errors when calling `mirrord ci stop` multiple times, since that command
     /// should've `kill`ed everything already on the 1st run.
-    #[cfg_attr(windows, allow(unused))]
     fn is_empty(&self) -> bool {
-        self.intproxy_pids.is_empty() && self.user_pids.is_empty()
+        self.intproxy_pids.is_empty()
+            && self.extproxy_pids.is_empty()
+            && self.sidecar_pids.is_empty()
+            && self.sidecar_containers.is_empty()
+            && self.user_pids.is_empty()
     }
 }
 
@@ -192,12 +222,45 @@ pub(super) struct MirrordCi {
     /// Used as the `Credentials` (certificate) for the `mirrord ci` operations.
     ci_api_key: Option<CiApiKey>,
 
-    /// Arguments that are specific to `mirrord ci start`.
-    #[cfg_attr(windows, allow(unused))]
-    start_args: StartArgs,
+    /// Arguments for the mirrord for CI operations that involve starting something:
+    /// - `mirrord ci start`
+    /// - `mirrord ci container`
+    ci_common_args: CiCommonArgs,
 }
 
 impl MirrordCi {
+    #[cfg(not(target_os = "windows"))]
+    async fn create_run_output_dir<P: Progress>(
+        progress: &P,
+        binary_path: &Path,
+        CiConfig { output_dir }: &CiConfig,
+    ) -> CiResult<PathBuf> {
+        let binary = binary_path
+            .file_name()
+            .unwrap_or(binary_path.as_os_str())
+            .to_string_lossy();
+
+        let parent_dir = output_dir
+            .clone()
+            .unwrap_or_else(|| temp_dir().join("mirrord"));
+
+        let random_name: String = Alphanumeric.sample_string(&mut rand::rng(), 7);
+        let timestamp = SystemTime::UNIX_EPOCH
+            .elapsed()
+            .expect("system time should not be earlier than UNIX EPOCH")
+            .as_secs();
+        let ci_run_output_dir = parent_dir.join(format!("{binary}-{timestamp}-{random_name}"));
+
+        create_dir_all(&ci_run_output_dir).await?;
+
+        progress.info(&format!(
+            "mirrord ci files will be stored in {}",
+            ci_run_output_dir.display()
+        ));
+
+        Ok(ci_run_output_dir)
+    }
+
     /// Helper to access the [`CiApiKey`] when preparing the kube request headers.
     pub(super) fn api_key(&self) -> Option<&CiApiKey> {
         self.ci_api_key.as_ref()
@@ -238,28 +301,14 @@ impl MirrordCi {
             .to_string_lossy();
         let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
 
-        // Create a dir like `/tmp/mirrord/node-1234-cool` where we dump ci related files.
-        let ci_run_output_dir = {
-            let parent_dir = output_dir
-                .clone()
-                .unwrap_or_else(|| temp_dir().join("mirrord"));
-
-            let random_name: String = Alphanumeric.sample_string(&mut rand::rng(), 7);
-            let timestamp = SystemTime::UNIX_EPOCH
-                .elapsed()
-                .expect("system time should not be earlier than UNIX EPOCH")
-                .as_secs();
-            let ci_run_output_dir = parent_dir.join(format!("{binary}-{timestamp}-{random_name}"));
-
-            create_dir_all(&ci_run_output_dir).await?;
-
-            ci_run_output_dir
-        };
-
-        progress.info(&format!(
-            "mirrord ci files will be stored in {}",
-            ci_run_output_dir.display()
-        ));
+        let ci_run_output_dir = Self::create_run_output_dir(
+            progress,
+            binary_path,
+            &CiConfig {
+                output_dir: output_dir.clone(),
+            },
+        )
+        .await?;
 
         let mut child = match tokio::process::Command::new(binary_path)
             .args(binary_args.iter().skip(1))
@@ -288,7 +337,7 @@ impl MirrordCi {
             .id()
             .map(|pid| pid.to_string())
             .unwrap_or("unknown".to_string());
-        if self.start_args.foreground {
+        if self.ci_common_args.foreground {
             progress.info(&format!("waiting for child with pid {child_pid}"));
             match child.wait().await {
                 Ok(status) => {
@@ -319,7 +368,124 @@ impl MirrordCi {
         }
     }
 
-    #[cfg_attr(windows, allow(unused))]
+    #[cfg(not(target_os = "windows"))]
+    #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(level = Level::TRACE, skip(progress), err)]
+    pub(super) async fn prepare_container_command<P: Progress>(
+        self,
+        progress: &mut P,
+        binary_path: &str,
+        binary_args: &[String],
+        extproxy_pid: Option<u32>,
+        sidecar_pid: Option<u32>,
+        sidecar_container: Option<MirrordCiManagedContainer>,
+        ci_config: &CiConfig,
+    ) -> CiResult<i32> {
+        use nix::libc::{SIGINT, SIGKILL, SIGTERM};
+
+        let binary_path = Path::new(binary_path);
+        let binary = binary_path
+            .file_name()
+            .expect("failed to get file name of binary path")
+            .to_string_lossy();
+        let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
+
+        if let Some(extproxy_pid) = extproxy_pid {
+            mirrord_ci_store.extproxy_pids.insert(extproxy_pid);
+        }
+
+        if let Some(sidecar_pid) = sidecar_pid {
+            mirrord_ci_store.sidecar_pids.insert(sidecar_pid);
+        }
+
+        if let Some(sidecar_container) = sidecar_container {
+            mirrord_ci_store
+                .sidecar_containers
+                .insert(sidecar_container);
+        }
+
+        // external proxy and sidecar already have started, so we want to record these and be able
+        // to delete them with `mirrord ci stop` even if the following code fails.
+        mirrord_ci_store.write_to_file().await?;
+
+        let mut command = tokio::process::Command::new(binary_path);
+        command.args(binary_args).kill_on_drop(false);
+
+        // If `--foreground` don't write stdio to file.
+        if self.ci_common_args.foreground {
+            command
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit());
+        } else {
+            let ci_output_dir =
+                Self::create_run_output_dir(progress, binary_path, ci_config).await?;
+
+            command
+                .stdin(Stdio::null())
+                .stdout(File::create(ci_output_dir.join("stdout"))?)
+                .stderr(File::create(ci_output_dir.join("stderr"))?);
+        }
+
+        let mut child = match command.spawn() {
+            Ok(child) => {
+                mirrord_ci_store.user_pids.insert(child.id());
+                mirrord_ci_store.write_to_file().await?;
+                child
+            }
+            Err(fail) => {
+                progress.failure(Some(&fail.to_string()));
+                return Err(CiError::BinaryExecuteFailed(
+                    binary.to_string(),
+                    binary_args.to_vec(),
+                ));
+            }
+        };
+
+        let child_pid = child
+            .id()
+            .map(|pid| pid.to_string())
+            .unwrap_or("unknown".to_string());
+
+        if self.ci_common_args.foreground {
+            progress.info(&format!("waiting for child with pid {child_pid}"));
+
+            // If we don't stop progress here, it keeps looping forever when `--foreground` is used.
+            progress.success(None);
+
+            match child.wait().await {
+                Ok(status) => {
+                    if status.success() {
+                        progress.success(None);
+                        Ok::<_, CiError>(status.code().unwrap_or_default())
+                    } else if let Some(signal) = status.signal() {
+                        match signal {
+                            SIGKILL => progress.success(Some("process killed by SIGKILL")),
+                            SIGTERM => progress.success(Some("process terminated by SIGTERM")),
+                            SIGINT => progress.success(Some("process interrupted by SIGINT")),
+                            _ => progress
+                                .failure(Some(&format!("process exited with status: {}", status))),
+                        };
+                        Ok::<_, CiError>(status.code().unwrap_or_default())
+                    } else {
+                        progress.failure(Some(&format!("process exited with status: {}", status)));
+                        Ok::<_, CiError>(status.code().unwrap_or_default())
+                    }
+                }
+                Err(fail) => {
+                    progress.failure(Some(&fail.to_string()));
+                    Err(CiError::BinaryExecuteFailed(
+                        binary.to_string(),
+                        binary_args.to_vec(),
+                    ))
+                }
+            }
+        } else {
+            progress.success(Some(&format!("child pid: {child_pid}")));
+            Ok::<_, CiError>(0)
+        }
+    }
+
     #[cfg(target_os = "windows")]
     pub(super) async fn prepare_command<P: Progress>(
         self,
@@ -335,15 +501,14 @@ impl MirrordCi {
     /// Reads the [`MirrordCiStore`], and the env var [`MIRRORD_CI_API_KEY`] to return a valid
     /// [`MirrordCi`].
     #[tracing::instrument(level = Level::TRACE, ret, err)]
-    pub(super) async fn new(args: &CiStartArgs) -> CiResult<Self> {
+    pub(super) async fn new(ci_common_args: CiCommonArgs) -> CiResult<Self> {
         MirrordCiStore::read_from_file_or_default().await?;
-        let start_args = args.into();
 
         let ci_api_key = ci_api_key_available()?;
 
         Ok(Self {
             ci_api_key,
-            start_args,
+            ci_common_args,
         })
     }
 
@@ -351,59 +516,18 @@ impl MirrordCi {
     pub(super) fn info(&self) -> SessionCiInfo {
         let CiInfo { name, .. } = ci_info::get();
 
-        let StartArgs {
+        let CiCommonArgs {
             foreground: _,
             environment,
             pipeline,
             triggered_by,
-        } = self.start_args.clone();
+        } = self.ci_common_args.clone();
 
         SessionCiInfo {
             provider: name,
             environment,
             pipeline,
             triggered_by,
-        }
-    }
-}
-
-/// Similar to [`CiStartArgs`], except here we don't need [`CiStartArgs::exec_args`].
-///
-/// Used instead of `CiStartArgs` so we can `Clone` it around, (we don't need the `ExecArgs` where
-/// this is used).
-#[cfg_attr(windows, allow(dead_code))]
-#[derive(Debug, Default, Clone)]
-struct StartArgs {
-    /// Runs mirrord ci in the foreground (the default behaviour is to run it as a background
-    /// task).
-    #[cfg_attr(windows, allow(unused))]
-    foreground: bool,
-
-    /// CI environment, e.g. "staging", "production", "testing", etc.
-    environment: Option<String>,
-
-    /// CI pipeline or job name, e.g. "e2e-tests".
-    pipeline: Option<String>,
-
-    /// CI pipeline trigger, e.g. "push", "pull request", "manual", etc.
-    triggered_by: Option<String>,
-}
-
-impl From<&CiStartArgs> for StartArgs {
-    fn from(
-        CiStartArgs {
-            exec_args: _,
-            foreground,
-            environment,
-            pipeline,
-            triggered_by,
-        }: &CiStartArgs,
-    ) -> Self {
-        Self {
-            foreground: *foreground,
-            environment: environment.clone(),
-            pipeline: pipeline.clone(),
-            triggered_by: triggered_by.clone(),
         }
     }
 }
