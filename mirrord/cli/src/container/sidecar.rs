@@ -215,6 +215,7 @@ impl IntproxySidecar {
                 error,
             })?;
 
+        let pid = child.id();
         let mut stdout = BufReader::new(child.stdout.take().expect("was piped")).lines();
         let mut stderr = BufReader::new(child.stderr.take().expect("was piped")).lines();
 
@@ -245,7 +246,14 @@ impl IntproxySidecar {
             })?,
         };
 
-        Ok((intproxy_addr, SidecarLogs { stdout, stderr }))
+        Ok((
+            intproxy_addr,
+            SidecarLogs {
+                pid,
+                stdout,
+                stderr,
+            },
+        ))
     }
 
     /// Reads all ready lines from the given reader.
@@ -268,11 +276,17 @@ impl IntproxySidecar {
 
 /// Live logs from a started [`IntproxySidecar`].
 pub struct SidecarLogs {
+    pid: Option<u32>,
     stdout: Lines<BufReader<ChildStdout>>,
     stderr: Lines<BufReader<ChildStderr>>,
 }
 
 impl SidecarLogs {
+    /// Returns the pid of the runtime attach client process that started the sidecar logs stream.
+    pub fn pid(&self) -> Option<u32> {
+        self.pid
+    }
+
     /// Returns the logs as a [`Stream`] of lines,
     /// from both stdout and stderr.
     pub fn into_merged_lines(self) -> impl 'static + Stream<Item = io::Result<String>> {

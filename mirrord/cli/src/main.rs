@@ -132,6 +132,16 @@
 //! `mirrord container`, so you can run something like `mirrord exec -- docker run {image}` from an
 //! IDE plugin.
 //!
+//! ### `mirrord ci container [OPTIONS] [EXEC]`
+//!
+//! - [`ci::ci_command`], [`ci::container`]
+//!
+//! > Runs the equivalent of `mirrord container ...`, but with using mirrord for CI.
+//!
+//! Pretty much the same thing as the regular `mirrord container` command, but this one uses
+//! the mirrord for CI handling of the various backend things. It also has to store pids and
+//! container ids so it can be stopped with `mirrord ci stop`.
+//!
 //! ### `mirrord extract <PATH>`
 //!
 //! - [`extract_library`]
@@ -281,7 +291,7 @@ use mirrord_config::{
     },
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
-use mirrord_progress::{Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
+use mirrord_progress::{JsonProgress, Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
 use operator::operator_command;
@@ -335,6 +345,7 @@ use verify_config::verify_config;
 
 use crate::{
     ci::{MirrordCi, ci_api_key_available},
+    config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
     newsletter::suggest_newsletter_signup,
     user_data::UserData,
     util::{apply_test_env_overrides, get_user_git_branch},
@@ -992,10 +1003,12 @@ fn main() -> miette::Result<()> {
                     let ci_args = CiArgs {
                         command: CiCommand::Start(Box::new(CiStartArgs {
                             exec_args: args,
-                            foreground: true,
-                            environment: None,
-                            pipeline: None,
-                            triggered_by: None,
+                            ci_common_args: CiCommonArgs {
+                                foreground: true,
+                                environment: None,
+                                pipeline: None,
+                                triggered_by: None,
+                            },
                         })),
                     };
                     windows_unsupported!(args, "ci", {
@@ -1054,17 +1067,37 @@ fn main() -> miette::Result<()> {
             }
             Commands::Diagnose(args) => diagnose_command(*args).await?,
             Commands::Container(args) => windows_unsupported!(args, "container", {
+                let mut progress = ProgressTracker::from_env("mirrord container");
+
                 let (runtime_args, exec_params) = args.into_parts();
 
-                let exit_code =
-                    container_command(runtime_args, exec_params, watch, &user_data).await?;
+                let exit_code = container_command(
+                    runtime_args,
+                    exec_params,
+                    watch,
+                    &user_data,
+                    &mut progress,
+                    None,
+                )
+                .await?;
 
                 if exit_code != 0 {
                     std::process::exit(exit_code);
                 }
             }),
             Commands::ExtensionContainer(args) => windows_unsupported!(args, "container-ext", {
-                container_ext_command(args.config_file, args.target, watch, &user_data).await?
+                let mut progress = ProgressTracker::try_from_env("mirrord preparing to launch")
+                    .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
+
+                container_ext_command(
+                    args.config_file,
+                    args.target,
+                    watch,
+                    &user_data,
+                    &mut progress,
+                    None,
+                )
+                .await?
             }),
             Commands::ExternalProxy { port, .. } => windows_unsupported!(port, "extproxy", {
                 let config = mirrord_config::util::read_resolved_config()?;

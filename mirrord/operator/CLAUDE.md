@@ -7,14 +7,21 @@ cargo check -p mirrord-operator --features crd --keep-going
 # Full client + CRD model used by CLI
 cargo check -p mirrord-operator --features client --keep-going
 cargo test -p mirrord-operator --features client
-
 ```
 
 ## What This Crate Does
 
 `mirrord-operator` is the crate that both the CLI and operator depend on for shared types:
-- `feature = "crd"`: the Rust types that define CRD specs and statuses, including `schemars` schema generation. To see the generated schema for any CRD, look at the `#[ignored]` tests in `src/crd.rs`, they dump the full YAML.
+- `feature = "crd"`: the Rust types that define CRD specs and statuses, including `schemars` schema generation.
 - `feature = "client"`: the operator API client used by the CLI to check operator status, create/connect sessions, and create some CRDs.
+
+## Generating CRD YAML
+To generate the actual YAML definition for a CRD, run the `write_all_crd_yamls` test in `src/crd.rs`, which calls `write_crd_yaml` for each CRD, with `MIRRORD_TEST_DUMP_CRD_DIR` pointing to the output directory.
+```bash
+tmp_dir="$(mktemp -d)"
+MIRRORD_TEST_DUMP_CRD_DIR="$tmp_dir" cargo test -p mirrord-operator --features crd write_all_crd_yamls
+```
+This writes one file per CRD, the one you want is at `$tmp_dir/{crd.metadata.name}`.
 
 ## Where CRDs Are Reconciled (in the operator repo)
 

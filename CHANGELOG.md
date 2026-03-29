@@ -8,6 +8,35 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.196.0](https://github.com/metalbear-co/mirrord/tree/3.196.0) - 2026-03-28
+
+
+### Added
+
+- Add `mirrord ci container` command: starts a mirrord for CI session using a
+  container, similar to mirrord container.
+- Preview environments now support DB branching.
+- Preview environments now support `feature.network.incoming.ignore_ports`.
+- Preview environments now support environment variable manipulation
+  (`feature.env`).
+- Preview environments now support queue splitting.
+- Support for Copy Target for Multi Cluster.
+
+
+### Fixed
+
+- Fixed regression using `mirrord.exe exec` without an already existing
+  `MIRRORD_LAYER_FILE` environment variable.
+
+
+### Internal
+
+- Removed "Crate-specific instructions" section from AGENTS.md/CLAUDE.md.
+- The new unified DB branching flow now supports running with isolated
+  operators.
+- added a sanity test for validating running exec without MIRRORD_LAYER_FILE
+  env var is working as expected
+
 ## [3.195.0](https://github.com/metalbear-co/mirrord/tree/3.195.0) - 2026-03-26
 
 
