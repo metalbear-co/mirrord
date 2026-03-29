@@ -148,7 +148,13 @@ async fn preview_start(
         CliError::PreviewListFailed(e.to_string())
     })?;
 
-    check_existing_key(existing_sessions.iter(), key, &progress);
+    // Check if there's an existing session with the same key and warns the user about it
+    if existing_sessions.any(|session| session.spec.key.as_str() == key) {
+        progress.warning(&format!(
+            "This key {key} is already part of an existing environment. \
+            If that’s not what you intended, please switch to a different key."
+        ));
+    }
 
     for session in existing_sessions
         .items
