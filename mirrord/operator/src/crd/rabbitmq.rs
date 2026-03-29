@@ -25,13 +25,9 @@ pub struct RmqQueueDetails {
     /// Name of the `MirrordPropertiesList` that should be used to resolve queue options.
     pub queue_properties_list_name: Option<String>,
 
-    /// Where the application gets the queue name from. Will be used to read messages from that
-    /// queue and distribute them to the output queues. When running with mirrord and splitting
-    /// this queue, applications will get a modified name from that source.
+    /// This is if your app auto-binds to exchanges, with this selector a new dummy exchange name
+    /// will be injected to replace any paramentes specified in this selector.
     pub exchange_source: Option<QueueNameSource>,
-
-    /// Name of the `MirrordPropertiesList` that should be used to resolve queue options.
-    pub exchange_properties_list_name: Option<String>,
 }
 
 impl Eq for RmqQueueDetails {}
