@@ -14,7 +14,7 @@ pub async fn run_exec_with_target(
     args: Option<Vec<&str>>,
     env: Option<Vec<(&str, &str)>>,
 ) -> TestProcess {
-    run_exec(process_cmd, Some(target), namespace, args, env).await
+    run_exec(process_cmd, Some(target), namespace, args, env, None).await
 }
 
 /// Run `mirrord exec` without specifying a target, to run in targetless mode.
@@ -24,7 +24,7 @@ pub async fn run_exec_targetless(
     args: Option<Vec<&str>>,
     env: Option<Vec<(&str, &str)>>,
 ) -> TestProcess {
-    run_exec(process_cmd, None, namespace, args, env).await
+    run_exec(process_cmd, None, namespace, args, env, None).await
 }
 
 /// Run `mirrord exec` with the given cmd, optional target (`None` for targetless), namespace,
@@ -35,6 +35,7 @@ pub async fn run_exec(
     namespace: Option<&str>,
     args: Option<Vec<&str>>,
     env: Option<Vec<(&str, &str)>>,
+    env_remove: Option<&[&str]>,
 ) -> TestProcess {
     let mut mirrord_args = vec!["exec", "-c"];
     if let Some(target) = target {
@@ -75,7 +76,7 @@ pub async fn run_exec(
         }
     }
 
-    run_mirrord(args, base_env).await
+    run_mirrord(args, base_env, env_remove).await
 }
 
 /// Runs `mirrord ls` command.
@@ -87,7 +88,7 @@ pub async fn run_ls(namespace: &str, use_operator: bool) -> TestProcess {
     let use_operator = use_operator.to_string();
     env.insert("MIRRORD_OPERATOR_ENABLE", use_operator.as_str());
 
-    run_mirrord(mirrord_args, env).await
+    run_mirrord(mirrord_args, env, None).await
 }
 
 /// Runs `mirrord verify-config [--ide] "/path/config.json"`.
@@ -103,10 +104,14 @@ pub async fn run_verify_config(args: Option<Vec<&str>>) -> TestProcess {
         mirrord_args.extend(args);
     }
 
-    run_mirrord(mirrord_args, Default::default()).await
+    run_mirrord(mirrord_args, Default::default(), None).await
 }
 
-pub async fn run_mirrord(args: Vec<&str>, env: HashMap<&str, &str>) -> TestProcess {
+pub async fn run_mirrord(
+    args: Vec<&str>,
+    env: HashMap<&str, &str>,
+    env_remove: Option<&[&str]>,
+) -> TestProcess {
     // compile-time assertion for cfg(feature="build-cli") || env(MIRRORD_TESTS_USE_BINARY)
     #[cfg(not(feature = "build-cli"))]
     const _: &str = env!(
@@ -128,15 +133,22 @@ pub async fn run_mirrord(args: Vec<&str>, env: HashMap<&str, &str>) -> TestProce
 
     // Used for debugging with breakpoint on `let server` to debug mirrord execution
     println!("executing mirrord with args {args:?}",);
-    let server = Command::new(path)
+    let mut server = Command::new(path);
+    server
         .args(&args)
         .envs(env)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .unwrap();
+        .kill_on_drop(true);
+
+    if let Some(env_remove) = env_remove {
+        for key in env_remove {
+            server.env_remove(key);
+        }
+    }
+
+    let server = server.spawn().unwrap();
     println!(
         "executed mirrord with args {args:?} pid {}",
         server.id().unwrap()
