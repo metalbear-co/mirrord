@@ -893,7 +893,7 @@ impl OperatorApi<PreparedClientCert> {
     /// This method skips:
     /// - `assert_valid_mirrord_target` (operator validates on workload cluster)
     /// - `runtime_data` warnings (operator handles on workload cluster)
-    /// - `copy_target` (not supported without local resolution)
+    /// - Replica-count auto-enable for copy_target (requires resolved target; operator validates)
     pub async fn connect_in_multi_cluster_session<P>(
         &self,
         target: &Target,
@@ -916,6 +916,8 @@ impl OperatorApi<PreparedClientCert> {
             "Connecting to multi-cluster primary - workload cluster will resolve target"
         );
 
+        let do_copy_target = self.should_copy_target_mc(layer_config);
+
         let use_proxy_api = self
             .operator
             .spec
@@ -934,34 +936,77 @@ impl OperatorApi<PreparedClientCert> {
             BranchDbNames::default()
         };
 
-        let params = ConnectParams::new(
-            layer_config,
-            branch_name,
-            branch_db_names,
-            session_ci_info,
-            layer_config.key.as_str(),
-        );
+        if do_copy_target {
+            let mut copy_subtask = progress.subtask("preparing target copy");
 
-        // If no namespace in config, use the kubeconfig's default namespace
-        let namespace = namespace.unwrap_or_else(|| self.client.default_namespace());
-        let connect_url =
-            Self::target_connect_url_from_config(use_proxy_api, target, namespace, &params);
+            let copied = {
+                let reused = self.try_reuse_copy_target(layer_config, progress).await?;
+                match reused {
+                    Some(reused) => reused,
+                    None => self.copy_target(layer_config, progress).await?,
+                }
+            };
+            copy_subtask.success(None);
 
-        let session = self.make_operator_session(
-            None,
-            connect_url,
-            layer_config.traceparent.clone(),
-            layer_config.baggage.clone(),
-        )?;
+            let id = copied
+                .status
+                .as_ref()
+                .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
 
-        let mut connection_subtask = progress.subtask("connecting to the target");
-        let conn = Self::connect_target(&self.client, &session).await?;
-        connection_subtask.success(Some("connected to the target"));
+            let connect_url = Self::copy_target_connect_url(
+                &copied,
+                use_proxy_api,
+                layer_config.profile.as_deref(),
+                branch_name.clone(),
+                branch_db_names.clone(),
+                session_ci_info.clone(),
+                layer_config.key.as_str(),
+            );
 
-        Ok(OperatorSessionConnection {
-            session: Box::new(session),
-            conn,
-        })
+            let session = self.make_operator_session(
+                id,
+                connect_url,
+                layer_config.traceparent.clone(),
+                layer_config.baggage.clone(),
+            )?;
+
+            let mut connection_subtask = progress.subtask("connecting to the target");
+            let conn = Self::connect_target(&self.client, &session).await?;
+            connection_subtask.success(Some("connected to the target"));
+
+            Ok(OperatorSessionConnection {
+                session: Box::new(session),
+                conn,
+            })
+        } else {
+            let params = ConnectParams::new(
+                layer_config,
+                branch_name,
+                branch_db_names.clone(),
+                session_ci_info,
+                layer_config.key.as_str(),
+            );
+
+            let namespace = namespace.unwrap_or_else(|| self.client.default_namespace());
+            let connect_url =
+                Self::target_connect_url_from_config(use_proxy_api, target, namespace, &params);
+
+            let session = self.make_operator_session(
+                None,
+                connect_url,
+                layer_config.traceparent.clone(),
+                layer_config.baggage.clone(),
+            )?;
+
+            let mut connection_subtask = progress.subtask("connecting to the target");
+            let conn = Self::connect_target(&self.client, &session).await?;
+            connection_subtask.success(Some("connected to the target"));
+
+            Ok(OperatorSessionConnection {
+                session: Box::new(session),
+                conn,
+            })
+        }
     }
 
     /// Returns whether the `copy_target` feature should be used,
@@ -1094,6 +1139,40 @@ impl OperatorApi<PreparedClientCert> {
         }
 
         Ok((true, Some("empty deployment")))
+    }
+
+    /// Multi-cluster variant of [`OperatorApi::should_copy_target`]. The client cannot check
+    /// replica count because the target lives on a remote cluster. Instead we
+    /// only look at things we know on the cluster we are conencted to:
+    /// explicit opt-in and queue-splitting config.
+    fn should_copy_target_mc(&self, config: &LayerConfig) -> bool {
+        if config.feature.copy_target.enabled {
+            return true;
+        }
+
+        if config.feature.split_queues.sqs().next().is_some()
+            && self
+                .operator
+                .spec
+                .supported_features()
+                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
+                .not()
+        {
+            return true;
+        }
+
+        if config.feature.split_queues.kafka().next().is_some()
+            && self
+                .operator()
+                .spec
+                .supported_features()
+                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
+                .not()
+        {
+            return true;
+        }
+
+        false
     }
 
     /// Creates a new [`OperatorSession`] with the given `id` and `connect_url`.
