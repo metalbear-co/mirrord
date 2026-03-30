@@ -489,6 +489,8 @@ async fn run_process_with_mirrord<P: Progress>(
     mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<()> {
     // since execvpe doesn't exist on macOS, resolve path with which and use execve
+
+    use std::ops::Not;
     let binary_path = process_which(&binary)?;
 
     let path = CString::new(binary_path.as_os_str().as_bytes())?;
@@ -508,8 +510,10 @@ async fn run_process_with_mirrord<P: Progress>(
 
     progress.success(Some("Ready!"));
 
+    // Foreground CI start command is treated same as mirrord exec
+    // upon this point, while background CI start command spawns a child process
     match mirrord_for_ci {
-        Some(mirrord_ci) => mirrord_ci
+        Some(mirrord_ci) if mirrord_ci.is_foreground().not() => mirrord_ci
             .prepare_command(
                 &mut progress,
                 &binary_path,
@@ -519,7 +523,7 @@ async fn run_process_with_mirrord<P: Progress>(
             )
             .await
             .map_err(From::from),
-        None => {
+        Some(_) | None => {
             // The execve hook is not yet active and does not hijack this call.
             let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
                 .expect_err("call to execve cannot succeed");
