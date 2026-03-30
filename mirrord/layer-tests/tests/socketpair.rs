@@ -19,9 +19,8 @@ async fn python_socketpair_windows() {
     let (mut test_process, mut intproxy) = application.start_process(vec![], None).await;
 
     // Ensure no unexpected mirrord messages are sent for local socketpair.
-    match tokio::time::timeout(Duration::from_secs(2), intproxy.try_recv()).await {
-        Ok(Some(msg)) => panic!("unexpected message from intproxy: {msg:?}"),
-        Ok(None) | Err(_) => {}
+    if let Ok(Some(msg)) = tokio::time::timeout(Duration::from_secs(2), intproxy.try_recv()).await {
+        panic!("unexpected message from intproxy: {msg:?}")
     }
 
     test_process.wait_assert_success().await;
