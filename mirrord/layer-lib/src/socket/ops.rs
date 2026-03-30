@@ -5,10 +5,7 @@ use std::{
     sync::Arc,
 };
 #[cfg(unix)]
-use std::{
-    io,
-    os::{fd::BorrowedFd, unix::io::RawFd},
-};
+use std::{io, os::fd::BorrowedFd};
 
 use libc::c_int;
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
@@ -34,9 +31,10 @@ use crate::{
     },
 };
 #[cfg(windows)]
-use crate::{error::ConnectError, socket::dns::windows::check_address_reachability};
-#[cfg(windows)]
-use crate::{error::windows::WindowsError, socket::sockets::find_listener_address_by_port};
+use crate::{
+    error::{ConnectError, windows::WindowsError},
+    socket::{SocketAddrExt, dns::windows::check_address_reachability},
+};
 
 /// Result type for connect operations that preserves errno information
 #[derive(Debug)]
@@ -180,10 +178,8 @@ pub fn nop_connect_fn(_addr: SockAddr) -> ConnectResult {
 /// trying to connect to - then don't forward this connection to the agent, and instead of
 /// connecting to the requested address, connect to the actual address where the application
 /// is locally listening.
-#[cfg(unix)]
 #[mirrord_layer_macro::instrument(level = "trace", skip(connect_fn), ret)]
 pub fn connect_to_local_address<F>(
-    sockfd: RawFd,
     user_socket_info: &UserSocket,
     ip_address: SocketAddr,
     connect_fn: F,
@@ -202,9 +198,21 @@ where
                     SocketState::Listening(Bound {
                         requested_address,
                         address,
-                    }) => (requested_address.port() == ip_address.port()
-                        && socket.protocol == user_socket_info.protocol)
-                        .then(|| SockAddr::from(address)),
+                    }) => {
+                        let is_same_target = (requested_address.port() == ip_address.port());
+
+                        // Windows edge case - Python's socketpair is emulated by a loopback
+                        // listener bound to port 0. The connect target uses
+                        // the actual bound port, so we must match against
+                        // it.
+                        #[cfg(windows)]
+                        let is_same_target = is_same_target
+                            || (requested_address.is_emulated_socketpair()
+                                && address.port() == ip_address.port());
+
+                        (is_same_target && socket.protocol == user_socket_info.protocol)
+                            .then(|| SockAddr::from(address))
+                    }
                     SocketState::Bound { .. }
                     | SocketState::Initialized
                     | SocketState::Connected(_) => None,
@@ -262,31 +270,13 @@ where
         // Handle localhost/unspecified addresses first -
         //  if applicable, connect locally without proxy
         let ip = ip_address.ip();
-        if ip.is_loopback() || ip.is_unspecified() {
-            // Note(Daniel): the next 2 if blocks are logically equivalent but were brought from
-            // layer and layer-win separately, they work and im only doing plumbing
-            // unification, so i rather keep both and each platform will run its own flavoring of
-            // it.
-            #[cfg(unix)]
-            if let Some(result) = connect_to_local_address(
-                sockfd,
-                &user_socket_info,
-                ip_address,
-                &mut call_connect_fn,
-            )? {
-                // `result` here is always a success, as error and bypass are returned on the `?`
-                // above.
-                return Detour::Success(result);
-            }
-            #[cfg(windows)]
-            if let Some(local_address) =
-                find_listener_address_by_port(ip_address.port(), user_socket_info.protocol)
-            {
-                tracing::debug!("connecting locally to listener at {}", local_address);
-                let local_sockaddr = SockAddr::from(local_address);
-                let connect_result = call_connect_fn(local_sockaddr);
-                return Detour::Success(connect_result);
-            }
+        if (ip.is_loopback() || ip.is_unspecified())
+            && let Some(result) =
+                connect_to_local_address(&user_socket_info, ip_address, &mut call_connect_fn)?
+        {
+            // `result` here is always a success, as error and bypass are returned on the `?`
+            // above.
+            return Detour::Success(result);
         }
 
         if is_ignored_port(&ip_address) {

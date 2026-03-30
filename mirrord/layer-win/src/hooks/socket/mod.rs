@@ -454,6 +454,28 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
         return listen_result;
     }
 
+    // For Windows socketpair emulation (loopback-bound listener paired with loopback connects),
+    // mirrord should leave the socket untouched so the runtime, e.g. python, can manage it locally.
+    // Use the requested address to identify synthetic socketpair listeners:
+    // they bind to loopback with port 0. Allow normal loopback services on
+    // explicit ports to remain managed.
+    // On Unix it doesn't matter since socketpair uses AF_UNIX sockets.
+    if bound_state.requested_address.is_emulated_socketpair() {
+        tracing::debug!(
+            "listen_detour -> skipping subscription for local listener {} -> {}",
+            bound_state.requested_address,
+            bound_state.address
+        );
+        // Reinsert the socket so later hooks (e.g., connect_to_local_address/getsockname)
+        // can find the listener and keep socketpair connections local.
+        Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(bound_state);
+        SOCKETS
+            .lock()
+            .expect("listen_detour -> failed to lock sockets for state update")
+            .insert(s, socket);
+        return listen_result;
+    }
+
     // Check if incoming traffic is enabled
     if matches!(
         setup().incoming_config().mode,
@@ -465,22 +487,6 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
 
     if setup().targetless() {
         tracing::warn!("listen_detour -> running targetless, binding locally instead");
-        return listen_result;
-    }
-
-    // For Windows socketpair emulation (loopback-bound listener paired with loopback connects),
-    // mirrord should leave the socket untouched so the runtime, e.g. python, can manage it locally.
-    // Use the requested address to identify synthetic socketpair listeners:
-    // they bind to loopback with port 0. Allow normal loopback services on
-    // explicit ports to remain managed.
-    // On Unix it doesn't matter since socketpair uses AF_UNIX sockets.
-    if bound_state.requested_address.ip().is_loopback() && bound_state.requested_address.port() == 0
-    {
-        tracing::debug!(
-            "listen_detour -> skipping subscription for local listener {} -> {}",
-            bound_state.requested_address,
-            bound_state.address
-        );
         return listen_result;
     }
 
@@ -619,6 +625,17 @@ unsafe extern "system" fn accept_detour(
         }
     };
 
+    // For Windows socketpair emulation (loopback-bound listener on port 0),
+    // do not apply mirrord accept handling. Let the runtime manage it locally.
+    if SocketAddr::new(listener_address.ip(), port).is_emulated_socketpair() {
+        tracing::debug!(
+            "accept_detour -> skipping mirrord handling for socketpair listener {} -> {}",
+            SocketAddr::new(listener_address.ip(), port),
+            listener_address
+        );
+        return auto_close_socket.release();
+    }
+
     // Get peer address from the accepted connection (this will be intproxy's address)
     let peer_address = match utils::get_peer_address_from_socket(auto_close_socket.get()) {
         Ok(addr) => addr,
@@ -712,7 +729,7 @@ unsafe extern "system" fn getsockname_detour(
     {
         Some(sock) => sock.clone(),
         None => {
-            tracing::warn!("getsockname_detour -> failed to get socket: {}", s);
+            tracing::warn!("getsockname_detour -> socket not managed: {}", s);
             return getsockname_fn();
         }
     };
