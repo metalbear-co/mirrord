@@ -133,7 +133,7 @@ pub struct MirrordRmqSessionSpec {
 
     /// For each queue_id, a mapping from attribute name, to attribute value regex.
     /// The queue_id for a queue is determined at the queue registry. It is not (necessarily)
-    /// The name of the queue on AWS.
+    /// the name of the queue.
     pub queue_filters: HashMap<QueueId, QueueMessageFilter>,
 
     /// The target of this session.
