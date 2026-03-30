@@ -9,6 +9,7 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
     ffi::OsStr,
+    ops::Not,
     time::{Duration, Instant},
 };
 
@@ -133,11 +134,8 @@ async fn preview_start(
         CliError::PreviewListFailed(e.to_string())
     })?;
 
-    // Check if there's an existing session with the same key and warns the user about it
-    if existing_sessions
-        .iter()
-        .any(|session| session.spec.key.as_str() == key)
-    {
+    // Check if there's an existing session with the same key and warns the user about it.
+    if existing_sessions.items.is_empty().not() {
         progress.warning(&format!(
             "This key {key} is already part of an existing environment. \
             If that’s not what you intended, please switch to a different key."
