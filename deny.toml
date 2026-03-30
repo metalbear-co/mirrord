@@ -17,7 +17,6 @@ ignore = [
   "RUSTSEC-2025-0134", # rustls-pemfile is unmaintained, but we cannot remove it yet.
   "RUSTSEC-2025-0141", # bincode is unmaintaned, but we cannot remove it yet.
   "RUSTSEC-2026-0049", # aws crates in tests/rust-sqs-printer depend on an old version of rustls-webpki
-  "RUSTSEC-2024-0384", # instant is unmaintained, transitive dep of notify via notify-types
 ]
 
 [licenses]

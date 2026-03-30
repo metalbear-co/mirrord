@@ -44,7 +44,7 @@ tracing-subscriber.workspace = true
 futures.workspace = true
 which.workspace = true
 semver.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["stream"] }
 const-random = "0.1.15"
 tokio = { workspace = true, features = ["rt", "net", "macros", "process"] }
 tokio-retry.workspace = true
@@ -72,18 +72,17 @@ tower = { workspace = true, features = ["retry"] }
 ci_info.workspace = true
 opener = "0.8.3"
 tempfile = { workspace = true, optional = true }
-axum = { version = "0.8.4", optional = true }
+axum = { version = "0.8.4", features = ["ws"] }
 tower-http = { version = "0.6.6", features = ["fs", "set-header"], optional = true }
 tar = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
 itertools = { workspace = true, optional = true }
 yamlpatch.workspace = true
 yamlpath.workspace = true
-rust-embed = { version = "8", optional = true }
-notify = { version = "7", features = ["macos_fsevent"], optional = true }
-hyper = { workspace = true, features = ["full"], optional = true }
-hyper-util = { workspace = true, features = ["client-legacy", "tokio"], optional = true }
-http-body-util = { workspace = true, optional = true }
+rust-embed = "8"
+notify = { version = "8", features = ["macos_fsevent"] }
+mime_guess = "2"
+eventsource-stream = "0.2"
 
 [target.'cfg(unix)'.dependencies]
 rand.workspace = true
@@ -118,5 +117,4 @@ tempfile.workspace = true
 
 [features]
 windows_build = []
-wizard = ["dep:axum", "dep:tower-http", "dep:tar", "dep:flate2", "dep:tempfile", "dep:itertools"]
-ui = ["dep:axum", "axum/ws", "dep:rust-embed", "dep:notify", "dep:hyper", "dep:hyper-util", "dep:http-body-util"]
+wizard = ["dep:tower-http", "dep:tar", "dep:flate2", "dep:tempfile", "dep:itertools"]

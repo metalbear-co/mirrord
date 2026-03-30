@@ -600,7 +600,6 @@ pub(crate) enum CliError {
     RuntimeDataResolution(KubeApiError),
 
     /// Errors produced by the `mirrord ui` command.
-    #[cfg(feature = "ui")]
     #[error("Session monitor UI error: {0}")]
     #[diagnostic(help("Check that no other process is using the port and try again."))]
     UiError(String),

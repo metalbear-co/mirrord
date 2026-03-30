@@ -8,7 +8,7 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
     convert::Infallible,
-    net::{Ipv4Addr, SocketAddr},
+    net::{Ipv6Addr, SocketAddr},
     path::PathBuf,
     sync::Arc,
     time::Duration,
@@ -24,17 +24,13 @@ use axum::{
     response::{IntoResponse, Response, sse},
     routing::{get, post},
 };
-use http_body_util::{BodyExt, Full};
-use hyper::body::Bytes;
-use hyper_util::rt::TokioIo;
+use eventsource_stream::Eventsource;
 use mirrord_intproxy::session_monitor::api::SessionInfo;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+#[cfg(not(debug_assertions))]
 use rust_embed::Embed;
 use serde::Serialize;
-use tokio::{
-    net::UnixStream,
-    sync::{RwLock, broadcast, mpsc},
-};
+use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info, warn};
 
@@ -42,6 +38,7 @@ use crate::{config::UiArgs, error::CliError};
 
 const MAX_EVENTS_PER_SESSION: usize = 500;
 
+#[cfg(not(debug_assertions))]
 #[derive(Embed)]
 #[folder = "../../monitor-frontend/dist/"]
 struct FrontendAssets;
@@ -71,82 +68,51 @@ struct AppState {
     notify_tx: broadcast::Sender<SessionNotification>,
 }
 
-async fn unix_http_request(
+/// Creates a reqwest client configured to connect via the given Unix socket.
+fn unix_client(
     socket_path: &std::path::Path,
-    method: &str,
-    path: &str,
-) -> Result<(StatusCode, Bytes), Box<dyn std::error::Error + Send + Sync>> {
-    let stream = UnixStream::connect(socket_path).await?;
-    let io = TokioIo::new(stream);
-
-    let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
-    tokio::spawn(async move {
-        if let Err(err) = conn.await {
-            debug!(?err, "Unix socket connection finished");
-        }
-    });
-
-    let req = hyper::Request::builder()
-        .method(method)
-        .uri(path)
-        .header("host", "localhost")
-        .body(Full::<Bytes>::new(Bytes::new()))?;
-
-    let resp = sender.send_request(req).await?;
-    let status = resp.status();
-    let body = resp.into_body().collect().await?.to_bytes();
-    Ok((status, body))
+) -> Result<reqwest::Client, Box<dyn std::error::Error + Send + Sync>> {
+    Ok(reqwest::Client::builder()
+        .unix_socket(socket_path)
+        .build()?)
 }
 
 async fn fetch_session_info(
     socket_path: &std::path::Path,
 ) -> Result<SessionInfo, Box<dyn std::error::Error + Send + Sync>> {
-    let (status, body) = unix_http_request(socket_path, "GET", "/info").await?;
-    if !status.is_success() {
-        return Err(format!("session info request returned {status}").into());
+    let client = unix_client(socket_path)?;
+    let resp = client.get("http://localhost/info").send().await?;
+    if !resp.status().is_success() {
+        return Err(format!("session info request returned {}", resp.status()).into());
     }
-    let info: SessionInfo = serde_json::from_slice(&body)?;
-    Ok(info)
+    Ok(resp.json().await?)
 }
 
-fn parse_sse_frames(leftover: &mut String, new_data: &[u8]) -> Vec<serde_json::Value> {
-    leftover.push_str(&String::from_utf8_lossy(new_data));
-    let mut values = Vec::new();
-    while let Some(pos) = leftover.find("\n\n") {
-        let chunk = leftover[..pos].to_owned();
-        leftover.replace_range(..pos + 2, "");
-        for line in chunk.lines() {
-            if let Some(json_str) = line.strip_prefix("data:") {
-                let json_str = json_str.trim();
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
-                    values.push(val);
-                }
-            }
-        }
-    }
-    values
-}
-
-/// Opens an SSE stream to a session's Unix socket /events endpoint.
-async fn open_sse_body(
+/// Opens an SSE connection to a session's Unix socket /events endpoint and returns
+/// a pinned `Eventsource` stream that yields parsed SSE events.
+async fn open_sse_stream(
     socket_path: &std::path::Path,
-) -> Result<hyper::body::Incoming, Box<dyn std::error::Error + Send + Sync>> {
-    let stream = UnixStream::connect(socket_path).await?;
-    let io = TokioIo::new(stream);
-    let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
-    tokio::spawn(async move {
-        let _ = conn.await;
-    });
-
-    let req = hyper::Request::builder()
-        .method("GET")
-        .uri("/events")
-        .header("host", "localhost")
+) -> Result<
+    std::pin::Pin<
+        Box<
+            dyn futures::Stream<
+                    Item = Result<
+                        eventsource_stream::Event,
+                        eventsource_stream::EventStreamError<reqwest::Error>,
+                    >,
+                > + Send,
+        >,
+    >,
+    Box<dyn std::error::Error + Send + Sync>,
+> {
+    let client = unix_client(socket_path)?;
+    let resp = client
+        .get("http://localhost/events")
         .header("accept", "text/event-stream")
-        .body(Full::<Bytes>::new(Bytes::new()))?;
-
-    let resp = sender.send_request(req).await?;
-    Ok(resp.into_body())
+        .send()
+        .await?;
+    let byte_stream = resp.bytes_stream();
+    Ok(Box::pin(byte_stream.eventsource()))
 }
 
 /// Appends parsed SSE values to the session's event buffer, capping at
@@ -170,22 +136,25 @@ async fn buffer_session_events(
 
 /// Connects to a session's SSE /events endpoint and buffers events into the shared state.
 async fn stream_session_events(session_id: String, socket_path: PathBuf, state: Arc<AppState>) {
-    let mut body = match open_sse_body(&socket_path).await {
-        Ok(b) => b,
+    let mut sse_stream = match open_sse_stream(&socket_path).await {
+        Ok(s) => s,
         Err(err) => {
             warn!(%session_id, ?err, "Failed to open SSE stream");
             return;
         }
     };
 
-    let mut leftover = String::new();
-    while let Some(Ok(frame)) = body.frame().await {
-        let Ok(data) = frame.into_data() else {
-            continue;
+    use futures::stream::StreamExt as _;
+    while let Some(result) = sse_stream.next().await {
+        let event = match result {
+            Ok(e) => e,
+            Err(err) => {
+                debug!(%session_id, ?err, "SSE stream error");
+                break;
+            }
         };
-        let values = parse_sse_frames(&mut leftover, &data);
-        if !values.is_empty() {
-            buffer_session_events(&session_id, values, &state).await;
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&event.data) {
+            buffer_session_events(&session_id, vec![val], &state).await;
         }
     }
 
@@ -305,20 +274,21 @@ async fn session_events_sse(
             }
         }
 
-        let mut body = match open_sse_body(&socket_path).await {
-            Ok(b) => b,
+        let mut sse_stream = match open_sse_stream(&socket_path).await {
+            Ok(s) => s,
             Err(err) => {
                 warn!(?err, "Failed to open SSE stream for proxy");
                 return;
             }
         };
 
-        let mut leftover = String::new();
-        while let Some(Ok(frame)) = body.frame().await {
-            let Ok(data) = frame.into_data() else {
-                continue;
+        use futures::stream::StreamExt as _;
+        while let Some(result) = sse_stream.next().await {
+            let event = match result {
+                Ok(e) => e,
+                Err(_) => break,
             };
-            for val in parse_sse_frames(&mut leftover, &data) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&event.data) {
                 let data_str =
                     serde_json::to_string(&val).expect("SSE event serialization cannot fail");
                 if tx
@@ -350,9 +320,21 @@ async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>
         }
     };
 
-    match unix_http_request(&socket_path, "POST", "/kill").await {
-        Ok((_status, body)) => {
-            let val: serde_json::Value = serde_json::from_slice(&body).unwrap_or_else(|err| {
+    let client = match unix_client(&socket_path) {
+        Ok(c) => c,
+        Err(err) => {
+            error!(?err, "Failed to create client for kill request");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(serde_json::json!({"error": err.to_string()})),
+            )
+                .into_response();
+        }
+    };
+
+    match client.post("http://localhost/kill").send().await {
+        Ok(resp) => {
+            let val: serde_json::Value = resp.json().await.unwrap_or_else(|err| {
                 warn!(?err, "Failed to parse kill response body");
                 serde_json::json!({"status": "ok"})
             });
@@ -407,39 +389,41 @@ async fn ws_connection(mut socket: WebSocket, state: Arc<AppState>) {
 }
 
 fn guess_mime(path: &str) -> &'static str {
-    match path.rsplit('.').next() {
-        Some("html") => "text/html",
-        Some("js") | Some("mjs") => "application/javascript",
-        Some("css") => "text/css",
-        Some("json") => "application/json",
-        Some("png") => "image/png",
-        Some("svg") => "image/svg+xml",
-        Some("ico") => "image/x-icon",
-        Some("woff") => "font/woff",
-        Some("woff2") => "font/woff2",
-        Some("ttf") => "font/ttf",
-        Some("map") => "application/json",
-        _ => "application/octet-stream",
+    mime_guess::from_path(path)
+        .first_raw()
+        .unwrap_or("application/octet-stream")
+}
+
+fn get_asset(path: &str) -> Option<Vec<u8>> {
+    #[cfg(debug_assertions)]
+    {
+        let base = concat!(env!("CARGO_MANIFEST_DIR"), "/../../monitor-frontend/dist/");
+        std::fs::read(format!("{base}{path}")).ok()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        FrontendAssets::get(path).map(|f| f.data.to_vec())
     }
 }
 
 async fn static_handler(uri: axum::http::Uri) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
 
-    if let Some(file) = FrontendAssets::get(path) {
+    if let Some(data) = get_asset(path) {
         let mime = guess_mime(path);
-        return ([(header::CONTENT_TYPE, mime)], file.data.to_vec()).into_response();
+        return ([(header::CONTENT_TYPE, mime)], data).into_response();
     }
 
     // SPA fallback
-    match FrontendAssets::get("index.html") {
-        Some(file) => ([(header::CONTENT_TYPE, "text/html")], file.data.to_vec()).into_response(),
+    match get_asset("index.html") {
+        Some(data) => ([(header::CONTENT_TYPE, "text/html")], data).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
 /// Spawns a background task that rescans the sessions directory every 2 seconds.
 /// Filesystem watchers can miss events on macOS, so this serves as a fallback.
+#[cfg(target_os = "macos")]
 fn start_periodic_rescan(sessions_dir: PathBuf, state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
@@ -530,17 +514,21 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
     });
 
     scan_existing_sessions(&sessions_dir, &state).await;
+    #[cfg(target_os = "macos")]
     start_periodic_rescan(sessions_dir.clone(), state.clone());
     start_filesystem_watcher(&sessions_dir, state.clone())?;
 
     let app = build_router(state);
 
-    let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), args.port);
+    let addr = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), args.port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .map_err(|e| CliError::UiError(format!("failed to bind to {addr}: {e}")))?;
 
-    let url = format!("http://127.0.0.1:{}", args.port);
+    let addr = listener
+        .local_addr()
+        .map_err(|e| CliError::UiError(format!("failed to get listener address: {e}")))?;
+    let url = format!("http://{addr}");
     eprintln!("mirrord session monitor: {url}");
 
     if let Err(err) = opener::open(&url) {
