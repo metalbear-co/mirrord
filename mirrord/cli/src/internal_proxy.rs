@@ -14,7 +14,9 @@
 use std::os::unix::ffi::OsStrExt;
 use std::{
     collections::{HashMap, HashSet},
-    env, io,
+    env,
+    fmt::Write as _,
+    io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
     sync::Arc,
@@ -288,6 +290,12 @@ async fn setup_db_portforwards(
             password: String,
             database: Option<String>,
         },
+        /// ADO.NET-style connection string for MSSQL.
+        BuildMssql {
+            user: String,
+            password: String,
+            database: Option<String>,
+        },
         /// Fall back to just the socket address.
         HostPort,
     }
@@ -303,7 +311,7 @@ async fn setup_db_portforwards(
             DatabaseBranchConfig::Mongodb(db) => (&db.base, Some("mongodb")),
             DatabaseBranchConfig::Mysql(db) => (&db.base, Some("mysql")),
             DatabaseBranchConfig::Pg(db) => (&db.base, Some("postgresql")),
-            DatabaseBranchConfig::Mssql(db) => (&db.base, None),
+            DatabaseBranchConfig::Mssql(db) => (&db.base, Some("mssql")),
             DatabaseBranchConfig::Redis(_) => continue,
         };
         let envs = match &base.connection {
@@ -446,11 +454,19 @@ async fn setup_db_portforwards(
                         let user = vars.get(&user_var)?.clone();
                         let password = vars.get(&pass_var)?.clone();
                         let database = database.and_then(|d| vars.get(&d)).cloned();
-                        Some(ConnInfo::BuildUrl {
-                            scheme,
-                            user,
-                            password,
-                            database,
+                        Some(if scheme == "mssql" {
+                            ConnInfo::BuildMssql {
+                                user,
+                                password,
+                                database,
+                            }
+                        } else {
+                            ConnInfo::BuildUrl {
+                                scheme,
+                                user,
+                                password,
+                                database,
+                            }
                         })
                     })
                     .unwrap_or(ConnInfo::HostPort);
@@ -550,6 +566,25 @@ async fn setup_db_portforwards(
                         url.query_pairs_mut().append_pair("authSource", "admin");
                     }
                     url.to_string()
+                }
+                ConnInfo::BuildMssql {
+                    user,
+                    password,
+                    database,
+                } => {
+                    let host = match local.ip() {
+                        IpAddr::V4(v4) => v4.to_string(),
+                        IpAddr::V6(v6) => format!("[{v6}]"),
+                    };
+                    let mut conn = format!(
+                        "Server={host},{};User Id={user};Password={password}",
+                        local.port()
+                    );
+                    if let Some(db) = database {
+                        write!(conn, ";Database={db}").unwrap();
+                    }
+                    conn.push(';');
+                    conn
                 }
                 ConnInfo::HostPort => local.to_string(),
             };
