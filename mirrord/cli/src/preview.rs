@@ -117,13 +117,27 @@ async fn preview_start(
         CliError::PreviewImageRequired
     })?;
 
-    let session_target = resolve_config_target(
-        config_target,
-        operator_api.client(),
-        layer_config.target.namespace.as_deref(),
-    )
-    .await
-    .inspect_err(|_| subtask.failure(None))?;
+    // In multi-cluster mode the target lives on a remote cluster, not on
+    // the primary cluster the CLI is connected to. Skip the local lookup
+    // and let the operator on the remote cluster resolve the container.
+    let session_target = if target_ns_annotation.is_some() {
+        let mut target = config_target.clone();
+        if target.container().is_none() {
+            target.set_container(String::new());
+        }
+        SessionTarget::from_config(target).ok_or_else(|| {
+            subtask.failure(None);
+            CliError::PreviewTargetResolutionFailed(config_target.to_string())
+        })?
+    } else {
+        resolve_config_target(
+            config_target,
+            operator_api.client(),
+            layer_config.target.namespace.as_deref(),
+        )
+        .await
+        .inspect_err(|_| subtask.failure(None))?
+    };
 
     // Check for an existing session with the same key+target.
     let key = layer_config.key.as_str();
@@ -545,23 +559,33 @@ async fn preview_stop(
 
     // Default to all namespaces when no namespace is configured, same as `status`.
     let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
-    let (operator_api, api, _) =
+    let (operator_api, api, target_ns_annotation) =
         create_preview_api(&layer_config, all_namespaces, &progress, &mut analytics).await?;
 
     let mut subtask = progress.subtask("finding preview sessions");
 
     // Resolve the config target (if provided) to a full SessionTarget for comparison.
-    // This allows the user to type, for example, "deployment/foo" and have it match a session that
-    // has `spec.target` set to "Deployment/foo/container/foo"
+    // In multi-cluster mode, skip the local lookup since the target lives on a remote cluster.
     let session_target = match &layer_config.target.path {
         Some(config_target) => {
-            let session_target = resolve_config_target(
-                config_target,
-                operator_api.client(),
-                layer_config.target.namespace.as_deref(),
-            )
-            .await
-            .inspect_err(|_| subtask.failure(None))?;
+            let session_target = if target_ns_annotation.is_some() {
+                let mut target = config_target.clone();
+                if target.container().is_none() {
+                    target.set_container(String::new());
+                }
+                SessionTarget::from_config(target).ok_or_else(|| {
+                    subtask.failure(None);
+                    CliError::PreviewTargetResolutionFailed(config_target.to_string())
+                })?
+            } else {
+                resolve_config_target(
+                    config_target,
+                    operator_api.client(),
+                    layer_config.target.namespace.as_deref(),
+                )
+                .await
+                .inspect_err(|_| subtask.failure(None))?
+            };
 
             Some(session_target)
         }

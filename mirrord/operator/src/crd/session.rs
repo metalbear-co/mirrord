@@ -172,15 +172,20 @@ impl SessionTarget {
     }
 
     /// Parse back into a [`Target`] by reconstructing the canonical target path string.
+    /// When container is empty (multi-cluster mode where the CLI couldn't resolve it),
+    /// omit the `/container/` part so the operator auto-detects.
     pub fn into_config(self) -> Option<Target> {
-        format!(
-            "{}/{}/container/{}",
-            self.kind.to_ascii_lowercase(),
-            self.name,
-            self.container
-        )
-        .parse()
-        .ok()
+        let path = if self.container.is_empty() {
+            format!("{}/{}", self.kind.to_ascii_lowercase(), self.name)
+        } else {
+            format!(
+                "{}/{}/container/{}",
+                self.kind.to_ascii_lowercase(),
+                self.name,
+                self.container
+            )
+        };
+        path.parse().ok()
     }
 }
 
