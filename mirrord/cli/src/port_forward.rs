@@ -110,8 +110,9 @@ pub struct ConnectionsState {
 }
 
 impl PortForwarder {
-    /// The keys in `mappings` must be unique (save port=0, for
-    /// ephemeral connections)
+    /// The local-side [`SocketAddr`]s yielded by `mappings` must be
+    /// unique (save port=0, for ephemeral connections), will return
+    /// an error otherwise.
     #[inline]
     pub(crate) async fn new(
         agent_tx: TxHandle<Client>,
