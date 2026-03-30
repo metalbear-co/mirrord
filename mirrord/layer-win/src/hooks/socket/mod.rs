@@ -542,8 +542,13 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
     let connect_fn = |addr: SockAddr| {
         let original = CONNECT_ORIGINAL.get().unwrap();
         let result = unsafe { original(s, addr.as_ptr() as *const _, addr.len()) };
+        let last_error = if result == SOCKET_ERROR {
+            Some(unsafe { WSAGetLastError() })
+        } else {
+            None
+        };
         log_connection_result(result, "connect_detour", addr);
-        ConnectResult::from(result)
+        ConnectResult::new(result, last_error)
     };
 
     match ops::connect(s, name, namelen, "connect_detour", connect_fn) {
@@ -558,7 +563,7 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
             );
         }
         Ok(connect_result) => {
-            return connect_result.result();
+            return connect_result.into();
         }
     }
 
