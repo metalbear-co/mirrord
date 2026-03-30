@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt::Debug, net::SocketAddr, ops::Not, path::PathBuf};
+use std::{collections::HashSet, fmt::Debug, ops::Not, path::PathBuf};
 
 use k8s_openapi::NamespaceResourceScope;
 use kube::{Api, Resource, api::DeleteParams};
@@ -23,7 +23,7 @@ use crate::{
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Portforward {
     pub db_id: String,
-    pub local_addr: SocketAddr,
+    pub connection_string: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -204,7 +204,7 @@ async fn connections_command() -> CliResult<()> {
     };
 
     let mut table = Table::new();
-    table.add_row(row!["DB ID", "LOCAL ADDRESS", "KEY", "SESSION ID"]);
+    table.add_row(row!["DB ID", "ADDRESS", "KEY", "SESSION ID"]);
     let mut has_rows = false;
 
     while let Ok(Some(entry)) = entries.next_entry().await {
@@ -238,7 +238,7 @@ async fn connections_command() -> CliResult<()> {
         for pf in &session.portforwards {
             table.add_row(row![
                 pf.db_id,
-                pf.local_addr,
+                pf.connection_string,
                 session.key,
                 format!("{:X}", session.session_id)
             ]);
