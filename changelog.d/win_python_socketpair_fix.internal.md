@@ -1,0 +1,1 @@
+Fixed windows python socketpair regression (affecting versions 3.190.0-3.196.0)
