@@ -626,7 +626,6 @@ pub enum SplitQueue {
     Sqs(SqsQueueDetails),
 
     /// RabbitMQ
-    #[serde(rename = "RMQ")]
     Rmq(rabbitmq::RmqQueueDetails),
 
     /// Unknown, left for future compatibility.
@@ -826,10 +825,6 @@ pub struct SqsSessionError {
 
 impl Display for SqsSessionError {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        // Write strictly the first element into the supplied output
-        // stream: `f`. Returns `fmt::Result` which indicates whether the
-        // operation succeeded or failed. Note that `write!` uses syntax which
-        // is very similar to `println!`.
         write!(f, "{}", self.reason)
     }
 }
