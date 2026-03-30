@@ -12,25 +12,23 @@ use super::{
     SplitQueueNameDetails,
 };
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")] // name_source -> nameSource in yaml.
 pub struct RmqQueueDetails {
     /// Name of the `MirrordPropertiesList` that should be used to resolve cluster connection
     /// options.
-    pub cluster_name: String,
+    pub cluster_properties: String,
 
     #[serde(flatten)]
     pub name_details: SplitQueueNameDetails,
 
     /// Name of the `MirrordPropertiesList` that should be used to resolve queue options.
-    pub queue_properties_list_name: Option<String>,
+    pub queue_properties: Option<String>,
 
     /// This is if your app auto-binds to exchanges, with this selector a new dummy exchange name
     /// will be injected to replace any paramentes specified in this selector.
     pub exchange_source: Option<QueueNameSource>,
 }
-
-impl Eq for RmqQueueDetails {}
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename = "RMQSplitDetails", rename_all = "camelCase")]
