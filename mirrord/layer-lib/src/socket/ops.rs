@@ -199,7 +199,7 @@ where
                         requested_address,
                         address,
                     }) => {
-                        let is_same_target = (requested_address.port() == ip_address.port());
+                        let is_same_target = requested_address.port() == ip_address.port();
 
                         // Windows edge case - Python's socketpair is emulated by a loopback
                         // listener bound to port 0. The connect target uses

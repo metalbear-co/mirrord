@@ -6,7 +6,6 @@ use std::os::fd::{BorrowedFd, RawFd};
 use std::{
     collections::HashMap,
     io,
-    net::SocketAddr,
     sync::{Arc, LazyLock, Mutex},
 };
 
@@ -25,10 +24,7 @@ use winapi::{
 };
 
 use super::{SocketKind, SocketState, UserSocket};
-use crate::{
-    detour::{Bypass, Detour},
-    setup::setup,
-};
+use crate::detour::{Bypass, Detour};
 
 // Platform-specific socket descriptors
 // RawFd
