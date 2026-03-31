@@ -297,7 +297,7 @@ use nix::errno::Errno;
 use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
-#[cfg(debug_assertions)]
+#[cfg(all(unix, debug_assertions))]
 use rust_embed as _;
 use semver::Version;
 use tracing::{error, info, trace, warn};
