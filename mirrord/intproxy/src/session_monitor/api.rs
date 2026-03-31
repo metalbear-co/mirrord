@@ -12,7 +12,10 @@ use axum::{
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
-use tokio::{net::UnixListener, sync::RwLock};
+use tokio::{
+    net::UnixListener,
+    sync::{RwLock, broadcast::error::RecvError},
+};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use tokio_util::sync::CancellationToken;
 
@@ -47,7 +50,9 @@ struct SocketCleanup {
 
 impl Drop for SocketCleanup {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        if let Err(err) = fs::remove_file(&self.path) {
+            tracing::warn!(?err, path = ?self.path, "Failed to remove session socket");
+        }
     }
 }
 
@@ -112,10 +117,10 @@ async fn update_processes_from_events(state: Arc<AppState>) {
                 info.processes.retain(|p| p.pid != pid);
             }
             Ok(_) => {}
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+            Err(RecvError::Lagged(n)) => {
                 tracing::warn!(n, "Process tracker lagged, dropped events");
             }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            Err(RecvError::Closed) => break,
         }
     }
 }

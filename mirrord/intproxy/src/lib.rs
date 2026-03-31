@@ -60,11 +60,6 @@ mod remote_resources;
 mod request_queue;
 pub mod session_monitor;
 
-/// Returns a short string describing the type of file operation.
-fn file_request_operation_name(req: &FileRequest) -> &'static str {
-    req.into()
-}
-
 /// Extracts the primary file path from a [`FileRequest`] variant, if one exists.
 ///
 /// Use `Variant => field` for required path fields and `Variant =>? field` for optional ones.
@@ -666,7 +661,7 @@ impl IntProxy {
             LayerToProxyMessage::File(req) => {
                 self.monitor_tx.emit(MonitorEvent::FileOp {
                     path: file_request_path(&req),
-                    operation: file_request_operation_name(&req).to_owned(),
+                    operation: <&str>::from(&req).to_owned(),
                 });
                 self.task_txs
                     .files

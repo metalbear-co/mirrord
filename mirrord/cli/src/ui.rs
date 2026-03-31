@@ -25,6 +25,7 @@ use axum::{
     routing::{get, post},
 };
 use eventsource_stream::Eventsource;
+use futures::stream::StreamExt as _;
 use mirrord_intproxy::session_monitor::api::SessionInfo;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 #[cfg(not(debug_assertions))]
@@ -55,6 +56,7 @@ struct TrackedSession {
     socket_path: PathBuf,
     info: SessionInfo,
     events: Vec<serde_json::Value>,
+    client: reqwest::Client,
 }
 
 impl Serialize for TrackedSession {
@@ -78,9 +80,8 @@ fn unix_client(
 }
 
 async fn fetch_session_info(
-    socket_path: &std::path::Path,
+    client: &reqwest::Client,
 ) -> Result<SessionInfo, Box<dyn std::error::Error + Send + Sync>> {
-    let client = unix_client(socket_path)?;
     let resp = client.get("http://localhost/info").send().await?;
     if !resp.status().is_success() {
         return Err(format!("session info request returned {}", resp.status()).into());
@@ -91,7 +92,7 @@ async fn fetch_session_info(
 /// Opens an SSE connection to a session's Unix socket /events endpoint and returns
 /// a pinned `Eventsource` stream that yields parsed SSE events.
 async fn open_sse_stream(
-    socket_path: &std::path::Path,
+    client: &reqwest::Client,
 ) -> Result<
     std::pin::Pin<
         Box<
@@ -105,7 +106,6 @@ async fn open_sse_stream(
     >,
     Box<dyn std::error::Error + Send + Sync>,
 > {
-    let client = unix_client(socket_path)?;
     let resp = client
         .get("http://localhost/events")
         .header("accept", "text/event-stream")
@@ -117,11 +117,7 @@ async fn open_sse_stream(
 
 /// Appends parsed SSE values to the session's event buffer, capping at
 /// [`MAX_EVENTS_PER_SESSION`].
-async fn buffer_session_events(
-    session_id: &str,
-    values: Vec<serde_json::Value>,
-    state: &Arc<AppState>,
-) {
+async fn buffer_session_events(session_id: &str, values: Vec<serde_json::Value>, state: &AppState) {
     let mut sessions = state.sessions.write().await;
     let Some(session) = sessions.get_mut(session_id) else {
         return;
@@ -135,8 +131,8 @@ async fn buffer_session_events(
 }
 
 /// Connects to a session's SSE /events endpoint and buffers events into the shared state.
-async fn stream_session_events(session_id: String, socket_path: PathBuf, state: Arc<AppState>) {
-    let mut sse_stream = match open_sse_stream(&socket_path).await {
+async fn stream_session_events(session_id: String, client: reqwest::Client, state: Arc<AppState>) {
+    let mut sse_stream = match open_sse_stream(&client).await {
         Ok(s) => s,
         Err(err) => {
             warn!(%session_id, ?err, "Failed to open SSE stream");
@@ -144,7 +140,6 @@ async fn stream_session_events(session_id: String, socket_path: PathBuf, state: 
         }
     };
 
-    use futures::stream::StreamExt as _;
     while let Some(result) = sse_stream.next().await {
         let event = match result {
             Ok(e) => e,
@@ -159,7 +154,9 @@ async fn stream_session_events(session_id: String, socket_path: PathBuf, state: 
     }
 
     info!(%session_id, "Session stream disconnected, removing");
-    let _ = std::fs::remove_file(&socket_path);
+    if let Some(session) = state.sessions.read().await.get(&session_id) {
+        let _ = std::fs::remove_file(&session.socket_path);
+    }
     remove_session(&session_id, &state).await;
 }
 
@@ -181,15 +178,20 @@ async fn scan_existing_sessions(sessions_dir: &std::path::Path, state: &Arc<AppS
 }
 
 async fn add_session(session_id: String, socket_path: PathBuf, state: Arc<AppState>) {
-    {
-        let sessions = state.sessions.write().await;
-        if sessions.contains_key(&session_id) {
-            return;
-        }
-        // Drop write lock before the network call to avoid holding it during I/O.
+    if state.sessions.read().await.contains_key(&session_id) {
+        return;
     }
 
-    let info = match fetch_session_info(&socket_path).await {
+    let client = match unix_client(&socket_path) {
+        Ok(c) => c,
+        Err(err) => {
+            debug!(%session_id, ?err, "Could not create client for session socket");
+            let _ = std::fs::remove_file(&socket_path);
+            return;
+        }
+    };
+
+    let info = match fetch_session_info(&client).await {
         Ok(i) => i,
         Err(err) => {
             debug!(%session_id, ?err, "Could not fetch session info, removing stale socket");
@@ -202,8 +204,10 @@ async fn add_session(session_id: String, socket_path: PathBuf, state: Arc<AppSta
         socket_path: socket_path.clone(),
         info,
         events: Vec::new(),
+        client,
     };
 
+    let session_client = tracked.client.clone();
     let notification = SessionNotification::SessionAdded {
         session: tracked.clone(),
     };
@@ -220,16 +224,11 @@ async fn add_session(session_id: String, socket_path: PathBuf, state: Arc<AppSta
     let _ = state.notify_tx.send(notification);
     info!(%session_id, "Session added");
 
-    tokio::spawn(stream_session_events(session_id, socket_path, state));
+    tokio::spawn(stream_session_events(session_id, session_client, state));
 }
 
-async fn remove_session(session_id: &str, state: &Arc<AppState>) {
-    let removed = {
-        let mut sessions = state.sessions.write().await;
-        sessions.remove(session_id)
-    };
-
-    if removed.is_some() {
+async fn remove_session(session_id: &str, state: &AppState) {
+    if state.sessions.write().await.remove(session_id).is_some() {
         let _ = state.notify_tx.send(SessionNotification::SessionRemoved {
             session_id: session_id.to_owned(),
         });
@@ -255,10 +254,10 @@ async fn session_events_sse(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    let (buffered_events, socket_path) = {
+    let (buffered_events, client) = {
         let sessions = state.sessions.read().await;
         match sessions.get(&id) {
-            Some(session) => (session.events.clone(), session.socket_path.clone()),
+            Some(session) => (session.events.clone(), session.client.clone()),
             None => return StatusCode::NOT_FOUND.into_response(),
         }
     };
@@ -274,7 +273,7 @@ async fn session_events_sse(
             }
         }
 
-        let mut sse_stream = match open_sse_stream(&socket_path).await {
+        let mut sse_stream = match open_sse_stream(&client).await {
             Ok(s) => s,
             Err(err) => {
                 warn!(?err, "Failed to open SSE stream for proxy");
@@ -312,23 +311,11 @@ async fn session_events_sse(
 }
 
 async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    let socket_path = {
+    let client = {
         let sessions = state.sessions.read().await;
         match sessions.get(&id) {
-            Some(session) => session.socket_path.clone(),
+            Some(session) => session.client.clone(),
             None => return StatusCode::NOT_FOUND.into_response(),
-        }
-    };
-
-    let client = match unix_client(&socket_path) {
-        Ok(c) => c,
-        Err(err) => {
-            error!(?err, "Failed to create client for kill request");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(serde_json::json!({"error": err.to_string()})),
-            )
-                .into_response();
         }
     };
 
