@@ -19,7 +19,7 @@ use tracing::{Level, debug, trace};
 /// Platform-specific connect function types
 #[cfg(windows)]
 use winapi::um::winsock2::{
-    SOCKET_ERROR, WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR, WSAEWOULDBLOCK,
+    WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR, WSAEWOULDBLOCK,
 };
 
 use crate::{
@@ -58,6 +58,7 @@ impl ConnectResult {
     fn adjust_for_local(addr: SockAddr, res: Self) -> Self {
         // For local loopback connects (socketpair emulation), a non-blocking connect can
         // report WSAEWOULDBLOCK even when the listener is ready. Treat it as success.
+        #[cfg(windows)]
         if res.error() == Some(WSAEWOULDBLOCK)
             && let Some(addr) = addr.as_socket()
             && (addr.ip().is_loopback() || addr.ip().is_unspecified())
@@ -66,10 +67,9 @@ impl ConnectResult {
                 ?res,
                 "ConnectResult to local target is not a failure, reporting success"
             );
-            Self::new(0, None)
-        } else {
-            res
+            return Self::new(0, None);
         }
+        res
     }
 
     pub fn is_failure(&self) -> bool {
@@ -96,7 +96,7 @@ impl ConnectResult {
 
 impl From<i32> for ConnectResult {
     fn from(result: i32) -> Self {
-        if result == SOCKET_ERROR {
+        if result == -1 {
             Self {
                 result,
                 error: Some(get_last_error()),
