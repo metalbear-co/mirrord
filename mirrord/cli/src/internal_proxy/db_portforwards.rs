@@ -473,3 +473,184 @@ pub(super) async fn setup(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use mirrord_config::feature::database_branches::{
+        ConnectionParamsConfig, ConnectionParamsVars, ConnectionSource, DatabaseBranchBaseConfig,
+        DatabaseBranchConfig, DatabaseBranchesConfig, MysqlBranchConfig, ParamSource,
+        TargetEnvironmentVariableSource,
+    };
+
+    use super::*;
+    use crate::config::RemoteAddr;
+
+    fn base(id: Option<&str>, connection: ConnectionSource) -> DatabaseBranchBaseConfig {
+        DatabaseBranchBaseConfig {
+            id: id.map(str::to_owned),
+            name: None,
+            ttl_secs: 300,
+            creation_timeout_secs: 60,
+            version: None,
+            connection,
+        }
+    }
+
+    fn mysql(id: Option<&str>, conn: ConnectionSource) -> DatabaseBranchConfig {
+        DatabaseBranchConfig::Mysql(Box::new(MysqlBranchConfig {
+            base: base(id, conn),
+            copy: Default::default(),
+        }))
+    }
+
+    fn url_env(var: &str) -> ConnectionSource {
+        ConnectionSource::Url {
+            url: TargetEnvironmentVariableSource::Env {
+                container: None,
+                variable: var.to_owned(),
+            },
+        }
+    }
+
+    // --- extract_portforward_configs ---
+
+    #[test]
+    fn extract_url_env() {
+        let config = DatabaseBranchesConfig(vec![mysql(Some("db1"), url_env("DB_URL"))]);
+        let result = extract_portforward_configs(&config, "key");
+
+        assert_eq!(result.len(), 1);
+        let pf = result.into_iter().next().unwrap();
+        assert_eq!(pf.envs, Envs::Url("DB_URL".to_owned()));
+        assert_eq!(pf.db_id, "db1");
+    }
+
+    #[test]
+    fn extract_url_secret_skipped() {
+        let conn = ConnectionSource::Url {
+            url: TargetEnvironmentVariableSource::Secret {
+                name: "db-secret".to_owned(),
+                key: "url".to_owned(),
+            },
+        };
+        let config = DatabaseBranchesConfig(vec![mysql(Some("db3"), conn)]);
+        assert!(extract_portforward_configs(&config, "key").is_empty());
+    }
+
+    #[test]
+    fn extract_params_all_variables() {
+        let conn = ConnectionSource::Params(ConnectionParamsConfig {
+            source_type: None,
+            params: ConnectionParamsVars {
+                host: Some(ParamSource::Variable("H".to_owned())),
+                port: Some(ParamSource::Variable("P".to_owned())),
+                user: Some(ParamSource::Variable("U".to_owned())),
+                password: Some(ParamSource::Variable("PW".to_owned())),
+                database: Some(ParamSource::Variable("DB".to_owned())),
+            },
+        });
+        let config = DatabaseBranchesConfig(vec![mysql(Some("db5"), conn)]);
+        let result = extract_portforward_configs(&config, "key");
+
+        assert_eq!(result.len(), 1);
+        let pf = result.into_iter().next().unwrap();
+        assert_eq!(
+            pf.envs,
+            Envs::Params {
+                host: "H".to_owned(),
+                port: "P".to_owned(),
+                user: Some("U".to_owned()),
+                password: Some("PW".to_owned()),
+                database: Some("DB".to_owned()),
+                scheme: Some("mysql"),
+            }
+        );
+    }
+
+    // --- resolve_port_mappings ---
+
+    #[test]
+    fn resolve_url_happy_path() {
+        let pf = Pf {
+            envs: Envs::Url("DB_URL".to_owned()),
+            db_id: "branch-1".to_owned(),
+        };
+        let vars = HashMap::from([(
+            "DB_URL".to_owned(),
+            "postgresql://user:pass@db.example.com:5432/mydb".to_owned(),
+        )]);
+
+        let result = resolve_port_mappings([pf].into(), &vars);
+
+        assert_eq!(result.len(), 1);
+        let key = (RemoteAddr::Hostname("db.example.com".to_owned()), 5432);
+        let mapping = result.get(&key).unwrap();
+        assert_eq!(mapping.db_id, "branch-1");
+        assert!(matches!(mapping.conn_info, ConnInfo::ReplaceInUrl(_)));
+    }
+
+    #[test]
+    fn resolve_params_build_url() {
+        let pf = Pf {
+            envs: Envs::Params {
+                host: "H".to_owned(),
+                port: "P".to_owned(),
+                user: Some("U".to_owned()),
+                password: Some("PW".to_owned()),
+                database: Some("DB".to_owned()),
+                scheme: Some("postgresql"),
+            },
+            db_id: "branch-2".to_owned(),
+        };
+        let vars = HashMap::from([
+            ("H".to_owned(), "db.host.com".to_owned()),
+            ("P".to_owned(), "5432".to_owned()),
+            ("U".to_owned(), "admin".to_owned()),
+            ("PW".to_owned(), "secret".to_owned()),
+            ("DB".to_owned(), "mydb".to_owned()),
+        ]);
+
+        let result = resolve_port_mappings([pf].into(), &vars);
+
+        assert_eq!(result.len(), 1);
+        let key = (RemoteAddr::Hostname("db.host.com".to_owned()), 5432);
+        let mapping = result.get(&key).unwrap();
+        assert_eq!(mapping.db_id, "branch-2");
+        assert!(matches!(
+            mapping.conn_info,
+            ConnInfo::BuildUrl {
+                scheme: "postgresql",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn resolve_params_mssql_build() {
+        let pf = Pf {
+            envs: Envs::Params {
+                host: "H".to_owned(),
+                port: "P".to_owned(),
+                user: Some("U".to_owned()),
+                password: Some("PW".to_owned()),
+                database: None,
+                scheme: Some("mssql"),
+            },
+            db_id: "mssql-branch".to_owned(),
+        };
+        let vars = HashMap::from([
+            ("H".to_owned(), "10.0.0.5".to_owned()),
+            ("P".to_owned(), "1433".to_owned()),
+            ("U".to_owned(), "sa".to_owned()),
+            ("PW".to_owned(), "pass".to_owned()),
+        ]);
+
+        let result = resolve_port_mappings([pf].into(), &vars);
+
+        let key = (RemoteAddr::Ip("10.0.0.5".parse().unwrap()), 1433);
+        let mapping = result.get(&key).unwrap();
+        assert!(matches!(mapping.conn_info, ConnInfo::BuildMssql { .. }));
+    }
+}
