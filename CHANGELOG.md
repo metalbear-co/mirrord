@@ -11,13 +11,9 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 ## [3.197.1](https://github.com/metalbear-co/mirrord/tree/3.197.1) - 2026-03-31
 
 
-### Fixed
-
-- RabbitMQ missing field from ConnectParams.
-
-
 ### Internal
 
+- RabbitMQ missing field from ConnectParams.
 - Fixed windows python `socketpair` regression. affecting versions
   3.190.0-3.196.0
 - fixed `outgoing_traffic_filter_udp_with_connect` e2e test by
