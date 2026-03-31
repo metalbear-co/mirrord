@@ -96,7 +96,7 @@ async fn preview_start(
         user_data.machine_id(),
     );
 
-    let (operator_api, api, target_ns_annotation) =
+    let (operator_api, api) =
         create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
     operator_api.check_feature_support(&layer_config)?;
 
@@ -117,27 +117,20 @@ async fn preview_start(
         CliError::PreviewImageRequired
     })?;
 
-    // In multi-cluster mode the target lives on a remote cluster, not on
-    // the primary cluster the CLI is connected to. Skip the local lookup
-    // and let the operator on the remote cluster resolve the container.
-    let session_target = if target_ns_annotation.is_some() {
-        let mut target = config_target.clone();
-        if target.container().is_none() {
-            target.set_container(String::new());
-        }
-        SessionTarget::from_config(target).ok_or_else(|| {
-            subtask.failure(None);
-            CliError::PreviewTargetResolutionFailed(config_target.to_string())
-        })?
-    } else {
-        resolve_config_target(
-            config_target,
-            operator_api.client(),
-            layer_config.target.namespace.as_deref(),
-        )
-        .await
-        .inspect_err(|_| subtask.failure(None))?
-    };
+    let multi_cluster = operator_api
+        .operator()
+        .spec
+        .operator_namespace
+        .is_some();
+
+    let session_target = resolve_config_target(
+        config_target,
+        operator_api.client(),
+        layer_config.target.namespace.as_deref(),
+        multi_cluster,
+    )
+    .await
+    .inspect_err(|_| subtask.failure(None))?;
 
     // Check for an existing session with the same key+target.
     let key = layer_config.key.as_str();
@@ -240,8 +233,14 @@ async fn preview_start(
         })?,
     };
 
-    let annotations = target_ns_annotation
-        .map(|ns| BTreeMap::from([(TARGET_NAMESPACE_ANNOTATION.to_string(), ns)]));
+    let annotations = multi_cluster.then(|| {
+        let target_ns = layer_config
+            .target
+            .namespace
+            .as_deref()
+            .unwrap_or(operator_api.client().default_namespace());
+        BTreeMap::from([(TARGET_NAMESPACE_ANNOTATION.to_string(), target_ns.to_owned())])
+    });
 
     let session = PreviewSession {
         metadata: ObjectMeta {
@@ -413,7 +412,7 @@ async fn preview_status(
     // Default to all namespaces when no namespace is configured, so `mirrord preview status`
     // with no flags shows everything.
     let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
-    let (_, api, _) =
+    let (_, api) =
         create_preview_api(&layer_config, all_namespaces, &progress, &mut analytics).await?;
 
     // List and filter sessions.
@@ -559,36 +558,28 @@ async fn preview_stop(
 
     // Default to all namespaces when no namespace is configured, same as `status`.
     let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
-    let (operator_api, api, target_ns_annotation) =
+    let (operator_api, api) =
         create_preview_api(&layer_config, all_namespaces, &progress, &mut analytics).await?;
+
+    let multi_cluster = operator_api
+        .operator()
+        .spec
+        .operator_namespace
+        .is_some();
 
     let mut subtask = progress.subtask("finding preview sessions");
 
-    // Resolve the config target (if provided) to a full SessionTarget for comparison.
-    // In multi-cluster mode, skip the local lookup since the target lives on a remote cluster.
     let session_target = match &layer_config.target.path {
-        Some(config_target) => {
-            let session_target = if target_ns_annotation.is_some() {
-                let mut target = config_target.clone();
-                if target.container().is_none() {
-                    target.set_container(String::new());
-                }
-                SessionTarget::from_config(target).ok_or_else(|| {
-                    subtask.failure(None);
-                    CliError::PreviewTargetResolutionFailed(config_target.to_string())
-                })?
-            } else {
-                resolve_config_target(
-                    config_target,
-                    operator_api.client(),
-                    layer_config.target.namespace.as_deref(),
-                )
-                .await
-                .inspect_err(|_| subtask.failure(None))?
-            };
-
-            Some(session_target)
-        }
+        Some(config_target) => Some(
+            resolve_config_target(
+                config_target,
+                operator_api.client(),
+                layer_config.target.namespace.as_deref(),
+                multi_cluster,
+            )
+            .await
+            .inspect_err(|_| subtask.failure(None))?,
+        ),
         None => None,
     };
 
@@ -669,21 +660,30 @@ async fn preview_stop(
 
 /// Resolves a [`Target`] to a [`SessionTarget`] by auto-detecting the container if not
 /// specified, then converting to the session representation.
+///
+/// In multi-cluster mode the target lives on a remote cluster, so we can't look up
+/// runtime data locally. Instead we set an empty container and let the operator on
+/// the remote cluster resolve it.
 async fn resolve_config_target(
     config_target: &Target,
     client: &kube::Client,
     namespace: Option<&str>,
+    multi_cluster: bool,
 ) -> CliResult<SessionTarget> {
-    let mut config_target_with_container = config_target.clone();
-    if config_target_with_container.container().is_none() {
-        let runtime_data = config_target
-            .runtime_data(client, namespace)
-            .await
-            .map_err(CliError::RuntimeDataResolution)?;
-        config_target_with_container.set_container(runtime_data.container_name);
+    let mut target = config_target.clone();
+    if target.container().is_none() {
+        if multi_cluster {
+            target.set_container(String::new());
+        } else {
+            let runtime_data = config_target
+                .runtime_data(client, namespace)
+                .await
+                .map_err(CliError::RuntimeDataResolution)?;
+            target.set_container(runtime_data.container_name);
+        }
     }
 
-    SessionTarget::from_config(config_target_with_container)
+    SessionTarget::from_config(target)
         .ok_or_else(|| CliError::PreviewTargetResolutionFailed(config_target.to_string()))
 }
 
@@ -713,22 +713,16 @@ fn load_preview_config(
 /// Connects to the operator, validates the license and checks that the `PreviewEnv` feature is
 /// supported, then returns the operator API and a `PreviewSession` API handle scoped to the
 /// appropriate namespace(s).
-/// Returns `(operator_api, session_api, target_ns_annotation)`.
 ///
-/// In management-only mode (`operator_namespace` is set), CRs are created in the
-/// operator's namespace with a `TARGET_NAMESPACE_ANNOTATION` pointing to the real
-/// target namespace. The sync controller reads this annotation to place the copy
-/// in the correct namespace on the default cluster.
+/// In multi-cluster mode (`operator_namespace` is set), CRs are created in the operator's
+/// namespace. Callsites should check `operator_api.operator().spec.operator_namespace.is_some()`
+/// to determine whether multi-cluster handling is needed.
 async fn create_preview_api(
     config: &LayerConfig,
     all_namespaces: bool,
     progress: &ProgressTracker,
     analytics: &mut AnalyticsReporter,
-) -> CliResult<(
-    OperatorApi<PreparedClientCert>,
-    Api<PreviewSession>,
-    Option<String>,
-)> {
+) -> CliResult<(OperatorApi<PreparedClientCert>, Api<PreviewSession>)> {
     let mut subtask = progress.subtask("connecting to operator");
 
     let operator_api = OperatorApi::try_new(config, analytics, progress)
@@ -760,24 +754,15 @@ async fn create_preview_api(
 
     let client = operator_api.client().clone();
     let operator_namespace = operator_api.operator().spec.operator_namespace.as_deref();
+    let target_namespace = config.target.namespace.as_deref();
 
-    let (api, target_ns_annotation) = if all_namespaces {
-        (Api::all(client.clone()), None)
-    } else if let Some(op_ns) = operator_namespace {
-        let target_namespace = config
-            .target
-            .namespace
-            .as_deref()
-            .unwrap_or(client.default_namespace());
-        (
-            Api::namespaced(client.clone(), op_ns),
-            Some(target_namespace.to_string()),
-        )
-    } else if let Some(namespace) = config.target.namespace.as_deref() {
-        (Api::namespaced(client.clone(), namespace), None)
+    let api = if all_namespaces {
+        Api::all(client)
+    } else if let Some(namespace) = operator_namespace.or(target_namespace) {
+        Api::namespaced(client, namespace)
     } else {
-        (Api::default_namespaced(client.clone()), None)
+        Api::default_namespaced(client)
     };
 
-    Ok((operator_api, api, target_ns_annotation))
+    Ok((operator_api, api))
 }
