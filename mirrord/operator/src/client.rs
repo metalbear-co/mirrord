@@ -1334,6 +1334,7 @@ impl OperatorApi<PreparedClientCert> {
             session_ci_info,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
+            rmq_output_queues: Default::default(),
             key: Some(key),
         };
 
@@ -2200,6 +2201,7 @@ mod test {
             session_ci_info,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
+            rmq_output_queues: Default::default(),
             key,
         };
 
@@ -2319,6 +2321,7 @@ mod test {
             session_ci_info: None,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
+            rmq_output_queues: Default::default(),
             key,
         };
         let produced =
