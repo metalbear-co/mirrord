@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 pub struct MirrordKafkaEphemeralTopicSpec {
     /// Name of the topic.
     pub name: String,
-    /// Links to [`operator_crd::crd::kafka::MirrordKafkaClientConfig`] resource living in the same
+    /// Links to `operator_crd::crd::kafka::MirrordKafkaClientConfig` resource living in the same
     /// namespace.
     pub client_config: String,
 }
