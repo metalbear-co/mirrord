@@ -543,12 +543,13 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
         let original = CONNECT_ORIGINAL.get().unwrap();
         let result = unsafe { original(s, addr.as_ptr() as *const _, addr.len()) };
         let last_error = if result == SOCKET_ERROR {
-            Some(unsafe { WSAGetLastError() })
+            Some(get_last_error())
         } else {
             None
         };
-        log_connection_result(result, "connect_detour", addr);
-        ConnectResult::new(result, last_error)
+
+        log_connection_result(result, "connect_detour", &addr);
+        ConnectResult::from_with_addr_and_error(result, addr, last_error)
     };
 
     match ops::connect(s, name, namelen, "connect_detour", connect_fn) {
@@ -1124,8 +1125,14 @@ unsafe extern "system" fn wsa_connect_detour(
                 lpGQOS,
             )
         };
-        log_connection_result(result, "wsa_connect_detour", addr);
-        ConnectResult::from(result)
+        let last_error = if result == SOCKET_ERROR {
+            Some(get_last_error())
+        } else {
+            None
+        };
+
+        log_connection_result(result, "wsa_connect_detour", &addr);
+        ConnectResult::from_with_addr_and_error(result, addr, last_error)
     };
 
     let socket_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {

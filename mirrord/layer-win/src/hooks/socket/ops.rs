@@ -19,7 +19,7 @@ use winapi::{
     um::{
         minwinbase::OVERLAPPED,
         mswsock::{LPFN_CONNECTEX, WSAID_CONNECTEX},
-        winsock2::{SOCKET, WSAEWOULDBLOCK, WSAGetLastError},
+        winsock2::{SOCKET, WSAGetLastError},
     },
 };
 
@@ -203,7 +203,7 @@ impl TryFrom<(*mut u8, u32)> for WSABufferData {
 }
 
 /// Log connection result and return it
-pub fn log_connection_result<T>(result: T, function_name: &str, addr: SockAddr)
+pub fn log_connection_result<T>(result: T, function_name: &str, addr: &SockAddr)
 where
     T: std::fmt::Display + std::cmp::PartialEq<i32>,
 {
@@ -215,10 +215,8 @@ where
             socket_address
         );
     } else {
-        tracing::error!(
-            "{} -> failed to connect to address: {:?}, error code: {}, wsa_getlasterror: {}",
-            function_name,
-            addr,
+        tracing::debug!(
+            "{function_name} -> connect to {socket_address:?} returned retval: {}, wsagle: {}",
             result,
             unsafe { WSAGetLastError() }
         );
@@ -259,27 +257,9 @@ where
         }
     };
 
-    let is_local_target = remote_addr.ip().is_loopback() || remote_addr.ip().is_unspecified();
-
-    // Wrap connect_fn so we can normalize WSAEWOULDBLOCK for local loopback connects
-    // (socketpair emulation) before it reaches higher-level logic.
-    let mut connect_fn = Some(connect_fn);
-    let wrapped_connect_fn = |addr: SockAddr| {
-        let result = connect_fn
-            .take()
-            .expect("connect_fn should only be called once")(addr);
-        if is_local_target && result.error() == Some(WSAEWOULDBLOCK) {
-            // For local loopback connects (socketpair emulation), a non-blocking connect can
-            // report WSAEWOULDBLOCK even when the listener is ready. Treat it as success.
-            ConnectResult::new(0, None)
-        } else {
-            result
-        }
-    };
-
     // Try to connect through the mirrord proxy using layer-lib integration
     // Temporary workaround until all socket ops are unified - WIN-85
-    match connect_common(socket, SockAddr::from(remote_addr), wrapped_connect_fn) {
+    match connect_common(socket, SockAddr::from(remote_addr), connect_fn) {
         Detour::Success(res) => Ok(res),
         Detour::Bypass(_) => Err(ConnectError::Fallback.into()),
         Detour::Error(err) => Err(err),
