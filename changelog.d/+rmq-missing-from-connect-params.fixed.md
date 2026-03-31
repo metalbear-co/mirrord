@@ -1,1 +1,1 @@
-RabbitMQ missing field from ConenctParams.
+RabbitMQ missing field from ConnectParams.
