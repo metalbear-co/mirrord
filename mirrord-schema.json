@@ -23,6 +23,14 @@
         }
       ]
     },
+    "api": {
+      "title": "api {#root-api}",
+      "description": "Enables the local session monitor API server.\n\nWhen enabled, mirrord exposes a Unix socket at `~/.mirrord/sessions/<session-id>.sock`\nwith HTTP endpoints for observing session activity in real time.\n\nDefaults to `true`.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "baggage": {
       "title": "baggage {#root-baggage}",
       "description": "OpenTelemetry (OTel) / W3C baggage propagator. This is used in HTTP requests sent to the\noperator to manually set values in the trace span, which can help when processing traces.\nSee [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)\n\nOnly relevant for use with the operator. For more details, read the [docs on monitoring](https://metalbear.com/mirrord/docs/managing-mirrord/monitoring).",
