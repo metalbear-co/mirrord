@@ -156,9 +156,6 @@ pub(crate) enum InternalProxyError {
     #[error("Initial ping pong with the agent failed: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     InitialPingPongFailed(String),
-
-    #[error("Setting up DB branch portforwards failed: {0}")]
-    DbBranchPortforwardsFailed(String),
 }
 
 /// Errors that can occur when executing the `mirrord operator setup` command.

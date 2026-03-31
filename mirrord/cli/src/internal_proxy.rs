@@ -128,15 +128,15 @@ pub(crate) async fn proxy(
 
     if config.feature.db_branches.is_empty().not()
         && let Some(session_id) = operator_session_id
-    {
-        db_portforwards::setup(
+        && let Err(err) = db_portforwards::setup(
             &config.feature.db_branches,
             &mut agent_conn,
             session_id,
             config.key.as_str(),
         )
         .await
-        .map_err(InternalProxyError::DbBranchPortforwardsFailed)?;
+    {
+        tracing::warn!(%err, "failed to set up DB branch port forwards, continuing without them");
     }
 
     // Let it assign address for us then print it for the user.

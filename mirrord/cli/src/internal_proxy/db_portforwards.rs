@@ -13,8 +13,10 @@ use mirrord_intproxy::agent_conn::AgentConnection;
 use mirrord_operator::client::database_branches::resolve_branch_id;
 use mirrord_progress::NullProgress;
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage, GetEnvVarsRequest, outgoing::tcp::DaemonTcpOutgoing,
+    ClientMessage, DaemonMessage, GetEnvVarsRequest, ResponseError,
+    outgoing::tcp::DaemonTcpOutgoing,
 };
+use thiserror::Error;
 use url::Url;
 
 use crate::{
@@ -22,6 +24,30 @@ use crate::{
     db_branches::{Portforward, PortforwardSession, portforward_session_dir},
     port_forward,
 };
+
+#[derive(Debug, Error)]
+pub(crate) enum SetupError {
+    #[error("error response from agent: {0}")]
+    AgentError(#[from] ResponseError),
+
+    #[error("unexpected message received from agent: {0:?}")]
+    UnexpectedAgentMessage(Box<DaemonMessage>),
+
+    #[error("agent connection dropped unexpectedly")]
+    AgentConnectionDropped,
+
+    #[error("failed to set up port forwarder: {0}")]
+    PortForwarder(#[from] port_forward::PortForwardError),
+
+    #[error("failed to create portforward directory: {0}")]
+    CreateDir(std::io::Error),
+
+    #[error("failed to serialize portforward session: {0}")]
+    Serialize(#[from] serde_json::Error),
+
+    #[error("failed to write portforward session file: {0}")]
+    WriteFile(std::io::Error),
+}
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 enum Envs {
@@ -305,7 +331,7 @@ pub(super) async fn setup(
     conn: &mut AgentConnection,
     session_id: u64,
     key: &str,
-) -> Result<(), String> {
+) -> Result<(), SetupError> {
     let portforwards = extract_portforward_configs(config, key);
 
     let env_vars_select = portforwards
@@ -343,10 +369,10 @@ pub(super) async fn setup(
     let vars = match conn.connection.recv().await {
         Some(DaemonMessage::GetEnvVarsResponse(Ok(env_vars))) => env_vars,
         Some(DaemonMessage::GetEnvVarsResponse(Err(err))) => {
-            return Err(format!("Error response from agent: {err}"));
+            return Err(SetupError::AgentError(err));
         }
-        Some(other) => return Err(format!("Unexpected message received from agent: {other:?}")),
-        None => return Err("Agent connection dropped unexpectedly".into()),
+        Some(other) => return Err(SetupError::UnexpectedAgentMessage(Box::new(other))),
+        None => return Err(SetupError::AgentConnectionDropped),
     };
 
     let port_mappings = resolve_port_mappings(portforwards, &vars);
@@ -388,8 +414,7 @@ pub(super) async fn setup(
             .map(|rmt| (localhost_ephemeral_port, rmt.clone())),
         Some(connections_state_2),
     )
-    .await
-    .map_err(|e| format!("Error setting up PortForwarder: {e}"))?;
+    .await?;
 
     let portforward_mappings: Vec<_> = portforwarder
         .listeners()
@@ -428,14 +453,13 @@ pub(super) async fn setup(
         let pf_dir = portforward_session_dir();
         tokio::fs::create_dir_all(&pf_dir)
             .await
-            .map_err(|e| format!("Failed to create portforward directory: {e}"))?;
+            .map_err(SetupError::CreateDir)?;
 
         let pf_path = pf_dir.join(format!("{}.json", std::process::id()));
-        let json = serde_json::to_vec(&session)
-            .map_err(|e| format!("Failed to serialize portforward session: {e}"))?;
+        let json = serde_json::to_vec(&session)?;
         tokio::fs::write(&pf_path, json)
             .await
-            .map_err(|e| format!("Failed to write portforward session file: {e}"))?;
+            .map_err(SetupError::WriteFile)?;
 
         PortforwardFileGuard { path: pf_path }
     };
