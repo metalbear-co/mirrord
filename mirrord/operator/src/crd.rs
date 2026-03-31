@@ -70,9 +70,10 @@ impl TargetCrd {
     /// # Warning
     ///
     /// Do **not** change url paths here, even if the operator recognizes the other format.
-    /// It can break existing [`policy::MirrordPolicy`]s and [`policy::MirrordClusterPolicy`]
-    /// (see [`policy::MirrordPolicySpec::target_path`] and
-    /// [`policy::MirrordClusterPolicySpec::target_path`]).
+    /// It can break existing [`operator-crd::crd::policy::MirrordPolicy`]s and
+    /// [`operator-crd::crd::policy::MirrordClusterPolicy`] (see
+    /// [`operator-crd::crd::policy::MirrordPolicySpec::target_path`] and
+    /// [`operator-crd::crd::policy::MirrordClusterPolicySpec::target_path`]).
     pub fn urlfied_name(target: &Target) -> String {
         let (type_name, target, container) = match target {
             Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
