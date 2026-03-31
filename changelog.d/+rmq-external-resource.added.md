@@ -1,1 +1,0 @@
-Added RabbitMQ resource to `MirrordClusterExternalResource` CRD.
