@@ -13,7 +13,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Added
 
-- Added RabbitMQ resource to `MirrordClusterExternalResource` CRD.
+- Added RabbitMQ queue splitting support.
 
 
 ### Changed
