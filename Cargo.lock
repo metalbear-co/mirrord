@@ -5207,7 +5207,6 @@ dependencies = [
  "hyper-util",
  "k8s-openapi",
  "kube",
- "mirrord-agent-env",
  "mirrord-analytics",
  "mirrord-auth",
  "mirrord-config",

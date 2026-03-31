@@ -26,19 +26,14 @@ use crate::{
 
 pub mod copy_target;
 pub mod db_branching;
-pub mod external;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
-pub mod multi_cluster;
-pub mod patch;
-pub mod policy;
 pub mod preview;
 pub mod profile;
-pub mod properties;
 pub mod rabbitmq;
+
 pub mod session;
-pub mod steal_tls;
 
 pub use kafka::MirrordKafkaEphemeralTopic;
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
@@ -968,17 +963,10 @@ mod tests {
             branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
         },
-        external::MirrordClusterExternalResource,
-        kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
-        multi_cluster::MirrordMultiClusterSession,
-        patch::{MirrordClusterWorkloadPatch, MirrordClusterWorkloadPatchRequest},
-        policy::{MirrordClusterPolicy, MirrordPolicy},
+        kafka::MirrordKafkaEphemeralTopic,
         preview::PreviewSession,
         profile::{MirrordClusterProfile, MirrordProfile},
-        properties::MirrordPropertyList,
         rabbitmq::MirrordRmqSession,
-        session::MirrordClusterSession,
-        steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig},
     };
 
     fn write_crd_yaml<T: CustomResourceExt>() {
@@ -1002,25 +990,13 @@ mod tests {
         write_crd_yaml::<MirrordRmqSession>();
         write_crd_yaml::<MirrordClusterOperatorUserCredential>();
         write_crd_yaml::<PreviewSession>();
-        write_crd_yaml::<MirrordClusterSession>();
-        write_crd_yaml::<MirrordMultiClusterSession>();
         write_crd_yaml::<PgBranchDatabase>();
         write_crd_yaml::<MysqlBranchDatabase>();
         write_crd_yaml::<MongodbBranchDatabase>();
         write_crd_yaml::<BranchDatabase>();
-        write_crd_yaml::<MirrordPolicy>();
-        write_crd_yaml::<MirrordClusterPolicy>();
-        write_crd_yaml::<MirrordClusterExternalResource>();
-        write_crd_yaml::<MirrordClusterWorkloadPatch>();
-        write_crd_yaml::<MirrordClusterWorkloadPatchRequest>();
-        write_crd_yaml::<MirrordKafkaClientConfig>();
-        write_crd_yaml::<MirrordKafkaTopicsConsumer>();
         write_crd_yaml::<MirrordKafkaEphemeralTopic>();
         write_crd_yaml::<MirrordClusterProfile>();
         write_crd_yaml::<MirrordProfile>();
-        write_crd_yaml::<MirrordTlsStealConfig>();
-        write_crd_yaml::<MirrordClusterTlsStealConfig>();
-        write_crd_yaml::<MirrordPropertyList>();
         write_crd_yaml::<PreviewSession>();
     }
 
