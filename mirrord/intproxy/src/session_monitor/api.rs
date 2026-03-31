@@ -142,7 +142,11 @@ pub async fn start_api_server(
     let socket_path = sessions_dir.join(format!("{session_id}.sock"));
 
     // Remove stale socket if it exists
-    let _ = fs::remove_file(&socket_path);
+    if let Err(err) = fs::remove_file(&socket_path)
+        && err.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(?err, ?socket_path, "Failed to remove stale session socket");
+    }
 
     let listener = UnixListener::bind(&socket_path)?;
     fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;

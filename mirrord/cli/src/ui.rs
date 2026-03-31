@@ -39,6 +39,15 @@ use crate::{config::UiArgs, error::CliError};
 
 const MAX_EVENTS_PER_SESSION: usize = 500;
 
+/// Errors from communicating with a per-session monitor API over its Unix socket.
+#[derive(Debug, thiserror::Error)]
+enum SessionError {
+    #[error("HTTP request failed: {0}")]
+    Request(#[from] reqwest::Error),
+    #[error("unexpected status {0} from session API")]
+    BadStatus(reqwest::StatusCode),
+}
+
 #[cfg(not(debug_assertions))]
 #[derive(Embed)]
 #[folder = "../../monitor-frontend/dist/"]
@@ -71,20 +80,16 @@ struct AppState {
 }
 
 /// Creates a reqwest client configured to connect via the given Unix socket.
-fn unix_client(
-    socket_path: &std::path::Path,
-) -> Result<reqwest::Client, Box<dyn std::error::Error + Send + Sync>> {
+fn unix_client(socket_path: &std::path::Path) -> Result<reqwest::Client, SessionError> {
     Ok(reqwest::Client::builder()
         .unix_socket(socket_path)
         .build()?)
 }
 
-async fn fetch_session_info(
-    client: &reqwest::Client,
-) -> Result<SessionInfo, Box<dyn std::error::Error + Send + Sync>> {
+async fn fetch_session_info(client: &reqwest::Client) -> Result<SessionInfo, SessionError> {
     let resp = client.get("http://localhost/info").send().await?;
     if !resp.status().is_success() {
-        return Err(format!("session info request returned {}", resp.status()).into());
+        return Err(SessionError::BadStatus(resp.status()));
     }
     Ok(resp.json().await?)
 }
@@ -104,7 +109,7 @@ async fn open_sse_stream(
                 > + Send,
         >,
     >,
-    Box<dyn std::error::Error + Send + Sync>,
+    SessionError,
 > {
     let resp = client
         .get("http://localhost/events")
@@ -154,8 +159,10 @@ async fn stream_session_events(session_id: String, client: reqwest::Client, stat
     }
 
     info!(%session_id, "Session stream disconnected, removing");
-    if let Some(session) = state.sessions.read().await.get(&session_id) {
-        let _ = std::fs::remove_file(&session.socket_path);
+    if let Some(session) = state.sessions.read().await.get(&session_id)
+        && let Err(err) = std::fs::remove_file(&session.socket_path)
+    {
+        warn!(%session_id, ?err, "Failed to remove session socket");
     }
     remove_session(&session_id, &state).await;
 }
@@ -186,7 +193,9 @@ async fn add_session(session_id: String, socket_path: PathBuf, state: Arc<AppSta
         Ok(c) => c,
         Err(err) => {
             debug!(%session_id, ?err, "Could not create client for session socket");
-            let _ = std::fs::remove_file(&socket_path);
+            if let Err(err) = std::fs::remove_file(&socket_path) {
+                warn!(%session_id, ?err, "Failed to remove stale socket");
+            }
             return;
         }
     };
@@ -195,7 +204,9 @@ async fn add_session(session_id: String, socket_path: PathBuf, state: Arc<AppSta
         Ok(i) => i,
         Err(err) => {
             debug!(%session_id, ?err, "Could not fetch session info, removing stale socket");
-            let _ = std::fs::remove_file(&socket_path);
+            if let Err(err) = std::fs::remove_file(&socket_path) {
+                warn!(%session_id, ?err, "Failed to remove stale socket");
+            }
             return;
         }
     };
@@ -429,9 +440,14 @@ fn start_filesystem_watcher(
     let (watcher_tx, mut watcher_rx) = mpsc::channel::<notify::Event>(100);
 
     let mut watcher: RecommendedWatcher =
-        notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-            if let Ok(event) = res {
-                let _ = watcher_tx.blocking_send(event);
+        notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
+            Ok(event) => {
+                if let Err(err) = watcher_tx.blocking_send(event) {
+                    tracing::warn!(%err, "Failed to send filesystem watcher event");
+                }
+            }
+            Err(err) => {
+                tracing::warn!(?err, "Filesystem watcher error");
             }
         })
         .map_err(|e| CliError::UiError(format!("failed to create file watcher: {e}")))?;
