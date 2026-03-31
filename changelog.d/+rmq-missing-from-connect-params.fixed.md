@@ -1,1 +1,0 @@
-RabbitMQ missing field from ConnectParams.
