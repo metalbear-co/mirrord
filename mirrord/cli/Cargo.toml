@@ -79,13 +79,12 @@ flate2 = { workspace = true, optional = true }
 itertools = { workspace = true, optional = true }
 yamlpatch.workspace = true
 yamlpath.workspace = true
+[target.'cfg(unix)'.dependencies]
+rand.workspace = true
 rust-embed = "8"
 notify = { version = "8", features = ["macos_fsevent"] }
 mime_guess = "2"
 eventsource-stream = "0.2"
-
-[target.'cfg(unix)'.dependencies]
-rand.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
