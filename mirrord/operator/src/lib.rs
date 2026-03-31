@@ -6,7 +6,6 @@
 use rstest as _;
 #[cfg(test)]
 use serde_yaml as _;
-use strum_macros as _;
 
 #[cfg(feature = "client")]
 pub mod client;
