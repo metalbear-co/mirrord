@@ -1,0 +1,2 @@
+# Temp directory for generated crd's from tests with `cargo test -p mirrord-operator --features crd -- --ignored`
+/crds

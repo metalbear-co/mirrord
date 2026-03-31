@@ -1487,7 +1487,7 @@
         },
         "sip_utils": {
           "title": "_experimental_ sip_utils {#experimental-sip_utils}",
-          "description": "Downloads pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses\nthem in place of SIP-patching the originals.\nThis shouldn't be used unless someone from MetalBear/mirrord tells you to.",
+          "description": "Extract pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses\nthem in place of SIP-patching the originals.\nThis shouldn't be used unless someone from MetalBear/mirrord tells you to.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
           "type": [
             "boolean",
             "null"
@@ -3145,6 +3145,26 @@
             "queue_type",
             "message_filter"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message_filter": {
+              "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "RMQ"
+            }
+          },
+          "required": [
+            "queue_type",
+            "message_filter"
+          ]
         }
       ]
     },
@@ -3519,7 +3539,7 @@
       ]
     },
     "SplitQueuesConfig": {
-      "description": "A mapping from queue ids to their filters. Each queue filter defines which messages from the\noriginal queue will be made available to the local application, based on message attributes\nor headers, and possibly on jq filters (for SQS).\n\nThe queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` or\n`MirrordKafkaTopicsConsumer` for SQS or Kafka respectively.\n\n\n```json\n{\n  \"feature\": {\n    \"split_queues\": {\n      \"first-queue\": {\n        \"queue_type\": \"SQS\",\n        \"message_filter\": {\n          \"wows\": \"so wows\",\n          \"coolz\": \"^very\"\n        }\n      },\n      \"second-queue\": {\n        \"queue_type\": \"SQS\",\n        \"jq_filter\": \".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"\n      },\n      \"third-queue\": {\n        \"queue_type\": \"Kafka\",\n        \"message_filter\": {\n          \"who\": \"you$\"\n        }\n      },\n      \"fourth-queue\": {\n        \"queue_type\": \"Kafka\",\n        \"message_filter\": {\n          \"wows\": \"so wows\",\n          \"coolz\": \"^very\"\n        }\n      },\n    }\n  }\n}\n```",
+      "description": "A mapping from queue ids to their filters. Each queue filter defines which messages from the\noriginal queue will be made available to the local application, based on message attributes\nor headers, and possibly on jq filters (for SQS).\n\nThe queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` for SQS and\nRabbitMQ or `MirrordKafkaTopicsConsumer` for Kafka.\n\n\n```json\n{\n  \"feature\": {\n    \"split_queues\": {\n      \"first-queue\": {\n        \"queue_type\": \"SQS\",\n        \"message_filter\": {\n          \"wows\": \"so wows\",\n          \"coolz\": \"^very\"\n        }\n      },\n      \"second-queue\": {\n        \"queue_type\": \"SQS\",\n        \"jq_filter\": \".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"\n      },\n      \"third-queue\": {\n        \"queue_type\": \"Kafka\",\n        \"message_filter\": {\n          \"who\": \"you$\"\n        }\n      },\n      \"fourth-queue\": {\n        \"queue_type\": \"Kafka\",\n        \"message_filter\": {\n          \"wows\": \"so wows\",\n          \"coolz\": \"^very\"\n        }\n      },\n    }\n  }\n}\n```",
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/QueueFilter"

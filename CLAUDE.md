@@ -79,10 +79,6 @@ The layer, intproxy, and agent communicate through two message enums defined in 
 
 Between the layer and intproxy there's a separate local protocol (`mirrord-intproxy-protocol`) using `LayerToProxyMessage` and `ProxyToLayerMessage`.
 
-## Crate-Specific Instructions
-
-When working in a specific crate, always check for and read its `{CLAUDE|AGENTS}.md` if one exists. They contain crate-specific gotchas and rules not covered here.
-
 ## Simplicity and Reuse
 
 mirrord is actively maintained by dozens of people, it is not a greenfield project. When adding or changing things, maximize simplicity. Reuse existing abstractions and codepaths instead of introducing new ones. Every new path is something someone has to understand, maintain, and keep compatible.

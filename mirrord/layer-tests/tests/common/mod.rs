@@ -113,6 +113,7 @@ pub enum Application {
     PythonIssue864,
     PythonFlaskHTTP,
     PythonSelfConnect,
+    PythonSocketPair,
     PythonDontLoad,
     PythonListen,
     RustFileOps,
@@ -194,7 +195,7 @@ impl Application {
     /// This is to help tests that run python with mirrord work locally on systems with pyenv.
     /// If we run `python3` on a system with pyenv the first executed is not python but bash. On mac
     /// that prevents the layer from loading because of SIP.
-    async fn get_python3_executable() -> String {
+    pub(crate) async fn get_python3_executable() -> String {
         let mut python = Command::new("python3")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -213,6 +214,7 @@ impl Application {
         match self {
             Application::PythonFlaskHTTP
             | Application::PythonSelfConnect
+            | Application::PythonSocketPair
             | Application::PythonDontLoad
             | Application::PythonListen => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP | Application::PythonIssue864 => String::from("uvicorn"),
@@ -463,6 +465,10 @@ impl Application {
                 app_path.push("self_connect.py");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
+            Application::PythonSocketPair => {
+                app_path.push("socketpair.py");
+                vec![String::from("-u"), app_path.to_string_lossy().to_string()]
+            }
             Application::GoHTTP(..)
             | Application::GoDir(..)
             | Application::GoFileOps(..)
@@ -600,6 +606,7 @@ impl Application {
             | Application::GoIssue2988(..)
             | Application::NodeMakeConnections
             | Application::DoubleListen
+            | Application::PythonSocketPair
             | Application::Connectx => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
@@ -632,7 +639,7 @@ impl Application {
             .collect();
 
         let cmdline: Vec<String> = [executable].into_iter().chain(self.get_args()).collect();
-        run_exec(cmdline, None, None, cli_args, Some(env_refs)).await
+        run_exec(cmdline, None, None, cli_args, Some(env_refs), None).await
     }
 
     pub async fn start_process(
