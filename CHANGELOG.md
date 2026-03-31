@@ -11,7 +11,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 ## [3.197.1](https://github.com/metalbear-co/mirrord/tree/3.197.1) - 2026-03-31
 
 
-### Fixed
+### Internal
 
 - RabbitMQ missing field from ConnectParams.
 
