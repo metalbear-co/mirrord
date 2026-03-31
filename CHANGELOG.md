@@ -8,6 +8,19 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.197.0](https://github.com/metalbear-co/mirrord/tree/3.197.0) - 2026-03-31
+
+
+### Added
+
+- Added RabbitMQ queue splitting support.
+
+
+### Changed
+
+- Check for existing key (preview env) and warn the user.
+- `mirrord ci start --foreground` command behaves exactly like `mirrord exec`.
+
 ## [3.196.0](https://github.com/metalbear-co/mirrord/tree/3.196.0) - 2026-03-28
 
 
