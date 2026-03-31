@@ -338,6 +338,7 @@ mod wsl;
 #[cfg(feature = "wizard")]
 mod wizard;
 
+#[cfg(unix)]
 mod ui;
 
 mod fix;
@@ -1134,6 +1135,7 @@ fn main() -> miette::Result<()> {
                 .await?
             }
             Commands::Fix(args) => fix::fix_command(args).await?,
+            #[cfg(unix)]
             Commands::Ui(args) => ui::ui_command(args).await?,
         };
 
