@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-03-28T00:00:00.000Z
+lastmod: 2026-03-31T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -2671,8 +2671,8 @@ A mapping from queue ids to their filters. Each queue filter defines which messa
 original queue will be made available to the local application, based on message attributes
 or headers, and possibly on jq filters (for SQS).
 
-The queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` or
-`MirrordKafkaTopicsConsumer` for SQS or Kafka respectively.
+The queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` for SQS and
+RabbitMQ or `MirrordKafkaTopicsConsumer` for Kafka.
 
 
 ```json
