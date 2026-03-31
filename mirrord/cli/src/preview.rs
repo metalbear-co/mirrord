@@ -36,7 +36,7 @@ use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
     client::{OperatorApi, PreparedClientCert},
     crd::{
-        NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION,
+        NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
             PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIncomingConfig,
             PreviewQueueSplittingConfig, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
@@ -661,9 +661,8 @@ async fn preview_stop(
 /// Resolves a [`Target`] to a [`SessionTarget`] by auto-detecting the container if not
 /// specified, then converting to the session representation.
 ///
-/// In multi-cluster mode the target lives on a remote cluster, so we can't look up
-/// runtime data locally. Instead we set an empty container and let the operator on
-/// the remote cluster resolve it.
+/// In multi-cluster mode the target lives on a remote cluster, so we resolve it through
+/// the operator's GET TargetCrd API which resolves the container on the workload cluster.
 async fn resolve_config_target(
     config_target: &Target,
     client: &kube::Client,
@@ -673,7 +672,20 @@ async fn resolve_config_target(
     let mut target = config_target.clone();
     if target.container().is_none() {
         if multi_cluster {
-            target.set_container(String::new());
+            let ns = namespace.unwrap_or(client.default_namespace());
+            let target_api: Api<TargetCrd> = Api::namespaced(client.clone(), ns);
+            let target_crd = target_api
+                .get(&TargetCrd::urlfied_name(config_target))
+                .await
+                .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?;
+            let resolved = target_crd
+                .spec
+                .target
+                .as_known()
+                .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?;
+            if let Some(container) = resolved.container() {
+                target.set_container(container.to_owned());
+            }
         } else {
             let runtime_data = config_target
                 .runtime_data(client, namespace)
