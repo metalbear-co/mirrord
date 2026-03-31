@@ -203,7 +203,7 @@ impl TryFrom<(*mut u8, u32)> for WSABufferData {
 }
 
 /// Log connection result and return it
-pub fn log_connection_result<T>(result: T, function_name: &str, addr: SockAddr)
+pub fn log_connection_result<T>(result: T, function_name: &str, addr: &SockAddr)
 where
     T: std::fmt::Display + std::cmp::PartialEq<i32>,
 {
@@ -215,10 +215,8 @@ where
             socket_address
         );
     } else {
-        tracing::error!(
-            "{} -> failed to connect to address: {:?}, error code: {}, wsa_getlasterror: {}",
-            function_name,
-            addr,
+        tracing::debug!(
+            "{function_name} -> connect to {socket_address:?} returned retval: {}, wsagle: {}",
             result,
             unsafe { WSAGetLastError() }
         );
