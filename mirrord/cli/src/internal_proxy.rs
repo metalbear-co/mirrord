@@ -187,6 +187,7 @@ pub(crate) async fn proxy(
     // **before** this happens to ensure that the agent does not prematurely exit.
     // We also perform initial ping pong round to ensure that k8s runtime actually made connection
     // with the agent (it's a must, because port forwarding may be done lazily).
+    let is_operator = matches!(&agent_connect_info, AgentConnectInfo::Operator(_));
     let mut agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
 
     if config.feature.db_branches.is_empty().not()
@@ -201,8 +202,6 @@ pub(crate) async fn proxy(
     {
         tracing::warn!(%err, "failed to set up DB branch port forwards, continuing without them");
     }
-
-    let agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
 
     // Let it assign address for us then print it for the user.
     let listener = create_listen_socket(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), listen_port))
@@ -219,7 +218,6 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    let is_operator = matches!(&agent_connect_info, AgentConnectInfo::Operator(_));
     let monitor_tx = start_session_monitor(&config, is_operator);
 
     IntProxy::new_with_connection(
