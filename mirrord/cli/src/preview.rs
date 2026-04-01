@@ -656,53 +656,27 @@ async fn preview_stop(
     Ok(())
 }
 
-/// Resolves a [`Target`] to a [`SessionTarget`] by auto-detecting the container if not
-/// specified, then converting to the session representation.
-///
-/// In multi-cluster mode the target may live on a remote cluster that the CLI can't
-/// reach directly, so we always resolve through the operator's GET TargetCrd API. This
-/// both validates that the target exists on the workload cluster and resolves the
-/// container if the user didn't specify one.
-///
-/// In single-cluster mode the CLI has direct access to the cluster, so it only needs to
-/// query Kubernetes when the container is missing.
+/// Resolves a [`Target`] to a [`SessionTarget`] by fetching the target from the
+/// operator's GET TargetCrd API. The operator validates the target exists and resolves
+/// the container if not specified. Works for both single-cluster and multi-cluster.
 async fn resolve_config_target(
     config_target: &Target,
     operator_api: &OperatorApi<PreparedClientCert>,
     namespace: Option<&str>,
 ) -> CliResult<SessionTarget> {
     let client = operator_api.client();
-    // When the primary is not the default cluster, the target may live on a remote
-    // cluster that the CLI can't query directly.
-    let multi_cluster = operator_api.operator().spec.operator_namespace.is_some();
-    let mut target = config_target.clone();
-
-    // In multi-cluster we always go through the operator, even if the user already
-    // specified a container. The CLI can't reach the workload cluster directly, so the
-    // operator is the only one that can validate the target exists and resolve the
-    // container when it's missing.
-    if multi_cluster {
-        let ns = namespace.unwrap_or(client.default_namespace());
-        let target_api: Api<TargetCrd> = Api::namespaced(client.clone(), ns);
-        let target_crd = target_api
-            .get(&TargetCrd::urlfied_name(config_target))
-            .await
-            .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?;
-        let resolved = target_crd
-            .spec
-            .target
-            .as_known()
-            .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?;
-        if let Some(container) = resolved.container() {
-            target.set_container(container.to_owned());
-        }
-    } else if target.container().is_none() {
-        let runtime_data = config_target
-            .runtime_data(client, namespace)
-            .await
-            .map_err(CliError::RuntimeDataResolution)?;
-        target.set_container(runtime_data.container_name);
-    }
+    let ns = namespace.unwrap_or(client.default_namespace());
+    let target_api: Api<TargetCrd> = Api::namespaced(client.clone(), ns);
+    let target_crd = target_api
+        .get(&TargetCrd::urlfied_name(config_target))
+        .await
+        .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?;
+    let target = target_crd
+        .spec
+        .target
+        .as_known()
+        .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?
+        .clone();
 
     SessionTarget::from_config(target)
         .ok_or_else(|| CliError::PreviewTargetResolutionFailed(config_target.to_string()))
