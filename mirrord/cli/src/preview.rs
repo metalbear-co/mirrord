@@ -118,13 +118,10 @@ async fn preview_start(
         CliError::PreviewImageRequired
     })?;
 
-    let multi_cluster = operator_api.operator().spec.operator_namespace.is_some();
-
     let session_target = resolve_config_target(
         config_target,
-        operator_api.client(),
+        &operator_api,
         layer_config.target.namespace.as_deref(),
-        multi_cluster,
     )
     .await
     .inspect_err(|_| subtask.failure(None))?;
@@ -569,17 +566,14 @@ async fn preview_stop(
     let (operator_api, api) =
         create_preview_api(&layer_config, all_namespaces, &progress, &mut analytics).await?;
 
-    let multi_cluster = operator_api.operator().spec.operator_namespace.is_some();
-
     let mut subtask = progress.subtask("finding preview sessions");
 
     let session_target = match &layer_config.target.path {
         Some(config_target) => Some(
             resolve_config_target(
                 config_target,
-                operator_api.client(),
+                &operator_api,
                 layer_config.target.namespace.as_deref(),
-                multi_cluster,
             )
             .await
             .inspect_err(|_| subtask.failure(None))?,
@@ -674,14 +668,17 @@ async fn preview_stop(
 /// query Kubernetes when the container is missing.
 async fn resolve_config_target(
     config_target: &Target,
-    client: &kube::Client,
+    operator_api: &OperatorApi<PreparedClientCert>,
     namespace: Option<&str>,
-    multi_cluster: bool,
 ) -> CliResult<SessionTarget> {
+    let client = operator_api.client();
+    // When the primary is not the default cluster, the target may live on a remote
+    // cluster that the CLI can't query directly.
+    let multi_cluster = operator_api.operator().spec.operator_namespace.is_some();
     let mut target = config_target.clone();
 
-    // In multi-cluster we always go through the operator.
-    // The CLI can't reach the workload cluster directly, so the
+    // In multi-cluster we always go through the operator, even if the user already
+    // specified a container. The CLI can't reach the workload cluster directly, so the
     // operator is the only one that can validate the target exists and resolve the
     // container when it's missing.
     if multi_cluster {
