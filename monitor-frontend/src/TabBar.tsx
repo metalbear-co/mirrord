@@ -1,6 +1,6 @@
 import { cn } from '@metalbear/ui'
 
-export type Tab = 'sessions' | 'events' | 'config'
+export type Tab = 'sessions' | 'topology' | 'config'
 
 interface TabBarProps {
   activeTab: Tab
@@ -9,7 +9,7 @@ interface TabBarProps {
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'sessions', label: 'Sessions' },
-  { id: 'events', label: 'Events' },
+  { id: 'topology', label: 'Topology' },
   { id: 'config', label: 'Config' },
 ]
 

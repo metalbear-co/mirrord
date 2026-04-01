@@ -7,6 +7,7 @@ import TabBar, { type Tab } from './TabBar'
 import SessionSidebar from './SessionSidebar'
 import EventStream from './EventStream'
 import ConfigView from './ConfigView'
+import TopologyView from './TopologyView'
 import StatusBar from './StatusBar'
 
 const WS_RECONNECT_INTERVAL = 3000
@@ -111,7 +112,7 @@ export default function App() {
   }, [])
 
   const selected = sessions.find((s) => s.session_id === selectedId)
-  const showEventStream = activeTab === 'sessions' || activeTab === 'events'
+  const showEventStream = activeTab === 'sessions'
 
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
@@ -172,7 +173,9 @@ export default function App() {
         )}
 
         <div className="flex-1 overflow-hidden">
-          {showEventStream ? (
+          {activeTab === 'topology' ? (
+            <TopologyView />
+          ) : showEventStream ? (
             selected ? (
               <EventStream session={selected} onStreamingChange={handleStreamingChange} />
             ) : (

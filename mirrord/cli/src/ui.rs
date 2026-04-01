@@ -77,6 +77,7 @@ impl Serialize for TrackedSession {
 struct AppState {
     sessions: RwLock<HashMap<String, TrackedSession>>,
     notify_tx: broadcast::Sender<SessionNotification>,
+    kube_client: Option<kube::Client>,
 }
 
 /// Creates a reqwest client configured to connect via the given Unix socket.
@@ -390,6 +391,45 @@ async fn ws_connection(mut socket: WebSocket, state: Arc<AppState>) {
     }
 }
 
+/// Proxies topology requests to the mirrord operator in the cluster.
+///
+/// Uses the Kubernetes API server's service proxy to reach the operator's `/topology` endpoint
+/// at `/api/v1/namespaces/mirrord/services/mirrord-operator:3000/proxy/topology`.
+async fn proxy_topology(State(state): State<Arc<AppState>>) -> Response {
+    let Some(client) = &state.kube_client else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({"error": "no kubernetes connection"})),
+        )
+            .into_response();
+    };
+
+    let request = axum::http::Request::builder()
+        .uri("/api/v1/namespaces/mirrord/services/mirrord-operator:3000/proxy/topology")
+        .header("accept", "application/json")
+        .body(vec![]);
+
+    let request = match request {
+        Ok(r) => r,
+        Err(err) => {
+            warn!(?err, "Failed to build topology proxy request");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    match client.request::<serde_json::Value>(request).await {
+        Ok(value) => axum::Json(value).into_response(),
+        Err(err) => {
+            warn!(%err, "Failed to proxy topology request to operator");
+            (
+                StatusCode::BAD_GATEWAY,
+                axum::Json(serde_json::json!({"error": err.to_string()})),
+            )
+                .into_response()
+        }
+    }
+}
+
 fn guess_mime(path: &str) -> &'static str {
     mime_guess::from_path(path)
         .first_raw()
@@ -495,7 +535,8 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/sessions", get(list_sessions))
         .route("/sessions/{id}", get(get_session))
         .route("/sessions/{id}/events", get(session_events_sse))
-        .route("/sessions/{id}/kill", post(kill_session));
+        .route("/sessions/{id}/kill", post(kill_session))
+        .route("/topology", get(proxy_topology));
 
     Router::new()
         .nest("/api", api_routes)
@@ -515,9 +556,21 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
 
     let (notify_tx, _) = broadcast::channel::<SessionNotification>(256);
 
+    let kube_client = match kube::Client::try_default().await {
+        Ok(client) => {
+            info!("Kubernetes client initialized for topology proxy");
+            Some(client)
+        }
+        Err(err) => {
+            warn!(?err, "Failed to create Kubernetes client, topology will be unavailable");
+            None
+        }
+    };
+
     let state = Arc::new(AppState {
         sessions: RwLock::new(HashMap::new()),
         notify_tx,
+        kube_client,
     });
 
     scan_existing_sessions(&sessions_dir, &state).await;
