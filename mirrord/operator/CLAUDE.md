@@ -27,13 +27,11 @@ This writes one file per CRD, the one you want is at `$tmp_dir/{crd.metadata.nam
 
 When changing a CRD here, check its reconciler there:
 
-- `MirrordClusterSession` → `operator/operator/session/src/**`
 - `PreviewSession` → `operator/operator/preview-env/src/**`
 - `CopyTargetCrd` → `operator/operator/context` + `operator/operator/controller/src/copy_target/**`
 - `MirrordWorkloadQueueRegistry` / `MirrordSqsSession` → `operator/operator/sqs-splitting/src/**`
 - `MirrordKafka*` CRDs → `operator/operator/kafka-splitting/src/**`
 - `*BranchDatabase` CRDs → `operator/operator/db-branching/src/**`
-- `MirrordClusterWorkloadPatch*` → `operator/operator/workload-patch/src/**`
 - `MirrordOperatorCrd`, `TargetCrd`, `SessionCrd` route handling → `operator/operator/controller/src/{status,target,restful,openapi}.rs`
 
 ## Backwards Compatibility
@@ -53,3 +51,4 @@ CRD compatibility is the highest-risk area in this crate. CRD schemas are genera
 - Query param JSON encoding is shared between client (`src/client/connect_params.rs`) and operator parser (`operator/operator/controller/src/restful/params.rs`), keep them aligned.
 - Never use `mirrord-config` types directly in CRD specs/statuses. CRs have much stronger backward compatibility requirements than `mirrord-config`, so embedding a config type into a CRD effectively freezes it. Any future change to that config type becomes a CRD-breaking change.
 - When adding a new CRD type, add an `#[ignored]` test in `src/crd.rs` that prints its generated schema. This makes it easy to inspect, verify and place the schema in the Helm charts in the operator repo.
+- If a CRD type is not used in the mirrord repo and is only used in the operator repo, add it to the `operator-crd` crate instead.
