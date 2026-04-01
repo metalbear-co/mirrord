@@ -1,47 +1,23 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { MirrordIcon } from '@metalbear/ui'
-import { Loader, cn } from '@metalbear/ui'
-import { Activity, Sun, Moon, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { cn } from '@metalbear/ui'
+import { Sun, Moon, Activity } from 'lucide-react'
 import type { SessionInfo, WsMessage } from './types'
-import SessionCard from './SessionCard'
+import TabBar, { type Tab } from './TabBar'
+import SessionSidebar from './SessionSidebar'
 import EventStream from './EventStream'
+import ConfigView from './ConfigView'
+import StatusBar from './StatusBar'
 
 const WS_RECONNECT_INTERVAL = 3000
-
-const SIDEBAR_MIN = 240
-const SIDEBAR_MAX = 600
-const SIDEBAR_DEFAULT = 320
-const SIDEBAR_STORAGE_KEY = 'session-monitor-sidebar-width'
-const SIDEBAR_HIDDEN_KEY = 'session-monitor-sidebar-hidden'
-
-function getSavedSidebarWidth(): number {
-  try {
-    const saved = localStorage.getItem(SIDEBAR_STORAGE_KEY)
-    if (saved) {
-      const val = parseInt(saved, 10)
-      if (val >= SIDEBAR_MIN && val <= SIDEBAR_MAX) return val
-    }
-  } catch {}
-  return SIDEBAR_DEFAULT
-}
-
-function getSavedSidebarHidden(): boolean {
-  try {
-    return localStorage.getItem(SIDEBAR_HIDDEN_KEY) === 'true'
-  } catch {}
-  return false
-}
 
 export default function App() {
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [sidebarWidth, setSidebarWidth] = useState(getSavedSidebarWidth)
-  const [sidebarHidden, setSidebarHidden] = useState(getSavedSidebarHidden)
-  const [isDragging, setIsDragging] = useState(false)
-  const sidebarRef = useRef<HTMLDivElement>(null)
-  const sidebarWidthRef = useRef(getSavedSidebarWidth())
+  const [activeTab, setActiveTab] = useState<Tab>('sessions')
+  const [sseStreaming, setSseStreaming] = useState(false)
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem('session-monitor-theme')
     if (saved) return saved === 'dark'
@@ -52,37 +28,6 @@ export default function App() {
     document.documentElement.classList.toggle('dark', isDarkMode)
     localStorage.setItem('session-monitor-theme', isDarkMode ? 'dark' : 'light')
   }, [isDarkMode])
-
-  // Sidebar drag resize
-  useEffect(() => {
-    if (!isDragging) return
-
-    const handleMouseMove = (e: MouseEvent) => {
-      e.preventDefault()
-      const newWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, e.clientX))
-      setSidebarWidth(newWidth)
-      sidebarWidthRef.current = newWidth
-    }
-
-    const handleMouseUp = () => {
-      setIsDragging(false)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarWidthRef.current))
-    }
-
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-    }
-  }, [isDragging])
 
   // Initial fetch
   useEffect(() => {
@@ -157,21 +102,30 @@ export default function App() {
     await fetch(`/api/sessions/${id}/kill`, { method: 'POST' })
   }, [])
 
+  const handleSelect = useCallback((id: string) => {
+    setSelectedId((prev) => (prev === id || id === '' ? null : id))
+  }, [])
+
+  const handleStreamingChange = useCallback((streaming: boolean) => {
+    setSseStreaming(streaming)
+  }, [])
+
   const selected = sessions.find((s) => s.session_id === selectedId)
+  const showEventStream = activeTab === 'sessions' || activeTab === 'events'
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="relative dark:bg-dark-background bg-white/80 backdrop-blur-sm border-b border-border dark:border-transparent">
-        <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-primary to-transparent opacity-40" />
+    <div className="h-screen flex flex-col bg-background text-foreground">
+      {/* Header */}
+      <header className="dark:bg-dark-background bg-white/80 backdrop-blur-sm border-b border-border dark:border-transparent shrink-0">
         <div className="px-6">
-          <div className="flex items-center justify-between h-14 text-foreground">
+          <div className="flex items-center justify-between h-12 text-foreground">
             <div className="flex items-center gap-3">
               <img
                 src={MirrordIcon}
                 alt="mirrord"
-                className="w-8 h-8 dark:invert"
+                className="w-7 h-7 dark:invert"
               />
-              <span className="font-semibold text-lg">mirrord</span>
+              <span className="font-semibold text-base">mirrord</span>
               <span className="opacity-30">|</span>
               <span className="text-sm font-medium opacity-80">
                 Session Monitor
@@ -185,15 +139,8 @@ export default function App() {
                     connected ? 'bg-green-500' : 'bg-red-500'
                   )}
                 />
-                <span className="text-sm opacity-60">
+                <span className="text-xs opacity-60">
                   {connected ? 'Connected' : 'Disconnected'}
-                </span>
-              </div>
-              <span className="opacity-20">|</span>
-              <div className="flex items-center gap-1.5 text-sm opacity-60">
-                <Activity className="h-3.5 w-3.5" />
-                <span>
-                  {sessions.length} session{sessions.length !== 1 ? 's' : ''}
                 </span>
               </div>
               <span className="opacity-20">|</span>
@@ -209,91 +156,39 @@ export default function App() {
         </div>
       </header>
 
-      <div className="flex h-[calc(100vh-57px)]">
-        {!sidebarHidden && (
-        <>
-        <div
-          ref={sidebarRef}
-          className="border-r border-border overflow-y-auto p-3 space-y-2 shrink-0 relative"
-          style={{ width: sidebarWidth }}
-        >
-          <div className="flex justify-end mb-1">
-            <button
-              onClick={() => {
-                setSidebarHidden(true)
-                localStorage.setItem(SIDEBAR_HIDDEN_KEY, 'true')
-              }}
-              className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-              title="Hide sidebar"
-            >
-              <PanelLeftClose className="h-4 w-4" />
-            </button>
-          </div>
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader size="lg" />
-            </div>
-          ) : sessions.length === 0 ? (
-            <div className="text-center text-muted-foreground py-12">
-              <Activity className="h-10 w-10 mx-auto mb-3 opacity-30" />
-              <p className="text-base mb-1">No active sessions</p>
-              <p className="text-sm opacity-70">Start mirrord to see sessions here</p>
-            </div>
-          ) : (
-            sessions.map((s) => (
-              <SessionCard
-                key={s.session_id}
-                session={s}
-                selected={s.session_id === selectedId}
-                onSelect={() => setSelectedId(s.session_id === selectedId ? null : s.session_id)}
-                onKill={() => handleKill(s.session_id)}
-              />
-            ))
-          )}
-        </div>
+      {/* Tab bar */}
+      <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
 
-        <div
-          className={cn(
-            'w-1 shrink-0 cursor-col-resize transition-colors relative group',
-            isDragging ? 'bg-primary' : 'bg-transparent hover:bg-primary/50'
-          )}
-          onMouseDown={(e) => {
-            e.preventDefault()
-            setIsDragging(true)
-          }}
-        >
-          <div className={cn(
-            'absolute inset-y-0 -left-1 -right-1',
-            'cursor-col-resize'
-          )} />
-        </div>
-        </>
-        )}
-
-        {sidebarHidden && (
-          <button
-            onClick={() => {
-              setSidebarHidden(false)
-              localStorage.setItem(SIDEBAR_HIDDEN_KEY, 'false')
-            }}
-            className="shrink-0 w-8 border-r border-border flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-            title="Show sidebar"
-          >
-            <PanelLeftOpen className="h-4 w-4" />
-          </button>
+      {/* Main content */}
+      <div className="flex flex-1 overflow-hidden">
+        {showEventStream && (
+          <SessionSidebar
+            sessions={sessions}
+            selectedId={selectedId}
+            loading={loading}
+            onSelect={handleSelect}
+            onKill={handleKill}
+          />
         )}
 
         <div className="flex-1 overflow-hidden">
-          {selected ? (
-            <EventStream session={selected} />
+          {showEventStream ? (
+            selected ? (
+              <EventStream session={selected} onStreamingChange={handleStreamingChange} />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
+                <Activity className="h-8 w-8 opacity-30" />
+                <p className="text-sm">Select a session to view live events</p>
+              </div>
+            )
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
-              <Activity className="h-8 w-8 opacity-30" />
-              <p>Select a session to view live events</p>
-            </div>
+            <ConfigView session={selected} />
           )}
         </div>
       </div>
+
+      {/* Status bar */}
+      <StatusBar wsConnected={connected} sseStreaming={sseStreaming} session={selected} />
     </div>
   )
 }
