@@ -118,11 +118,7 @@ async fn preview_start(
         CliError::PreviewImageRequired
     })?;
 
-    let multi_cluster = operator_api
-        .operator()
-        .spec
-        .operator_namespace
-        .is_some();
+    let multi_cluster = operator_api.operator().spec.operator_namespace.is_some();
 
     let session_target = resolve_config_target(
         config_target,
@@ -248,7 +244,10 @@ async fn preview_start(
             .namespace
             .as_deref()
             .unwrap_or(operator_api.client().default_namespace());
-        BTreeMap::from([(TARGET_NAMESPACE_ANNOTATION.to_string(), target_ns.to_owned())])
+        BTreeMap::from([(
+            TARGET_NAMESPACE_ANNOTATION.to_string(),
+            target_ns.to_owned(),
+        )])
     });
 
     let session = PreviewSession {
@@ -570,11 +569,7 @@ async fn preview_stop(
     let (operator_api, api) =
         create_preview_api(&layer_config, all_namespaces, &progress, &mut analytics).await?;
 
-    let multi_cluster = operator_api
-        .operator()
-        .spec
-        .operator_namespace
-        .is_some();
+    let multi_cluster = operator_api.operator().spec.operator_namespace.is_some();
 
     let mut subtask = progress.subtask("finding preview sessions");
 
@@ -685,7 +680,7 @@ async fn resolve_config_target(
 ) -> CliResult<SessionTarget> {
     let mut target = config_target.clone();
 
-    // In multi-cluster we always go through the operator. 
+    // In multi-cluster we always go through the operator.
     // The CLI can't reach the workload cluster directly, so the
     // operator is the only one that can validate the target exists and resolve the
     // container when it's missing.
