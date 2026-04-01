@@ -4,7 +4,7 @@ import { cn } from '@metalbear/ui'
 import { Sun, Moon, Activity } from 'lucide-react'
 import type { SessionInfo, WsMessage } from './types'
 import SessionSidebar from './SessionSidebar'
-import EventStream from './EventStream'
+import SessionDetail from './SessionDetail'
 import StatusBar from './StatusBar'
 
 const WS_RECONNECT_INTERVAL = 3000
@@ -159,7 +159,7 @@ export default function App() {
 
         <div className="flex-1 overflow-hidden">
           {selected ? (
-            <EventStream session={selected} />
+            <SessionDetail session={selected} />
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
               <Activity className="h-8 w-8 opacity-30" />
