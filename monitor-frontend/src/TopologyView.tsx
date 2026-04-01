@@ -16,7 +16,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import ELK from 'elkjs/lib/elk.bundled.js'
 import { fetchTopology, type TopologyResponse, type TopologyEdge, type ActiveSession } from './topologyApi'
-import { Laptop } from 'lucide-react'
+import { Laptop, Network, Users, Shield, Zap, ArrowRight } from 'lucide-react'
 
 const elk = new ELK()
 
@@ -480,6 +480,88 @@ function TopologyInner({ initialNodes, initialEdges }: { initialNodes: Node[]; i
   )
 }
 
+function TopologyTeaser() {
+  const features = [
+    {
+      icon: Network,
+      title: 'Service Topology Map',
+      description: 'Automatically discover and visualize how your services communicate in real time.',
+    },
+    {
+      icon: Users,
+      title: 'Team Collaboration',
+      description: 'See who on your team is mirroring which services, with live developer nodes on the graph.',
+    },
+    {
+      icon: Shield,
+      title: 'Policy & Access Control',
+      description: 'Fine-grained RBAC policies for who can mirror, steal, or access specific targets.',
+    },
+    {
+      icon: Zap,
+      title: 'Queue Splitting & More',
+      description: 'Split Kafka and SQS queues, branch databases, and preview environments for your team.',
+    },
+  ]
+
+  return (
+    <div className="h-full overflow-auto">
+      <div className="max-w-2xl mx-auto px-6 py-16 flex flex-col items-center">
+        {/* Hero */}
+        <div className="relative mb-8">
+          <div className="w-20 h-20 rounded-2xl flex items-center justify-center bg-indigo-50 dark:bg-indigo-950 shadow-[0_0_40px_rgba(99,102,241,0.1)] dark:shadow-[0_0_40px_rgba(99,102,241,0.15)]">
+            <Network className="w-10 h-10 text-indigo-600 dark:text-indigo-400" />
+          </div>
+          <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white bg-[#7c5aff] shadow-[0_2px_8px_rgba(124,90,255,0.4)]">
+            PRO
+          </div>
+        </div>
+
+        <h2 className="text-2xl font-bold mb-3 text-center text-slate-800 dark:text-slate-100">
+          See how your services connect
+        </h2>
+        <p className="text-center mb-10 leading-relaxed max-w-md text-[15px] text-slate-500 dark:text-slate-400">
+          Service Topology automatically maps your cluster's service-to-service
+          communication and shows who on your team is actively mirroring.
+        </p>
+
+        {/* Feature grid */}
+        <div className="grid grid-cols-2 gap-4 w-full mb-10">
+          {features.map(({ icon: Icon, title, description }) => (
+            <div
+              key={title}
+              className="rounded-xl p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+            >
+              <Icon className="w-5 h-5 mb-2.5 text-indigo-500 dark:text-indigo-400" />
+              <div className="text-sm font-semibold mb-1 text-slate-700 dark:text-slate-200">
+                {title}
+              </div>
+              <div className="text-xs leading-relaxed text-slate-400 dark:text-slate-500">
+                {description}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* CTA */}
+        <a
+          href="https://mirrord.dev/docs/overview/teams/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02] active:scale-[0.98] bg-[linear-gradient(135deg,#7c5aff_0%,#6366f1_100%)] shadow-[0_4px_16px_rgba(124,90,255,0.3)]"
+        >
+          Try mirrord for Teams
+          <ArrowRight className="w-4 h-4" />
+        </a>
+
+        <p className="mt-4 text-xs text-center text-slate-400 dark:text-slate-600">
+          Free for small teams. Install the operator to unlock topology and more.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 export default function TopologyView() {
   const [layoutedNodes, setLayoutedNodes] = useState<Node[]>([])
   const [layoutedEdges, setLayoutedEdges] = useState<Edge[]>([])
@@ -524,14 +606,7 @@ export default function TopologyView() {
   }
 
   if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
-        <p className="text-destructive">{error}</p>
-        <p className="text-sm opacity-70">
-          Make sure the operator is running and accessible.
-        </p>
-      </div>
-    )
+    return <TopologyTeaser />
   }
 
   if (layoutedNodes.length === 0) {
