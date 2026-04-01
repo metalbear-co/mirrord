@@ -1715,14 +1715,27 @@ impl OperatorApi<PreparedClientCert> {
             .as_deref()
             .unwrap_or(self.client.default_namespace());
 
-        // In multi-cluster management-only mode, create CRDs in operator's namespace
-        // with an annotation specifying the target namespace for the sync controller.
-        let (api_namespace, target_ns_annotation) =
-            if let Some(op_ns) = &self.operator.spec.operator_namespace {
-                (op_ns.as_str(), Some(target_namespace.to_string()))
-            } else {
-                (target_namespace, None)
-            };
+        // Management-only operators set operator_namespace so the sync controller can
+        // pick up CRDs and forward them to the default cluster. When the user forces
+        // single-cluster mode we skip that redirect and put CRDs straight into the
+        // target namespace where the local branching controller will handle them.
+        let use_operator_namespace = layer_config.multi_cluster != Some(false);
+        let (api_namespace, target_ns_annotation) = match self
+            .operator
+            .spec
+            .operator_namespace
+            .as_deref()
+            .filter(|_| use_operator_namespace)
+        {
+            // Multi-cluster: CRD goes into the operator namespace, and the sync
+            // controller reads the annotation to know which namespace on the
+            // default cluster it should replicate the CRD into.
+            Some(op_ns) => (op_ns, Some(target_namespace.to_string())),
+            // Single-cluster (or no operator_namespace configured): CRD goes
+            // directly into the target namespace where the branching controller
+            // and the target pod both live.
+            None => (target_namespace, None),
+        };
 
         let timeout_secs = layer_config
             .feature
