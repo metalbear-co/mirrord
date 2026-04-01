@@ -120,7 +120,7 @@ async fn preview_start(
 
     let session_target = resolve_config_target(
         config_target,
-        &operator_api,
+        operator_api.client(),
         layer_config.target.namespace.as_deref(),
     )
     .await
@@ -572,7 +572,7 @@ async fn preview_stop(
         Some(config_target) => Some(
             resolve_config_target(
                 config_target,
-                &operator_api,
+                operator_api.client(),
                 layer_config.target.namespace.as_deref(),
             )
             .await
@@ -661,10 +661,9 @@ async fn preview_stop(
 /// the container if not specified. Works for both single-cluster and multi-cluster.
 async fn resolve_config_target(
     config_target: &Target,
-    operator_api: &OperatorApi<PreparedClientCert>,
+    client: &kube::Client,
     namespace: Option<&str>,
 ) -> CliResult<SessionTarget> {
-    let client = operator_api.client();
     let ns = namespace.unwrap_or(client.default_namespace());
     let target_api: Api<TargetCrd> = Api::namespaced(client.clone(), ns);
     let target_crd = target_api
