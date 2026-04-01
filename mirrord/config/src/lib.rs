@@ -274,6 +274,17 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_OPERATOR_ENABLE")]
     pub operator: Option<bool>,
 
+    /// ## api {#root-api}
+    ///
+    /// Enables the local session monitor API server.
+    ///
+    /// When enabled, mirrord exposes a Unix socket at `~/.mirrord/sessions/<session-id>.sock`
+    /// with HTTP endpoints for observing session activity in real time.
+    ///
+    /// Defaults to `true`.
+    #[config(default = true, env = "MIRRORD_API")]
+    pub api: bool,
+
     /// ## profile {#root-profile}
     ///
     /// Name of the mirrord profile to use.
@@ -839,6 +850,81 @@ impl LayerConfig {
 
         Ok(())
     }
+
+    /// Verifies that there are no ignored/unused settings for a preview environment.
+    ///
+    /// This is used to notify the user about settings that don't make sense in the context of
+    /// preview environments, since it's already running in the cluster.
+    pub fn verify_for_preview_env(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
+        let ignored = |field: &str| {
+            format!("`{field}` is ignored in preview environments and will not be used.")
+        };
+
+        let default =
+            Self::resolve(&mut ConfigContext::default()).expect("default config must be valid");
+
+        // feature.env - partially supported
+
+        if self.feature.env.unset != default.feature.env.unset {
+            context.add_warning(ignored("feature.env.unset"));
+        }
+
+        if self.feature.env.mapping != default.feature.env.mapping {
+            context.add_warning(ignored("feature.env.mapping"));
+        }
+
+        // feature.network.incoming - partially supported
+
+        if self.feature.network.incoming.listen_ports
+            != default.feature.network.incoming.listen_ports
+        {
+            context.add_warning(ignored("feature.network.incoming.listen_ports"));
+        }
+
+        if self.feature.network.incoming.port_mapping
+            != default.feature.network.incoming.port_mapping
+        {
+            context.add_warning(ignored("feature.network.incoming.port_mapping"));
+        }
+
+        if self.feature.network.incoming.ignore_localhost
+            != default.feature.network.incoming.ignore_localhost
+        {
+            context.add_warning(ignored("feature.network.incoming.ignore_localhost"));
+        }
+
+        // feature.fs - unsupported
+
+        if self.feature.fs != default.feature.fs {
+            context.add_warning(ignored("feature.fs"));
+        }
+
+        // feature.network.outgoing - unsupported
+
+        if self.feature.network.outgoing != default.feature.network.outgoing {
+            context.add_warning(ignored("feature.network.outgoing"));
+        }
+
+        // feature.network.dns - unsupported
+
+        if self.feature.network.dns != default.feature.network.dns {
+            context.add_warning(ignored("feature.network.dns"));
+        }
+
+        // feature.magic - unsupported
+
+        if self.feature.magic != default.feature.magic {
+            context.add_warning(ignored("feature.magic"));
+        }
+
+        // feature.hostname - unsupported
+
+        if self.feature.hostname != default.feature.hostname {
+            context.add_warning(ignored("feature.hostname"));
+        }
+
+        self.verify(context)
+    }
 }
 
 impl CollectAnalytics for &LayerConfig {
@@ -1262,6 +1348,7 @@ mod tests {
             ci: None,
             traceparent: None,
             baggage: None,
+            api: None,
         };
 
         assert_eq!(config, expect);

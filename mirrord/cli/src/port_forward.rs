@@ -12,6 +12,7 @@ use mirrord_intproxy::{
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     main_tasks::{ProxyMessage, ToLayer},
     proxies::incoming::{IncomingProxy, IncomingProxyError, IncomingProxyMessage},
+    session_monitor::MonitorTx,
 };
 use mirrord_intproxy_protocol::{
     IncomingRequest, IncomingResponse, LayerId, PortSubscribe, PortSubscription,
@@ -585,6 +586,7 @@ impl ReversePortForwarder {
                     .clone()
                     .or_else(|| network_config.https_delivery.clone())
                     .unwrap_or_default(),
+                MonitorTx::disabled(),
             ),
             (),
             512,

@@ -9,7 +9,7 @@ use crate::config::source::MirrordConfigSource;
 
 /// Container runtimes supported by mirrord.
 #[derive(
-    Clone, Copy, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default, ValueEnum,
+    Clone, Copy, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default, ValueEnum, Hash,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ContainerRuntime {

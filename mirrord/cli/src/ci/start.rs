@@ -3,7 +3,7 @@ use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
 
 use super::{CiResult, MirrordCi};
-use crate::{CiStartArgs, CliResult, ExecArgs, exec, user_data::UserData};
+use crate::{CliResult, ExecArgs, config::ci::*, exec, user_data::UserData};
 
 /// Handles the `mirrord ci start` command.
 ///
@@ -40,7 +40,7 @@ impl<'a> CiStartCommandHandler<'a> {
     ) -> CiResult<Self> {
         let progress = ProgressTracker::from_env("mirrord ci start");
 
-        let mirrord_for_ci = MirrordCi::new(&args).await?;
+        let mirrord_for_ci = MirrordCi::new(args.ci_common_args).await?;
 
         Ok(Self {
             mirrord_for_ci,

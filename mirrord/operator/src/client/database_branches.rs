@@ -1162,6 +1162,15 @@ impl UnifiedDatabaseBranchParams {
                 DatabaseBranchConfig::Redis(_) => {}
             };
         }
+
+        if let Ok(marker) = std::env::var(OPERATOR_ISOLATION_MARKER_ENV) {
+            for branch_params in branches.values_mut() {
+                branch_params
+                    .labels
+                    .insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker.clone());
+            }
+        }
+
         Ok(Self { branches })
     }
 }

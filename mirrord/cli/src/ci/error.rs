@@ -40,4 +40,8 @@ pub(crate) enum CiError {
         "`mirrord ci` failed to execute an internal command for this operation, please report it to us."
     ))]
     NixErrno(#[from] nix::errno::Errno),
+
+    #[cfg(not(target_os = "windows"))]
+    #[error("`mirrord ci container` runtime command `{command}` failed with {message}")]
+    ContainerRuntimeCommand { command: String, message: String },
 }

@@ -5,21 +5,29 @@
 //! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Failed`), which
 //! the CLI watches to report progress back to the user.
 
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use k8s_openapi::{apimachinery::pkg::apis::meta::v1::MicroTime, jiff::Timestamp};
-use kube::CustomResource;
+use kube::{
+    Api, Client, CustomResource,
+    api::{Patch, PatchParams},
+};
 use mirrord_config::{
     feature::{
+        env::EnvConfig,
         network::incoming::{IncomingConfig, IncomingMode},
         preview::PreviewTtlMins,
+        split_queues::{QueueId, SplitQueuesConfig},
     },
     target::Target,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use super::session::SessionTarget;
+#[cfg(feature = "client")]
+use crate::client::connect_params::BranchDbNames;
 
 /// This resource represents a preview environment created by the `mirrord preview start` command.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -43,6 +51,10 @@ pub struct PreviewSessionSpec {
     /// The preview pod will be a copy of the target's pod spec with the user's image.
     pub target: SessionTarget,
 
+    /// How long (in seconds) this session is allowed to live.
+    /// Values >= `u32::MAX` are treated as infinite.
+    pub ttl_secs: u64,
+
     /// Incoming traffic configuration for the preview environment.
     ///
     /// Specifies which ports to steal/mirror traffic from and optional HTTP filters.
@@ -51,9 +63,17 @@ pub struct PreviewSessionSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub incoming: Option<PreviewIncomingConfig>,
 
-    /// How long (in seconds) this session is allowed to live.
-    /// Values >= `u32::MAX` are treated as infinite.
-    pub ttl_secs: u64,
+    /// Queue splitting configuration for this preview session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_splitting: Option<PreviewQueueSplittingConfig>,
+
+    /// Database branching configuration for this preview session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub db_branching: Option<PreviewDbBranchingConfig>,
+
+    /// User-configured environment variable settings for this preview session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<PreviewEnvVarsConfig>,
 }
 
 impl PreviewSessionSpec {
@@ -132,6 +152,82 @@ pub enum PreviewSessionPhase {
     Unknown,
 }
 
+/// `status` sub-resource update for a preview session CR.
+///
+/// Only fields that are set are included in the merge patch, allowing partial updates
+/// without replacing the full status object.
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewStatusUpdate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    phase: Option<PreviewSessionPhase>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    started_at: Option<MicroTime>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pod_name: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure_message: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expires_at: Option<MicroTime>,
+}
+
+impl PreviewStatusUpdate {
+    /// Creates an empty status update.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets `.status.phase`.
+    pub fn phase(mut self, phase: PreviewSessionPhase) -> Self {
+        self.phase = Some(phase);
+        self
+    }
+
+    /// Sets `.status.startedAt`.
+    pub fn started_at(mut self, started_at: MicroTime) -> Self {
+        self.started_at = Some(started_at);
+        self
+    }
+
+    /// Sets `.status.podName`.
+    pub fn pod_name(mut self, pod_name: String) -> Self {
+        self.pod_name = Some(pod_name);
+        self
+    }
+
+    /// Sets `.status.failureMessage`.
+    pub fn failure_message(mut self, failure_message: String) -> Self {
+        self.failure_message = Some(failure_message);
+        self
+    }
+
+    /// Sets `.status.expiresAt`.
+    pub fn expires_at(mut self, expires_at: MicroTime) -> Self {
+        self.expires_at = Some(expires_at);
+        self
+    }
+
+    /// Patches the status sub-resource with a merge patch.
+    pub async fn patch(
+        self,
+        client: &Client,
+        name: &str,
+        namespace: &str,
+    ) -> Result<(), kube::Error> {
+        let api = Api::<PreviewSession>::namespaced(client.clone(), namespace);
+        let data = json!({ "status": self });
+
+        api.patch_status(name, &PatchParams::default(), &Patch::Merge(data))
+            .await?;
+
+        Ok(())
+    }
+}
+
 /// Incoming traffic configuration for preview environments.
 ///
 /// Extracted from the user's mirrord config by the CLI and included in the CR.
@@ -142,8 +238,16 @@ pub enum PreviewSessionPhase {
 pub struct PreviewIncomingConfig {
     /// Explicit list of ports to steal/mirror. When `None`, the operator discovers ports from
     /// the preview pod's container port declarations.
+    ///
+    /// Mutually exclusive with `ignore_ports`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ports: Option<Vec<u16>>,
+
+    /// Ports to ignore while preview traffic interception is enabled.
+    ///
+    /// Mutually exclusive with `ports`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore_ports: Vec<u16>,
 
     /// Whether to steal (`true`) or mirror (`false`) traffic from the target.
     pub steal: bool,
@@ -162,6 +266,7 @@ impl PreviewIncomingConfig {
             IncomingMode::Off => None,
             IncomingMode::Mirror | IncomingMode::Steal => Some(Self {
                 ports: value.ports.as_ref().map(|p| p.iter().copied().collect()),
+                ignore_ports: value.ignore_ports.iter().copied().collect(),
                 steal: matches!(value.mode, IncomingMode::Steal),
                 http_filter: value
                     .http_filter
@@ -170,6 +275,172 @@ impl PreviewIncomingConfig {
                     .transpose()
                     .expect("HttpFilterConfig serialization cannot fail"),
             }),
+        }
+    }
+}
+
+/// Queue splitting configuration for preview environments.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewQueueSplittingConfig {
+    /// SQS queue splitting filters, keyed by queue ID.
+    ///
+    /// Each entry configures how messages from a specific SQS queue should be filtered
+    /// for this preview session.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sqs_queue_filters: BTreeMap<QueueId, PreviewSqsFilter>,
+
+    /// Kafka queue splitting filters, keyed by topic ID.
+    ///
+    /// Each value maps header names to regex patterns that messages must match.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub kafka_queue_filters: BTreeMap<QueueId, BTreeMap<String, String>>,
+}
+
+impl PreviewQueueSplittingConfig {
+    /// Converts from the user's split queues config. Returns `None` when no queues are configured.
+    pub fn from_config(value: &SplitQueuesConfig) -> Option<Self> {
+        let mut sqs_queue_filters = BTreeMap::new();
+
+        for (id, message_filter) in value.sqs() {
+            sqs_queue_filters
+                .entry(id.to_owned())
+                .or_insert_with(PreviewSqsFilter::default)
+                .message_filter = Some(message_filter.clone());
+        }
+
+        for (id, jq_filter) in value.sqs_jq_filters() {
+            sqs_queue_filters
+                .entry(id.to_owned())
+                .or_insert_with(PreviewSqsFilter::default)
+                .jq_filter = Some(jq_filter.to_owned());
+        }
+
+        let kafka_queue_filters: BTreeMap<_, _> = value
+            .kafka()
+            .map(|(id, filter)| (id.to_owned(), filter.clone()))
+            .collect();
+
+        if sqs_queue_filters.is_empty() && kafka_queue_filters.is_empty() {
+            None
+        } else {
+            Some(Self {
+                sqs_queue_filters,
+                kafka_queue_filters,
+            })
+        }
+    }
+}
+
+/// Per-queue SQS filter configuration for preview sessions.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSqsFilter {
+    /// Message attribute filter: a mapping from attribute names to regex patterns.
+    ///
+    /// Only messages whose attributes match **all** patterns will be delivered
+    /// to the preview environment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_filter: Option<BTreeMap<String, String>>,
+
+    /// A jq filter expression.
+    ///
+    /// For each SQS message, the jq filter runs on a JSON representation of the
+    /// SQS `Message` object. If the jq program outputs `true`, the message is
+    /// considered as matching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jq_filter: Option<String>,
+}
+
+/// Database branching configuration for preview environments.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewDbBranchingConfig {
+    /// MySQL branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mysql_branch_names: Vec<String>,
+
+    /// PostgreSQL branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pg_branch_names: Vec<String>,
+
+    /// MongoDB branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mongodb_branch_names: Vec<String>,
+
+    /// MSSQL branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mssql_branch_names: Vec<String>,
+}
+
+impl PreviewDbBranchingConfig {
+    /// Returns `None` when all branch name lists are empty.
+    #[cfg(feature = "client")]
+    pub fn from_db_names(branch_db_names: BranchDbNames) -> Option<Self> {
+        if branch_db_names.is_empty() {
+            None
+        } else {
+            Some(Self {
+                mysql_branch_names: branch_db_names.mysql,
+                pg_branch_names: branch_db_names.pg,
+                mongodb_branch_names: branch_db_names.mongodb,
+                mssql_branch_names: branch_db_names.mssql,
+            })
+        }
+    }
+}
+
+/// User-configured environment variable settings for preview environments.
+///
+/// Since preview environments have no layer (no local process), the CLI resolves the supported
+/// subset of `feature.env` into the CR so the operator can apply it directly to the pod spec
+/// before creation.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewEnvVarsConfig {
+    /// Glob patterns selecting which env vars to keep from the target pod spec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include: Option<Vec<String>>,
+
+    /// Glob patterns selecting which env vars to remove from the target pod spec.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<String>,
+
+    /// Env vars to set or replace in the target container.
+    ///
+    /// The CLI folds `feature.env.env_file` into this map before creating the CR, then applies
+    /// explicit `feature.env.override` values on top.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub overrides: BTreeMap<String, String>,
+}
+
+impl PreviewEnvVarsConfig {
+    /// Converts from the user's env config. Returns `None` when all fields are empty.
+    pub fn from_config(value: &EnvConfig) -> Result<Option<Self>, dotenvy::Error> {
+        let mut overrides = BTreeMap::new();
+
+        if let Some(file) = &value.env_file {
+            for entry in dotenvy::from_path_iter(file)? {
+                let (k, v) = entry?;
+                overrides.insert(k, v);
+            }
+        }
+
+        if let Some(user_overrides) = value.r#override.clone() {
+            overrides.extend(user_overrides);
+        }
+
+        let include = value.include.clone().map(Vec::from);
+        let exclude = value.exclude.clone().map(Vec::from).unwrap_or_default();
+
+        if include.is_none() && exclude.is_empty() && overrides.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(Self {
+                include,
+                exclude,
+                overrides,
+            }))
         }
     }
 }

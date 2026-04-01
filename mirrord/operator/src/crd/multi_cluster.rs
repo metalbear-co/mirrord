@@ -5,7 +5,7 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::session::{SessionOwner, SessionTarget};
+use super::session::{SessionCopyTarget, SessionOwner, SessionTarget};
 
 /// Multi-cluster session coordinated by Envoy on Primary cluster.
 #[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -41,6 +41,11 @@ pub struct MirrordMultiClusterSessionSpec {
     /// specified.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_cluster: Option<String>,
+
+    /// Copy target configuration. When set, a copy pod is created on the default
+    /// cluster and the original workload is scaled down on all clusters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copy_target: Option<SessionCopyTarget>,
 }
 
 /// Status of a multi-cluster session
@@ -87,6 +92,11 @@ pub struct ClusterSessionStatus {
     /// Last heartbeat from agent
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_heartbeat: Option<MicroTime>,
+
+    /// Scale-down-only session (no agent routing). Excluded from readiness checks
+    /// but included in cleanup. Used for copy target downstream scale-down.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scaledown_only: bool,
 }
 
 /// Phase of multi-cluster session lifecycle
