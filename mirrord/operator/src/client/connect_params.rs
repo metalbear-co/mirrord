@@ -83,6 +83,10 @@ pub struct ConnectParams<'a> {
     )]
     pub rmq_output_queues: HashMap<String, String>,
 
+    /// When set to `false`, forces a single-cluster session on a multi-cluster Primary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multi_cluster: Option<bool>,
+
     /// Key for this session
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<&'a str>,
@@ -132,6 +136,7 @@ impl<'a> ConnectParams<'a> {
             is_default_cluster: None,
             sqs_output_queues: HashMap::new(),
             rmq_output_queues: HashMap::new(),
+            multi_cluster: config.multi_cluster,
             key: Some(key),
         }
     }

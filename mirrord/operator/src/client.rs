@@ -1342,6 +1342,7 @@ impl OperatorApi<PreparedClientCert> {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
+            multi_cluster: None,
             key: Some(key),
         };
 
@@ -1767,6 +1768,17 @@ impl OperatorApi<PreparedClientCert> {
                     params
                         .annotations
                         .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                }
+            }
+
+            // Single-cluster session on a multi-cluster Primary: mark the CRD so the
+            // sync controller ignores it and the local branching controller picks it up.
+            if layer_config.multi_cluster == Some(false) {
+                for params in create_params.values_mut() {
+                    params.labels.insert(
+                        crate::types::MULTI_CLUSTER_SKIP_SYNC_LABEL.to_string(),
+                        "true".to_string(),
+                    );
                 }
             }
 
@@ -2209,6 +2221,7 @@ mod test {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
+            multi_cluster: None,
             key,
         };
 
@@ -2329,6 +2342,7 @@ mod test {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
+            multi_cluster: None,
             key,
         };
         let produced =

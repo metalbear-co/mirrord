@@ -274,6 +274,15 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_OPERATOR_ENABLE")]
     pub operator: Option<bool>,
 
+    /// ## multi_cluster {#root-multi_cluster}
+    ///
+    /// Controls multi-cluster session behavior when connecting to a multi-cluster Primary
+    /// operator. When set to `false`, forces a single-cluster session on the Primary cluster
+    /// instead of creating a multi-cluster session that spans all workload clusters.
+    /// When `true` or unset, multi-cluster sessions are used when the operator supports them.
+    #[config(env = "MIRRORD_MULTI_CLUSTER")]
+    pub multi_cluster: Option<bool>,
+
     /// ## api {#root-api}
     ///
     /// Enables the local session monitor API server.
