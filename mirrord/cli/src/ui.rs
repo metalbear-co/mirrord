@@ -336,6 +336,10 @@ async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>
                 warn!(?err, "Failed to parse kill response body");
                 serde_json::json!({"status": "ok"})
             });
+            if let Some(session) = state.sessions.read().await.get(&id) {
+                let _ = std::fs::remove_file(&session.socket_path);
+            }
+            remove_session(&id, &state).await;
             axum::Json(val).into_response()
         }
         Err(err) => {
