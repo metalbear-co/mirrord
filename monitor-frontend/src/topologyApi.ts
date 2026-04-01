@@ -4,8 +4,13 @@ export interface ActiveSession {
   target_type: string
 }
 
+export interface TopologyEdge {
+  source: string
+  targets: string[]
+}
+
 export interface TopologyResponse {
-  edges: Record<string, string[]>
+  edges: TopologyEdge[]
   sessions: ActiveSession[]
   updated_at: string
 }

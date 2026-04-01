@@ -15,7 +15,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import ELK from 'elkjs/lib/elk.bundled.js'
-import { fetchTopology, type TopologyResponse, type ActiveSession } from './topologyApi'
+import { fetchTopology, type TopologyResponse, type TopologyEdge, type ActiveSession } from './topologyApi'
 import { Laptop } from 'lucide-react'
 
 const elk = new ELK()
@@ -221,18 +221,18 @@ function buildNodesAndEdges(data: TopologyResponse): {
 } {
   const allServices = new Set<string>()
 
-  for (const [source, destinations] of Object.entries(data.edges)) {
-    allServices.add(source)
-    for (const dest of destinations) {
+  for (const edge of data.edges) {
+    allServices.add(edge.source)
+    for (const dest of edge.targets) {
       allServices.add(dest)
     }
   }
 
   const outboundCount = new Map<string, number>()
   const inboundCount = new Map<string, number>()
-  for (const [source, destinations] of Object.entries(data.edges)) {
-    outboundCount.set(source, (outboundCount.get(source) ?? 0) + destinations.length)
-    for (const dest of destinations) {
+  for (const edge of data.edges) {
+    outboundCount.set(edge.source, (outboundCount.get(edge.source) ?? 0) + edge.targets.length)
+    for (const dest of edge.targets) {
       inboundCount.set(dest, (inboundCount.get(dest) ?? 0) + 1)
     }
   }
@@ -263,11 +263,11 @@ function buildNodesAndEdges(data: TopologyResponse): {
 
   const edgeColor = dark ? '#475569' : '#94a3b8'
   const edges: Edge[] = []
-  for (const [source, destinations] of Object.entries(data.edges)) {
-    for (const dest of destinations) {
+  for (const edge of data.edges) {
+    for (const dest of edge.targets) {
       edges.push({
-        id: `${source}-${dest}`,
-        source,
+        id: `${edge.source}-${dest}`,
+        source: edge.source,
         target: dest,
         type: 'smoothstep',
         style: { stroke: edgeColor, strokeWidth: 1.5 },
@@ -490,7 +490,7 @@ export default function TopologyView() {
     try {
       const data = await fetchTopology()
 
-      if (Object.keys(data.edges).length === 0) {
+      if (data.edges.length === 0) {
         setLayoutedNodes([])
         setLayoutedEdges([])
         setLoading(false)
