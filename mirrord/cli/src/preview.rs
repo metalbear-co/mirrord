@@ -670,8 +670,13 @@ async fn preview_stop(
 /// Resolves a [`Target`] to a [`SessionTarget`] by auto-detecting the container if not
 /// specified, then converting to the session representation.
 ///
-/// In multi-cluster mode the target lives on a remote cluster, so we resolve it through
-/// the operator's GET TargetCrd API which resolves the container on the workload cluster.
+/// In multi-cluster mode the target may live on a remote cluster that the CLI can't
+/// reach directly, so we always resolve through the operator's GET TargetCrd API. This
+/// both validates that the target exists on the workload cluster and resolves the
+/// container if the user didn't specify one.
+///
+/// In single-cluster mode the CLI has direct access to the cluster, so it only needs to
+/// query Kubernetes when the container is missing.
 async fn resolve_config_target(
     config_target: &Target,
     client: &kube::Client,
@@ -679,29 +684,32 @@ async fn resolve_config_target(
     multi_cluster: bool,
 ) -> CliResult<SessionTarget> {
     let mut target = config_target.clone();
-    if target.container().is_none() {
-        if multi_cluster {
-            let ns = namespace.unwrap_or(client.default_namespace());
-            let target_api: Api<TargetCrd> = Api::namespaced(client.clone(), ns);
-            let target_crd = target_api
-                .get(&TargetCrd::urlfied_name(config_target))
-                .await
-                .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?;
-            let resolved = target_crd
-                .spec
-                .target
-                .as_known()
-                .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?;
-            if let Some(container) = resolved.container() {
-                target.set_container(container.to_owned());
-            }
-        } else {
-            let runtime_data = config_target
-                .runtime_data(client, namespace)
-                .await
-                .map_err(CliError::RuntimeDataResolution)?;
-            target.set_container(runtime_data.container_name);
+
+    // In multi-cluster we always go through the operator. 
+    // The CLI can't reach the workload cluster directly, so the
+    // operator is the only one that can validate the target exists and resolve the
+    // container when it's missing.
+    if multi_cluster {
+        let ns = namespace.unwrap_or(client.default_namespace());
+        let target_api: Api<TargetCrd> = Api::namespaced(client.clone(), ns);
+        let target_crd = target_api
+            .get(&TargetCrd::urlfied_name(config_target))
+            .await
+            .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?;
+        let resolved = target_crd
+            .spec
+            .target
+            .as_known()
+            .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?;
+        if let Some(container) = resolved.container() {
+            target.set_container(container.to_owned());
         }
+    } else if target.container().is_none() {
+        let runtime_data = config_target
+            .runtime_data(client, namespace)
+            .await
+            .map_err(CliError::RuntimeDataResolution)?;
+        target.set_container(runtime_data.container_name);
     }
 
     SessionTarget::from_config(target)
