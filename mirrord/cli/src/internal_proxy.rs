@@ -10,13 +10,16 @@
 //! The proxy will either directly connect to an existing agent (currently only used for tests),
 //! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
 
+mod db_portforwards;
+
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStrExt;
 use std::{
     env, io,
     net::{Ipv4Addr, SocketAddr},
+    ops::Not,
     time::Duration,
 };
-#[cfg(not(target_os = "windows"))]
-use std::{ops::Not, os::unix::ffi::OsStrExt};
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
@@ -172,6 +175,12 @@ pub(crate) async fn proxy(
     };
     (&config).collect_analytics(analytics.get_mut());
 
+    let operator_session_id = if let AgentConnectInfo::Operator(session) = &agent_connect_info {
+        Some(session.id())
+    } else {
+        None
+    };
+
     // The agent is spawned and our parent process already established a connection.
     // However, the parent process (`exec` or `ext` command) is free to exec/exit as soon as it
     // reads the TCP listener address from our stdout. We open our own connection with the agent
@@ -179,7 +188,20 @@ pub(crate) async fn proxy(
     // We also perform initial ping pong round to ensure that k8s runtime actually made connection
     // with the agent (it's a must, because port forwarding may be done lazily).
     let is_operator = matches!(&agent_connect_info, AgentConnectInfo::Operator(_));
-    let agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
+    let mut agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
+
+    if config.feature.db_branches.is_empty().not()
+        && let Some(session_id) = operator_session_id
+        && let Err(err) = db_portforwards::setup(
+            &config.feature.db_branches,
+            &mut agent_conn,
+            session_id,
+            config.key.as_str(),
+        )
+        .await
+    {
+        tracing::warn!(%err, "failed to set up DB branch port forwards, continuing without them");
+    }
 
     // Let it assign address for us then print it for the user.
     let listener = create_listen_socket(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), listen_port))

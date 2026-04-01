@@ -70,7 +70,7 @@ x509-parser.workspace = true
 rustls.workspace = true
 socket2.workspace = true
 prometheus = { version = "0.14", features = ["process"] }
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.8.4", features = ["macros"] }
 procfs = "0.17.0"
 rcgen.workspace = true
 serde_json_path.workspace = true
