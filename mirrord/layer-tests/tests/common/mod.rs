@@ -113,6 +113,7 @@ pub enum Application {
     PythonIssue864,
     PythonFlaskHTTP,
     PythonSelfConnect,
+    PythonSocketPair,
     PythonDontLoad,
     PythonListen,
     RustFileOps,
@@ -213,6 +214,7 @@ impl Application {
         match self {
             Application::PythonFlaskHTTP
             | Application::PythonSelfConnect
+            | Application::PythonSocketPair
             | Application::PythonDontLoad
             | Application::PythonListen => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP | Application::PythonIssue864 => String::from("uvicorn"),
@@ -463,6 +465,10 @@ impl Application {
                 app_path.push("self_connect.py");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
+            Application::PythonSocketPair => {
+                app_path.push("socketpair.py");
+                vec![String::from("-u"), app_path.to_string_lossy().to_string()]
+            }
             Application::GoHTTP(..)
             | Application::GoDir(..)
             | Application::GoFileOps(..)
@@ -600,6 +606,7 @@ impl Application {
             | Application::GoIssue2988(..)
             | Application::NodeMakeConnections
             | Application::DoubleListen
+            | Application::PythonSocketPair
             | Application::Connectx => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,

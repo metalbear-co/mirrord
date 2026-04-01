@@ -19,6 +19,7 @@ use bound_socket::BoundTcpSocket;
 use futures::future::Either;
 use http::{ClientStore, ResponseMode, StreamingBody};
 use http_gateway::HttpGatewayTask;
+use hyper::{HeaderMap, Method, Uri};
 use metadata_store::MetadataStore;
 use mirrord_config::feature::network::incoming::tls_delivery::LocalTlsDelivery;
 use mirrord_intproxy_protocol::{
@@ -49,6 +50,7 @@ use crate::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
     main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
+    session_monitor::{MonitorEvent, MonitorTx},
 };
 
 mod bound_socket;
@@ -205,6 +207,28 @@ pub struct IncomingProxy {
     protocol_version: Option<Version>,
 
     restore_subscriptions_on_protocol_version_switch: bool,
+
+    /// Session monitor event sender.
+    monitor_tx: MonitorTx,
+}
+
+struct HttpMetadata {
+    method: String,
+    path: String,
+    host: String,
+}
+
+/// Extracts HTTP metadata from request headers, method, and URI for session monitor events.
+fn extract_http_metadata(headers: &HeaderMap, method: &Method, uri: &Uri) -> HttpMetadata {
+    HttpMetadata {
+        method: method.to_string(),
+        path: uri.path().to_owned(),
+        host: headers
+            .get("host")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_owned(),
+    }
 }
 
 impl IncomingProxy {
@@ -214,6 +238,7 @@ impl IncomingProxy {
     pub fn new(
         idle_local_http_connection_timeout: Duration,
         https_delivery: LocalTlsDelivery,
+        monitor_tx: MonitorTx,
     ) -> Self {
         let tls_setup = LocalTlsSetup::from_config(https_delivery);
         Self {
@@ -230,6 +255,7 @@ impl IncomingProxy {
             tasks: None,
             protocol_version: None,
             restore_subscriptions_on_protocol_version_switch: false,
+            monitor_tx,
         }
     }
 
@@ -421,6 +447,13 @@ impl IncomingProxy {
     ) {
         match request {
             ChunkedRequest::StartV1(request) => {
+                let HttpMetadata { method, path, host } = extract_http_metadata(
+                    &request.internal_request.headers,
+                    &request.internal_request.method,
+                    &request.internal_request.uri,
+                );
+                self.monitor_tx
+                    .emit(MonitorEvent::IncomingRequest { method, path, host });
                 let (body_tx, body_rx) = mpsc::channel(128);
                 let request = request.map_body(|frames| StreamingBody::new(body_rx, frames));
                 self.start_http_gateway(
@@ -434,6 +467,14 @@ impl IncomingProxy {
             }
 
             ChunkedRequest::StartV2(request) => {
+                let HttpMetadata { method, path, host } = extract_http_metadata(
+                    &request.request.headers,
+                    &request.request.method,
+                    &request.request.uri,
+                );
+                self.monitor_tx
+                    .emit(MonitorEvent::IncomingRequest { method, path, host });
+
                 let (body, body_tx) = if request.request.body.is_last {
                     (StreamingBody::from(request.request.body.frames), None)
                 } else {
@@ -590,6 +631,13 @@ impl IncomingProxy {
             }
 
             DaemonTcp::HttpRequest(request) => {
+                let HttpMetadata { method, path, host } = extract_http_metadata(
+                    &request.internal_request.headers,
+                    &request.internal_request.method,
+                    &request.internal_request.uri,
+                );
+                self.monitor_tx
+                    .emit(MonitorEvent::IncomingRequest { method, path, host });
                 self.start_http_gateway(
                     request.map_body(From::from),
                     None,
@@ -601,6 +649,13 @@ impl IncomingProxy {
             }
 
             DaemonTcp::HttpRequestFramed(request) => {
+                let HttpMetadata { method, path, host } = extract_http_metadata(
+                    &request.internal_request.headers,
+                    &request.internal_request.method,
+                    &request.internal_request.uri,
+                );
+                self.monitor_tx
+                    .emit(MonitorEvent::IncomingRequest { method, path, host });
                 self.start_http_gateway(
                     request.map_body(From::from),
                     None,
