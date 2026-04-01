@@ -274,6 +274,17 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_OPERATOR_ENABLE")]
     pub operator: Option<bool>,
 
+    /// ## api {#root-api}
+    ///
+    /// Enables the local session monitor API server.
+    ///
+    /// When enabled, mirrord exposes a Unix socket at `~/.mirrord/sessions/<session-id>.sock`
+    /// with HTTP endpoints for observing session activity in real time.
+    ///
+    /// Defaults to `true`.
+    #[config(default = true, env = "MIRRORD_API")]
+    pub api: bool,
+
     /// ## profile {#root-profile}
     ///
     /// Name of the mirrord profile to use.
@@ -1337,6 +1348,7 @@ mod tests {
             ci: None,
             traceparent: None,
             baggage: None,
+            api: None,
         };
 
         assert_eq!(config, expect);

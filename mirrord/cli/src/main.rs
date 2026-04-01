@@ -297,6 +297,8 @@ use nix::errno::Errno;
 use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
+#[cfg(all(unix, debug_assertions))]
+use rust_embed as _;
 use semver::Version;
 use tracing::{error, info, trace, warn};
 use which::which;
@@ -335,6 +337,9 @@ mod wsl;
 
 #[cfg(feature = "wizard")]
 mod wizard;
+
+#[cfg(unix)]
+mod ui;
 
 mod fix;
 
@@ -489,6 +494,8 @@ async fn run_process_with_mirrord<P: Progress>(
     mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<()> {
     // since execvpe doesn't exist on macOS, resolve path with which and use execve
+
+    use std::ops::Not;
     let binary_path = process_which(&binary)?;
 
     let path = CString::new(binary_path.as_os_str().as_bytes())?;
@@ -508,8 +515,10 @@ async fn run_process_with_mirrord<P: Progress>(
 
     progress.success(Some("Ready!"));
 
+    // Foreground CI start command is treated same as mirrord exec
+    // upon this point, while background CI start command spawns a child process
     match mirrord_for_ci {
-        Some(mirrord_ci) => mirrord_ci
+        Some(mirrord_ci) if mirrord_ci.is_foreground().not() => mirrord_ci
             .prepare_command(
                 &mut progress,
                 &binary_path,
@@ -519,7 +528,7 @@ async fn run_process_with_mirrord<P: Progress>(
             )
             .await
             .map_err(From::from),
-        None => {
+        Some(_) | None => {
             // The execve hook is not yet active and does not hijack this call.
             let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
                 .expect_err("call to execve cannot succeed");
@@ -1126,6 +1135,8 @@ fn main() -> miette::Result<()> {
                 .await?
             }
             Commands::Fix(args) => fix::fix_command(args).await?,
+            #[cfg(unix)]
+            Commands::Ui(args) => ui::ui_command(args).await?,
         };
 
         Ok(())

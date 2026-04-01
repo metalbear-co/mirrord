@@ -30,8 +30,8 @@ use mirrord_protocol::{
 use socket2::SockAddr;
 // Re-export sockets module items
 pub use sockets::{
-    SHARED_SOCKETS_ENV_VAR, SOCKETS, SocketDescriptor, get_bound_address, get_connected_addresses,
-    get_socket_state, is_socket_in_state, is_socket_managed,
+    SHARED_SOCKETS_ENV_VAR, SOCKETS, SocketDescriptor, get_connected_addresses, get_socket_state,
+    is_socket_in_state, is_socket_managed,
 };
 #[cfg(windows)]
 pub use winapi::{
@@ -299,6 +299,11 @@ pub trait SocketAddrExt {
         }
         Ok((storage, len))
     }
+
+    /// Returns true if this address matches the Windows socketpair emulation listener.
+    ///
+    /// Python's socketpair emulation binds a loopback listener to port 0.
+    fn is_emulated_socketpair(&self) -> bool;
 }
 
 #[cfg(windows)]
@@ -311,6 +316,10 @@ impl SocketAddrExt for SocketAddr {
     }
     unsafe fn copy_to(&self, name: *mut SOCKADDR, namelen: *mut INT) -> WindowsResult<()> {
         unsafe { socketaddr_to_windows_sockaddr(self, name, namelen) }
+    }
+
+    fn is_emulated_socketpair(&self) -> bool {
+        self.ip().is_loopback() && self.port() == 0
     }
 }
 
@@ -328,6 +337,13 @@ impl SocketAddrExt for SocketAddress {
         let std_addr =
             SocketAddr::try_from(self.clone()).map_err(|_| WindowsError::WinSock(WSAEFAULT))?;
         std_addr.to_sockaddr()
+    }
+
+    fn is_emulated_socketpair(&self) -> bool {
+        match self {
+            SocketAddress::Ip(addr) => addr.is_emulated_socketpair(),
+            SocketAddress::Unix(_) => false,
+        }
     }
 }
 /// Helper function to convert Windows SOCKADDR to Rust SocketAddr
