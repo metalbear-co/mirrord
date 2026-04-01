@@ -4757,6 +4757,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
  "which",
  "xmas-elf",
@@ -5244,7 +5245,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.26.1"
+version = "1.26.2"
 dependencies = [
  "actix-codec",
  "bincode",
