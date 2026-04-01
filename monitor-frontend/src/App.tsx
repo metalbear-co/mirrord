@@ -3,11 +3,8 @@ import { MirrordIcon } from '@metalbear/ui'
 import { cn } from '@metalbear/ui'
 import { Sun, Moon, Activity } from 'lucide-react'
 import type { SessionInfo, WsMessage } from './types'
-import TabBar, { type Tab } from './TabBar'
 import SessionSidebar from './SessionSidebar'
 import EventStream from './EventStream'
-import ConfigView from './ConfigView'
-import TopologyView from './TopologyView'
 import StatusBar from './StatusBar'
 
 const WS_RECONNECT_INTERVAL = 3000
@@ -17,8 +14,6 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<Tab>('sessions')
-  const [sseStreaming, setSseStreaming] = useState(false)
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem('session-monitor-theme')
     if (saved) return saved === 'dark'
@@ -107,12 +102,7 @@ export default function App() {
     setSelectedId((prev) => (prev === id || id === '' ? null : id))
   }, [])
 
-  const handleStreamingChange = useCallback((streaming: boolean) => {
-    setSseStreaming(streaming)
-  }, [])
-
   const selected = sessions.find((s) => s.session_id === selectedId)
-  const showEventStream = activeTab === 'sessions'
 
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
@@ -157,41 +147,30 @@ export default function App() {
         </div>
       </header>
 
-      {/* Tab bar */}
-      <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
-
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
-        {showEventStream && (
-          <SessionSidebar
-            sessions={sessions}
-            selectedId={selectedId}
-            loading={loading}
-            onSelect={handleSelect}
-            onKill={handleKill}
-          />
-        )}
+        <SessionSidebar
+          sessions={sessions}
+          selectedId={selectedId}
+          loading={loading}
+          onSelect={handleSelect}
+          onKill={handleKill}
+        />
 
         <div className="flex-1 overflow-hidden">
-          {activeTab === 'topology' ? (
-            <TopologyView />
-          ) : showEventStream ? (
-            selected ? (
-              <EventStream session={selected} onStreamingChange={handleStreamingChange} />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
-                <Activity className="h-8 w-8 opacity-30" />
-                <p className="text-sm">Select a session to view live events</p>
-              </div>
-            )
+          {selected ? (
+            <EventStream session={selected} />
           ) : (
-            <ConfigView session={selected} />
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
+              <Activity className="h-8 w-8 opacity-30" />
+              <p className="text-sm">Select a session to view live events</p>
+            </div>
           )}
         </div>
       </div>
 
       {/* Status bar */}
-      <StatusBar wsConnected={connected} sseStreaming={sseStreaming} session={selected} />
+      <StatusBar wsConnected={connected} session={selected} />
     </div>
   )
 }

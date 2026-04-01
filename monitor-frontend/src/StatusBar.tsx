@@ -3,11 +3,10 @@ import type { SessionInfo } from './types'
 
 interface StatusBarProps {
   wsConnected: boolean
-  sseStreaming: boolean
   session: SessionInfo | undefined
 }
 
-export default function StatusBar({ wsConnected, sseStreaming, session }: StatusBarProps) {
+export default function StatusBar({ wsConnected, session }: StatusBarProps) {
   return (
     <div className="flex items-center gap-3 px-4 py-1 border-t border-border bg-card/30 text-xs text-muted-foreground shrink-0">
       <div className="flex items-center gap-1.5">
@@ -21,16 +20,6 @@ export default function StatusBar({ wsConnected, sseStreaming, session }: Status
       </div>
       {session && (
         <>
-          <span className="opacity-20">|</span>
-          <div className="flex items-center gap-1.5">
-            <div
-              className={cn(
-                'h-1.5 w-1.5 rounded-full',
-                sseStreaming ? 'bg-green-500 animate-pulse' : 'bg-destructive'
-              )}
-            />
-            <span>{sseStreaming ? 'Streaming' : 'Paused'}</span>
-          </div>
           <span className="opacity-20">|</span>
           <span className="font-mono text-foreground/80">{session.target}</span>
           <span className="opacity-20">|</span>

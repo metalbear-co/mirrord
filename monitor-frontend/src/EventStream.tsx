@@ -71,10 +71,9 @@ interface TimestampedEvent {
 
 interface Props {
   session: SessionInfo
-  onStreamingChange?: (streaming: boolean) => void
 }
 
-export default function EventStream({ session, onStreamingChange }: Props) {
+export default function EventStream({ session }: Props) {
   const [events, setEvents] = useState<TimestampedEvent[]>([])
   const [streaming, setStreaming] = useState(false)
   const [detailEvent, setDetailEvent] = useState<{ summary: string; raw: string } | null>(null)
@@ -87,7 +86,6 @@ export default function EventStream({ session, onStreamingChange }: Props) {
   useEffect(() => {
     setEvents([])
     setStreaming(true)
-    onStreamingChange?.(true)
 
     const eventSource = new EventSource(`/api/sessions/${session.session_id}/events`)
 
@@ -106,16 +104,14 @@ export default function EventStream({ session, onStreamingChange }: Props) {
 
     eventSource.onerror = () => {
       setStreaming(false)
-      onStreamingChange?.(false)
       eventSource.close()
     }
 
     return () => {
       eventSource.close()
       setStreaming(false)
-      onStreamingChange?.(false)
     }
-  }, [session.session_id, onStreamingChange])
+  }, [session.session_id])
 
   const isNearBottom = useRef(true)
   useEffect(() => {
