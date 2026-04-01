@@ -1,6 +1,20 @@
 use serde::Serialize;
 use tokio::sync::broadcast;
 
+/// Wrapper around `Vec<String>` that redacts its [`Debug`] output to avoid leaking environment
+/// variable names into logs, while still serializing normally for the session monitor API.
+#[derive(Clone, Serialize)]
+#[serde(transparent)]
+pub struct RedactedVarNames(pub Vec<String>);
+
+impl core::fmt::Debug for RedactedVarNames {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("RedactedVarNames")
+            .field(&"<REDACTED>")
+            .finish()
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MonitorEvent {
@@ -25,7 +39,7 @@ pub enum MonitorEvent {
         mode: String,
     },
     EnvVar {
-        vars: Vec<String>,
+        vars: RedactedVarNames,
     },
     LayerConnected {
         pid: u32,

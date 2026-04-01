@@ -59,7 +59,7 @@ fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> MonitorTx {
     #[cfg(not(unix))]
     {
         let _ = (config, is_operator);
-        return MonitorTx::disabled();
+        MonitorTx::disabled()
     }
 
     #[cfg(unix)]

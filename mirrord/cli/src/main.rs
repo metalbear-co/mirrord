@@ -42,6 +42,9 @@
 //! and finally run the user binary with the mirrord lib loaded, but this time we use `execve`,
 //! instead of [`tokio::process::Command`].
 //!
+//! - When the env var `MIRRORD_CI_API_KEY` is set, `exec` actually becomes `mirrord ci start
+//!   --foreground`.
+//!
 //! #### operator vs no operator `exec`
 //!
 //! Target resolution is performed the same, regardless of operator usage, but
@@ -128,6 +131,16 @@
 //! Just as we have a special IDE favoured command in `mirrord ext`, we have an equivalent for
 //! `mirrord container`, so you can run something like `mirrord exec -- docker run {image}` from an
 //! IDE plugin.
+//!
+//! ### `mirrord ci container [OPTIONS] [EXEC]`
+//!
+//! - [`ci::ci_command`], [`ci::container`]
+//!
+//! > Runs the equivalent of `mirrord container ...`, but with using mirrord for CI.
+//!
+//! Pretty much the same thing as the regular `mirrord container` command, but this one uses
+//! the mirrord for CI handling of the various backend things. It also has to store pids and
+//! container ids so it can be stopped with `mirrord ci stop`.
 //!
 //! ### `mirrord extract <PATH>`
 //!
@@ -278,12 +291,14 @@ use mirrord_config::{
     },
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
-use mirrord_progress::{Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
+use mirrord_progress::{JsonProgress, Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
 use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
+#[cfg(all(unix, debug_assertions))]
+use rust_embed as _;
 use semver::Version;
 use tracing::{error, info, trace, warn};
 use which::which;
@@ -323,7 +338,7 @@ mod wsl;
 #[cfg(feature = "wizard")]
 mod wizard;
 
-#[cfg(feature = "ui")]
+#[cfg(unix)]
 mod ui;
 
 mod fix;
@@ -334,7 +349,8 @@ use mirrord_layer_lib::process::windows::{console, execution::LayerManagedProces
 use verify_config::verify_config;
 
 use crate::{
-    ci::MirrordCi,
+    ci::{MirrordCi, ci_api_key_available},
+    config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
     newsletter::suggest_newsletter_signup,
     user_data::UserData,
     util::{apply_test_env_overrides, get_user_git_branch},
@@ -478,6 +494,8 @@ async fn run_process_with_mirrord<P: Progress>(
     mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<()> {
     // since execvpe doesn't exist on macOS, resolve path with which and use execve
+
+    use std::ops::Not;
     let binary_path = process_which(&binary)?;
 
     let path = CString::new(binary_path.as_os_str().as_bytes())?;
@@ -497,8 +515,10 @@ async fn run_process_with_mirrord<P: Progress>(
 
     progress.success(Some("Ready!"));
 
+    // Foreground CI start command is treated same as mirrord exec
+    // upon this point, while background CI start command spawns a child process
     match mirrord_for_ci {
-        Some(mirrord_ci) => mirrord_ci
+        Some(mirrord_ci) if mirrord_ci.is_foreground().not() => mirrord_ci
             .prepare_command(
                 &mut progress,
                 &binary_path,
@@ -508,7 +528,7 @@ async fn run_process_with_mirrord<P: Progress>(
             )
             .await
             .map_err(From::from),
-        None => {
+        Some(_) | None => {
             // The execve hook is not yet active and does not hijack this call.
             let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
                 .expect_err("call to execve cannot succeed");
@@ -977,8 +997,36 @@ fn main() -> miette::Result<()> {
 
         match cli.commands {
             Commands::Exec(args) => {
-                let mut progress = ProgressTracker::from_env("mirrord exec");
-                exec(&args, watch, &mut user_data, &mut progress, None).await?
+                if ci_api_key_available()?.is_some() {
+                    let mut progress = ProgressTracker::from_env("mirrord exec");
+                    progress.warning("Detected `mirrord exec` running with a CI token.");
+                    progress.info(
+                        "This run is being handled as a mirrord CI session. \
+                        For future compatibility, please migrate to: `mirrord ci start` \
+                        More details can be found here: \
+                        https://metalbear.com/mirrord/docs/using-mirrord/mirrord-for-ci",
+                    );
+                    progress.success(None);
+                    drop(progress);
+
+                    let ci_args = CiArgs {
+                        command: CiCommand::Start(Box::new(CiStartArgs {
+                            exec_args: args,
+                            ci_common_args: CiCommonArgs {
+                                foreground: true,
+                                environment: None,
+                                pipeline: None,
+                                triggered_by: None,
+                            },
+                        })),
+                    };
+                    windows_unsupported!(args, "ci", {
+                        ci::ci_command(ci_args, watch, &mut user_data).await?
+                    });
+                } else {
+                    let mut progress = ProgressTracker::from_env("mirrord exec");
+                    exec(&args, watch, &mut user_data, &mut progress, None).await?
+                }
             }
             Commands::Dump(args) => windows_unsupported!(args, "dump", {
                 dump_command(&args, watch, &user_data).await?
@@ -1028,17 +1076,37 @@ fn main() -> miette::Result<()> {
             }
             Commands::Diagnose(args) => diagnose_command(*args).await?,
             Commands::Container(args) => windows_unsupported!(args, "container", {
+                let mut progress = ProgressTracker::from_env("mirrord container");
+
                 let (runtime_args, exec_params) = args.into_parts();
 
-                let exit_code =
-                    container_command(runtime_args, exec_params, watch, &user_data).await?;
+                let exit_code = container_command(
+                    runtime_args,
+                    exec_params,
+                    watch,
+                    &user_data,
+                    &mut progress,
+                    None,
+                )
+                .await?;
 
                 if exit_code != 0 {
                     std::process::exit(exit_code);
                 }
             }),
             Commands::ExtensionContainer(args) => windows_unsupported!(args, "container-ext", {
-                container_ext_command(args.config_file, args.target, watch, &user_data).await?
+                let mut progress = ProgressTracker::try_from_env("mirrord preparing to launch")
+                    .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
+
+                container_ext_command(
+                    args.config_file,
+                    args.target,
+                    watch,
+                    &user_data,
+                    &mut progress,
+                    None,
+                )
+                .await?
             }),
             Commands::ExternalProxy { port, .. } => windows_unsupported!(port, "extproxy", {
                 let config = mirrord_config::util::read_resolved_config()?;
@@ -1067,7 +1135,7 @@ fn main() -> miette::Result<()> {
                 .await?
             }
             Commands::Fix(args) => fix::fix_command(args).await?,
-            #[cfg(feature = "ui")]
+            #[cfg(unix)]
             Commands::Ui(args) => ui::ui_command(args).await?,
         };
 

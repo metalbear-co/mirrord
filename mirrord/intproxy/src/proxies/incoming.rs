@@ -212,20 +212,23 @@ pub struct IncomingProxy {
     monitor_tx: MonitorTx,
 }
 
+struct HttpMetadata {
+    method: String,
+    path: String,
+    host: String,
+}
+
 /// Extracts HTTP metadata from request headers, method, and URI for session monitor events.
-fn extract_http_metadata(
-    headers: &HeaderMap,
-    method: &Method,
-    uri: &Uri,
-) -> (String, String, String) {
-    let method_str = method.to_string();
-    let path_str = uri.path().to_owned();
-    let host_str = headers
-        .get("host")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_owned();
-    (method_str, path_str, host_str)
+fn extract_http_metadata(headers: &HeaderMap, method: &Method, uri: &Uri) -> HttpMetadata {
+    HttpMetadata {
+        method: method.to_string(),
+        path: uri.path().to_owned(),
+        host: headers
+            .get("host")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_owned(),
+    }
 }
 
 impl IncomingProxy {
@@ -444,7 +447,7 @@ impl IncomingProxy {
     ) {
         match request {
             ChunkedRequest::StartV1(request) => {
-                let (method, path, host) = extract_http_metadata(
+                let HttpMetadata { method, path, host } = extract_http_metadata(
                     &request.internal_request.headers,
                     &request.internal_request.method,
                     &request.internal_request.uri,
@@ -464,7 +467,7 @@ impl IncomingProxy {
             }
 
             ChunkedRequest::StartV2(request) => {
-                let (method, path, host) = extract_http_metadata(
+                let HttpMetadata { method, path, host } = extract_http_metadata(
                     &request.request.headers,
                     &request.request.method,
                     &request.request.uri,
@@ -628,7 +631,7 @@ impl IncomingProxy {
             }
 
             DaemonTcp::HttpRequest(request) => {
-                let (method, path, host) = extract_http_metadata(
+                let HttpMetadata { method, path, host } = extract_http_metadata(
                     &request.internal_request.headers,
                     &request.internal_request.method,
                     &request.internal_request.uri,
@@ -646,7 +649,7 @@ impl IncomingProxy {
             }
 
             DaemonTcp::HttpRequestFramed(request) => {
-                let (method, path, host) = extract_http_metadata(
+                let HttpMetadata { method, path, host } = extract_http_metadata(
                     &request.internal_request.headers,
                     &request.internal_request.method,
                     &request.internal_request.uri,

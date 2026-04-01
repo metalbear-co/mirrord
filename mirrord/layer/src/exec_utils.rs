@@ -98,6 +98,7 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
                 .layer_config()
                 .experimental
                 .sip_utils
+                .unwrap_or_default()
                 .then(|| mirrord_sip::MIRRORD_BINARIES_DIR_PATH_BUF.as_path()),
         },
         log_info,

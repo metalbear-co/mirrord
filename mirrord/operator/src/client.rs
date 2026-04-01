@@ -590,7 +590,7 @@ where
     }
 
     /// Check the operator supports all the operator features required by the user's configuration.
-    fn check_feature_support(&self, layer_config: &LayerConfig) -> OperatorApiResult<()> {
+    pub fn check_feature_support(&self, layer_config: &LayerConfig) -> OperatorApiResult<()> {
         if layer_config.feature.copy_target.enabled {
             self.operator
                 .spec
@@ -637,6 +637,12 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::SqsQueueSplittingWithJqFilter)?;
+        }
+
+        if layer_config.feature.split_queues.rmq().next().is_some() {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::RmqQueueSplitting)?;
         }
 
         Ok(())
@@ -900,7 +906,7 @@ impl OperatorApi<PreparedClientCert> {
     /// This method skips:
     /// - `assert_valid_mirrord_target` (operator validates on workload cluster)
     /// - `runtime_data` warnings (operator handles on workload cluster)
-    /// - `copy_target` (not supported without local resolution)
+    /// - Replica-count auto-enable for copy_target (requires resolved target; operator validates)
     pub async fn connect_in_multi_cluster_session<P>(
         &self,
         target: &Target,
@@ -923,6 +929,8 @@ impl OperatorApi<PreparedClientCert> {
             "Connecting to multi-cluster primary - workload cluster will resolve target"
         );
 
+        let do_copy_target = self.should_copy_target_mc(layer_config);
+
         let use_proxy_api = self
             .operator
             .spec
@@ -941,34 +949,77 @@ impl OperatorApi<PreparedClientCert> {
             BranchDbNames::default()
         };
 
-        let params = ConnectParams::new(
-            layer_config,
-            branch_name,
-            branch_db_names,
-            session_ci_info,
-            layer_config.key.as_str(),
-        );
+        if do_copy_target {
+            let mut copy_subtask = progress.subtask("preparing target copy");
 
-        // If no namespace in config, use the kubeconfig's default namespace
-        let namespace = namespace.unwrap_or_else(|| self.client.default_namespace());
-        let connect_url =
-            Self::target_connect_url_from_config(use_proxy_api, target, namespace, &params);
+            let copied = {
+                let reused = self.try_reuse_copy_target(layer_config, progress).await?;
+                match reused {
+                    Some(reused) => reused,
+                    None => self.copy_target(layer_config, progress).await?,
+                }
+            };
+            copy_subtask.success(None);
 
-        let session = self.make_operator_session(
-            None,
-            connect_url,
-            layer_config.traceparent.clone(),
-            layer_config.baggage.clone(),
-        )?;
+            let id = copied
+                .status
+                .as_ref()
+                .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
 
-        let mut connection_subtask = progress.subtask("connecting to the target");
-        let conn = Self::connect_target(&self.client, &session).await?;
-        connection_subtask.success(Some("connected to the target"));
+            let connect_url = Self::copy_target_connect_url(
+                &copied,
+                use_proxy_api,
+                layer_config.profile.as_deref(),
+                branch_name.clone(),
+                branch_db_names.clone(),
+                session_ci_info.clone(),
+                layer_config.key.as_str(),
+            );
 
-        Ok(OperatorSessionConnection {
-            session: Box::new(session),
-            conn,
-        })
+            let session = self.make_operator_session(
+                id,
+                connect_url,
+                layer_config.traceparent.clone(),
+                layer_config.baggage.clone(),
+            )?;
+
+            let mut connection_subtask = progress.subtask("connecting to the target");
+            let conn = Self::connect_target(&self.client, &session).await?;
+            connection_subtask.success(Some("connected to the target"));
+
+            Ok(OperatorSessionConnection {
+                session: Box::new(session),
+                conn,
+            })
+        } else {
+            let params = ConnectParams::new(
+                layer_config,
+                branch_name,
+                branch_db_names.clone(),
+                session_ci_info,
+                layer_config.key.as_str(),
+            );
+
+            let namespace = namespace.unwrap_or_else(|| self.client.default_namespace());
+            let connect_url =
+                Self::target_connect_url_from_config(use_proxy_api, target, namespace, &params);
+
+            let session = self.make_operator_session(
+                None,
+                connect_url,
+                layer_config.traceparent.clone(),
+                layer_config.baggage.clone(),
+            )?;
+
+            let mut connection_subtask = progress.subtask("connecting to the target");
+            let conn = Self::connect_target(&self.client, &session).await?;
+            connection_subtask.success(Some("connected to the target"));
+
+            Ok(OperatorSessionConnection {
+                session: Box::new(session),
+                conn,
+            })
+        }
     }
 
     /// Returns whether the `copy_target` feature should be used,
@@ -1101,6 +1152,40 @@ impl OperatorApi<PreparedClientCert> {
         }
 
         Ok((true, Some("empty deployment")))
+    }
+
+    /// Multi-cluster variant of [`OperatorApi::should_copy_target`]. The client cannot check
+    /// replica count because the target lives on a remote cluster. Instead we
+    /// only look at things we know on the cluster we are conencted to:
+    /// explicit opt-in and queue-splitting config.
+    fn should_copy_target_mc(&self, config: &LayerConfig) -> bool {
+        if config.feature.copy_target.enabled {
+            return true;
+        }
+
+        if config.feature.split_queues.sqs().next().is_some()
+            && self
+                .operator
+                .spec
+                .supported_features()
+                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
+                .not()
+        {
+            return true;
+        }
+
+        if config.feature.split_queues.kafka().next().is_some()
+            && self
+                .operator()
+                .spec
+                .supported_features()
+                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
+                .not()
+        {
+            return true;
+        }
+
+        false
     }
 
     /// Creates a new [`OperatorSession`] with the given `id` and `connect_url`.
@@ -1245,6 +1330,7 @@ impl OperatorApi<PreparedClientCert> {
             on_concurrent_steal: None,
             profile,
             kafka_splits: Default::default(),
+            rmq_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
             branch_name,
@@ -1255,6 +1341,7 @@ impl OperatorApi<PreparedClientCert> {
             session_ci_info,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
+            rmq_output_queues: Default::default(),
             key: Some(key),
         };
 
@@ -1608,7 +1695,7 @@ impl OperatorApi<PreparedClientCert> {
     /// 2. Create new ones if any missing.
     /// 3. Wait for all new databases to be ready.
     #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
-    async fn prepare_branch_dbs<P: Progress>(
+    pub async fn prepare_branch_dbs<P: Progress>(
         &self,
         layer_config: &LayerConfig,
         progress: &P,
@@ -1846,6 +1933,7 @@ mod test {
         concurrent_steal: ConcurrentSteal,
         profile: Option<&'static str>,
         kafka_splits: HashMap<&'static str, BTreeMap<String, String>>,
+        rmq_splits: HashMap<&'static str, BTreeMap<String, String>>,
         sqs_splits: HashMap<&'static str, BTreeMap<String, String>>,
         sqs_jq_filters: HashMap<&'static str, &'static str>,
         branch_db_names: BranchDbNames,
@@ -1874,6 +1962,7 @@ mod test {
                 concurrent_steal: Default::default(),
                 profile: None,
                 kafka_splits: Default::default(),
+                rmq_splits: Default::default(),
                 sqs_splits: Default::default(),
                 sqs_jq_filters: Default::default(),
                 branch_db_names: Default::default(),
@@ -1908,7 +1997,7 @@ mod test {
         TargetConnectUrlTestCase{
             expected: "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_no_container_proxy(
         TargetConnectUrlTestCase{
@@ -1916,14 +2005,14 @@ mod test {
             key: Some("my-key"),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort&key=my-key",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_container_no_proxy(
         TargetConnectUrlTestCase{
             target: deployment_with_container(),
             expected: "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_container_proxy_key(
         TargetConnectUrlTestCase{
@@ -1932,7 +2021,7 @@ mod test {
             key: Some("auth-token-123"),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&key=auth-token-123",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_container_proxy_profile(
         TargetConnectUrlTestCase{
@@ -1941,7 +2030,7 @@ mod test {
             profile: Some("no-steal"),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=no-steal",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_container_proxy_profile_escape(
         TargetConnectUrlTestCase{
@@ -1951,7 +2040,7 @@ mod test {
             key: Some("key-value"),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=%2Fshould%3Fbe%26escaped&key=key-value",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_container_proxy_kafka_splits(
         TargetConnectUrlTestCase{
@@ -1967,7 +2056,24 @@ mod test {
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&kafka_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
             ..Default::default()
-            }
+        }
+    )]
+    #[case::deployment_container_proxy_rmq_splits(
+        TargetConnectUrlTestCase{
+            use_proxy: true,
+            target: deployment_with_container(),
+            rmq_splits: HashMap::from([(
+                "topic-id",
+                BTreeMap::from([
+                    ("header-1".to_string(), "filter-1".to_string()),
+                    ("header-2".to_string(), "filter-2".to_string()),
+                ]),
+            )]),
+            key: Some("sqs-key"),
+            expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
+            ?connect=true&on_concurrent_steal=abort&rmq_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D&key=sqs-key",
+            ..Default::default()
+        }
     )]
     #[case::deployment_container_proxy_sqs_splits(
         TargetConnectUrlTestCase{
@@ -1984,7 +2090,7 @@ mod test {
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort&sqs_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D&key=sqs-key",
             ..Default::default()
-            }
+        }
     )]
     #[case::sqs_splits_and_sqs_jq_filters(
         TargetConnectUrlTestCase{
@@ -2005,7 +2111,7 @@ mod test {
             header-2%22%3A%22filter-2%22%7D%7D&sqs_jq_filters=%7B%22some-topic-id%22%3A%22\
             .message_body+%7C+fromjson+%7C+.user_id+%7C+test%28%5C%22%5E%28cookie%7C%5C%5C%5C%5Cd%2B%29%24%5C%22%29%22%7D",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_container_proxy_branch_dbs(
         TargetConnectUrlTestCase{
@@ -2022,7 +2128,7 @@ mod test {
             &mysql_branch_names=%5B%22mysql-branch-1%22%5D\
             &pg_branch_names=%5B%22pg-branch-1%22%5D",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_no_container_no_proxy_with_session_ci_info(
         TargetConnectUrlTestCase{
@@ -2035,7 +2141,7 @@ mod test {
             key: Some("ci-key-123"),
             expected: "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort&session_ci_info=%7B%22provider%22%3A%22Krzysztof%22%2C%22environment%22%3A%22Kresy%22%2C%22pipeline%22%3A%22Wschodnie%22%2C%22triggeredBy%22%3A%22Kononowicz%22%7D&key=ci-key-123",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_with_key_none(
         TargetConnectUrlTestCase{
@@ -2043,7 +2149,7 @@ mod test {
             target: deployment_with_container(),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort",
             ..Default::default()
-            }
+        }
     )]
     #[case::deployment_with_key_special_chars(
         TargetConnectUrlTestCase{
@@ -2052,7 +2158,7 @@ mod test {
             key: Some("key/with?special&chars=value"),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&key=key%2Fwith%3Fspecial%26chars%3Dvalue",
             ..Default::default()
-            }
+        }
     )]
     #[test]
     fn target_connect_url(
@@ -2062,6 +2168,7 @@ mod test {
             concurrent_steal,
             profile,
             kafka_splits,
+            rmq_splits,
             sqs_splits,
             sqs_jq_filters,
             branch_db_names,
@@ -2071,6 +2178,11 @@ mod test {
         }: TargetConnectUrlTestCase,
     ) {
         let kafka_splits = kafka_splits
+            .iter()
+            .map(|(topic_id, filters)| (*topic_id, filters))
+            .collect();
+
+        let rmq_splits = rmq_splits
             .iter()
             .map(|(topic_id, filters)| (*topic_id, filters))
             .collect();
@@ -2085,6 +2197,7 @@ mod test {
             on_concurrent_steal: Some(concurrent_steal),
             profile,
             kafka_splits,
+            rmq_splits,
             sqs_splits,
             sqs_jq_filters,
             branch_name: None,
@@ -2095,6 +2208,7 @@ mod test {
             session_ci_info,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
+            rmq_output_queues: Default::default(),
             key,
         };
 
@@ -2203,6 +2317,7 @@ mod test {
             on_concurrent_steal: Some(ConcurrentSteal::Abort),
             profile: None,
             kafka_splits: Default::default(),
+            rmq_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
             branch_name: None,
@@ -2213,6 +2328,7 @@ mod test {
             session_ci_info: None,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
+            rmq_output_queues: Default::default(),
             key,
         };
         let produced =

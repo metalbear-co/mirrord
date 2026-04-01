@@ -44,7 +44,7 @@ use crate::{
     error::{ProxyRuntimeError, ProxyStartupError},
     failover_strategy::FailoverStrategy,
     main_tasks::{ConnectionRefresh, LayerClosed},
-    session_monitor::{MonitorEvent, MonitorTx},
+    session_monitor::{MonitorEvent, MonitorTx, RedactedVarNames},
 };
 
 pub mod agent_conn;
@@ -60,50 +60,41 @@ mod remote_resources;
 mod request_queue;
 pub mod session_monitor;
 
-/// Returns a short string describing the type of file operation.
-fn file_request_operation_name(req: &FileRequest) -> &'static str {
-    match req {
-        FileRequest::Open(..) | FileRequest::OpenRelative(..) => "open",
-        FileRequest::Read(..) | FileRequest::ReadLimited(..) => "read",
-        FileRequest::Seek(..) => "seek",
-        FileRequest::Write(..) | FileRequest::WriteLimited(..) => "write",
-        FileRequest::Close(..) => "close",
-        FileRequest::Access(..) => "access",
-        FileRequest::Xstat(..) | FileRequest::XstatFs(..) | FileRequest::XstatFsV2(..) => "stat",
-        FileRequest::FdOpenDir(..) => "opendir",
-        FileRequest::ReadDir(..) | FileRequest::ReadDirBatch(..) => "readdir",
-        FileRequest::CloseDir(..) => "closedir",
-        FileRequest::GetDEnts64(..) => "getdents64",
-        FileRequest::ReadLink(..) => "readlink",
-        FileRequest::MakeDir(..) | FileRequest::MakeDirAt(..) => "mkdir",
-        FileRequest::RemoveDir(..) => "rmdir",
-        FileRequest::Unlink(..) | FileRequest::UnlinkAt(..) => "unlink",
-        FileRequest::StatFs(..) | FileRequest::StatFsV2(..) => "statfs",
-        FileRequest::Rename(..) => "rename",
-        FileRequest::Ftruncate(..) => "ftruncate",
-        FileRequest::Futimens(..) => "futimens",
-        FileRequest::Fchown(..) => "fchown",
-        FileRequest::Fchmod(..) => "fchmod",
-    }
+/// Extracts the primary file path from a [`FileRequest`] variant, if one exists.
+///
+/// Use `Variant => field` for required path fields and `Variant =>? field` for optional ones.
+macro_rules! file_request_path_of {
+    ($req:expr, $($Variant:ident => $field:ident),+ $(,)?) => {
+        match $req {
+            $(FileRequest::$Variant(r) => Some(r.$field.to_string_lossy().into_owned()),)+
+            _ => None,
+        }
+    };
+    ($req:expr, $($Variant:ident => $field:ident),+ , @opt $($OptVariant:ident => $opt_field:ident),+ $(,)?) => {
+        match $req {
+            $(FileRequest::$Variant(r) => Some(r.$field.to_string_lossy().into_owned()),)+
+            $(FileRequest::$OptVariant(r) => r.$opt_field.as_ref().map(|p| p.to_string_lossy().into_owned()),)+
+            _ => None,
+        }
+    };
 }
 
 fn file_request_path(req: &FileRequest) -> Option<String> {
-    match req {
-        FileRequest::Open(r) => Some(r.path.to_string_lossy().into_owned()),
-        FileRequest::OpenRelative(r) => Some(r.path.to_string_lossy().into_owned()),
-        FileRequest::Access(r) => Some(r.pathname.to_string_lossy().into_owned()),
-        FileRequest::Xstat(r) => r.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
-        FileRequest::ReadLink(r) => Some(r.path.to_string_lossy().into_owned()),
-        FileRequest::MakeDir(r) => Some(r.pathname.to_string_lossy().into_owned()),
-        FileRequest::MakeDirAt(r) => Some(r.pathname.to_string_lossy().into_owned()),
-        FileRequest::RemoveDir(r) => Some(r.pathname.to_string_lossy().into_owned()),
-        FileRequest::Unlink(r) => Some(r.pathname.to_string_lossy().into_owned()),
-        FileRequest::UnlinkAt(r) => Some(r.pathname.to_string_lossy().into_owned()),
-        FileRequest::StatFs(r) => Some(r.path.to_string_lossy().into_owned()),
-        FileRequest::StatFsV2(r) => Some(r.path.to_string_lossy().into_owned()),
-        FileRequest::Rename(r) => Some(r.old_path.to_string_lossy().into_owned()),
-        _ => None,
-    }
+    file_request_path_of!(req,
+        Open => path,
+        OpenRelative => path,
+        Access => pathname,
+        ReadLink => path,
+        MakeDir => pathname,
+        MakeDirAt => pathname,
+        RemoveDir => pathname,
+        Unlink => pathname,
+        UnlinkAt => pathname,
+        StatFs => path,
+        StatFsV2 => path,
+        Rename => old_path,
+        @opt Xstat => path,
+    )
 }
 
 /// [`TaskSender`]s for main background tasks. See [`MainTaskId`].
@@ -670,7 +661,7 @@ impl IntProxy {
             LayerToProxyMessage::File(req) => {
                 self.monitor_tx.emit(MonitorEvent::FileOp {
                     path: file_request_path(&req),
-                    operation: file_request_operation_name(&req).to_owned(),
+                    operation: <&str>::from(&req).to_owned(),
                 });
                 self.task_txs
                     .files
@@ -719,12 +710,13 @@ impl IntProxy {
             }
             LayerToProxyMessage::GetEnv(req) => {
                 self.monitor_tx.emit(MonitorEvent::EnvVar {
-                    vars: req
-                        .env_vars_select
-                        .iter()
-                        .chain(req.env_vars_filter.iter())
-                        .cloned()
-                        .collect(),
+                    vars: RedactedVarNames(
+                        req.env_vars_select
+                            .iter()
+                            .chain(req.env_vars_filter.iter())
+                            .cloned()
+                            .collect(),
+                    ),
                 });
                 self.task_txs
                     .simple

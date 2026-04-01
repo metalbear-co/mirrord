@@ -15,7 +15,7 @@
       let
         pkgs = import inputs.nixpkgs { inherit system; };
 
-        nightlyRustToolchain =
+        rustToolchain =
           let
             fenix = inputs.fenix.packages.${system};
 
@@ -40,16 +40,11 @@
             };
           in
           # On darwin we need both x86 and arm toolchains in order to compile universal binaries
-          # as well as a linux toolchain in order to work on mirrord-agent, which is linux-only
+          # as well as a linux toolchain in order to work on the agent, which is linux-only
           if pkgs.stdenv.isDarwin then
             let
-              # aarch64 -> x86_64
-              # x86_64 -> aarch64
-              darwinCrossTarget =
-                if pkgs.stdenv.hostPlatform.isAarch then "x86_64-apple-darwin" else "aarch64-apple-darwin";
-
               crossComponents =
-                builtins.map
+                map
                   (
                     target:
                     (fenix.targets.${target}.fromToolchainName toolchainName).withComponents [
@@ -59,7 +54,7 @@
                     ]
                   )
                   [
-                    darwinCrossTarget
+                    "x86_64-apple-darwin"
                     "x86_64-unknown-linux-gnu"
                   ];
             in
@@ -73,33 +68,37 @@
             };
       in
       {
-        devShells.default = pkgs.mkShell {
-          packages = with pkgs; [
-            nightlyRustToolchain.components
-            nightlyRustToolchain.rust-analyzer
-            cargo-zigbuild
+        devShells.default = pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
+          packages =
+            with pkgs;
+            [
+              # Toolchain
+              rustToolchain.components
+              rustToolchain.rust-analyzer
+              rustPlatform.bindgenHook
 
-            # E2E testing
-            go
-            protobuf
-            clang
-            rustPlatform.bindgenHook
-            nodejs_24 # Needs express.js - install with `npm install express` after entering the devshell
-            (python3.withPackages (
-              py-pkgs: with py-pkgs; [
-                flask
-                fastapi
-                uvicorn
-              ]
-            ))
-          ];
+              # Wizard
+              nodejs_25
+
+              # Release
+              python3Packages.towncrier
+              cargo-deny
+            ]
+            ++ lib.optionals stdenv.isLinux [
+              # Required to build the agent
+              protobuf
+            ];
 
           env =
             with pkgs;
+            let
+              x86-gcc = lib.getExe pkgsCross.gnu64.stdenv.cc;
+            in
             lib.optionalAttrs stdenv.isDarwin {
-              # Tells bindgen which C/C++ compiler to compile frida with when targetting linux
-              CC_x86_64_unknown_linux_gnu = lib.getExe pkgsCross.gnu64.stdenv.cc;
-              CXX_x86_64_unknown_linux_gnu = lib.getExe pkgsCross.gnu64.stdenv.cc;
+              # Tells bindgen/cargo which C/C++ toolchain to use when targetting linux
+              CC_x86_64_unknown_linux_gnu = x86-gcc;
+              CXX_x86_64_unknown_linux_gnu = x86-gcc;
+              CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = x86-gcc;
             };
         };
       }

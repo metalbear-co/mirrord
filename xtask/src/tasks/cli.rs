@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use super::{layer::Target, signing};
+use super::{layer::Target, signing, sip_binaries};
 
 /// Builds the mirrord CLI for the specified target
 pub fn build_cli(
@@ -55,6 +55,14 @@ pub fn build_cli(
         target,
         Target::MacosX86_64 | Target::MacosAarch64 | Target::MacosUniversal
     ) {
+        let sip_binaries_archive = sip_binaries::download()?;
+        cmd.env(
+            "MIRRORD_SIP_BINARIES_TAR",
+            sip_binaries_archive
+                .canonicalize()
+                .context("Failed to canonicalize SIP utilities bundle path")?,
+        );
+
         let mode = if release { "release" } else { "debug" };
         let arm_layer = Path::new("target")
             .join("aarch64-apple-darwin")

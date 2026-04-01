@@ -17,7 +17,7 @@ use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 use mirrord_protocol_io::{Client, Connection};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{
-    MIRRORD_BINARIES_DIR_PATH_BUF, SipError, SipPatchOptions, download_sip_binaries, sip_patch,
+    MIRRORD_BINARIES_DIR_PATH_BUF, SipError, SipPatchOptions, extract_sip_binaries, sip_patch,
 };
 use mirrord_tls_util::SecureChannelSetup;
 use semver::Version;
@@ -43,8 +43,15 @@ use crate::{
     util::{get_user_git_branch, remove_proxy_env},
 };
 
+#[cfg(target_os = "macos")]
+const COMPRESSED_SIP_BINARIES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/apple-utils.tar.gz"));
+
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
+
+/// Environment variable pointing to the mirrord layer DLL/dylib/so path.
+const MIRRORD_LAYER_FILE_ENV: &str = "MIRRORD_LAYER_FILE";
 
 /// Alias to "LD_PRELOAD" enviromnent variable used to mount mirrord-layer on linux targets and as
 /// part of the `mirrord container` command.
@@ -154,6 +161,13 @@ where
 }
 
 impl MirrordExecution {
+    /// Gets the child id of [`MirrordExecution`].
+    ///
+    /// Used so we can store the `external proxy` pid when running `mirrord ci container`.
+    pub(crate) fn child_id(&self) -> Option<u32> {
+        self.child.as_ref().and_then(|child| child.id())
+    }
+
     /// Makes the agent connection and starts the internal proxy child process.
     ///
     /// # Internal proxy
@@ -182,7 +196,7 @@ impl MirrordExecution {
     ///
     /// Returned [`MirrordExecution::environment`] contains everything that the user application
     /// might need, including [`INJECTION_ENV_VAR`] and [`LayerConfig::RESOLVED_CONFIG_ENV`].
-    #[tracing::instrument(level = Level::DEBUG, skip_all, ret, err(level = Level::DEBUG))]
+    #[tracing::instrument(level = Level::TRACE, skip_all, ret, err(level = Level::DEBUG))]
     pub(crate) async fn start_internal<P>(
         config: &mut LayerConfig,
         // We only need the executable and args on macos, for SIP handling.
@@ -197,16 +211,16 @@ impl MirrordExecution {
     {
         // Extract Layer from exe, or use existing file if MIRRORD_LAYER_FILE env var is set (for
         // debugging)
-        let lib_path = match std::env::var("MIRRORD_LAYER_FILE") {
+        let lib_path = match std::env::var(MIRRORD_LAYER_FILE_ENV) {
             Ok(existing_path) => {
                 tracing::debug!(
-                    "Using existing library file from MIRRORD_LAYER_FILE: {}",
+                    "Using existing library file from {MIRRORD_LAYER_FILE_ENV}: {}",
                     existing_path
                 );
                 std::path::PathBuf::from(existing_path)
             }
             Err(_) => {
-                tracing::debug!("MIRRORD_LAYER_FILE not set, extracting library from binary");
+                tracing::debug!("{MIRRORD_LAYER_FILE_ENV} not set, extracting library from binary");
                 extract_library(None, progress, true)?
             }
         };
@@ -260,7 +274,7 @@ impl MirrordExecution {
         }
         #[cfg(windows)]
         {
-            env_vars.insert("MIRRORD_LAYER_FILE".to_string(), lib_path);
+            env_vars.insert(MIRRORD_LAYER_FILE_ENV.to_string(), lib_path);
         }
 
         let patched_path = {
@@ -280,8 +294,8 @@ impl MirrordExecution {
                             args,
                             load_type: None,
                         });
-                if config.experimental.sip_utils {
-                    download_sip_binaries().await?;
+                if config.experimental.sip_utils.unwrap_or_default() {
+                    extract_sip_binaries(&MIRRORD_BINARIES_DIR_PATH_BUF, COMPRESSED_SIP_BINARIES)?;
                 }
 
                 executable
@@ -298,6 +312,7 @@ impl MirrordExecution {
                                 sip_binaries_dir: config
                                     .experimental
                                     .sip_utils
+                                    .unwrap_or_default()
                                     .then(|| MIRRORD_BINARIES_DIR_PATH_BUF.as_path()),
                             },
                             log_info,
@@ -358,12 +373,13 @@ impl MirrordExecution {
     /// The address should be accessible from the internal proxy sidecar.
     ///
     /// Returned [`MirrordExecution::environment`] contains *only* remote environment.
-    #[tracing::instrument(level = Level::TRACE, skip_all)]
+    #[tracing::instrument(level = Level::DEBUG, skip_all)]
     pub(crate) async fn start_external<P>(
         config: &mut LayerConfig,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
         tls: Option<&SecureChannelSetup>,
+        mirrord_for_ci: Option<&MirrordCi>,
     ) -> CliResult<(Self, SocketAddr)>
     where
         P: Progress,
@@ -375,7 +391,7 @@ impl MirrordExecution {
         let branch_name = get_user_git_branch().await;
 
         let (connect_info, mut connection) =
-            create_and_connect(config, progress, analytics, branch_name, None)
+            create_and_connect(config, progress, analytics, branch_name, mirrord_for_ci)
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
