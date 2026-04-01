@@ -1,5 +1,6 @@
-import { Card, CardContent, Badge, Button, cn } from '@metalbear/ui'
-import { Cpu, Clock, Server, Trash2 } from 'lucide-react'
+import { cn } from '@metalbear/ui'
+import { Badge } from '@metalbear/ui'
+import { Clock, Trash2 } from 'lucide-react'
 import type { SessionInfo } from './types'
 
 function formatUptime(startedAt: string): string {
@@ -23,59 +24,43 @@ interface Props {
 
 export default function SessionCard({ session, selected, onSelect, onKill }: Props) {
   return (
-    <Card
+    <div
       className={cn(
-        'cursor-pointer transition-all duration-150 hover:border-primary/50',
-        selected && 'border-l-4 border-l-primary border-primary/60 bg-primary/5'
+        'rounded-md px-3 py-2.5 cursor-pointer transition-all duration-150 border border-transparent group',
+        selected
+          ? 'bg-primary/8 border-primary/30 border-l-[3px] border-l-primary'
+          : 'hover:bg-muted/40 hover:border-border'
       )}
       onClick={onSelect}
     >
-      <CardContent className="p-3 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <Server className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <span className="font-mono text-sm font-semibold text-foreground truncate">
-              {session.target}
-            </span>
-          </div>
+      <div className="font-mono text-xs font-medium text-foreground break-all leading-snug">
+        {session.target}
+      </div>
+
+      <div className="flex items-center justify-between mt-1.5">
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <Clock className="h-2.5 w-2.5" />
+            {formatUptime(session.started_at)}
+          </span>
+          <span className="font-mono">v{session.mirrord_version}</span>
           {session.is_operator && (
-            <Badge variant="secondary" className="shrink-0 text-[10px] tracking-wider">
+            <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4 tracking-wider">
               Operator
             </Badge>
           )}
         </div>
-
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          {session.processes.length > 0 && (
-            <span className="flex items-center gap-1" title="Processes">
-              <Cpu className="h-3 w-3" />
-              {session.processes.map((p) => p.process_name || `PID ${p.pid}`).join(', ')}
-            </span>
-          )}
-          <span className="flex items-center gap-1" title="Uptime">
-            <Clock className="h-3 w-3" />
-            {formatUptime(session.started_at)}
-          </span>
-          <span title="mirrord version" className="ml-auto font-mono">
-            v{session.mirrord_version}
-          </span>
-        </div>
-
-        <div className="flex items-center justify-end">
-          <Button
-            variant="destructive"
-            size="sm"
-            className="h-6 px-2 text-xs"
-            onClick={(e) => {
-              e.stopPropagation()
-              onKill()
-            }}
-          >
-            <Trash2 className="h-3 w-3 mr-1" />
-            Kill
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+        <button
+          className="text-[9px] text-destructive bg-destructive/10 border border-destructive/25 px-2 py-0.5 rounded cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+          onClick={(e) => {
+            e.stopPropagation()
+            onKill()
+          }}
+        >
+          <Trash2 className="h-2.5 w-2.5 inline mr-0.5" />
+          Kill
+        </button>
+      </div>
+    </div>
   )
 }
