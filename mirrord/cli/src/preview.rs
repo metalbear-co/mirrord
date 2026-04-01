@@ -28,12 +28,8 @@ use mirrord_analytics::{
     preview::{PreviewEvent, PreviewEventKind},
 };
 use mirrord_config::{
-    LayerConfig,
-    config::ConfigContext,
-    feature::preview::PreviewTtlMins,
-    target::{Target, TargetDisplay},
+    LayerConfig, config::ConfigContext, feature::preview::PreviewTtlMins, target::Target,
 };
-use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
     client::{OperatorApi, PreparedClientCert},
     crd::{
@@ -235,17 +231,22 @@ async fn preview_start(
         })?,
     };
 
-    let annotations = multi_cluster.then(|| {
-        let target_ns = layer_config
-            .target
-            .namespace
-            .as_deref()
-            .unwrap_or(operator_api.client().default_namespace());
-        BTreeMap::from([(
-            TARGET_NAMESPACE_ANNOTATION.to_string(),
-            target_ns.to_owned(),
-        )])
-    });
+    let annotations = operator_api
+        .operator()
+        .spec
+        .operator_namespace
+        .is_some()
+        .then(|| {
+            let target_ns = layer_config
+                .target
+                .namespace
+                .as_deref()
+                .unwrap_or(operator_api.client().default_namespace());
+            BTreeMap::from([(
+                TARGET_NAMESPACE_ANNOTATION.to_string(),
+                target_ns.to_owned(),
+            )])
+        });
 
     let session = PreviewSession {
         metadata: ObjectMeta {
