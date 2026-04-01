@@ -49,7 +49,7 @@ tokio-rustls.workspace = true
 tokio-util.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-axum = "0.8.4"
+axum = "0.7.0"
 serde_json.workspace = true
 home.workspace = true
 

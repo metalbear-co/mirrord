@@ -72,7 +72,7 @@ tower = { workspace = true, features = ["retry"] }
 ci_info.workspace = true
 opener = "0.8.3"
 tempfile = { workspace = true, optional = true }
-axum = { version = "0.8.4", features = ["ws"], optional = true }
+axum = { version = "0.7.0", features = ["ws"], optional = true }
 tower-http = { version = "0.6.6", features = ["fs", "set-header"], optional = true }
 tar = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
@@ -81,7 +81,7 @@ yamlpatch.workspace = true
 yamlpath.workspace = true
 [target.'cfg(unix)'.dependencies]
 rand.workspace = true
-axum = { version = "0.8.4", features = ["ws"] }
+axum = { version = "0.7.0", features = ["ws"] }
 rust-embed = "8"
 notify = { version = "8", features = ["macos_fsevent"] }
 mime_guess = "2"
