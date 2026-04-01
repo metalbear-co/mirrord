@@ -16,6 +16,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import ELK from 'elkjs/lib/elk.bundled.js'
 import { fetchTopology, type TopologyResponse, type TopologyEdge, type ActiveSession } from './topologyApi'
+import { MirrordIcon } from '@metalbear/ui'
 import { Laptop, Network, Users, Shield, Zap, ArrowRight } from 'lucide-react'
 
 const elk = new ELK()
@@ -508,12 +509,9 @@ function TopologyTeaser() {
     <div className="h-full overflow-auto">
       <div className="max-w-2xl mx-auto px-6 py-16 flex flex-col items-center">
         {/* Hero */}
-        <div className="relative mb-8">
+        <div className="mb-8">
           <div className="w-20 h-20 rounded-2xl flex items-center justify-center bg-indigo-50 dark:bg-indigo-950 shadow-[0_0_40px_rgba(99,102,241,0.1)] dark:shadow-[0_0_40px_rgba(99,102,241,0.15)]">
-            <Network className="w-10 h-10 text-indigo-600 dark:text-indigo-400" />
-          </div>
-          <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white bg-[#7c5aff] shadow-[0_2px_8px_rgba(124,90,255,0.4)]">
-            PRO
+            <img src={MirrordIcon} alt="mirrord" className="w-12 h-12 dark:invert" />
           </div>
         </div>
 
@@ -545,7 +543,7 @@ function TopologyTeaser() {
 
         {/* CTA */}
         <a
-          href="https://mirrord.dev/docs/overview/teams/"
+          href="https://app.metalbear.com/account/sign-up"
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold text-white transition-all hover:scale-[1.02] active:scale-[0.98] bg-[linear-gradient(135deg,#7c5aff_0%,#6366f1_100%)] shadow-[0_4px_16px_rgba(124,90,255,0.3)]"
@@ -555,7 +553,7 @@ function TopologyTeaser() {
         </a>
 
         <p className="mt-4 text-xs text-center text-slate-400 dark:text-slate-600">
-          Free for small teams. Install the operator to unlock topology and more.
+          Free to get started. Install the operator to unlock topology, queue splitting, and more.
         </p>
       </div>
     </div>
