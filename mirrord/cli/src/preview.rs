@@ -707,10 +707,6 @@ fn load_preview_config(
 /// Connects to the operator, validates the license and checks that the `PreviewEnv` feature is
 /// supported, then returns the operator API and a `PreviewSession` API handle scoped to the
 /// appropriate namespace(s).
-///
-/// In multi-cluster mode (`operator_namespace` is set), CRs are created in the operator's
-/// namespace. Callsites should check `operator_api.operator().spec.operator_namespace.is_some()`
-/// to determine whether multi-cluster handling is needed.
 async fn create_preview_api(
     config: &LayerConfig,
     all_namespaces: bool,
