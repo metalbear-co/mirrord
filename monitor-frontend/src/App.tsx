@@ -20,6 +20,17 @@ export default function App() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches
   })
 
+  // Strip auth token from URL bar after page load (cookie is already set)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get('token')
+    if (token) {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('token')
+      window.history.replaceState({}, '', url.toString())
+    }
+  }, [])
+
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDarkMode)
     localStorage.setItem('session-monitor-theme', isDarkMode ? 'dark' : 'light')
