@@ -66,6 +66,7 @@ keywords = [
 categories = ["development-tools", "backend", "devtool"]
 
 [workspace.dependencies]
+axum = "0.8"
 actix-codec = "0.5"
 async-pidfd = "0.1.5"
 
