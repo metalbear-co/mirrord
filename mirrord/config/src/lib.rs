@@ -1288,6 +1288,7 @@ mod tests {
             skip_processes: None,
             skip_extra_build_tools: None,
             skip_build_tools: None,
+            multi_cluster: None,
             agent: Some(AgentFileConfig {
                 privileged: None,
                 log_level: Some("info".to_owned()),
