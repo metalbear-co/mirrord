@@ -274,7 +274,10 @@ impl DateValidityExt for rfc5280::Validity {
 #[cfg(feature = "client")]
 pub mod client {
     use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
-    use kube::{Api, Client, Resource, api::PostParams};
+    use kube::{
+        Api, Client, Resource,
+        api::{PostParams, Request},
+    };
     use serde::Serialize;
 
     use super::*;
@@ -313,16 +316,18 @@ pub mod client {
                 .encode_pem()
                 .map_err(X509CertificateError::from)?;
 
-            let api: Api<R> = Api::all(client);
-
-            let certificate: Certificate = api
+            // Here we manually create `Request::create_subresource` and send it with the
+            // `Client`. We can't use `Api::create_subresource`, because it always
+            // serializes body to JSON. We need the body to be raw PEM.
+            let request = Request::new(R::url_path(&Default::default(), None))
                 .create_subresource(
                     "certificate",
                     "operator",
-                    &PostParams::default(),
-                    &certificate_request,
+                    &Default::default(),
+                    certificate_request.into(),
                 )
-                .await?;
+                .map_err(kube::Error::BuildRequest)?;
+            let certificate: Certificate = client.request(request).await?;
 
             Ok(Credentials {
                 certificate,
@@ -500,9 +505,12 @@ mod test {
         Mode,
         decode::{BytesSource, Constructed},
     };
+    use http::{Method, Request, Response};
+    use k8s_openapi::api::core::v1::Pod;
+    use kube::{Client, client::Body};
     use x509_certificate::rfc2986::CertificationRequest;
 
-    use crate::credentials::CiApiKey;
+    use crate::credentials::{CiApiKey, Credentials};
 
     /// Verifies that [`CertificationRequest`] properly decodes from value produced by old code.
     #[test]
@@ -565,5 +573,32 @@ fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
 
         let encoded = api_key.encode_as_url_safe_string().expect("encode api key");
         assert_eq!(encoded, V1_API_KEY);
+    }
+
+    /// Verifies that the body of the request made in [`Credentials::init`] has correct PEM
+    /// encoding.
+    #[tokio::test]
+    async fn legacy_crt_request_valid_pem() {
+        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
+        let client = Client::new(service, "default");
+
+        tokio::join!(
+            async {
+                // We use `Pod` instead of `MirrordOperatorCrd`
+                // because we can't import the `mirrord-operator` crate (dependency cycle).
+                // The exact resource type does not matter in this test.
+                Credentials::init::<Pod>(client, "whatever", None)
+                    .await
+                    .expect_err("mock service should drop the response sender");
+            },
+            async {
+                let (request, _) = handle.next_request().await.unwrap();
+                assert_eq!(request.method(), Method::POST,);
+                assert_eq!(request.uri().path(), "/api/v1/pods/operator/certificate",);
+                let body = request.into_body().collect_bytes().await.unwrap();
+                let parsed_pem = pem::parse(body.as_ref()).unwrap();
+                assert_eq!(parsed_pem.tag(), "CERTIFICATE REQUEST",);
+            },
+        );
     }
 }
