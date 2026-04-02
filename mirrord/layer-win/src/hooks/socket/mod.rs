@@ -53,7 +53,7 @@ use winapi::{
         winsock2::{
             HOSTENT, INVALID_SOCKET, IPPORT_RESERVED, LPWSAOVERLAPPED_COMPLETION_ROUTINE, SOCKET,
             SOCKET_ERROR, WSA_IO_PENDING, WSAEACCES, WSAECONNABORTED, WSAECONNREFUSED, WSAEFAULT,
-            WSAGetLastError, WSAOVERLAPPED, WSASend, WSASetLastError,
+            WSAGetLastError, WSAHOST_NOT_FOUND, WSAOVERLAPPED, WSASend, WSASetLastError,
         },
     },
 };
@@ -454,6 +454,28 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
         return listen_result;
     }
 
+    // For Windows socketpair emulation (loopback-bound listener paired with loopback connects),
+    // mirrord should leave the socket untouched so the runtime, e.g. python, can manage it locally.
+    // Use the requested address to identify synthetic socketpair listeners:
+    // they bind to loopback with port 0. Allow normal loopback services on
+    // explicit ports to remain managed.
+    // On Unix it doesn't matter since socketpair uses AF_UNIX sockets.
+    if bound_state.requested_address.is_emulated_socketpair() {
+        tracing::debug!(
+            "listen_detour -> skipping subscription for local listener {} -> {}",
+            bound_state.requested_address,
+            bound_state.address
+        );
+        // Reinsert the socket so later hooks (e.g., connect_to_local_address/getsockname)
+        // can find the listener and keep socketpair connections local.
+        Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(bound_state);
+        SOCKETS
+            .lock()
+            .expect("listen_detour -> failed to lock sockets for state update")
+            .insert(s, socket);
+        return listen_result;
+    }
+
     // Check if incoming traffic is enabled
     if matches!(
         setup().incoming_config().mode,
@@ -465,22 +487,6 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
 
     if setup().targetless() {
         tracing::warn!("listen_detour -> running targetless, binding locally instead");
-        return listen_result;
-    }
-
-    // For Windows socketpair emulation (loopback-bound listener paired with loopback connects),
-    // mirrord should leave the socket untouched so the runtime, e.g. python, can manage it locally.
-    // Use the requested address to identify synthetic socketpair listeners:
-    // they bind to loopback with port 0. Allow normal loopback services on
-    // explicit ports to remain managed.
-    // On Unix it doesn't matter since socketpair uses AF_UNIX sockets.
-    if bound_state.requested_address.ip().is_loopback() && bound_state.requested_address.port() == 0
-    {
-        tracing::debug!(
-            "listen_detour -> skipping subscription for local listener {} -> {}",
-            bound_state.requested_address,
-            bound_state.address
-        );
         return listen_result;
     }
 
@@ -536,12 +542,22 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
     let connect_fn = |addr: SockAddr| {
         let original = CONNECT_ORIGINAL.get().unwrap();
         let result = unsafe { original(s, addr.as_ptr() as *const _, addr.len()) };
-        log_connection_result(result, "connect_detour", addr);
-        ConnectResult::from(result)
+        let last_error = if result == SOCKET_ERROR {
+            Some(get_last_error())
+        } else {
+            None
+        };
+
+        log_connection_result(result, "connect_detour", &addr);
+        ConnectResult::from_with_addr_and_error(result, addr, last_error)
     };
 
     match ops::connect(s, name, namelen, "connect_detour", connect_fn) {
         Err(HookError::ConnectError(ConnectError::AddressUnreachable(_))) => {
+            return SOCKET_ERROR;
+        }
+        Err(HookError::DNSNoName) => {
+            unsafe { WSASetLastError(WSAHOST_NOT_FOUND) };
             return SOCKET_ERROR;
         }
         Err(e) => {
@@ -552,7 +568,7 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
             );
         }
         Ok(connect_result) => {
-            return connect_result.result();
+            return connect_result.into();
         }
     }
 
@@ -618,6 +634,17 @@ unsafe extern "system" fn accept_detour(
             }
         }
     };
+
+    // For Windows socketpair emulation (loopback-bound listener on port 0),
+    // do not apply mirrord accept handling. Let the runtime manage it locally.
+    if SocketAddr::new(listener_address.ip(), port).is_emulated_socketpair() {
+        tracing::debug!(
+            "accept_detour -> skipping mirrord handling for socketpair listener {} -> {}",
+            SocketAddr::new(listener_address.ip(), port),
+            listener_address
+        );
+        return auto_close_socket.release();
+    }
 
     // Get peer address from the accepted connection (this will be intproxy's address)
     let peer_address = match utils::get_peer_address_from_socket(auto_close_socket.get()) {
@@ -712,7 +739,7 @@ unsafe extern "system" fn getsockname_detour(
     {
         Some(sock) => sock.clone(),
         None => {
-            tracing::warn!("getsockname_detour -> failed to get socket: {}", s);
+            tracing::warn!("getsockname_detour -> socket not managed: {}", s);
             return getsockname_fn();
         }
     };
@@ -1098,8 +1125,14 @@ unsafe extern "system" fn wsa_connect_detour(
                 lpGQOS,
             )
         };
-        log_connection_result(result, "wsa_connect_detour", addr);
-        ConnectResult::from(result)
+        let last_error = if result == SOCKET_ERROR {
+            Some(get_last_error())
+        } else {
+            None
+        };
+
+        log_connection_result(result, "wsa_connect_detour", &addr);
+        ConnectResult::from_with_addr_and_error(result, addr, last_error)
     };
 
     let socket_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
@@ -1122,6 +1155,10 @@ unsafe extern "system" fn wsa_connect_detour(
                 raw_addr,
                 e
             );
+            return SOCKET_ERROR;
+        }
+        Err(HookError::DNSNoName) => {
+            unsafe { WSASetLastError(WSAHOST_NOT_FOUND) };
             return SOCKET_ERROR;
         }
         Err(_) => {

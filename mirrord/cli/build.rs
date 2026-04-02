@@ -1,5 +1,13 @@
 use std::process::exit;
 
+/// Ensure `monitor-frontend/dist` exists so rust-embed doesn't fail during compilation.
+fn ensure_monitor_frontend_dist() {
+    let dist_dir = std::path::Path::new("../../monitor-frontend/dist");
+    if !dist_dir.exists() {
+        std::fs::create_dir_all(dist_dir).ok();
+    }
+}
+
 fn recheck_and_setup_layer_file() {
     println!("cargo::rerun-if-env-changed=MIRRORD_LAYER_FILE");
 
@@ -126,6 +134,9 @@ fn main() {
                 std::fs::write(sip_path, "").unwrap();
             };
         }
+
+        ensure_monitor_frontend_dist();
+
         return;
     }
     // Make sure `MIRRORD_LAYER_FILE` is provided either by user, or computed.
@@ -138,6 +149,8 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|target| target == "macos") {
         package_sip_binaries();
     }
+
+    ensure_monitor_frontend_dist();
 
     // this check uses cargo env vars instead of conditional compilation due to cfg! not respecting
     // the target flag on a build

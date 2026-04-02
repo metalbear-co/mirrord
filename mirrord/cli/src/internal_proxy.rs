@@ -10,24 +10,30 @@
 //! The proxy will either directly connect to an existing agent (currently only used for tests),
 //! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
 
+mod db_portforwards;
+
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStrExt;
 use std::{
     env, io,
     net::{Ipv4Addr, SocketAddr},
+    ops::Not,
     time::Duration,
 };
-#[cfg(not(target_os = "windows"))]
-use std::{ops::Not, os::unix::ffi::OsStrExt};
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::{
     IntProxy,
     agent_conn::{AgentConnectInfo, AgentConnection},
+    session_monitor::MonitorTx,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 #[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
 use tokio::net::TcpListener;
+#[cfg(unix)]
+use tokio_util::sync::CancellationToken;
 use tracing::Level;
 #[cfg(not(target_os = "windows"))]
 use tracing::warn;
@@ -48,6 +54,66 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
     let addr = listener.local_addr()?;
     println!("{addr}\n");
     Ok(())
+}
+
+/// Starts the session monitor API server if enabled and on Unix, otherwise returns a
+/// disabled [`MonitorTx`].
+fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> MonitorTx {
+    #[cfg(not(unix))]
+    {
+        let _ = (config, is_operator);
+        MonitorTx::disabled()
+    }
+
+    #[cfg(unix)]
+    {
+        if !config.api {
+            return MonitorTx::disabled();
+        }
+
+        let (tx, _rx) =
+            tokio::sync::broadcast::channel::<mirrord_intproxy::session_monitor::MonitorEvent>(256);
+        let proxy_monitor_tx = MonitorTx::from_sender(tx.clone());
+        let api_monitor_tx = MonitorTx::from_sender(tx);
+
+        let session_id =
+            env::var("MIRRORD_SESSION_ID").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+
+        let target_name = config
+            .target
+            .path
+            .as_ref()
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| "unknown".to_owned());
+
+        let config_value = serde_json::to_value(config).unwrap_or(serde_json::Value::Null);
+
+        let session_info = mirrord_intproxy::session_monitor::api::SessionInfo {
+            session_id: session_id.clone(),
+            target: target_name,
+            started_at: humantime::format_rfc3339(std::time::SystemTime::now()).to_string(),
+            mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
+            is_operator,
+            processes: Vec::new(),
+            config: config_value,
+        };
+
+        let shutdown = CancellationToken::new();
+
+        tokio::spawn(async move {
+            if let Err(error) = mirrord_intproxy::session_monitor::api::start_api_server(
+                session_info,
+                api_monitor_tx,
+                shutdown,
+            )
+            .await
+            {
+                tracing::warn!(%error, "Session monitor API server failed");
+            }
+        });
+
+        proxy_monitor_tx
+    }
 }
 
 /// Main entry point for the internal proxy.
@@ -109,13 +175,33 @@ pub(crate) async fn proxy(
     };
     (&config).collect_analytics(analytics.get_mut());
 
+    let operator_session_id = if let AgentConnectInfo::Operator(session) = &agent_connect_info {
+        Some(session.id())
+    } else {
+        None
+    };
+
     // The agent is spawned and our parent process already established a connection.
     // However, the parent process (`exec` or `ext` command) is free to exec/exit as soon as it
     // reads the TCP listener address from our stdout. We open our own connection with the agent
     // **before** this happens to ensure that the agent does not prematurely exit.
     // We also perform initial ping pong round to ensure that k8s runtime actually made connection
     // with the agent (it's a must, because port forwarding may be done lazily).
-    let agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
+    let is_operator = matches!(&agent_connect_info, AgentConnectInfo::Operator(_));
+    let mut agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
+
+    if config.feature.db_branches.is_empty().not()
+        && let Some(session_id) = operator_session_id
+        && let Err(err) = db_portforwards::setup(
+            &config.feature.db_branches,
+            &mut agent_conn,
+            session_id,
+            config.key.as_str(),
+        )
+        .await
+    {
+        tracing::warn!(%err, "failed to set up DB branch port forwards, continuing without them");
+    }
 
     // Let it assign address for us then print it for the user.
     let listener = create_listen_socket(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), listen_port))
@@ -132,6 +218,8 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
+    let monitor_tx = start_session_monitor(&config, is_operator);
+
     IntProxy::new_with_connection(
         agent_conn,
         listener,
@@ -145,6 +233,7 @@ pub(crate) async fn proxy(
             .unwrap_or_default(),
         process_logging_interval,
         &config.experimental,
+        monitor_tx,
     )
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await

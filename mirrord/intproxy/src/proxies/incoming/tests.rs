@@ -62,7 +62,11 @@ async fn http_request_terminates_on_remote_close(#[case] steal_type: StealType) 
     let local_addr = local_listener.local_addr().unwrap();
 
     let (conn, _, out) = Connection::dummy();
-    let proxy = IncomingProxy::new(Duration::from_secs(3), Default::default());
+    let proxy = IncomingProxy::new(
+        Duration::from_secs(3),
+        Default::default(),
+        crate::session_monitor::MonitorTx::disabled(),
+    );
     let mut background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError> =
         BackgroundTasks::new(conn.tx_handle());
 

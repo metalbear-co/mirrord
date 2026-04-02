@@ -26,18 +26,14 @@ use crate::{
 
 pub mod copy_target;
 pub mod db_branching;
-pub mod external;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
-pub mod multi_cluster;
-pub mod patch;
-pub mod policy;
 pub mod preview;
 pub mod profile;
-pub mod properties;
+pub mod rabbitmq;
+
 pub mod session;
-pub mod steal_tls;
 
 pub use kafka::MirrordKafkaEphemeralTopic;
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
@@ -74,9 +70,10 @@ impl TargetCrd {
     /// # Warning
     ///
     /// Do **not** change url paths here, even if the operator recognizes the other format.
-    /// It can break existing [`policy::MirrordPolicy`]s and [`policy::MirrordClusterPolicy`]
-    /// (see [`policy::MirrordPolicySpec::target_path`] and
-    /// [`policy::MirrordClusterPolicySpec::target_path`]).
+    /// It can break existing `operator-crd::crd::policy::MirrordPolicy`s and
+    /// `operator-crd::crd::policy::MirrordClusterPolicy` (see
+    /// `operator-crd::crd::policy::MirrordPolicySpec::target_path` and
+    /// `operator-crd::crd::policy::MirrordClusterPolicySpec::target_path`).
     pub fn urlfied_name(target: &Target) -> String {
         let (type_name, target, container) = match target {
             Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
@@ -426,6 +423,7 @@ pub struct Session {
     pub locked_ports: Option<Vec<LockedPortCompat>>,
     pub user_id: Option<String>,
     pub sqs: Option<Vec<MirrordSqsSession>>,
+    pub rmq: Option<Vec<rabbitmq::MirrordRmqSession>>,
     pub kafka: Option<Vec<MirrordKafkaEphemeralTopicSpec>>,
 }
 
@@ -498,6 +496,8 @@ pub enum NewOperatorFeature {
     /// `PgBranchDatabase`, `MysqlBranchDatabase`, `MongodbBranchDatabase` CRDs.
     UnifiedBranchDbCrd,
 
+    /// This operator can perform queue splitting on RabbitMQ
+    RmqQueueSplitting,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -535,6 +535,7 @@ impl Display for NewOperatorFeature {
                 "Splitting SQS queues with a jq filter"
             }
             NewOperatorFeature::UnifiedBranchDbCrd => "unified branch database CRD",
+            NewOperatorFeature::RmqQueueSplitting => "RabbitMQ queue splitting",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -568,7 +569,7 @@ pub enum QueueNameSource {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // name_source -> nameSource in yaml.
-pub struct SqsQueueDetails {
+pub struct SplitQueueNameDetails {
     /// Where the application gets the queue name from. Will be used to read messages from that
     /// queue and distribute them to the output queues. When running with mirrord and splitting
     /// this queue, applications will get a modified name from that source.
@@ -588,6 +589,13 @@ pub struct SqsQueueDetails {
     /// If set, the value read from `name_source` or `fallback_name`
     /// will be parsed as a JSON map. The values in this map will be used as queue names.
     pub names_from_json_map: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")] // name_source -> nameSource in yaml.
+pub struct SqsQueueDetails {
+    #[serde(flatten)]
+    pub name_details: SplitQueueNameDetails,
 
     /// These tags will be set for all temporary SQS queues created by mirrord for queues defined
     /// in this MirrordWorkloadQueueRegistry, alongside with the original tags of the respective
@@ -602,6 +610,8 @@ pub struct SqsQueueDetails {
     pub sns: Option<bool>,
 }
 
+// This is a proxy to generate a schemars schema that contains the common fields between
+// [`SqsQueueDetails`] and [`RmqQueueDetails`](rabbitmq::RmqQueueDetails)
 /// The details of a queue that should be split.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, EnumDiscriminants)]
 #[strum_discriminants(derive(Deserialize, Serialize, JsonSchema))]
@@ -610,6 +620,9 @@ pub struct SqsQueueDetails {
 pub enum SplitQueue {
     /// Amazon SQS
     Sqs(SqsQueueDetails),
+
+    /// RabbitMQ
+    Rmq(rabbitmq::RmqQueueDetails),
 
     /// Unknown, left for future compatibility.
     ///
@@ -808,10 +821,6 @@ pub struct SqsSessionError {
 
 impl Display for SqsSessionError {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        // Write strictly the first element into the supplied output
-        // stream: `f`. Returns `fmt::Result` which indicates whether the
-        // operation succeeded or failed. Note that `write!` uses syntax which
-        // is very similar to `println!`.
         write!(f, "{}", self.reason)
     }
 }
@@ -949,22 +958,16 @@ mod tests {
     use kube::CustomResourceExt;
 
     use crate::crd::{
-        MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
-        MirrordWorkloadQueueRegistry, QueueNameSource, SessionCrd, SplitQueue, SqsQueueDetails,
+        MirrordClusterOperatorUserCredential, MirrordSqsSession, MirrordWorkloadQueueRegistry,
+        QueueNameSource, SplitQueue, SplitQueueNameDetails, SqsQueueDetails,
         db_branching::{
             branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
         },
-        external::MirrordClusterExternalResource,
-        kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
-        multi_cluster::MirrordMultiClusterSession,
-        patch::{MirrordClusterWorkloadPatch, MirrordClusterWorkloadPatchRequest},
-        policy::{MirrordClusterPolicy, MirrordPolicy},
+        kafka::MirrordKafkaEphemeralTopic,
         preview::PreviewSession,
         profile::{MirrordClusterProfile, MirrordProfile},
-        properties::MirrordPropertyList,
-        session::MirrordClusterSession,
-        steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig},
+        rabbitmq::MirrordRmqSession,
     };
 
     fn write_crd_yaml<T: CustomResourceExt>() {
@@ -976,38 +979,25 @@ mod tests {
             let path = Path::new(&out_path);
             fs::create_dir_all(path).unwrap();
             let filename = crd.metadata.name.as_ref().unwrap();
-            let filepath = path.join(filename);
+            let filepath = path.join(format!("{filename}.yaml"));
             fs::write(filepath, yaml).unwrap();
         }
     }
 
     #[test]
     fn write_all_crd_yamls() {
-        write_crd_yaml::<MirrordOperatorCrd>();
-        write_crd_yaml::<SessionCrd>();
         write_crd_yaml::<MirrordWorkloadQueueRegistry>();
         write_crd_yaml::<MirrordSqsSession>();
+        write_crd_yaml::<MirrordRmqSession>();
         write_crd_yaml::<MirrordClusterOperatorUserCredential>();
         write_crd_yaml::<PreviewSession>();
-        write_crd_yaml::<MirrordClusterSession>();
-        write_crd_yaml::<MirrordMultiClusterSession>();
         write_crd_yaml::<PgBranchDatabase>();
         write_crd_yaml::<MysqlBranchDatabase>();
         write_crd_yaml::<MongodbBranchDatabase>();
         write_crd_yaml::<BranchDatabase>();
-        write_crd_yaml::<MirrordPolicy>();
-        write_crd_yaml::<MirrordClusterPolicy>();
-        write_crd_yaml::<MirrordClusterExternalResource>();
-        write_crd_yaml::<MirrordClusterWorkloadPatch>();
-        write_crd_yaml::<MirrordClusterWorkloadPatchRequest>();
-        write_crd_yaml::<MirrordKafkaClientConfig>();
-        write_crd_yaml::<MirrordKafkaTopicsConsumer>();
         write_crd_yaml::<MirrordKafkaEphemeralTopic>();
         write_crd_yaml::<MirrordClusterProfile>();
         write_crd_yaml::<MirrordProfile>();
-        write_crd_yaml::<MirrordTlsStealConfig>();
-        write_crd_yaml::<MirrordClusterTlsStealConfig>();
-        write_crd_yaml::<MirrordPropertyList>();
         write_crd_yaml::<PreviewSession>();
     }
 
@@ -1023,9 +1013,11 @@ mod tests {
         assert_eq!(
             deserialized,
             SplitQueue::Sqs(SqsQueueDetails {
-                name_source: QueueNameSource::EnvVar("TEST_ENV".into()),
-                fallback_name: None,
-                names_from_json_map: None,
+                name_details: SplitQueueNameDetails {
+                    name_source: QueueNameSource::EnvVar("TEST_ENV".into()),
+                    fallback_name: None,
+                    names_from_json_map: None,
+                },
                 tags: None,
                 sns: None,
             }),

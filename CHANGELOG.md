@@ -8,6 +8,63 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.198.0](https://github.com/metalbear-co/mirrord/tree/3.198.0) - 2026-04-02
+
+
+### Added
+
+- Added `mirrord ui` command that launches a local web dashboard for monitoring
+  all active mirrord sessions in real time. Each session now exposes a
+  per-session HTTP API on a Unix socket for health checks, session info, event
+  streaming (SSE), and session termination.
+- Preview env support for Multi Cluster.
+- When DB branches are enabled, intproxy now automatically creates portforwards
+  to DB pods. Active portforwards can be viewed with `mirrord db-branches
+  connections`.
+
+
+### Fixed
+
+- Changed the progress printout to specify `(cli version X.Y.Z)` to avoid
+  confusing output in operator commands.
+- Fixed an issue where new versions of the mirrord CLI were sometimes not able
+  to use old versions of the mirrord Operator (`Unable to decode to pem
+  body...` error).
+
+
+### Internal
+
+- Removed CRD and related types that are only used by the operator into the
+  `metalbear-co/operator` repository.
+- Revamped and trimmed nix shell.
+
+## [3.197.1](https://github.com/metalbear-co/mirrord/tree/3.197.1) - 2026-03-31
+
+
+### Fixed
+
+- Fixed windows python `socketpair` regression. affecting versions
+  3.190.0-3.196.0
+
+
+### Internal
+
+- RabbitMQ missing field from ConnectParams.
+- Fixed `outgoing_traffic_filter_udp_with_connect` e2e test.
+
+## [3.197.0](https://github.com/metalbear-co/mirrord/tree/3.197.0) - 2026-03-31
+
+
+### Added
+
+- Added RabbitMQ queue splitting support.
+
+
+### Changed
+
+- Check for existing key (preview env) and warn the user.
+- `mirrord ci start --foreground` command behaves exactly like `mirrord exec`.
+
 ## [3.196.0](https://github.com/metalbear-co/mirrord/tree/3.196.0) - 2026-03-28
 
 

@@ -44,7 +44,7 @@ tracing-subscriber.workspace = true
 futures.workspace = true
 which.workspace = true
 semver.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["stream"] }
 const-random = "0.1.15"
 tokio = { workspace = true, features = ["rt", "net", "macros", "process"] }
 tokio-retry.workspace = true
@@ -72,16 +72,22 @@ tower = { workspace = true, features = ["retry"] }
 ci_info.workspace = true
 opener = "0.8.3"
 tempfile = { workspace = true, optional = true }
-axum = { version = "0.8.4", optional = true }
+axum = { version = "0.8.4", features = ["ws"], optional = true }
 tower-http = { version = "0.6.6", features = ["fs", "set-header"], optional = true }
 tar = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
 itertools = { workspace = true, optional = true }
 yamlpatch.workspace = true
 yamlpath.workspace = true
+url.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 rand.workspace = true
+axum = { version = "0.8.4", features = ["ws"] }
+rust-embed = "8"
+notify = { version = "8", features = ["macos_fsevent"] }
+mime_guess = "2"
+eventsource-stream = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }

@@ -600,6 +600,13 @@ impl From<String> for BranchDatabaseId {
         BranchDatabaseId::Specified(value)
     }
 }
+impl From<BranchDatabaseId> for String {
+    fn from(value: BranchDatabaseId) -> Self {
+        match value {
+            BranchDatabaseId::Specified(s) | BranchDatabaseId::Generated(s) => s,
+        }
+    }
+}
 
 impl std::fmt::Display for BranchDatabaseId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1068,7 +1075,7 @@ pub async fn wait_for_pending_branches<P: Progress>(
 /// - No `id` in config: uses the session key directly (enables automatic reuse)
 /// - `id` contains the session key: user likely used `{{key}}` in their template
 /// - `id` without the session key: uses the custom ID as-is, warns that the key is unused
-fn resolve_branch_id<P: Progress>(
+pub fn resolve_branch_id<P: Progress>(
     config_id: &Option<String>,
     session_key: &str,
     progress: &P,

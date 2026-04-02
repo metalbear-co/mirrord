@@ -214,6 +214,14 @@ pub(super) enum Commands {
 
     /// Fix issues related to mirrord.
     Fix(FixArgs),
+
+    /// Launch the session monitor UI.
+    ///
+    /// Watches active mirrord sessions and displays a web dashboard showing
+    /// real-time events (file operations, DNS queries, HTTP requests, etc.)
+    /// from all running mirrord sessions.
+    #[cfg(unix)]
+    Ui(UiArgs),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -1063,6 +1071,8 @@ pub(super) enum DbBranchesCommand {
         #[arg()]
         names: Vec<String>,
     },
+    /// Show active portforward connections for database branches
+    Connections,
     /// Destroy database branches
     Destroy {
         /// Destroy all branches
@@ -1365,6 +1375,15 @@ impl PreviewStopArgs {
 
         envs
     }
+}
+
+/// Arguments for the `mirrord ui` command.
+#[cfg(unix)]
+#[derive(Args, Debug)]
+pub struct UiArgs {
+    /// Port to serve the UI on.
+    #[arg(short = 'p', long, default_value_t = 59281)]
+    pub port: u16,
 }
 
 #[cfg(test)]
