@@ -55,3 +55,5 @@ tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 bcder = "0.7"
+http.workspace = true
+tower-test = "0.4"
