@@ -161,9 +161,12 @@ export default function App() {
           {selected ? (
             <SessionDetail session={selected} />
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
-              <Activity className="h-8 w-8 opacity-30" />
-              <p className="text-sm">Select a session to get started</p>
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
+              <Activity className="h-8 w-8 opacity-20" />
+              <p className="text-sm font-medium">Select a session to get started</p>
+              <p className="text-xs opacity-60 max-w-xs text-center">
+                Choose a session from the sidebar to see live activity, configuration, and intercepted traffic
+              </p>
             </div>
           )}
         </div>
