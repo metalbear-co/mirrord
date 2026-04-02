@@ -6,6 +6,7 @@ import type { SessionInfo, WsMessage } from './types'
 import SessionSidebar from './SessionSidebar'
 import SessionDetail from './SessionDetail'
 import StatusBar from './StatusBar'
+import { initAnalytics, trackEvent } from './analytics'
 
 const WS_RECONNECT_INTERVAL = 3000
 
@@ -35,6 +36,16 @@ export default function App() {
     document.documentElement.classList.toggle('dark', isDarkMode)
     localStorage.setItem('session-monitor-theme', isDarkMode ? 'dark' : 'light')
   }, [isDarkMode])
+
+  // Initialize PostHog analytics (respects telemetry opt-out)
+  useEffect(() => {
+    if (sessions.length > 0) {
+      const telemetryEnabled = sessions.every(
+        s => (s.config as Record<string, unknown>)?.telemetry !== false
+      )
+      initAnalytics(telemetryEnabled)
+    }
+  }, [sessions])
 
   // Initial fetch
   useEffect(() => {
@@ -110,6 +121,7 @@ export default function App() {
   }, [])
 
   const handleKillAll = useCallback(async () => {
+    trackEvent('session_monitor_kill_all', { count: sessions.length })
     const current = sessions
     for (const s of current) {
       await fetch(`/api/sessions/${s.session_id}/kill`, { method: 'POST' })

@@ -6,25 +6,32 @@ import {
 } from 'lucide-react'
 import type { SessionInfo, MonitorEvent } from './types'
 import EventStream from './EventStream'
+import defaultConfig from './defaultConfig.json'
+import { trackEvent } from './analytics'
 
 type DetailTab = 'overview' | 'events' | 'config'
 
-/** Recursively strip null values and empty objects from config for cleaner display. */
-function stripNulls(obj: unknown): unknown {
-  if (obj === null || obj === undefined) return undefined
-  if (Array.isArray(obj)) {
-    const filtered = obj.map(stripNulls).filter(v => v !== undefined)
-    return filtered.length > 0 ? filtered : undefined
+/** Recursively diff config against defaults, returning only values that differ. */
+function diffConfig(config: unknown, defaults: unknown): unknown {
+  if (config === null || config === undefined) return undefined
+  if (defaults === undefined || defaults === null) return config
+  if (typeof config !== typeof defaults) return config
+  if (Array.isArray(config)) {
+    if (!Array.isArray(defaults)) return config
+    if (JSON.stringify(config) === JSON.stringify(defaults)) return undefined
+    return config
   }
-  if (typeof obj === 'object') {
+  if (typeof config === 'object') {
     const result: Record<string, unknown> = {}
-    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
-      const stripped = stripNulls(value)
-      if (stripped !== undefined) result[key] = stripped
+    const cfgObj = config as Record<string, unknown>
+    const defObj = defaults as Record<string, unknown>
+    for (const [key, value] of Object.entries(cfgObj)) {
+      const diffed = diffConfig(value, defObj[key])
+      if (diffed !== undefined) result[key] = diffed
     }
     return Object.keys(result).length > 0 ? result : undefined
   }
-  return obj
+  return config === defaults ? undefined : config
 }
 
 interface Props {
@@ -127,59 +134,6 @@ function OverviewTab({ session, portSubs, processes, eventCounts, onSwitchTab }:
         </div>
 
 
-        {/* Processes */}
-        <div className="rounded-lg border border-border overflow-hidden">
-          <div className="px-4 py-2.5 bg-card/50 border-b border-border">
-            <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Processes</span>
-          </div>
-          {processes.length > 0 ? (
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border text-[10px] text-muted-foreground">
-                  <th className="text-left px-4 py-2 font-medium">Name</th>
-                  <th className="text-right px-4 py-2 font-medium">PID</th>
-                  <th className="text-right px-4 py-2 font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {processes.map(p => (
-                  <tr key={p.pid}>
-                    <td className="px-4 py-2.5 font-mono font-medium text-foreground">{p.process_name || 'unknown'}</td>
-                    <td className="px-4 py-2.5 font-mono text-muted-foreground text-right">{p.pid}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      <span className="inline-flex items-center gap-1">
-                        <LiveDot active={true} />
-                        <span className="text-[10px] text-muted-foreground">Connected</span>
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div className="px-4 py-3 text-xs text-muted-foreground">No processes connected</div>
-          )}
-        </div>
-
-        {/* Port Subscriptions */}
-        <div className="rounded-lg border border-border overflow-hidden">
-          <div className="px-4 py-2.5 bg-card/50 border-b border-border">
-            <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Port Subscriptions</span>
-          </div>
-          {portSubs.length > 0 ? (
-            <div className="divide-y divide-border">
-              {portSubs.map(p => (
-                <div key={p.port} className="flex items-center justify-between px-4 py-2.5">
-                  <span className="text-xs font-mono font-medium text-foreground">:{p.port}</span>
-                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-mono">{p.mode}</Badge>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="px-4 py-3 text-xs text-muted-foreground">No port subscriptions</div>
-          )}
-        </div>
-
         {/* Session identity */}
         <div className="rounded-lg border border-border overflow-hidden">
           <div className="px-4 py-2.5 bg-card/50 border-b border-border">
@@ -216,6 +170,50 @@ function OverviewTab({ session, portSubs, processes, eventCounts, onSwitchTab }:
             })()}
           </div>
         </div>
+
+        {/* Port Subscriptions */}
+        <div className="rounded-lg border border-border overflow-hidden">
+          <div className="px-4 py-2.5 bg-card/50 border-b border-border">
+            <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Port Subscriptions</span>
+          </div>
+          {portSubs.length > 0 ? (
+            <div className="divide-y divide-border">
+              {portSubs.map(p => (
+                <div key={p.port} className="flex items-center justify-between px-4 py-2.5">
+                  <span className="text-xs font-mono font-medium text-foreground">:{p.port}</span>
+                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-mono">{p.mode}</Badge>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="px-4 py-3 text-xs text-muted-foreground">No port subscriptions</div>
+          )}
+        </div>
+
+        {/* Processes */}
+        {processes.length > 0 && (
+          <div className="rounded-lg border border-border overflow-hidden">
+            <div className="px-4 py-2.5 bg-card/50 border-b border-border">
+              <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Processes</span>
+            </div>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border text-[10px] text-muted-foreground">
+                  <th className="text-left px-4 py-2 font-medium">Name</th>
+                  <th className="text-right px-4 py-2 font-medium">PID</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {processes.map(p => (
+                  <tr key={p.pid}>
+                    <td className="px-4 py-2.5 font-mono font-medium text-foreground">{p.process_name || 'unknown'}</td>
+                    <td className="px-4 py-2.5 font-mono text-muted-foreground text-right">{p.pid}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -237,6 +235,19 @@ export default function SessionDetail({ session, onKill }: Props) {
       incoming_request: 0, outgoing_connection: 0, dns_query: 0, file_op: 0,
       port_subscription: 0, env_var: 0, layer_connected: 0, layer_disconnected: 0, total: 0,
     })
+
+    // Fetch fresh session info to get current processes and port subscriptions
+    fetch(`/api/sessions/${session.session_id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((info: SessionInfo | null) => {
+        if (info?.processes?.length) {
+          setProcesses(info.processes.map(p => ({ pid: p.pid, process_name: p.process_name })))
+        }
+        if (info?.port_subscriptions?.length) {
+          setPortSubs(info.port_subscriptions.map(p => ({ port: p.port, mode: p.mode })))
+        }
+      })
+      .catch(() => {})
 
     const eventSource = new EventSource(`/api/sessions/${session.session_id}/events`)
 
@@ -295,15 +306,15 @@ export default function SessionDetail({ session, onKill }: Props) {
             <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4 tracking-wider">
               {session.is_operator ? 'Operator' : 'Direct'}
             </Badge>
+            <button
+              onClick={() => { trackEvent('session_monitor_kill_session'); onKill() }}
+              className="text-[10px] text-destructive bg-destructive/10 border border-destructive/25 px-2.5 py-1 rounded flex items-center gap-1 hover:bg-destructive/20 transition-colors"
+            >
+              <Trash2 className="h-3 w-3" />
+              Kill
+            </button>
           </div>
           <span className="text-[10px] text-muted-foreground font-mono">v{session.mirrord_version}</span>
-          <button
-            onClick={onKill}
-            className="ml-2 text-[10px] text-destructive bg-destructive/10 border border-destructive/25 px-2.5 py-1 rounded flex items-center gap-1 hover:bg-destructive/20 transition-colors"
-          >
-            <Trash2 className="h-3 w-3" />
-            Kill Session
-          </button>
         </div>
       </div>
 
@@ -314,7 +325,7 @@ export default function SessionDetail({ session, onKill }: Props) {
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => { trackEvent('session_monitor_tab_switch', { tab: tab.id }); setActiveTab(tab.id) }}
               className={cn(
                 'flex items-center gap-1.5 px-4 py-2 text-xs font-medium border-b-2 transition-colors',
                 activeTab === tab.id
@@ -349,7 +360,7 @@ export default function SessionDetail({ session, onKill }: Props) {
         {activeTab === 'config' && (
           <div className="p-4 overflow-auto h-full">
             <pre className="p-4 text-[11px] font-mono text-foreground/80 whitespace-pre-wrap overflow-auto rounded-lg border border-border bg-card/30">
-              {JSON.stringify(stripNulls(session.config), null, 2)}
+              {JSON.stringify(diffConfig(session.config, defaultConfig), null, 2)}
             </pre>
           </div>
         )}
