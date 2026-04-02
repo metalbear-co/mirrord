@@ -274,7 +274,10 @@ impl DateValidityExt for rfc5280::Validity {
 #[cfg(feature = "client")]
 pub mod client {
     use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
-    use kube::{Api, Client, Resource, api::PostParams};
+    use kube::{
+        Api, Client, Resource,
+        api::{PostParams, Request},
+    };
     use serde::Serialize;
 
     use super::*;
@@ -313,16 +316,18 @@ pub mod client {
                 .encode_pem()
                 .map_err(X509CertificateError::from)?;
 
-            let api: Api<R> = Api::all(client);
-
-            let certificate: Certificate = api
+            // Here we to manually create the create_subresource `Request` and send it with the
+            // `Client`. We can't use `Api::create_subresource`, because it always
+            // serializes body to JSON. We need the body to be raw PEM.
+            let request = Request::new(R::url_path(&Default::default(), None))
                 .create_subresource(
                     "certificate",
                     "operator",
-                    &PostParams::default(),
-                    &certificate_request,
+                    &Default::default(),
+                    certificate_request.into(),
                 )
-                .await?;
+                .map_err(kube::Error::BuildRequest)?;
+            let certificate: Certificate = client.request(request).await?;
 
             Ok(Credentials {
                 certificate,
