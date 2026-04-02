@@ -20,7 +20,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 - Preview env support for Multi Cluster.
 - When DB branches are enabled, intproxy now automatically creates portforwards
   to DB pods. Active portforwards can be viewed with `mirrord db-branches
-  connections`
+  connections`.
 
 
 ### Fixed
