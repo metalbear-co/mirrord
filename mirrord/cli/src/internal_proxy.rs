@@ -99,16 +99,28 @@ fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> MonitorTx {
         };
 
         let shutdown = CancellationToken::new();
+        let session_id_for_log = session_id.clone();
 
         tokio::spawn(async move {
-            if let Err(error) = mirrord_intproxy::session_monitor::api::start_api_server(
+            match mirrord_intproxy::session_monitor::api::start_api_server(
                 session_info,
                 api_monitor_tx,
                 shutdown,
             )
             .await
             {
-                tracing::warn!(%error, "Session monitor API server failed");
+                Ok(token) => {
+                    tracing::info!(
+                        session_id = %session_id_for_log,
+                        url = %format!(
+                            "http://localhost/session/{session_id_for_log}?token={token}"
+                        ),
+                        "Session monitor available",
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "Session monitor API server failed");
+                }
             }
         });
 

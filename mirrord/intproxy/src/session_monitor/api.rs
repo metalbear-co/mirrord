@@ -4,13 +4,16 @@ use std::{
 
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Request, State},
+    http::{HeaderMap, StatusCode, header},
+    middleware::{self, Next},
     response::{
         IntoResponse,
         sse::{Event, Sse},
     },
     routing::{get, post},
 };
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tokio::{
     net::UnixListener,
@@ -42,18 +45,87 @@ struct AppState {
     session_info: RwLock<SessionInfo>,
     monitor_tx: MonitorTx,
     shutdown: CancellationToken,
+    token: String,
 }
 
 struct SocketCleanup {
-    path: PathBuf,
+    socket_path: PathBuf,
+    token_path: PathBuf,
 }
 
 impl Drop for SocketCleanup {
     fn drop(&mut self) {
-        if let Err(err) = fs::remove_file(&self.path) {
-            tracing::warn!(?err, path = ?self.path, "Failed to remove session socket");
+        if let Err(err) = fs::remove_file(&self.socket_path) {
+            tracing::warn!(?err, path = ?self.socket_path, "Failed to remove session socket");
+        }
+        if let Err(err) = fs::remove_file(&self.token_path) {
+            tracing::warn!(?err, path = ?self.token_path, "Failed to remove session token file");
         }
     }
+}
+
+/// Generates a random 32-byte hex token for API authentication.
+fn generate_token() -> String {
+    let bytes: [u8; 32] = rand::rng().random();
+    hex::encode(bytes)
+}
+
+/// Parses the `mirrord_token` value from a raw `Cookie` header.
+fn parse_cookie_token(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(header::COOKIE)?
+        .to_str()
+        .ok()?
+        .split(';')
+        .find_map(|pair| {
+            let pair = pair.trim();
+            pair.strip_prefix("mirrord_token=")
+        })
+}
+
+/// Parses the `token` query parameter from the request URI.
+fn parse_query_token(uri: &axum::http::Uri) -> Option<&str> {
+    uri.query()?.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key == "token").then_some(value)
+    })
+}
+
+/// Middleware that validates the authentication token on every request.
+///
+/// Checks the `mirrord_token` cookie first, then falls back to the `?token=` query parameter.
+/// If the query parameter is valid, sets an `HttpOnly`, `SameSite=Strict` cookie for subsequent
+/// requests.
+async fn token_auth(
+    State(state): State<Arc<AppState>>,
+    request: Request,
+    next: Next,
+) -> impl IntoResponse {
+    let expected = &state.token;
+
+    // Check cookie first
+    if let Some(cookie_token) = parse_cookie_token(request.headers())
+        && cookie_token == expected
+    {
+        return next.run(request).await;
+    }
+
+    // Fall back to query param
+    if let Some(query_token) = parse_query_token(request.uri())
+        && query_token == expected
+    {
+        let mut response = next.run(request).await;
+        let cookie_value = format!("mirrord_token={expected}; HttpOnly; SameSite=Strict; Path=/");
+        response.headers_mut().insert(
+            header::SET_COOKIE,
+            cookie_value
+                .parse()
+                .expect("cookie value should be valid header"),
+        );
+        return response;
+    }
+
+    StatusCode::FORBIDDEN.into_response()
 }
 
 async fn health() -> impl IntoResponse {
@@ -129,7 +201,7 @@ pub async fn start_api_server(
     session_info: SessionInfo,
     monitor_tx: MonitorTx,
     shutdown: CancellationToken,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let session_id = &session_info.session_id;
     let sessions_dir = home::home_dir()
         .ok_or("could not determine home directory")?
@@ -140,6 +212,13 @@ pub async fn start_api_server(
     fs::set_permissions(&sessions_dir, fs::Permissions::from_mode(0o700))?;
 
     let socket_path = sessions_dir.join(format!("{session_id}.sock"));
+    let token_path = sessions_dir.join(format!("{session_id}.token"));
+
+    let token = generate_token();
+
+    // Write token file with restricted permissions so `mirrord ui` can read it
+    fs::write(&token_path, &token)?;
+    fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600))?;
 
     // Remove stale socket if it exists
     if let Err(err) = fs::remove_file(&socket_path)
@@ -152,23 +231,30 @@ pub async fn start_api_server(
     fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;
 
     let _cleanup = SocketCleanup {
-        path: socket_path.clone(),
+        socket_path: socket_path.clone(),
+        token_path,
     };
 
     let state = Arc::new(AppState {
         session_info: RwLock::new(session_info),
         monitor_tx,
         shutdown: shutdown.clone(),
+        token: token.clone(),
     });
 
     // Spawn background task to update processes from monitor events
     tokio::spawn(update_processes_from_events(state.clone()));
 
-    let app = Router::new()
-        .route("/health", get(health))
+    // Auth middleware applies to all routes except /health
+    let authenticated_routes = Router::new()
         .route("/info", get(info))
         .route("/events", get(events))
         .route("/kill", post(kill))
+        .layer(middleware::from_fn_with_state(state.clone(), token_auth));
+
+    let app = Router::new()
+        .route("/health", get(health))
+        .merge(authenticated_routes)
         .with_state(state);
 
     tracing::info!(?socket_path, "Session monitor API server starting");
@@ -179,5 +265,5 @@ pub async fn start_api_server(
 
     tracing::info!("Session monitor API server stopped");
 
-    Ok(())
+    Ok(token)
 }

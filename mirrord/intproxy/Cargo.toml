@@ -50,6 +50,7 @@ tokio-util.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 axum = "0.8.4"
+hex.workspace = true
 serde_json.workspace = true
 home.workspace = true
 

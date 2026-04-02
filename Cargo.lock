@@ -4955,6 +4955,7 @@ dependencies = [
  "axum 0.8.8",
  "bytes",
  "futures",
+ "hex",
  "home",
  "http-body-util",
  "hyper 1.8.1",
