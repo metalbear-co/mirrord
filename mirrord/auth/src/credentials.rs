@@ -505,9 +505,12 @@ mod test {
         Mode,
         decode::{BytesSource, Constructed},
     };
+    use http::{Method, Request, Response};
+    use k8s_openapi::api::core::v1::Pod;
+    use kube::{Client, client::Body};
     use x509_certificate::rfc2986::CertificationRequest;
 
-    use crate::credentials::CiApiKey;
+    use crate::credentials::{CiApiKey, Credentials};
 
     /// Verifies that [`CertificationRequest`] properly decodes from value produced by old code.
     #[test]
@@ -570,5 +573,32 @@ fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
 
         let encoded = api_key.encode_as_url_safe_string().expect("encode api key");
         assert_eq!(encoded, V1_API_KEY);
+    }
+
+    /// Verifies that the body of the request made in [`Credentials::init`] has correct PEM
+    /// encoding.
+    #[tokio::test]
+    async fn legacy_crt_request_valid_pem() {
+        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
+        let client = Client::new(service, "default");
+
+        tokio::join!(
+            async {
+                // We use `Pod` instead of `MirrordOperatorCrd`
+                // because we can't import the `mirrord-operator` crate (dependency cycle).
+                // The exact resource type does not matter in this test.
+                Credentials::init::<Pod>(client, "whatever", None)
+                    .await
+                    .expect_err("mock service should drop the response sender");
+            },
+            async {
+                let (request, _) = handle.next_request().await.unwrap();
+                assert_eq!(request.method(), Method::POST,);
+                assert_eq!(request.uri().path(), "/api/v1/pods/operator/certificate",);
+                let body = request.into_body().collect_bytes().await.unwrap();
+                let parsed_pem = pem::parse(body.as_ref()).unwrap();
+                assert_eq!(parsed_pem.tag(), "CERTIFICATE REQUEST",);
+            },
+        );
     }
 }
