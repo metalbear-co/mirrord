@@ -95,6 +95,7 @@ fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> MonitorTx {
             mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
             is_operator,
             processes: Vec::new(),
+            port_subscriptions: Vec::new(),
             config: config_value,
         };
 
