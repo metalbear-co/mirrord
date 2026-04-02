@@ -316,7 +316,7 @@ pub mod client {
                 .encode_pem()
                 .map_err(X509CertificateError::from)?;
 
-            // Here we to manually create the create_subresource `Request` and send it with the
+            // Here we manually create `Request::create_subresource` and send it with the
             // `Client`. We can't use `Api::create_subresource`, because it always
             // serializes body to JSON. We need the body to be raw PEM.
             let request = Request::new(R::url_path(&Default::default(), None))
