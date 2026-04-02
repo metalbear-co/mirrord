@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { Loader, cn } from '@metalbear/ui'
+import { Loader, cn, Button } from '@metalbear/ui'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose, DialogTrigger } from '@metalbear/ui'
 import { Activity, PanelLeftClose, PanelLeftOpen, Trash2 } from 'lucide-react'
 import type { SessionInfo } from './types'
 import SessionCard from './SessionCard'
@@ -100,17 +101,35 @@ export default function SessionSidebar({ sessions, selectedId, loading, onSelect
           </span>
           <div className="flex items-center gap-1">
             {sessions.length > 0 && (
-              <button
-                onClick={() => {
-                  if (window.confirm(`Kill all ${sessions.length} session${sessions.length !== 1 ? 's' : ''}?`)) {
-                    onKillAll()
-                  }
-                }}
-                className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                title="Kill all sessions"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <button
+                    className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                    title="Kill all sessions"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Kill all sessions?</DialogTitle>
+                    <DialogDescription>
+                      This will terminate {sessions.length} active mirrord session{sessions.length !== 1 ? 's' : ''}. This action cannot be undone.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogFooter>
+                    <DialogClose asChild>
+                      <Button variant="outline" size="sm">Cancel</Button>
+                    </DialogClose>
+                    <DialogClose asChild>
+                      <Button variant="destructive" size="sm" onClick={onKillAll}>
+                        <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                        Kill All
+                      </Button>
+                    </DialogClose>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             )}
             <button
               onClick={() => {

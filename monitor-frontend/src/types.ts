@@ -3,6 +3,11 @@ export interface ProcessInfo {
   process_name: string
 }
 
+export interface PortSubscription {
+  port: number
+  mode: string
+}
+
 export interface SessionInfo {
   session_id: string
   target: string
@@ -10,6 +15,7 @@ export interface SessionInfo {
   mirrord_version: string
   is_operator: boolean
   processes: ProcessInfo[]
+  port_subscriptions: PortSubscription[]
   config: Record<string, unknown>
 }
 

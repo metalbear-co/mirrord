@@ -51,7 +51,7 @@ export default function SessionCard({ session, selected, onSelect, onKill }: Pro
           )}
         </div>
         <button
-          className="text-[9px] text-destructive bg-destructive/10 border border-destructive/25 px-2 py-0.5 rounded cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+          className="text-[9px] text-destructive bg-destructive/10 border border-destructive/25 px-2 py-0.5 rounded cursor-pointer transition-colors hover:bg-destructive/20"
           onClick={(e) => {
             e.stopPropagation()
             onKill()
