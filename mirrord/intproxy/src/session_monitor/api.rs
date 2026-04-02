@@ -24,6 +24,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::{MonitorEvent, MonitorTx};
 
+/// Hostnames allowed in the `Host` header (DNS rebinding protection).
+const ALLOWED_HOSTS: &[&str] = &["localhost", "127.0.0.1", "[::1]"];
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessInfo {
     pub pid: u32,
@@ -125,6 +128,22 @@ async fn token_auth(
         return response;
     }
 
+    StatusCode::FORBIDDEN.into_response()
+}
+
+/// Middleware that rejects requests whose `Host` header does not resolve to localhost.
+///
+/// This prevents DNS rebinding attacks where an attacker's domain resolves to 127.0.0.1.
+/// The port portion of the Host header (if present) is ignored.
+async fn validate_host(request: Request, next: Next) -> impl IntoResponse {
+    if let Some(host) = request.headers().get(header::HOST) {
+        let host_str = host.to_str().unwrap_or("");
+        // Strip port suffix: "localhost:1234" -> "localhost", "[::1]:1234" -> "[::1]"
+        let hostname = host_str.split(':').next().unwrap_or(host_str);
+        if ALLOWED_HOSTS.contains(&hostname) {
+            return next.run(request).await;
+        }
+    }
     StatusCode::FORBIDDEN.into_response()
 }
 
@@ -255,6 +274,7 @@ pub async fn start_api_server(
     let app = Router::new()
         .route("/health", get(health))
         .merge(authenticated_routes)
+        .layer(middleware::from_fn(validate_host))
         .with_state(state);
 
     tracing::info!(?socket_path, "Session monitor API server starting");
