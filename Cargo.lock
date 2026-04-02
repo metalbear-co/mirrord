@@ -4984,6 +4984,7 @@ dependencies = [
  "tokio-rustls 0.26.4",
  "tokio-stream",
  "tokio-util",
+ "tower-http",
  "tracing",
 ]
 

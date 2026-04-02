@@ -5,7 +5,7 @@ use std::{
 use axum::{
     Json, Router,
     extract::{Request, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::{self, Next},
     response::{
         IntoResponse,
@@ -21,6 +21,10 @@ use tokio::{
 };
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use tokio_util::sync::CancellationToken;
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    set_header::SetResponseHeaderLayer,
+};
 
 use super::{MonitorEvent, MonitorTx};
 
@@ -271,9 +275,49 @@ pub async fn start_api_server(
         .route("/kill", post(kill))
         .layer(middleware::from_fn_with_state(state.clone(), token_auth));
 
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::predicate(|origin, _| {
+            origin
+                .to_str()
+                .ok()
+                .and_then(|s| s.strip_prefix("http://localhost"))
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with(':'))
+        }))
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::OPTIONS,
+        ])
+        .allow_headers([header::CONTENT_TYPE, header::COOKIE])
+        .allow_credentials(true);
+
+    let csp = "default-src 'self'; \
+               script-src 'self'; \
+               style-src 'self' 'unsafe-inline'; \
+               connect-src 'self' ws://localhost:* wss://localhost:*";
+
+    // Layers are applied bottom-up: host validation runs first (outermost), then CORS,
+    // then security headers are appended to every response.
     let app = Router::new()
         .route("/health", get(health))
         .merge(authenticated_routes)
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(csp),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::REFERRER_POLICY,
+            HeaderValue::from_static("no-referrer"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(cors)
         .layer(middleware::from_fn(validate_host))
         .with_state(state);
 

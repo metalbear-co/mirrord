@@ -53,6 +53,7 @@ axum = "0.8.4"
 hex.workspace = true
 serde_json.workspace = true
 home.workspace = true
+tower-http = { version = "0.6.6", features = ["cors", "set-header"] }
 
 [dev-dependencies]
 rcgen.workspace = true
