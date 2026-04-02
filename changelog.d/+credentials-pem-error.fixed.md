@@ -1,0 +1,1 @@
+Fixed an issue where new versions of the mirrord CLI were sometimes not able to use old versions of the mirrord Operator (`Unable to decode to pem body...` error).
