@@ -130,10 +130,10 @@ async fn preview_start(
         CliError::PreviewListFailed(e.to_string())
     })?;
 
-    // Check if there's an existing session with the same key and warns the user about it.
+    // Check if there's an existing session with the same key and warn the user about it.
     if existing_sessions.items.is_empty().not() {
         progress.warning(&format!(
-            "This key {key} is already part of an existing environment. \
+            "the key '{key}' is already part of an existing preview environment. \
             If that’s not what you intended, please switch to a different key."
         ));
     }
@@ -377,7 +377,7 @@ async fn preview_start(
         .as_deref()
         .unwrap_or(operator_api.client().default_namespace());
 
-    progress.success(None);
+    progress.success(Some("preview environment created successfully"));
 
     let key = layer_config.key.as_str();
 
@@ -678,8 +678,9 @@ async fn resolve_config_target(
         .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?
         .clone();
 
-    SessionTarget::from_config(target)
-        .ok_or_else(|| CliError::PreviewTargetResolutionFailed(config_target.to_string()))
+    SessionTarget::from_config(target).ok_or_else(|| {
+        CliError::PreviewTargetResolutionFailed("no valid container found".to_owned())
+    })
 }
 
 fn load_preview_config(
