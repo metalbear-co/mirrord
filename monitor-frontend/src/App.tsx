@@ -98,6 +98,13 @@ export default function App() {
     await fetch(`/api/sessions/${id}/kill`, { method: 'POST' })
   }, [])
 
+  const handleKillAll = useCallback(async () => {
+    const current = sessions
+    for (const s of current) {
+      await fetch(`/api/sessions/${s.session_id}/kill`, { method: 'POST' })
+    }
+  }, [sessions])
+
   const handleSelect = useCallback((id: string) => {
     setSelectedId((prev) => (prev === id || id === '' ? null : id))
   }, [])
@@ -155,11 +162,12 @@ export default function App() {
           loading={loading}
           onSelect={handleSelect}
           onKill={handleKill}
+          onKillAll={handleKillAll}
         />
 
         <div className="flex-1 overflow-hidden">
           {selected ? (
-            <SessionDetail session={selected} />
+            <SessionDetail session={selected} onKill={() => handleKill(selected.session_id)} />
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
               <Activity className="h-8 w-8 opacity-20" />

@@ -27,7 +27,7 @@ const FILTER_CHIPS: { type: string | null; label: string; colorClass: string; ac
   { type: 'dns_query', label: 'DNS', colorClass: 'border-blue-500/30 text-blue-500/60 hover:text-blue-400', activeClass: 'border-blue-500 bg-blue-500/15 text-blue-400' },
   { type: 'file_op', label: 'File Ops', colorClass: 'border-amber-500/30 text-amber-500/60 hover:text-amber-400', activeClass: 'border-amber-500 bg-amber-500/15 text-amber-400' },
   { type: 'outgoing_connection', label: 'Outgoing', colorClass: 'border-purple-500/30 text-purple-500/60 hover:text-purple-400', activeClass: 'border-purple-500 bg-purple-500/15 text-purple-400' },
-  { type: 'port_subscription', label: 'Ports', colorClass: 'border-indigo-500/30 text-indigo-500/60 hover:text-indigo-400', activeClass: 'border-indigo-500 bg-indigo-500/15 text-indigo-400' },
+  { type: 'port_subscription', label: 'Port Subscribe', colorClass: 'border-indigo-500/30 text-indigo-500/60 hover:text-indigo-400', activeClass: 'border-indigo-500 bg-indigo-500/15 text-indigo-400' },
   { type: 'env_var', label: 'Env Vars', colorClass: 'border-pink-500/30 text-pink-500/60 hover:text-pink-400', activeClass: 'border-pink-500 bg-pink-500/15 text-pink-400' },
 ]
 

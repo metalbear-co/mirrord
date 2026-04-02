@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Loader, cn } from '@metalbear/ui'
-import { Activity, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { Activity, PanelLeftClose, PanelLeftOpen, Trash2 } from 'lucide-react'
 import type { SessionInfo } from './types'
 import SessionCard from './SessionCard'
 
@@ -34,9 +34,10 @@ interface SessionSidebarProps {
   loading: boolean
   onSelect: (id: string) => void
   onKill: (id: string) => void
+  onKillAll: () => void
 }
 
-export default function SessionSidebar({ sessions, selectedId, loading, onSelect, onKill }: SessionSidebarProps) {
+export default function SessionSidebar({ sessions, selectedId, loading, onSelect, onKill, onKillAll }: SessionSidebarProps) {
   const [sidebarWidth, setSidebarWidth] = useState(getSavedSidebarWidth)
   const [sidebarHidden, setSidebarHidden] = useState(getSavedSidebarHidden)
   const [isDragging, setIsDragging] = useState(false)
@@ -97,16 +98,27 @@ export default function SessionSidebar({ sessions, selectedId, loading, onSelect
           <span className="text-xs text-muted-foreground">
             {sessions.length} session{sessions.length !== 1 ? 's' : ''}
           </span>
-          <button
-            onClick={() => {
-              setSidebarHidden(true)
-              localStorage.setItem(SIDEBAR_HIDDEN_KEY, 'true')
-            }}
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            title="Hide sidebar"
-          >
-            <PanelLeftClose className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            {sessions.length > 0 && (
+              <button
+                onClick={onKillAll}
+                className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                title="Kill all sessions"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setSidebarHidden(true)
+                localStorage.setItem(SIDEBAR_HIDDEN_KEY, 'true')
+              }}
+              className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              title="Hide sidebar"
+            >
+              <PanelLeftClose className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         {loading ? (
           <div className="flex items-center justify-center py-12">

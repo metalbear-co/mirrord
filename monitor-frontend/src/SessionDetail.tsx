@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { cn } from '@metalbear/ui'
 import { Badge, Separator } from '@metalbear/ui'
 import {
-  Clock, Cpu, Server, Settings, Activity, Radio, Zap, Globe, FileText,
-  ArrowUpRight, ArrowDownLeft, Lock, Unlock, Eye, Copy, ChevronRight,
+  Clock, Cpu, Server, Settings, Activity, Radio, Globe, FileText,
+  ArrowUpRight, ArrowDownLeft, Copy, ChevronRight, Trash2,
 } from 'lucide-react'
 import type { SessionInfo, MonitorEvent } from './types'
 import EventStream from './EventStream'
@@ -12,6 +12,7 @@ type DetailTab = 'overview' | 'events' | 'config'
 
 interface Props {
   session: SessionInfo
+  onKill: () => void
 }
 
 interface PortSub {
@@ -276,75 +277,43 @@ function OverviewTab({ session, portSubs, processes, eventCounts, onSwitchTab }:
           <div className="px-4 py-2.5 bg-card/50 border-b border-border">
             <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Session</span>
           </div>
-          <div className="grid grid-cols-2 divide-x divide-border">
-            <div className="px-4 py-2.5">
-              <div className="text-[10px] text-muted-foreground mb-0.5">Target</div>
-              <div className="text-xs font-mono font-medium text-foreground">{session.target}</div>
+          <div className="divide-y divide-border">
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-[10px] text-muted-foreground">Target</span>
+              <span className="text-xs font-mono font-medium text-foreground">{session.target}</span>
             </div>
-            <div className="px-4 py-2.5">
-              <div className="text-[10px] text-muted-foreground mb-0.5">Session ID</div>
-              <div className="text-xs font-mono text-foreground">{session.session_id}</div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-[10px] text-muted-foreground">Session ID</span>
+              <span className="text-xs font-mono text-foreground">{session.session_id}</span>
             </div>
-          </div>
-          <div className="grid grid-cols-3 divide-x divide-border border-t border-border">
-            <div className="px-4 py-2.5">
-              <div className="text-[10px] text-muted-foreground mb-0.5">Version</div>
-              <div className="text-xs font-mono text-foreground">v{session.mirrord_version}</div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-[10px] text-muted-foreground">Version</span>
+              <span className="text-xs font-mono text-foreground">v{session.mirrord_version}</span>
             </div>
-            <div className="px-4 py-2.5">
-              <div className="text-[10px] text-muted-foreground mb-0.5">Mode</div>
-              <div className="text-xs text-foreground flex items-center gap-1.5">
-                {session.is_operator ? <Lock className="h-3 w-3 text-primary" /> : <Unlock className="h-3 w-3" />}
-                {session.is_operator ? 'Operator' : 'Direct'}
-              </div>
-            </div>
-            <div className="px-4 py-2.5">
-              <div className="text-[10px] text-muted-foreground mb-0.5">Key</div>
-              <div className="text-xs font-mono text-foreground truncate">
-                {(() => {
-                  const rawKey = (session.config as Record<string, unknown>)?.key
-                  if (!rawKey) return 'N/A'
-                  if (typeof rawKey === 'string') return rawKey.slice(0, 12) + '...'
-                  if (typeof rawKey === 'object' && rawKey !== null) {
-                    const val = String(Object.values(rawKey as Record<string, unknown>)[0] ?? '')
-                    return val ? val.slice(0, 12) + '...' : 'N/A'
-                  }
-                  return 'N/A'
-                })()}
-              </div>
-            </div>
+            {(() => {
+              const rawKey = (session.config as Record<string, unknown>)?.key
+              if (!rawKey) return null
+              let keyStr: string
+              if (typeof rawKey === 'string') keyStr = rawKey
+              else if (typeof rawKey === 'object' && rawKey !== null) {
+                keyStr = String(Object.values(rawKey as Record<string, unknown>)[0] ?? '')
+              } else keyStr = String(rawKey)
+              if (!keyStr) return null
+              return (
+                <div className="flex items-center justify-between px-4 py-2.5">
+                  <span className="text-[10px] text-muted-foreground">Key</span>
+                  <span className="text-xs font-mono text-foreground">{keyStr}</span>
+                </div>
+              )
+            })()}
           </div>
         </div>
-
-        {/* Teams features discovery */}
-        {session.is_operator && (
-          <div className="rounded-lg border border-dashed border-primary/20 bg-primary/[0.02] overflow-hidden">
-            <div className="px-4 py-3 flex items-start gap-3">
-              <Eye className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-              <div>
-                <div className="text-xs font-medium text-foreground mb-1">Explore more with mirrord for Teams</div>
-                <div className="text-[11px] text-muted-foreground leading-relaxed">
-                  Your operator session supports advanced features like queue splitting,
-                  database branching, and preview environments.{' '}
-                  <a
-                    href="https://metalbear.com/mirrord/pricing/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary hover:underline"
-                  >
-                    Learn more
-                  </a>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )
 }
 
-export default function SessionDetail({ session }: Props) {
+export default function SessionDetail({ session, onKill }: Props) {
   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
   const [portSubs, setPortSubs] = useState<PortSub[]>([])
   const [processes, setProcesses] = useState<TrackedProcess[]>([])
@@ -420,6 +389,13 @@ export default function SessionDetail({ session }: Props) {
             </Badge>
           </div>
           <span className="text-[10px] text-muted-foreground font-mono">v{session.mirrord_version}</span>
+          <button
+            onClick={onKill}
+            className="ml-2 text-[10px] text-destructive bg-destructive/10 border border-destructive/25 px-2.5 py-1 rounded flex items-center gap-1 hover:bg-destructive/20 transition-colors"
+          >
+            <Trash2 className="h-3 w-3" />
+            Kill Session
+          </button>
         </div>
       </div>
 
