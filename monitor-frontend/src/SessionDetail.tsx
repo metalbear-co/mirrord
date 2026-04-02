@@ -1,14 +1,24 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { cn } from '@metalbear/ui'
 import { Badge, Separator } from '@metalbear/ui'
-import { Clock, Cpu, Server, Settings, Activity, FileText, Globe, Zap, Shield } from 'lucide-react'
-import type { SessionInfo } from './types'
+import { Clock, Cpu, Server, Settings, Activity, Radio, Key } from 'lucide-react'
+import type { SessionInfo, MonitorEvent } from './types'
 import EventStream from './EventStream'
 
 type DetailTab = 'overview' | 'events' | 'config'
 
 interface Props {
   session: SessionInfo
+}
+
+interface PortSub {
+  port: number
+  mode: string
+}
+
+interface TrackedProcess {
+  pid: number
+  process_name: string
 }
 
 function formatUptime(startedAt: string): string {
@@ -41,51 +51,6 @@ function StatCard({ icon: Icon, label, value, detail, color }: {
   )
 }
 
-function ConfigSection({ config }: { config: Record<string, unknown> }) {
-  const items: { label: string; value: string }[] = []
-
-  const targetPath = config.target as Record<string, unknown> | undefined
-  if (targetPath?.path) {
-    const path = targetPath.path as Record<string, unknown>
-    const kind = Object.keys(path).find(k => k !== 'container') ?? 'target'
-    items.push({ label: 'Target', value: `${kind}/${path[kind] ?? ''}` })
-  }
-  if (targetPath?.namespace) items.push({ label: 'Namespace', value: String(targetPath.namespace) })
-
-  items.push({ label: 'Incoming', value: extractConfigValue(config, 'feature', 'network', 'incoming', 'mode') })
-  items.push({ label: 'Outgoing TCP', value: extractConfigValue(config, 'feature', 'network', 'outgoing', 'tcp') })
-  items.push({ label: 'DNS', value: extractConfigValue(config, 'feature', 'network', 'dns', 'enabled') })
-  items.push({ label: 'File System', value: extractConfigValue(config, 'feature', 'fs', 'mode') })
-  items.push({ label: 'Hostname', value: extractConfigValue(config, 'feature', 'hostname') })
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-border overflow-hidden">
-        <div className="px-4 py-2 bg-card/50 border-b border-border">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Configuration Summary</span>
-        </div>
-        <div className="divide-y divide-border">
-          {items.map(({ label, value }) => (
-            <div key={label} className="flex items-center justify-between px-4 py-2.5">
-              <span className="text-xs text-muted-foreground">{label}</span>
-              <span className="text-xs font-mono font-medium text-foreground">{value}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-border overflow-hidden">
-        <div className="px-4 py-2 bg-card/50 border-b border-border">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Raw Config</span>
-        </div>
-        <pre className="p-4 text-[11px] font-mono text-foreground/80 whitespace-pre-wrap overflow-auto max-h-[400px]">
-          {JSON.stringify(config, null, 2)}
-        </pre>
-      </div>
-    </div>
-  )
-}
-
 function extractConfigValue(obj: unknown, ...paths: string[]): string {
   let current = obj
   for (const path of paths) {
@@ -101,21 +66,20 @@ function extractConfigValue(obj: unknown, ...paths: string[]): string {
   return 'disabled'
 }
 
-function OverviewTab({ session }: { session: SessionInfo }) {
-  const config = session.config as Record<string, unknown>
-  const incomingMode = extractConfigValue(config, 'feature', 'network', 'incoming', 'mode')
-  const fsMode = extractConfigValue(config, 'feature', 'fs', 'mode')
-  const dnsEnabled = extractConfigValue(config, 'feature', 'network', 'dns', 'enabled')
-
+function OverviewTab({ session, portSubs, processes }: {
+  session: SessionInfo
+  portSubs: PortSub[]
+  processes: TrackedProcess[]
+}) {
   return (
     <div className="p-4 space-y-5 overflow-auto h-full">
       {/* Stats row */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <StatCard
           icon={Cpu}
           label="Processes"
-          value={session.processes.length}
-          detail={session.processes.map(p => p.process_name || `PID ${p.pid}`).join(', ') || 'None connected'}
+          value={processes.length}
+          detail={processes.map(p => p.process_name || `PID ${p.pid}`).join(', ') || 'None connected'}
         />
         <StatCard
           icon={Clock}
@@ -123,15 +87,11 @@ function OverviewTab({ session }: { session: SessionInfo }) {
           value={formatUptime(session.started_at)}
         />
         <StatCard
-          icon={Zap}
-          label="Incoming"
-          value={incomingMode}
-          color={incomingMode === 'steal' ? '#f59e0b' : incomingMode === 'mirror' ? '#4ade80' : undefined}
-        />
-        <StatCard
-          icon={FileText}
-          label="File System"
-          value={fsMode}
+          icon={Radio}
+          label="Port Subscriptions"
+          value={portSubs.length}
+          detail={portSubs.map(p => `${p.port} (${p.mode})`).join(', ') || 'None'}
+          color={portSubs.length > 0 ? '#4ade80' : undefined}
         />
       </div>
 
@@ -159,50 +119,134 @@ function OverviewTab({ session }: { session: SessionInfo }) {
               {session.is_operator ? 'Operator' : 'Direct'}
             </Badge>
           </div>
-          {session.processes.length > 0 && (
-            <div className="flex items-center justify-between px-4 py-2.5">
-              <span className="text-xs text-muted-foreground">Processes</span>
-              <div className="flex gap-1.5">
-                {session.processes.map(p => (
-                  <Badge key={p.pid} variant="outline" className="text-[10px] px-2 py-0 h-5 font-mono">
-                    {p.process_name || 'unknown'} ({p.pid})
-                  </Badge>
-                ))}
+          {(() => {
+            const rawKey = (session.config as Record<string, unknown>)?.key
+            if (!rawKey) return null
+            let keyStr: string
+            if (typeof rawKey === 'string') {
+              keyStr = rawKey
+            } else if (typeof rawKey === 'object' && rawKey !== null) {
+              const val = Object.values(rawKey as Record<string, unknown>)[0]
+              keyStr = String(val ?? '')
+            } else {
+              keyStr = String(rawKey)
+            }
+            if (!keyStr) return null
+            return (
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs text-muted-foreground">Key</span>
+                <span className="text-xs font-mono text-foreground truncate max-w-[300px]">{keyStr}</span>
               </div>
-            </div>
-          )}
+            )
+          })()}
         </div>
       </div>
 
-      {/* Config summary */}
+      {/* Processes */}
       <div className="rounded-lg border border-border overflow-hidden">
         <div className="px-4 py-2 bg-card/50 border-b border-border">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Feature Configuration</span>
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Processes</span>
         </div>
-        <div className="grid grid-cols-3 divide-x divide-border">
-          <div className="p-3 text-center">
-            <Globe className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
-            <div className="text-[10px] text-muted-foreground mb-0.5">Network</div>
-            <div className="text-xs font-medium text-foreground">{incomingMode}</div>
+        {processes.length === 0 ? (
+          <div className="px-4 py-6 text-center text-xs text-muted-foreground">
+            No processes connected yet
           </div>
-          <div className="p-3 text-center">
-            <FileText className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
-            <div className="text-[10px] text-muted-foreground mb-0.5">File System</div>
-            <div className="text-xs font-medium text-foreground">{fsMode}</div>
+        ) : (
+          <div className="divide-y divide-border">
+            {processes.map(p => (
+              <div key={p.pid} className="flex items-center justify-between px-4 py-2.5">
+                <div className="flex items-center gap-2">
+                  <Cpu className="h-3 w-3 text-muted-foreground" />
+                  <span className="text-xs font-mono font-medium text-foreground">
+                    {p.process_name || 'unknown'}
+                  </span>
+                </div>
+                <span className="text-xs font-mono text-muted-foreground">PID {p.pid}</span>
+              </div>
+            ))}
           </div>
-          <div className="p-3 text-center">
-            <Shield className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
-            <div className="text-[10px] text-muted-foreground mb-0.5">DNS</div>
-            <div className="text-xs font-medium text-foreground">{dnsEnabled}</div>
-          </div>
-        </div>
+        )}
       </div>
+
+      {/* Port subscriptions */}
+      {portSubs.length > 0 && (
+        <div className="rounded-lg border border-border overflow-hidden">
+          <div className="px-4 py-2 bg-card/50 border-b border-border">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Port Subscriptions</span>
+          </div>
+          <div className="divide-y divide-border">
+            {portSubs.map(p => (
+              <div key={p.port} className="flex items-center justify-between px-4 py-2.5">
+                <div className="flex items-center gap-2">
+                  <Radio className="h-3 w-3 text-muted-foreground" />
+                  <span className="text-xs font-mono font-medium text-foreground">
+                    :{p.port}
+                  </span>
+                </div>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    'text-[10px] px-2 py-0 h-5',
+                    p.mode === 'steal' ? 'border-amber-500/50 text-amber-500' : 'border-green-500/50 text-green-500'
+                  )}
+                >
+                  {p.mode}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 export default function SessionDetail({ session }: Props) {
   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
+  const [portSubs, setPortSubs] = useState<PortSub[]>([])
+  const [processes, setProcesses] = useState<TrackedProcess[]>([])
+  const eventSourceRef = useRef<EventSource | null>(null)
+
+  // Track port subscriptions and processes from the SSE event stream
+  useEffect(() => {
+    setPortSubs([])
+    setProcesses([])
+
+    const eventSource = new EventSource(`/api/sessions/${session.session_id}/events`)
+    eventSourceRef.current = eventSource
+
+    eventSource.onmessage = (e) => {
+      let event: MonitorEvent
+      try {
+        event = JSON.parse(e.data)
+      } catch {
+        return
+      }
+
+      if (event.type === 'port_subscription') {
+        setPortSubs(prev => {
+          if (prev.some(p => p.port === event.port)) return prev
+          return [...prev, { port: event.port, mode: event.mode }]
+        })
+      } else if (event.type === 'layer_connected') {
+        setProcesses(prev => {
+          if (prev.some(p => p.pid === event.pid)) return prev
+          return [...prev, { pid: event.pid, process_name: event.process_name }]
+        })
+      } else if (event.type === 'layer_disconnected') {
+        setProcesses(prev => prev.filter(p => p.pid !== event.pid))
+      }
+    }
+
+    eventSource.onerror = () => {
+      eventSource.close()
+    }
+
+    return () => {
+      eventSource.close()
+      eventSourceRef.current = null
+    }
+  }, [session.session_id])
 
   const tabs: { id: DetailTab; label: string; icon: typeof Activity }[] = [
     { id: 'overview', label: 'Overview', icon: Server },
@@ -255,11 +299,15 @@ export default function SessionDetail({ session }: Props) {
 
       {/* Tab content */}
       <div className="flex-1 overflow-hidden">
-        {activeTab === 'overview' && <OverviewTab session={session} />}
+        {activeTab === 'overview' && (
+          <OverviewTab session={session} portSubs={portSubs} processes={processes} />
+        )}
         {activeTab === 'events' && <EventStream session={session} />}
         {activeTab === 'config' && (
           <div className="p-4 overflow-auto h-full">
-            <ConfigSection config={session.config as Record<string, unknown>} />
+            <pre className="p-4 text-[11px] font-mono text-foreground/80 whitespace-pre-wrap overflow-auto rounded-lg border border-border bg-card/30">
+              {JSON.stringify(session.config, null, 2)}
+            </pre>
           </div>
         )}
       </div>

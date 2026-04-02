@@ -163,7 +163,7 @@ export default function App() {
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
               <Activity className="h-8 w-8 opacity-30" />
-              <p className="text-sm">Select a session to view live events</p>
+              <p className="text-sm">Select a session to get started</p>
             </div>
           )}
         </div>
