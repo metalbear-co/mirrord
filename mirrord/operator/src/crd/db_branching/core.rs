@@ -170,6 +170,8 @@ impl std::fmt::Display for BranchDatabasePhase {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BranchDatabaseStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pod_name: Option<String>,
     pub phase: BranchDatabasePhase,
     /// Time when the branch database should be deleted.
     pub expire_time: MicroTime,
