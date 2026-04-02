@@ -84,6 +84,7 @@ url.workspace = true
 [target.'cfg(unix)'.dependencies]
 rand.workspace = true
 axum = { version = "0.8.4", features = ["ws"] }
+tower-http = { version = "0.6.6", features = ["cors", "set-header"] }
 rust-embed = "8"
 notify = { version = "8", features = ["macos_fsevent"] }
 mime_guess = "2"

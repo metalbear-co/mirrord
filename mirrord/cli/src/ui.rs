@@ -17,10 +17,11 @@ use std::{
 use axum::{
     Router,
     extract::{
-        Path, State,
+        Path, Request, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response, sse},
     routing::{get, post},
 };
@@ -28,16 +29,28 @@ use eventsource_stream::Eventsource;
 use futures::stream::StreamExt as _;
 use mirrord_intproxy::session_monitor::api::SessionInfo;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use rand::Rng;
 #[cfg(not(debug_assertions))]
 use rust_embed::Embed;
 use serde::Serialize;
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    set_header::SetResponseHeaderLayer,
+};
 use tracing::{debug, error, info, warn};
 
 use crate::{config::UiArgs, error::CliError};
 
 const MAX_EVENTS_PER_SESSION: usize = 500;
+
+/// Hostnames allowed in the `Host` header (DNS rebinding protection).
+const ALLOWED_HOSTS: &[&str] = &["localhost", "127.0.0.1", "[::1]"];
+
+/// Origin prefixes allowed for WebSocket upgrades.
+const ALLOWED_ORIGIN_PREFIXES: &[&str] =
+    &["http://localhost:", "http://127.0.0.1:", "http://[::1]:"];
 
 /// Errors from communicating with a per-session monitor API over its Unix socket.
 #[derive(Debug, thiserror::Error)]
@@ -77,6 +90,95 @@ impl Serialize for TrackedSession {
 struct AppState {
     sessions: RwLock<HashMap<String, TrackedSession>>,
     notify_tx: broadcast::Sender<SessionNotification>,
+    token: String,
+    sessions_dir: PathBuf,
+}
+
+/// Generates a random 32-byte hex token for API authentication.
+fn generate_token() -> String {
+    let bytes: [u8; 16] = rand::rng().random();
+    hex::encode(bytes)
+}
+
+/// Parses the `mirrord_token` value from a raw `Cookie` header.
+fn parse_cookie_token(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(header::COOKIE)?
+        .to_str()
+        .ok()?
+        .split(';')
+        .find_map(|pair| {
+            let pair = pair.trim();
+            pair.strip_prefix("mirrord_token=")
+        })
+}
+
+/// Parses the `token` query parameter from the request URI.
+fn parse_query_token(uri: &axum::http::Uri) -> Option<&str> {
+    uri.query()?.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key == "token").then_some(value)
+    })
+}
+
+/// Middleware that validates the authentication token on every request.
+///
+/// Checks the `mirrord_token` cookie first, then falls back to the `?token=` query parameter.
+/// If the query parameter is valid, sets an `HttpOnly`, `SameSite=Strict` cookie for subsequent
+/// requests.
+async fn token_auth(
+    State(state): State<Arc<AppState>>,
+    request: Request,
+    next: Next,
+) -> impl IntoResponse {
+    let expected = &state.token;
+
+    if let Some(cookie_token) = parse_cookie_token(request.headers())
+        && cookie_token == expected
+    {
+        return next.run(request).await;
+    }
+
+    if let Some(query_token) = parse_query_token(request.uri())
+        && query_token == expected
+    {
+        let mut response = next.run(request).await;
+        let cookie_value = format!("mirrord_token={expected}; HttpOnly; SameSite=Strict; Path=/");
+        response.headers_mut().insert(
+            header::SET_COOKIE,
+            cookie_value
+                .parse()
+                .expect("cookie value should be valid header"),
+        );
+        return response;
+    }
+
+    StatusCode::FORBIDDEN.into_response()
+}
+
+/// Middleware that rejects requests whose `Host` header does not resolve to localhost.
+async fn validate_host(request: Request, next: Next) -> impl IntoResponse {
+    if let Some(host) = request.headers().get(header::HOST) {
+        let host_str = host.to_str().unwrap_or("");
+        let hostname = host_str.split(':').next().unwrap_or(host_str);
+        if ALLOWED_HOSTS.contains(&hostname) {
+            return next.run(request).await;
+        }
+    }
+    StatusCode::FORBIDDEN.into_response()
+}
+
+/// Returns true if the `Origin` header value starts with an allowed localhost prefix.
+fn is_allowed_origin(origin: &str) -> bool {
+    ALLOWED_ORIGIN_PREFIXES
+        .iter()
+        .any(|prefix| origin.starts_with(prefix))
+}
+
+/// Reads the per-session authentication token from `~/.mirrord/sessions/<id>.token`.
+fn read_session_token(sessions_dir: &std::path::Path, session_id: &str) -> Option<String> {
+    let token_path = sessions_dir.join(format!("{session_id}.token"));
+    std::fs::read_to_string(token_path).ok()
 }
 
 /// Creates a reqwest client configured to connect via the given Unix socket.
@@ -86,8 +188,15 @@ fn unix_client(socket_path: &std::path::Path) -> Result<reqwest::Client, Session
         .build()?)
 }
 
-async fn fetch_session_info(client: &reqwest::Client) -> Result<SessionInfo, SessionError> {
-    let resp = client.get("http://localhost/info").send().await?;
+async fn fetch_session_info(
+    client: &reqwest::Client,
+    session_token: Option<&str>,
+) -> Result<SessionInfo, SessionError> {
+    let url = match session_token {
+        Some(token) => format!("http://localhost/info?token={token}"),
+        None => "http://localhost/info".to_owned(),
+    };
+    let resp = client.get(&url).send().await?;
     if !resp.status().is_success() {
         return Err(SessionError::BadStatus(resp.status()));
     }
@@ -98,6 +207,7 @@ async fn fetch_session_info(client: &reqwest::Client) -> Result<SessionInfo, Ses
 /// a pinned `Eventsource` stream that yields parsed SSE events.
 async fn open_sse_stream(
     client: &reqwest::Client,
+    session_token: Option<&str>,
 ) -> Result<
     std::pin::Pin<
         Box<
@@ -111,8 +221,12 @@ async fn open_sse_stream(
     >,
     SessionError,
 > {
+    let url = match session_token {
+        Some(token) => format!("http://localhost/events?token={token}"),
+        None => "http://localhost/events".to_owned(),
+    };
     let resp = client
-        .get("http://localhost/events")
+        .get(&url)
         .header("accept", "text/event-stream")
         .send()
         .await?;
@@ -137,7 +251,8 @@ async fn buffer_session_events(session_id: &str, values: Vec<serde_json::Value>,
 
 /// Connects to a session's SSE /events endpoint and buffers events into the shared state.
 async fn stream_session_events(session_id: String, client: reqwest::Client, state: Arc<AppState>) {
-    let mut sse_stream = match open_sse_stream(&client).await {
+    let session_token = read_session_token(&state.sessions_dir, &session_id);
+    let mut sse_stream = match open_sse_stream(&client, session_token.as_deref()).await {
         Ok(s) => s,
         Err(err) => {
             warn!(%session_id, ?err, "Failed to open SSE stream");
@@ -200,7 +315,8 @@ async fn add_session(session_id: String, socket_path: PathBuf, state: Arc<AppSta
         }
     };
 
-    let info = match fetch_session_info(&client).await {
+    let session_token = read_session_token(&state.sessions_dir, &session_id);
+    let info = match fetch_session_info(&client, session_token.as_deref()).await {
         Ok(i) => i,
         Err(err) => {
             debug!(%session_id, ?err, "Could not fetch session info, removing stale socket");
@@ -265,10 +381,14 @@ async fn session_events_sse(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    let (buffered_events, client) = {
+    let (buffered_events, client, session_token) = {
         let sessions = state.sessions.read().await;
         match sessions.get(&id) {
-            Some(session) => (session.events.clone(), session.client.clone()),
+            Some(session) => (
+                session.events.clone(),
+                session.client.clone(),
+                read_session_token(&state.sessions_dir, &id),
+            ),
             None => return StatusCode::NOT_FOUND.into_response(),
         }
     };
@@ -284,7 +404,7 @@ async fn session_events_sse(
             }
         }
 
-        let mut sse_stream = match open_sse_stream(&client).await {
+        let mut sse_stream = match open_sse_stream(&client, session_token.as_deref()).await {
             Ok(s) => s,
             Err(err) => {
                 warn!(?err, "Failed to open SSE stream for proxy");
@@ -292,7 +412,6 @@ async fn session_events_sse(
             }
         };
 
-        use futures::stream::StreamExt as _;
         while let Some(result) = sse_stream.next().await {
             let event = match result {
                 Ok(e) => e,
@@ -322,15 +441,22 @@ async fn session_events_sse(
 }
 
 async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    let client = {
+    let (client, session_token) = {
         let sessions = state.sessions.read().await;
         match sessions.get(&id) {
-            Some(session) => session.client.clone(),
+            Some(session) => (
+                session.client.clone(),
+                read_session_token(&state.sessions_dir, &id),
+            ),
             None => return StatusCode::NOT_FOUND.into_response(),
         }
     };
 
-    match client.post("http://localhost/kill").send().await {
+    let url = match session_token.as_deref() {
+        Some(token) => format!("http://localhost/kill?token={token}"),
+        None => "http://localhost/kill".to_owned(),
+    };
+    match client.post(&url).send().await {
         Ok(resp) => {
             let val: serde_json::Value = resp.json().await.unwrap_or_else(|err| {
                 warn!(?err, "Failed to parse kill response body");
@@ -349,8 +475,19 @@ async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>
     }
 }
 
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
+async fn ws_handler(
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if let Some(origin) = headers.get(header::ORIGIN) {
+        let origin_str = origin.to_str().unwrap_or("");
+        if !is_allowed_origin(origin_str) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+    }
     ws.on_upgrade(|socket| ws_connection(socket, state))
+        .into_response()
 }
 
 async fn ws_connection(mut socket: WebSocket, state: Arc<AppState>) {
@@ -493,11 +630,52 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/sessions/{id}/events", get(session_events_sse))
         .route("/sessions/{id}/kill", post(kill_session));
 
-    Router::new()
+    let authenticated_routes = Router::new()
         .nest("/api", api_routes)
         .route("/ws", get(ws_handler))
-        .with_state(state)
+        .layer(middleware::from_fn_with_state(state.clone(), token_auth));
+
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::predicate(|origin, _| {
+            origin.to_str().ok().is_some_and(is_allowed_origin)
+        }))
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::OPTIONS,
+        ])
+        .allow_headers([header::CONTENT_TYPE, header::COOKIE])
+        .allow_credentials(true);
+
+    let csp = "default-src 'self'; \
+               script-src 'self'; \
+               style-src 'self' 'unsafe-inline'; \
+               connect-src 'self' ws://localhost:* wss://localhost:*";
+
+    // Layers are applied bottom-up: host validation runs first (outermost), then CORS,
+    // then security headers are appended to every response.
+    Router::new()
+        .merge(authenticated_routes)
+        .with_state(state.clone())
         .fallback(static_handler)
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(csp),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::REFERRER_POLICY,
+            HeaderValue::from_static("no-referrer"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(cors)
+        .layer(middleware::from_fn(validate_host))
 }
 
 pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
@@ -510,10 +688,13 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
         .map_err(|e| CliError::UiError(format!("failed to create sessions directory: {e}")))?;
 
     let (notify_tx, _) = broadcast::channel::<SessionNotification>(256);
+    let token = generate_token();
 
     let state = Arc::new(AppState {
         sessions: RwLock::new(HashMap::new()),
         notify_tx,
+        token: token.clone(),
+        sessions_dir: sessions_dir.clone(),
     });
 
     scan_existing_sessions(&sessions_dir, &state).await;
@@ -531,7 +712,7 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
     let addr = listener
         .local_addr()
         .map_err(|e| CliError::UiError(format!("failed to get listener address: {e}")))?;
-    let url = format!("http://{addr}");
+    let url = format!("http://{addr}?token={token}");
     eprintln!("mirrord session monitor: {url}");
 
     if let Err(err) = opener::open(&url) {
