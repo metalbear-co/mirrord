@@ -768,6 +768,10 @@ async fn exec(
             None
         }) {
         let port = redis_config.local.port;
+        let redis_instance_id = local_redis::resolve_instance_id(
+            redis_config.id.as_deref(),
+            config.key.as_str()
+        );
 
         // Get the override variable and build the appropriate connection string
         if let Some(variable) = redis_config.connection.override_variable() {
@@ -784,7 +788,7 @@ async fn exec(
         // Auto-configure: ignore localhost so traffic goes directly to local Redis
         config.feature.network.outgoing.ignore_localhost = true;
 
-        Some(local_redis::start(progress, &redis_config.local).await?)
+        Some(local_redis::start(progress, &redis_config.local, redis_instance_id).await?)
     } else {
         None
     };
