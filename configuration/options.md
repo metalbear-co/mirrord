@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-03-31T00:00:00.000Z
+lastmod: 2026-04-02T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -423,6 +423,15 @@ Controls how long the agent pod persists for after the agent exits (in seconds).
 Can be useful for collecting logs.
 
 Defaults to `1`.
+
+## api {#root-api}
+
+Enables the local session monitor API server.
+
+When enabled, mirrord exposes a Unix socket at `~/.mirrord/sessions/<session-id>.sock`
+with HTTP endpoints for observing session activity in real time.
+
+Defaults to `true`.
 
 ## baggage {#root-baggage}
 
