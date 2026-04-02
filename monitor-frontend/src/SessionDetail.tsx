@@ -2,13 +2,30 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { cn } from '@metalbear/ui'
 import { Badge, Separator } from '@metalbear/ui'
 import {
-  Clock, Cpu, Server, Settings, Activity, Radio, Globe, FileText,
-  ArrowUpRight, ArrowDownLeft, Copy, ChevronRight, Trash2,
+  Clock, Cpu, Server, Settings, Activity, Radio, ChevronRight, Trash2,
 } from 'lucide-react'
 import type { SessionInfo, MonitorEvent } from './types'
 import EventStream from './EventStream'
 
 type DetailTab = 'overview' | 'events' | 'config'
+
+/** Recursively strip null values and empty objects from config for cleaner display. */
+function stripNulls(obj: unknown): unknown {
+  if (obj === null || obj === undefined) return undefined
+  if (Array.isArray(obj)) {
+    const filtered = obj.map(stripNulls).filter(v => v !== undefined)
+    return filtered.length > 0 ? filtered : undefined
+  }
+  if (typeof obj === 'object') {
+    const result: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      const stripped = stripNulls(value)
+      if (stripped !== undefined) result[key] = stripped
+    }
+    return Object.keys(result).length > 0 ? result : undefined
+  }
+  return obj
+}
 
 interface Props {
   session: SessionInfo
@@ -48,20 +65,6 @@ function formatUptime(startedAt: string): string {
   return `${seconds}s`
 }
 
-function extractConfigValue(obj: unknown, ...paths: string[]): string {
-  let current = obj
-  for (const path of paths) {
-    if (current && typeof current === 'object' && path in (current as Record<string, unknown>)) {
-      current = (current as Record<string, unknown>)[path]
-    } else {
-      return 'off'
-    }
-  }
-  if (typeof current === 'string') return current
-  if (typeof current === 'boolean') return current ? 'on' : 'off'
-  if (typeof current === 'number') return String(current)
-  return 'off'
-}
 
 function LiveDot({ active, className }: { active: boolean; className?: string }) {
   return (
@@ -77,50 +80,6 @@ function LiveDot({ active, className }: { active: boolean; className?: string })
   )
 }
 
-function FeatureRow({ icon: Icon, label, value, active, count, hint }: {
-  icon: typeof Activity
-  label: string
-  value: string
-  active: boolean
-  count?: number
-  hint?: string
-}) {
-  return (
-    <div className={cn(
-      'flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors',
-      active ? 'bg-primary/5' : 'opacity-60'
-    )}>
-      <div className={cn(
-        'flex items-center justify-center w-7 h-7 rounded-md',
-        active ? 'bg-primary/10 text-primary' : 'bg-muted/50 text-muted-foreground'
-      )}>
-        <Icon className="h-3.5 w-3.5" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-foreground">{label}</span>
-          {count !== undefined && count > 0 && (
-            <span className="text-[10px] font-mono text-primary tabular-nums">{count}</span>
-          )}
-        </div>
-        {hint && <div className="text-[10px] text-muted-foreground truncate">{hint}</div>}
-      </div>
-      <Badge
-        variant="outline"
-        className={cn(
-          'text-[9px] px-1.5 py-0 h-4 font-mono shrink-0',
-          active
-            ? value === 'steal' ? 'border-amber-500/40 text-amber-500 bg-amber-500/5'
-              : value === 'mirror' ? 'border-green-500/40 text-green-500 bg-green-500/5'
-              : 'border-primary/40 text-primary bg-primary/5'
-            : 'border-border text-muted-foreground'
-        )}
-      >
-        {value}
-      </Badge>
-    </div>
-  )
-}
 
 function OverviewTab({ session, portSubs, processes, eventCounts, onSwitchTab }: {
   session: SessionInfo
@@ -129,17 +88,6 @@ function OverviewTab({ session, portSubs, processes, eventCounts, onSwitchTab }:
   eventCounts: EventCounts
   onSwitchTab: (tab: DetailTab) => void
 }) {
-  const config = session.config as Record<string, unknown>
-  const incomingMode = extractConfigValue(config, 'feature', 'network', 'incoming', 'mode')
-  const outgoingTcp = extractConfigValue(config, 'feature', 'network', 'outgoing', 'tcp')
-  const dnsEnabled = extractConfigValue(config, 'feature', 'network', 'dns', 'enabled')
-  const fsMode = extractConfigValue(config, 'feature', 'fs', 'mode')
-  const envEnabled = extractConfigValue(config, 'feature', 'env', 'include') !== 'off' ||
-    extractConfigValue(config, 'feature', 'env', 'exclude') !== 'off'
-    ? 'on' : extractConfigValue(config, 'feature', 'env', 'unset') !== 'off' ? 'filtered' : 'off'
-  const hostnameEnabled = extractConfigValue(config, 'feature', 'hostname')
-  const copyTargetEnabled = extractConfigValue(config, 'feature', 'copy_target', 'enabled')
-
   const [uptimeStr, setUptimeStr] = useState(formatUptime(session.started_at))
 
   useEffect(() => {
@@ -152,13 +100,6 @@ function OverviewTab({ session, portSubs, processes, eventCounts, onSwitchTab }:
       <div className="p-4 space-y-4 max-w-3xl">
         {/* Live status strip */}
         <div className="flex items-center gap-6 px-4 py-3 rounded-lg bg-card/40 border border-border">
-          <div className="flex items-center gap-2">
-            <LiveDot active={processes.length > 0} />
-            <span className="text-xs font-medium text-foreground">
-              {processes.length > 0 ? 'Active' : 'Idle'}
-            </span>
-          </div>
-          <Separator orientation="vertical" className="h-4" />
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Clock className="h-3 w-3" />
             <span className="font-mono tabular-nums">{uptimeStr}</span>
@@ -185,92 +126,59 @@ function OverviewTab({ session, portSubs, processes, eventCounts, onSwitchTab }:
           </button>
         </div>
 
-        {/* What mirrord is doing */}
-        <div className="rounded-lg border border-border overflow-hidden">
-          <div className="px-4 py-2.5 bg-card/50 border-b border-border flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Active Features</span>
-            <button
-              onClick={() => onSwitchTab('config')}
-              className="text-[10px] text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-            >
-              Full config <ChevronRight className="h-3 w-3" />
-            </button>
-          </div>
-          <div className="p-1.5 space-y-0.5">
-            <FeatureRow
-              icon={ArrowDownLeft}
-              label="Incoming Traffic"
-              value={incomingMode}
-              active={incomingMode !== 'off'}
-              count={eventCounts.incoming_request}
-              hint={portSubs.length > 0 ? `Ports: ${portSubs.map(p => p.port).join(', ')}` : undefined}
-            />
-            <FeatureRow
-              icon={ArrowUpRight}
-              label="Outgoing Traffic"
-              value={outgoingTcp === 'on' ? 'enabled' : outgoingTcp}
-              active={outgoingTcp === 'on' || outgoingTcp === 'true'}
-              count={eventCounts.outgoing_connection}
-            />
-            <FeatureRow
-              icon={Globe}
-              label="DNS Resolution"
-              value={dnsEnabled === 'on' ? 'enabled' : dnsEnabled}
-              active={dnsEnabled === 'on' || dnsEnabled === 'true'}
-              count={eventCounts.dns_query}
-            />
-            <FeatureRow
-              icon={FileText}
-              label="File Operations"
-              value={fsMode}
-              active={fsMode !== 'off' && fsMode !== 'disabled'}
-              count={eventCounts.file_op}
-              hint={fsMode === 'local' ? 'Local FS with remote fallback' : fsMode === 'read' ? 'Remote read, local write' : undefined}
-            />
-            <FeatureRow
-              icon={Settings}
-              label="Environment Variables"
-              value={envEnabled}
-              active={envEnabled !== 'off'}
-              count={eventCounts.env_var}
-            />
-            <FeatureRow
-              icon={Server}
-              label="Hostname Override"
-              value={hostnameEnabled === 'on' ? 'enabled' : hostnameEnabled}
-              active={hostnameEnabled === 'on' || hostnameEnabled === 'true'}
-            />
-            {copyTargetEnabled !== 'off' && copyTargetEnabled !== 'false' && (
-              <FeatureRow
-                icon={Copy}
-                label="Copy Target"
-                value="enabled"
-                active={true}
-                hint="Running against a copy of the target pod"
-              />
-            )}
-          </div>
-        </div>
 
         {/* Processes */}
-        {processes.length > 0 && (
-          <div className="rounded-lg border border-border overflow-hidden">
-            <div className="px-4 py-2.5 bg-card/50 border-b border-border">
-              <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Connected Processes</span>
-            </div>
+        <div className="rounded-lg border border-border overflow-hidden">
+          <div className="px-4 py-2.5 bg-card/50 border-b border-border">
+            <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Processes</span>
+          </div>
+          {processes.length > 0 ? (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border text-[10px] text-muted-foreground">
+                  <th className="text-left px-4 py-2 font-medium">Name</th>
+                  <th className="text-right px-4 py-2 font-medium">PID</th>
+                  <th className="text-right px-4 py-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {processes.map(p => (
+                  <tr key={p.pid}>
+                    <td className="px-4 py-2.5 font-mono font-medium text-foreground">{p.process_name || 'unknown'}</td>
+                    <td className="px-4 py-2.5 font-mono text-muted-foreground text-right">{p.pid}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <span className="inline-flex items-center gap-1">
+                        <LiveDot active={true} />
+                        <span className="text-[10px] text-muted-foreground">Connected</span>
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="px-4 py-3 text-xs text-muted-foreground">No processes connected</div>
+          )}
+        </div>
+
+        {/* Port Subscriptions */}
+        <div className="rounded-lg border border-border overflow-hidden">
+          <div className="px-4 py-2.5 bg-card/50 border-b border-border">
+            <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Port Subscriptions</span>
+          </div>
+          {portSubs.length > 0 ? (
             <div className="divide-y divide-border">
-              {processes.map(p => (
-                <div key={p.pid} className="flex items-center gap-3 px-4 py-2.5">
-                  <LiveDot active={true} />
-                  <span className="text-xs font-mono font-medium text-foreground">
-                    {p.process_name || 'unknown'}
-                  </span>
-                  <span className="text-[10px] font-mono text-muted-foreground ml-auto">PID {p.pid}</span>
+              {portSubs.map(p => (
+                <div key={p.port} className="flex items-center justify-between px-4 py-2.5">
+                  <span className="text-xs font-mono font-medium text-foreground">:{p.port}</span>
+                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-mono">{p.mode}</Badge>
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="px-4 py-3 text-xs text-muted-foreground">No port subscriptions</div>
+          )}
+        </div>
 
         {/* Session identity */}
         <div className="rounded-lg border border-border overflow-hidden">
@@ -441,7 +349,7 @@ export default function SessionDetail({ session, onKill }: Props) {
         {activeTab === 'config' && (
           <div className="p-4 overflow-auto h-full">
             <pre className="p-4 text-[11px] font-mono text-foreground/80 whitespace-pre-wrap overflow-auto rounded-lg border border-border bg-card/30">
-              {JSON.stringify(session.config, null, 2)}
+              {JSON.stringify(stripNulls(session.config), null, 2)}
             </pre>
           </div>
         )}

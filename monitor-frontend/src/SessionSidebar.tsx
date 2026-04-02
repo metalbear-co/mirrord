@@ -101,7 +101,11 @@ export default function SessionSidebar({ sessions, selectedId, loading, onSelect
           <div className="flex items-center gap-1">
             {sessions.length > 0 && (
               <button
-                onClick={onKillAll}
+                onClick={() => {
+                  if (window.confirm(`Kill all ${sessions.length} session${sessions.length !== 1 ? 's' : ''}?`)) {
+                    onKillAll()
+                  }
+                }}
                 className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                 title="Kill all sessions"
               >

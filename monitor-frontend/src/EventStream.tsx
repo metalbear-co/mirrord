@@ -15,8 +15,6 @@ const EVENT_TYPE_CONFIG: Record<string, {
   dns_query: { variant: 'outline', label: 'DNS', className: 'border-blue-500/50 text-blue-400 bg-blue-500/10', icon: Globe, chipColor: 'blue' },
   incoming_request: { variant: 'outline', label: 'HTTP', className: 'border-green-500/50 text-green-400 bg-green-500/10', icon: Zap, chipColor: 'green' },
   outgoing_connection: { variant: 'outline', label: 'Out', className: 'border-purple-500/50 text-purple-400 bg-purple-500/10', icon: Server, chipColor: 'purple' },
-  port_subscription: { variant: 'outline', label: 'Port', className: 'border-indigo-500/50 text-indigo-400 bg-indigo-500/10', icon: Server, chipColor: 'indigo' },
-  env_var: { variant: 'outline', label: 'Env', className: 'border-pink-500/50 text-pink-400 bg-pink-500/10', icon: Settings, chipColor: 'pink' },
   layer_connected: { variant: 'outline', label: 'Info', className: 'border-sky-500/50 text-sky-400 bg-sky-500/10', icon: Info, chipColor: 'sky' },
   layer_disconnected: { variant: 'outline', label: 'Info', className: 'border-sky-500/50 text-sky-400 bg-sky-500/10', icon: Info, chipColor: 'sky' },
 }
@@ -27,8 +25,6 @@ const FILTER_CHIPS: { type: string | null; label: string; colorClass: string; ac
   { type: 'dns_query', label: 'DNS', colorClass: 'border-blue-500/30 text-blue-500/60 hover:text-blue-400', activeClass: 'border-blue-500 bg-blue-500/15 text-blue-400' },
   { type: 'file_op', label: 'File Ops', colorClass: 'border-amber-500/30 text-amber-500/60 hover:text-amber-400', activeClass: 'border-amber-500 bg-amber-500/15 text-amber-400' },
   { type: 'outgoing_connection', label: 'Outgoing', colorClass: 'border-purple-500/30 text-purple-500/60 hover:text-purple-400', activeClass: 'border-purple-500 bg-purple-500/15 text-purple-400' },
-  { type: 'port_subscription', label: 'Port Subscribe', colorClass: 'border-indigo-500/30 text-indigo-500/60 hover:text-indigo-400', activeClass: 'border-indigo-500 bg-indigo-500/15 text-indigo-400' },
-  { type: 'env_var', label: 'Env Vars', colorClass: 'border-pink-500/30 text-pink-500/60 hover:text-pink-400', activeClass: 'border-pink-500 bg-pink-500/15 text-pink-400' },
 ]
 
 const MAX_EVENTS = 500
@@ -39,7 +35,7 @@ interface ParsedEvent {
   rawData?: string
 }
 
-function parseEvent(event: MonitorEvent): ParsedEvent {
+function parseEvent(event: MonitorEvent): ParsedEvent | null {
   switch (event.type) {
     case 'file_op':
       return { type: 'file_op', summary: `${event.operation}: ${event.path || '?'}` }
@@ -50,9 +46,9 @@ function parseEvent(event: MonitorEvent): ParsedEvent {
     case 'outgoing_connection':
       return { type: 'outgoing_connection', summary: `Outgoing: ${event.address}:${event.port}` }
     case 'port_subscription':
-      return { type: 'port_subscription', summary: `Port ${event.port} subscribed (${event.mode})` }
+      return null
     case 'env_var':
-      return { type: 'env_var', summary: `Fetched ${event.vars.length} env vars` }
+      return null
     case 'layer_connected':
       return { type: 'layer_connected', summary: `Process connected: ${event.process_name} (PID ${event.pid})` }
     case 'layer_disconnected':
@@ -130,11 +126,13 @@ export default function EventStream({ session }: Props) {
     }
   }, [events])
 
-  const processedEvents = events.map(({ event, receivedAt }) => ({
-    event,
-    receivedAt,
-    parsed: parseEvent(event),
-  }))
+  const processedEvents = events
+    .map(({ event, receivedAt }) => ({
+      event,
+      receivedAt,
+      parsed: parseEvent(event),
+    }))
+    .filter((e): e is { event: MonitorEvent; receivedAt: Date; parsed: ParsedEvent } => e.parsed !== null)
 
   const filteredEvents = processedEvents.filter(({ parsed }) => {
     const matchesType = activeFilter === null || parsed.type === activeFilter
