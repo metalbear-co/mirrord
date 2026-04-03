@@ -1,1 +1,1 @@
-Auto bump infra's latest cli version on end of release
+Auto bump "infra"'s latest CLI version on end of release
