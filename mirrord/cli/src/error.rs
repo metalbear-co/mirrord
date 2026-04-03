@@ -344,7 +344,7 @@ pub(crate) enum CliError {
     #[diagnostic(help(
     "Please check the following:
     1. The operator is running and the logs are not showing any errors.
-    2. You have sufficient permissions to port forward to the operator.
+    2. You have sufficient permissions to use the operator (mirrord-operator-user role bound to you)
 
     If you want to run without the operator, please set `\"operator\": false` in the mirrord configuration file.
 

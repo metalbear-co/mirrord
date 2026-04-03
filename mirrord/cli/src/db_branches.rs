@@ -44,6 +44,7 @@ pub fn portforward_session_dir() -> PathBuf {
 #[derive(Debug, Clone)]
 struct BranchInfo {
     name: String,
+    pod_name: Option<String>,
     db_type: String,
     phase: Option<String>,
     ttl: u64,
@@ -62,6 +63,7 @@ impl From<BranchDatabase> for BranchInfo {
     ) -> Self {
         Self {
             name: metadata.name.unwrap_or_default(),
+            pod_name: status.as_ref().and_then(|s| s.pod_name.clone()),
             db_type: spec
                 .dialect()
                 .map(|d| d.to_string())
@@ -96,6 +98,7 @@ impl From<MysqlBranchDatabase> for BranchInfo {
     ) -> Self {
         Self {
             name: metadata.name.unwrap_or_default(),
+            pod_name: status.as_ref().and_then(|s| s.pod_name.clone()),
             db_type: "MySQL".to_string(),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
@@ -127,6 +130,7 @@ impl From<PgBranchDatabase> for BranchInfo {
     ) -> Self {
         Self {
             name: metadata.name.unwrap_or_default(),
+            pod_name: status.as_ref().and_then(|s| s.pod_name.clone()),
             db_type: "PostgreSQL".to_string(),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
@@ -158,6 +162,7 @@ impl From<MongodbBranchDatabase> for BranchInfo {
     ) -> Self {
         Self {
             name: metadata.name.unwrap_or_default(),
+            pod_name: status.as_ref().and_then(|s| s.pod_name.clone()),
             db_type: "MongoDB".to_string(),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
@@ -381,6 +386,7 @@ fn build_status_table(all_infos: Vec<BranchInfo>, names: HashSet<&str>) -> Table
     let mut table = Table::new();
     table.add_row(row![
         "Name",
+        "Pod Name",
         "DB Type",
         "Phase",
         "TTL (sec)",
@@ -392,6 +398,7 @@ fn build_status_table(all_infos: Vec<BranchInfo>, names: HashSet<&str>) -> Table
     for info in all_infos_iter {
         table.add_row(row![
             info.name,
+            info.pod_name.unwrap_or_else(|| "Unknown".to_owned()),
             info.db_type,
             info.phase.unwrap_or_else(|| "Unknown".to_owned()),
             info.ttl,
@@ -610,6 +617,7 @@ mod tests {
     fn branch_info(name: &str, db_type: &'static str) -> BranchInfo {
         BranchInfo {
             name: name.to_owned(),
+            pod_name: None,
             db_type: db_type.to_string(),
             phase: None,
             ttl: 3600,
@@ -622,6 +630,7 @@ mod tests {
     fn build_expected_table(rows: Vec<Row>) -> Table {
         let mut table = Table::from_iter([row![
             "Name",
+            "Pod Name",
             "DB Type",
             "Phase",
             "TTL (sec)",
@@ -647,13 +656,13 @@ mod tests {
         let table = build_status_table(branches.clone(), HashSet::new());
         let expected = build_expected_table(vec![
             row![
-                "branch-a", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"
+                "branch-a", "Unknown", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"
             ],
             row![
-                "branch-b", "Db2", "Unknown", "3600", "<none>", "none", "Unknown"
+                "branch-b", "Unknown", "Db2", "Unknown", "3600", "<none>", "none", "Unknown"
             ],
             row![
-                "branch-c", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"
+                "branch-c", "Unknown", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"
             ],
         ]);
         assert_eq!(
@@ -667,10 +676,10 @@ mod tests {
         let table = build_status_table(branches.clone(), names);
         let expected = build_expected_table(vec![
             row![
-                "branch-a", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"
+                "branch-a", "Unknown", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"
             ],
             row![
-                "branch-c", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"
+                "branch-c", "Unknown", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"
             ],
         ]);
         assert_eq!(
