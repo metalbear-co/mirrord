@@ -3,6 +3,8 @@ use std::{collections::HashSet, time::Duration};
 use mirrord_analytics::Reporter;
 use mirrord_config::{
     LayerConfig,
+    agent::AgentFileConfig,
+    config::MirrordConfig,
     target::{Target, TargetDisplay},
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
@@ -204,7 +206,11 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     if let Some(connection) =
         try_connect_using_operator(config, progress, analytics, branch_name, mirrord_for_ci).await?
     {
-        if config.agent.has_non_default_settings() {
+        if config.agent
+            != AgentFileConfig::default()
+                .generate_config(&mut Default::default())
+                .expect("BUG: Default agent config should always work!")
+        {
             progress.warning(
                 "Agent configuration is ignored when using the mirrord operator. \
                  Agent configuration is managed by the cluster admin.",
