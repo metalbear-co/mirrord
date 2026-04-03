@@ -1,0 +1,1 @@
+Change the encoding of the generated key.

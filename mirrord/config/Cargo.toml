@@ -45,7 +45,6 @@ rustls.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
 semver.workspace = true
-uuid.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true
