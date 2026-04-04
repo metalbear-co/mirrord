@@ -56,4 +56,4 @@ nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 mirrord-sip = { path = "../sip" }
-apple-codesign = { version = "0.29", default-features = false }
+apple-codesign.workspace = true

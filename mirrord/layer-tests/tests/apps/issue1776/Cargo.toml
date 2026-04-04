@@ -19,4 +19,4 @@ workspace = true
 [dependencies]
 libc.workspace = true
 socket2.workspace = true
-errno = "0.3"
+errno.workspace = true
