@@ -27,6 +27,16 @@ jobs:
         with:
           ref: main
 
+      - name: Install Rust toolchain
+        if: github.event_name == 'pull_request'
+        uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          rustflags: ""
+
+      - name: Install cargo-get
+        if: github.event_name == 'pull_request'
+        run: cargo install cargo-get
+
       - name: Validate release conditions
         id: validate
         env:
@@ -58,7 +68,7 @@ jobs:
             exit 0
           fi
 
-          version=$(grep -oP '(?<=^version = ")[^"]+' Cargo.toml | head -1)
+          version=$(cargo get workspace.package.version)
           if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Invalid version format in Cargo.toml: ${version}"
             exit 1
@@ -1175,15 +1185,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Move latest git tag to new release
+      - name: Update major version and latest tags in git
+        uses: metalbear-co/release-tracker-action@main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.validate_release_request.outputs.version }}
-        run: |
-          git fetch --tags
-          git tag -f latest "${VERSION}"
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push --force origin latest
+        with:
+          # Move "latest" tag
+          update-latest: true
+          # Don't update the vX.Y tags
+          update-minor: false
 
       - name: Update latest release on GitHub (not latest git tag).
         run: gh release edit "${{ needs.validate_release_request.outputs.version }}" --latest

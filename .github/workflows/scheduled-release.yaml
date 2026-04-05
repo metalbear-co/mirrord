@@ -1,24 +1,12 @@
 name: Scheduled Release
 
 on:
-  pull_request:
-    branches:
-      - main
-    types:
-      - closed
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
 
 jobs:
   evaluate_release_conditions:
-    # On PR close events: only run when a non-release PR is merged to main.
-    # Skipping release PRs themselves (releases/*) avoids an infinite loop where
-    # merging the release PR would immediately trigger another release PR.
-    if: |
-      github.event_name != 'pull_request' ||
-      (github.event.pull_request.merged == true &&
-       !startsWith(github.head_ref, 'releases/'))
     runs-on: ubuntu-24.04
     permissions:
       contents: read

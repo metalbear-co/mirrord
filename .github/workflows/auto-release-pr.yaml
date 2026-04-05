@@ -29,6 +29,14 @@ jobs:
       - name: Install towncrier
         run: uv pip install towncrier==23.11.0
 
+      - name: Install Rust toolchain
+        uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          rustflags: ""
+
+      - name: Install cargo-get and cargo-set
+        run: cargo install cargo-get cargo-set
+
       - name: Determine next release version
         id: version
         shell: bash
@@ -58,7 +66,7 @@ jobs:
             esac
           done
 
-          current_version=$(grep -oP '(?<=^version = ")[^"]+' Cargo.toml | head -1)
+          current_version=$(cargo get workspace.package.version)
           IFS='.' read -r major minor patch <<< "${current_version}"
 
           if [ "${bump_level}" = "minor" ]; then
@@ -73,19 +81,10 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Bump version in Cargo.toml
-        shell: bash
-        run: |
-          set -euo pipefail
-          new_version="${{ steps.version.outputs.new_version }}"
-          # Only replace version within the [workspace.package] section
-          sed -i '/\[workspace\.package\]/,/^\[/s/^version = ".*"/version = "'"${new_version}"'"/' Cargo.toml
-
-      - name: Install Rust toolchain for Cargo.lock update
-        uses: dtolnay/rust-toolchain@stable
+        run: cargo set workspace.package.version "${{ steps.version.outputs.new_version }}"
 
       - name: Update Cargo.lock
-        # Override rust-toolchain.toml to avoid installing nightly for a simple lockfile update
-        run: RUSTUP_TOOLCHAIN=stable cargo update -w -q
+        run: cargo update -w -q
 
       - name: Generate draft release notes
         run: uv run towncrier build --draft --version "${{ steps.version.outputs.new_version }}" > /tmp/release-notes.md
