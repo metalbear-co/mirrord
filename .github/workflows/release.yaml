@@ -27,10 +27,12 @@ jobs:
         with:
           ref: main
 
-      - name: Install Rust toolchain
+      - run: rm rust-toolchain.toml
         if: github.event_name == 'pull_request'
-        uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        if: github.event_name == 'pull_request'
         with:
+          toolchain: ${{ env.PINNED_NIGHTLY }}
           rustflags: ""
 
       - name: Install cargo-get

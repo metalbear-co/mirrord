@@ -872,7 +872,7 @@ If you need to create a release outside the automated flow entirely, run:
 ```
 
 Ensure there are no uncommitted changes before running the script. It will:
-- Create a `3.333.0` branch off `main`.
+- Create a `releases/3.333.0` branch off `main`.
 - Bump the workspace version in `Cargo.toml` and refresh `Cargo.lock`.
 - Generate the changelog with `towncrier`.
 - Push the branch.
