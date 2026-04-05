@@ -856,12 +856,12 @@ Releases are fully automated. Under normal circumstances no manual steps are req
    - Builds all platform binaries (Linux x86\_64 / aarch64, macOS universal, Windows).
    - Publishes the Docker images to GHCR.
    - Creates the GitHub release (with tag and release notes from `CHANGELOG.md`).
-   - Publishes to Homebrew, Chocolatey, and WinGet.
-   - Updates the `latest` git tag and notifies the infra repo.
+   - Publishes to Homebrew, Chocolatey, and winget.
+   - Updates the `latest` git tag and notifies the infra repository.
 
 ## Triggering a release PR manually
 
-If you don't want to wait for the daily cron, you can trigger the [Auto Release PR workflow](/.github/workflows/auto-release-pr.yaml) directly from the [Actions tab](https://github.com/metalbear-co/mirrord/actions/workflows/auto-release-pr.yaml) using the "Run workflow" button. It will create (or update) the release PR immediately.
+If you don't want to wait for the daily schedule, you can trigger the [Auto Release PR workflow](/.github/workflows/auto-release-pr.yaml) directly from the [Actions tab](https://github.com/metalbear-co/mirrord/actions/workflows/auto-release-pr.yaml) using the "Run workflow" button. It will create (or update) the release PR immediately.
 
 ## Manual release
 
