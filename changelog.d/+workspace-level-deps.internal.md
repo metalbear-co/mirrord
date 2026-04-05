@@ -1,1 +1,1 @@
-qol: move all deps to workspace level
+quality of life: move all dependencies to workspace level
