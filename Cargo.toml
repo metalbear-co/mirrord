@@ -67,7 +67,7 @@ categories = ["development-tools", "backend", "devtool"]
 
 [workspace.dependencies]
 axum = "0.8"
-actix-codec = "0.5"
+actix-codec = { version = "0.5", default-features = false }
 async-pidfd = "0.1.5"
 
 # Used by `operator`, `layer`, `console`, `protocol`, `intproxy-protocol`, `auth`.
@@ -120,8 +120,8 @@ enum_dispatch = "0.3"
 dotenvy = "0.15"
 
 # Used by `agent`, `protocol`
-serde_json_path = "0.7.2"
-serde_json_path_core = "0.2.2"
+serde_json_path = { version = "0.7.2", default-features = false }
+serde_json_path_core = { version = "0.2.2", default-features = false }
 serde_json_path_macros = "0.1.6"
 
 # If you update `hyper`, check that `h2` version is compatible in `intproxy/Cargo.toml`.
@@ -207,7 +207,7 @@ home = "0.5"
 fs4 = { version = "0.13", features = ["tokio"], default-features = false }
 
 # Used by `cli`, `analytics`, `protocol`
-uuid = { version = "1.18", features = ["v4", "serde"] }
+uuid = { version = "1.18", default-features = false }
 
 # Used by `cli`, `sip`
 hex = "0.4"

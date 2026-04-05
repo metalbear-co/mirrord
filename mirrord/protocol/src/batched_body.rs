@@ -1,8 +1,8 @@
 use std::future::Future;
 
 use futures::FutureExt;
+use http_body::{Body, Frame};
 use http_body_util::BodyExt;
-use hyper::body::{Body, Frame};
 
 /// Utility extension trait for [`Body`].
 ///

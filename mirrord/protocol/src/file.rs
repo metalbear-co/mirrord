@@ -246,7 +246,7 @@ pub struct DirEntryInternal {
     pub file_type: u8,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "libc"))]
 impl TryFrom<(usize, io::Result<DirEntry>)> for DirEntryInternal {
     type Error = io::Error;
 
