@@ -83,25 +83,6 @@ fi
 rustup component add clippy rustfmt
 rustup target add x86_64-unknown-linux-gnu
 
-# Install Java (matching CI: OpenJDK 17.0.6-tem via SDKMAN)
-print_step "Installing Java via SDKMAN..."
-if [ ! -d "$HOME/.sdkman" ]; then
-    # Ensure unzip and zip are available for SDKMAN
-    if ! command -v unzip &> /dev/null || ! command -v zip &> /dev/null; then
-        print_error "unzip and zip are required for SDKMAN but not installed"
-        exit 1
-    fi
-    curl -s "https://get.sdkman.io" | bash
-    source "$HOME/.sdkman/bin/sdkman-init.sh"
-    sdk install java 17.0.6-tem
-else
-    print_warning "SDKMAN already installed"
-    source "$HOME/.sdkman/bin/sdkman-init.sh"
-    if ! sdk list java | grep -q "17.0.6-tem"; then
-        sdk install java 17.0.6-tem
-    fi
-fi
-
 # Install Node.js (matching CI: Node 18)
 print_step "Installing Node.js v18..."
 if ! command -v node &> /dev/null || [ "$(node -v | cut -d'.' -f1 | sed 's/v//')" != "18" ]; then
