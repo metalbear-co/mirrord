@@ -1094,3 +1094,30 @@ jobs:
         run: gh release edit "${{ github.ref_name }}" --latest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update_infra_cli_version:
+    runs-on: ubuntu-24.04
+    needs: [release_homebrew, check_for_new_docs, update_latest]
+    if: github.event_name != 'workflow_dispatch'
+    steps:
+      - name: Create app token for infra workflow dispatch
+        id: app_token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+          private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+          owner: metalbear-co
+          repositories: infra
+          permission-actions: write
+
+      - name: Dispatch infra update-cli-version workflow
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          gh api \
+            --method POST \
+            repos/metalbear-co/infra/actions/workflows/update-cli-version.yml/dispatches \
+            -f ref=main \
+            -f inputs[cli_version]=${{ github.ref_name }}
