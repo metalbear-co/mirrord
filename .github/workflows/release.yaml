@@ -592,30 +592,15 @@ jobs:
 
       - name: Build and push (test)
         if: github.event_name == 'workflow_dispatch'
-        uses: docker/build-push-action@v6
-        with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          context: .
-          file: mirrord/agent/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}
+        env:
+          AGENT_TAGS: "ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}"
+        run: docker buildx bake agent --push
 
       - name: Build and push (final/release)
         if: github.event_name != 'workflow_dispatch'
-        uses: docker/build-push-action@v6
-        with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          context: .
-          file: mirrord/agent/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/metalbear-co/mirrord:latest
-            ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}
+        env:
+          AGENT_TAGS: "ghcr.io/metalbear-co/mirrord:latest,ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}"
+        run: docker buildx bake agent --push
 
   release_cli_docker_image:
     runs-on: ubuntu-24.04
@@ -680,30 +665,15 @@ jobs:
 
       - name: Build and push (test)
         if: github.event_name == 'workflow_dispatch'
-        uses: docker/build-push-action@v6
-        with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          context: .
-          file: mirrord/cli/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/metalbear-co/mirrord-cli-staging:${{ github.sha }}
+        env:
+          CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli-staging:${{ github.sha }}"
+        run: docker buildx bake cli --push
 
       - name: Build and push (final/release)
         if: github.event_name != 'workflow_dispatch'
-        uses: docker/build-push-action@v6
-        with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          context: .
-          file: mirrord/cli/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }}
-            ghcr.io/metalbear-co/mirrord-cli:latest
+        env:
+          CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }},ghcr.io/metalbear-co/mirrord-cli:latest"
+        run: docker buildx bake cli --push
 
   check_for_new_docs:
     runs-on: ubuntu-24.04

@@ -360,14 +360,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - name: build and export
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: test
-          file: mirrord/agent/Dockerfile
-          outputs: type=docker,dest=/tmp/test.tar
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: |
+          docker buildx bake agent \
+            --set "agent.platforms=linux/amd64" \
+            --set "agent.tags=test" \
+            --set "agent.output=type=docker,dest=/tmp/test.tar"
       - name: upload image
         uses: actions/upload-artifact@v4
         with:
@@ -382,14 +379,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - name: build and export
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: cli_image
-          file: mirrord/cli/Dockerfile
-          outputs: type=docker,dest=/tmp/cli_image.tar
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: |
+          docker buildx bake cli \
+            --set "cli.platforms=linux/amd64" \
+            --set "cli.tags=cli_image" \
+            --set "cli.output=type=docker,dest=/tmp/cli_image.tar"
 
   integration_tests:
     runs-on: ubuntu-24.04
