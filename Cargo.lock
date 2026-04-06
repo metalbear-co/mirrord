@@ -4919,7 +4919,6 @@ dependencies = [
  "thiserror 2.0.18",
  "toml 0.8.23",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -5364,6 +5363,7 @@ dependencies = [
 name = "mirrord-tls-util"
 version = "3.198.0"
 dependencies = [
+ "home",
  "http 1.4.0",
  "pem",
  "rcgen",
