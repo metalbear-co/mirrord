@@ -48,12 +48,11 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
 
-          fragments=(changelog.d/*.md)
-          if [ ${#fragments[@]} -eq 0 ]; then
-            echo "No changelog entries found in changelog.d"
-            exit 1
-          fi
+          current_version=$(cargo get workspace.package.version)
 
+          uv run towncrier check --compare-with "tags/${current_version}"
+
+          fragments=(changelog.d/*.md)
           bump_level=patch
           for fragment in "${fragments[@]}"; do
             category=$(basename "${fragment}")
@@ -70,7 +69,6 @@ jobs:
             esac
           done
 
-          current_version=$(cargo get workspace.package.version)
           IFS='.' read -r major minor patch <<< "${current_version}"
 
           if [ "${bump_level}" = "minor" ]; then

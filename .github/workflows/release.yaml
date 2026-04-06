@@ -820,8 +820,8 @@ jobs:
 
   update_config_docs:
     runs-on: ubuntu-24.04
-    needs: check_for_new_docs
-    if: ${{needs.check_for_new_docs.outputs.config_schema_changed == 'true'}}
+    needs: [validate_release_request, check_for_new_docs]
+    if: needs.validate_release_request.outputs.should_release == 'true' && needs.check_for_new_docs.outputs.config_schema_changed == 'true'
     permissions:
       contents: write
     env:

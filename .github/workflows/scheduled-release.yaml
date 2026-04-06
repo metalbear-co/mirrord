@@ -22,12 +22,14 @@ jobs:
 
       - name: Evaluate changelog and release status
         id: evaluate
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           changelog_entry_count=$(find changelog.d -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')
           last_release_date=$(
-            sed -nE 's/^## \[[^]]+\]\([^)]*\) - ([0-9]{4}-[0-9]{2}-[0-9]{2})$/\1/p' CHANGELOG.md | head -n 1
+            gh release view --repo "${{ github.repository }}" --json publishedAt --jq '.publishedAt[:10]' 2>/dev/null || true
           )
           release_older_than_seven_days=true
 
