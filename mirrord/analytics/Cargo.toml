@@ -25,8 +25,8 @@ tokio.workspace = true
 drain.workspace = true
 uuid.workspace = true
 ci_info.workspace = true
-sha2 = "0.10"
+sha2.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
-assert-json-diff = "2"
+assert-json-diff.workspace = true

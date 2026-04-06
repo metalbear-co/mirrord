@@ -28,7 +28,7 @@ serde_json_path.workspace = true
 serde_json_path_macros.workspace = true
 tracing.workspace = true
 hyper = { workspace = true, features = ["client"] }
-http-serde = "2"
+http-serde.workspace = true
 http-body-util = { workspace = true }
 fancy-regex = { workspace = true }
 socket2.workspace = true
