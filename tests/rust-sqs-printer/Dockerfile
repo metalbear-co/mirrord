@@ -11,7 +11,7 @@ RUN /build/platform.sh
 
 # Build binary.
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
-RUN cargo zigbuild -Z bindeps --target $(cat /.platform)
+RUN cargo zigbuild --target $(cat /.platform)
 RUN cp /build/target/$(cat /.platform)/debug/rust-sqs-printer /rust-sqs-printer
 
 # Slim final layer with only the binary.

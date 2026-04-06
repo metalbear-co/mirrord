@@ -25,16 +25,6 @@ actix-codec.workspace = true
 futures.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "macros", "fs", "rt-multi-thread"] }
 
-# used for `run_command` wraper of mirrord cli for exec-based test harness
-# By default, we use the `build-cli` feature for mirrord compilation via build dependancy
-# In CI context, we can prevent this by running with --no-default-features and 
-#   specifying existing binary in `MIRRORD_TESTS_USE_BINARY` env var
-mirrord-test-utils = { path = "../../test-utils", default-features = false}
-
-[features]
-# on by default, can be disabled via `--no-default-features`
-default = ["build-cli"]
-build-cli = ["mirrord-test-utils/build-cli"]
 
 [dev-dependencies]
 actix-codec.workspace = true

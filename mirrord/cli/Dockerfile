@@ -23,14 +23,14 @@ RUN cargo +nightly-2026-02-24 chef cook --release --zigbuild --target $(cat /.pl
 
 COPY . /build/
 RUN echo INITIAL CARGO LOCK --- && cat Cargo.lock && echo INITIAL CARGO LOCK OVER ----
-RUN cargo +nightly-2026-02-24 zigbuild -p mirrord -p mirrord-layer -Z bindeps --target $(cat /.platform) --release
+RUN cargo +nightly-2026-02-24 zigbuild -p mirrord -p mirrord-layer --target $(cat /.platform) --release
 RUN echo MODIFIED CARGO LOCK --- && cat Cargo.lock && echo MODIFIED CARGO LOCK OVER ----
 RUN cp /build/target/$(cat /.platform)/release/mirrord /mirrord
 RUN cp /build/target/$(cat /.platform)/release/libmirrord_layer.so /libmirrord_layer.so
 
 # For ARM64 builds, also build x86_64 version to support cross-platform containers
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
-    cargo +nightly-2026-02-24 zigbuild -p mirrord-layer -Z bindeps --target x86_64-unknown-linux-gnu --release --locked && \
+    cargo +nightly-2026-02-24 zigbuild -p mirrord-layer --target x86_64-unknown-linux-gnu --release --locked && \
     cp /build/target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so /libmirrord_layer_x86_64.so; \
     fi
 
