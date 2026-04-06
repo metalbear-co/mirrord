@@ -41,7 +41,6 @@ group "ci-images" {
     "ci-layer-build-x86_64",
     "ci-layer-build-aarch64",
     "ci-rust-build",
-    "ci-docs-build",
   ]
 }
 
@@ -135,17 +134,6 @@ target "ci-rust-build" {
   tags = compact([
     "${REGISTRY}/ci-rust-build:latest",
     SHA != "" ? "${REGISTRY}/ci-rust-build:${SHA}" : "",
-  ])
-}
-
-# Docs build image with Rust nightly, clang, and rsync.
-target "ci-docs-build" {
-  context    = "./ci"
-  dockerfile = "docs-build/Dockerfile"
-  platforms  = ["linux/amd64", "linux/arm64"]
-  tags = compact([
-    "${REGISTRY}/ci-docs-build:latest",
-    SHA != "" ? "${REGISTRY}/ci-docs-build:${SHA}" : "",
   ])
 }
 

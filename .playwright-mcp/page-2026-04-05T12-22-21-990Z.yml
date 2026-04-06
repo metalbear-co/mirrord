@@ -1,0 +1,1554 @@
+- generic [ref=e2]:
+  - region
+  - generic [ref=e3]:
+    - link "Skip to content" [ref=e4] [cursor=pointer]:
+      - /url: "#start-of-content"
+    - banner [ref=e6]:
+      - heading "Navigation Menu" [level=2] [ref=e7]
+      - generic [ref=e8]:
+        - link "Homepage" [ref=e10] [cursor=pointer]:
+          - /url: /
+          - img [ref=e11]
+        - generic [ref=e13]:
+          - navigation "Global" [ref=e16]:
+            - list [ref=e17]:
+              - listitem [ref=e18]:
+                - button "Platform" [ref=e20] [cursor=pointer]:
+                  - text: Platform
+                  - img [ref=e21]
+              - listitem [ref=e23]:
+                - button "Solutions" [ref=e25] [cursor=pointer]:
+                  - text: Solutions
+                  - img [ref=e26]
+              - listitem [ref=e28]:
+                - button "Resources" [ref=e30] [cursor=pointer]:
+                  - text: Resources
+                  - img [ref=e31]
+              - listitem [ref=e33]:
+                - button "Open Source" [ref=e35] [cursor=pointer]:
+                  - text: Open Source
+                  - img [ref=e36]
+              - listitem [ref=e38]:
+                - button "Enterprise" [ref=e40] [cursor=pointer]:
+                  - text: Enterprise
+                  - img [ref=e41]
+              - listitem [ref=e43]:
+                - link "Pricing" [ref=e44] [cursor=pointer]:
+                  - /url: https://github.com/pricing
+                  - generic [ref=e45]: Pricing
+          - generic [ref=e46]:
+            - button "Search or jump to…" [ref=e49] [cursor=pointer]:
+              - img [ref=e51]
+            - link "Sign in" [ref=e54] [cursor=pointer]:
+              - /url: /login?return_to=https%3A%2F%2Fgithub.com%2Fmetalbear-co%2Fmirrord-intellij%2Fpull%2F419%2Ffiles
+            - link "Sign up" [ref=e55] [cursor=pointer]:
+              - /url: /signup?ref_cta=Sign+up&ref_loc=header+logged+out&ref_page=%2F%3Cuser-name%3E%2F%3Crepo-name%3E%2Fpull_requests%2Fshow%2Ffiles&source=header-repo&source_repo=metalbear-co%2Fmirrord-intellij
+            - button "Appearance settings" [ref=e58] [cursor=pointer]:
+              - img
+  - main [ref=e62]:
+    - generic [ref=e63]:
+      - generic [ref=e64]:
+        - generic [ref=e66]:
+          - img [ref=e67]
+          - link "metalbear-co" [ref=e70] [cursor=pointer]:
+            - /url: /metalbear-co
+          - generic [ref=e71]: /
+          - strong [ref=e72]:
+            - link "mirrord-intellij" [ref=e73] [cursor=pointer]:
+              - /url: /metalbear-co/mirrord-intellij
+          - generic [ref=e74]: Public
+        - generic [ref=e75]:
+          - list:
+            - listitem [ref=e76]:
+              - link "You must be signed in to change notification settings" [ref=e77] [cursor=pointer]:
+                - /url: /login?return_to=%2Fmetalbear-co%2Fmirrord-intellij
+                - img [ref=e78]
+                - text: Notifications
+            - listitem [ref=e80]:
+              - link "Fork 18" [ref=e81] [cursor=pointer]:
+                - /url: /login?return_to=%2Fmetalbear-co%2Fmirrord-intellij
+                - img [ref=e82]
+                - text: Fork
+                - generic "18" [ref=e84]
+            - listitem [ref=e85]:
+              - link "You must be signed in to star a repository" [ref=e87] [cursor=pointer]:
+                - /url: /login?return_to=%2Fmetalbear-co%2Fmirrord-intellij
+                - img [ref=e88]
+                - text: Star
+                - generic "13 users starred this repository" [ref=e90]: "13"
+      - navigation "Repository" [ref=e91]:
+        - list [ref=e92]:
+          - listitem [ref=e93]:
+            - link "Code" [ref=e94] [cursor=pointer]:
+              - /url: /metalbear-co/mirrord-intellij
+              - img [ref=e95]
+              - generic [ref=e97]: Code
+          - listitem [ref=e98]:
+            - link "Issues 38" [ref=e99] [cursor=pointer]:
+              - /url: /metalbear-co/mirrord-intellij/issues
+              - img [ref=e100]
+              - generic [ref=e103]: Issues
+              - generic "38" [ref=e104]
+          - listitem [ref=e105]:
+            - link "Pull requests 6" [ref=e106] [cursor=pointer]:
+              - /url: /metalbear-co/mirrord-intellij/pulls
+              - img [ref=e107]
+              - generic [ref=e109]: Pull requests
+              - generic "6" [ref=e110]
+          - listitem [ref=e111]:
+            - link "Actions" [ref=e112] [cursor=pointer]:
+              - /url: /metalbear-co/mirrord-intellij/actions
+              - img [ref=e113]
+              - generic [ref=e115]: Actions
+          - listitem [ref=e116]:
+            - link "Projects" [ref=e117] [cursor=pointer]:
+              - /url: /metalbear-co/mirrord-intellij/projects
+              - img [ref=e118]
+              - generic [ref=e120]: Projects
+          - listitem [ref=e121]:
+            - link "Security and quality" [ref=e122] [cursor=pointer]:
+              - /url: /metalbear-co/mirrord-intellij/security
+              - img [ref=e123]
+              - generic [ref=e125]: Security and quality
+          - listitem [ref=e126]:
+            - link "Insights" [ref=e127] [cursor=pointer]:
+              - /url: /metalbear-co/mirrord-intellij/pulse
+              - img [ref=e128]
+              - generic [ref=e130]: Insights
+    - generic [ref=e136]:
+      - generic [ref=e138]:
+        - generic [ref=e140]:
+          - 'heading "Automated release #419" [level=1] [ref=e141]'
+          - group [ref=e143]:
+            - button "New issue" [ref=e144] [cursor=pointer]
+        - generic [ref=e145]:
+          - 'generic "Status: Open" [ref=e147]':
+            - img [ref=e148]
+            - text: Open
+          - generic [ref=e150]:
+            - link "aviramha" [ref=e151] [cursor=pointer]:
+              - /url: /aviramha
+            - text: wants to merge 3 commits into
+            - generic "metalbear-co/mirrord-intellij:main" [ref=e152]:
+              - link "main" [ref=e153] [cursor=pointer]:
+                - /url: /metalbear-co/mirrord-intellij/tree/main
+                - generic [ref=e154]: main
+            - text: from
+            - generic "metalbear-co/mirrord-intellij:automate_release" [ref=e155]:
+              - link "automate_release" [ref=e156] [cursor=pointer]:
+                - /url: /metalbear-co/mirrord-intellij/tree/automate_release
+                - generic [ref=e157]: automate_release
+            - button "Copy" [ref=e160]:
+              - img [ref=e161]
+      - generic [ref=e165]:
+        - generic [ref=e167]: +427 −50
+        - navigation "Pull request tabs" [ref=e174]:
+          - link "Conversation 1" [ref=e175] [cursor=pointer]:
+            - /url: /metalbear-co/mirrord-intellij/pull/419
+            - img [ref=e176]
+            - text: Conversation
+            - generic "1" [ref=e178]
+          - link "Commits 3" [ref=e179] [cursor=pointer]:
+            - /url: /metalbear-co/mirrord-intellij/pull/419/commits
+            - img [ref=e180]
+            - text: Commits
+            - generic "3" [ref=e182]
+          - link "Checks 13" [ref=e183] [cursor=pointer]:
+            - /url: /metalbear-co/mirrord-intellij/pull/419/checks
+            - img [ref=e184]
+            - text: Checks
+            - generic "13" [ref=e186]
+          - link "Files changed 9" [ref=e187] [cursor=pointer]:
+            - /url: /metalbear-co/mirrord-intellij/pull/419/files
+            - img [ref=e188]
+            - text: Files changed
+            - generic "9" [ref=e190]
+      - generic [ref=e191]:
+        - generic [ref=e195]:
+          - button "Hide file tree" [ref=e198] [cursor=pointer]:
+            - img [ref=e199]
+          - group [ref=e202]:
+            - button "Changes from all commits" [ref=e203] [cursor=pointer]:
+              - text: Changes from
+              - strong [ref=e204]: all commits
+          - group [ref=e206]:
+            - button "File filter" [ref=e207] [cursor=pointer]:
+              - strong [ref=e208]: File filter
+          - group [ref=e210]:
+            - button "Conversations" [ref=e211] [cursor=pointer]:
+              - strong [ref=e212]: Conversations
+          - group [ref=e214]:
+            - button "Diff settings" [ref=e215] [cursor=pointer]:
+              - img "Diff settings" [ref=e216]
+        - generic [ref=e219]:
+          - generic [ref=e221]:
+            - generic [ref=e222]:
+              - textbox "Filter changed files" [ref=e223]
+              - img
+            - navigation "File Tree Navigation" [ref=e226]:
+              - tree "File Tree" [ref=e227]:
+                - treeitem ".github/workflows" [level=1] [ref=e228]:
+                  - button ".github/workflows" [expanded] [ref=e229] [cursor=pointer]:
+                    - generic:
+                      - img
+                    - generic:
+                      - img
+                    - generic [ref=e230]: .github/workflows
+                  - group [ref=e231]:
+                    - treeitem "auto-release-pr.yaml" [level=2] [ref=e232]:
+                      - link "auto-release-pr.yaml" [ref=e233] [cursor=pointer]:
+                        - /url: "#diff-a5814ba5112f9d1f43aa9f4200124f2cb4b611ed3103294a5557735bfd10c1b1"
+                        - generic:
+                          - img
+                        - generic: auto-release-pr.yaml
+                        - generic:
+                          - img
+                    - treeitem "ci.yaml" [level=2] [ref=e234]:
+                      - link "ci.yaml" [ref=e235] [cursor=pointer]:
+                        - /url: "#diff-944291df2c9c06359d37cc8833d182d705c9e8c3108e7cfe132d61a06e9133dd"
+                        - generic:
+                          - img
+                        - generic: ci.yaml
+                        - generic:
+                          - img
+                    - treeitem "plugin_verifier.yaml" [level=2] [ref=e236]:
+                      - link "plugin_verifier.yaml" [ref=e237] [cursor=pointer]:
+                        - /url: "#diff-0049dd70cb5343243eec31ef686d0bfa2a52587af5cd2708ae2c9ca67338c916"
+                        - generic:
+                          - img
+                        - generic: plugin_verifier.yaml
+                        - generic:
+                          - img
+                    - treeitem "release.yaml" [level=2] [ref=e238]:
+                      - link "release.yaml" [ref=e239] [cursor=pointer]:
+                        - /url: "#diff-e426ed45842837026e10e66af23d9c7077e89eacbe6958ce7cb991130ad05ada"
+                        - generic:
+                          - img
+                        - generic: release.yaml
+                        - generic:
+                          - img
+                    - treeitem "reusable_e2e.yaml" [level=2] [ref=e240]:
+                      - link "reusable_e2e.yaml" [ref=e241] [cursor=pointer]:
+                        - /url: "#diff-c07ddeae5a1ec7b65950e536eab8e592e37354003fb552e0491330346ca4722b"
+                        - generic:
+                          - img
+                        - generic: reusable_e2e.yaml
+                        - generic:
+                          - img
+                    - treeitem "scheduled_release.yaml" [level=2] [ref=e242]:
+                      - link "scheduled_release.yaml" [ref=e243] [cursor=pointer]:
+                        - /url: "#diff-5b05ac3ad8dab42d8174d36eac57f6be326836f8d906548acd56ab06317afc19"
+                        - generic:
+                          - img
+                        - generic: scheduled_release.yaml
+                        - generic:
+                          - img
+                - treeitem "CODEOWNERS" [level=1] [ref=e244]:
+                  - link "CODEOWNERS" [ref=e245] [cursor=pointer]:
+                    - /url: "#diff-fcf14c4b7b34fe7a11916195871ae66a59be87a395f28db73e345ebdc828085b"
+                    - generic:
+                      - img
+                    - generic: CODEOWNERS
+                    - generic:
+                      - img
+                - treeitem "changelog.d" [level=1] [ref=e246]:
+                  - button "changelog.d" [expanded] [ref=e247] [cursor=pointer]:
+                    - generic:
+                      - img
+                    - generic:
+                      - img
+                    - generic [ref=e248]: changelog.d
+                  - group [ref=e249]:
+                    - treeitem "+automated-release.internal.md" [level=2] [ref=e250]:
+                      - link "+automated-release.internal.md" [ref=e251] [cursor=pointer]:
+                        - /url: "#diff-7b29868bd4aa5e0290195799cbef1ce2a51d3eb4a3cb7fd54c05e663a8eb3eb7"
+                        - generic:
+                          - img
+                        - generic: +automated-release.internal.md
+                        - generic:
+                          - img
+                    - treeitem "changelog_template.jinja" [level=2] [ref=e252]:
+                      - link "changelog_template.jinja" [ref=e253] [cursor=pointer]:
+                        - /url: "#diff-2e819af98d176e5c4fb51bbd3e0571cde7b630103349fb026b517319ff5fa4ee"
+                        - generic:
+                          - img
+                        - generic: changelog_template.jinja
+                        - generic:
+                          - img
+          - generic [ref=e254]:
+            - generic [ref=e255]:
+              - generic [ref=e256]:
+                - generic [ref=e258]:
+                  - generic [ref=e259]:
+                    - generic [ref=e260]:
+                      - button "Toggle diff contents" [expanded] [ref=e261] [cursor=pointer]:
+                        - img [ref=e262]
+                      - generic [ref=e264]: "161 changes: 161 additions & 0 deletions"
+                      - generic [ref=e265]: "161"
+                      - generic [ref=e271]:
+                        - link ".github/workflows/auto-release-pr.yaml" [ref=e272] [cursor=pointer]:
+                          - /url: "#diff-a5814ba5112f9d1f43aa9f4200124f2cb4b611ed3103294a5557735bfd10c1b1"
+                        - button "Copy" [ref=e274]:
+                          - img [ref=e275]
+                    - group [ref=e281]:
+                      - button "Show options" [ref=e282] [cursor=pointer]:
+                        - img "Show options" [ref=e284]
+                  - table [ref=e289]:
+                    - rowgroup [ref=e290]:
+                      - row "Original file line number Diff line number Diff line change" [ref=e291]:
+                        - columnheader "Original file line number" [ref=e292]
+                        - columnheader "Diff line number" [ref=e293]
+                        - columnheader "Diff line change" [ref=e294]
+                    - rowgroup [ref=e295]:
+                      - row "... ... @@ -0,0 +1,161 @@" [ref=e296]:
+                        - cell "..." [ref=e297]
+                        - cell "..." [ref=e298]
+                        - cell "@@ -0,0 +1,161 @@" [ref=e299]
+                      - 'row "1 + name: Auto Release PR" [ref=e300]':
+                        - cell [ref=e301] [cursor=pointer]
+                        - cell "1" [ref=e302] [cursor=pointer]
+                        - 'cell "+ name: Auto Release PR" [ref=e303]':
+                          - generic [ref=e304]: "+ name: Auto Release PR"
+                      - row "2 +" [ref=e305]:
+                        - cell [ref=e306] [cursor=pointer]
+                        - cell "2" [ref=e307] [cursor=pointer]
+                        - cell "+" [ref=e308]:
+                          - generic: +
+                      - row "3 + on:" [ref=e309]:
+                        - cell [ref=e310] [cursor=pointer]
+                        - cell "3" [ref=e311] [cursor=pointer]
+                        - cell "+ on:" [ref=e312]:
+                          - generic [ref=e313]: "+ on:"
+                      - row "4 + workflow_call:" [ref=e314]:
+                        - cell [ref=e315] [cursor=pointer]
+                        - cell "4" [ref=e316] [cursor=pointer]
+                        - cell "+ workflow_call:" [ref=e317]:
+                          - generic [ref=e318]: "+ workflow_call:"
+                      - row "5 + workflow_dispatch:" [ref=e319]:
+                        - cell [ref=e320] [cursor=pointer]
+                        - cell "5" [ref=e321] [cursor=pointer]
+                        - cell "+ workflow_dispatch:" [ref=e322]:
+                          - generic [ref=e323]: "+ workflow_dispatch:"
+                      - row "6 +" [ref=e324]:
+                        - cell [ref=e325] [cursor=pointer]
+                        - cell "6" [ref=e326] [cursor=pointer]
+                        - cell "+" [ref=e327]:
+                          - generic: +
+                      - row "7 + permissions:" [ref=e328]:
+                        - cell [ref=e329] [cursor=pointer]
+                        - cell "7" [ref=e330] [cursor=pointer]
+                        - cell "+ permissions:" [ref=e331]:
+                          - generic [ref=e332]: "+ permissions:"
+                      - 'row "8 + contents: read" [ref=e333]':
+                        - cell [ref=e334] [cursor=pointer]
+                        - cell "8" [ref=e335] [cursor=pointer]
+                        - 'cell "+ contents: read" [ref=e336]':
+                          - generic [ref=e337]: "+ contents: read"
+                      - row "9 +" [ref=e338]:
+                        - cell [ref=e339] [cursor=pointer]
+                        - cell "9" [ref=e340] [cursor=pointer]
+                        - cell "+" [ref=e341]:
+                          - generic: +
+                      - row "10 + jobs:" [ref=e342]:
+                        - cell [ref=e343] [cursor=pointer]
+                        - cell "10" [ref=e344] [cursor=pointer]
+                        - cell "+ jobs:" [ref=e345]:
+                          - generic [ref=e346]: "+ jobs:"
+                      - row "11 + create_release_pr:" [ref=e347]:
+                        - cell [ref=e348] [cursor=pointer]
+                        - cell "11" [ref=e349] [cursor=pointer]
+                        - cell "+ create_release_pr:" [ref=e350]:
+                          - generic [ref=e351]: "+ create_release_pr:"
+                      - 'row "12 + runs-on: ubuntu-24.04" [ref=e352]':
+                        - cell [ref=e353] [cursor=pointer]
+                        - cell "12" [ref=e354] [cursor=pointer]
+                        - 'cell "+ runs-on: ubuntu-24.04" [ref=e355]':
+                          - generic [ref=e356]: "+ runs-on: ubuntu-24.04"
+                      - row "13 + steps:" [ref=e357]:
+                        - cell [ref=e358] [cursor=pointer]
+                        - cell "13" [ref=e359] [cursor=pointer]
+                        - cell "+ steps:" [ref=e360]:
+                          - generic [ref=e361]: "+ steps:"
+                      - 'row "14 + - name: Checkout" [ref=e362]':
+                        - cell [ref=e363] [cursor=pointer]
+                        - cell "14" [ref=e364] [cursor=pointer]
+                        - 'cell "+ - name: Checkout" [ref=e365]':
+                          - generic [ref=e366]: "+ - name: Checkout"
+                      - 'row "15 + uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2" [ref=e367]':
+                        - cell [ref=e368] [cursor=pointer]
+                        - cell "15" [ref=e369] [cursor=pointer]
+                        - 'cell "+ uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2" [ref=e370]':
+                          - generic [ref=e371]: "+ uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2"
+                      - row "16 + with:" [ref=e372]:
+                        - cell [ref=e373] [cursor=pointer]
+                        - cell "16" [ref=e374] [cursor=pointer]
+                        - cell "+ with:" [ref=e375]:
+                          - generic [ref=e376]: "+ with:"
+                      - 'row "17 + # Avoid persisting GITHUB_TOKEN credentials; pushes must use the app token instead." [ref=e377]':
+                        - cell [ref=e378] [cursor=pointer]
+                        - cell "17" [ref=e379] [cursor=pointer]
+                        - 'cell "+ # Avoid persisting GITHUB_TOKEN credentials; pushes must use the app token instead." [ref=e380]':
+                          - generic [ref=e381]: "+ # Avoid persisting GITHUB_TOKEN credentials; pushes must use the app token instead."
+                      - 'row "18 + persist-credentials: false" [ref=e382]':
+                        - cell [ref=e383] [cursor=pointer]
+                        - cell "18" [ref=e384] [cursor=pointer]
+                        - 'cell "+ persist-credentials: false" [ref=e385]':
+                          - generic [ref=e386]: "+ persist-credentials: false"
+                      - 'row "19 + ref: main" [ref=e387]':
+                        - cell [ref=e388] [cursor=pointer]
+                        - cell "19" [ref=e389] [cursor=pointer]
+                        - 'cell "+ ref: main" [ref=e390]':
+                          - generic [ref=e391]: "+ ref: main"
+                      - row "20 +" [ref=e392]:
+                        - cell [ref=e393] [cursor=pointer]
+                        - cell "20" [ref=e394] [cursor=pointer]
+                        - cell "+" [ref=e395]:
+                          - generic: +
+                      - 'row "21 + - name: Install uv" [ref=e396]':
+                        - cell [ref=e397] [cursor=pointer]
+                        - cell "21" [ref=e398] [cursor=pointer]
+                        - 'cell "+ - name: Install uv" [ref=e399]':
+                          - generic [ref=e400]: "+ - name: Install uv"
+                      - 'row "22 + uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0" [ref=e401]':
+                        - cell [ref=e402] [cursor=pointer]
+                        - cell "22" [ref=e403] [cursor=pointer]
+                        - 'cell "+ uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0" [ref=e404]':
+                          - generic [ref=e405]: "+ uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0"
+                      - row "23 +" [ref=e406]:
+                        - cell [ref=e407] [cursor=pointer]
+                        - cell "23" [ref=e408] [cursor=pointer]
+                        - cell "+" [ref=e409]:
+                          - generic: +
+                      - 'row "24 + - name: Install Python" [ref=e410]':
+                        - cell [ref=e411] [cursor=pointer]
+                        - cell "24" [ref=e412] [cursor=pointer]
+                        - 'cell "+ - name: Install Python" [ref=e413]':
+                          - generic [ref=e414]: "+ - name: Install Python"
+                      - 'row "25 + run: uv python install" [ref=e415]':
+                        - cell [ref=e416] [cursor=pointer]
+                        - cell "25" [ref=e417] [cursor=pointer]
+                        - 'cell "+ run: uv python install" [ref=e418]':
+                          - generic [ref=e419]: "+ run: uv python install"
+                      - row "26 +" [ref=e420]:
+                        - cell [ref=e421] [cursor=pointer]
+                        - cell "26" [ref=e422] [cursor=pointer]
+                        - cell "+" [ref=e423]:
+                          - generic: +
+                      - 'row "27 + - name: Create virtual environment" [ref=e424]':
+                        - cell [ref=e425] [cursor=pointer]
+                        - cell "27" [ref=e426] [cursor=pointer]
+                        - 'cell "+ - name: Create virtual environment" [ref=e427]':
+                          - generic [ref=e428]: "+ - name: Create virtual environment"
+                      - 'row "28 + run: uv venv" [ref=e429]':
+                        - cell [ref=e430] [cursor=pointer]
+                        - cell "28" [ref=e431] [cursor=pointer]
+                        - 'cell "+ run: uv venv" [ref=e432]':
+                          - generic [ref=e433]: "+ run: uv venv"
+                      - row "29 +" [ref=e434]:
+                        - cell [ref=e435] [cursor=pointer]
+                        - cell "29" [ref=e436] [cursor=pointer]
+                        - cell "+" [ref=e437]:
+                          - generic: +
+                      - 'row "30 + - name: Install towncrier" [ref=e438]':
+                        - cell [ref=e439] [cursor=pointer]
+                        - cell "30" [ref=e440] [cursor=pointer]
+                        - 'cell "+ - name: Install towncrier" [ref=e441]':
+                          - generic [ref=e442]: "+ - name: Install towncrier"
+                      - 'row "31 + run: uv pip install towncrier==23.11.0" [ref=e443]':
+                        - cell [ref=e444] [cursor=pointer]
+                        - cell "31" [ref=e445] [cursor=pointer]
+                        - 'cell "+ run: uv pip install towncrier==23.11.0" [ref=e446]':
+                          - generic [ref=e447]: "+ run: uv pip install towncrier==23.11.0"
+                      - row "32 +" [ref=e448]:
+                        - cell [ref=e449] [cursor=pointer]
+                        - cell "32" [ref=e450] [cursor=pointer]
+                        - cell "+" [ref=e451]:
+                          - generic: +
+                      - 'row "33 + - name: Determine next release version" [ref=e452]':
+                        - cell [ref=e453] [cursor=pointer]
+                        - cell "33" [ref=e454] [cursor=pointer]
+                        - 'cell "+ - name: Determine next release version" [ref=e455]':
+                          - generic [ref=e456]: "+ - name: Determine next release version"
+                      - 'row "34 + id: version" [ref=e457]':
+                        - cell [ref=e458] [cursor=pointer]
+                        - cell "34" [ref=e459] [cursor=pointer]
+                        - 'cell "+ id: version" [ref=e460]':
+                          - generic [ref=e461]: "+ id: version"
+                      - 'row "35 + shell: bash" [ref=e462]':
+                        - cell [ref=e463] [cursor=pointer]
+                        - cell "35" [ref=e464] [cursor=pointer]
+                        - 'cell "+ shell: bash" [ref=e465]':
+                          - generic [ref=e466]: "+ shell: bash"
+                      - 'row "36 + run: |" [ref=e467]':
+                        - cell [ref=e468] [cursor=pointer]
+                        - cell "36" [ref=e469] [cursor=pointer]
+                        - 'cell "+ run: |" [ref=e470]':
+                          - generic [ref=e471]: "+ run: |"
+                      - row "37 + set -euo pipefail" [ref=e472]:
+                        - cell [ref=e473] [cursor=pointer]
+                        - cell "37" [ref=e474] [cursor=pointer]
+                        - cell "+ set -euo pipefail" [ref=e475]:
+                          - generic [ref=e476]: + set -euo pipefail
+                      - row "38 + shopt -s nullglob" [ref=e477]:
+                        - cell [ref=e478] [cursor=pointer]
+                        - cell "38" [ref=e479] [cursor=pointer]
+                        - cell "+ shopt -s nullglob" [ref=e480]:
+                          - generic [ref=e481]: + shopt -s nullglob
+                      - row "39 +" [ref=e482]:
+                        - cell [ref=e483] [cursor=pointer]
+                        - cell "39" [ref=e484] [cursor=pointer]
+                        - cell "+" [ref=e485]:
+                          - generic: +
+                      - row "40 + fragments=(changelog.d/*.md)" [ref=e486]:
+                        - cell [ref=e487] [cursor=pointer]
+                        - cell "40" [ref=e488] [cursor=pointer]
+                        - cell "+ fragments=(changelog.d/*.md)" [ref=e489]:
+                          - generic [ref=e490]: + fragments=(changelog.d/*.md)
+                      - 'row "41 + if [ ${#fragments[@]} -eq 0 ]; then" [ref=e491]':
+                        - cell [ref=e492] [cursor=pointer]
+                        - cell "41" [ref=e493] [cursor=pointer]
+                        - 'cell "+ if [ ${#fragments[@]} -eq 0 ]; then" [ref=e494]':
+                          - generic [ref=e495]: "+ if [ ${#fragments[@]} -eq 0 ]; then"
+                      - row "42 + echo \"No changelog entries found in changelog.d\"" [ref=e496]:
+                        - cell [ref=e497] [cursor=pointer]
+                        - cell "42" [ref=e498] [cursor=pointer]
+                        - cell "+ echo \"No changelog entries found in changelog.d\"" [ref=e499]:
+                          - generic [ref=e500]: + echo "No changelog entries found in changelog.d"
+                      - row "43 + exit 1" [ref=e501]:
+                        - cell [ref=e502] [cursor=pointer]
+                        - cell "43" [ref=e503] [cursor=pointer]
+                        - cell "+ exit 1" [ref=e504]:
+                          - generic [ref=e505]: + exit 1
+                      - row "44 + fi" [ref=e506]:
+                        - cell [ref=e507] [cursor=pointer]
+                        - cell "44" [ref=e508] [cursor=pointer]
+                        - cell "+ fi" [ref=e509]:
+                          - generic [ref=e510]: + fi
+                      - row "45 +" [ref=e511]:
+                        - cell [ref=e512] [cursor=pointer]
+                        - cell "45" [ref=e513] [cursor=pointer]
+                        - cell "+" [ref=e514]:
+                          - generic: +
+                      - row "46 + bump_level=patch" [ref=e515]:
+                        - cell [ref=e516] [cursor=pointer]
+                        - cell "46" [ref=e517] [cursor=pointer]
+                        - cell "+ bump_level=patch" [ref=e518]:
+                          - generic [ref=e519]: + bump_level=patch
+                      - 'row "47 + for fragment in \"${fragments[@]}\"; do" [ref=e520]':
+                        - cell [ref=e521] [cursor=pointer]
+                        - cell "47" [ref=e522] [cursor=pointer]
+                        - 'cell "+ for fragment in \"${fragments[@]}\"; do" [ref=e523]':
+                          - generic [ref=e524]: "+ for fragment in \"${fragments[@]}\"; do"
+                      - 'row "48 + category=$(basename \"${fragment}\")" [ref=e525]':
+                        - cell [ref=e526] [cursor=pointer]
+                        - cell "48" [ref=e527] [cursor=pointer]
+                        - 'cell "+ category=$(basename \"${fragment}\")" [ref=e528]':
+                          - generic [ref=e529]: "+ category=$(basename \"${fragment}\")"
+                      - 'row "49 + category=\"${category%.md}\"" [ref=e530]':
+                        - cell [ref=e531] [cursor=pointer]
+                        - cell "49" [ref=e532] [cursor=pointer]
+                        - 'cell "+ category=\"${category%.md}\"" [ref=e533]':
+                          - generic [ref=e534]: "+ category=\"${category%.md}\""
+                      - 'row "50 + category=\"${category##*.}\"" [ref=e535]':
+                        - cell [ref=e536] [cursor=pointer]
+                        - cell "50" [ref=e537] [cursor=pointer]
+                        - 'cell "+ category=\"${category##*.}\"" [ref=e538]':
+                          - generic [ref=e539]: "+ category=\"${category##*.}\""
+                      - row "51 +" [ref=e540]:
+                        - cell [ref=e541] [cursor=pointer]
+                        - cell "51" [ref=e542] [cursor=pointer]
+                        - cell "+" [ref=e543]:
+                          - generic: +
+                      - 'row "52 + case \"${category}\" in" [ref=e544]':
+                        - cell [ref=e545] [cursor=pointer]
+                        - cell "52" [ref=e546] [cursor=pointer]
+                        - 'cell "+ case \"${category}\" in" [ref=e547]':
+                          - generic [ref=e548]: "+ case \"${category}\" in"
+                      - row "53 + internal|fixed)" [ref=e549]:
+                        - cell [ref=e550] [cursor=pointer]
+                        - cell "53" [ref=e551] [cursor=pointer]
+                        - cell "+ internal|fixed)" [ref=e552]:
+                          - generic [ref=e553]: + internal|fixed)
+                      - row "54 + ;;" [ref=e554]:
+                        - cell [ref=e555] [cursor=pointer]
+                        - cell "54" [ref=e556] [cursor=pointer]
+                        - cell "+ ;;" [ref=e557]:
+                          - generic [ref=e558]: + ;;
+                      - row "55 + *)" [ref=e559]:
+                        - cell [ref=e560] [cursor=pointer]
+                        - cell "55" [ref=e561] [cursor=pointer]
+                        - cell "+ *)" [ref=e562]:
+                          - generic [ref=e563]: + *)
+                      - row "56 + bump_level=minor" [ref=e564]:
+                        - cell [ref=e565] [cursor=pointer]
+                        - cell "56" [ref=e566] [cursor=pointer]
+                        - cell "+ bump_level=minor" [ref=e567]:
+                          - generic [ref=e568]: + bump_level=minor
+                      - row "57 + break" [ref=e569]:
+                        - cell [ref=e570] [cursor=pointer]
+                        - cell "57" [ref=e571] [cursor=pointer]
+                        - cell "+ break" [ref=e572]:
+                          - generic [ref=e573]: + break
+                      - row "58 + ;;" [ref=e574]:
+                        - cell [ref=e575] [cursor=pointer]
+                        - cell "58" [ref=e576] [cursor=pointer]
+                        - cell "+ ;;" [ref=e577]:
+                          - generic [ref=e578]: + ;;
+                      - row "59 + esac" [ref=e579]:
+                        - cell [ref=e580] [cursor=pointer]
+                        - cell "59" [ref=e581] [cursor=pointer]
+                        - cell "+ esac" [ref=e582]:
+                          - generic [ref=e583]: + esac
+                      - row "60 + done" [ref=e584]:
+                        - cell [ref=e585] [cursor=pointer]
+                        - cell "60" [ref=e586] [cursor=pointer]
+                        - cell "+ done" [ref=e587]:
+                          - generic [ref=e588]: + done
+                      - row "61 +" [ref=e589]:
+                        - cell [ref=e590] [cursor=pointer]
+                        - cell "61" [ref=e591] [cursor=pointer]
+                        - cell "+" [ref=e592]:
+                          - generic: +
+                      - 'row "62 + {" [ref=e593]':
+                        - cell [ref=e594] [cursor=pointer]
+                        - cell "62" [ref=e595] [cursor=pointer]
+                        - 'cell "+ {" [ref=e596]':
+                          - generic [ref=e597]: "+ {"
+                      - 'row "63 + echo \"bump_level=${bump_level}\"" [ref=e598]':
+                        - cell [ref=e599] [cursor=pointer]
+                        - cell "63" [ref=e600] [cursor=pointer]
+                        - 'cell "+ echo \"bump_level=${bump_level}\"" [ref=e601]':
+                          - generic [ref=e602]: "+ echo \"bump_level=${bump_level}\""
+                      - 'row "64 + } >> \"${GITHUB_OUTPUT}\"" [ref=e603]':
+                        - cell [ref=e604] [cursor=pointer]
+                        - cell "64" [ref=e605] [cursor=pointer]
+                        - 'cell "+ } >> \"${GITHUB_OUTPUT}\"" [ref=e606]':
+                          - generic [ref=e607]: "+ } >> \"${GITHUB_OUTPUT}\""
+                      - row "65 +" [ref=e608]:
+                        - cell [ref=e609] [cursor=pointer]
+                        - cell "65" [ref=e610] [cursor=pointer]
+                        - cell "+" [ref=e611]:
+                          - generic: +
+                      - 'row "66 + - name: Bump plugin version" [ref=e612]':
+                        - cell [ref=e613] [cursor=pointer]
+                        - cell "66" [ref=e614] [cursor=pointer]
+                        - 'cell "+ - name: Bump plugin version" [ref=e615]':
+                          - generic [ref=e616]: "+ - name: Bump plugin version"
+                      - 'row "67 + id: bump" [ref=e617]':
+                        - cell [ref=e618] [cursor=pointer]
+                        - cell "67" [ref=e619] [cursor=pointer]
+                        - 'cell "+ id: bump" [ref=e620]':
+                          - generic [ref=e621]: "+ id: bump"
+                      - 'row "68 + shell: bash" [ref=e622]':
+                        - cell [ref=e623] [cursor=pointer]
+                        - cell "68" [ref=e624] [cursor=pointer]
+                        - 'cell "+ shell: bash" [ref=e625]':
+                          - generic [ref=e626]: "+ shell: bash"
+                      - 'row "69 + run: |" [ref=e627]':
+                        - cell [ref=e628] [cursor=pointer]
+                        - cell "69" [ref=e629] [cursor=pointer]
+                        - 'cell "+ run: |" [ref=e630]':
+                          - generic [ref=e631]: "+ run: |"
+                      - row "70 + set -euo pipefail" [ref=e632]:
+                        - cell [ref=e633] [cursor=pointer]
+                        - cell "70" [ref=e634] [cursor=pointer]
+                        - cell "+ set -euo pipefail" [ref=e635]:
+                          - generic [ref=e636]: + set -euo pipefail
+                      - row "71 +" [ref=e637]:
+                        - cell [ref=e638] [cursor=pointer]
+                        - cell "71" [ref=e639] [cursor=pointer]
+                        - cell "+" [ref=e640]:
+                          - generic: +
+                      - row "72 + current_version=$(grep -oP '(?<=pluginVersion = )[\\d.]+' gradle.properties)" [ref=e641]:
+                        - cell [ref=e642] [cursor=pointer]
+                        - cell "72" [ref=e643] [cursor=pointer]
+                        - cell "+ current_version=$(grep -oP '(?<=pluginVersion = )[\\d.]+' gradle.properties)" [ref=e644]:
+                          - generic [ref=e645]: + current_version=$(grep -oP '(?<=pluginVersion = )[\d.]+' gradle.properties)
+                      - 'row "73 + IFS=''.'' read -r major minor patch <<< \"${current_version}\"" [ref=e646]':
+                        - cell [ref=e647] [cursor=pointer]
+                        - cell "73" [ref=e648] [cursor=pointer]
+                        - 'cell "+ IFS=''.'' read -r major minor patch <<< \"${current_version}\"" [ref=e649]':
+                          - generic [ref=e650]: "+ IFS='.' read -r major minor patch <<< \"${current_version}\""
+                      - 'row "74 + if [ \"${{ steps.version.outputs.bump_level }}\" = \"minor\" ]; then" [ref=e651]':
+                        - cell [ref=e652] [cursor=pointer]
+                        - cell "74" [ref=e653] [cursor=pointer]
+                        - 'cell "+ if [ \"${{ steps.version.outputs.bump_level }}\" = \"minor\" ]; then" [ref=e654]':
+                          - generic [ref=e655]: "+ if [ \"${{ steps.version.outputs.bump_level }}\" = \"minor\" ]; then"
+                      - 'row "75 + new_version=\"${major}.$((minor + 1)).0\"" [ref=e656]':
+                        - cell [ref=e657] [cursor=pointer]
+                        - cell "75" [ref=e658] [cursor=pointer]
+                        - 'cell "+ new_version=\"${major}.$((minor + 1)).0\"" [ref=e659]':
+                          - generic [ref=e660]: "+ new_version=\"${major}.$((minor + 1)).0\""
+                      - row "76 + else" [ref=e661]:
+                        - cell [ref=e662] [cursor=pointer]
+                        - cell "76" [ref=e663] [cursor=pointer]
+                        - cell "+ else" [ref=e664]:
+                          - generic [ref=e665]: + else
+                      - 'row "77 + new_version=\"${major}.${minor}.$((patch + 1))\"" [ref=e666]':
+                        - cell [ref=e667] [cursor=pointer]
+                        - cell "77" [ref=e668] [cursor=pointer]
+                        - 'cell "+ new_version=\"${major}.${minor}.$((patch + 1))\"" [ref=e669]':
+                          - generic [ref=e670]: "+ new_version=\"${major}.${minor}.$((patch + 1))\""
+                      - row "78 + fi" [ref=e671]:
+                        - cell [ref=e672] [cursor=pointer]
+                        - cell "78" [ref=e673] [cursor=pointer]
+                        - cell "+ fi" [ref=e674]:
+                          - generic [ref=e675]: + fi
+                      - 'row "79 + sed -i \"s/pluginVersion = .*/pluginVersion = ${new_version}/\" gradle.properties" [ref=e676]':
+                        - cell [ref=e677] [cursor=pointer]
+                        - cell "79" [ref=e678] [cursor=pointer]
+                        - 'cell "+ sed -i \"s/pluginVersion = .*/pluginVersion = ${new_version}/\" gradle.properties" [ref=e679]':
+                          - generic [ref=e680]: "+ sed -i \"s/pluginVersion = .*/pluginVersion = ${new_version}/\" gradle.properties"
+                      - 'row "80 + echo \"new_version=${new_version}\" >> \"$GITHUB_OUTPUT\"" [ref=e681]':
+                        - cell [ref=e682] [cursor=pointer]
+                        - cell "80" [ref=e683] [cursor=pointer]
+                        - 'cell "+ echo \"new_version=${new_version}\" >> \"$GITHUB_OUTPUT\"" [ref=e684]':
+                          - generic [ref=e685]: "+ echo \"new_version=${new_version}\" >> \"$GITHUB_OUTPUT\""
+                      - row "81 +" [ref=e686]:
+                        - cell [ref=e687] [cursor=pointer]
+                        - cell "81" [ref=e688] [cursor=pointer]
+                        - cell "+" [ref=e689]:
+                          - generic: +
+                      - 'row "82 + - name: Generate release notes" [ref=e690]':
+                        - cell [ref=e691] [cursor=pointer]
+                        - cell "82" [ref=e692] [cursor=pointer]
+                        - 'cell "+ - name: Generate release notes" [ref=e693]':
+                          - generic [ref=e694]: "+ - name: Generate release notes"
+                      - 'row "83 + run: uv run towncrier build --draft --version \"${{ steps.bump.outputs.new_version }}\" > /tmp/release-notes.md" [ref=e695]':
+                        - cell [ref=e696] [cursor=pointer]
+                        - cell "83" [ref=e697] [cursor=pointer]
+                        - 'cell "+ run: uv run towncrier build --draft --version \"${{ steps.bump.outputs.new_version }}\" > /tmp/release-notes.md" [ref=e698]':
+                          - generic [ref=e699]: "+ run: uv run towncrier build --draft --version \"${{ steps.bump.outputs.new_version }}\" > /tmp/release-notes.md"
+                      - row "84 +" [ref=e700]:
+                        - cell [ref=e701] [cursor=pointer]
+                        - cell "84" [ref=e702] [cursor=pointer]
+                        - cell "+" [ref=e703]:
+                          - generic: +
+                      - 'row "85 + - name: Generate changelog" [ref=e704]':
+                        - cell [ref=e705] [cursor=pointer]
+                        - cell "85" [ref=e706] [cursor=pointer]
+                        - 'cell "+ - name: Generate changelog" [ref=e707]':
+                          - generic [ref=e708]: "+ - name: Generate changelog"
+                      - 'row "86 + run: uv run towncrier build --yes --version \"${{ steps.bump.outputs.new_version }}\"" [ref=e709]':
+                        - cell [ref=e710] [cursor=pointer]
+                        - cell "86" [ref=e711] [cursor=pointer]
+                        - 'cell "+ run: uv run towncrier build --yes --version \"${{ steps.bump.outputs.new_version }}\"" [ref=e712]':
+                          - generic [ref=e713]: "+ run: uv run towncrier build --yes --version \"${{ steps.bump.outputs.new_version }}\""
+                      - row "87 +" [ref=e714]:
+                        - cell [ref=e715] [cursor=pointer]
+                        - cell "87" [ref=e716] [cursor=pointer]
+                        - cell "+" [ref=e717]:
+                          - generic: +
+                      - 'row "88 + - name: Create app token for release PR updates" [ref=e718]':
+                        - cell [ref=e719] [cursor=pointer]
+                        - cell "88" [ref=e720] [cursor=pointer]
+                        - 'cell "+ - name: Create app token for release PR updates" [ref=e721]':
+                          - generic [ref=e722]: "+ - name: Create app token for release PR updates"
+                      - 'row "89 + id: app_token" [ref=e723]':
+                        - cell [ref=e724] [cursor=pointer]
+                        - cell "89" [ref=e725] [cursor=pointer]
+                        - 'cell "+ id: app_token" [ref=e726]':
+                          - generic [ref=e727]: "+ id: app_token"
+                      - 'row "90 + uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0" [ref=e728]':
+                        - cell [ref=e729] [cursor=pointer]
+                        - cell "90" [ref=e730] [cursor=pointer]
+                        - 'cell "+ uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0" [ref=e731]':
+                          - generic [ref=e732]: "+ uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0"
+                      - row "91 + with:" [ref=e733]:
+                        - cell [ref=e734] [cursor=pointer]
+                        - cell "91" [ref=e735] [cursor=pointer]
+                        - cell "+ with:" [ref=e736]:
+                          - generic [ref=e737]: "+ with:"
+                      - 'row "92 + app-id: ${{ secrets.CUBBY_CLIENT_ID }}" [ref=e738]':
+                        - cell [ref=e739] [cursor=pointer]
+                        - cell "92" [ref=e740] [cursor=pointer]
+                        - 'cell "+ app-id: ${{ secrets.CUBBY_CLIENT_ID }}" [ref=e741]':
+                          - generic [ref=e742]: "+ app-id: ${{ secrets.CUBBY_CLIENT_ID }}"
+                      - 'row "93 + private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}" [ref=e743]':
+                        - cell [ref=e744] [cursor=pointer]
+                        - cell "93" [ref=e745] [cursor=pointer]
+                        - 'cell "+ private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}" [ref=e746]':
+                          - generic [ref=e747]: "+ private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}"
+                      - 'row "94 + permission-contents: write" [ref=e748]':
+                        - cell [ref=e749] [cursor=pointer]
+                        - cell "94" [ref=e750] [cursor=pointer]
+                        - 'cell "+ permission-contents: write" [ref=e751]':
+                          - generic [ref=e752]: "+ permission-contents: write"
+                      - 'row "95 + permission-pull-requests: write" [ref=e753]':
+                        - cell [ref=e754] [cursor=pointer]
+                        - cell "95" [ref=e755] [cursor=pointer]
+                        - 'cell "+ permission-pull-requests: write" [ref=e756]':
+                          - generic [ref=e757]: "+ permission-pull-requests: write"
+                      - row "96 +" [ref=e758]:
+                        - cell [ref=e759] [cursor=pointer]
+                        - cell "96" [ref=e760] [cursor=pointer]
+                        - cell "+" [ref=e761]:
+                          - generic: +
+                      - 'row "97 + - name: Create or update release pull request" [ref=e762]':
+                        - cell [ref=e763] [cursor=pointer]
+                        - cell "97" [ref=e764] [cursor=pointer]
+                        - 'cell "+ - name: Create or update release pull request" [ref=e765]':
+                          - generic [ref=e766]: "+ - name: Create or update release pull request"
+                      - row "98 + env:" [ref=e767]:
+                        - cell [ref=e768] [cursor=pointer]
+                        - cell "98" [ref=e769] [cursor=pointer]
+                        - cell "+ env:" [ref=e770]:
+                          - generic [ref=e771]: "+ env:"
+                      - 'row "99 + APP_TOKEN: ${{ steps.app_token.outputs.token }}" [ref=e772]':
+                        - cell [ref=e773] [cursor=pointer]
+                        - cell "99" [ref=e774] [cursor=pointer]
+                        - 'cell "+ APP_TOKEN: ${{ steps.app_token.outputs.token }}" [ref=e775]':
+                          - generic [ref=e776]: "+ APP_TOKEN: ${{ steps.app_token.outputs.token }}"
+                      - 'row "100 + GH_TOKEN: ${{ steps.app_token.outputs.token }}" [ref=e777]':
+                        - cell [ref=e778] [cursor=pointer]
+                        - cell "100" [ref=e779] [cursor=pointer]
+                        - 'cell "+ GH_TOKEN: ${{ steps.app_token.outputs.token }}" [ref=e780]':
+                          - generic [ref=e781]: "+ GH_TOKEN: ${{ steps.app_token.outputs.token }}"
+                      - 'row "101 + shell: bash" [ref=e782]':
+                        - cell [ref=e783] [cursor=pointer]
+                        - cell "101" [ref=e784] [cursor=pointer]
+                        - 'cell "+ shell: bash" [ref=e785]':
+                          - generic [ref=e786]: "+ shell: bash"
+                      - 'row "102 + run: |" [ref=e787]':
+                        - cell [ref=e788] [cursor=pointer]
+                        - cell "102" [ref=e789] [cursor=pointer]
+                        - 'cell "+ run: |" [ref=e790]':
+                          - generic [ref=e791]: "+ run: |"
+                      - row "103 + set -euo pipefail" [ref=e792]:
+                        - cell [ref=e793] [cursor=pointer]
+                        - cell "103" [ref=e794] [cursor=pointer]
+                        - cell "+ set -euo pipefail" [ref=e795]:
+                          - generic [ref=e796]: + set -euo pipefail
+                      - row "104 +" [ref=e797]:
+                        - cell [ref=e798] [cursor=pointer]
+                        - cell "104" [ref=e799] [cursor=pointer]
+                        - cell "+" [ref=e800]:
+                          - generic: +
+                      - 'row "105 + if [ -z \"${APP_TOKEN}\" ]; then" [ref=e801]':
+                        - cell [ref=e802] [cursor=pointer]
+                        - cell "105" [ref=e803] [cursor=pointer]
+                        - 'cell "+ if [ -z \"${APP_TOKEN}\" ]; then" [ref=e804]':
+                          - generic [ref=e805]: "+ if [ -z \"${APP_TOKEN}\" ]; then"
+                      - row "106 + echo \"GitHub App token is required to push the release branch and open the PR.\"" [ref=e806]:
+                        - cell [ref=e807] [cursor=pointer]
+                        - cell "106" [ref=e808] [cursor=pointer]
+                        - cell "+ echo \"GitHub App token is required to push the release branch and open the PR.\"" [ref=e809]:
+                          - generic [ref=e810]: + echo "GitHub App token is required to push the release branch and open the PR."
+                      - row "107 + exit 1" [ref=e811]:
+                        - cell [ref=e812] [cursor=pointer]
+                        - cell "107" [ref=e813] [cursor=pointer]
+                        - cell "+ exit 1" [ref=e814]:
+                          - generic [ref=e815]: + exit 1
+                      - row "108 + fi" [ref=e816]:
+                        - cell [ref=e817] [cursor=pointer]
+                        - cell "108" [ref=e818] [cursor=pointer]
+                        - cell "+ fi" [ref=e819]:
+                          - generic [ref=e820]: + fi
+                      - row "109 +" [ref=e821]:
+                        - cell [ref=e822] [cursor=pointer]
+                        - cell "109" [ref=e823] [cursor=pointer]
+                        - cell "+" [ref=e824]:
+                          - generic: +
+                      - 'row "110 + branch=\"releases/${{ steps.bump.outputs.new_version }}\"" [ref=e825]':
+                        - cell [ref=e826] [cursor=pointer]
+                        - cell "110" [ref=e827] [cursor=pointer]
+                        - 'cell "+ branch=\"releases/${{ steps.bump.outputs.new_version }}\"" [ref=e828]':
+                          - generic [ref=e829]: "+ branch=\"releases/${{ steps.bump.outputs.new_version }}\""
+                      - 'row "111 + title=\"Release ${{ steps.bump.outputs.new_version }}\"" [ref=e830]':
+                        - cell [ref=e831] [cursor=pointer]
+                        - cell "111" [ref=e832] [cursor=pointer]
+                        - 'cell "+ title=\"Release ${{ steps.bump.outputs.new_version }}\"" [ref=e833]':
+                          - generic [ref=e834]: "+ title=\"Release ${{ steps.bump.outputs.new_version }}\""
+                      - row "112 + body_file=$(mktemp)" [ref=e835]:
+                        - cell [ref=e836] [cursor=pointer]
+                        - cell "112" [ref=e837] [cursor=pointer]
+                        - cell "+ body_file=$(mktemp)" [ref=e838]:
+                          - generic [ref=e839]: + body_file=$(mktemp)
+                      - row "113 +" [ref=e840]:
+                        - cell [ref=e841] [cursor=pointer]
+                        - cell "113" [ref=e842] [cursor=pointer]
+                        - cell "+" [ref=e843]:
+                          - generic: +
+                      - 'row "114 + {" [ref=e844]':
+                        - cell [ref=e845] [cursor=pointer]
+                        - cell "114" [ref=e846] [cursor=pointer]
+                        - 'cell "+ {" [ref=e847]':
+                          - generic [ref=e848]: "+ {"
+                      - row "115 + cat <<EOF" [ref=e849]:
+                        - cell [ref=e850] [cursor=pointer]
+                        - cell "115" [ref=e851] [cursor=pointer]
+                        - cell "+ cat <<EOF" [ref=e852]:
+                          - generic [ref=e853]: + cat <<EOF
+                      - 'row "116 + Automated release preparation for \\`${{ steps.bump.outputs.new_version }}\\`." [ref=e854]':
+                        - cell [ref=e855] [cursor=pointer]
+                        - cell "116" [ref=e856] [cursor=pointer]
+                        - 'cell "+ Automated release preparation for \\`${{ steps.bump.outputs.new_version }}\\`." [ref=e857]':
+                          - generic [ref=e858]: "+ Automated release preparation for \\`${{ steps.bump.outputs.new_version }}\\`."
+                      - row "117 +" [ref=e859]:
+                        - cell [ref=e860] [cursor=pointer]
+                        - cell "117" [ref=e861] [cursor=pointer]
+                        - cell "+" [ref=e862]:
+                          - generic: +
+                      - row "118 + This PR updates:" [ref=e863]:
+                        - cell [ref=e864] [cursor=pointer]
+                        - cell "118" [ref=e865] [cursor=pointer]
+                        - cell "+ This PR updates:" [ref=e866]:
+                          - generic [ref=e867]: "+ This PR updates:"
+                      - 'row "119 + - \\`gradle.properties\\`" [ref=e868]':
+                        - cell [ref=e869] [cursor=pointer]
+                        - cell "119" [ref=e870] [cursor=pointer]
+                        - 'cell "+ - \\`gradle.properties\\`" [ref=e871]':
+                          - generic [ref=e872]: "+ - \\`gradle.properties\\`"
+                      - 'row "120 + - \\`CHANGELOG.md\\`" [ref=e873]':
+                        - cell [ref=e874] [cursor=pointer]
+                        - cell "120" [ref=e875] [cursor=pointer]
+                        - 'cell "+ - \\`CHANGELOG.md\\`" [ref=e876]':
+                          - generic [ref=e877]: "+ - \\`CHANGELOG.md\\`"
+                      - 'row "121 + - consumed \\`changelog.d\\` entries" [ref=e878]':
+                        - cell [ref=e879] [cursor=pointer]
+                        - cell "121" [ref=e880] [cursor=pointer]
+                        - 'cell "+ - consumed \\`changelog.d\\` entries" [ref=e881]':
+                          - generic [ref=e882]: "+ - consumed \\`changelog.d\\` entries"
+                      - row "122 +" [ref=e883]:
+                        - cell [ref=e884] [cursor=pointer]
+                        - cell "122" [ref=e885] [cursor=pointer]
+                        - cell "+" [ref=e886]:
+                          - generic: +
+                      - row "123 + Draft release notes:" [ref=e887]:
+                        - cell [ref=e888] [cursor=pointer]
+                        - cell "123" [ref=e889] [cursor=pointer]
+                        - cell "+ Draft release notes:" [ref=e890]:
+                          - generic [ref=e891]: "+ Draft release notes:"
+                      - row "124 +" [ref=e892]:
+                        - cell [ref=e893] [cursor=pointer]
+                        - cell "124" [ref=e894] [cursor=pointer]
+                        - cell "+" [ref=e895]:
+                          - generic: +
+                      - row "125 + EOF" [ref=e896]:
+                        - cell [ref=e897] [cursor=pointer]
+                        - cell "125" [ref=e898] [cursor=pointer]
+                        - cell "+ EOF" [ref=e899]:
+                          - generic [ref=e900]: + EOF
+                      - row "126 + cat /tmp/release-notes.md" [ref=e901]:
+                        - cell [ref=e902] [cursor=pointer]
+                        - cell "126" [ref=e903] [cursor=pointer]
+                        - cell "+ cat /tmp/release-notes.md" [ref=e904]:
+                          - generic [ref=e905]: + cat /tmp/release-notes.md
+                      - 'row "127 + } > \"${body_file}\"" [ref=e906]':
+                        - cell [ref=e907] [cursor=pointer]
+                        - cell "127" [ref=e908] [cursor=pointer]
+                        - 'cell "+ } > \"${body_file}\"" [ref=e909]':
+                          - generic [ref=e910]: "+ } > \"${body_file}\""
+                      - row "128 +" [ref=e911]:
+                        - cell [ref=e912] [cursor=pointer]
+                        - cell "128" [ref=e913] [cursor=pointer]
+                        - cell "+" [ref=e914]:
+                          - generic: +
+                      - row "129 + git config user.name \"cubby-mb[bot]\"" [ref=e915]:
+                        - cell [ref=e916] [cursor=pointer]
+                        - cell "129" [ref=e917] [cursor=pointer]
+                        - cell "+ git config user.name \"cubby-mb[bot]\"" [ref=e918]:
+                          - generic [ref=e919]: + git config user.name "cubby-mb[bot]"
+                      - row "130 + git config user.email \"273354325+cubby-mb[bot]@users.noreply.github.com\"" [ref=e920]:
+                        - cell [ref=e921] [cursor=pointer]
+                        - cell "130" [ref=e922] [cursor=pointer]
+                        - cell "+ git config user.email \"273354325+cubby-mb[bot]@users.noreply.github.com\"" [ref=e923]:
+                          - generic [ref=e924]: + git config user.email "273354325+cubby-mb[bot]@users.noreply.github.com"
+                      - row "131 +" [ref=e925]:
+                        - cell [ref=e926] [cursor=pointer]
+                        - cell "131" [ref=e927] [cursor=pointer]
+                        - cell "+" [ref=e928]:
+                          - generic: +
+                      - row "132 + if git diff --quiet; then" [ref=e929]:
+                        - cell [ref=e930] [cursor=pointer]
+                        - cell "132" [ref=e931] [cursor=pointer]
+                        - cell "+ if git diff --quiet; then" [ref=e932]:
+                          - generic [ref=e933]: + if git diff --quiet; then
+                      - row "133 + echo \"No release changes to commit.\"" [ref=e934]:
+                        - cell [ref=e935] [cursor=pointer]
+                        - cell "133" [ref=e936] [cursor=pointer]
+                        - cell "+ echo \"No release changes to commit.\"" [ref=e937]:
+                          - generic [ref=e938]: + echo "No release changes to commit."
+                      - row "134 + exit 0" [ref=e939]:
+                        - cell [ref=e940] [cursor=pointer]
+                        - cell "134" [ref=e941] [cursor=pointer]
+                        - cell "+ exit 0" [ref=e942]:
+                          - generic [ref=e943]: + exit 0
+                      - row "135 + fi" [ref=e944]:
+                        - cell [ref=e945] [cursor=pointer]
+                        - cell "135" [ref=e946] [cursor=pointer]
+                        - cell "+ fi" [ref=e947]:
+                          - generic [ref=e948]: + fi
+                      - row "136 +" [ref=e949]:
+                        - cell [ref=e950] [cursor=pointer]
+                        - cell "136" [ref=e951] [cursor=pointer]
+                        - cell "+" [ref=e952]:
+                          - generic: +
+                      - 'row "137 + git checkout -B \"${branch}\"" [ref=e953]':
+                        - cell [ref=e954] [cursor=pointer]
+                        - cell "137" [ref=e955] [cursor=pointer]
+                        - 'cell "+ git checkout -B \"${branch}\"" [ref=e956]':
+                          - generic [ref=e957]: "+ git checkout -B \"${branch}\""
+                      - row "138 + git add gradle.properties CHANGELOG.md changelog.d" [ref=e958]:
+                        - cell [ref=e959] [cursor=pointer]
+                        - cell "138" [ref=e960] [cursor=pointer]
+                        - cell "+ git add gradle.properties CHANGELOG.md changelog.d" [ref=e961]:
+                          - generic [ref=e962]: + git add gradle.properties CHANGELOG.md changelog.d
+                      - 'row "139 + git commit -m \"Prepare release ${{ steps.bump.outputs.new_version }}\"" [ref=e963]':
+                        - cell [ref=e964] [cursor=pointer]
+                        - cell "139" [ref=e965] [cursor=pointer]
+                        - 'cell "+ git commit -m \"Prepare release ${{ steps.bump.outputs.new_version }}\"" [ref=e966]':
+                          - generic [ref=e967]: "+ git commit -m \"Prepare release ${{ steps.bump.outputs.new_version }}\""
+                      - 'row "140 + # Use an app token so PR opened/synchronize events trigger CI normally." [ref=e968]':
+                        - cell [ref=e969] [cursor=pointer]
+                        - cell "140" [ref=e970] [cursor=pointer]
+                        - 'cell "+ # Use an app token so PR opened/synchronize events trigger CI normally." [ref=e971]':
+                          - generic [ref=e972]: "+ # Use an app token so PR opened/synchronize events trigger CI normally."
+                      - 'row "141 + git remote set-url origin \"https://x-access-token:${APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git\"" [ref=e973]':
+                        - cell [ref=e974] [cursor=pointer]
+                        - cell "141" [ref=e975] [cursor=pointer]
+                        - 'cell "+ git remote set-url origin \"https://x-access-token:${APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git\"" [ref=e976]':
+                          - generic [ref=e977]: "+ git remote set-url origin \"https://x-access-token:${APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git\""
+                      - 'row "142 + git push --force-with-lease --set-upstream origin \"${branch}\"" [ref=e978]':
+                        - cell [ref=e979] [cursor=pointer]
+                        - cell "142" [ref=e980] [cursor=pointer]
+                        - 'cell "+ git push --force-with-lease --set-upstream origin \"${branch}\"" [ref=e981]':
+                          - generic [ref=e982]: "+ git push --force-with-lease --set-upstream origin \"${branch}\""
+                      - row "143 +" [ref=e983]:
+                        - cell [ref=e984] [cursor=pointer]
+                        - cell "143" [ref=e985] [cursor=pointer]
+                        - cell "+" [ref=e986]:
+                          - generic: +
+                      - row "144 + existing_pr_url=$(" [ref=e987]:
+                        - cell [ref=e988] [cursor=pointer]
+                        - cell "144" [ref=e989] [cursor=pointer]
+                        - cell "+ existing_pr_url=$(" [ref=e990]:
+                          - generic [ref=e991]: + existing_pr_url=$(
+                      - row "145 + gh pr list \\" [ref=e992]:
+                        - cell [ref=e993] [cursor=pointer]
+                        - cell "145" [ref=e994] [cursor=pointer]
+                        - cell "+ gh pr list \\" [ref=e995]:
+                          - generic [ref=e996]: + gh pr list \
+                      - 'row "146 + --head \"${branch}\" \\" [ref=e997]':
+                        - cell [ref=e998] [cursor=pointer]
+                        - cell "146" [ref=e999] [cursor=pointer]
+                        - 'cell "+ --head \"${branch}\" \\" [ref=e1000]':
+                          - generic [ref=e1001]: "+ --head \"${branch}\" \\"
+                      - row "147 + --base main \\" [ref=e1002]:
+                        - cell [ref=e1003] [cursor=pointer]
+                        - cell "147" [ref=e1004] [cursor=pointer]
+                        - cell "+ --base main \\" [ref=e1005]:
+                          - generic [ref=e1006]: + --base main \
+                      - row "148 + --state open \\" [ref=e1007]:
+                        - cell [ref=e1008] [cursor=pointer]
+                        - cell "148" [ref=e1009] [cursor=pointer]
+                        - cell "+ --state open \\" [ref=e1010]:
+                          - generic [ref=e1011]: + --state open \
+                      - row "149 + --json url \\" [ref=e1012]:
+                        - cell [ref=e1013] [cursor=pointer]
+                        - cell "149" [ref=e1014] [cursor=pointer]
+                        - cell "+ --json url \\" [ref=e1015]:
+                          - generic [ref=e1016]: + --json url \
+                      - row "150 + --jq '.[0].url'" [ref=e1017]:
+                        - cell [ref=e1018] [cursor=pointer]
+                        - cell "150" [ref=e1019] [cursor=pointer]
+                        - cell "+ --jq '.[0].url'" [ref=e1020]:
+                          - generic [ref=e1021]: + --jq '.[0].url'
+                      - row "151 + )" [ref=e1022]:
+                        - cell [ref=e1023] [cursor=pointer]
+                        - cell "151" [ref=e1024] [cursor=pointer]
+                        - cell "+ )" [ref=e1025]:
+                          - generic [ref=e1026]: + )
+                      - row "152 +" [ref=e1027]:
+                        - cell [ref=e1028] [cursor=pointer]
+                        - cell "152" [ref=e1029] [cursor=pointer]
+                        - cell "+" [ref=e1030]:
+                          - generic: +
+                      - 'row "153 + if [ -n \"${existing_pr_url}\" ]; then" [ref=e1031]':
+                        - cell [ref=e1032] [cursor=pointer]
+                        - cell "153" [ref=e1033] [cursor=pointer]
+                        - 'cell "+ if [ -n \"${existing_pr_url}\" ]; then" [ref=e1034]':
+                          - generic [ref=e1035]: "+ if [ -n \"${existing_pr_url}\" ]; then"
+                      - 'row "154 + gh pr edit \"${existing_pr_url}\" --title \"${title}\" --body-file \"${body_file}\"" [ref=e1036]':
+                        - cell [ref=e1037] [cursor=pointer]
+                        - cell "154" [ref=e1038] [cursor=pointer]
+                        - 'cell "+ gh pr edit \"${existing_pr_url}\" --title \"${title}\" --body-file \"${body_file}\"" [ref=e1039]':
+                          - generic [ref=e1040]: "+ gh pr edit \"${existing_pr_url}\" --title \"${title}\" --body-file \"${body_file}\""
+                      - row "155 + else" [ref=e1041]:
+                        - cell [ref=e1042] [cursor=pointer]
+                        - cell "155" [ref=e1043] [cursor=pointer]
+                        - cell "+ else" [ref=e1044]:
+                          - generic [ref=e1045]: + else
+                      - row "156 + gh pr create \\" [ref=e1046]:
+                        - cell [ref=e1047] [cursor=pointer]
+                        - cell "156" [ref=e1048] [cursor=pointer]
+                        - cell "+ gh pr create \\" [ref=e1049]:
+                          - generic [ref=e1050]: + gh pr create \
+                      - row "157 + --base main \\" [ref=e1051]:
+                        - cell [ref=e1052] [cursor=pointer]
+                        - cell "157" [ref=e1053] [cursor=pointer]
+                        - cell "+ --base main \\" [ref=e1054]:
+                          - generic [ref=e1055]: + --base main \
+                      - 'row "158 + --head \"${branch}\" \\" [ref=e1056]':
+                        - cell [ref=e1057] [cursor=pointer]
+                        - cell "158" [ref=e1058] [cursor=pointer]
+                        - 'cell "+ --head \"${branch}\" \\" [ref=e1059]':
+                          - generic [ref=e1060]: "+ --head \"${branch}\" \\"
+                      - 'row "159 + --title \"${title}\" \\" [ref=e1061]':
+                        - cell [ref=e1062] [cursor=pointer]
+                        - cell "159" [ref=e1063] [cursor=pointer]
+                        - 'cell "+ --title \"${title}\" \\" [ref=e1064]':
+                          - generic [ref=e1065]: "+ --title \"${title}\" \\"
+                      - 'row "160 + --body-file \"${body_file}\"" [ref=e1066]':
+                        - cell [ref=e1067] [cursor=pointer]
+                        - cell "160" [ref=e1068] [cursor=pointer]
+                        - 'cell "+ --body-file \"${body_file}\"" [ref=e1069]':
+                          - generic [ref=e1070]: "+ --body-file \"${body_file}\""
+                      - row "161 + fi" [ref=e1071]:
+                        - cell [ref=e1072] [cursor=pointer]
+                        - cell "161" [ref=e1073] [cursor=pointer]
+                        - cell "+ fi" [ref=e1074]:
+                          - generic [ref=e1075]: + fi
+                - generic [ref=e1077]:
+                  - generic [ref=e1078]:
+                    - generic [ref=e1079]:
+                      - button "Toggle diff contents" [expanded] [ref=e1080] [cursor=pointer]:
+                        - img [ref=e1081]
+                      - button "Expand all" [ref=e1084] [cursor=pointer]:
+                        - img "Expand all" [ref=e1085]
+                      - generic [ref=e1087]: "14 changes: 9 additions & 5 deletions"
+                      - generic [ref=e1088]: "14"
+                      - generic [ref=e1094]:
+                        - link ".github/workflows/ci.yaml" [ref=e1095] [cursor=pointer]:
+                          - /url: "#diff-944291df2c9c06359d37cc8833d182d705c9e8c3108e7cfe132d61a06e9133dd"
+                        - button "Copy" [ref=e1097]:
+                          - img [ref=e1098]
+                    - group [ref=e1104]:
+                      - button "Show options" [ref=e1105] [cursor=pointer]:
+                        - img "Show options" [ref=e1107]
+                  - table [ref=e1112]:
+                    - rowgroup [ref=e1113]:
+                      - row "Original file line number Diff line number Diff line change" [ref=e1114]:
+                        - columnheader "Original file line number" [ref=e1115]
+                        - columnheader "Diff line number" [ref=e1116]
+                        - columnheader "Diff line change" [ref=e1117]
+                    - rowgroup [ref=e1118]:
+                      - row "... ... @@ -1,6 +1,10 @@" [ref=e1119]:
+                        - cell "..." [ref=e1120]
+                        - cell "..." [ref=e1121]
+                        - cell "@@ -1,6 +1,10 @@" [ref=e1122]
+                      - 'row "1 1 name: CI" [ref=e1123]':
+                        - cell "1" [ref=e1124] [cursor=pointer]
+                        - cell "1" [ref=e1125] [cursor=pointer]
+                        - 'cell "name: CI" [ref=e1126]':
+                          - generic [ref=e1127]: "name: CI"
+                      - row "2 2 env:" [ref=e1128]:
+                        - cell "2" [ref=e1129] [cursor=pointer]
+                        - cell "2" [ref=e1130] [cursor=pointer]
+                        - cell "env:" [ref=e1131]:
+                          - generic [ref=e1132]: "env:"
+                      - 'row "3 3 MIRRORD_TELEMETRY: false" [ref=e1133]':
+                        - cell "3" [ref=e1134] [cursor=pointer]
+                        - cell "3" [ref=e1135] [cursor=pointer]
+                        - 'cell "MIRRORD_TELEMETRY: false" [ref=e1136]':
+                          - generic [ref=e1137]: "MIRRORD_TELEMETRY: false"
+                      - row "4 +" [ref=e1138]:
+                        - cell [ref=e1139] [cursor=pointer]
+                        - cell "4" [ref=e1140] [cursor=pointer]
+                        - cell "+" [ref=e1141]:
+                          - generic: +
+                      - row "5 + permissions:" [ref=e1142]:
+                        - cell [ref=e1143] [cursor=pointer]
+                        - cell "5" [ref=e1144] [cursor=pointer]
+                        - cell "+ permissions:" [ref=e1145]:
+                          - generic [ref=e1146]: "+ permissions:"
+                      - 'row "6 + contents: read" [ref=e1147]':
+                        - cell [ref=e1148] [cursor=pointer]
+                        - cell "6" [ref=e1149] [cursor=pointer]
+                        - 'cell "+ contents: read" [ref=e1150]':
+                          - generic [ref=e1151]: "+ contents: read"
+                      - row "7 +" [ref=e1152]:
+                        - cell [ref=e1153] [cursor=pointer]
+                        - cell "7" [ref=e1154] [cursor=pointer]
+                        - cell "+" [ref=e1155]:
+                          - generic: +
+                      - row "4 8 on:" [ref=e1156]:
+                        - cell "4" [ref=e1157] [cursor=pointer]
+                        - cell "8" [ref=e1158] [cursor=pointer]
+                        - cell "on:" [ref=e1159]:
+                          - generic [ref=e1160]: "on:"
+                      - row "5 9 workflow_dispatch:" [ref=e1161]:
+                        - cell "5" [ref=e1162] [cursor=pointer]
+                        - cell "9" [ref=e1163] [cursor=pointer]
+                        - cell "workflow_dispatch:" [ref=e1164]:
+                          - generic [ref=e1165]: "workflow_dispatch:"
+                      - row "6 10 push:" [ref=e1166]:
+                        - cell "6" [ref=e1167] [cursor=pointer]
+                        - cell "10" [ref=e1168] [cursor=pointer]
+                        - cell "push:" [ref=e1169]:
+                          - generic [ref=e1170]: "push:"
+                      - row "Expand All @@ -18,11 +22,11 @@ jobs:" [ref=e1171]:
+                        - cell "Expand All" [ref=e1172] [cursor=pointer]:
+                          - link "Expand All" [ref=e1173]:
+                            - /url: "#diff-944291df2c9c06359d37cc8833d182d705c9e8c3108e7cfe132d61a06e9133dd"
+                            - img [ref=e1174]
+                        - cell "@@ -18,11 +22,11 @@ jobs:" [ref=e1176]
+                      - row "18 22 towncrier_check:" [ref=e1177]:
+                        - cell "18" [ref=e1178] [cursor=pointer]
+                        - cell "22" [ref=e1179] [cursor=pointer]
+                        - cell "towncrier_check:" [ref=e1180]:
+                          - generic [ref=e1181]: "towncrier_check:"
+                      - 'row "19 23 runs-on: ubuntu-24.04" [ref=e1182]':
+                        - cell "19" [ref=e1183] [cursor=pointer]
+                        - cell "23" [ref=e1184] [cursor=pointer]
+                        - 'cell "runs-on: ubuntu-24.04" [ref=e1185]':
+                          - generic [ref=e1186]: "runs-on: ubuntu-24.04"
+                      - row "20 24 steps:" [ref=e1187]:
+                        - cell "20" [ref=e1188] [cursor=pointer]
+                        - cell "24" [ref=e1189] [cursor=pointer]
+                        - cell "steps:" [ref=e1190]:
+                          - generic [ref=e1191]: "steps:"
+                      - 'row "21 - - uses: actions/checkout@v4" [ref=e1192]':
+                        - cell "21" [ref=e1193] [cursor=pointer]
+                        - cell [ref=e1194] [cursor=pointer]
+                        - 'cell "- - uses: actions/checkout@v4" [ref=e1195]':
+                          - generic [ref=e1196]: "- - uses: actions/checkout@v4"
+                      - 'row "25 + - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2" [ref=e1197]':
+                        - cell [ref=e1198] [cursor=pointer]
+                        - cell "25" [ref=e1199] [cursor=pointer]
+                        - 'cell "+ - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2" [ref=e1200]':
+                          - generic [ref=e1201]: "+ - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2"
+                      - row "22 26 with:" [ref=e1202]:
+                        - cell "22" [ref=e1203] [cursor=pointer]
+                        - cell "26" [ref=e1204] [cursor=pointer]
+                        - cell "with:" [ref=e1205]:
+                          - generic [ref=e1206]: "with:"
+                      - 'row "23 27 fetch-depth: 0" [ref=e1207]':
+                        - cell "23" [ref=e1208] [cursor=pointer]
+                        - cell "27" [ref=e1209] [cursor=pointer]
+                        - 'cell "fetch-depth: 0" [ref=e1210]':
+                          - generic [ref=e1211]: "fetch-depth: 0"
+                      - 'row "24 28 - name: Install uv" [ref=e1212]':
+                        - cell "24" [ref=e1213] [cursor=pointer]
+                        - cell "28" [ref=e1214] [cursor=pointer]
+                        - 'cell "- name: Install uv" [ref=e1215]':
+                          - generic [ref=e1216]: "- name: Install uv"
+                      - 'row "25 - uses: astral-sh/setup-uv@v2" [ref=e1217]':
+                        - cell "25" [ref=e1218] [cursor=pointer]
+                        - cell [ref=e1219] [cursor=pointer]
+                        - 'cell "- uses: astral-sh/setup-uv@v2" [ref=e1220]':
+                          - generic [ref=e1221]: "- uses: astral-sh/setup-uv@v2"
+                      - 'row "29 + uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0" [ref=e1222]':
+                        - cell [ref=e1223] [cursor=pointer]
+                        - cell "29" [ref=e1224] [cursor=pointer]
+                        - 'cell "+ uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0" [ref=e1225]':
+                          - generic [ref=e1226]: "+ uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0"
+                      - 'row "26 30 - run: uv python install" [ref=e1227]':
+                        - cell "26" [ref=e1228] [cursor=pointer]
+                        - cell "30" [ref=e1229] [cursor=pointer]
+                        - 'cell "- run: uv python install" [ref=e1230]':
+                          - generic [ref=e1231]: "- run: uv python install"
+                      - 'row "27 31 - run: uv venv" [ref=e1232]':
+                        - cell "27" [ref=e1233] [cursor=pointer]
+                        - cell "31" [ref=e1234] [cursor=pointer]
+                        - 'cell "- run: uv venv" [ref=e1235]':
+                          - generic [ref=e1236]: "- run: uv venv"
+                      - 'row "28 32 - name: install towncrier" [ref=e1237]':
+                        - cell "28" [ref=e1238] [cursor=pointer]
+                        - cell "32" [ref=e1239] [cursor=pointer]
+                        - 'cell "- name: install towncrier" [ref=e1240]':
+                          - generic [ref=e1241]: "- name: install towncrier"
+                      - row "Expand All @@ -33,7 +37,7 @@ jobs:" [ref=e1242]:
+                        - cell "Expand All" [ref=e1243] [cursor=pointer]:
+                          - link "Expand All" [ref=e1244]:
+                            - /url: "#diff-944291df2c9c06359d37cc8833d182d705c9e8c3108e7cfe132d61a06e9133dd"
+                            - img [ref=e1245]
+                        - cell "@@ -33,7 +37,7 @@ jobs:" [ref=e1247]
+                      - row "33 37 lint_markdown:" [ref=e1248]:
+                        - cell "33" [ref=e1249] [cursor=pointer]
+                        - cell "37" [ref=e1250] [cursor=pointer]
+                        - cell "lint_markdown:" [ref=e1251]:
+                          - generic [ref=e1252]: "lint_markdown:"
+                      - 'row "34 38 runs-on: ubuntu-24.04" [ref=e1253]':
+                        - cell "34" [ref=e1254] [cursor=pointer]
+                        - cell "38" [ref=e1255] [cursor=pointer]
+                        - 'cell "runs-on: ubuntu-24.04" [ref=e1256]':
+                          - generic [ref=e1257]: "runs-on: ubuntu-24.04"
+                      - row "35 39 steps:" [ref=e1258]:
+                        - cell "35" [ref=e1259] [cursor=pointer]
+                        - cell "39" [ref=e1260] [cursor=pointer]
+                        - cell "steps:" [ref=e1261]:
+                          - generic [ref=e1262]: "steps:"
+                      - 'row "36 - - uses: actions/checkout@v4" [ref=e1263]':
+                        - cell "36" [ref=e1264] [cursor=pointer]
+                        - cell [ref=e1265] [cursor=pointer]
+                        - 'cell "- - uses: actions/checkout@v4" [ref=e1266]':
+                          - generic [ref=e1267]: "- - uses: actions/checkout@v4"
+                      - 'row "40 + - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2" [ref=e1268]':
+                        - cell [ref=e1269] [cursor=pointer]
+                        - cell "40" [ref=e1270] [cursor=pointer]
+                        - 'cell "+ - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2" [ref=e1271]':
+                          - generic [ref=e1272]: "+ - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2"
+                      - 'row "37 41 - uses: metalbear-co/markdownlint-cli2-action@0fb2cca662f67f99dfdb04fce7d81bb2904ee404" [ref=e1273]':
+                        - cell "37" [ref=e1274] [cursor=pointer]
+                        - cell "41" [ref=e1275] [cursor=pointer]
+                        - 'cell "- uses: metalbear-co/markdownlint-cli2-action@0fb2cca662f67f99dfdb04fce7d81bb2904ee404" [ref=e1276]':
+                          - generic [ref=e1277]: "- uses: metalbear-co/markdownlint-cli2-action@0fb2cca662f67f99dfdb04fce7d81bb2904ee404"
+                      - row "38 42 with:" [ref=e1278]:
+                        - cell "38" [ref=e1279] [cursor=pointer]
+                        - cell "42" [ref=e1280] [cursor=pointer]
+                        - cell "with:" [ref=e1281]:
+                          - generic [ref=e1282]: "with:"
+                      - 'row "39 43 config: \".markdownlint.json\"" [ref=e1283]':
+                        - cell "39" [ref=e1284] [cursor=pointer]
+                        - cell "43" [ref=e1285] [cursor=pointer]
+                        - 'cell "config: \".markdownlint.json\"" [ref=e1286]':
+                          - generic [ref=e1287]: "config: \".markdownlint.json\""
+                      - row "Expand All @@ -42,9 +46,9 @@ jobs:" [ref=e1288]:
+                        - cell "Expand All" [ref=e1289] [cursor=pointer]:
+                          - link "Expand All" [ref=e1290]:
+                            - /url: "#diff-944291df2c9c06359d37cc8833d182d705c9e8c3108e7cfe132d61a06e9133dd"
+                            - img [ref=e1291]
+                        - cell "@@ -42,9 +46,9 @@ jobs:" [ref=e1293]
+                      - row "42 46 lint:" [ref=e1294]:
+                        - cell "42" [ref=e1295] [cursor=pointer]
+                        - cell "46" [ref=e1296] [cursor=pointer]
+                        - cell "lint:" [ref=e1297]:
+                          - generic [ref=e1298]: "lint:"
+                      - 'row "43 47 runs-on: ubuntu-24.04" [ref=e1299]':
+                        - cell "43" [ref=e1300] [cursor=pointer]
+                        - cell "47" [ref=e1301] [cursor=pointer]
+                        - 'cell "runs-on: ubuntu-24.04" [ref=e1302]':
+                          - generic [ref=e1303]: "runs-on: ubuntu-24.04"
+                      - row "44 48 steps:" [ref=e1304]:
+                        - cell "44" [ref=e1305] [cursor=pointer]
+                        - cell "48" [ref=e1306] [cursor=pointer]
+                        - cell "steps:" [ref=e1307]:
+                          - generic [ref=e1308]: "steps:"
+                      - 'row "45 - - uses: actions/checkout@v4" [ref=e1309]':
+                        - cell "45" [ref=e1310] [cursor=pointer]
+                        - cell [ref=e1311] [cursor=pointer]
+                        - 'cell "- - uses: actions/checkout@v4" [ref=e1312]':
+                          - generic [ref=e1313]: "- - uses: actions/checkout@v4"
+                      - 'row "49 + - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2" [ref=e1314]':
+                        - cell [ref=e1315] [cursor=pointer]
+                        - cell "49" [ref=e1316] [cursor=pointer]
+                        - 'cell "+ - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2" [ref=e1317]':
+                          - generic [ref=e1318]: "+ - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2"
+                      - 'row "46 50 - name: Setup Java" [ref=e1319]':
+                        - cell "46" [ref=e1320] [cursor=pointer]
+                        - cell "50" [ref=e1321] [cursor=pointer]
+                        - 'cell "- name: Setup Java" [ref=e1322]':
+                          - generic [ref=e1323]: "- name: Setup Java"
+                      - 'row "47 - uses: actions/setup-java@v4" [ref=e1324]':
+                        - cell "47" [ref=e1325] [cursor=pointer]
+                        - cell [ref=e1326] [cursor=pointer]
+                        - 'cell "- uses: actions/setup-java@v4" [ref=e1327]':
+                          - generic [ref=e1328]: "- uses: actions/setup-java@v4"
+                      - 'row "51 + uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0" [ref=e1329]':
+                        - cell [ref=e1330] [cursor=pointer]
+                        - cell "51" [ref=e1331] [cursor=pointer]
+                        - 'cell "+ uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0" [ref=e1332]':
+                          - generic [ref=e1333]: "+ uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0"
+                      - row "48 52 with:" [ref=e1334]:
+                        - cell "48" [ref=e1335] [cursor=pointer]
+                        - cell "52" [ref=e1336] [cursor=pointer]
+                        - cell "with:" [ref=e1337]:
+                          - generic [ref=e1338]: "with:"
+                      - 'row "49 53 distribution: zulu" [ref=e1339]':
+                        - cell "49" [ref=e1340] [cursor=pointer]
+                        - cell "53" [ref=e1341] [cursor=pointer]
+                        - 'cell "distribution: zulu" [ref=e1342]':
+                          - generic [ref=e1343]: "distribution: zulu"
+                      - 'row "50 54 java-version: 17" [ref=e1344]':
+                        - cell "50" [ref=e1345] [cursor=pointer]
+                        - cell "54" [ref=e1346] [cursor=pointer]
+                        - 'cell "java-version: 17" [ref=e1347]':
+                          - generic [ref=e1348]: "java-version: 17"
+                      - row "Expand Down" [ref=e1349]:
+                        - cell "Expand Down" [ref=e1350] [cursor=pointer]:
+                          - link "Expand Down" [ref=e1351]:
+                            - /url: "#diff-944291df2c9c06359d37cc8833d182d705c9e8c3108e7cfe132d61a06e9133dd"
+                            - img [ref=e1352]
+                        - cell [ref=e1354]
+                - generic [ref=e1356]:
+                  - generic [ref=e1357]:
+                    - generic [ref=e1358]:
+                      - button "Toggle diff contents" [expanded] [ref=e1359] [cursor=pointer]:
+                        - img [ref=e1360]
+                      - button "Expand all" [ref=e1363] [cursor=pointer]:
+                        - img "Expand all" [ref=e1364]
+                      - generic [ref=e1366]: "7 changes: 5 additions & 2 deletions"
+                      - generic [ref=e1367]: "7"
+                      - generic [ref=e1373]:
+                        - link ".github/workflows/plugin_verifier.yaml" [ref=e1374] [cursor=pointer]:
+                          - /url: "#diff-0049dd70cb5343243eec31ef686d0bfa2a52587af5cd2708ae2c9ca67338c916"
+                        - button "Copy" [ref=e1376]:
+                          - img [ref=e1377]
+                    - group [ref=e1383]:
+                      - button "Show options" [ref=e1384] [cursor=pointer]:
+                        - img "Show options" [ref=e1386]
+                  - table [ref=e1391]:
+                    - rowgroup [ref=e1392]:
+                      - row "Original file line number Diff line number Diff line change" [ref=e1393]:
+                        - columnheader "Original file line number" [ref=e1394]
+                        - columnheader "Diff line number" [ref=e1395]
+                        - columnheader "Diff line change" [ref=e1396]
+                    - rowgroup [ref=e1397]:
+                      - row "Expand Up @@ -4,6 +4,9 @@ on:" [ref=e1398]:
+                        - cell "Expand Up" [ref=e1399] [cursor=pointer]:
+                          - link "Expand Up" [ref=e1400]:
+                            - /url: "#diff-0049dd70cb5343243eec31ef686d0bfa2a52587af5cd2708ae2c9ca67338c916"
+                            - img [ref=e1401]
+                        - cell "@@ -4,6 +4,9 @@ on:" [ref=e1403]
+                      - row "4 4 schedule:" [ref=e1404]:
+                        - cell "4" [ref=e1405] [cursor=pointer]
+                        - cell "4" [ref=e1406] [cursor=pointer]
+                        - cell "schedule:" [ref=e1407]:
+                          - generic [ref=e1408]: "schedule:"
+                      - 'row "5 5 - cron: ''0 0 * * *''" [ref=e1409]':
+                        - cell "5" [ref=e1410] [cursor=pointer]
+                        - cell "5" [ref=e1411] [cursor=pointer]
+                        - 'cell "- cron: ''0 0 * * *''" [ref=e1412]':
+                          - generic [ref=e1413]: "- cron: '0 0 * * *'"
+                      - row "6 6" [ref=e1414]:
+                        - cell "6" [ref=e1415] [cursor=pointer]
+                        - cell "6" [ref=e1416] [cursor=pointer]
+                        - cell [ref=e1417]
+                      - row "7 + permissions:" [ref=e1418]:
+                        - cell [ref=e1419] [cursor=pointer]
+                        - cell "7" [ref=e1420] [cursor=pointer]
+                        - cell "+ permissions:" [ref=e1421]:
+                          - generic [ref=e1422]: "+ permissions:"
+                      - 'row "8 + contents: read" [ref=e1423]':
+                        - cell [ref=e1424] [cursor=pointer]
+                        - cell "8" [ref=e1425] [cursor=pointer]
+                        - 'cell "+ contents: read" [ref=e1426]':
+                          - generic [ref=e1427]: "+ contents: read"
+                      - row "9 +" [ref=e1428]:
+                        - cell [ref=e1429] [cursor=pointer]
+                        - cell "9" [ref=e1430] [cursor=pointer]
+                        - cell "+" [ref=e1431]:
+                          - generic: +
+                      - row "7 10 jobs:" [ref=e1432]:
+                        - cell "7" [ref=e1433] [cursor=pointer]
+                        - cell "10" [ref=e1434] [cursor=pointer]
+                        - cell "jobs:" [ref=e1435]:
+                          - generic [ref=e1436]: "jobs:"
+                      - row "8 11 pluginVerifier:" [ref=e1437]:
+                        - cell "8" [ref=e1438] [cursor=pointer]
+                        - cell "11" [ref=e1439] [cursor=pointer]
+                        - cell "pluginVerifier:" [ref=e1440]:
+                          - generic [ref=e1441]: "pluginVerifier:"
+                      - row "9 12 strategy:" [ref=e1442]:
+                        - cell "9" [ref=e1443] [cursor=pointer]
+                        - cell "12" [ref=e1444] [cursor=pointer]
+                        - cell "strategy:" [ref=e1445]:
+                          - generic [ref=e1446]: "strategy:"
+                      - row "Expand All @@ -15,9 +18,9 @@ jobs:" [ref=e1447]:
+                        - cell "Expand All" [ref=e1448] [cursor=pointer]:
+                          - link "Expand All" [ref=e1449]:
+                            - /url: "#diff-0049dd70cb5343243eec31ef686d0bfa2a52587af5cd2708ae2c9ca67338c916"
+                            - img [ref=e1450]
+                        - cell "@@ -15,9 +18,9 @@ jobs:" [ref=e1452]
+                      - 'row "15 18 run: |" [ref=e1453]':
+                        - cell "15" [ref=e1454] [cursor=pointer]
+                        - cell "18" [ref=e1455] [cursor=pointer]
+                        - 'cell "run: |" [ref=e1456]':
+                          - generic [ref=e1457]: "run: |"
+                      - row "16 19 sudo rm -rf /usr/share/dotnet" [ref=e1458]:
+                        - cell "16" [ref=e1459] [cursor=pointer]
+                        - cell "19" [ref=e1460] [cursor=pointer]
+                        - cell "sudo rm -rf /usr/share/dotnet" [ref=e1461]:
+                          - generic [ref=e1462]: sudo rm -rf /usr/share/dotnet
+                      - row "17 20 sudo rm -rf \"$AGENT_TOOLSDIRECTORY\"" [ref=e1463]:
+                        - cell "17" [ref=e1464] [cursor=pointer]
+                        - cell "20" [ref=e1465] [cursor=pointer]
+                        - cell "sudo rm -rf \"$AGENT_TOOLSDIRECTORY\"" [ref=e1466]:
+                          - generic [ref=e1467]: sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+                      - 'row "18 - - uses: actions/checkout@v4" [ref=e1468]':
+                        - cell "18" [ref=e1469] [cursor=pointer]
+                        - cell [ref=e1470] [cursor=pointer]
+                        - 'cell "- - uses: actions/checkout@v4" [ref=e1471]':
+                          - generic [ref=e1472]: "- - uses: actions/checkout@v4"
+                      - 'row "21 + - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2" [ref=e1473]':
+                        - cell [ref=e1474] [cursor=pointer]
+                        - cell "21" [ref=e1475] [cursor=pointer]
+                        - 'cell "+ - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2" [ref=e1476]':
+                          - generic [ref=e1477]: "+ - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2"
+                      - 'row "19 22 - name: Setup Java" [ref=e1478]':
+                        - cell "19" [ref=e1479] [cursor=pointer]
+                        - cell "22" [ref=e1480] [cursor=pointer]
+                        - 'cell "- name: Setup Java" [ref=e1481]':
+                          - generic [ref=e1482]: "- name: Setup Java"
+                      - 'row "20 - uses: actions/setup-java@v4" [ref=e1483]':
+                        - cell "20" [ref=e1484] [cursor=pointer]
+                        - cell [ref=e1485] [cursor=pointer]
+                        - 'cell "- uses: actions/setup-java@v4" [ref=e1486]':
+                          - generic [ref=e1487]: "- uses: actions/setup-java@v4"
+                      - 'row "23 + uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0" [ref=e1488]':
+                        - cell [ref=e1489] [cursor=pointer]
+                        - cell "23" [ref=e1490] [cursor=pointer]
+                        - 'cell "+ uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0" [ref=e1491]':
+                          - generic [ref=e1492]: "+ uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0"
+                      - row "21 24 with:" [ref=e1493]:
+                        - cell "21" [ref=e1494] [cursor=pointer]
+                        - cell "24" [ref=e1495] [cursor=pointer]
+                        - cell "with:" [ref=e1496]:
+                          - generic [ref=e1497]: "with:"
+                      - 'row "22 25 distribution: zulu" [ref=e1498]':
+                        - cell "22" [ref=e1499] [cursor=pointer]
+                        - cell "25" [ref=e1500] [cursor=pointer]
+                        - 'cell "distribution: zulu" [ref=e1501]':
+                          - generic [ref=e1502]: "distribution: zulu"
+                      - 'row "23 26 java-version: 17" [ref=e1503]':
+                        - cell "23" [ref=e1504] [cursor=pointer]
+                        - cell "26" [ref=e1505] [cursor=pointer]
+                        - 'cell "java-version: 17" [ref=e1506]':
+                          - generic [ref=e1507]: "java-version: 17"
+                      - row "Expand Down" [ref=e1508]:
+                        - cell "Expand Down" [ref=e1509] [cursor=pointer]:
+                          - link "Expand Down" [ref=e1510]:
+                            - /url: "#diff-0049dd70cb5343243eec31ef686d0bfa2a52587af5cd2708ae2c9ca67338c916"
+                            - img [ref=e1511]
+                        - cell [ref=e1513]
+              - generic [ref=e1516]:
+                - img [ref=e1517]
+                - generic [ref=e1520]: Loading
+            - img [ref=e1521]
+  - contentinfo [ref=e1522]:
+    - heading "Footer" [level=2] [ref=e1523]
+    - generic [ref=e1524]:
+      - generic [ref=e1525]:
+        - link "GitHub Homepage" [ref=e1526] [cursor=pointer]:
+          - /url: https://github.com
+          - img [ref=e1527]
+        - generic [ref=e1529]: © 2026 GitHub, Inc.
+      - navigation "Footer" [ref=e1530]:
+        - heading "Footer navigation" [level=3] [ref=e1531]
+        - list "Footer navigation" [ref=e1532]:
+          - listitem [ref=e1533]:
+            - link "Terms" [ref=e1534] [cursor=pointer]:
+              - /url: https://docs.github.com/site-policy/github-terms/github-terms-of-service
+          - listitem [ref=e1535]:
+            - link "Privacy" [ref=e1536] [cursor=pointer]:
+              - /url: https://docs.github.com/site-policy/privacy-policies/github-privacy-statement
+          - listitem [ref=e1537]:
+            - link "Security" [ref=e1538] [cursor=pointer]:
+              - /url: https://github.com/security
+          - listitem [ref=e1539]:
+            - link "Status" [ref=e1540] [cursor=pointer]:
+              - /url: https://www.githubstatus.com/
+          - listitem [ref=e1541]:
+            - link "Community" [ref=e1542] [cursor=pointer]:
+              - /url: https://github.community/
+          - listitem [ref=e1543]:
+            - link "Docs" [ref=e1544] [cursor=pointer]:
+              - /url: https://docs.github.com/
+          - listitem [ref=e1545]:
+            - link "Contact" [ref=e1546] [cursor=pointer]:
+              - /url: https://support.github.com?tags=dotcom-footer
+          - listitem [ref=e1547]:
+            - button "Manage cookies" [ref=e1549] [cursor=pointer]
+          - listitem [ref=e1550]:
+            - button "Do not share my personal information" [ref=e1552] [cursor=pointer]
