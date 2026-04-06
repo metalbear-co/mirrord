@@ -1,5 +1,5 @@
 {% if sections[""] %}
-{% for category, val in definitions.items() if category in sections[""] %}
+{% for category, val in definitions.items() if category in sections[""] and category != "internal" %}
 
 ### {{ definitions[category]['name'] }}
 
