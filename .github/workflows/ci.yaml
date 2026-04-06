@@ -360,11 +360,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - name: build and export
-        run: |
-          docker buildx bake agent \
-            --set "agent.platforms=linux/amd64" \
-            --set "agent.tags=test" \
-            --set "agent.output=type=docker,dest=/tmp/test.tar"
+        env:
+          PLATFORMS: "linux/amd64"
+          AGENT_TAGS: "test"
+        run: docker buildx bake agent --set "agent.output=type=docker,dest=/tmp/test.tar"
       - name: upload image
         uses: actions/upload-artifact@v4
         with:
@@ -379,11 +378,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - name: build and export
-        run: |
-          docker buildx bake cli \
-            --set "cli.platforms=linux/amd64" \
-            --set "cli.tags=cli_image" \
-            --set "cli.output=type=docker,dest=/tmp/cli_image.tar"
+        env:
+          PLATFORMS: "linux/amd64"
+          CLI_TAGS: "cli_image"
+        run: docker buildx bake cli --set "cli.output=type=docker,dest=/tmp/cli_image.tar"
 
   integration_tests:
     runs-on: ubuntu-24.04

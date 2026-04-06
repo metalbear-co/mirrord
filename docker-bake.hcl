@@ -23,6 +23,11 @@ variable "SQS_PRINTER_TAGS" {
   default = "${REGISTRY}/test-sqs-printer:dev"
 }
 
+# Platforms for product images. Override to target a single platform (e.g. linux/amd64 for local test builds).
+variable "PLATFORMS" {
+  default = "linux/amd64,linux/arm64"
+}
+
 # Product images built from this repo.
 group "default" {
   targets = ["agent", "cli"]
@@ -47,7 +52,7 @@ group "ci-images" {
 target "agent" {
   context    = "."
   dockerfile = "mirrord/agent/Dockerfile"
-  platforms  = ["linux/amd64", "linux/arm64"]
+  platforms  = split(",", PLATFORMS)
   tags       = split(",", AGENT_TAGS)
   cache-from = ["type=gha"]
   cache-to   = ["type=gha,mode=max"]
@@ -60,7 +65,7 @@ target "agent" {
 target "cli" {
   context    = "."
   dockerfile = "mirrord/cli/Dockerfile"
-  platforms  = ["linux/amd64", "linux/arm64"]
+  platforms  = split(",", PLATFORMS)
   tags       = split(",", CLI_TAGS)
   cache-from = ["type=gha"]
   cache-to   = ["type=gha,mode=max"]
@@ -73,7 +78,7 @@ target "cli" {
 target "sqs-printer" {
   context    = "./tests/rust-sqs-printer"
   dockerfile = "Dockerfile"
-  platforms  = ["linux/amd64", "linux/arm64"]
+  platforms  = split(",", PLATFORMS)
   tags       = split(",", SQS_PRINTER_TAGS)
   cache-from = ["type=gha"]
   cache-to   = ["type=gha,mode=max"]
