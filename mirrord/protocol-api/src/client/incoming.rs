@@ -554,13 +554,29 @@ impl fmt::Debug for Incoming {
     }
 }
 
+/// State of a port subscription.
 enum Subscription {
+    /// The subscription was requested, but we're still waiting for the confirmation/failure from
+    /// the [`mirrord_protocol`] server.
     Pending {
+        /// Used for sending the result to the party that requested the subscription from us.
         result_tx: ResponseOneshot<FifoStream<TunneledIncoming>>,
+        /// If present, the latest subscription request we've sent to the server is for a
+        /// previous, already forgotten local subscription request. Upon receiving server
+        /// response, we should immediately unsubscribe and issue a new remote subscription request
+        /// using this optional HTTP filter.
+        ///
+        /// This field is here, because when overwriting subscriptions, we need to wait for the
+        /// server response for the previous subscription.
+        /// We can't just fire the unsubscribe request blindly, because the previous pending
+        /// request might still fail.
         waiting_to_overwrite: Option<Option<HttpFilter>>,
     },
+    /// The subscription was confirmed by the [`mirrord_protocol`] server.
     Confirmed {
+        /// Used for sending incoming traffic to the party that requested this subscription.
         traffic_tx: FifoSink<TunneledIncoming>,
+        /// Aborts the corresponding [`FifoClosed`] future in [`Incoming::closed`].
         abort_closed_fut: AbortHandle,
     },
 }
