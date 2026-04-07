@@ -46,7 +46,7 @@ impl Drop for LocalRedis {
     }
 }
 
-pub fn resolve_instance_id<'a>(config_id: Option<&str>, session_key: &str) -> String {
+pub fn resolve_instance_id(config_id: Option<&str>, session_key: &str) -> String {
     format!("mirrord-redis-{}", config_id.unwrap_or(session_key))
 }
 
