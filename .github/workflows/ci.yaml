@@ -363,12 +363,12 @@ jobs:
         env:
           PLATFORMS: "linux/amd64"
           AGENT_TAGS: "test"
-        run: docker buildx bake -f ci/docker-bake.hcl agent --set "agent.output=type=docker,dest=/tmp/test.tar"
+        run: docker buildx bake -f ci/docker-bake.hcl agent --set "agent.output=type=docker,dest=${{ github.workspace }}/test.tar"
       - name: upload image
         uses: actions/upload-artifact@v4
         with:
           name: test
-          path: /tmp/test.tar
+          path: ${{ github.workspace }}/test.tar
 
   test_cli_image:
     runs-on: ubuntu-24.04
@@ -381,7 +381,7 @@ jobs:
         env:
           PLATFORMS: "linux/amd64"
           CLI_TAGS: "cli_image"
-        run: docker buildx bake -f ci/docker-bake.hcl cli --set "cli.output=type=docker,dest=/tmp/cli_image.tar"
+        run: docker buildx bake -f ci/docker-bake.hcl cli --set "cli.output=type=docker,dest=${{ github.workspace }}/cli_image.tar"
 
   integration_tests:
     runs-on: ubuntu-24.04
