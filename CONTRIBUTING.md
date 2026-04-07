@@ -60,7 +60,7 @@ Build the mirrord-agent image. Images are defined in `ci/docker-bake.hcl`.
 For a local dev build (single platform, loaded into the local Docker daemon):
 
 ```bash
-PLATFORMS=linux/amd64 AGENT_TAGS=test docker buildx bake -f ci/docker-bake.hcl agent --load
+PLATFORMS="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" AGENT_TAGS=test docker buildx bake -f ci/docker-bake.hcl agent --load
 ```
 
 ```bash
