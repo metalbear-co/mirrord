@@ -684,30 +684,15 @@ jobs:
 
       - name: Build and push (test)
         if: github.event_name == 'workflow_dispatch'
-        uses: docker/build-push-action@v6
-        with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          context: .
-          file: mirrord/agent/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}
+        env:
+          AGENT_TAGS: "ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}"
+        run: docker buildx bake -f ci/docker-bake.hcl agent --push
 
       - name: Build and push (final/release)
         if: needs.validate_release_request.outputs.should_release == 'true'
-        uses: docker/build-push-action@v6
-        with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          context: .
-          file: mirrord/agent/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/metalbear-co/mirrord:latest
-            ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}
+        env:
+          AGENT_TAGS: "ghcr.io/metalbear-co/mirrord:latest,ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}"
+        run: docker buildx bake -f ci/docker-bake.hcl agent --push
 
   release_cli_docker_image:
     needs: [validate_release_request]
@@ -774,30 +759,15 @@ jobs:
 
       - name: Build and push (test)
         if: github.event_name == 'workflow_dispatch'
-        uses: docker/build-push-action@v6
-        with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          context: .
-          file: mirrord/cli/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/metalbear-co/mirrord-cli-staging:${{ github.sha }}
+        env:
+          CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli-staging:${{ github.sha }}"
+        run: docker buildx bake -f ci/docker-bake.hcl cli --push
 
       - name: Build and push (final/release)
         if: needs.validate_release_request.outputs.should_release == 'true'
-        uses: docker/build-push-action@v6
-        with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          context: .
-          file: mirrord/cli/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }}
-            ghcr.io/metalbear-co/mirrord-cli:latest
+        env:
+          CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }},ghcr.io/metalbear-co/mirrord-cli:latest"
+        run: docker buildx bake -f ci/docker-bake.hcl cli --push
 
   check_for_new_docs:
     needs: [validate_release_request]
