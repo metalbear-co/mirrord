@@ -104,7 +104,7 @@ impl ProgressTracker {
     /// Automatically appends current version to the title.
     pub fn from_env(title: &str) -> Self {
         Self::try_from_env(title).unwrap_or_else(|| {
-            let title = format!("{title} ({})", env!("CARGO_PKG_VERSION"));
+            let title = format!("{title} (cli version {})", env!("CARGO_PKG_VERSION"));
             SpinnerProgress::new(&title).into()
         })
     }
@@ -113,7 +113,7 @@ impl ProgressTracker {
     ///
     /// Automatically appends current version to the title.
     pub fn try_from_env(title: &str) -> Option<Self> {
-        let title_with_version = format!("{title} ({})", env!("CARGO_PKG_VERSION"));
+        let title_with_version = format!("{title} (cli version {})", env!("CARGO_PKG_VERSION"));
         let progress = match std::env::var(MIRRORD_PROGRESS_ENV).as_deref() {
             Ok("dumb" | "simple") => SimpleProgress::new(&title_with_version).into(),
             // adding version in title breaks IDE extension.

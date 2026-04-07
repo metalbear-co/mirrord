@@ -45,7 +45,6 @@ crd = [
   "dep:dotenvy",
   "dep:k8s-openapi",
   "dep:kube",
-  "dep:mirrord-agent-env",
   "dep:mirrord-config",
   "dep:mirrord-kube",
   "dep:semver",
@@ -56,7 +55,6 @@ crd = [
 ]
 
 [dependencies]
-mirrord-agent-env = { path = "../agent/env", features = ["schema"], optional = true }
 mirrord-analytics = { path = "../analytics", optional = true }
 mirrord-auth = { path = "../auth", features = ["client"], optional = true }
 mirrord-config = { path = "../config", optional = true }
@@ -83,7 +81,7 @@ strum_macros = { workspace = true, optional = true }
 strum = { workspace = true, optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
-serde_urlencoded = { version = "0.7", optional = true }
+serde_urlencoded = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tower = { workspace = true, features = ["retry"], optional = true }

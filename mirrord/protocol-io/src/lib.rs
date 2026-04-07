@@ -5,6 +5,7 @@ use std::{
     fmt,
     io::{self},
     marker::PhantomData,
+    ops::Not,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -22,8 +23,7 @@ use tokio::{
     pin, select,
     sync::{Notify, futures::OwnedNotified, mpsc},
 };
-use tokio_util::sync::CancellationToken;
-use tracing::{Level, instrument};
+use tracing::{Instrument, Level, instrument};
 
 pub trait AsyncIO: AsyncWrite + AsyncRead + Send + 'static {}
 impl<T: AsyncWrite + AsyncRead + Send + 'static> AsyncIO for T {}
@@ -227,11 +227,63 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
     pub fn is_closed(&self) -> bool {
         self.rx.is_closed()
     }
-}
 
-impl<Type: ProtocolEndpoint> Drop for Connection<Type> {
-    fn drop(&mut self) {
-        self.shared_state.cancel.cancel();
+    /// Splits incoming messages on this connection using `splitter`.
+    /// For a given message, if `splitter` returns `false`, it will be
+    /// directed to `self`, otherwise into the returned [`mpsc::Receiver`].
+    ///
+    /// Works by spawning a background task, and running the filter
+    /// function on received messages in it. The receiver in `self` is
+    /// moved into the background task, and is replaced with another
+    /// one downstream from it.
+    ///
+    /// Note that since a single background task is used, it will get
+    /// blocked once one of the channels fills up. Therefore, one
+    /// channel filling up will cause the other (free) one to not
+    /// receive messages, regardless of the free capacity in the free
+    /// channel.
+    #[tracing::instrument(skip_all)]
+    pub fn split_incoming<F>(
+        &mut self,
+        channel_size: usize,
+        mut splitter: F,
+    ) -> mpsc::Receiver<Type::InMsg>
+    where
+        F: FnMut(&mut Type::InMsg) -> bool + Send + 'static,
+    {
+        let (tx_this, rx_this) = mpsc::channel(channel_size);
+        let (tx_other, rx_other) = mpsc::channel(channel_size);
+
+        let mut real_rx = std::mem::replace(&mut self.rx, rx_this);
+        tokio::spawn(
+            async move {
+                while (tx_this.is_closed() && tx_other.is_closed()).not()
+                    && let Some(mut next) = real_rx.recv().await
+                {
+                    let destination = if splitter(&mut next) {
+                        &tx_other
+                    } else {
+                        &tx_this
+                    };
+                    let _ = destination.send(next).await;
+                }
+            }
+            .instrument(tracing::debug_span!("connection splitter task")),
+        );
+
+        rx_other
+    }
+
+    /// Destructure `self` into a `(TxHandle, Receiver)` pair
+    #[inline]
+    pub fn destructure(self) -> (TxHandle<Type>, mpsc::Receiver<Type::InMsg>) {
+        (
+            TxHandle {
+                shared_state: self.shared_state,
+                id: QueueId(0),
+            },
+            self.rx,
+        )
     }
 }
 
@@ -300,8 +352,8 @@ async fn io_task<Channel, Type>(
                     },
                 }
             }
-            _ = queues.cancel.cancelled() => {
-                tracing::info!("Cancellation token triggered, shutting down after flushing all remaining messages");
+            _ = tx.closed() => {
+                tracing::info!("Receiver closed, shutting down after flushing all remaining messages");
                 break;
             }
         }
@@ -346,9 +398,6 @@ struct SharedState<Type: ProtocolEndpoint> {
     out_filter: Option<Box<FilterFn<Type::InMsg, Type::OutMsg>>>,
 
     next_queue_id: AtomicUsize,
-
-    /// Used for telling the io task to shut down.
-    cancel: CancellationToken,
 }
 
 impl<Type: ProtocolEndpoint> fmt::Debug for SharedState<Type> {
@@ -377,7 +426,6 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
             out_filter,
             // 0 is reserved for the Connection struct
             next_queue_id: 1.into(),
-            cancel: CancellationToken::new(),
         }
     }
 

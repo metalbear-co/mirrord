@@ -1071,6 +1071,8 @@ pub(super) enum DbBranchesCommand {
         #[arg()]
         names: Vec<String>,
     },
+    /// Show active portforward connections for database branches
+    Connections,
     /// Destroy database branches
     Destroy {
         /// Destroy all branches

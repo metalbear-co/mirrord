@@ -118,7 +118,6 @@ pub enum Application {
     PythonListen,
     RustFileOps,
     GoFileOps(GoVersion),
-    JavaTemurinSip,
     EnvBashCat,
     NodeFileOps,
     NodeSpawn,
@@ -227,10 +226,6 @@ impl Application {
             | Application::NodeIssue2283
             | Application::NodeIssue2807
             | Application::NodeIssue3456 => String::from("node"),
-            Application::JavaTemurinSip => format!(
-                "{}/.sdkman/candidates/java/17.0.6-tem/bin/java",
-                std::env::var("HOME").unwrap(),
-            ),
             Application::GoHTTP(version) => format!("tests/apps/app_go/{version}.go_test_app"),
             Application::GoFileOps(version) => {
                 format!("tests/apps/fileops/go/{version}.go_test_app")
@@ -391,10 +386,6 @@ impl Application {
         let mut app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         app_path.push("tests/apps/");
         match self {
-            Application::JavaTemurinSip => {
-                app_path.push("java_temurin_sip/src/Main.java");
-                vec![app_path.to_string_lossy().to_string()]
-            }
             Application::PythonFlaskHTTP => {
                 app_path.push("app_flask.py");
                 println!("using flask server from {app_path:?}");
@@ -561,7 +552,6 @@ impl Application {
             Application::PythonDontLoad
             | Application::RustFileOps
             | Application::RustDnsResolve
-            | Application::JavaTemurinSip
             | Application::EnvBashCat
             | Application::NodeFileOps
             | Application::NodeSpawn

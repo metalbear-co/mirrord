@@ -1,0 +1,33 @@
+name: Release CI base images
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ci/**'
+      - 'ci/docker-bake.hcl'
+      - '.github/workflows/ci-images.yaml'
+  workflow_dispatch:
+
+jobs:
+  ci-images:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push CI images
+        env:
+          SHA: ${{ github.sha }}
+        run: docker buildx bake -f ci/docker-bake.hcl ci-images --push

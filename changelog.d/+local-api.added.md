@@ -1,1 +1,0 @@
-Added `mirrord ui` command that launches a local web dashboard for monitoring all active mirrord sessions in real time. Each session now exposes a per-session HTTP API on a Unix socket for health checks, session info, event streaming (SSE), and session termination.

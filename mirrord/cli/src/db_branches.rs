@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt::Debug};
+use std::{collections::HashSet, fmt::Debug, ops::Not, path::PathBuf};
 
 use k8s_openapi::NamespaceResourceScope;
 use kube::{Api, Resource, api::DeleteParams};
@@ -12,7 +12,7 @@ use mirrord_operator::crd::{
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{Table, row};
-use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
     CliResult,
@@ -20,9 +20,31 @@ use crate::{
     kube::{kube_client_from_layer_config, list_resource_if_defined},
 };
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Portforward {
+    pub db_id: String,
+    pub connection_string: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PortforwardSession {
+    pub portforwards: Vec<Portforward>,
+    pub key: String,
+    pub session_id: u64,
+}
+
+/// Directory where portforward session files are stored (`~/.mirrord/db_branch_portforwards/`).
+pub fn portforward_session_dir() -> PathBuf {
+    home::home_dir()
+        .unwrap_or_else(|| PathBuf::from("~"))
+        .join(".mirrord")
+        .join("db_branch_portforwards")
+}
+
 #[derive(Debug, Clone)]
 struct BranchInfo {
     name: String,
+    pod_name: Option<String>,
     db_type: String,
     phase: Option<String>,
     ttl: u64,
@@ -41,6 +63,7 @@ impl From<BranchDatabase> for BranchInfo {
     ) -> Self {
         Self {
             name: metadata.name.unwrap_or_default(),
+            pod_name: status.as_ref().and_then(|s| s.pod_name.clone()),
             db_type: spec
                 .dialect()
                 .map(|d| d.to_string())
@@ -75,6 +98,7 @@ impl From<MysqlBranchDatabase> for BranchInfo {
     ) -> Self {
         Self {
             name: metadata.name.unwrap_or_default(),
+            pod_name: status.as_ref().and_then(|s| s.pod_name.clone()),
             db_type: "MySQL".to_string(),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
@@ -106,6 +130,7 @@ impl From<PgBranchDatabase> for BranchInfo {
     ) -> Self {
         Self {
             name: metadata.name.unwrap_or_default(),
+            pod_name: status.as_ref().and_then(|s| s.pod_name.clone()),
             db_type: "PostgreSQL".to_string(),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
@@ -137,6 +162,7 @@ impl From<MongodbBranchDatabase> for BranchInfo {
     ) -> Self {
         Self {
             name: metadata.name.unwrap_or_default(),
+            pod_name: status.as_ref().and_then(|s| s.pod_name.clone()),
             db_type: "MongoDB".to_string(),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
@@ -161,8 +187,99 @@ impl From<MongodbBranchDatabase> for BranchInfo {
 pub async fn db_branches_command(args: DbBranchesArgs) -> CliResult<()> {
     match &args.command {
         DbBranchesCommand::Status { names } => status_command(&args, names.as_slice()).await,
+        DbBranchesCommand::Connections => connections_command().await,
         DbBranchesCommand::Destroy { all, names } => destroy_command(&args, *all, names).await,
     }
+}
+
+async fn connections_command() -> CliResult<()> {
+    let pf_dir = portforward_session_dir();
+
+    let mut entries = match tokio::fs::read_dir(&pf_dir).await {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            println!("No active portforward sessions.");
+            return Ok(());
+        }
+        Err(err) => {
+            tracing::warn!(?err, "failed to read portforward session directory");
+            println!("No active portforward sessions.");
+            return Ok(());
+        }
+    };
+
+    let mut table = Table::new();
+    table.add_row(row!["DB ID", "ADDRESS", "KEY", "SESSION ID"]);
+    let mut has_rows = false;
+
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+
+        let pid: u32 = match path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.parse().ok())
+        {
+            Some(pid) => pid,
+            None => continue,
+        };
+
+        // Check if the process is still alive.
+        if is_pid_alive(pid).not() {
+            // Stale file, clean it up.
+            let _ = tokio::fs::remove_file(&path).await;
+            continue;
+        }
+
+        let contents = match tokio::fs::read(&path).await {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let session: PortforwardSession = match serde_json::from_slice(&contents) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+
+        for pf in &session.portforwards {
+            table.add_row(row![
+                pf.db_id,
+                pf.connection_string,
+                session.key,
+                format!("{:X}", session.session_id)
+            ]);
+            has_rows = true;
+        }
+    }
+
+    if has_rows {
+        table.printstd();
+    } else {
+        println!("No active portforward sessions.");
+    }
+
+    Ok(())
+}
+
+#[cfg(unix)]
+fn is_pid_alive(pid: u32) -> bool {
+    use nix::{sys::signal::kill, unistd::Pid};
+
+    match kill(Pid::from_raw(pid as i32), None) {
+        Ok(()) => true,
+        Err(nix::errno::Errno::ESRCH) => false,
+        // EPERM means the process exists but we can't signal it.
+        Err(_) => true,
+    }
+}
+
+#[cfg(windows)]
+fn is_pid_alive(pid: u32) -> bool {
+    // Untested AI slop
+    std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+        .unwrap_or(false)
 }
 
 fn get_api<T: Resource<DynamicType = (), Scope = NamespaceResourceScope>>(
@@ -269,6 +386,7 @@ fn build_status_table(all_infos: Vec<BranchInfo>, names: HashSet<&str>) -> Table
     let mut table = Table::new();
     table.add_row(row![
         "Name",
+        "Pod Name",
         "DB Type",
         "Phase",
         "TTL (sec)",
@@ -280,6 +398,7 @@ fn build_status_table(all_infos: Vec<BranchInfo>, names: HashSet<&str>) -> Table
     for info in all_infos_iter {
         table.add_row(row![
             info.name,
+            info.pod_name.unwrap_or_else(|| "Unknown".to_owned()),
             info.db_type,
             info.phase.unwrap_or_else(|| "Unknown".to_owned()),
             info.ttl,
@@ -498,6 +617,7 @@ mod tests {
     fn branch_info(name: &str, db_type: &'static str) -> BranchInfo {
         BranchInfo {
             name: name.to_owned(),
+            pod_name: None,
             db_type: db_type.to_string(),
             phase: None,
             ttl: 3600,
@@ -510,6 +630,7 @@ mod tests {
     fn build_expected_table(rows: Vec<Row>) -> Table {
         let mut table = Table::from_iter([row![
             "Name",
+            "Pod Name",
             "DB Type",
             "Phase",
             "TTL (sec)",
@@ -535,13 +656,13 @@ mod tests {
         let table = build_status_table(branches.clone(), HashSet::new());
         let expected = build_expected_table(vec![
             row![
-                "branch-a", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"
+                "branch-a", "Unknown", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"
             ],
             row![
-                "branch-b", "Db2", "Unknown", "3600", "<none>", "none", "Unknown"
+                "branch-b", "Unknown", "Db2", "Unknown", "3600", "<none>", "none", "Unknown"
             ],
             row![
-                "branch-c", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"
+                "branch-c", "Unknown", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"
             ],
         ]);
         assert_eq!(
@@ -555,10 +676,10 @@ mod tests {
         let table = build_status_table(branches.clone(), names);
         let expected = build_expected_table(vec![
             row![
-                "branch-a", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"
+                "branch-a", "Unknown", "Db1", "Unknown", "3600", "<none>", "none", "Unknown"
             ],
             row![
-                "branch-c", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"
+                "branch-c", "Unknown", "Db3", "Unknown", "3600", "<none>", "none", "Unknown"
             ],
         ]);
         assert_eq!(
