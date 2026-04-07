@@ -1,4 +1,4 @@
-FROM buildpack-deps:bookworm as base
+FROM buildpack-deps:bookworm AS base
 
 RUN apt-get update && apt-get install -y protobuf-compiler
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o rustup-init.sh
