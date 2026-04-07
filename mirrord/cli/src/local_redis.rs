@@ -263,8 +263,6 @@ async fn start_server<P: Progress>(
 
 /// Check if Redis is ready by sending a PING command.
 fn is_ready(port: u16) -> bool {
-    // FIXME: redis-cli might not be installed and if it's the case - there is no good error
-    // description
     Command::new("redis-cli")
         .args(["-p", &port.to_string(), "PING"])
         .output()
