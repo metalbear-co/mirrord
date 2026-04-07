@@ -146,7 +146,7 @@ async fn start_container<P: Progress>(
     progress: &P,
     config: &RedisLocalConfig,
     container_runtime: ContainerRuntime,
-    instance_id: String
+    instance_id: String,
 ) -> CliResult<LocalRedis> {
     let runtime_name = container_runtime.command();
     let mut sub = progress.subtask("starting local Redis");
@@ -206,7 +206,7 @@ async fn start_container<P: Progress>(
         sub.success(Some(&format!("Redis ({runtime_name}) on localhost:{port}")));
         Ok(LocalRedis::Container {
             runtime: container_runtime,
-            container_name: instance_id
+            container_name: instance_id,
         })
     } else {
         sub.failure(Some("Redis container not responding"));

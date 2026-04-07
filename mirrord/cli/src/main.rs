@@ -768,10 +768,8 @@ async fn exec(
             None
         }) {
         let port = redis_config.local.port;
-        let redis_instance_id = local_redis::resolve_instance_id(
-            redis_config.id.as_deref(),
-            config.key.as_str()
-        );
+        let redis_instance_id =
+            local_redis::resolve_instance_id(redis_config.id.as_deref(), config.key.as_str());
 
         // Get the override variable and build the appropriate connection string
         if let Some(variable) = redis_config.connection.override_variable() {
