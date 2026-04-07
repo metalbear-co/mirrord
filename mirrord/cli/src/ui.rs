@@ -69,7 +69,7 @@ struct FrontendAssets;
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum SessionNotification {
-    SessionAdded { session: TrackedSession },
+    SessionAdded { session: Box<TrackedSession> },
     SessionRemoved { session_id: String },
 }
 
@@ -341,7 +341,7 @@ async fn add_session(session_id: String, socket_path: PathBuf, state: Arc<AppSta
 
     let session_client = tracked.client.clone();
     let notification = SessionNotification::SessionAdded {
-        session: tracked.clone(),
+        session: Box::new(tracked.clone()),
     };
 
     {
@@ -500,7 +500,7 @@ async fn ws_connection(mut socket: WebSocket, state: Arc<AppState>) {
         let sessions = state.sessions.read().await;
         for session in sessions.values() {
             let notification = SessionNotification::SessionAdded {
-                session: session.clone(),
+                session: Box::new(session.clone()),
             };
             let msg = serde_json::to_string(&notification)
                 .expect("notification serialization cannot fail");
