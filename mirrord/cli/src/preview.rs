@@ -31,7 +31,7 @@ use mirrord_config::{
     LayerConfig, config::ConfigContext, feature::preview::PreviewTtlMins, target::Target,
 };
 use mirrord_operator::{
-    client::{OperatorApi, PreparedClientCert},
+    client::{NoClientCert, OperatorApi},
     crd::{
         NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
@@ -713,7 +713,7 @@ async fn create_preview_api(
     all_namespaces: bool,
     progress: &ProgressTracker,
     analytics: &mut AnalyticsReporter,
-) -> CliResult<(OperatorApi<PreparedClientCert>, Api<PreviewSession>)> {
+) -> CliResult<(OperatorApi<NoClientCert>, Api<PreviewSession>)> {
     let mut subtask = progress.subtask("connecting to operator");
 
     let operator_api = OperatorApi::try_new(config, analytics, progress)
@@ -729,14 +729,6 @@ async fn create_preview_api(
         .operator()
         .spec
         .require_feature(NewOperatorFeature::PreviewEnv)
-        .inspect_err(|_| {
-            subtask.failure(None);
-        })?;
-
-    let operator_api = operator_api
-        .with_client_certificate(analytics, progress, config)
-        .await
-        .into_certified()
         .inspect_err(|_| {
             subtask.failure(None);
         })?;

@@ -16,6 +16,7 @@ edition.workspace = true
 [features]
 
 [dependencies]
+home.workspace = true
 http.workspace = true
 pem.workspace = true
 rcgen.workspace = true

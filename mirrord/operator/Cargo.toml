@@ -81,7 +81,7 @@ strum_macros = { workspace = true, optional = true }
 strum = { workspace = true, optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
-serde_urlencoded = { version = "0.7", optional = true }
+serde_urlencoded = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tower = { workspace = true, features = ["retry"], optional = true }

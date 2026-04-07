@@ -45,35 +45,35 @@ futures.workspace = true
 which.workspace = true
 semver.workspace = true
 reqwest = { workspace = true, features = ["stream"] }
-const-random = "0.1.15"
+const-random.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "macros", "process"] }
 tokio-retry.workspace = true
 kube.workspace = true
 k8s-openapi.workspace = true
 miette = { workspace = true, features = ["fancy"] }
 thiserror.workspace = true
-humantime = "2"
+humantime.workspace = true
 tokio-util.workspace = true
 socket2.workspace = true
 drain.workspace = true
-prettytable-rs = "0.10"
-clap_complete = "4.4.1"
+prettytable-rs.workspace = true
+clap_complete.workspace = true
 rustls.workspace = true
-local-ip-address = "0.6"
+local-ip-address.workspace = true
 tokio-rustls.workspace = true
 tokio-stream = { workspace = true, features = ["io-util", "net"] }
 regex.workspace = true
-mid = "3.0.0"
+mid.workspace = true
 home.workspace = true
 uuid.workspace = true
 fs4.workspace = true
 hex.workspace = true
 tower = { workspace = true, features = ["retry"] }
 ci_info.workspace = true
-opener = "0.8.3"
+opener.workspace = true
 tempfile = { workspace = true, optional = true }
-axum = { version = "0.8.4", features = ["ws"], optional = true }
-tower-http = { version = "0.6.6", features = ["fs", "set-header"], optional = true }
+axum = { workspace = true, features = ["ws"], optional = true }
+tower-http = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
 itertools = { workspace = true, optional = true }
@@ -83,12 +83,12 @@ url.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 rand.workspace = true
-axum = { version = "0.8.4", features = ["ws"] }
-tower-http = { version = "0.6.6", features = ["cors", "set-header"] }
-rust-embed = "8"
-notify = { version = "8", features = ["macos_fsevent"] }
-mime_guess = "2"
-eventsource-stream = "0.2"
+axum = { workspace = true, features = ["ws"] }
+tower-http = { workspace = true, features = ["cors"] }
+rust-embed.workspace = true
+notify.workspace = true
+mime_guess.workspace = true
+eventsource-stream.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
@@ -101,7 +101,7 @@ base64.workspace = true
 mirrord-sip = { path = "../sip" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-xmas-elf = "0.10"
+xmas-elf.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.build-dependencies]
 mirrord-layer = { artifact = "cdylib", path = "../layer" }

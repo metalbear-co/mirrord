@@ -270,7 +270,9 @@ pub(crate) async fn container_command<P: Progress>(
     let PreparedProxies {
         runtime_command,
         execution_info,
-        tls_setup: _,
+        // tls_setup must be named - if you call it _ it'd drop immediately
+        // and cause you pain https://github.com/metalbear-co/mirrord/issues/4126
+        tls_setup: _tls_setup,
         sidecar_pid,
         sidecar_container,
     } = prepare_proxies(
@@ -381,7 +383,9 @@ pub async fn container_ext_command<P: Progress>(
     let PreparedProxies {
         runtime_command,
         execution_info,
-        tls_setup: _,
+        // tls_setup must be named - if you call it _ it'd drop immediately
+        // and cause you pain https://github.com/metalbear-co/mirrord/issues/4126
+        tls_setup: _tls_setup,
         sidecar_pid: _,
         sidecar_container: _,
     } = prepare_proxies(
