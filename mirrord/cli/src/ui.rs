@@ -17,14 +17,15 @@ use std::{
 use axum::{
     Router,
     extract::{
-        Path, Request, State,
+        Path, Query, Request, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderValue, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response, sse},
     routing::{get, post},
 };
+use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use eventsource_stream::Eventsource;
 use futures::stream::StreamExt as _;
 use mirrord_intproxy::session_monitor::api::SessionInfo;
@@ -100,25 +101,9 @@ fn generate_token() -> String {
     hex::encode(bytes)
 }
 
-/// Parses the `mirrord_token` value from a raw `Cookie` header.
-fn parse_cookie_token(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(header::COOKIE)?
-        .to_str()
-        .ok()?
-        .split(';')
-        .find_map(|pair| {
-            let pair = pair.trim();
-            pair.strip_prefix("mirrord_token=")
-        })
-}
-
-/// Parses the `token` query parameter from the request URI.
-fn parse_query_token(uri: &axum::http::Uri) -> Option<&str> {
-    uri.query()?.split('&').find_map(|pair| {
-        let (key, value) = pair.split_once('=')?;
-        (key == "token").then_some(value)
-    })
+#[derive(serde::Deserialize)]
+struct TokenQuery {
+    token: Option<String>,
 }
 
 /// Middleware that validates the authentication token on every request.
@@ -128,29 +113,28 @@ fn parse_query_token(uri: &axum::http::Uri) -> Option<&str> {
 /// requests.
 async fn token_auth(
     State(state): State<Arc<AppState>>,
+    jar: CookieJar,
+    Query(query): Query<TokenQuery>,
     request: Request,
     next: Next,
-) -> impl IntoResponse {
+) -> Response {
     let expected = &state.token;
 
-    if let Some(cookie_token) = parse_cookie_token(request.headers())
-        && cookie_token == expected
+    if jar
+        .get("mirrord_token")
+        .is_some_and(|c| c.value() == expected)
     {
         return next.run(request).await;
     }
 
-    if let Some(query_token) = parse_query_token(request.uri())
-        && query_token == expected
-    {
-        let mut response = next.run(request).await;
-        let cookie_value = format!("mirrord_token={expected}; HttpOnly; SameSite=Strict; Path=/");
-        response.headers_mut().insert(
-            header::SET_COOKIE,
-            cookie_value
-                .parse()
-                .expect("cookie value should be valid header"),
-        );
-        return response;
+    if query.token.as_deref() == Some(expected) {
+        let cookie = Cookie::build(("mirrord_token", expected.clone()))
+            .http_only(true)
+            .same_site(SameSite::Strict)
+            .path("/")
+            .build();
+        let response = next.run(request).await;
+        return (jar.add(cookie), response).into_response();
     }
 
     StatusCode::FORBIDDEN.into_response()
