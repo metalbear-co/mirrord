@@ -212,6 +212,34 @@ impl HttpFilterConfig {
             || self.header_filter_jq.is_some()
     }
 
+    pub fn ensure_no_empty_strings(&self) -> Result<(), HttpFilterValidationError> {
+        ensure_non_empty(self.header_filter.as_deref(), "header_filter".to_owned())?;
+        ensure_non_empty(self.path_filter.as_deref(), "path_filter".to_owned())?;
+        ensure_non_empty(self.method_filter.as_deref(), "method_filter".to_owned())?;
+        ensure_non_empty(
+            self.header_filter_jq.as_deref(),
+            "header_filter_jq".to_owned(),
+        )?;
+
+        if let Some(body_filter) = &self.body_filter {
+            body_filter.ensure_no_empty_strings("body_filter")?;
+        }
+
+        if let Some(filters) = &self.all_of {
+            for (index, filter) in filters.iter().enumerate() {
+                filter.ensure_no_empty_strings(&format!("all_of[{index}]"))?;
+            }
+        }
+
+        if let Some(filters) = &self.any_of {
+            for (index, filter) in filters.iter().enumerate() {
+                filter.ensure_no_empty_strings(&format!("any_of[{index}]"))?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn ensure_usable_with(
         &self,
         agent_protocol_version: Option<Version>,
@@ -586,6 +614,17 @@ pub enum BodyFilter {
 }
 
 impl BodyFilter {
+    fn ensure_no_empty_strings(&self, prefix: &str) -> Result<(), HttpFilterValidationError> {
+        match self {
+            BodyFilter::Json { query, matches } => {
+                ensure_non_empty(Some(query.as_str()), format!("{prefix}.query"))?;
+                ensure_non_empty(Some(matches.as_str()), format!("{prefix}.matches"))?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Converts this config into the protocol-level [`HttpBodyFilter`].
     pub fn as_protocol_http_body_filter(&self) -> Result<HttpBodyFilter, Box<fancy_regex::Error>> {
         match self {
@@ -595,6 +634,39 @@ impl BodyFilter {
             }),
         }
     }
+}
+
+impl InnerFilter {
+    fn ensure_no_empty_strings(&self, prefix: &str) -> Result<(), HttpFilterValidationError> {
+        match self {
+            InnerFilter::Header { header } => {
+                ensure_non_empty(Some(header.as_str()), format!("{prefix}.header"))
+            }
+            InnerFilter::Path { path } => {
+                ensure_non_empty(Some(path.as_str()), format!("{prefix}.path"))
+            }
+            InnerFilter::Method { method } => {
+                ensure_non_empty(Some(method.as_str()), format!("{prefix}.method"))
+            }
+            InnerFilter::Body(body_filter) => body_filter.ensure_no_empty_strings(prefix),
+            InnerFilter::HeaderJq { query } => {
+                ensure_non_empty(Some(query.as_str()), format!("{prefix}.query"))
+            }
+        }
+    }
+}
+
+fn ensure_non_empty(value: Option<&str>, field: String) -> Result<(), HttpFilterValidationError> {
+    match value {
+        Some("") => Err(HttpFilterValidationError::EmptyString { field })?,
+        _ => Ok(()),
+    }
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum HttpFilterValidationError {
+    #[error("HTTP filter `{field}` cannot be an empty string")]
+    EmptyString { field: String },
 }
 
 impl MirrordToggleableConfig for HttpFilterFileConfig {

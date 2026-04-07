@@ -31,7 +31,10 @@ use experimental::ExperimentalConfig;
 use feature::{
     env::mapper::EnvVarsRemapper,
     network::{
-        incoming::http_filter::{BodyFilter, InnerFilter},
+        incoming::{
+            IncomingMode,
+            http_filter::{BodyFilter, InnerFilter},
+        },
         outgoing::OutgoingFilterConfig,
     },
 };
@@ -601,6 +604,14 @@ impl LayerConfig {
                 "Composite HTTP filter cannot be empty".to_string(),
             ))?;
         }
+
+        http_filter
+            .ensure_no_empty_strings()
+            .map_err(|error| ConfigError::InvalidValue {
+                name: "feature.network.incoming.http_filter",
+                provided: String::new(),
+                error: Box::new(error),
+            })?;
 
         let verify_body_filter = |filter: &BodyFilter| match filter {
             BodyFilter::Json { query, .. } => {
@@ -1591,5 +1602,38 @@ mod tests {
         };
 
         assert_eq!(pod_target.pod, "test-my-session");
+    }
+
+    #[test]
+    fn empty_http_filter_strings_are_rejected() {
+        let config = ConfigType::Json.parse(
+            r#"
+            {
+                "feature": {
+                    "network": {
+                        "incoming": {
+                            "mode": "steal",
+                            "http_filter": {
+                                "header_filter": ""
+                            }
+                        }
+                    }
+                }
+            }
+            "#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        let error = resolved
+            .verify(&mut context)
+            .expect_err("empty HTTP filter strings should be rejected");
+
+        assert_eq!(
+            error.to_string(),
+            "invalid feature.network.incoming.http_filter value ``: HTTP filter `header_filter` cannot be an empty string",
+        );
     }
 }
