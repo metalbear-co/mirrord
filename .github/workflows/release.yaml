@@ -686,13 +686,13 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         env:
           AGENT_TAGS: "ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}"
-        run: docker buildx bake agent --push
+        run: docker buildx bake -f ci/docker-bake.hcl agent --push
 
       - name: Build and push (final/release)
         if: needs.validate_release_request.outputs.should_release == 'true'
         env:
           AGENT_TAGS: "ghcr.io/metalbear-co/mirrord:latest,ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}"
-        run: docker buildx bake agent --push
+        run: docker buildx bake -f ci/docker-bake.hcl agent --push
 
   release_cli_docker_image:
     needs: [validate_release_request]
@@ -761,13 +761,13 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         env:
           CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli-staging:${{ github.sha }}"
-        run: docker buildx bake cli --push
+        run: docker buildx bake -f ci/docker-bake.hcl cli --push
 
       - name: Build and push (final/release)
         if: needs.validate_release_request.outputs.should_release == 'true'
         env:
           CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }},ghcr.io/metalbear-co/mirrord-cli:latest"
-        run: docker buildx bake cli --push
+        run: docker buildx bake -f ci/docker-bake.hcl cli --push
 
   check_for_new_docs:
     needs: [validate_release_request]

@@ -4,7 +4,7 @@ on:
     branches: [main]
     paths:
       - 'ci/**'
-      - 'docker-bake.hcl'
+      - 'ci/docker-bake.hcl'
       - '.github/workflows/ci-images.yaml'
   workflow_dispatch:
 
@@ -30,4 +30,4 @@ jobs:
       - name: Build and push CI images
         env:
           SHA: ${{ github.sha }}
-        run: docker buildx bake ci-images --push
+        run: docker buildx bake -f ci/docker-bake.hcl ci-images --push

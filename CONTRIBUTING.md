@@ -56,13 +56,11 @@ minikube start --driver=docker
 
 ### Prepare a cluster
 
- Build mirrord-agent Docker Image.
+Build the mirrord-agent image. Images are defined in `ci/docker-bake.hcl`.
+For a local dev build (single platform, loaded into the local Docker daemon):
 
-Make sure you're [logged in to GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
-
-Then run:
 ```bash
-docker buildx build -t test . --file mirrord/agent/Dockerfile
+PLATFORMS=linux/amd64 AGENT_TAGS=test docker buildx bake -f ci/docker-bake.hcl agent --load
 ```
 
 ```bash
