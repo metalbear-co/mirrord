@@ -213,7 +213,10 @@ async fn preview_start(
             PreviewTtlMins::Finite(mins) => mins.saturating_mul(60),
             PreviewTtlMins::Infinite(_) => PreviewTtlMins::INFINITE_TTL_SECS,
         },
-        incoming: PreviewIncomingConfig::from_config(&layer_config.feature.network.incoming),
+        incoming: PreviewIncomingConfig::from_config(
+            &layer_config.feature.network.incoming,
+            layer_config.key.as_str(),
+        ),
         queue_splitting: PreviewQueueSplittingConfig::from_config(
             &layer_config.feature.split_queues,
         ),

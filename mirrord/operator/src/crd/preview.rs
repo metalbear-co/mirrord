@@ -15,7 +15,7 @@ use kube::{
 use mirrord_config::{
     feature::{
         env::EnvConfig,
-        network::incoming::{IncomingConfig, IncomingMode},
+        network::incoming::{IncomingConfig, IncomingMode, http_filter::HttpFilterConfig},
         preview::PreviewTtlMins,
         split_queues::{QueueId, SplitQueuesConfig},
     },
@@ -261,21 +261,95 @@ pub struct PreviewIncomingConfig {
 
 impl PreviewIncomingConfig {
     /// Converts from the user's incoming config. Returns `None` when the mode is `Off`.
-    pub fn from_config(value: &IncomingConfig) -> Option<Self> {
+    pub fn from_config(value: &IncomingConfig, key: &str) -> Option<Self> {
+        let steal = matches!(value.mode, IncomingMode::Steal);
+
+        let http_filter = if steal && !value.http_filter.is_filter_set() {
+            Some(Self::default_http_filter(key))
+        } else {
+            if value.http_filter.is_filter_set() {
+                Some(value.http_filter.clone())
+            } else {
+                None
+            }
+        };
+
         match value.mode {
             IncomingMode::Off => None,
             IncomingMode::Mirror | IncomingMode::Steal => Some(Self {
                 ports: value.ports.as_ref().map(|p| p.iter().copied().collect()),
                 ignore_ports: value.ignore_ports.iter().copied().collect(),
-                steal: matches!(value.mode, IncomingMode::Steal),
-                http_filter: value
-                    .http_filter
-                    .is_filter_set()
-                    .then(|| serde_json::to_string(&value.http_filter))
+                steal,
+                http_filter: http_filter
+                    .map(|http_filter| serde_json::to_string(&http_filter))
                     .transpose()
                     .expect("HttpFilterConfig serialization cannot fail"),
             }),
         }
+    }
+
+    fn default_http_filter(key: &str) -> HttpFilterConfig {
+        HttpFilterConfig {
+            header_filter: Some(format!("^baggage: .*mirrord-session={key}.*$")),
+            ..Default::default()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn steal_without_explicit_filter_defaults_to_baggage_header() {
+        let incoming = PreviewIncomingConfig::from_config(
+            &IncomingConfig {
+                mode: IncomingMode::Steal,
+                ..Default::default()
+            },
+            "pr-123",
+        )
+        .expect("steal mode should produce a preview incoming config");
+
+        let filter: HttpFilterConfig = serde_json::from_str(
+            incoming
+                .http_filter
+                .as_deref()
+                .expect("default filter should be serialized into the preview session"),
+        )
+        .expect("default filter should deserialize");
+
+        assert_eq!(
+            filter.header_filter.as_deref(),
+            Some("^baggage: .*mirrord-session=pr-123.*$"),
+        );
+    }
+
+    #[test]
+    fn explicit_filter_is_preserved() {
+        let incoming = PreviewIncomingConfig::from_config(
+            &IncomingConfig {
+                mode: IncomingMode::Steal,
+                http_filter: HttpFilterConfig {
+                    path_filter: Some("^/preview$".to_owned()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            "pr-123",
+        )
+        .expect("steal mode should produce a preview incoming config");
+
+        let filter: HttpFilterConfig = serde_json::from_str(
+            incoming
+                .http_filter
+                .as_deref()
+                .expect("explicit filter should be serialized into the preview session"),
+        )
+        .expect("explicit filter should deserialize");
+
+        assert_eq!(filter.path_filter.as_deref(), Some("^/preview$"));
+        assert_eq!(filter.header_filter, None);
     }
 }
 
