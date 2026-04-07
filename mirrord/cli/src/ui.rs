@@ -177,13 +177,16 @@ fn is_allowed_origin(origin: &str) -> bool {
 
 /// Reads the per-session authentication token from `~/.mirrord/sessions/<id>.token`.
 ///
-/// Rejects session IDs containing path separators to prevent path traversal.
+/// Canonicalizes the resolved path and verifies it stays within the sessions directory
+/// to prevent path traversal.
 fn read_session_token(sessions_dir: &std::path::Path, session_id: &str) -> Option<String> {
-    if session_id.contains('/') || session_id.contains('\\') || session_id.contains("..") {
+    let token_path = sessions_dir.join(format!("{session_id}.token"));
+    let canonical = token_path.canonicalize().ok()?;
+    let canonical_dir = sessions_dir.canonicalize().ok()?;
+    if !canonical.starts_with(&canonical_dir) {
         return None;
     }
-    let token_path = sessions_dir.join(format!("{session_id}.token"));
-    std::fs::read_to_string(token_path).ok()
+    std::fs::read_to_string(canonical).ok()
 }
 
 /// Creates a reqwest client configured to connect via the given Unix socket.
