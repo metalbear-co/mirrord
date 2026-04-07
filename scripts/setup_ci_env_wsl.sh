@@ -83,25 +83,6 @@ fi
 rustup component add clippy rustfmt
 rustup target add x86_64-unknown-linux-gnu
 
-# Install Java (matching CI: OpenJDK 17.0.6-tem via SDKMAN)
-print_step "Installing Java via SDKMAN..."
-if [ ! -d "$HOME/.sdkman" ]; then
-    # Ensure unzip and zip are available for SDKMAN
-    if ! command -v unzip &> /dev/null || ! command -v zip &> /dev/null; then
-        print_error "unzip and zip are required for SDKMAN but not installed"
-        exit 1
-    fi
-    curl -s "https://get.sdkman.io" | bash
-    source "$HOME/.sdkman/bin/sdkman-init.sh"
-    sdk install java 17.0.6-tem
-else
-    print_warning "SDKMAN already installed"
-    source "$HOME/.sdkman/bin/sdkman-init.sh"
-    if ! sdk list java | grep -q "17.0.6-tem"; then
-        sdk install java 17.0.6-tem
-    fi
-fi
-
 # Install Node.js (matching CI: Node 18)
 print_step "Installing Node.js v18..."
 if ! command -v node &> /dev/null || [ "$(node -v | cut -d'.' -f1 | sed 's/v//')" != "18" ]; then
@@ -212,24 +193,24 @@ fi
 
 # Build Rust test apps (matching CI)
 rust_test_apps=(
-    "mirrord/layer/tests/apps/issue1123"
-    "mirrord/layer/tests/apps/issue1054" 
-    "mirrord/layer/tests/apps/issue1458"
-    "mirrord/layer/tests/apps/issue1458portnot53"
-    "mirrord/layer/tests/apps/issue2058"
-    "mirrord/layer/tests/apps/issue2204"
-    "mirrord/layer/tests/apps/fileops"
-    "mirrord/layer/tests/apps/outgoing"
-    "mirrord/layer/tests/apps/recv_from"
-    "mirrord/layer/tests/apps/dns_resolve"
-    "mirrord/layer/tests/apps/listen_ports"
-    "mirrord/layer/tests/apps/issue1776"
-    "mirrord/layer/tests/apps/issue1776portnot53"
-    "mirrord/layer/tests/apps/issue1899"
-    "mirrord/layer/tests/apps/issue2001"
-    "mirrord/layer/tests/apps/issue2438" 
-    "mirrord/layer/tests/apps/issue3248"
-    "mirrord/layer/tests/apps/rebind0"
+    "mirrord/layer-tests/tests/apps/issue1123"
+    "mirrord/layer-tests/tests/apps/issue1054" 
+    "mirrord/layer-tests/tests/apps/issue1458"
+    "mirrord/layer-tests/tests/apps/issue1458portnot53"
+    "mirrord/layer-tests/tests/apps/issue2058"
+    "mirrord/layer-tests/tests/apps/issue2204"
+    "mirrord/layer-tests/tests/apps/fileops"
+    "mirrord/layer-tests/tests/apps/outgoing"
+    "mirrord/layer-tests/tests/apps/recv_from"
+    "mirrord/layer-tests/tests/apps/dns_resolve"
+    "mirrord/layer-tests/tests/apps/listen_ports"
+    "mirrord/layer-tests/tests/apps/issue1776"
+    "mirrord/layer-tests/tests/apps/issue1776portnot53"
+    "mirrord/layer-tests/tests/apps/issue1899"
+    "mirrord/layer-tests/tests/apps/issue2001"
+    "mirrord/layer-tests/tests/apps/issue2438" 
+    "mirrord/layer-tests/tests/apps/issue3248"
+    "mirrord/layer-tests/tests/apps/rebind0"
 )
 
 # Build simple Rust apps
@@ -265,7 +246,7 @@ print_step "Building Go test applications..."
 if [ -f "scripts/build_go_apps.sh" ]; then
     chmod +x scripts/build_go_apps.sh
     
-    cd mirrord/layer/tests
+    cd mirrord/layer-tests/tests
     
     # Source the Go version script to get aliases
     source ~/.go-version
@@ -289,11 +270,11 @@ print_step "Testing the setup..."
 
 # Test Rust compilation
 print_step "Testing Rust compilation..."
-cargo check -p mirrord-layer
+cargo check -p mirrord-layer-tests
 
 # Test clippy
 print_step "Testing clippy..."
-cargo clippy -p mirrord-layer -- -D warnings
+cargo clippy -p mirrord-layer-tests -- -D warnings
 
 # Test basic Go compilation
 print_step "Testing Go compilation..."
@@ -309,12 +290,12 @@ echo "  mirrord_test_env   - Set mirrord test environment variables"
 echo ""
 echo "🧪 Run integration tests:"
 echo "  cd /path/to/mirrord"
-echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer"
+echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests"
 echo ""
 echo "🐛 Run specific failing tests:"
-echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer faccessat_go"
-echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer read_go"
-echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer write_go"
+echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests faccessat_go"
+echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests read_go"
+echo "  cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests write_go"
 echo ""
 echo "📝 Remember to source your bashrc or restart your shell:"
 echo "  source ~/.bashrc"

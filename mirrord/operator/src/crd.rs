@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap},
     fmt::{Display, Formatter},
 };
@@ -14,6 +15,7 @@ use mirrord_config::{
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use strum_macros::EnumDiscriminants;
 
 #[cfg(feature = "client")]
 use crate::client::error::OperatorApiError;
@@ -24,17 +26,14 @@ use crate::{
 
 pub mod copy_target;
 pub mod db_branching;
-pub mod external;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
-pub mod multi_cluster;
-pub mod patch;
-pub mod policy;
 pub mod preview;
 pub mod profile;
+pub mod rabbitmq;
+
 pub mod session;
-pub mod steal_tls;
 
 pub use kafka::MirrordKafkaEphemeralTopic;
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
@@ -71,9 +70,10 @@ impl TargetCrd {
     /// # Warning
     ///
     /// Do **not** change url paths here, even if the operator recognizes the other format.
-    /// It can break existing [`policy::MirrordPolicy`]s and [`policy::MirrordClusterPolicy`]
-    /// (see [`policy::MirrordPolicySpec::target_path`] and
-    /// [`policy::MirrordClusterPolicySpec::target_path`]).
+    /// It can break existing `operator-crd::crd::policy::MirrordPolicy`s and
+    /// `operator-crd::crd::policy::MirrordClusterPolicy` (see
+    /// `operator-crd::crd::policy::MirrordPolicySpec::target_path` and
+    /// `operator-crd::crd::policy::MirrordClusterPolicySpec::target_path`).
     pub fn urlfied_name(target: &Target) -> String {
         let (type_name, target, container) = match target {
             Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
@@ -254,11 +254,11 @@ pub enum CopyTargetEntryCompat {
 }
 
 impl JsonSchema for CopyTargetEntryCompat {
-    fn schema_name() -> String {
-        "CopyTargetEntry".to_owned()
+    fn schema_name() -> Cow<'static, str> {
+        "CopyTargetEntry".into()
     }
 
-    fn json_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(schema_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
         // Only expose the modern schema in OpenAPI
         CopyTargetEntry::json_schema(schema_gen)
     }
@@ -386,11 +386,11 @@ pub enum LockedPortCompat {
 }
 
 impl JsonSchema for LockedPortCompat {
-    fn schema_name() -> String {
-        "LockedPort".to_owned()
+    fn schema_name() -> Cow<'static, str> {
+        "LockedPort".into()
     }
 
-    fn json_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(schema_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
         // Only expose the modern schema in OpenAPI
         LockedPort::json_schema(schema_gen)
     }
@@ -423,6 +423,7 @@ pub struct Session {
     pub locked_ports: Option<Vec<LockedPortCompat>>,
     pub user_id: Option<String>,
     pub sqs: Option<Vec<MirrordSqsSession>>,
+    pub rmq: Option<Vec<rabbitmq::MirrordRmqSession>>,
     pub kafka: Option<Vec<MirrordKafkaEphemeralTopicSpec>>,
 }
 
@@ -490,6 +491,13 @@ pub enum NewOperatorFeature {
 
     PreviewEnv,
 
+    /// The operator supports the unified `BranchDatabase` CRD with per-dialect options
+    /// (`postgresOptions`, `mysqlOptions`, `mongodbOptions`) instead of the old separate
+    /// `PgBranchDatabase`, `MysqlBranchDatabase`, `MongodbBranchDatabase` CRDs.
+    UnifiedBranchDbCrd,
+
+    /// This operator can perform queue splitting on RabbitMQ
+    RmqQueueSplitting,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -526,6 +534,8 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SqsQueueSplittingWithJqFilter => {
                 "Splitting SQS queues with a jq filter"
             }
+            NewOperatorFeature::UnifiedBranchDbCrd => "unified branch database CRD",
+            NewOperatorFeature::RmqQueueSplitting => "RabbitMQ queue splitting",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -559,7 +569,7 @@ pub enum QueueNameSource {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // name_source -> nameSource in yaml.
-pub struct SqsQueueDetails {
+pub struct SplitQueueNameDetails {
     /// Where the application gets the queue name from. Will be used to read messages from that
     /// queue and distribute them to the output queues. When running with mirrord and splitting
     /// this queue, applications will get a modified name from that source.
@@ -579,6 +589,13 @@ pub struct SqsQueueDetails {
     /// If set, the value read from `name_source` or `fallback_name`
     /// will be parsed as a JSON map. The values in this map will be used as queue names.
     pub names_from_json_map: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")] // name_source -> nameSource in yaml.
+pub struct SqsQueueDetails {
+    #[serde(flatten)]
+    pub name_details: SplitQueueNameDetails,
 
     /// These tags will be set for all temporary SQS queues created by mirrord for queues defined
     /// in this MirrordWorkloadQueueRegistry, alongside with the original tags of the respective
@@ -593,13 +610,52 @@ pub struct SqsQueueDetails {
     pub sns: Option<bool>,
 }
 
+// This is a proxy to generate a schemars schema that contains the common fields between
+// [`SqsQueueDetails`] and [`RmqQueueDetails`](rabbitmq::RmqQueueDetails)
 /// The details of a queue that should be split.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(tag = "queueType")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, EnumDiscriminants)]
+#[strum_discriminants(derive(Deserialize, Serialize, JsonSchema))]
+#[strum_discriminants(serde(rename_all = "SCREAMING_SNAKE_CASE"))]
+#[serde(tag = "queueType", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SplitQueue {
     /// Amazon SQS
-    #[serde(rename = "SQS")]
     Sqs(SqsQueueDetails),
+
+    /// RabbitMQ
+    Rmq(rabbitmq::RmqQueueDetails),
+
+    /// Unknown, left for future compatibility.
+    ///
+    /// Solves issues when deserializing unknown variants returned in responses to list or watch
+    /// requests.
+    #[strum_discriminants(schemars(skip))]
+    #[serde(other)]
+    Unknown,
+}
+
+impl JsonSchema for SplitQueue {
+    fn schema_name() -> Cow<'static, str> {
+        "SplitQueue".into()
+    }
+
+    /// [`SplitQueue`] is adjacently tagged. Because of this, its JSON schema is not valid according
+    /// to CRD standards.
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        struct Proxy {
+            // We verify the tag.
+            #[serde(rename = "queueType")]
+            tag: SplitQueueDiscriminants,
+            // Other fields can be whatever.
+            //
+            // Generated CRD has `x-kubernetes-preserve-unknown-fields`,
+            // so everything is all right.
+            #[serde(flatten)]
+            rest: HashMap<String, serde_json::Value>,
+        }
+
+        Proxy::json_schema(generator)
+    }
 }
 
 /// A workload that is a consumer of a queue that is being split.
@@ -765,10 +821,6 @@ pub struct SqsSessionError {
 
 impl Display for SqsSessionError {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        // Write strictly the first element into the supplied output
-        // stream: `f`. Returns `fmt::Result` which indicates whether the
-        // operation succeeded or failed. Note that `write!` uses syntax which
-        // is very similar to `println!`.
         write!(f, "{}", self.reason)
     }
 }
@@ -901,210 +953,93 @@ pub enum UserCredentialKind {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf};
+    use std::{fs, path::Path};
 
     use kube::CustomResourceExt;
 
     use crate::crd::{
-        MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
-        MirrordWorkloadQueueRegistry, SessionCrd,
+        MirrordClusterOperatorUserCredential, MirrordSqsSession, MirrordWorkloadQueueRegistry,
+        QueueNameSource, SplitQueue, SplitQueueNameDetails, SqsQueueDetails,
         db_branching::{
-            mongodb::MongodbBranchDatabase, mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
+            branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
+            mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
         },
-        external::MirrordClusterExternalResource,
-        kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
-        multi_cluster::MirrordMultiClusterSession,
-        patch::{MirrordClusterWorkloadPatch, MirrordClusterWorkloadPatchRequest},
-        policy::{MirrordClusterPolicy, MirrordPolicy},
+        kafka::MirrordKafkaEphemeralTopic,
         preview::PreviewSession,
         profile::{MirrordClusterProfile, MirrordProfile},
-        session::MirrordClusterSession,
-        steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig},
+        rabbitmq::MirrordRmqSession,
     };
 
     fn write_crd_yaml<T: CustomResourceExt>() {
         let crd = T::crd();
-        let file_name = crd
-            .metadata
-            .name
-            .clone()
-            .unwrap_or_else(|| "crd".to_owned());
-
-        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        path.push("crds");
-        path.push(format!("{file_name}.yaml"));
-
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-
         let yaml = serde_yaml::to_string(&crd).unwrap();
-        fs::write(path, yaml).unwrap();
+        println!("{yaml}");
+
+        if let Some(out_path) = std::env::var_os("MIRRORD_TEST_DUMP_CRD_DIR") {
+            let path = Path::new(&out_path);
+            fs::create_dir_all(path).unwrap();
+            let filename = crd.metadata.name.as_ref().unwrap();
+            let filepath = path.join(format!("{filename}.yaml"));
+            fs::write(filepath, yaml).unwrap();
+        }
     }
 
     #[test]
-    #[ignore]
-    fn write_mirrord_operator_crd_yaml() {
-        write_crd_yaml::<MirrordOperatorCrd>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_session_crd_yaml() {
-        write_crd_yaml::<SessionCrd>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_workload_queue_registry_crd_yaml() {
-        write_crd_yaml::<MirrordWorkloadQueueRegistry>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_sqs_session_crd_yaml() {
-        write_crd_yaml::<MirrordSqsSession>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_cluster_operator_user_credential_crd_yaml() {
-        write_crd_yaml::<MirrordClusterOperatorUserCredential>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_preview_session_crd_yaml() {
-        write_crd_yaml::<PreviewSession>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_cluster_session_crd_yaml() {
-        write_crd_yaml::<MirrordClusterSession>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_multi_cluster_session_crd_yaml() {
-        write_crd_yaml::<MirrordMultiClusterSession>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_pg_branch_database_crd_yaml() {
-        write_crd_yaml::<PgBranchDatabase>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mysql_branch_database_crd_yaml() {
-        write_crd_yaml::<MysqlBranchDatabase>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mongodb_branch_database_crd_yaml() {
-        write_crd_yaml::<MongodbBranchDatabase>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_policy_crd_yaml() {
-        write_crd_yaml::<MirrordPolicy>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_cluster_policy_crd_yaml() {
-        write_crd_yaml::<MirrordClusterPolicy>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_cluster_external_resource_crd_yaml() {
-        write_crd_yaml::<MirrordClusterExternalResource>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_cluster_workload_patch_crd_yaml() {
-        write_crd_yaml::<MirrordClusterWorkloadPatch>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_cluster_workload_patch_request_crd_yaml() {
-        write_crd_yaml::<MirrordClusterWorkloadPatchRequest>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_kafka_client_config_crd_yaml() {
-        write_crd_yaml::<MirrordKafkaClientConfig>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_kafka_topics_consumer_crd_yaml() {
-        write_crd_yaml::<MirrordKafkaTopicsConsumer>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_kafka_ephemeral_topic_crd_yaml() {
-        write_crd_yaml::<MirrordKafkaEphemeralTopic>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_cluster_profile_crd_yaml() {
-        write_crd_yaml::<MirrordClusterProfile>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_profile_crd_yaml() {
-        write_crd_yaml::<MirrordProfile>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_tls_steal_config_crd_yaml() {
-        write_crd_yaml::<MirrordTlsStealConfig>();
-    }
-
-    #[test]
-    #[ignore]
-    fn write_mirrord_cluster_tls_steal_config_crd_yaml() {
-        write_crd_yaml::<MirrordClusterTlsStealConfig>();
-    }
-
-    #[test]
-    #[ignore]
     fn write_all_crd_yamls() {
-        write_crd_yaml::<MirrordOperatorCrd>();
-        write_crd_yaml::<SessionCrd>();
         write_crd_yaml::<MirrordWorkloadQueueRegistry>();
         write_crd_yaml::<MirrordSqsSession>();
+        write_crd_yaml::<MirrordRmqSession>();
         write_crd_yaml::<MirrordClusterOperatorUserCredential>();
         write_crd_yaml::<PreviewSession>();
-        write_crd_yaml::<MirrordClusterSession>();
-        write_crd_yaml::<MirrordMultiClusterSession>();
         write_crd_yaml::<PgBranchDatabase>();
         write_crd_yaml::<MysqlBranchDatabase>();
         write_crd_yaml::<MongodbBranchDatabase>();
-        write_crd_yaml::<MirrordPolicy>();
-        write_crd_yaml::<MirrordClusterPolicy>();
-        write_crd_yaml::<MirrordClusterExternalResource>();
-        write_crd_yaml::<MirrordClusterWorkloadPatch>();
-        write_crd_yaml::<MirrordClusterWorkloadPatchRequest>();
-        write_crd_yaml::<MirrordKafkaClientConfig>();
-        write_crd_yaml::<MirrordKafkaTopicsConsumer>();
+        write_crd_yaml::<BranchDatabase>();
         write_crd_yaml::<MirrordKafkaEphemeralTopic>();
         write_crd_yaml::<MirrordClusterProfile>();
         write_crd_yaml::<MirrordProfile>();
-        write_crd_yaml::<MirrordTlsStealConfig>();
-        write_crd_yaml::<MirrordClusterTlsStealConfig>();
+        write_crd_yaml::<PreviewSession>();
+    }
+
+    #[test]
+    fn deserialize_split_queue() {
+        let valid_sqs = serde_json::json!({
+            "queueType": "SQS",
+            "nameSource": {
+                "envVar": "TEST_ENV",
+            },
+        });
+        let deserialized = serde_json::from_value::<SplitQueue>(valid_sqs).unwrap();
+        assert_eq!(
+            deserialized,
+            SplitQueue::Sqs(SqsQueueDetails {
+                name_details: SplitQueueNameDetails {
+                    name_source: QueueNameSource::EnvVar("TEST_ENV".into()),
+                    fallback_name: None,
+                    names_from_json_map: None,
+                },
+                tags: None,
+                sns: None,
+            }),
+        );
+
+        let invalid_sqs = serde_json::json!({
+            "queueType": "SQS",
+            "nameSource": {
+                "ENV_VAR": "TEST_ENV",
+            },
+        });
+        serde_json::from_value::<SplitQueue>(invalid_sqs).unwrap_err();
+
+        let unknown_queue_type = serde_json::json!({
+            "queueType": "I_DO_NOT_EXIST",
+            "nameSource": {
+                "envVar": {
+                    "variable": "TEST_ENV",
+                },
+            },
+        });
+        let deserialized = serde_json::from_value::<SplitQueue>(unknown_queue_type).unwrap();
+        assert_eq!(deserialized, SplitQueue::Unknown,);
     }
 }

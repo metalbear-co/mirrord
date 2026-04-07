@@ -14,8 +14,8 @@ pub type QueueId = String;
 /// original queue will be made available to the local application, based on message attributes
 /// or headers, and possibly on jq filters (for SQS).
 ///
-/// The queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` or
-/// `MirrordKafkaTopicsConsumer` for SQS or Kafka respectively.
+/// The queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` for SQS and
+/// RabbitMQ or `MirrordKafkaTopicsConsumer` for Kafka.
 ///
 ///
 /// ```json
@@ -97,6 +97,13 @@ impl SplitQueuesConfig {
         })
     }
 
+    pub fn rmq(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ QueueMessageFilter)> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::Rmq { message_filter } => Some((name.as_str(), message_filter)),
+            _ => None,
+        })
+    }
+
     fn verify_message_attribute_filter(
         queue_id: &QueueId,
         filter: &QueueMessageFilter,
@@ -143,6 +150,9 @@ impl SplitQueuesConfig {
                     }
                 }
                 QueueFilter::Kafka { message_filter } => {
+                    Self::verify_message_attribute_filter(queue_name, message_filter)?;
+                }
+                QueueFilter::Rmq { message_filter } => {
                     Self::verify_message_attribute_filter(queue_name, message_filter)?;
                 }
                 QueueFilter::Unknown => {
@@ -232,6 +242,15 @@ pub enum QueueFilter {
         message_filter: QueueMessageFilter,
     },
 
+    #[serde(rename = "RMQ")]
+    Rmq {
+        /// A filter is a mapping between message header names and regexes they should match.
+        /// The local application will only receive messages that match **all** of the given
+        /// patterns. This means, only messages that have **all** of the headers in the
+        /// filter, with values of those headers matching the respective patterns.
+        message_filter: QueueMessageFilter,
+    },
+
     // When a newer client sends a new filter kind to an older operator, that does not yet know
     // about that filter type, the filter will be deserialized to unknown.
     #[schemars(skip)]
@@ -247,6 +266,7 @@ impl CollectAnalytics for &SplitQueuesConfig {
         // The number of SQS queues filtered with jq filters.
         analytics.add("sqs_jq_filter_count", self.sqs_jq_filters().count());
         analytics.add("kafka_queue_count", self.kafka().count());
+        analytics.add("rmq_queue_count", self.rmq().count());
     }
 }
 
@@ -286,6 +306,21 @@ mod test {
             filter,
             QueueFilter::Kafka {
                 message_filter: [("key".to_string(), "value".to_string())].into()
+            }
+        );
+
+        let value = serde_json::json!({
+            "queue_type": "RMQ",
+            "message_filter": {
+                "key": "value",
+            },
+        });
+
+        let filter = serde_json::from_value::<QueueFilter>(value).unwrap();
+        assert_eq!(
+            filter,
+            QueueFilter::Rmq {
+                message_filter: [("key".to_string(), "value".to_string())].into(),
             }
         );
 

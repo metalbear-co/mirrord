@@ -19,7 +19,7 @@ workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-glob = "0.3"
+glob.workspace = true
 syn = { workspace = true, features = ["full", "extra-traits"]}
 thiserror.workspace = true
 clap = { workspace = true, features = ["derive"] }

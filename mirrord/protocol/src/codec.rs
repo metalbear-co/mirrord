@@ -74,23 +74,34 @@ pub struct GetEnvVarsRequest {
     pub env_vars_select: HashSet<String>,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, strum_macros::IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
 pub enum FileRequest {
     Open(OpenFileRequest),
+    #[strum(serialize = "open")]
     OpenRelative(OpenRelativeFileRequest),
     Read(ReadFileRequest),
+    #[strum(serialize = "read")]
     ReadLimited(ReadLimitedFileRequest),
     Seek(SeekFileRequest),
     Write(WriteFileRequest),
+    #[strum(serialize = "write")]
     WriteLimited(WriteLimitedFileRequest),
     Close(CloseFileRequest),
     Access(AccessFileRequest),
+    #[strum(serialize = "stat")]
     Xstat(XstatRequest),
+    #[strum(serialize = "stat")]
     XstatFs(XstatFsRequest),
+    #[strum(serialize = "opendir")]
     FdOpenDir(FdOpenDirRequest),
+    #[strum(serialize = "readdir")]
     ReadDir(ReadDirRequest),
+    #[strum(serialize = "closedir")]
     CloseDir(CloseDirRequest),
+    #[strum(serialize = "getdents64")]
     GetDEnts64(GetDEnts64Request),
+    #[strum(serialize = "readlink")]
     ReadLink(ReadLinkFileRequest),
 
     /// `readdir` request.
@@ -98,18 +109,27 @@ pub enum FileRequest {
     /// Unlike other requests that come from the layer -> intproxy, this one is intproxy
     /// only. [`ReadDirRequest`]s that come from the layer are transformed into this
     /// batched form when the protocol version supports it. See [`READDIR_BATCH_VERSION`].
+    #[strum(serialize = "readdir")]
     ReadDirBatch(ReadDirBatchRequest),
+    #[strum(serialize = "mkdir")]
     MakeDir(MakeDirRequest),
+    #[strum(serialize = "mkdir")]
     MakeDirAt(MakeDirAtRequest),
+    #[strum(serialize = "rmdir")]
     RemoveDir(RemoveDirRequest),
+    #[strum(serialize = "unlink")]
     Unlink(UnlinkRequest),
+    #[strum(serialize = "unlink")]
     UnlinkAt(UnlinkAtRequest),
+    #[strum(serialize = "statfs")]
     StatFs(StatFsRequest),
 
     /// Same as XstatFs, but results in the V2 response.
+    #[strum(serialize = "stat")]
     XstatFsV2(XstatFsRequestV2),
 
     /// Same as StatFs, but results in the V2 response.
+    #[strum(serialize = "statfs")]
     StatFsV2(StatFsRequestV2),
     Rename(RenameRequest),
     Ftruncate(FtruncateRequest),

@@ -51,10 +51,16 @@ impl<'c> ContainerApi<JobTargetedVariant<'c>> for Targeted<'c, JobTargetedVarian
                 NodeCheck::Failed { node, pod_count } => {
                     progress.failure(Some("node is not allocatable"));
 
-                    return Err(KubeApiError::invalid_state(
-                        node.as_ref(),
-                        format_args!("too full with {pod_count} pods"),
-                    ));
+                    let node_name = node
+                        .metadata
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| "<unknown>".to_owned());
+
+                    return Err(KubeApiError::NodeOutOfPods {
+                        node_name,
+                        pod_count,
+                    });
                 }
             }
         }

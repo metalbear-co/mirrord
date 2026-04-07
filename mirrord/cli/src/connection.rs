@@ -3,6 +3,8 @@ use std::{collections::HashSet, time::Duration};
 use mirrord_analytics::Reporter;
 use mirrord_config::{
     LayerConfig,
+    agent::AgentFileConfig,
+    config::MirrordConfig,
     target::{Target, TargetDisplay},
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
@@ -204,6 +206,16 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     if let Some(connection) =
         try_connect_using_operator(config, progress, analytics, branch_name, mirrord_for_ci).await?
     {
+        if config.agent
+            != AgentFileConfig::default()
+                .generate_config(&mut Default::default())
+                .expect("BUG: Default agent config should always work!")
+        {
+            progress.warning(
+                "Agent configuration is ignored when using the mirrord operator. \
+                 Agent configuration is managed by the cluster admin.",
+            );
+        }
         return Ok((
             AgentConnectInfo::Operator(connection.session),
             connection.conn,
@@ -248,7 +260,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
                 CliError::friendlier_error_or_else(error, CliError::AgentConnectionFailed)
             })?,
     )
-    .await?;
+    .await;
 
     Ok((AgentConnectInfo::DirectKubernetes(agent_connect_info), conn))
 }
@@ -310,6 +322,11 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
         (false, true) => show_http_filter_warning(progress)?,
         _ => (),
     };
+
+    config.experimental.non_blocking_tcp_connect =
+        config.experimental.non_blocking_tcp_connect.or(Some(true));
+
+    config.experimental.sip_utils = config.experimental.sip_utils.or(Some(true));
 
     Ok(())
 }

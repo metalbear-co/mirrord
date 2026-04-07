@@ -360,36 +360,31 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - name: build and export
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: test
-          file: mirrord/agent/Dockerfile
-          outputs: type=docker,dest=/tmp/test.tar
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        env:
+          PLATFORMS: "linux/amd64"
+          AGENT_TAGS: "test"
+        run: docker buildx bake -f ci/docker-bake.hcl agent --set "agent.output=type=docker,dest=${{ github.workspace }}/test.tar"
       - name: upload image
         uses: actions/upload-artifact@v4
         with:
           name: test
-          path: /tmp/test.tar
+          path: ${{ github.workspace }}/test.tar
 
   test_cli_image:
     runs-on: ubuntu-24.04
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - name: build and export
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: cli_image
-          file: mirrord/cli/Dockerfile
-          outputs: type=docker,dest=/tmp/cli_image.tar
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        env:
+          PLATFORMS: ${{ matrix.platform }}
+          CLI_TAGS: "cli_image"
+        run: docker buildx bake -f ci/docker-bake.hcl cli --set "cli.output=type=docker,dest=${{ github.workspace }}/cli_image.tar"
 
   integration_tests:
     runs-on: ubuntu-24.04
@@ -404,30 +399,23 @@ jobs:
         with:
           target: x86_64-unknown-linux-gnu
       - run: |
-          cd mirrord/layer/tests/apps/issue1123
+          cd mirrord/layer-tests/tests/apps/issue1123
           rustc issue1123.rs --out-dir target
       - run: |
-          cd mirrord/layer/tests/apps/issue1054
+          cd mirrord/layer-tests/tests/apps/issue1054
           rustc issue1054.rs --out-dir target
       - run: |
-          cd mirrord/layer/tests/apps/issue1458
+          cd mirrord/layer-tests/tests/apps/issue1458
           rustc issue1458.rs --out-dir target
       - run: |
-          cd mirrord/layer/tests/apps/issue1458portnot53
+          cd mirrord/layer-tests/tests/apps/issue1458portnot53
           rustc issue1458portnot53.rs --out-dir target
       - run: |
-          cd mirrord/layer/tests/apps/issue2058
+          cd mirrord/layer-tests/tests/apps/issue2058
           rustc issue2058.rs --out-dir target
       - run: |
-          cd mirrord/layer/tests/apps/issue2204
+          cd mirrord/layer-tests/tests/apps/issue2204
           rustc issue2204.rs --out-dir target
-      # For the `java_temurin_sip` test.
-      - uses: metalbear-co/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
-        id: sdkman
-        with:
-          candidate: java
-          version: 17.0.6-tem
-      - run: java -version
       - uses: actions/setup-node@v3
         with:
           node-version: 24
@@ -442,7 +430,7 @@ jobs:
       - run: |
           go version
       - run: | # Build Go test apps.
-          cd mirrord/layer/tests
+          cd mirrord/layer-tests/tests
           ../../../scripts/build_go_apps.sh 24
       - uses: actions/setup-go@v5
         with:
@@ -451,7 +439,7 @@ jobs:
       - run: |
           go version
       - run: | # Build Go test apps.
-          cd mirrord/layer/tests
+          cd mirrord/layer-tests/tests
           ../../../scripts/build_go_apps.sh 25
       - uses: actions/setup-go@v5
         with:
@@ -460,51 +448,51 @@ jobs:
       - run: |
           go version
       - run: | # Build Go test apps.
-          cd mirrord/layer/tests
+          cd mirrord/layer-tests/tests
           ../../../scripts/build_go_apps.sh 26
       - run: |
-          cd mirrord/layer/tests/apps/fileops
+          cd mirrord/layer-tests/tests/apps/fileops
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/outgoing
+          cd mirrord/layer-tests/tests/apps/outgoing
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/recv_from
+          cd mirrord/layer-tests/tests/apps/recv_from
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/dns_resolve
+          cd mirrord/layer-tests/tests/apps/dns_resolve
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/listen_ports
+          cd mirrord/layer-tests/tests/apps/listen_ports
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/issue1776
+          cd mirrord/layer-tests/tests/apps/issue1776
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/issue1776portnot53
+          cd mirrord/layer-tests/tests/apps/issue1776portnot53
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/issue1899
+          cd mirrord/layer-tests/tests/apps/issue1899
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/issue2001
+          cd mirrord/layer-tests/tests/apps/issue2001
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/issue2438
+          cd mirrord/layer-tests/tests/apps/issue2438
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/issue3248
+          cd mirrord/layer-tests/tests/apps/issue3248
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/rebind0
+          cd mirrord/layer-tests/tests/apps/rebind0
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/dup_listen
+          cd mirrord/layer-tests/tests/apps/dup_listen
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/double_listen
+          cd mirrord/layer-tests/tests/apps/double_listen
           cargo build
-      - run: ./mirrord/layer/tests/apps/dlopen_cgo/build_test_app.sh
+      - run: ./mirrord/layer-tests/tests/apps/dlopen_cgo/build_test_app.sh
       - run: ./scripts/build_c_apps.sh
       - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord-layer
       - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord
@@ -545,11 +533,8 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
-      # mirrod-layer integration tests (mimic test harness)
-      MIRRORD_TEST_USE_EXISTING_LIB: ${{ github.workspace }}/target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
-      MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/debug/libmirrord_layer.dylib
-      # mirrord-layer-tests (exec test harness)
-      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/libmirrord_layer.dylib
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/universal-apple-darwin/debug/libmirrord_layer.dylib
+      MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/aarch64-apple-darwin/debug/libmirrord_layer.dylib
       MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
@@ -566,10 +551,8 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: verify SIP status
         run: csrutil status
-      - name: build layer
-        run: cargo build -p mirrord-layer
-      - name: build layer x86
-        run: cargo build -p mirrord-layer --target=x86_64-apple-darwin
+      - name: build universal layer files
+        run: cargo xtask build-layer --platform macos-universal
       - name: build cli
         run: cargo build -p mirrord
       - name: mirrord-sip UT
@@ -578,19 +561,19 @@ jobs:
         run: cargo test -p mirrord-intproxy
       # prepare stuff needed for integration tests
       - run: |
-          cd mirrord/layer/tests/apps/issue1123
+          cd mirrord/layer-tests/tests/apps/issue1123
           rustc issue1123.rs --out-dir target
       - run: |
-          cd mirrord/layer/tests/apps/issue1054
+          cd mirrord/layer-tests/tests/apps/issue1054
           rustc issue1054.rs --out-dir target
       - run: |
-          cd mirrord/layer/tests/apps/issue1458
+          cd mirrord/layer-tests/tests/apps/issue1458
           rustc issue1458.rs --out-dir target
       - run: |
-          cd mirrord/layer/tests/apps/issue1458portnot53
+          cd mirrord/layer-tests/tests/apps/issue1458portnot53
           rustc issue1458portnot53.rs --out-dir target
       - run: |
-          cd mirrord/layer/tests/apps/issue2058
+          cd mirrord/layer-tests/tests/apps/issue2058
           rustc issue2058.rs --out-dir target
       - uses: actions/setup-go@v5
         with:
@@ -600,7 +583,7 @@ jobs:
           go version
       # don't use "cache" for other Gos since it will try to overwrite and have bad results.
       - run: | # Build Go test apps.
-          cd mirrord/layer/tests
+          cd mirrord/layer-tests/tests
           ../../../scripts/build_go_apps.sh 24
       - uses: actions/setup-go@v5
         with:
@@ -609,7 +592,7 @@ jobs:
       - run: |
           go version
       - run: | # Build Go test apps.
-          cd mirrord/layer/tests
+          cd mirrord/layer-tests/tests
           ../../../scripts/build_go_apps.sh 25
       - uses: actions/setup-go@v5
         with:
@@ -618,55 +601,48 @@ jobs:
       - run: |
           go version
       - run: | # Build Go test apps.
-          cd mirrord/layer/tests
+          cd mirrord/layer-tests/tests
           ../../../scripts/build_go_apps.sh 26
       - run: |
-          cd mirrord/layer/tests/apps/fileops
+          cd mirrord/layer-tests/tests/apps/fileops
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/outgoing
+          cd mirrord/layer-tests/tests/apps/outgoing
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/recv_from
+          cd mirrord/layer-tests/tests/apps/recv_from
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/dns_resolve
+          cd mirrord/layer-tests/tests/apps/dns_resolve
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/issue1776
+          cd mirrord/layer-tests/tests/apps/issue1776
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/issue1776portnot53
+          cd mirrord/layer-tests/tests/apps/issue1776portnot53
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/issue1899
+          cd mirrord/layer-tests/tests/apps/issue1899
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/issue2001
+          cd mirrord/layer-tests/tests/apps/issue2001
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/issue2438
+          cd mirrord/layer-tests/tests/apps/issue2438
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/issue3248
+          cd mirrord/layer-tests/tests/apps/issue3248
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/rebind0
+          cd mirrord/layer-tests/tests/apps/rebind0
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/dup_listen
+          cd mirrord/layer-tests/tests/apps/dup_listen
           cargo build
       - run: |
-          cd mirrord/layer/tests/apps/double_listen
+          cd mirrord/layer-tests/tests/apps/double_listen
           cargo build
       - run: ./scripts/build_c_apps.sh
-      # For the `java_temurin_sip` test.
-      - uses: metalbear-co/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
-        id: sdkman
-        with:
-          candidate: java
-          version: 17.0.6-tem
-      - run: java -version
       - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
         with:
           python-version: "3.14"
@@ -678,9 +654,9 @@ jobs:
           node-version: 24
       - run: npm install express # For http mirroring test with node.
       - run: npm install portfinder # For a node specific test
-      - name: mirrord layer unified tests
+      - name: mirrord layer integration tests
         run: cargo test -p mirrord-layer-tests --no-default-features
-      - name: mirrord layer tests
+      - name: mirrord layer unit tests
         run: cargo test -p mirrord-layer
       - name: save intproxy logs
         continue-on-error: true
@@ -778,13 +754,13 @@ jobs:
           toolchain: ${{ env.PINNED_NIGHTLY }}
 
       - run: |
-          cd mirrord/layer/tests/apps/outgoing
+          cd mirrord/layer-tests/tests/apps/outgoing
           cargo build
       - name: build layer
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
         run: cargo build -p mirrord
-      - name: mirrord layer unified integration tests
+      - name: mirrord layer integration tests
         run: |
           $ErrorActionPreference = "Stop"
           cargo test -p mirrord-layer-tests --no-default-features

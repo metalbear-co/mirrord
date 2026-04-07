@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -32,13 +32,13 @@ pub struct MongodbBranchConfig {
 #[serde(tag = "mode", rename_all = "lowercase")]
 pub enum MongodbBranchCopyConfig {
     Empty {
-        collections: Option<HashMap<String, MongodbBranchCollectionCopyConfig>>,
+        collections: Option<BTreeMap<String, MongodbBranchCollectionCopyConfig>>,
     },
 
     All {
         /// Optional collection filters. If not specified, all collections are copied.
         /// If specified, only the listed collections are copied with their optional filters.
-        collections: Option<HashMap<String, MongodbBranchCollectionCopyConfig>>,
+        collections: Option<BTreeMap<String, MongodbBranchCollectionCopyConfig>>,
     },
 }
 
@@ -50,25 +50,4 @@ impl Default for MongodbBranchCopyConfig {
     }
 }
 
-/// Configuration for copying a specific collection.
-///
-/// Example:
-///
-/// ```json
-/// {
-///   "users": {
-///     "filter": "{\"name\": {\"$in\": [\"alice\", \"bob\"]}}"
-///   },
-///   "orders": {
-///     "filter": "{\"created_at\": {\"$gt\": 1759948761}}"
-///   }
-/// }
-/// ```
-///
-/// With the config above, only alice and bob from the `users` collection and orders
-/// created after the given timestamp will be copied.
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-pub struct MongodbBranchCollectionCopyConfig {
-    /// A MongoDB query filter in JSON format. Documents matching this filter will be copied.
-    pub filter: Option<String>,
-}
+pub type MongodbBranchCollectionCopyConfig = super::BranchItemCopyConfig;

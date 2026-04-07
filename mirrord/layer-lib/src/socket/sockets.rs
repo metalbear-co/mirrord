@@ -6,7 +6,6 @@ use std::os::fd::{BorrowedFd, RawFd};
 use std::{
     collections::HashMap,
     io,
-    net::SocketAddr,
     sync::{Arc, LazyLock, Mutex},
 };
 
@@ -25,10 +24,7 @@ use winapi::{
 };
 
 use super::{SocketKind, SocketState, UserSocket};
-use crate::{
-    detour::{Bypass, Detour},
-    setup::setup,
-};
+use crate::detour::{Bypass, Detour};
 
 // Platform-specific socket descriptors
 // RawFd
@@ -220,46 +216,6 @@ pub fn is_socket_in_state(
     get_socket_state(socket)
         .map(|state| state_check(&state))
         .unwrap_or(false)
-}
-
-/// Get bound address for a socket if it's in bound state
-///
-/// For localhost addresses that were bound to port 0 (let OS choose), returns the actual
-/// bound address so that local clients can connect to it. For other addresses, returns
-/// the requested address to maintain the mirrord illusion.
-pub fn get_bound_address(socket: SocketDescriptor) -> Option<SocketAddr> {
-    get_socket_state(socket).and_then(|state| match state {
-        SocketState::Bound { bound, .. } | SocketState::Listening(bound) => {
-            // For localhost binds to port 0, return the actual bound address
-            // so that local clients (like Python's socketpair()) can connect
-            if bound.requested_address.ip().is_loopback() && bound.requested_address.port() == 0 {
-                Some(bound.address)
-            } else {
-                Some(bound.requested_address)
-            }
-        }
-        _ => None,
-    })
-}
-
-/// Find the actual bound address of a listening socket that matches the given port and protocol.
-/// Used to detect local self-connections so they can be handled without proxying.
-pub fn find_listener_address_by_port(port: u16, protocol: i32) -> Option<SocketAddr> {
-    if setup().outgoing_config().ignore_localhost {
-        return None;
-    }
-    SOCKETS.lock().ok().and_then(|sockets| {
-        sockets.iter().find_map(|(_, socket)| match socket.state {
-            SocketState::Listening(bound) => {
-                if bound.requested_address.port() == port && socket.protocol == protocol {
-                    Some(bound.address)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        })
-    })
 }
 
 /// Get connected addresses for a socket if it's in connected state

@@ -1,0 +1,172 @@
+name: Auto Release PR
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PINNED_NIGHTLY: nightly-2026-02-24
+
+jobs:
+  create_release_pr:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: main
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+
+      - name: Install Python
+        run: uv python install
+
+      - name: Create virtual environment
+        run: uv venv
+
+      - name: Install towncrier
+        run: uv pip install towncrier==23.11.0
+
+      - run: rm rust-toolchain.toml
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          toolchain: ${{ env.PINNED_NIGHTLY }}
+          rustflags: ""
+
+      - name: Install cargo-get and cargo-set
+        run: cargo install cargo-get cargo-set
+
+      - name: Determine next release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          current_version=$(cargo get workspace.package.version)
+
+          uv run towncrier check --compare-with "tags/${current_version}"
+
+          fragments=(changelog.d/*.md)
+          bump_level=patch
+          for fragment in "${fragments[@]}"; do
+            category=$(basename "${fragment}")
+            category="${category%.md}"
+            category="${category##*.}"
+
+            case "${category}" in
+              internal|fixed)
+                ;;
+              *)
+                bump_level=minor
+                break
+                ;;
+            esac
+          done
+
+          IFS='.' read -r major minor patch <<< "${current_version}"
+
+          if [ "${bump_level}" = "minor" ]; then
+            new_version="${major}.$((minor + 1)).0"
+          else
+            new_version="${major}.${minor}.$((patch + 1))"
+          fi
+
+          {
+            echo "bump_level=${bump_level}"
+            echo "new_version=${new_version}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Bump version in Cargo.toml
+        run: cargo set workspace.package.version "${{ steps.version.outputs.new_version }}"
+
+      - name: Update Cargo.lock
+        run: cargo update -w -q
+
+      - name: Generate draft release notes
+        run: uv run towncrier build --draft --version "${{ steps.version.outputs.new_version }}" > /tmp/release-notes.md
+
+      - name: Generate changelog
+        run: uv run towncrier build --yes --version "${{ steps.version.outputs.new_version }}"
+
+      - name: Create app token for release PR updates
+        id: app_token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+          private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Create or update release pull request
+        env:
+          APP_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APP_TOKEN}" ]; then
+            echo "GitHub App token is required to push the release branch and open the PR."
+            exit 1
+          fi
+
+          new_version="${{ steps.version.outputs.new_version }}"
+          branch="releases/${new_version}"
+          title="Release ${new_version}"
+          body_file=$(mktemp)
+
+          {
+            cat <<EOF
+          Automated release preparation for \`${new_version}\`.
+
+          This PR updates:
+          - \`Cargo.toml\`
+          - \`Cargo.lock\`
+          - \`CHANGELOG.md\`
+          - consumed \`changelog.d\` entries
+
+          Draft release notes:
+
+          EOF
+            cat /tmp/release-notes.md
+          } > "${body_file}"
+
+          git config user.name "cubby-mb[bot]"
+          git config user.email "273354325+cubby-mb[bot]@users.noreply.github.com"
+
+          if git diff --quiet; then
+            echo "No release changes to commit."
+            exit 0
+          fi
+
+          git checkout -B "${branch}"
+          git add Cargo.toml Cargo.lock changelog.d/ CHANGELOG.md
+          git commit -m "Prepare release ${new_version}"
+          git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force-with-lease --set-upstream origin "${branch}"
+
+          existing_pr_url=$(
+            gh pr list \
+              --head "${branch}" \
+              --base main \
+              --state open \
+              --json url \
+              --jq '.[0].url'
+          )
+
+          if [ -n "${existing_pr_url}" ]; then
+            gh pr edit "${existing_pr_url}" --title "${title}" --body-file "${body_file}"
+          else
+            gh pr create \
+              --base main \
+              --head "${branch}" \
+              --title "${title}" \
+              --body-file "${body_file}"
+          fi

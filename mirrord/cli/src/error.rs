@@ -2,7 +2,10 @@ use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
 #[cfg(feature = "wizard")]
 use axum::response::{IntoResponse, Response};
-use kube::{self, core::ErrorResponse};
+use kube::{
+    self,
+    core::{Status, response::StatusSummary},
+};
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
 use mirrord_config::config::ConfigError;
@@ -341,7 +344,7 @@ pub(crate) enum CliError {
     #[diagnostic(help(
     "Please check the following:
     1. The operator is running and the logs are not showing any errors.
-    2. You have sufficient permissions to port forward to the operator.
+    2. You have sufficient permissions to use the operator (mirrord-operator-user role bound to you)
 
     If you want to run without the operator, please set `\"operator\": false` in the mirrord configuration file.
 
@@ -472,6 +475,18 @@ pub(crate) enum CliError {
     ))]
     AgentPodDeleted,
 
+    #[error(
+        "The target node `{node_name}` has no capacity for a new agent pod (currently running {pod_count} pods)"
+    )]
+    #[diagnostic(help(
+        "The Kubernetes node where the target pod runs has reached its pod limit. You can either:
+        1. Free up pod capacity on the node by deleting unused pods.
+        2. Use ephemeral containers instead, which do not count toward the node's pod limit.
+           Set `\"agent\": {{ \"ephemeral\": true }}` in your mirrord config file,
+           or set the environment variable MIRRORD_EPHEMERAL_CONTAINER=true.{GENERAL_HELP}"
+    ))]
+    NodeOutOfPods { node_name: String, pod_count: usize },
+
     #[error("Detected mirrord being run within mirrord")]
     #[diagnostic(help(
         "Running mirrord within mirrord is likely to fail or introduce severe slowness. \
@@ -577,12 +592,11 @@ pub(crate) enum CliError {
     #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
     PreviewKeyRequired,
 
-    #[error("Failed to resolve target container: {0}")]
-    #[diagnostic(help(
-        "mirrord was unable to resolve the target container from the cluster. \
-        Please check that the target exists and has running pods.{GENERAL_HELP}"
-    ))]
-    RuntimeDataResolution(KubeApiError),
+    /// Errors produced by the `mirrord ui` command.
+    #[cfg(unix)]
+    #[error("Session monitor UI error: {0}")]
+    #[diagnostic(help("Check that no other process is using the port and try again."))]
+    UiError(String),
 }
 
 impl CliError {
@@ -609,6 +623,13 @@ impl CliError {
                 Self::InvalidCertificate(error)
             }
             KubeApiError::AgentPodDeleted => Self::AgentPodDeleted,
+            KubeApiError::NodeOutOfPods {
+                node_name,
+                pod_count,
+            } => Self::NodeOutOfPods {
+                node_name,
+                pod_count,
+            },
             error => fallback(error),
         }
     }
@@ -634,9 +655,11 @@ impl From<OperatorApiError> for CliError {
             }
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::KubeError {
-                error: Error::Api(ErrorResponse { message, code, .. }),
+                error: Error::Api(status),
                 operation,
-            } if code == StatusCode::FORBIDDEN => Self::OperatorApiForbidden(operation, message),
+            } if status.code == StatusCode::FORBIDDEN => {
+                Self::OperatorApiForbidden(operation, status.message)
+            }
             OperatorApiError::KubeError {
                 error: Error::Auth(AuthError::AuthExecStart(error)),
                 ..
@@ -653,12 +676,13 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorApiForbidden(operation, status.message)
             }
             OperatorApiError::StatusFailure { operation, status } => {
-                let error = kube::Error::Api(ErrorResponse {
-                    status: "Failure".to_string(),
+                let error = kube::Error::Api(Box::new(Status {
+                    status: Some(StatusSummary::Failure),
                     message: status.message,
                     reason: status.reason,
                     code: status.code,
-                });
+                    ..Default::default()
+                }));
 
                 Self::OperatorApiFailed(operation, error)
             }
@@ -679,6 +703,9 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::ProtocolError(error) => Self::from(error),
             OperatorApiError::ApiKey(fail) => Self::ApiKey(fail),
             OperatorApiError::SerdeJson(fail) => Self::JsonSerializeError(fail),
+            OperatorApiError::TargetResolutionFailed(msg) => {
+                Self::OperatorTargetResolution(KubeApiError::MalformedResource(msg))
+            }
         }
     }
 }

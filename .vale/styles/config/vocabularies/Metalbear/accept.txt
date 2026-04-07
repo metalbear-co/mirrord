@@ -3,6 +3,7 @@ mirrord
 MetalBear
 
 # Kubernetes ecosystem
+kube
 kubectl
 kubeconfig
 Kubernetes
@@ -55,11 +56,15 @@ hashmap
 # Programming terms
 bool
 boolean
+codepaths
 enum
+enums
 impl
 const
+consts
 fd
 fds
+syscalls
 
 # Linux syscalls and C API
 openat
@@ -208,4 +213,6 @@ newtype
 coreutils
 uutils
 teardown
+portforward
+portforwards
 ```
