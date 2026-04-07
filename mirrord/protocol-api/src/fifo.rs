@@ -17,7 +17,7 @@ use crate::{shrinkable::Shrinkable, size::HeapSize};
 ///
 /// # Capacity
 ///
-/// The capacity of the queue is specified a a total *size* of items, not their count.
+/// The capacity of the queue is specified as the total *size* of items, not their count.
 /// Item size is specified when pushing an item to the queue.
 ///
 /// To ensure that any item can be sent to the queue, capacity limit is ignored when sending to an
