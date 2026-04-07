@@ -240,6 +240,11 @@ pub async fn start_api_server(
     shutdown: CancellationToken,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let session_id = &session_info.session_id;
+
+    if session_id.contains('/') || session_id.contains('\\') || session_id.contains("..") {
+        return Err("session_id contains invalid path characters".into());
+    }
+
     let sessions_dir = home::home_dir()
         .ok_or("could not determine home directory")?
         .join(".mirrord")

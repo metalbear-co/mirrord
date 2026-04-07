@@ -176,7 +176,12 @@ fn is_allowed_origin(origin: &str) -> bool {
 }
 
 /// Reads the per-session authentication token from `~/.mirrord/sessions/<id>.token`.
+///
+/// Rejects session IDs containing path separators to prevent path traversal.
 fn read_session_token(sessions_dir: &std::path::Path, session_id: &str) -> Option<String> {
+    if session_id.contains('/') || session_id.contains('\\') || session_id.contains("..") {
+        return None;
+    }
     let token_path = sessions_dir.join(format!("{session_id}.token"));
     std::fs::read_to_string(token_path).ok()
 }
