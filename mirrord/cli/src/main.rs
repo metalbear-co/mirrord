@@ -769,8 +769,7 @@ async fn exec(
             None
         }) {
         let port = redis_config.local.port;
-        let redis_instance_id =
-            resolve_branch_id(&redis_config.id, config.key.as_str(), progress).to_string();
+        let redis_instance_id = resolve_branch_id(&redis_config.id, config.key.as_str(), progress);
         let redis_container_name = format!("mirrord-redis-{redis_instance_id}");
 
         // Get the override variable and build the appropriate connection string

@@ -110,7 +110,7 @@ pub fn build_local_connection_string(port: u16, config: &RedisConnectionConfig) 
 pub async fn start<P: Progress>(
     progress: &P,
     local_config: &RedisLocalConfig,
-    instance_id: String,
+    container_name: String,
 ) -> CliResult<LocalRedis> {
     match local_config.runtime {
         RedisRuntime::Container => {
@@ -118,7 +118,7 @@ pub async fn start<P: Progress>(
                 progress,
                 local_config,
                 local_config.container_runtime,
-                instance_id,
+                container_name,
             )
             .await
         }
@@ -129,7 +129,7 @@ pub async fn start<P: Progress>(
                 progress,
                 local_config,
                 local_config.container_runtime,
-                instance_id,
+                container_name,
             )
             .await
             .or_else(|_| futures::executor::block_on(start_server(progress, local_config)))
@@ -142,7 +142,7 @@ async fn start_container<P: Progress>(
     progress: &P,
     config: &RedisLocalConfig,
     container_runtime: ContainerRuntime,
-    instance_id: String,
+    container_name: String,
 ) -> CliResult<LocalRedis> {
     let runtime_name = container_runtime.command();
     let mut sub = progress.subtask("starting local Redis");
@@ -156,7 +156,7 @@ async fn start_container<P: Progress>(
 
     // Remove any existing container with same name
     let _ = Command::new(runtime_cmd)
-        .args(["rm", "-f", &instance_id])
+        .args(["rm", "-f", &container_name])
         .output();
 
     // Build container run command
@@ -166,7 +166,7 @@ async fn start_container<P: Progress>(
         "--rm",
         "-d",
         "--name",
-        &instance_id,
+        &container_name,
         "-p",
         port_map,
         &image,
@@ -202,7 +202,7 @@ async fn start_container<P: Progress>(
         sub.success(Some(&format!("Redis ({runtime_name}) on localhost:{port}")));
         Ok(LocalRedis::Container {
             runtime: container_runtime,
-            container_name: instance_id,
+            container_name,
         })
     } else {
         sub.failure(Some("Redis container not responding"));
