@@ -10,8 +10,28 @@ const ATTACH_SIGNAL_TIMEOUT_MS: u32 = 30_000;
 
 /// Attach the mirrord layer to an already-running process by injecting the layer DLL.
 ///
-/// The target process is expected to already have all mirrord environment variables
-/// configured (by the IDE extension), so no k8s setup or proxy spawning is needed.
+/// This is only the DLL-injection half of the attach flow. By the time this function runs,
+/// the **IDE extension** (mirrord-vscode) has already done all the heavy lifting:
+///
+/// 1. Started the intproxy.
+/// 2. Retrieved the necessary environment variables from the agent/intproxy (proxy address, layer
+///    ID, resolved config, etc.).
+/// 3. Injected those environment variables into the target process (through editing the debug
+///    launch configuration).
+/// 4. Invoked `mirrord attach --pid <pid>` (this function).
+///
+/// Because of this, `attach_command` does **not** spawn an intproxy, resolve a k8s
+/// target, or set up any environment variables itself — all of that state already
+/// exists in the target process's environment before we get here.
+///
+/// Presently, the debugging VSCode instance is waiting for attach to finish.
+///
+/// When we are done, the VSCode instance will do post-attach chores, such as
+/// resuming the user-code process' primary execution thread, making this
+/// whole process invisible to the user.
+///
+/// The extension-side implementation was introduced in the following pull request:
+/// <https://github.com/metalbear-co/mirrord-vscode/pull/210>.
 pub(crate) fn attach_command<P>(args: AttachArgs, progress: &P) -> CliResult<()>
 where
     P: Progress,
@@ -26,9 +46,9 @@ where
         .map_err(|e| CliError::AttachProcessOpenFailed(args.pid, e))?;
     sub_progress.info(&format!("obtained handle to process {}", args.pid));
 
-    // Create the attach event before injection. The layer reads this by name (derived from its
-    // own PID) and signals it when initialization is complete.
-    let init_event = LayerInitEvent::for_attach_parent(args.pid)
+    // Create the event before injection. The layer opens it by deriving the same
+    // name from its own PID and signals it when initialization is complete.
+    let init_event = LayerInitEvent::for_parent(args.pid)
         .map_err(|e| CliError::AttachInjectionFailed(args.pid, e.to_string()))?;
 
     let syringe = Syringe::for_process(process);
