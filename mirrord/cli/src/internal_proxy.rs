@@ -29,6 +29,8 @@ use mirrord_intproxy::{
     session_monitor::MonitorTx,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
+#[cfg(unix)]
+use mirrord_session_monitor_protocol::SessionInfo;
 #[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
 use tokio::net::TcpListener;
@@ -104,7 +106,7 @@ async fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> Monit
 
         let config_value = serde_json::to_value(config).unwrap_or(serde_json::Value::Null);
 
-        let session_info = mirrord_intproxy::session_monitor::api::SessionInfo {
+        let session_info = SessionInfo {
             session_id: session_id.clone(),
             key: Some(config.key.as_str().to_owned()),
             target: target_name,

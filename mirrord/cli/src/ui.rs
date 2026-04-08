@@ -26,10 +26,10 @@ use axum::{
 };
 use eventsource_stream::Eventsource;
 use futures::stream::StreamExt as _;
-use mirrord_intproxy::session_monitor::api::SessionInfo;
 use mirrord_session_monitor_client::{
     SessionError, connect_to_session, session_socket_entries, sessions_dir,
 };
+use mirrord_session_monitor_protocol::SessionInfo;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 #[cfg(not(debug_assertions))]
 use rust_embed::Embed;

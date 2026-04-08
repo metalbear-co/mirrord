@@ -28,7 +28,6 @@ mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-analytics = { path = "../analytics" }
 mirrord-intproxy = { path = "../intproxy" }
-mirrord-session-monitor-client = { path = "../session-monitor-client" }
 mirrord-vpn = { path = "../vpn" }
 mirrord-tls-util = { path = "../tls-util" }
 mirrord-protocol-io = { path = "../protocol-io" }
@@ -89,6 +88,8 @@ rust-embed.workspace = true
 notify.workspace = true
 mime_guess.workspace = true
 eventsource-stream.workspace = true
+mirrord-session-monitor-protocol = { path = "../session-monitor-protocol" }
+mirrord-session-monitor-client = { path = "../session-monitor-client" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }

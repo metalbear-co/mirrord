@@ -6,7 +6,6 @@ use std::{
 use kube::Api;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_intproxy::session_monitor::api::{ProcessInfo, SessionInfo};
 use mirrord_operator::{
     client::{MaybeClientCert, NoClientCert, OperatorApi},
     crd::{Session as OperatorStatusSession, SessionCrd},
@@ -15,6 +14,7 @@ use mirrord_progress::NullProgress;
 use mirrord_session_monitor_client::{
     SessionConnection, connect_to_session, kill_session, session_socket_entries, sessions_dir,
 };
+use mirrord_session_monitor_protocol::{ProcessInfo, SessionInfo};
 use prettytable::{Table, row};
 use tracing::Level;
 

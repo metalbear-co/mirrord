@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-session-monitor-client"
+name = "mirrord-session-monitor-protocol"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -17,7 +17,5 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-mirrord-session-monitor-protocol = { path = "../session-monitor-protocol" }
-reqwest.workspace = true
-home.workspace = true
-thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true

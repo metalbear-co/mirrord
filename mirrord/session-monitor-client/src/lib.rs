@@ -1,6 +1,8 @@
+#![cfg(unix)]
+
 use std::path::{Path, PathBuf};
 
-use mirrord_intproxy::session_monitor::api::SessionInfo;
+pub use mirrord_session_monitor_protocol::{ProcessInfo, SessionInfo};
 use thiserror::Error;
 
 pub struct SessionConnection {
