@@ -96,23 +96,21 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
     env
 }
 
-pub(super) fn base_command_line(agent: &AgentConfig, params: &ContainerParams) -> Vec<String> {
-    let mut command_line = vec![
-        "./mirrord-agent".to_owned(),
-        "-l".to_owned(),
-        params.port.to_string(),
-    ];
+pub(super) const AGENT_COMMAND: &str = "./mirrord-agent";
+
+pub(super) fn agent_base_args(agent: &AgentConfig, params: &ContainerParams) -> Vec<String> {
+    let mut args = vec!["-l".to_owned(), params.port.to_string()];
     if let Some(timeout) = agent.communication_timeout {
-        command_line.push("-t".to_owned());
-        command_line.push(timeout.to_string());
+        args.push("-t".to_owned());
+        args.push(timeout.to_string());
     }
 
     #[cfg(debug_assertions)]
     if agent.test_error {
-        command_line.push("--test-error".to_owned());
+        args.push("--test-error".to_owned());
     }
 
-    command_line
+    args
 }
 
 /**
