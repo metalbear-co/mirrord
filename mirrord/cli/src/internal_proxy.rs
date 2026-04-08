@@ -38,13 +38,14 @@ use tracing::Level;
 #[cfg(not(target_os = "windows"))]
 use tracing::warn;
 
+#[cfg(unix)]
+use crate::kube::kube_client_from_layer_config;
 #[cfg(not(target_os = "windows"))]
 use crate::util::detach_io;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
-    kube::kube_client_from_layer_config,
     user_data::UserData,
     util::create_listen_socket,
 };

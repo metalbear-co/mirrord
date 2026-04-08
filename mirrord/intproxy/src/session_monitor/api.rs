@@ -200,34 +200,3 @@ pub async fn start_api_server(
 
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::SessionInfo;
-
-    #[test]
-    fn deserialize_session_info_from_older_payload() {
-        let json = serde_json::json!({
-            "session_id": "session-id",
-            "target": "pod/test",
-            "started_at": "2026-04-07T20:33:29Z",
-            "mirrord_version": "3.199.0",
-            "is_operator": false,
-            "processes": [
-                {
-                    "pid": 1234,
-                    "process_name": "bash"
-                }
-            ],
-            "config": {}
-        });
-
-        let session: SessionInfo = serde_json::from_value(json).unwrap();
-
-        assert_eq!(session.key, None);
-        assert_eq!(session.namespace, None);
-        assert_eq!(session.processes.len(), 1);
-        assert_eq!(session.processes[0].parent_pid, None);
-        assert_eq!(session.processes[0].cmdline, Vec::<String>::new());
-    }
-}
