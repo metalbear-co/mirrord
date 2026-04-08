@@ -422,7 +422,8 @@ mod test {
                                 "name": "mirrord-agent",
                                 "image": agent.image(),
                                 "imagePullPolicy": agent.image_pull_policy,
-                                "command": ["./mirrord-agent", "-l", "3000", "targetless"],
+                                "command": ["./mirrord-agent"],
+                                "args": ["-l", "3000", "targetless"],
                                 "env": [
                                     { "name": envs::LOG_LEVEL.name, "value": agent.log_level },
                                     { "name": envs::STEALER_FLUSH_CONNECTIONS.name, "value": agent.flush_connections.to_string() },
@@ -567,7 +568,8 @@ mod test {
                                         "name": "hostvar"
                                     }
                                 ],
-                                "command": ["./mirrord-agent", "-l", "3000", "targeted", "--container-id", "container", "--container-runtime", "docker"],
+                                "command": ["./mirrord-agent"],
+                                "args": ["-l", "3000", "targeted", "--container-id", "container", "--container-runtime", "docker"],
                                 "env": [
                                     { "name": envs::LOG_LEVEL.name, "value": agent.log_level },
                                     { "name": envs::STEALER_FLUSH_CONNECTIONS.name, "value": agent.flush_connections.to_string() },
