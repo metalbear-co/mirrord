@@ -626,6 +626,95 @@ impl AsRef<str> for BranchDatabaseId {
     }
 }
 
+/// Extract all literal `value` fields from a CRD connection source, collecting
+/// them into `values_out` keyed by variable name. Each extracted value is removed
+/// from the source kind so that `replace_values_with_secret_refs` can fill in the
+/// Secret reference afterwards.
+#[cfg(feature = "client")]
+pub fn extract_literal_values(
+    source: &mut CrdConnectionSource,
+    values_out: &mut std::collections::HashMap<String, String>,
+) {
+    use crate::crd::db_branching::core::ConnectionSourceKind;
+
+    fn extract_from_kind(
+        kind: &mut ConnectionSourceKind,
+        values_out: &mut std::collections::HashMap<String, String>,
+    ) {
+        if let ConnectionSourceKind::Env {
+            variable,
+            value: value @ Some(_),
+            ..
+        } = kind
+        {
+            values_out.insert(variable.clone(), value.take().unwrap());
+        }
+    }
+
+    match source {
+        CrdConnectionSource::Url(kind) => extract_from_kind(kind, values_out),
+        CrdConnectionSource::Params(params) => {
+            for kind in [
+                &mut params.host,
+                &mut params.port,
+                &mut params.user,
+                &mut params.password,
+                &mut params.database,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                extract_from_kind(kind, values_out);
+            }
+        }
+    }
+}
+
+/// Replace `Env` source kinds whose variable name matches a key in the Secret
+/// with `Secret { name, key }` source kinds. Called after the operator has created
+/// the Secret and returned its name.
+#[cfg(feature = "client")]
+pub fn replace_values_with_secret_refs(
+    source: &mut CrdConnectionSource,
+    secret_name: &str,
+    keys: &std::collections::HashMap<String, String>,
+) {
+    use crate::crd::db_branching::core::ConnectionSourceKind;
+
+    fn replace_env_with_secret_ref(
+        kind: &mut ConnectionSourceKind,
+        secret_name: &str,
+        keys: &std::collections::HashMap<String, String>,
+    ) {
+        if let ConnectionSourceKind::Env { variable, .. } = kind {
+            if keys.contains_key(variable.as_str()) {
+                *kind = ConnectionSourceKind::Secret {
+                    name: secret_name.to_string(),
+                    key: variable.clone(),
+                };
+            }
+        }
+    }
+
+    match source {
+        CrdConnectionSource::Url(kind) => replace_env_with_secret_ref(kind, secret_name, keys),
+        CrdConnectionSource::Params(params) => {
+            for kind in [
+                &mut params.host,
+                &mut params.port,
+                &mut params.user,
+                &mut params.password,
+                &mut params.database,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                replace_env_with_secret_ref(kind, secret_name, keys);
+            }
+        }
+    }
+}
+
 fn convert_connection_source(source: &ConnectionSource) -> CrdConnectionSource {
     match source {
         ConnectionSource::Url { url } => CrdConnectionSource::Url(Box::new(url.into())),
@@ -640,6 +729,7 @@ fn convert_connection_source(source: &ConnectionSource) -> CrdConnectionSource {
                 _ => TargetEnvironmentVariableSource::Env {
                     container: None,
                     variable: url.clone(),
+                    value: None,
                 },
             };
             CrdConnectionSource::Url(Box::new((&kind).into()))

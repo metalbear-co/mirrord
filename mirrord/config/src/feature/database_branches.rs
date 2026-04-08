@@ -361,17 +361,25 @@ pub struct ConnectionParamsConfig {
 }
 
 /// <!--${internal}-->
-/// A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-/// reference (object).
+/// A connection parameter source: a plain env var name (string), an env var with a fallback
+/// value (object with `variable` and optional `value`), or a Kubernetes Secret reference.
 ///
-/// As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
+/// As a string: `"DB_HOST"` - resolved using the parent `type` field (env or env_from).
 ///
-/// As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
+/// As an object with fallback: `{ "variable": "DB_HOST", "value": "myhost.com" }` - tries the
+/// env var first, falls back to the literal value when the var is not on the target pod.
+///
+/// As a Secret ref: `{ "secret": "my-secret", "key": "password" }` - read directly from a
 /// Kubernetes Secret.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ParamSource {
     Variable(String),
+    Env {
+        variable: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
+    },
     Secret {
         #[serde(rename = "secret")]
         name: String,
@@ -383,6 +391,7 @@ impl ParamSource {
     pub fn as_variable(&self) -> Option<&str> {
         match self {
             Self::Variable(v) => Some(v),
+            Self::Env { variable, .. } => Some(variable),
             Self::Secret { .. } => None,
         }
     }
@@ -419,6 +428,11 @@ pub enum TargetEnvironmentVariableSource {
     Env {
         container: Option<String>,
         variable: String,
+        /// Fallback value to use when the env var is not found on the target pod.
+        /// Useful when the app gets credentials from Vault or other non-K8s sources.
+        /// The CLI encrypts this value before it reaches the CRD.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
     },
     EnvFrom {
         container: Option<String>,
@@ -477,6 +491,7 @@ mod tests {
                 url: TargetEnvironmentVariableSource::Env {
                     container: None,
                     variable: "DB_URL".to_string(),
+                    value: None,
                 }
             }
         );
@@ -507,6 +522,7 @@ mod tests {
                 url: TargetEnvironmentVariableSource::Env {
                     container: Some("my-app".to_string()),
                     variable: "DB_URL".to_string(),
+                    value: None,
                 }
             }
         );
@@ -666,6 +682,7 @@ mod tests {
             url: TargetEnvironmentVariableSource::Env {
                 container: None,
                 variable: "DB_URL".to_string(),
+                value: None,
             },
         };
         let json = serde_json::to_string(&source).unwrap();

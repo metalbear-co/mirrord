@@ -510,6 +510,7 @@ mod tests {
             url: TargetEnvironmentVariableSource::Env {
                 container: None,
                 variable: var.to_owned(),
+                value: None,
             },
         }
     }

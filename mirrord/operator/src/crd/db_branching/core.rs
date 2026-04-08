@@ -42,6 +42,12 @@ pub enum ConnectionSourceKind {
     Env {
         container: Option<String>,
         variable: String,
+        /// Literal fallback value. When the CLI receives a `value` in the user config,
+        /// it creates a K8s Secret via the operator and replaces this with a
+        /// `Secret { name, key }` variant before writing the CRD. This field is kept
+        /// for backward compatibility but should not carry sensitive data in the CRD.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
     },
 
     /// Environment from resource reference in the the pod template.
@@ -60,9 +66,11 @@ impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
             TargetEnvironmentVariableSource::Env {
                 container,
                 variable,
+                value,
             } => ConnectionSourceKind::Env {
                 container,
                 variable,
+                value,
             },
             TargetEnvironmentVariableSource::EnvFrom {
                 container,
@@ -84,9 +92,11 @@ impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
             TargetEnvironmentVariableSource::Env {
                 container,
                 variable,
+                value,
             } => ConnectionSourceKind::Env {
                 container: container.clone(),
                 variable: variable.clone(),
+                value: value.clone(),
             },
             TargetEnvironmentVariableSource::EnvFrom {
                 container,
@@ -112,11 +122,21 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
                         container: None,
                         variable: v.clone(),
                     },
-                    // None or Env: default to Env. The operator auto-detects
-                    // envFrom at resolution time if the variable isn't in env[].
                     _ => ConnectionSourceKind::Env {
                         container: None,
                         variable: v.clone(),
+                        value: None,
+                    },
+                },
+                ParamSource::Env { variable, value } => match config.source_type.as_ref() {
+                    Some(ConnectionSourceType::EnvFrom) => ConnectionSourceKind::EnvFrom {
+                        container: None,
+                        variable: variable.clone(),
+                    },
+                    _ => ConnectionSourceKind::Env {
+                        container: None,
+                        variable: variable.clone(),
+                        value: value.clone(),
                     },
                 },
                 ParamSource::Secret { name, key } => ConnectionSourceKind::Secret {

@@ -112,6 +112,9 @@ pub enum OperatorApiError {
 
     #[error(transparent)]
     SerdeJson(#[from] serde_json::Error),
+
+    #[error("{0}")]
+    Other(String),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;
