@@ -1,6 +1,12 @@
-#[cfg(target_os = "windows")]
-use std::path::Path;
 use std::process::exit;
+
+/// Ensure `monitor-frontend/dist` exists so rust-embed doesn't fail during compilation.
+fn ensure_monitor_frontend_dist() {
+    let dist_dir = std::path::Path::new("../../monitor-frontend/dist");
+    if !dist_dir.exists() {
+        std::fs::create_dir_all(dist_dir).ok();
+    }
+}
 
 fn recheck_and_setup_layer_file() {
     println!("cargo::rerun-if-env-changed=MIRRORD_LAYER_FILE");
@@ -9,30 +15,12 @@ fn recheck_and_setup_layer_file() {
     println!("cargo::rerun-if-env-changed=MIRRORD_LAYER_FILE_MACOS_ARM64");
 
     if std::env::var("MIRRORD_LAYER_FILE").is_err() {
-        #[cfg(target_os = "windows")]
-        {
-            let out_dir_env =
-                std::env::var("OUT_DIR").expect("Failed getting OUT_DIR from environment");
-            let out_dir = Path::new(&out_dir_env);
-            let build_dir = out_dir
-                .ancestors()
-                .nth(3)
-                .expect("Failed extracting build directory from OUT_DIR");
-            let layer = build_dir.join("mirrord_layer_win.dll");
-
-            println!(
-                "cargo:rustc-env=MIRRORD_LAYER_FILE={}",
-                layer.to_str().unwrap()
-            );
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            println!(
-                "cargo:rustc-env=MIRRORD_LAYER_FILE={}",
-                std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER").unwrap()
-            );
-        }
+        let layer_path = if cfg!(windows) {
+            std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER_WIN").unwrap()
+        } else {
+            std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER").unwrap()
+        };
+        println!("cargo:rustc-env=MIRRORD_LAYER_FILE={}", layer_path);
     };
 }
 
@@ -93,6 +81,30 @@ fn build_wizard_frontend() {
     assert!(status.success(), "tar command should succeed");
 }
 
+fn package_sip_binaries() {
+    use std::{env, path::Path};
+
+    println!("cargo::rerun-if-env-changed=MIRRORD_SIP_BINARIES_TAR");
+
+    let out_dir = env::var_os("OUT_DIR").unwrap();
+    let out_dir = Path::new(&out_dir);
+    let tar_path = out_dir.join("apple-utils.tar.gz");
+
+    match env::var("MIRRORD_SIP_BINARIES_TAR") {
+        Ok(source_path) => {
+            println!("cargo::rerun-if-changed={source_path}");
+            std::fs::copy(&source_path, &tar_path)
+                .expect("copying embedded SIP utilities bundle should succeed");
+        }
+        Err(_) => {
+            if !std::fs::exists(&tar_path).unwrap_or(false) {
+                std::fs::write(&tar_path, "")
+                    .expect("creating placeholder SIP archive should work");
+            }
+        }
+    }
+}
+
 fn main() {
     // don't run on clippy
     if std::env::var("CLIPPY_ARGS").is_ok() {
@@ -114,6 +126,17 @@ fn main() {
         if !std::fs::exists(&frontend_path).unwrap_or(false) {
             std::fs::write(frontend_path, "").unwrap();
         };
+
+        if std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|target| target == "macos") {
+            let sip_path = format!("{}/apple-utils.tar.gz", std::env::var("OUT_DIR").unwrap());
+
+            if !std::fs::exists(&sip_path).unwrap_or(false) {
+                std::fs::write(sip_path, "").unwrap();
+            };
+        }
+
+        ensure_monitor_frontend_dist();
+
         return;
     }
     // Make sure `MIRRORD_LAYER_FILE` is provided either by user, or computed.
@@ -122,6 +145,12 @@ fn main() {
     // Build the wizard frontend
     #[cfg(feature = "wizard")]
     build_wizard_frontend();
+
+    if std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|target| target == "macos") {
+        package_sip_binaries();
+    }
+
+    ensure_monitor_frontend_dist();
 
     // this check uses cargo env vars instead of conditional compilation due to cfg! not respecting
     // the target flag on a build

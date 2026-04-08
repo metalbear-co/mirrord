@@ -11,7 +11,7 @@ use mirrord_protocol::dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, S
 use tracing::Level;
 
 use crate::{
-    HookResult,
+    error::HookResult,
     proxy_connection::make_proxy_request_with_response,
     socket::{
         AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM,

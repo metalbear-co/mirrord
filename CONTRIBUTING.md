@@ -13,9 +13,10 @@ Make sure to take a look at the project's [style guide](STYLE.md).
 - [Getting Started](#getting-started)
 - [Debugging mirrord](#debugging-mirrord)
 - [New Hook Guidelines](#new-hook-guidelines)
-- [Compiling on MacOS](#compiling-on-macos)
+- [Compiling on macOS](#compiling-on-macos)
 - [Adding new target types](#adding-new-target-types)
 - [Testing the release workflow](#testing-the-release-workflow)
+- [Submitting a Pull Request](#submitting-a-pull-request)
 - [Architecture](#architecture)
 - [Release mirrord](#release-mirrord)
 
@@ -27,10 +28,11 @@ The following guide details the steps to setup a local development environment f
 
 - [GCC](https://gcc.gnu.org/) - only on Linux, GCC is needed for Go dynamic linking
 - [Rust](https://www.rust-lang.org/)
-- [NodeJS](https://nodejs.org/en/), [ExpressJS](https://expressjs.com/)
+- [NodeJS](https://nodejs.org/en/), [ExpressJS](https://expressjs.com/), [portfinder](https://www.npmjs.com/package/portfinder)
 - [Python](https://www.python.org/), [Flask](https://flask.palletsprojects.com/en/2.1.x/), [FastAPI](https://fastapi.tiangolo.com/), [Uvicorn](https://www.uvicorn.org/)
 - [Go](https://go.dev/)
 - Kubernetes Cluster (local/remote)
+- [Argo Rollouts CRD](https://argoproj.github.io/argo-rollouts/) - required for rollout-related E2E tests (`kubectl create namespace argo-rollouts && kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml`)
 
 ### Setup a Kubernetes cluster
 
@@ -54,13 +56,11 @@ minikube start --driver=docker
 
 ### Prepare a cluster
 
- Build mirrord-agent Docker Image.
+Build the mirrord-agent image. Images are defined in `ci/docker-bake.hcl`.
+For a local development build (single platform, loaded into the local Docker daemon):
 
-Make sure you're [logged in to GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
-
-Then run:
 ```bash
-docker buildx build -t test . --file mirrord/agent/Dockerfile
+PLATFORMS="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" AGENT_TAGS=test docker buildx bake -f ci/docker-bake.hcl agent --load
 ```
 
 ```bash
@@ -194,12 +194,23 @@ Some test apps need to be compiled before they can be used in the tests
 
 The basic command to run the integration tests is:
 ```bash
-cargo test --package mirrord-layer
+cargo test --package mirrord-layer-tests
 ```
 
-However, when running on macOS a dylib has to be created first. You can use xtask:
+#### Running the Integration Tests using pre-compiled Binaries (Optional)
+If you want to avoid building the CLI as a build dependency (or speed up iteration), you can run the integration tests against prebuilt artifacts. This requires `--no-default-features` and pointing to the CLI binary and layer library.
+
 ```bash
-cargo xtask build-layer
+MIRRORD_TESTS_USE_BINARY=../../target/x86_64-unknown-linux-gnu/debug/mirrord \
+MIRRORD_LAYER_FILE=../../target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so \
+cargo test -p mirrord-layer-tests --no-default-features
+```
+Swap `x86_64-unknown-linux-gnu` with your target triplet, or omit the triplet if you built for the host default.
+Paths use `../..` because `cargo test -p mirrord-layer-tests` runs tests with `mirrord/layer-tests` as the working directory.
+
+For macOS with pre-compiled binaries, build the universal CLI (which embeds both arch compilations):
+```bash
+cargo xtask build-cli --platform macos-universal
 ```
 
 Or the build script:
@@ -207,16 +218,11 @@ Or the build script:
 scripts/build_fat_mac.sh
 ```
 
-And then in order to use that dylib in the tests, run the tests like this:
+And then use it in the tests as follows:
 ```bash
-MIRRORD_TEST_USE_EXISTING_LIB=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib cargo test -p mirrord-layer
-```
-
-On Apple Silicon, set `MIRRORD_MACOS_ARM64_LIBRARY` additionally to use the arm64 layer lib as well:
-```bash
-MIRRORD_TEST_USE_EXISTING_LIB=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib \
-MIRRORD_MACOS_ARM64_LIBRARY=../../target/aarch64-apple-darwin/debug/libmirrord_layer.dylib \
-cargo test -p mirrord-layer
+MIRRORD_TESTS_USE_BINARY=../../target/universal-apple-darwin/debug/mirrord \
+MIRRORD_LAYER_FILE=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib \
+cargo test -p mirrord-layer-tests --no-default-features
 ```
 
 ### Integration Tests logs and you
@@ -341,7 +347,7 @@ The binary is created at `./target/<platform>/debug/mirrord`
 
 #### Run mirrord with a local process
 
-Sample web server - `app.js` (present at `sample/node/app.mjs` in the repo)
+Sample web server - `app.js` (present at `sample/node/app.mjs` in the repository)
 
 <details>
   <summary>sample/node/app.mjs</summary>
@@ -510,10 +516,10 @@ To debug it with a debugger:
        tokio::time::sleep(Duration::from_secs(20)).await;
    ```
    to [somewhere](https://github.com/metalbear-co/mirrord/blob/fa2af7f1e77a9254fb0908be40b0dae5da53d298/mirrord/cli/src/internal_proxy.rs#L145) in the start of the intproxy code.
-2. Set breakpoints in vscode in the relevant lines of the intproxy code.
+2. Set breakpoints in VS Code in the relevant lines of the intproxy code.
 3. Build mirrord.
 4. Run mirrord.
-5. Attach a debugger in vscode to the inproxy process. On macOS you can do that with `Cmd` + `Shift` + `P` -> `LLDB: Attach to Process...` -> type `intproxy` and choose the `mirrord intproxy` process. The sleep you added at the start of the intproxy is time for you to attach the debugger.
+5. Attach a debugger in VS Code to the intproxy process. On macOS you can do that with `Cmd` + `Shift` + `P` -> `LLDB: Attach to Process...` -> type `intproxy` and choose the `mirrord intproxy` process. The sleep you added at the start of the intproxy is time for you to attach the debugger.
 
 ## Retrieving Agent Logs
 
@@ -576,7 +582,7 @@ In order to have a more structured approach, here's the flow you should follow w
     1. To implement use case "App needs to read credentials from a file*"
     2. I will hook `open` and `read` handling calls only with flags O_RDONLY.
     3. Once `open` is called, I'll send a blocking request to the agent to open the remote file, returning the return code of the operation.
-    4. Create an fd using `memfd`. The result will be returned to the local app, and if successful we'll save that fd into a HashMap that matches between local fd and remote fd/identifier.
+    4. Create an fd using `memfd`. The result will be returned to the local app, and if successful we'll save that fd into a hashmap that matches between local fd and remote fd/identifier.
     5. When `read` is called, I will check if the fd being read was previously opened by us, and if it is we'll send a blocking `read` request to the agent. The result will be sent back to the caller.
     6. And so on.
 5. This doc should go later on to our mirrord docs for advanced developers so people can understand how stuff works
@@ -587,19 +593,19 @@ In order to have a more structured approach, here's the flow you should follow w
     2. A call that should be bypassed. Make sure the result of the operation proves it happened locally. Please test
        different reasons for bypassing. E.g. for file operations, make a call with a relative path, and make a call
        with a path that is configured to be local. If it's easier for you, you can test bypassing in an integration
-       test of mirrord-layer (under mirrord/layer/tests).
+       test of mirrord-layer (under mirrord/layer-tests/tests).
     3. If the configuration supports mappings that are relevant for this hook, add test cases with those mappings,
        and test that the mappings take effect correctly. E.g. for file operations test with a path mapping.
 
 
-# Compiling on MacOS
+# Compiling on macOS
 
-`mirrord` is cross-platform and natively supports compiling from a MacOS host, with one exception: `mirrord-agent` - the component/crate that runs inside of the kubernetes cluster.
+`mirrord` is cross-platform and natively supports compiling from a macOS host, with one exception: `mirrord-agent` - the component/crate that runs inside of the Kubernetes cluster.
 
-`mirrord-agent` feature-gates dependencies, modules and its entrypoint to allow compilation on MacOS, but produces a binary that does nothing.
-To be able to properly compile and work on the code (using rust-analyzer) you need to be able to cross-compile to linux, which requires the following steps:
+`mirrord-agent` feature-gates dependencies, modules and its entrypoint to allow compilation on macOS, but produces a binary that does nothing.
+To be able to properly compile and work on the code (using rust-analyzer) you need to be able to cross-compile to Linux, which requires the following steps:
 
-1. Install the x86 linux target
+1. Install the x86 Linux target
 ```sh
 rustup target add x86_64-unknown-linux-gnu
 ```
@@ -614,7 +620,7 @@ Usually the builtin clang compiler can handle this, if you use GCC you'll need a
 export CC_x86_64_unknown_linux_gnu=(C compiler from step 2)
 ```
 
-Now you can pass the linux target to `cargo` commands:
+Now you can pass the Linux target to `cargo` commands:
 ```sh
 cargo check -p mirrord-agent --target x86_64-unknown-linux-gnu
 ```
@@ -646,22 +652,73 @@ From [the release workflow definition](/.github/workflows/release.yaml):
 
 To test the release workflow:
 
-1. Push your changes to a branch on the main mirrord repo (not a fork)
-2. Go to [the release workflow section under the Actions tab on the mirrord repo](https://github.com/metalbear-co/mirrord/actions/workflows/release.yaml)
+1. Push your changes to a branch on the main mirrord repository (not a fork)
+2. Go to [the release workflow section under the Actions tab on the mirrord repository](https://github.com/metalbear-co/mirrord/actions/workflows/release.yaml)
 3. On the right of the "This workflow has a `workflow_dispatch` event trigger." banner, select the dropdown labelled "Run workflow"
 4. Select the branch with your changes and run
 
 You can check the run as it progresses and download the completed artifacts from the "Summary" tab in the sidebar.
 
-## Changing the release on MacOS
+## Changing the release on macOS
 
-If you're making changes to the release and/or CI workflows for MacOS specifically - for example changing how the universal binary is created, you need to update the build logic in both:
+If you're making changes to the release and/or CI workflows for macOS specifically - for example changing how the universal binary is created, you need to update the build logic in both:
 - [xtask/](/xtask/) - the recommended build automation tool
 - [scripts/build_fat_mac.sh](/scripts/build_fat_mac.sh) - the legacy build script (still supported)
 
 The xtask approach is preferred for new development as it provides better error messages, type safety, and consistency across platforms. See [xtask/README.md](xtask/README.md) for details.
 
 # Submitting a Pull Request
+
+## Typo Checks
+
+mirrord uses [`typos`](https://github.com/crate-ci/typos) to catch typos in CI. If the pipeline fails
+due to a false positive (e.g. a domain-specific term, identifier, or intentional spelling), you can add
+an exception in the [typos configuration file](typos.toml) at the root of the repository:
+
+- **Identifiers** (variable names, type names, etc.) — add to `[default.extend-identifiers]`:
+  ```toml
+  [default.extend-identifiers]
+  MyTerm = "MyTerm"
+  ```
+
+- **Words** (plain words in prose or strings) — add to `[default.extend-words]`:
+  ```toml
+  [default.extend-words]
+  myword = "myword"
+  ```
+
+- **Regex patterns** (e.g. to ignore URLs or structured text) — add to `extend-ignore-re` under `[default]`:
+  ```toml
+  [default]
+  extend-ignore-re = ["<your-pattern>"]
+  ```
+
+
+## Prose Checks (Vale)
+
+mirrord uses [Vale](https://vale.sh) to enforce writing style in Markdown files and Rust doc comments. It runs in CI on changed files. To run it locally:
+
+```bash
+vale .
+```
+
+If Vale reports a false positive, you have two options depending on the type of issue:
+
+- **Unknown word** (spelling error on a valid technical term) - add it to the vocabulary file at [.vale/styles/config/vocabularies/Metalbear/accept.txt](.vale/styles/config/vocabularies/Metalbear/accept.txt), one word per line.
+
+- **Wrong term** (Vale flags a correct capitalization or spelling as wrong) - add a substitution rule to [.vale/styles/Metalbear/Terms.yml](.vale/styles/Metalbear/Terms.yml):
+  ```yaml
+  swap:
+    WrongForm: CorrectForm
+  ```
+
+- **Inline suppression** (single occurrence that shouldn't be a global exception) — wrap the text with Vale's disable/enable comments:
+  ```markdown
+  <!-- vale off -->
+  Text that should not be checked.
+  <!-- vale on -->
+  ```
+
 
 ## Changelog Entry
 
@@ -672,9 +729,9 @@ Add a changelog file in `changelog.d/` named `<identifier>.<category>.md`
 - `+some-name.added.md` (without issue)
 
 **Identifier:**
-- If a GitHub issue exists, use the issue number from the public [mirrord repo](https://github.com/metalbear-co/mirrord)
+- If a GitHub issue exists, use the issue number from the public [mirrord repository](https://github.com/metalbear-co/mirrord)
 - Use `+some-name` if no issue exists
-- Don't use Linear issues or private repo issue numbers
+- Don't use Linear issues or private repository issue numbers
 
 **Category:**
 - `added` for new functionality
@@ -780,25 +837,42 @@ flowchart TB
 
 # Release mirrord
 
-## Release PR
+Releases are fully automated. Under normal circumstances no manual steps are required.
 
-1. Create a new branch named after the new version, e.g. `3.333.0`. This will trigger additional CI jobs.
-	1. If the new release only contains `internal` and `fixed` changes, bump a patch version. Otherwise, bump a minor version.
-2. On the new branch, bump the workspace version in `Cargo.toml` and run `cargo update -w` to update `Cargo.lock`.
-3. Generate the changelog with: `towncrier build --version <new-version>`.
-4. Review the generated changelog and fix any issues or typos.
-5. Push the release branch and open a PR.
+## Automated flow
 
-**Note:** All the steps above can also be completed by running: `./scripts/release.sh 3.333.0`.
-Before running the script, ensure there are no uncommitted changes in your repository.
+1. Once daily, the [Scheduled Release workflow](/.github/workflows/scheduled-release.yaml) evaluates whether a release is due:
+   - There is at least one entry in `changelog.d/`.
+   - The last release is older than 7 days.
+2. When both conditions are met, the [Auto Release PR workflow](/.github/workflows/auto-release-pr.yaml) opens (or updates) a PR from `releases/<version>` to `main`. The PR:
+   - Bumps the workspace version in `Cargo.toml` (patch bump if all changes are `fixed`/`internal`; minor bump otherwise).
+   - Updates `Cargo.lock`.
+   - Generates `CHANGELOG.md` by consuming the `changelog.d/` fragments.
+3. Review the release PR, fix any changelog issues or typos, then merge it.
+4. Merging triggers the [Release workflow](/.github/workflows/release.yaml), which:
+   - Validates the PR came from a `releases/*` branch.
+   - Builds all platform binaries (Linux x86\_64 / aarch64, macOS universal, Windows).
+   - Publishes the Docker images to GHCR.
+   - Creates the GitHub release (with tag and release notes from `CHANGELOG.md`).
+   - Publishes to Homebrew, Chocolatey, and winget.
+   - Updates the `latest` git tag and notifies the infra repository.
 
-## Create a new GitHub release
+## Triggering a release PR manually
 
-1. After the release PR is merged, create a new GitHub release with a new tag. Use the new version for both
-   the tag name and the release title. Use the changelog from the release PR as the release description,
-   excluding the `Internal` section if present.
+If you don't want to wait for the daily schedule, you can trigger the [Auto Release PR workflow](/.github/workflows/auto-release-pr.yaml) directly from the [Actions tab](https://github.com/metalbear-co/mirrord/actions/workflows/auto-release-pr.yaml) using the "Run workflow" button. It will create (or update) the release PR immediately.
 
-   **Note**: Ensure the tag is attached to the release commit.
+## Manual release
 
-2. Creating the release will trigger the `Release` workflow, which builds and publishes all artifacts, including images.
-3. When the `Release` workflow completes successfully, update the relevant environment variables in the analytics server.
+If you need to create a release outside the automated flow entirely, run:
+
+```bash
+./scripts/release.sh 3.333.0
+```
+
+Ensure there are no uncommitted changes before running the script. It will:
+- Create a `releases/3.333.0` branch off `main`.
+- Bump the workspace version in `Cargo.toml` and refresh `Cargo.lock`.
+- Generate the changelog with `towncrier`.
+- Push the branch.
+
+Open a PR from that branch to `main`, then merge it — the Release workflow will fire automatically.

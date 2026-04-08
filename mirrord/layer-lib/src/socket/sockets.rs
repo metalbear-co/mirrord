@@ -6,7 +6,6 @@ use std::os::fd::{BorrowedFd, RawFd};
 use std::{
     collections::HashMap,
     io,
-    net::SocketAddr,
     sync::{Arc, LazyLock, Mutex},
 };
 
@@ -25,11 +24,7 @@ use winapi::{
 };
 
 use super::{SocketKind, SocketState, UserSocket};
-use crate::{
-    detour::Bypass,
-    error::{HookError, HookResult},
-    setup::setup,
-};
+use crate::detour::{Bypass, Detour};
 
 // Platform-specific socket descriptors
 // RawFd
@@ -113,16 +108,6 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
             .unwrap_or_default()
     });
 
-/// Helper function to safely convert socket descriptors to i64 for error handling and logging
-pub fn socket_descriptor_to_i64(socket: SocketDescriptor) -> i64 {
-    socket as i64
-}
-
-/// Helper function to convert i64 back to SocketDescriptor (for cases where it's needed)
-pub fn i64_to_socket_descriptor(value: i64) -> SocketDescriptor {
-    value as SocketDescriptor
-}
-
 // Helper function to convert socket types to SocketKind
 pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
     if (socket_type & SOCK_STREAM) == SOCK_STREAM {
@@ -144,14 +129,10 @@ pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
 /// ```ignore
 /// let user_socket = match SOCKETS.lock()?.remove(&sockfd) {
 ///     Some(socket) => socket,
-///     None => match reconstruct_user_socket(sockfd) {
-///         Ok(socket) => socket,
-///         Err(HookError::Bypass(bypass)) => return Detour::Bypass(bypass),
-///         Err(error) => return Detour::Error(error),
-///     },
+///     None => reconstruct_user_socket(sockfd)?
 /// };
 /// ```
-pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserSocket>> {
+pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> Detour<Arc<UserSocket>> {
     // Here we just recreate `UserSocket` using domain and type fetched from the descriptor
     // we have.
     let (domain, type_) = {
@@ -163,7 +144,7 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
                 .map(|family| family as i32)
                 .unwrap_or(-1);
             if domain != libc::AF_INET && domain != libc::AF_UNIX {
-                return Err(HookError::Bypass(Bypass::Domain(domain)));
+                return Detour::Bypass(Bypass::Domain(domain));
             }
             // I really hate it, but nix seems to really make this API bad :(
             let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
@@ -186,13 +167,14 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
                 )
             };
             if result == SOCKET_ERROR {
-                return Err(HookError::from(io::Error::last_os_error()));
+                return Detour::Error(io::Error::last_os_error().into());
             }
 
             let proto_info = unsafe { proto_info.assume_init() };
             let domain = proto_info.iAddressFamily;
+            // currently only support reconstruction of AF_INET sockets
             if domain != AF_INET {
-                return Err(HookError::Bypass(Bypass::Domain(domain)));
+                return Detour::Bypass(Bypass::Domain(domain));
             }
 
             let socket_type = proto_info.iSocketType;
@@ -200,46 +182,14 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> HookResult<Arc<UserS
         }
     };
 
-    let kind = socket_kind_from_type(type_).map_err(|_| HookError::Bypass(Bypass::Type(type_)))?;
-    Ok(Arc::new(UserSocket::new(
+    let kind = SocketKind::try_from(type_)?;
+    Detour::Success(Arc::new(UserSocket::new(
         domain,
         type_,
         0,
         Default::default(),
         kind,
     )))
-}
-
-/// Register a new socket with the unified SOCKETS collection
-pub fn register_socket(socket: SocketDescriptor, domain: i32, socket_type: i32, protocol: i32) {
-    let kind = match socket_kind_from_type(socket_type) {
-        Ok(kind) => kind,
-        Err(e) => {
-            tracing::warn!("Failed to create socket kind: {}", e);
-            return;
-        }
-    };
-
-    let user_socket = UserSocket::new(
-        domain,
-        socket_type,
-        protocol,
-        SocketState::Initialized,
-        kind,
-    );
-
-    let mut sockets = match SOCKETS.lock() {
-        Ok(sockets) => sockets,
-        Err(poisoned) => {
-            tracing::warn!(
-                "SocketManager: sockets mutex was poisoned during registration, attempting recovery"
-            );
-            poisoned.into_inner()
-        }
-    };
-
-    sockets.insert(socket, Arc::new(user_socket));
-    tracing::info!("SocketManager: Registered socket {} with mirrord", socket);
 }
 
 /// Check if a socket is managed by mirrord
@@ -266,46 +216,6 @@ pub fn is_socket_in_state(
     get_socket_state(socket)
         .map(|state| state_check(&state))
         .unwrap_or(false)
-}
-
-/// Get bound address for a socket if it's in bound state
-///
-/// For localhost addresses that were bound to port 0 (let OS choose), returns the actual
-/// bound address so that local clients can connect to it. For other addresses, returns
-/// the requested address to maintain the mirrord illusion.
-pub fn get_bound_address(socket: SocketDescriptor) -> Option<SocketAddr> {
-    get_socket_state(socket).and_then(|state| match state {
-        SocketState::Bound { bound, .. } | SocketState::Listening(bound) => {
-            // For localhost binds to port 0, return the actual bound address
-            // so that local clients (like Python's socketpair()) can connect
-            if bound.requested_address.ip().is_loopback() && bound.requested_address.port() == 0 {
-                Some(bound.address)
-            } else {
-                Some(bound.requested_address)
-            }
-        }
-        _ => None,
-    })
-}
-
-/// Find the actual bound address of a listening socket that matches the given port and protocol.
-/// Used to detect local self-connections so they can be handled without proxying.
-pub fn find_listener_address_by_port(port: u16, protocol: i32) -> Option<SocketAddr> {
-    if setup().outgoing_config().ignore_localhost {
-        return None;
-    }
-    SOCKETS.lock().ok().and_then(|sockets| {
-        sockets.iter().find_map(|(_, socket)| match socket.state {
-            SocketState::Listening(bound) => {
-                if bound.requested_address.port() == port && socket.protocol == protocol {
-                    Some(bound.address)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        })
-    })
 }
 
 /// Get connected addresses for a socket if it's in connected state

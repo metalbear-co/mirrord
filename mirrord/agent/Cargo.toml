@@ -24,7 +24,7 @@ mirrord-agent-env = { path = "./env", default-features = false }
 mirrord-agent-iptables = { path = "./iptables" }
 mirrord-tls-util = { path = "../tls-util" }
 
-containerd-client = "0.6"
+containerd-client.workspace = true
 tokio = { workspace = true, features = [
     "rt",
     "net",
@@ -46,35 +46,40 @@ tracing-subscriber.workspace = true
 tokio-stream.workspace = true
 thiserror.workspace = true
 hickory-resolver.workspace = true
-bollard = "0.18"
+bollard.workspace = true
 tokio-util.workspace = true
 streammap-ext.workspace = true
 libc.workspace = true
-faccess = "0.2"
+faccess.workspace = true
 bytes.workspace = true
-wildmatch = "2"
+wildmatch.workspace = true
 enum_dispatch.workspace = true
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["full"] }
 hyper-util.workspace = true
-httparse = "1"
+httparse.workspace = true
 fancy-regex = { workspace = true }
-oci-spec = "0.7.0"
-tonic = "0.12"
+oci-spec.workspace = true
+tonic.workspace = true
 tower.workspace = true
 http.workspace = true
-k8s-cri = "0.9"
+k8s-cri.workspace = true
 semver.workspace = true
 tokio-rustls.workspace = true
 x509-parser.workspace = true
 rustls.workspace = true
 socket2.workspace = true
-prometheus = { version = "0.14", features = ["process"] }
-axum = { version = "0.7", features = ["macros"] }
-procfs = "0.17.0"
+prometheus.workspace = true
+axum = { workspace = true, features = ["macros"] }
+procfs.workspace = true
 rcgen.workspace = true
 serde_json_path.workspace = true
-dns-lookup = "3"
+dns-lookup.workspace = true
+tokio-retry.workspace = true
+jaq-std.workspace = true
+jaq-core.workspace = true
+jaq-json = { workspace = true, features = ["serde_json"] }
+
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 pem.workspace = true

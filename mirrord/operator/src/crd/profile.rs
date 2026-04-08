@@ -39,7 +39,7 @@ pub struct MirrordClusterProfileSpec {
 ///
 /// Can be selected from the user's mirrord config.
 ///
-/// Examle:
+/// Example:
 /// ```json
 /// {
 ///     "profile": "my-namespace/my-profile"

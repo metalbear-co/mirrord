@@ -1,11 +1,12 @@
-use std::{collections::HashMap, fmt::Formatter};
+use std::{borrow::Cow, collections::HashMap, fmt::Formatter};
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use mirrord_config::feature::database_branches::{
-    ConnectionParamsConfig, ConnectionSourceType, ParamSource, TargetEnviromentVariableSource,
+    ConnectionParamsConfig, ConnectionSourceType, ParamSource, TargetEnvironmentVariableSource,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use strum_macros::EnumDiscriminants;
 
 use crate::crd::session::SessionOwner;
 
@@ -53,48 +54,48 @@ pub enum ConnectionSourceKind {
     Secret { name: String, key: String },
 }
 
-impl From<TargetEnviromentVariableSource> for ConnectionSourceKind {
-    fn from(src: TargetEnviromentVariableSource) -> Self {
+impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
+    fn from(src: TargetEnvironmentVariableSource) -> Self {
         match src {
-            TargetEnviromentVariableSource::Env {
+            TargetEnvironmentVariableSource::Env {
                 container,
                 variable,
             } => ConnectionSourceKind::Env {
                 container,
                 variable,
             },
-            TargetEnviromentVariableSource::EnvFrom {
+            TargetEnvironmentVariableSource::EnvFrom {
                 container,
                 variable,
             } => ConnectionSourceKind::EnvFrom {
                 container,
                 variable,
             },
-            TargetEnviromentVariableSource::Secret { name, key } => {
+            TargetEnvironmentVariableSource::Secret { name, key } => {
                 ConnectionSourceKind::Secret { name, key }
             }
         }
     }
 }
 
-impl From<&TargetEnviromentVariableSource> for ConnectionSourceKind {
-    fn from(src: &TargetEnviromentVariableSource) -> Self {
+impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
+    fn from(src: &TargetEnvironmentVariableSource) -> Self {
         match src {
-            TargetEnviromentVariableSource::Env {
+            TargetEnvironmentVariableSource::Env {
                 container,
                 variable,
             } => ConnectionSourceKind::Env {
                 container: container.clone(),
                 variable: variable.clone(),
             },
-            TargetEnviromentVariableSource::EnvFrom {
+            TargetEnvironmentVariableSource::EnvFrom {
                 container,
                 variable,
             } => ConnectionSourceKind::EnvFrom {
                 container: container.clone(),
                 variable: variable.clone(),
             },
-            TargetEnviromentVariableSource::Secret { name, key } => ConnectionSourceKind::Secret {
+            TargetEnvironmentVariableSource::Secret { name, key } => ConnectionSourceKind::Secret {
                 name: name.clone(),
                 key: key.clone(),
             },
@@ -106,12 +107,14 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
     fn from(config: &ConnectionParamsConfig) -> Self {
         let wrap = |param: &Option<ParamSource>| -> Option<ConnectionSourceKind> {
             param.as_ref().map(|p| match p {
-                ParamSource::Variable(v) => match &config.source_type {
-                    ConnectionSourceType::Env => ConnectionSourceKind::Env {
+                ParamSource::Variable(v) => match config.source_type.as_ref() {
+                    Some(ConnectionSourceType::EnvFrom) => ConnectionSourceKind::EnvFrom {
                         container: None,
                         variable: v.clone(),
                     },
-                    ConnectionSourceType::EnvFrom => ConnectionSourceKind::EnvFrom {
+                    // None or Env: default to Env. The operator auto-detects
+                    // envFrom at resolution time if the variable isn't in env[].
+                    _ => ConnectionSourceKind::Env {
                         container: None,
                         variable: v.clone(),
                     },
@@ -167,6 +170,8 @@ impl std::fmt::Display for BranchDatabasePhase {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BranchDatabaseStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pod_name: Option<String>,
     pub phase: BranchDatabasePhase,
     /// Time when the branch database should be deleted.
     pub expire_time: MicroTime,
@@ -182,7 +187,9 @@ pub struct BranchDatabaseStatus {
 /// Environment variable sources follow the same pattern as `connection.url`:
 /// - `Env` - direct env var from pod spec
 /// - `EnvFrom` - from configMapRef/secretRef
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, EnumDiscriminants)]
+#[strum_discriminants(derive(Deserialize, Serialize, JsonSchema))]
+#[strum_discriminants(serde(rename_all = "snake_case"))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IamAuthConfig {
     /// AWS RDS/Aurora IAM authentication.
@@ -221,4 +228,29 @@ pub enum IamAuthConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project: Option<ConnectionSourceKind>,
     },
+}
+
+impl JsonSchema for IamAuthConfig {
+    fn schema_name() -> Cow<'static, str> {
+        "IamAuthConfig".into()
+    }
+
+    /// [`IamAuthConfig`] is adjacently tagged. Because of this, its JSON schema is not valid
+    /// according to CRD standards.
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        struct Proxy {
+            // We verify the tag.
+            #[serde(rename = "type")]
+            tag: IamAuthConfigDiscriminants,
+            // Other fields can be whatever.
+            //
+            // Generated CRD has `x-kubernetes-preserve-unknown-fields`,
+            // so everything is all right.
+            #[serde(flatten)]
+            rest: HashMap<String, serde_json::Value>,
+        }
+
+        Proxy::json_schema(generator)
+    }
 }

@@ -129,6 +129,7 @@ mod integration_tests_deps {
     use apple_codesign as _;
     use futures as _;
     use mirrord_intproxy as _;
+    use mirrord_layer_tests as _;
     use mirrord_test_utils as _;
     use serde_json as _;
     use tempfile as _;
@@ -236,6 +237,11 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
             mirrord_sip::SipPatchOptions {
                 patch: &patch_binaries,
                 skip: &skip_patch_binaries,
+                sip_binaries_dir: config
+                    .experimental
+                    .sip_utils
+                    .unwrap_or_default()
+                    .then(|| mirrord_sip::MIRRORD_BINARIES_DIR_PATH_BUF.as_path()),
             },
             log_info,
         ) {

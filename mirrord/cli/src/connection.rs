@@ -3,6 +3,8 @@ use std::{collections::HashSet, time::Duration};
 use mirrord_analytics::Reporter;
 use mirrord_config::{
     LayerConfig,
+    agent::AgentFileConfig,
+    config::MirrordConfig,
     target::{Target, TargetDisplay},
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
@@ -18,6 +20,7 @@ use mirrord_operator::{
 use mirrord_progress::{
     IdeAction, IdeMessage, NotificationLevel, Progress,
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
+    utm_medium,
 };
 use mirrord_protocol_io::{Client, Connection};
 use tracing::Level;
@@ -25,6 +28,32 @@ use tracing::Level;
 use crate::{CliError, CliResult, MirrordCi, ci::error::CiError};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
+
+/// Sends a "Sign up for mirrord for Teams" upgrade CTA to the IDE via the [`IdeMessage`] protocol.
+///
+/// Only has an effect when running inside an IDE (`MIRRORD_PROGRESS_MODE=json`).
+/// In CLI mode, [`Progress::ide`] is a no-op.
+fn send_upgrade_ide_message<P: Progress>(
+    progress: &P,
+    text: &str,
+    utm_source: &str,
+) -> CliResult<()> {
+    let mut actions = HashSet::new();
+    actions.insert(IdeAction::Link {
+        label: "Sign up for mirrord for Teams".to_owned(),
+        link: format!(
+            "https://app.metalbear.com/?utm_source={utm_source}&utm_medium={}",
+            utm_medium()
+        ),
+    });
+    progress.ide(serde_json::to_value(IdeMessage {
+        id: "upgrade_cta".to_owned(),
+        level: NotificationLevel::Warning,
+        text: text.to_owned(),
+        actions,
+    })?);
+    Ok(())
+}
 
 /// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
 ///    with the target using the mirrord-operator.
@@ -51,6 +80,11 @@ where
     let api = match OperatorApi::try_new(layer_config, analytics, progress).await? {
         Some(api) => api,
         None if layer_config.operator == Some(true) => {
+            send_upgrade_ide_message(
+                progress,
+                "mirrord operator was not found in the cluster.",
+                "operatornotinstalled",
+            )?;
             return Err(CliError::OperatorNotInstalled);
         }
         None => {
@@ -66,6 +100,11 @@ where
             license_subtask.failure(Some("operator license expired"));
 
             if layer_config.operator == Some(true) {
+                send_upgrade_ide_message(
+                    progress,
+                    "mirrord operator license expired.",
+                    "licenseexpired",
+                )?;
                 return Err(error.into());
             } else {
                 operator_subtask.failure(Some("proceeding without operator"));
@@ -167,6 +206,16 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     if let Some(connection) =
         try_connect_using_operator(config, progress, analytics, branch_name, mirrord_for_ci).await?
     {
+        if config.agent
+            != AgentFileConfig::default()
+                .generate_config(&mut Default::default())
+                .expect("BUG: Default agent config should always work!")
+        {
+            progress.warning(
+                "Agent configuration is ignored when using the mirrord operator. \
+                 Agent configuration is managed by the cluster admin.",
+            );
+        }
         return Ok((
             AgentConnectInfo::Operator(connection.session),
             connection.conn,
@@ -211,7 +260,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
                 CliError::friendlier_error_or_else(error, CliError::AgentConnectionFailed)
             })?,
     )
-    .await?;
+    .await;
 
     Ok((AgentConnectInfo::DirectKubernetes(agent_connect_info), conn))
 }
@@ -223,6 +272,14 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
     if let Some(target) = config.target.path.as_ref()
         && Target::requires_operator(target)
     {
+        send_upgrade_ide_message(
+            progress,
+            &format!(
+                "Target type {} requires the mirrord operator, which is part of mirrord for Teams.",
+                target.type_()
+            ),
+            "requiresoperator",
+        )?;
         return Err(CliError::FeatureRequiresOperatorError(format!(
             "target type {}",
             target.type_()
@@ -230,6 +287,11 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
     }
 
     if config.feature.copy_target.enabled {
+        send_upgrade_ide_message(
+            progress,
+            "copy_target requires the mirrord operator, which is part of mirrord for Teams.",
+            "requiresoperator",
+        )?;
         return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
     }
 
@@ -260,6 +322,11 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
         (false, true) => show_http_filter_warning(progress)?,
         _ => (),
     };
+
+    config.experimental.non_blocking_tcp_connect =
+        config.experimental.non_blocking_tcp_connect.or(Some(true));
+
+    config.experimental.sip_utils = config.experimental.sip_utils.or(Some(true));
 
     Ok(())
 }

@@ -11,14 +11,12 @@ workspace = true
 doctest = false
 
 [dependencies]
-aws-config = { version = "1.5", features = [
-    "behavior-version-latest",
-], optional = true }
-aws-credential-types = "1.2"
-aws-sdk-sqs = { version = "1.39", optional = true }
-aws-types = "1.3"
-json-patch = "4.0"
-jsonptr = "0.7"
+aws-config = { workspace = true, optional = true }
+aws-credential-types.workspace = true
+aws-sdk-sqs = { workspace = true, optional = true }
+aws-types.workspace = true
+json-patch.workspace = true
+jsonptr.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
 reqwest.workspace = true
@@ -47,8 +45,8 @@ rustls.workspace = true
 rstest.workspace = true
 mirrord-kube = { path = "../mirrord/kube" }
 
-futures-util = "0.3"
-wsl = "0.1"
+futures-util.workspace = true
+wsl.workspace = true
 chrono.workspace = true
 tempfile.workspace = true
 tokio-tungstenite.workspace = true

@@ -18,7 +18,7 @@ use crate::utils::{
 /// (it's always part of the target pod status).
 #[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(240))]
 #[cfg_attr(not(feature = "ephemeral"), ignore)]
 async fn agent_container_exits(

@@ -9,7 +9,7 @@ use crate::config::source::MirrordConfigSource;
 
 /// Container runtimes supported by mirrord.
 #[derive(
-    Clone, Copy, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default, ValueEnum,
+    Clone, Copy, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default, ValueEnum, Hash,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ContainerRuntime {
@@ -101,7 +101,7 @@ pub struct ContainerConfig {
     /// one bound as host.
     ///
     /// - If you're running inside WSL, and encountering problems, try setting
-    ///   `external_proxy.host_ip` T `0.0.0.0`, and this to the internal container runtime address
+    ///   `external_proxy.host_ip` to `0.0.0.0`, and this to the internal container runtime address
     ///   (for docker, this  would be what `host.docker.internal` resolved to, which by default is
     ///   `192.168.65.254`). You can find this ip by resolving it from inside a running container,
     ///   e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`

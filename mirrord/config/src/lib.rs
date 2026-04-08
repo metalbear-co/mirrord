@@ -64,9 +64,15 @@ use crate::{
 /// Environment variable we use to pass the internal proxy address to the layer.
 pub const MIRRORD_LAYER_INTPROXY_ADDR: &str = "MIRRORD_LAYER_INTPROXY_ADDR";
 
+/// Environment variable we use to pass an already-running internal proxy address to the layer
+/// during exec-based tests.
+pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";
+
 /// Environment variable to indicate towards layer to wait for debugger.
 pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGGER";
 
+/// # Getting Started
+///
 /// mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
 ///
@@ -80,6 +86,8 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 /// To use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag.
 /// Or if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file
 /// or use the UI.
+///
+/// ## Examples
 ///
 /// To help you get started, here are examples of a basic configuration file, and a complete
 /// configuration file containing all fields.
@@ -161,7 +169,7 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 ///       "incoming": {
 ///         "mode": "steal",
 ///         "http_filter": {
-///           "header_filter": "host: api\\..+"
+///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -265,6 +273,17 @@ pub struct LayerConfig {
     /// of failure.
     #[config(env = "MIRRORD_OPERATOR_ENABLE")]
     pub operator: Option<bool>,
+
+    /// ## api {#root-api}
+    ///
+    /// Enables the local session monitor API server.
+    ///
+    /// When enabled, mirrord exposes a Unix socket at `~/.mirrord/sessions/<session-id>.sock`
+    /// with HTTP endpoints for observing session activity in real time.
+    ///
+    /// Defaults to `true`.
+    #[config(default = true, env = "MIRRORD_API")]
+    pub api: bool,
 
     /// ## profile {#root-profile}
     ///
@@ -403,7 +422,8 @@ pub struct LayerConfig {
     /// An identifier for a mirrord session.
     ///
     /// This key can be referenced in your configuration using the `{{ key }}` template variable.
-    /// For example, you can use it in HTTP filters: `"header_filter": "x-session: key-{{ key }}"`.
+    /// The recommended use is to propagate it in W3C `baggage` or `tracestate`, then filter on
+    /// `mirrord-session={{ key }}` in `feature.network.incoming.http_filter`.
     ///
     /// Priority (highest to lowest):
     /// 1. CLI argument: `mirrord exec --key my-key`
@@ -417,7 +437,7 @@ pub struct LayerConfig {
     ///     "network": {
     ///       "incoming": {
     ///         "http_filter": {
-    ///           "header_filter": "x-session: key-{{ key }}"
+    ///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
     ///         }
     ///       }
     ///     }
@@ -830,6 +850,81 @@ impl LayerConfig {
 
         Ok(())
     }
+
+    /// Verifies that there are no ignored/unused settings for a preview environment.
+    ///
+    /// This is used to notify the user about settings that don't make sense in the context of
+    /// preview environments, since it's already running in the cluster.
+    pub fn verify_for_preview_env(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
+        let ignored = |field: &str| {
+            format!("`{field}` is ignored in preview environments and will not be used.")
+        };
+
+        let default =
+            Self::resolve(&mut ConfigContext::default()).expect("default config must be valid");
+
+        // feature.env - partially supported
+
+        if self.feature.env.unset != default.feature.env.unset {
+            context.add_warning(ignored("feature.env.unset"));
+        }
+
+        if self.feature.env.mapping != default.feature.env.mapping {
+            context.add_warning(ignored("feature.env.mapping"));
+        }
+
+        // feature.network.incoming - partially supported
+
+        if self.feature.network.incoming.listen_ports
+            != default.feature.network.incoming.listen_ports
+        {
+            context.add_warning(ignored("feature.network.incoming.listen_ports"));
+        }
+
+        if self.feature.network.incoming.port_mapping
+            != default.feature.network.incoming.port_mapping
+        {
+            context.add_warning(ignored("feature.network.incoming.port_mapping"));
+        }
+
+        if self.feature.network.incoming.ignore_localhost
+            != default.feature.network.incoming.ignore_localhost
+        {
+            context.add_warning(ignored("feature.network.incoming.ignore_localhost"));
+        }
+
+        // feature.fs - unsupported
+
+        if self.feature.fs != default.feature.fs {
+            context.add_warning(ignored("feature.fs"));
+        }
+
+        // feature.network.outgoing - unsupported
+
+        if self.feature.network.outgoing != default.feature.network.outgoing {
+            context.add_warning(ignored("feature.network.outgoing"));
+        }
+
+        // feature.network.dns - unsupported
+
+        if self.feature.network.dns != default.feature.network.dns {
+            context.add_warning(ignored("feature.network.dns"));
+        }
+
+        // feature.magic - unsupported
+
+        if self.feature.magic != default.feature.magic {
+            context.add_warning(ignored("feature.magic"));
+        }
+
+        // feature.hostname - unsupported
+
+        if self.feature.hostname != default.feature.hostname {
+            context.add_warning(ignored("feature.hostname"));
+        }
+
+        self.verify(context)
+    }
 }
 
 impl CollectAnalytics for &LayerConfig {
@@ -859,7 +954,7 @@ impl LayerFileConfig {
     /// To solve this, we resolve the key *before* parsing the full config:
     /// 1. Check if CLI provided a key via `MIRRORD_ENV_KEY` in the context
     /// 2. Otherwise, extract just the `key` field from the raw file (no template rendering)
-    /// 3. Otherwise, auto-generate a UUID (with [`EnvKey::AUTOGENERATED_MARKER`] prefix)
+    /// 3. Otherwise, auto-generate a random key (with [`EnvKey::AUTOGENERATED_MARKER`] prefix)
     ///
     /// The resolved key is then:
     /// - Passed to Tera for template rendering
@@ -939,7 +1034,7 @@ mod tests {
     };
 
     use rstest::*;
-    use schemars::schema::RootSchema;
+    use schemars::Schema;
     use tempfile::NamedTempFile;
 
     use super::*;
@@ -1253,6 +1348,7 @@ mod tests {
             ci: None,
             traceparent: None,
             baggage: None,
+            api: None,
         };
 
         assert_eq!(config, expect);
@@ -1277,10 +1373,10 @@ mod tests {
 
     /// <!--${internal}-->
     /// Writes the config schema to a file (uploaded to the schema store).
-    fn write_schema_to_file(schema: &RootSchema) -> File {
+    fn write_schema_to_file(schema: &Schema) -> File {
         println!("Writing schema to file.");
 
-        let content = serde_json::to_string_pretty(&schema).expect("Failed generating schema!");
+        let content = serde_json::to_string_pretty(schema).expect("Failed generating schema!");
         let mut file = OpenOptions::new()
             .create(true)
             .write(true)

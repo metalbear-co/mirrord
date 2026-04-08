@@ -16,13 +16,21 @@ use clap_complete::Shell;
 pub use mirrord_config::container::ContainerRuntime;
 use mirrord_config::{
     LayerConfig, env_key,
-    feature::env::{
-        MIRRORD_OVERRIDE_ENV_FILE_ENV, MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV,
-        MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV,
+    feature::{
+        env::{
+            MIRRORD_OVERRIDE_ENV_FILE_ENV, MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV,
+            MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV,
+        },
+        preview::PreviewTtlMins,
     },
     target::TargetType,
 };
 use thiserror::Error;
+
+use crate::config::ci::CiArgs;
+
+pub(crate) mod ci;
+
 /// Macro to automatically handle Windows unsupported commands.
 /// Usage: `windows_unsupported!(args, "command_name", { command_execution })`
 #[macro_export]
@@ -214,6 +222,14 @@ pub(super) enum Commands {
     #[cfg(windows)]
     #[command(hide = true)]
     Attach(AttachArgs),
+
+    /// Launch the session monitor UI.
+    ///
+    /// Watches active mirrord sessions and displays a web dashboard showing
+    /// real-time events (file operations, DNS queries, HTTP requests, etc.)
+    /// from all running mirrord sessions.
+    #[cfg(unix)]
+    Ui(UiArgs),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -458,31 +474,6 @@ pub(super) struct DumpArgs {
     /// Can be specified multiple times.
     #[arg(short = 'p', long)]
     pub ports: Vec<u16>,
-}
-
-// `mirrord ci start` command
-#[derive(Args, Debug)]
-pub(super) struct CiStartArgs {
-    /// Args passed down to mirrord itself (similar to `mirrord exec`).
-    #[clap(flatten)]
-    pub exec_args: Box<ExecArgs>,
-
-    /// Runs mirrord ci in the foreground (the default behaviour is to run it as a background
-    /// task).
-    #[arg(long)]
-    pub foreground: bool,
-
-    /// CI environment, e.g. "staging", "production", "testing", etc.
-    #[arg(long)]
-    pub environment: Option<String>,
-
-    /// CI pipeline or job name, e.g. "e2e-tests".
-    #[arg(long)]
-    pub pipeline: Option<String>,
-
-    /// CI pipeline trigger, e.g. "push", "pull request", "manual", etc.
-    #[arg(long)]
-    pub triggered_by: Option<String>,
 }
 
 /// Target-related parameters, present in more than one command.
@@ -1062,34 +1053,6 @@ pub(super) struct VpnArgs {
 }
 
 #[derive(Args, Debug)]
-pub(super) struct CiArgs {
-    /// Command to use with `mirrord ci`.
-    #[command(subcommand)]
-    pub command: CiCommand,
-}
-
-/// `mirrord ci` commands.
-#[derive(Subcommand, Debug)]
-pub(super) enum CiCommand {
-    /// Generates a `CiApiKey` that should be set in the ci's environment variable as
-    /// `MIRRORD_CI_API_KEY`.
-    ApiKey {
-        /// Specify config file to use
-        #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
-        config_file: Option<PathBuf>,
-    },
-    /// Starts mirrord for ci. Takes the same arguments as `mirrord exec` plus ci specific options.
-    ///
-    /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
-    Start(Box<CiStartArgs>),
-
-    /// Stops mirrord for ci.
-    ///
-    /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
-    Stop,
-}
-
-#[derive(Args, Debug)]
 pub(super) struct DbBranchesArgs {
     /// Specify the namespace to operate on
     #[arg(short = 'n', long = "namespace")]
@@ -1116,6 +1079,8 @@ pub(super) enum DbBranchesCommand {
         #[arg()]
         names: Vec<String>,
     },
+    /// Show active portforward connections for database branches
+    Connections,
     /// Destroy database branches
     Destroy {
         /// Destroy all branches
@@ -1275,14 +1240,23 @@ pub(super) struct PreviewStartArgs {
     /// TTL in minutes for the preview session.
     ///
     /// The operator will terminate the session after this time elapses.
+    ///
+    /// Set to `"infinite"` to disable TTL.
     #[arg(long)]
-    pub ttl: Option<u64>,
+    pub ttl: Option<PreviewTtlMins>,
 
     /// How long (in seconds) to wait for the preview to become ready.
     ///
     /// If the session hasn't reached `Ready` within this time, the CLI deletes it.
     #[arg(long)]
     pub timeout: Option<u64>,
+
+    /// Replace an existing preview session with the same key and target.
+    ///
+    /// Without this flag, the CLI will refuse to create a session if one already exists
+    /// for the same key+target combination.
+    #[arg(long)]
+    pub force: bool,
 }
 
 impl PreviewStartArgs {
@@ -1417,6 +1391,15 @@ impl PreviewStopArgs {
 pub(super) struct AttachArgs {
     /// PID of the target process to attach to.
     pub pid: u32,
+}
+
+/// Arguments for the `mirrord ui` command.
+#[cfg(unix)]
+#[derive(Args, Debug)]
+pub struct UiArgs {
+    /// Port to serve the UI on.
+    #[arg(short = 'p', long, default_value_t = 59281)]
+    pub port: u16,
 }
 
 #[cfg(test)]

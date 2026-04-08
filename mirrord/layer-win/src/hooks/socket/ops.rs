@@ -1,9 +1,10 @@
 use std::{net::SocketAddr, sync::OnceLock};
 
 use mirrord_layer_lib::{
-    error::ConnectError,
+    detour::Detour,
+    error::{ConnectError, HookResult},
     socket::{
-        HookResult, SocketAddrExt,
+        SocketAddrExt,
         ops::{ConnectResult, connect_common},
     },
 };
@@ -202,7 +203,7 @@ impl TryFrom<(*mut u8, u32)> for WSABufferData {
 }
 
 /// Log connection result and return it
-pub fn log_connection_result<T>(result: T, function_name: &str, addr: SockAddr)
+pub fn log_connection_result<T>(result: T, function_name: &str, addr: &SockAddr)
 where
     T: std::fmt::Display + std::cmp::PartialEq<i32>,
 {
@@ -214,10 +215,8 @@ where
             socket_address
         );
     } else {
-        tracing::error!(
-            "{} -> failed to connect to address: {:?}, error code: {}, wsa_getlasterror: {}",
-            function_name,
-            addr,
+        tracing::debug!(
+            "{function_name} -> connect to {socket_address:?} returned retval: {}, wsagle: {}",
             result,
             unsafe { WSAGetLastError() }
         );
@@ -259,5 +258,10 @@ where
     };
 
     // Try to connect through the mirrord proxy using layer-lib integration
-    connect_common(socket, SockAddr::from(remote_addr), connect_fn)
+    // Temporary workaround until all socket ops are unified - WIN-85
+    match connect_common(socket, SockAddr::from(remote_addr), connect_fn) {
+        Detour::Success(res) => Ok(res),
+        Detour::Bypass(_) => Err(ConnectError::Fallback.into()),
+        Detour::Error(err) => Err(err),
+    }
 }
