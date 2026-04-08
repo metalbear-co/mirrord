@@ -177,7 +177,7 @@ async fn start_container<P: Progress>(
     ];
 
     // Add any custom Redis args (passed as CMD to the container)
-    container_args.extend(config.options.args.iter().map(std::ops::Deref::deref));
+    container_args.extend(config.options.args.iter().map(String::as_str));
 
     let output = Command::new(runtime_cmd)
         .args(&container_args)
