@@ -18,7 +18,7 @@ use crate::{
     api::{
         container::{
             ContainerParams, ContainerVariant,
-            util::{base_command_line, get_capabilities, wait_for_agent_startup},
+            util::{agent_base_args, get_capabilities, wait_for_agent_startup},
         },
         kubernetes::AgentKubernetesConnectInfo,
         runtime::RuntimeData,
@@ -166,7 +166,7 @@ where
 
 pub struct EphemeralTargetedVariant<'c> {
     agent: &'c AgentConfig,
-    command_line: Vec<String>,
+    args: Vec<String>,
     params: &'c ContainerParams,
     runtime_data: &'c RuntimeData,
 }
@@ -177,14 +177,14 @@ impl<'c> EphemeralTargetedVariant<'c> {
         params: &'c ContainerParams,
         runtime_data: &'c RuntimeData,
     ) -> Self {
-        let mut command_line = base_command_line(agent, params);
+        let mut args = agent_base_args(agent, params);
 
-        command_line.extend(["ephemeral".to_string()]);
+        args.extend(["ephemeral".to_string()]);
 
         EphemeralTargetedVariant {
             agent,
             params,
-            command_line,
+            args,
             runtime_data,
         }
     }
@@ -206,7 +206,7 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
             agent,
             params,
             runtime_data,
-            command_line,
+            args,
         } = self;
         let mut env = agent_env(agent, params);
 
@@ -250,7 +250,8 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
             image_pull_policy: Some(agent.image_pull_policy.clone()),
             target_container_name: Some(runtime_data.container_name.clone()),
             env: Some(env),
-            command: Some(command_line.clone()),
+            command: Some(vec!["./mirrord-agent".into()]),
+            args: Some(args.clone()),
             ..Default::default()
         }
     }

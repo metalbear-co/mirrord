@@ -96,23 +96,28 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
     env
 }
 
-pub(super) fn base_command_line(agent: &AgentConfig, params: &ContainerParams) -> Vec<String> {
-    let mut command_line = vec![
-        "./mirrord-agent".to_owned(),
-        "-l".to_owned(),
-        params.port.to_string(),
-    ];
+/// Static [`Container::command`](k8s_openapi::api::core::v1::Container::command) to use with agent
+/// containers.
+///
+/// Keeping the command static enables matching the agent pods with GKE Autopilot [WorkloadAllowlist](https://docs.cloud.google.com/kubernetes-engine/docs/reference/crds/workloadallowlist).
+/// Any dynamic configuration should be passed in
+/// [`Container::args`](k8s_openapi::api::core::v1::Container::args) or
+/// [`Container::env`](k8s_openapi::api::core::v1::Container::env).
+pub(super) const AGENT_COMMAND: &str = "./mirrord-agent";
+
+pub(super) fn agent_base_args(agent: &AgentConfig, params: &ContainerParams) -> Vec<String> {
+    let mut args = vec!["-l".to_owned(), params.port.to_string()];
     if let Some(timeout) = agent.communication_timeout {
-        command_line.push("-t".to_owned());
-        command_line.push(timeout.to_string());
+        args.push("-t".to_owned());
+        args.push(timeout.to_string());
     }
 
     #[cfg(debug_assertions)]
     if agent.test_error {
-        command_line.push("--test-error".to_owned());
+        args.push("--test-error".to_owned());
     }
 
-    command_line
+    args
 }
 
 /**
