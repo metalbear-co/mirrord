@@ -1,0 +1,25 @@
+name: Build mirrord CLI
+description: Build the mirrord CLI binary and upload as artifact
+
+inputs:
+  github-token:
+    description: GitHub token for setup-protoc
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+      with:
+        repo-token: ${{ inputs.github-token }}
+    - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+    - name: build mirrord CLI
+      shell: bash
+      run: cargo build --manifest-path=./Cargo.toml -p mirrord
+    - name: upload mirrord CLI
+      uses: actions/upload-artifact@v4
+      with:
+        name: mirrord-artifacts
+        path: |
+          target/debug/mirrord
+        if-no-files-found: error

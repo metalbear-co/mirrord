@@ -1,0 +1,14 @@
+name: Build Agent Image
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build-agent-image:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-agent-image

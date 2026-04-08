@@ -1,0 +1,47 @@
+name: Test Windows
+
+on:
+  workflow_call:
+    inputs:
+      rust_toolchain:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  MIRRORD_TELEMETRY: false
+
+jobs:
+  windows-tests:
+    runs-on: windows-latest
+    env:
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord.exe
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/mirrord_layer_win.dll
+    steps:
+      - uses: actions/checkout@v4 # Checkout the mirrord repo.
+      # the setup rust toolchain action ignores the input if file exists.. so remove it
+      - run: Remove-Item rust-toolchain.toml
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          components: rustfmt, clippy
+          target: x86_64-pc-windows-msvc
+          toolchain: ${{ inputs.rust_toolchain }}
+
+      - run: |
+          cd mirrord/layer-tests/tests/apps/outgoing
+          cargo build
+      - name: build layer
+        run: cargo build -p mirrord-layer-win
+      - name: build mirrord
+        run: cargo build -p mirrord
+      - name: mirrord layer integration tests
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test -p mirrord-layer-tests --no-default-features
+      - name: run UT
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test -p mirrord -p mirrord-layer-win

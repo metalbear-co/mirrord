@@ -1,0 +1,150 @@
+name: Test macOS
+
+on:
+  workflow_call:
+    inputs:
+      rust_toolchain:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  MIRRORD_TELEMETRY: false
+
+jobs:
+  macos-tests:
+    runs-on: macos-latest
+    env:
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/universal-apple-darwin/debug/libmirrord_layer.dylib
+      MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/aarch64-apple-darwin/debug/libmirrord_layer.dylib
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord
+    steps:
+      - uses: actions/checkout@v4 # Checkout the mirrord repo.
+      # the setup rust toolchain action ignores the input if file exists.. so remove it
+      - run: rm rust-toolchain.toml
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          components: rustfmt, clippy
+          target: x86_64-apple-darwin, aarch64-apple-darwin
+          toolchain: ${{ inputs.rust_toolchain }}
+      - name: Install Protoc
+        uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: verify SIP status
+        run: csrutil status
+      - name: build universal layer files
+        run: cargo xtask build-layer --platform macos-universal
+      - name: build cli
+        run: cargo build -p mirrord
+      - name: unit tests
+        run: cargo test -p mirrord-sip -p mirrord-intproxy
+      # prepare stuff needed for integration tests
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue1123
+          rustc issue1123.rs --out-dir target
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue1054
+          rustc issue1054.rs --out-dir target
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue1458
+          rustc issue1458.rs --out-dir target
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue1458portnot53
+          rustc issue1458portnot53.rs --out-dir target
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue2058
+          rustc issue2058.rs --out-dir target
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: tests/go-e2e/go.sum
+      - run: |
+          go version
+      # don't use "cache" for other Gos since it will try to overwrite and have bad results.
+      - run: | # Build Go test apps.
+          cd mirrord/layer-tests/tests
+          ../../../scripts/build_go_apps.sh 24
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          cd mirrord/layer-tests/tests
+          ../../../scripts/build_go_apps.sh 25
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          cd mirrord/layer-tests/tests
+          ../../../scripts/build_go_apps.sh 26
+      - run: |
+          cd mirrord/layer-tests/tests/apps/fileops
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/outgoing
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/recv_from
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/dns_resolve
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue1776
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue1776portnot53
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue1899
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue2001
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue2438
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue3248
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/rebind0
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/dup_listen
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/double_listen
+          cargo build
+      - run: ./scripts/build_c_apps.sh
+      - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
+        with:
+          python-version: "3.14"
+      - name: Display Pip version
+        run: pip --version
+      - run: python3 -m pip install flask fastapi uvicorn[standard] # For http mirroring test with Flask.
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 24
+      - run: npm install express # For http mirroring test with node.
+      - run: npm install portfinder # For a node specific test
+      - name: layer integration tests
+        run: cargo test -p mirrord-layer-tests --no-default-features
+      - name: layer unit tests
+        run: cargo test -p mirrord-layer
+      - name: save intproxy logs
+        continue-on-error: true
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: intproxy_logs_macos
+          path: /tmp/intproxy_logs/macos

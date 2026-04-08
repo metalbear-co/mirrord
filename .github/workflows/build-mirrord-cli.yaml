@@ -1,0 +1,16 @@
+name: Build mirrord CLI
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build-mirrord-cli:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-mirrord-cli
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}

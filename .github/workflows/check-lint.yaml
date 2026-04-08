@@ -1,0 +1,58 @@
+name: Check Lint
+
+on:
+  workflow_call:
+    inputs:
+      rust_toolchain:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  MIRRORD_TELEMETRY: false
+
+jobs:
+  lint:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{matrix.os}}
+    steps:
+      - uses: actions/checkout@v4
+      # Otherwise the arguments to the setup-rust-toolchain action are ignored.
+      - run: rm rust-toolchain.toml
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          toolchain: ${{ inputs.rust_toolchain }}
+          components: rustfmt, clippy
+          target: ${{matrix.target}}
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: cargo fmt (run only on one platform)
+        if: ${{matrix.target == 'x86_64-unknown-linux-gnu'}}
+        run: cargo fmt --all -- --check
+
+        # Check whether `mirrord-operator` crate compiles the way it's used in the operator
+      - if: ${{matrix.target == 'x86_64-unknown-linux-gnu'}}
+        run: cargo check -p mirrord-operator --features crd --target ${{matrix.target}}
+
+        # Wclippy is quoted for Windows T_T. They don't like ::
+      - if: ${{matrix.os == 'macos-latest'}}
+        run: touch /tmp/not-really-layer.dylib
+      - run: cargo clippy --workspace --lib --bins --all-features --target ${{matrix.target}} --tests -- "-Wclippy::indexing_slicing" -D warnings
+        env:
+          MIRRORD_LAYER_FILE_MACOS_ARM64: /tmp/not-really-layer.dylib

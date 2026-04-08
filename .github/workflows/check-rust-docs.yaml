@@ -1,0 +1,31 @@
+name: Check Rust Docs
+
+on:
+  workflow_call:
+    inputs:
+      rust_toolchain:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  # enables the creation of a workspace index.html page.
+  RUSTDOCFLAGS: "--enable-index-page -Zunstable-options -Dwarnings"
+
+jobs:
+  rust-docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          toolchain: ${{ inputs.rust_toolchain }}
+          cache: false
+      # TODO(alex): `no-deps` here due to an issue in `futures-util`.
+      - run: cargo doc --document-private-items --no-deps

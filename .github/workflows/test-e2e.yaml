@@ -1,0 +1,68 @@
+name: Test E2E
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  MIRRORD_TELEMETRY: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        container-runtime: ["docker", "containerd"]
+    name: e2e
+    env:
+      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/ci/e2e-setup-action@main
+        with:
+          container-runtime: ${{matrix.container-runtime}}
+      - name: download image
+        uses: actions/download-artifact@v4
+        with:
+          name: test
+          path: /tmp
+      - run: minikube image load /tmp/test.tar
+      # run the cli tests only once, i.e. docker runtime only
+      - name: Run cli E2E tests
+        if: ${{ matrix.container-runtime == 'docker' }}
+        run: |
+          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features cli -- --test-threads=6
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: cargo build --manifest-path=./Cargo.toml -p mirrord --features wizard
+      # This needs improving to prevent flakiness! e.g. examining output for progress messages
+      # `sleep` is used here to give the wizard enough time to start before curl
+      - run: |
+          ./target/debug/mirrord wizard &
+          sleep 2 && curl localhost:3000
+      # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
+      - name: Run targetless E2E test
+        run: |
+          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features targetless -- --test-threads=6 targetless
+      # prepare argo rollouts
+      - run: kubectl create namespace argo-rollouts
+      - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+      - name: Run all E2E tests
+        run: |
+          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features job -- --test-threads=6
+          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features ephemeral -- --test-threads=6
+      - name: Collect logs
+        if: ${{ failure() }}
+        run: |
+          find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \;
+          kubectl get all
+          kubectl describe pods
+          docker exec minikube find /var/log/pods -print -exec cat {} \;

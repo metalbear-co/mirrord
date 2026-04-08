@@ -1,0 +1,23 @@
+name: Check Towncrier
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  towncrier:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+      - run: uv python install
+      - run: uv venv
+      - name: install towncrier
+        run: uv pip install towncrier==25.08.0
+      - name: verify newsfragment exist
+        run: uv run towncrier check

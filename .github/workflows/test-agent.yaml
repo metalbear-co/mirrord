@@ -1,0 +1,31 @@
+name: Test Agent
+
+on:
+  workflow_call:
+    inputs:
+      rust_toolchain:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  MIRRORD_TELEMETRY: false
+
+jobs:
+  test-agent:
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21
+    steps:
+      - uses: actions/checkout@v4
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      # the setup rust toolchain action ignores the input if file exists.. so remove it
+      - run: rm rust-toolchain.toml
+      - run: rustup default ${{ inputs.rust_toolchain }}
+      - name: agent UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent -p mirrord-agent-env -p mirrord-agent-iptables
