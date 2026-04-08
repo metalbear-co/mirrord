@@ -190,14 +190,34 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
                 };
 
                 let (host, port) = match (host, port) {
-                    (ParamSource::Variable(host), ParamSource::Variable(port))
-                    | (ParamSource::Env { variable: host, .. }, ParamSource::Variable(port))
-                    | (ParamSource::Variable(host), ParamSource::Env { variable: port, .. })
-                    | (
-                        ParamSource::Env { variable: host, .. },
-                        ParamSource::Env { variable: port, .. },
+                    (ParamSource::Variable(host), ParamSource::Variable(port)) => {
+                        (host.clone(), port.clone())
+                    }
+                    (
+                        ParamSource::Env {
+                            variable: Some(host),
+                            ..
+                        },
+                        ParamSource::Variable(port),
                     ) => (host.clone(), port.clone()),
-                    (ParamSource::Secret { .. }, _) | (_, ParamSource::Secret { .. }) => continue,
+                    (
+                        ParamSource::Variable(host),
+                        ParamSource::Env {
+                            variable: Some(port),
+                            ..
+                        },
+                    ) => (host.clone(), port.clone()),
+                    (
+                        ParamSource::Env {
+                            variable: Some(host),
+                            ..
+                        },
+                        ParamSource::Env {
+                            variable: Some(port),
+                            ..
+                        },
+                    ) => (host.clone(), port.clone()),
+                    _ => continue,
                 };
 
                 let user = user

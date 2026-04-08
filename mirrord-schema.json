@@ -2877,7 +2877,7 @@
       ]
     },
     "ParamSource": {
-      "description": "<!--${internal}-->\nA connection parameter source: a plain env var name (string), an env var with a fallback\nvalue (object with `variable` and optional `value`), or a Kubernetes Secret reference.\n\nAs a string: `\"DB_HOST\"` - resolved using the parent `type` field (env or env_from).\n\nAs an object with fallback: `{ \"variable\": \"DB_HOST\", \"value\": \"myhost.com\" }` - tries the\nenv var first, falls back to the literal value when the var is not on the target pod.\n\nAs a Secret ref: `{ \"secret\": \"my-secret\", \"key\": \"password\" }` - read directly from a\nKubernetes Secret.",
+      "description": "<!--${internal}-->\nA connection parameter source: a plain env var name (string), an env var with a fallback\nvalue (object with `variable` and optional `value`), or a Kubernetes Secret reference.\n\nAs a string: `\"DB_HOST\"` - resolved using the parent `type` field (env or env_from).\n\nAs an object with fallback: `{ \"variable\": \"DB_HOST\", \"value\": \"myhost.com\" }` - tries the\nenv var first, falls back to the literal value when the var is not on the target pod.\n\nAs a value-only object: `{ \"value\": \"myhost.com\" }` - provides the value directly without\nreferencing any env var on the target pod.\n\nAs a Secret ref: `{ \"secret\": \"my-secret\", \"key\": \"password\" }` - read directly from a\nKubernetes Secret.",
       "anyOf": [
         {
           "type": "string"
@@ -2892,12 +2892,12 @@
               ]
             },
             "variable": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
-          },
-          "required": [
-            "variable"
-          ]
+          }
         },
         {
           "type": "object",

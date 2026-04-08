@@ -115,7 +115,7 @@ impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
 
 impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
     fn from(config: &ConnectionParamsConfig) -> Self {
-        let wrap = |param: &Option<ParamSource>| -> Option<ConnectionSourceKind> {
+        let wrap = |param: &Option<ParamSource>, role: &str| -> Option<ConnectionSourceKind> {
             param.as_ref().map(|p| match p {
                 ParamSource::Variable(v) => match config.source_type.as_ref() {
                     Some(ConnectionSourceType::EnvFrom) => ConnectionSourceKind::EnvFrom {
@@ -128,17 +128,22 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
                         value: None,
                     },
                 },
-                ParamSource::Env { variable, value } => match config.source_type.as_ref() {
-                    Some(ConnectionSourceType::EnvFrom) => ConnectionSourceKind::EnvFrom {
-                        container: None,
-                        variable: variable.clone(),
-                    },
-                    _ => ConnectionSourceKind::Env {
-                        container: None,
-                        variable: variable.clone(),
-                        value: value.clone(),
-                    },
-                },
+                ParamSource::Env { variable, value } => {
+                    let var_name = variable
+                        .clone()
+                        .unwrap_or_else(|| format!("MIRRORD_DB_{}", role.to_uppercase()));
+                    match config.source_type.as_ref() {
+                        Some(ConnectionSourceType::EnvFrom) => ConnectionSourceKind::EnvFrom {
+                            container: None,
+                            variable: var_name,
+                        },
+                        _ => ConnectionSourceKind::Env {
+                            container: None,
+                            variable: var_name,
+                            value: value.clone(),
+                        },
+                    }
+                }
                 ParamSource::Secret { name, key } => ConnectionSourceKind::Secret {
                     name: name.clone(),
                     key: key.clone(),
@@ -146,11 +151,11 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
             })
         };
         Self {
-            host: wrap(&config.params.host),
-            port: wrap(&config.params.port),
-            user: wrap(&config.params.user),
-            password: wrap(&config.params.password),
-            database: wrap(&config.params.database),
+            host: wrap(&config.params.host, "host"),
+            port: wrap(&config.params.port, "port"),
+            user: wrap(&config.params.user, "user"),
+            password: wrap(&config.params.password, "password"),
+            database: wrap(&config.params.database, "database"),
         }
     }
 }

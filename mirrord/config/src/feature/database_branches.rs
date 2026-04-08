@@ -369,6 +369,9 @@ pub struct ConnectionParamsConfig {
 /// As an object with fallback: `{ "variable": "DB_HOST", "value": "myhost.com" }` - tries the
 /// env var first, falls back to the literal value when the var is not on the target pod.
 ///
+/// As a value-only object: `{ "value": "myhost.com" }` - provides the value directly without
+/// referencing any env var on the target pod.
+///
 /// As a Secret ref: `{ "secret": "my-secret", "key": "password" }` - read directly from a
 /// Kubernetes Secret.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
@@ -376,7 +379,8 @@ pub struct ConnectionParamsConfig {
 pub enum ParamSource {
     Variable(String),
     Env {
-        variable: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        variable: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         value: Option<String>,
     },
@@ -391,7 +395,7 @@ impl ParamSource {
     pub fn as_variable(&self) -> Option<&str> {
         match self {
             Self::Variable(v) => Some(v),
-            Self::Env { variable, .. } => Some(variable),
+            Self::Env { variable, .. } => variable.as_deref(),
             Self::Secret { .. } => None,
         }
     }
