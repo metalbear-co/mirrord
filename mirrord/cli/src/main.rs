@@ -291,6 +291,7 @@ use mirrord_config::{
     },
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
+use mirrord_operator::client::database_branches::resolve_branch_id;
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
@@ -769,7 +770,8 @@ async fn exec(
         }) {
         let port = redis_config.local.port;
         let redis_instance_id =
-            local_redis::resolve_instance_id(redis_config.id.as_deref(), config.key.as_str());
+            resolve_branch_id(&redis_config.id, config.key.as_str(), progress).to_string();
+        let redis_container_name = format!("mirrord-redis-{redis_instance_id}");
 
         // Get the override variable and build the appropriate connection string
         if let Some(variable) = redis_config.connection.override_variable() {
@@ -786,7 +788,7 @@ async fn exec(
         // Auto-configure: ignore localhost so traffic goes directly to local Redis
         config.feature.network.outgoing.ignore_localhost = true;
 
-        Some(local_redis::start(progress, &redis_config.local, redis_instance_id).await?)
+        Some(local_redis::start(progress, &redis_config.local, redis_container_name).await?)
     } else {
         None
     };

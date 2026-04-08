@@ -46,10 +46,6 @@ impl Drop for LocalRedis {
     }
 }
 
-pub fn resolve_instance_id(config_id: Option<&str>, session_key: &str) -> String {
-    format!("mirrord-redis-{}", config_id.unwrap_or(session_key))
-}
-
 /// Build a Redis connection URL from separated connection settings.
 ///
 /// Constructs a URL in the format: `redis://[user:pass@]host[:port][/db]`
