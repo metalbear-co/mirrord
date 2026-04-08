@@ -222,6 +222,15 @@ pub(super) enum Commands {
     /// from all running mirrord sessions.
     #[cfg(unix)]
     Ui(UiArgs),
+
+    /// Manage local mirrord sessions.
+    #[cfg(unix)]
+    #[command(visible_alias = "sessions")]
+    Session(Box<SessionArgs>),
+
+    /// Kill a local mirrord session.
+    #[cfg(unix)]
+    Kill(Box<SessionDeleteArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -1384,6 +1393,45 @@ pub struct UiArgs {
     /// Port to serve the UI on.
     #[arg(short = 'p', long, default_value_t = 59281)]
     pub port: u16,
+}
+
+/// Arguments for the `mirrord session` command.
+#[cfg(unix)]
+#[derive(Args, Debug)]
+pub struct SessionArgs {
+    /// Subcommand to use with `mirrord session`.
+    #[command(subcommand)]
+    pub command: Option<LocalSessionCommand>,
+}
+
+/// `mirrord session` subcommands.
+#[cfg(unix)]
+#[derive(Subcommand, Debug)]
+pub enum LocalSessionCommand {
+    /// List local mirrord sessions currently running on this machine.
+    #[command(visible_alias = "ls")]
+    List,
+
+    /// Kill a local mirrord session.
+    #[command(visible_alias = "kill")]
+    Delete(SessionDeleteArgs),
+}
+
+/// Arguments for deleting local mirrord sessions.
+#[cfg(unix)]
+#[derive(Args, Debug)]
+#[command(group(
+    ArgGroup::new("session-delete-target")
+        .args(["id", "key"])
+        .required(true)
+))]
+pub struct SessionDeleteArgs {
+    /// Session ID to kill.
+    pub id: Option<String>,
+
+    /// Kill all local sessions with this key.
+    #[arg(long, conflicts_with = "id")]
+    pub key: Option<String>,
 }
 
 #[cfg(test)]

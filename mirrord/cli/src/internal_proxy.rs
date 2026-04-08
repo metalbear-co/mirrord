@@ -44,6 +44,7 @@ use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
+    kube::kube_client_from_layer_config,
     user_data::UserData,
     util::create_listen_socket,
 };
@@ -58,7 +59,7 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 
 /// Starts the session monitor API server if enabled and on Unix, otherwise returns a
 /// disabled [`MonitorTx`].
-fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> MonitorTx {
+async fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> MonitorTx {
     #[cfg(not(unix))]
     {
         let _ = (config, is_operator);
@@ -84,13 +85,29 @@ fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> MonitorTx {
             .path
             .as_ref()
             .map(|t| t.to_string())
-            .unwrap_or_else(|| "unknown".to_owned());
+            .unwrap_or_else(|| "targetless".to_owned());
+
+        let namespace = match &config.target.namespace {
+            Some(namespace) => Some(namespace.clone()),
+            None => match kube_client_from_layer_config(config).await {
+                Ok(client) => Some(client.default_namespace().to_owned()),
+                Err(error) => {
+                    tracing::debug!(
+                        ?error,
+                        "Failed to resolve effective namespace from kube client"
+                    );
+                    None
+                }
+            },
+        };
 
         let config_value = serde_json::to_value(config).unwrap_or(serde_json::Value::Null);
 
         let session_info = mirrord_intproxy::session_monitor::api::SessionInfo {
             session_id: session_id.clone(),
+            key: Some(config.key.as_str().to_owned()),
             target: target_name,
+            namespace,
             started_at: humantime::format_rfc3339(std::time::SystemTime::now()).to_string(),
             mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
             is_operator,
@@ -218,7 +235,7 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    let monitor_tx = start_session_monitor(&config, is_operator);
+    let monitor_tx = start_session_monitor(&config, is_operator).await;
 
     IntProxy::new_with_connection(
         agent_conn,

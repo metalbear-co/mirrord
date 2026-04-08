@@ -24,16 +24,25 @@ use super::{MonitorEvent, MonitorTx};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessInfo {
     pub pid: u32,
+    #[serde(default)]
+    pub parent_pid: Option<u32>,
     pub process_name: String,
+    #[serde(default)]
+    pub cmdline: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionInfo {
     pub session_id: String,
+    #[serde(default)]
+    pub key: Option<String>,
     pub target: String,
+    #[serde(default)]
+    pub namespace: Option<String>,
     pub started_at: String,
     pub mirrord_version: String,
     pub is_operator: bool,
+    #[serde(default)]
     pub processes: Vec<ProcessInfo>,
     pub config: serde_json::Value,
 }
@@ -106,10 +115,20 @@ async fn update_processes_from_events(state: Arc<AppState>) {
 
     loop {
         match rx.recv().await {
-            Ok(MonitorEvent::LayerConnected { pid, process_name }) => {
+            Ok(MonitorEvent::LayerConnected {
+                pid,
+                parent_pid,
+                process_name,
+                cmdline,
+            }) => {
                 let mut info = state.session_info.write().await;
                 if !info.processes.iter().any(|p| p.pid == pid) {
-                    info.processes.push(ProcessInfo { pid, process_name });
+                    info.processes.push(ProcessInfo {
+                        pid,
+                        parent_pid,
+                        process_name,
+                        cmdline,
+                    });
                 }
             }
             Ok(MonitorEvent::LayerDisconnected { pid }) => {
@@ -180,4 +199,35 @@ pub async fn start_api_server(
     tracing::info!("Session monitor API server stopped");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SessionInfo;
+
+    #[test]
+    fn deserialize_session_info_from_older_payload() {
+        let json = serde_json::json!({
+            "session_id": "session-id",
+            "target": "pod/test",
+            "started_at": "2026-04-07T20:33:29Z",
+            "mirrord_version": "3.199.0",
+            "is_operator": false,
+            "processes": [
+                {
+                    "pid": 1234,
+                    "process_name": "bash"
+                }
+            ],
+            "config": {}
+        });
+
+        let session: SessionInfo = serde_json::from_value(json).unwrap();
+
+        assert_eq!(session.key, None);
+        assert_eq!(session.namespace, None);
+        assert_eq!(session.processes.len(), 1);
+        assert_eq!(session.processes[0].parent_pid, None);
+        assert_eq!(session.processes[0].cmdline, Vec::<String>::new());
+    }
 }
