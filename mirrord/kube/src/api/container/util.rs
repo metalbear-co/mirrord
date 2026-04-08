@@ -96,6 +96,13 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
     env
 }
 
+/// Static [`Container::command`](k8s_openapi::api::core::v1::Container::command) to use with agent
+/// containers.
+///
+/// Keeping the command static enables matching the agent pods with GKE Autopilot [WorkflowAllowlist](https://docs.cloud.google.com/kubernetes-engine/docs/reference/crds/workloadallowlist).
+/// Any dynamic configuration should be passed in
+/// [`Container::args`](k8s_openapi::api::core::v1::Container::args) or
+/// [`Container::env`](k8s_openapi::api::core::v1::Container::env).
 pub(super) const AGENT_COMMAND: &str = "./mirrord-agent";
 
 pub(super) fn agent_base_args(agent: &AgentConfig, params: &ContainerParams) -> Vec<String> {
