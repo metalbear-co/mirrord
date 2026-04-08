@@ -558,19 +558,22 @@ where
         };
 
         let body = serde_json::to_vec(&request_body)
-            .map_err(|e| OperatorApiError::Other(format!("failed to serialize request: {e}")))?;
+            .map_err(|e| OperatorApiError::CredentialSecretCreation(format!("serialize: {e}")))?;
 
         let request = http::Request::builder()
             .method("POST")
             .uri("/apis/operator.metalbear.co/v1/branchcredentials")
             .header("content-type", "application/json")
             .body(body)
-            .map_err(|e| OperatorApiError::Other(format!("failed to build request: {e}")))?;
-
-        let response: CreateCredentialSecretResponse =
-            self.client.request(request).await.map_err(|e| {
-                OperatorApiError::Other(format!("failed to create credential secret: {e}"))
+            .map_err(|e| {
+                OperatorApiError::CredentialSecretCreation(format!("build request: {e}"))
             })?;
+
+        let response: CreateCredentialSecretResponse = self
+            .client
+            .request(request)
+            .await
+            .map_err(|e| OperatorApiError::CredentialSecretCreation(e.to_string()))?;
 
         Ok(response.secret_name)
     }

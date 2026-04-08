@@ -113,8 +113,8 @@ pub enum OperatorApiError {
     #[error(transparent)]
     SerdeJson(#[from] serde_json::Error),
 
-    #[error("{0}")]
-    Other(String),
+    #[error("failed to create credential secret: {0}")]
+    CredentialSecretCreation(String),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;

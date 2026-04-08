@@ -190,11 +190,13 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
                 };
 
                 let (host, port) = match (host, port) {
-                    (ParamSource::Variable(host), ParamSource::Variable(port)) => {
-                        (host.clone(), port.clone())
-                    }
-                    // Listing the secret case explicitly so variants
-                    // added in the future are not silently discarded.
+                    (ParamSource::Variable(host), ParamSource::Variable(port))
+                    | (ParamSource::Env { variable: host, .. }, ParamSource::Variable(port))
+                    | (ParamSource::Variable(host), ParamSource::Env { variable: port, .. })
+                    | (
+                        ParamSource::Env { variable: host, .. },
+                        ParamSource::Env { variable: port, .. },
+                    ) => (host.clone(), port.clone()),
                     (ParamSource::Secret { .. }, _) | (_, ParamSource::Secret { .. }) => continue,
                 };
 
