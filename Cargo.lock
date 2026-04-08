@@ -4705,6 +4705,7 @@ dependencies = [
  "mirrord-progress",
  "mirrord-protocol",
  "mirrord-protocol-io",
+ "mirrord-session-monitor-client",
  "mirrord-sip",
  "mirrord-tls-util",
  "mirrord-vpn",
@@ -5269,6 +5270,16 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "mirrord-session-monitor-client"
+version = "3.199.0"
+dependencies = [
+ "home",
+ "mirrord-intproxy",
+ "reqwest 0.13.2",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

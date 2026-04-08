@@ -27,6 +27,9 @@ use axum::{
 use eventsource_stream::Eventsource;
 use futures::stream::StreamExt as _;
 use mirrord_intproxy::session_monitor::api::SessionInfo;
+use mirrord_session_monitor_client::{
+    SessionError, connect_to_session, session_socket_entries, sessions_dir,
+};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 #[cfg(not(debug_assertions))]
 use rust_embed::Embed;
@@ -35,11 +38,7 @@ use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info, warn};
 
-use crate::{
-    config::UiArgs,
-    error::CliError,
-    local_sessions::{SessionError, connect_to_session, session_socket_entries, sessions_dir},
-};
+use crate::{config::UiArgs, error::CliError};
 
 const MAX_EVENTS_PER_SESSION: usize = 500;
 
@@ -459,7 +458,8 @@ fn build_router(state: Arc<AppState>) -> Router {
 }
 
 pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
-    let sessions_dir = sessions_dir()?;
+    let sessions_dir = sessions_dir()
+        .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
 
     std::fs::create_dir_all(&sessions_dir)
         .map_err(|e| CliError::UiError(format!("failed to create sessions directory: {e}")))?;

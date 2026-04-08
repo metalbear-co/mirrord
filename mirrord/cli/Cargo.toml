@@ -28,6 +28,7 @@ mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-analytics = { path = "../analytics" }
 mirrord-intproxy = { path = "../intproxy" }
+mirrord-session-monitor-client = { path = "../session-monitor-client" }
 mirrord-vpn = { path = "../vpn" }
 mirrord-tls-util = { path = "../tls-util" }
 mirrord-protocol-io = { path = "../protocol-io" }

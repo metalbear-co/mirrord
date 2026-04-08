@@ -12,15 +12,15 @@ use mirrord_operator::{
     crd::{Session as OperatorStatusSession, SessionCrd},
 };
 use mirrord_progress::NullProgress;
+use mirrord_session_monitor_client::{
+    SessionConnection, connect_to_session, kill_session, session_socket_entries, sessions_dir,
+};
 use prettytable::{Table, row};
 use tracing::Level;
 
 use crate::{
     config::{LocalSessionCommand, SessionArgs, SessionDeleteArgs},
     error::CliError,
-    local_sessions::{
-        SessionConnection, connect_to_session, kill_session, session_socket_entries, sessions_dir,
-    },
     util::remove_proxy_env,
 };
 
@@ -201,7 +201,8 @@ async fn merged_sessions() -> Result<(Vec<MergedSessionRow>, bool), CliError> {
 }
 
 async fn load_sessions() -> Result<Vec<SessionConnection>, CliError> {
-    let sessions_dir = sessions_dir()?;
+    let sessions_dir = sessions_dir()
+        .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
     let mut sessions = Vec::new();
 
     for (session_id, socket_path) in session_socket_entries(&sessions_dir) {

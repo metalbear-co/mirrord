@@ -339,9 +339,6 @@ mod wsl;
 mod wizard;
 
 #[cfg(unix)]
-mod local_sessions;
-
-#[cfg(unix)]
 mod session;
 
 #[cfg(unix)]
