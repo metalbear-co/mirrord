@@ -38,10 +38,6 @@ pub mod session;
 pub use kafka::MirrordKafkaEphemeralTopic;
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
-/// Prefix for Kubernetes Secrets created by the operator to hold branch credential
-/// values that the CLI extracted from literal `value` fields in the mirrord config.
-pub const BRANCH_CREDENTIAL_SECRET_PREFIX: &str = "mirrord-branch-creds-";
-
 /// Request body for `POST /branchcredentials` - asks the operator to create a K8s
 /// Secret with the given values in the target namespace. The Secret name is derived
 /// from `branch_id` so the same branch always reuses the same Secret.
