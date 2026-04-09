@@ -2885,6 +2885,21 @@
         {
           "type": "object",
           "properties": {
+            "key": {
+              "type": "string"
+            },
+            "secret": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "secret",
+            "key"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
             "value": {
               "type": [
                 "string",
@@ -2898,21 +2913,6 @@
               ]
             }
           }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "key": {
-              "type": "string"
-            },
-            "secret": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "secret",
-            "key"
-          ]
         }
       ]
     },
