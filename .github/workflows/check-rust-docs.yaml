@@ -25,6 +25,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: metalbear-co/setup-rust-toolchain@bb0a05a1b7e260b5081982438f974879f47940f4
         with:
+          add-rust-environment-hash-key: ""
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
           toolchain: ${{ inputs.rust_toolchain }}
       # TODO(alex): `no-deps` here due to an issue in `futures-util`.

@@ -28,6 +28,12 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push CI images
+        uses: docker/bake-action@82490499d2e5613fcead7e128237ef0b0ea210f7
         env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
           SHA: ${{ github.sha }}
-        run: docker buildx bake -f ci/docker-bake.hcl ci-images --push
+        with:
+          source: .
+          files: ci/docker-bake.hcl
+          targets: ci-images
+          push: true
