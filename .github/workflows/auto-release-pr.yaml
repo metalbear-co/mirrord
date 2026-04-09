@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
           ref: main
@@ -36,6 +36,7 @@ jobs:
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
+          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
           toolchain: ${{ env.PINNED_NIGHTLY }}
           rustflags: ""
 

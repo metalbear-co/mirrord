@@ -20,25 +20,30 @@ jobs:
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
         with:
           node-version: 22
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
       - uses: metalbear-co/ci/e2e-setup-action@main
         with:
           container-runtime: ${{matrix.container-runtime}}
       - name: download image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: test
           path: /tmp
       - run: minikube image load /tmp/test.tar
+      - uses: metalbear-co/install-action@98dac1828614f016bb6346e86fa46318e9328a07
+        with:
+          tool: cargo-nextest
       # run the cli tests only once, i.e. docker runtime only
       - name: Run cli E2E tests
         if: ${{ matrix.container-runtime == 'docker' }}
         run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features cli -- --test-threads=6
+          cargo nextest run -p mirrord-tests --no-default-features --features cli --test-threads 6
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -51,14 +56,14 @@ jobs:
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test
         run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features targetless -- --test-threads=6 targetless
+          cargo nextest run -p mirrord-tests --no-default-features --features targetless --test-threads 6 -E 'test(targetless)'
       # prepare argo rollouts
       - run: kubectl create namespace argo-rollouts
       - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
       - name: Run all E2E tests
         run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features job -- --test-threads=6
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features ephemeral -- --test-threads=6
+          cargo nextest run -p mirrord-tests --no-default-features --features job --test-threads 6
+          cargo nextest run -p mirrord-tests --no-default-features --features ephemeral --test-threads 6
       - name: Collect logs
         if: ${{ failure() }}
         run: |

@@ -13,11 +13,13 @@ runs:
       with:
         repo-token: ${{ inputs.github-token }}
     - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      with:
+        cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
     - name: build mirrord CLI
       shell: bash
       run: cargo build --manifest-path=./Cargo.toml -p mirrord
     - name: upload mirrord CLI
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
       with:
         name: mirrord-artifacts
         path: |

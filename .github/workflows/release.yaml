@@ -23,7 +23,7 @@ jobs:
     steps:
       - name: Checkout
         if: github.event_name == 'pull_request'
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: main
 
@@ -93,7 +93,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           cache: false
@@ -106,7 +106,7 @@ jobs:
       # When 0.3.0 (or 0.2.6, but it seems unlikely) is released, we should use that
       - name: Install cross from a recent commit
         run: cargo install --git https://github.com/cross-rs/cross cross --rev 154b4ead7e639c7597d9e4e626b9c1c1e37608c0
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
         with:
           node-version: 24
       - run: npm install
@@ -121,7 +121,7 @@ jobs:
           MIRRORD_LAYER_FILE: ../../../target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
           WIZARD_DIST_DIR: ./wizard-frontend/dist
         run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord --target=aarch64-unknown-linux-gnu --features "wizard"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: aarch64-unknown-linux-gnu
           path: |
@@ -133,7 +133,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           cache: false
@@ -145,7 +145,7 @@ jobs:
       # When 0.3.0 (or 0.2.6, but it seems unlikely) is released, we should use that
       - name: Install cross from a recent commit
         run: cargo install --git https://github.com/cross-rs/cross cross --rev 154b4ead7e639c7597d9e4e626b9c1c1e37608c0
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
         with:
           node-version: 24
       - run: npm install
@@ -155,20 +155,20 @@ jobs:
       - name: build mirrord-layer and cli
         env:
           WIZARD_DIST_DIR: ./wizard-frontend/dist
-        run: cross build --release -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu --features "wizard"
-      - uses: actions/upload-artifact@v4
+        run: cross build --release -p mirrord -p mirrord-layer --features "wizard"
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: x86_64-unknown-linux-gnu
           path: |
-            target/x86_64-unknown-linux-gnu/release/mirrord
-            target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so
+            target/release/mirrord
+            target/release/libmirrord_layer.so
           if-no-files-found: error
   build_binaries_windows:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
 
@@ -194,16 +194,16 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           # Build DLL in release mode
-          cargo build --release -p mirrord-layer-win --target x86_64-pc-windows-msvc
-          $dll = "target\x86_64-pc-windows-msvc\release\mirrord_layer_win.dll"
+          cargo build --release -p mirrord-layer-win
+          $dll = "target\release\mirrord_layer_win.dll"
           if (-not (Test-Path $dll)) {
             throw "DLL not found at $dll"
           }
 
           # Build EXE in release mode
           $env:MIRRORD_LAYER_FILE = (Resolve-Path $dll).Path
-          cargo build --release -p mirrord --bin mirrord --target x86_64-pc-windows-msvc
-          $exe = "target\x86_64-pc-windows-msvc\release\mirrord.exe"
+          cargo build --release -p mirrord --bin mirrord
+          $exe = "target\release\mirrord.exe"
           if (-not (Test-Path $exe)) {
             throw "EXE not found at $exe"
           }
@@ -219,7 +219,7 @@ jobs:
           echo "SM_CLIENT_CERT_FILE=$certPath" >> $env:GITHUB_ENV
 
       - name: Setup Software Trust Manager
-        uses: digicert/code-signing-software-trust-action@v1.0.1
+        uses: digicert/code-signing-software-trust-action@fae23a455ba4bde62b64fd7cb2f81ade788f5a95
         env:
           SM_HOST: https://clientauth.one.digicert.com/
           SM_API_KEY: ${{ secrets.SM_API_KEY }}
@@ -344,7 +344,7 @@ jobs:
           (Get-FileHash $dll -Algorithm SHA256).Hash.ToLower() | Out-File -FilePath "$dll.sha256" -NoNewline -Encoding ascii
           (Get-FileHash $msi -Algorithm SHA256).Hash.ToLower() | Out-File -FilePath "$msi.sha256" -NoNewline -Encoding ascii
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: x86_64-pc-windows-msvc
           path: |
@@ -362,7 +362,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: macos-15-intel
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
@@ -384,7 +384,7 @@ jobs:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo +${{ env.PINNED_NIGHTLY }} xtask build-layer --platform macos-x86_64 --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: layer-x86_64-apple-darwin
           path: target/x86_64-apple-darwin/release/libmirrord_layer.dylib
@@ -396,7 +396,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
@@ -418,7 +418,7 @@ jobs:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo +${{ env.PINNED_NIGHTLY }} xtask build-layer --platform macos-aarch64 --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: layer-aarch64-apple-darwin
           path: |
@@ -432,12 +432,12 @@ jobs:
     needs: [validate_release_request, build_layer_macos_x86_64, build_layer_macos_aarch64]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-x86_64-apple-darwin
           path: artifacts/layer-x86_64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-aarch64-apple-darwin
           path: artifacts/layer-aarch64
@@ -462,7 +462,7 @@ jobs:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo xtask link-layer-universal --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: layer-universal-apple-darwin
           path: |
@@ -476,7 +476,7 @@ jobs:
     needs: [validate_release_request, link_layer_macos_universal]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
@@ -484,10 +484,10 @@ jobs:
           toolchain: ${{ env.PINNED_NIGHTLY }}
           rustflags: ""
           cache: false
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
         with:
           node-version: 24
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-universal-apple-darwin
           path: artifacts/layer-universal
@@ -513,7 +513,7 @@ jobs:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo +${{ env.PINNED_NIGHTLY }} xtask build-cli --platform macos-x86_64 --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: cli-x86_64-apple-darwin
           path: target/x86_64-apple-darwin/release/mirrord
@@ -525,7 +525,7 @@ jobs:
     needs: [validate_release_request, link_layer_macos_universal]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
@@ -533,10 +533,10 @@ jobs:
           toolchain: ${{ env.PINNED_NIGHTLY }}
           rustflags: ""
           cache: false
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
         with:
           node-version: 24
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-universal-apple-darwin
           path: artifacts/layer-universal
@@ -562,7 +562,7 @@ jobs:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo +${{ env.PINNED_NIGHTLY }} xtask build-cli --platform macos-aarch64 --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: cli-aarch64-apple-darwin
           path: target/aarch64-apple-darwin/release/mirrord
@@ -580,16 +580,16 @@ jobs:
       ]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: cli-x86_64-apple-darwin
           path: artifacts/cli-x86_64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: cli-aarch64-apple-darwin
           path: artifacts/cli-aarch64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-universal-apple-darwin
           path: artifacts/layer-universal
@@ -615,7 +615,7 @@ jobs:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo xtask merge-cli-universal --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: universal-apple-darwin
           path: |
@@ -632,7 +632,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - name: Check disk space
         run: df . -h
       - name: Free disk space
@@ -672,11 +672,11 @@ jobs:
           sudo du /usr/ -hx -d 4 --threshold=1G | sort -hr | head
       - name: Set up QEMU
         id: qemu
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -709,7 +709,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - name: Check disk space
         run: df . -h
       - name: Free disk space
@@ -749,11 +749,11 @@ jobs:
           sudo du /usr/ -hx -d 4 --threshold=1G | sort -hr | head
       - name: Set up QEMU
         id: qemu
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -784,7 +784,7 @@ jobs:
     outputs:
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-tags: true
           fetch-depth: 0
@@ -805,7 +805,7 @@ jobs:
     env:
       TEMP_DIR_NAME: temp-docs-dir
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
@@ -850,8 +850,8 @@ jobs:
       deployments: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           path: /tmp/artifacts
           pattern: +(*-unknown-linux-gnu|*-apple-darwin|*-pc-windows-msvc)
@@ -872,7 +872,7 @@ jobs:
           shasum -a 256 mirrord_mac_universal.zip > mirrord_mac_universal.shasum256
         working-directory: /tmp/artifacts/universal-apple-darwin
       # used for the homebrew formula
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: shasum
           path: |
@@ -898,11 +898,11 @@ jobs:
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
 
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord.exe /tmp/release/mirrord.exe
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord_layer_win.dll /tmp/release/mirrord_layer_win.dll
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/release/mirrord.exe /tmp/release/mirrord.exe
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/release/mirrord_layer_win.dll /tmp/release/mirrord_layer_win.dll
           mv /tmp/artifacts/x86_64-pc-windows-msvc/_temp/wix/mirrord.msi /tmp/release/mirrord.msi
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord.exe.sha256 /tmp/release/mirrord.exe.sha256
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord_layer_win.dll.sha256 /tmp/release/mirrord_layer_win.dll.sha256
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/release/mirrord.exe.sha256 /tmp/release/mirrord.exe.sha256
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/release/mirrord_layer_win.dll.sha256 /tmp/release/mirrord_layer_win.dll.sha256
           mv /tmp/artifacts/x86_64-pc-windows-msvc/_temp/wix/mirrord.msi.sha256 /tmp/release/mirrord.msi.sha256
 
       - name: Extract release notes from CHANGELOG.md
@@ -928,11 +928,11 @@ jobs:
     runs-on: ubuntu-24.04
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: shasum
           path: /tmp/artifacts
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - name: Get release version and hashes
         shell: bash # for -o pipefail, see https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#exit-codes-and-error-action-preference
         run: |
@@ -941,7 +941,7 @@ jobs:
           echo "sha256_linux_aarch64=$(cat /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
           echo "sha256_linux_x86_64=$(cat /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
       - name: Checkout into homebrew-mirrord
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: metalbear-co/homebrew-mirrord
           path: ./
@@ -967,9 +967,9 @@ jobs:
     runs-on: windows-latest
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: x86_64-pc-windows-msvc
           path: artifacts/windows
@@ -1093,10 +1093,10 @@ jobs:
     runs-on: windows-latest
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Install .NET runtime for wingetcreate
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
         with:
           dotnet-version: "8.0.x"
 
@@ -1161,7 +1161,7 @@ jobs:
       contents: write
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
 

@@ -22,11 +22,12 @@ jobs:
       MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/aarch64-apple-darwin/debug/libmirrord_layer.dylib
       MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord
     steps:
-      - uses: actions/checkout@v4 # Checkout the mirrord repo.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
+          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
           components: rustfmt, clippy
           target: x86_64-apple-darwin, aarch64-apple-darwin
           toolchain: ${{ inputs.rust_toolchain }}
@@ -40,8 +41,11 @@ jobs:
         run: cargo xtask build-layer --platform macos-universal
       - name: build cli
         run: cargo build -p mirrord
+      - uses: metalbear-co/install-action@98dac1828614f016bb6346e86fa46318e9328a07
+        with:
+          tool: cargo-nextest
       - name: unit tests
-        run: cargo test -p mirrord-sip -p mirrord-intproxy
+        run: cargo nextest run -p mirrord-sip -p mirrord-intproxy
       # prepare stuff needed for integration tests
       - run: |
           cd mirrord/layer-tests/tests/apps/issue1123
@@ -58,7 +62,7 @@ jobs:
       - run: |
           cd mirrord/layer-tests/tests/apps/issue2058
           rustc issue2058.rs --out-dir target
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
           go-version: "1.24"
           cache-dependency-path: tests/go-e2e/go.sum
@@ -68,7 +72,7 @@ jobs:
       - run: | # Build Go test apps.
           cd mirrord/layer-tests/tests
           ../../../scripts/build_go_apps.sh 24
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
           go-version: "1.25"
           cache: false
@@ -77,7 +81,7 @@ jobs:
       - run: | # Build Go test apps.
           cd mirrord/layer-tests/tests
           ../../../scripts/build_go_apps.sh 25
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
           go-version: "1.26"
           cache: false
@@ -126,25 +130,25 @@ jobs:
           cd mirrord/layer-tests/tests/apps/double_listen
           cargo build
       - run: ./scripts/build_c_apps.sh
-      - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # For http mirroring tests with Flask and FastAPI.
         with:
           python-version: "3.14"
       - name: Display Pip version
         run: pip --version
       - run: python3 -m pip install flask fastapi uvicorn[standard] # For http mirroring test with Flask.
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
         with:
           node-version: 24
       - run: npm install express # For http mirroring test with node.
       - run: npm install portfinder # For a node specific test
       - name: layer integration tests
-        run: cargo test -p mirrord-layer-tests --no-default-features
+        run: cargo nextest run -p mirrord-layer-tests --no-default-features
       - name: layer unit tests
-        run: cargo test -p mirrord-layer
+        run: cargo nextest run -p mirrord-layer
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: intproxy_logs_macos
           path: /tmp/intproxy_logs/macos

@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
           submodules: recursive
@@ -65,6 +65,11 @@ jobs:
           cargo -V
           rustup show
 
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+          rustflags: ""
+
       - name: Prepare e2e tests dependencies
         run: |
           $ErrorActionPreference = "Stop"
@@ -84,12 +89,11 @@ jobs:
       - name: Build (Debug)
         run: |
           $ErrorActionPreference = "Stop"
-          $Target = "x86_64-pc-windows-msvc"
 
           Write-Host "Building mirrord-layer-win..."
-          cargo build -p mirrord-layer-win --target $Target
+          cargo build -p mirrord-layer-win
 
-          $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\debug"
+          $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\debug"
           $dll = Join-Path $RelDir "mirrord_layer_win.dll"
           if (-not (Test-Path $dll)) { throw "mirrord_layer_win.dll not found" }
 
@@ -97,7 +101,7 @@ jobs:
           $env:MIRRORD_LAYER_FILE = $dll
 
           Write-Host "Building mirrord binary..."
-          cargo build -p mirrord --bin mirrord --target $Target
+          cargo build -p mirrord --bin mirrord
           
           $exe = Join-Path $RelDir "mirrord.exe"
           
@@ -106,16 +110,19 @@ jobs:
           "MIRRORD_EXE=$exe" | Out-File -Append -FilePath $env:GITHUB_ENV
           "MIRRORD_LAYER_FILE=$dll" | Out-File -Append -FilePath $env:GITHUB_ENV
 
+      - uses: metalbear-co/install-action@98dac1828614f016bb6346e86fa46318e9328a07
+        with:
+          tool: cargo-nextest
       - name: Run Windows E2E Tests
         run: |
           $ErrorActionPreference = "Stop"
-          
+
           # 1. Verify Connection
           $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE ".github\workflows\scripts"
           & "$ScriptsDir\verify_k3s_connectivity.ps1"
 
           Write-Host "Running E2E tests..."
           # Note: skipping the specific test skipped in windows-build.yaml
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --nocapture --test-threads=1
+          cargo nextest run -p mirrord-tests --test-threads 1
         env:
           KUBECONFIG: ${{ env.USERPROFILE }}\.kube\config
