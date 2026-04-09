@@ -1,1 +1,1 @@
-Added  for troubleshooting mirrord fot Teamas license usage.
+Added for oubleshooting mirrord for Teams license usage.
