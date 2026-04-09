@@ -9,6 +9,7 @@ pub struct SessionConnection {
     pub socket_path: PathBuf,
     pub info: SessionInfo,
     pub client: reqwest::Client,
+    pub token: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -47,14 +48,32 @@ pub fn session_socket_entries(sessions_dir: &Path) -> Vec<(String, PathBuf)> {
         .collect()
 }
 
+/// Reads the authentication token for a session from its `.token` file.
+fn read_token_for_socket(socket_path: &Path) -> Option<String> {
+    let token_path = socket_path.with_extension("token");
+    std::fs::read_to_string(token_path).ok()
+}
+
+/// Builds a URL with an optional token query parameter.
+fn url_with_token(path: &str, token: Option<&str>) -> String {
+    match token {
+        Some(t) => format!("http://localhost{path}?token={t}"),
+        None => format!("http://localhost{path}"),
+    }
+}
+
 pub fn unix_client(socket_path: &Path) -> Result<reqwest::Client, SessionError> {
     Ok(reqwest::Client::builder()
         .unix_socket(socket_path)
         .build()?)
 }
 
-pub async fn fetch_session_info(client: &reqwest::Client) -> Result<SessionInfo, SessionError> {
-    let response = client.get("http://localhost/info").send().await?;
+pub async fn fetch_session_info(
+    client: &reqwest::Client,
+    token: Option<&str>,
+) -> Result<SessionInfo, SessionError> {
+    let url = url_with_token("/info", token);
+    let response = client.get(&url).send().await?;
     if !response.status().is_success() {
         return Err(SessionError::BadStatus(response.status()));
     }
@@ -64,17 +83,23 @@ pub async fn fetch_session_info(client: &reqwest::Client) -> Result<SessionInfo,
 
 pub async fn connect_to_session(socket_path: &Path) -> Result<SessionConnection, SessionError> {
     let client = unix_client(socket_path)?;
-    let info = fetch_session_info(&client).await?;
+    let token = read_token_for_socket(socket_path);
+    let info = fetch_session_info(&client, token.as_deref()).await?;
 
     Ok(SessionConnection {
         socket_path: socket_path.to_path_buf(),
         info,
         client,
+        token,
     })
 }
 
-pub async fn kill_session(client: &reqwest::Client) -> Result<(), SessionError> {
-    let response = client.post("http://localhost/kill").send().await?;
+pub async fn kill_session(
+    client: &reqwest::Client,
+    token: Option<&str>,
+) -> Result<(), SessionError> {
+    let url = url_with_token("/kill", token);
+    let response = client.post(&url).send().await?;
     if !response.status().is_success() {
         return Err(SessionError::BadStatus(response.status()));
     }
