@@ -31,5 +31,8 @@ jobs:
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
           rustflags: ""
           toolchain: ${{ inputs.rust_toolchain }}
+      - uses: metalbear-co/install-action@98dac1828614f016bb6346e86fa46318e9328a07
+        with:
+          tool: cargo-nextest
       - name: agent UT
-        run: cargo test -p mirrord-agent -p mirrord-agent-env -p mirrord-agent-iptables
+        run: cargo nextest run -p mirrord-agent -p mirrord-agent-env -p mirrord-agent-iptables

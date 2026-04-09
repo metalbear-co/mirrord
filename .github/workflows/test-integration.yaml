@@ -124,7 +124,7 @@ jobs:
         with:
           tool: cargo-nextest
       - name: layer tests
-        run: cargo test -p mirrord-layer-tests --no-default-features
+        run: cargo nextest run -p mirrord-layer-tests --no-default-features
       - name: unit tests (exclude e2e)
         run: >-
           cargo nextest run --workspace --exclude mirrord-tests
