@@ -1,0 +1,25 @@
+name: Build Tests Image
+description: Build the mirrord tests Docker image and upload as artifact
+
+runs:
+  using: composite
+  steps:
+    - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+    - name: build and export
+      uses: docker/bake-action@82490499d2e5613fcead7e128237ef0b0ea210f7
+      env:
+        DOCKER_BUILD_RECORD_UPLOAD: "false"
+        PLATFORMS: "linux/amd64"
+        TESTS_IMAGE_TAGS: "mirrord-tests-image"
+      with:
+        source: .
+        files: ci/docker-bake.hcl
+        targets: mirrord-tests-image
+        set: |
+          mirrord-tests-image.output=type=docker,dest=${{ github.workspace }}/mirrord-tests-image.tar
+    - name: upload image
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: mirrord-tests-image
+        path: ${{ github.workspace }}/mirrord-tests-image.tar
+        if-no-files-found: error

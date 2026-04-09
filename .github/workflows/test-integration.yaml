@@ -14,18 +14,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # Checkout the mirrord repo.
-      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
-      - name: build mirrord tests image
-        uses: docker/bake-action@82490499d2e5613fcead7e128237ef0b0ea210f7
-        env:
-          DOCKER_BUILD_RECORD_UPLOAD: "false"
-          TESTS_IMAGE_TAGS: "mirrord-tests-image"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          source: .
-          files: ci/docker-bake.hcl
-          targets: mirrord-tests-image
-          set: |
-            mirrord-tests-image.output=type=docker,dest=${{ github.workspace }}/mirrord-tests-image.tar
+          name: mirrord-tests-image
+          path: ${{ github.workspace }}
       - name: load mirrord tests image
         run: docker load --input "${{ github.workspace }}/mirrord-tests-image.tar"
       - name: create intproxy logs dir

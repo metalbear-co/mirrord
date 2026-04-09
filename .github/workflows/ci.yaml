@@ -188,6 +188,11 @@ jobs:
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
     uses: ./.github/workflows/build-agent-image.yaml
 
+  build-tests-image:
+    needs: [plan]
+    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    uses: ./.github/workflows/build-tests-image.yaml
+
   build-cli-image:
     needs: [plan]
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
@@ -202,7 +207,7 @@ jobs:
   # ── tests ───────────────────────────────────────────────────────────
 
   test-integration:
-    needs: [plan]
+    needs: [plan, build-tests-image]
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
     uses: ./.github/workflows/test-integration.yaml
     secrets: inherit
@@ -216,7 +221,7 @@ jobs:
     secrets: inherit
 
   test-e2e:
-    needs: [plan, build-agent-image]
+    needs: [plan, build-agent-image, build-tests-image]
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
     uses: ./.github/workflows/test-e2e.yaml
     secrets: inherit
@@ -261,6 +266,7 @@ jobs:
         check-rust-docs,
         check-lint-markdown,
         build-agent-image,
+        build-tests-image,
         build-cli-image,
         build-mirrord-cli,
         test-integration,

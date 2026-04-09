@@ -123,7 +123,18 @@ RUN --mount=type=cache,target=/root/.cargo/registry,id=mirrord-tests-cargo-regis
     cargo test -p mirrord-tests --no-default-features --features "cli targetless job ephemeral" --no-run; \
     rm -rf /workspace/target; \
     mkdir -p /workspace/target; \
-    cp -a /cargo-target/. /workspace/target/
+    cp -a /cargo-target/. /workspace/target/; \
+    rm -rf /workspace/target/debug/incremental /workspace/target/debug/examples
+
+RUN rm -rf \
+    /root/.cargo/registry \
+    /root/.cargo/git \
+    /root/.rustup/downloads \
+    /root/.rustup/tmp \
+    /root/.npm \
+    /root/.cache/pip \
+    /root/go/pkg/mod \
+    /root/go/pkg/sumdb
 
 ENV MIRRORD_LAYER_FILE=/workspace/target/debug/libmirrord_layer.so \
     MIRRORD_TESTS_USE_BINARY=/workspace/target/debug/mirrord

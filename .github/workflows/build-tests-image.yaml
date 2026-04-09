@@ -1,0 +1,14 @@
+name: Build Tests Image
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build-tests-image:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: ./.github/actions/build-tests-image

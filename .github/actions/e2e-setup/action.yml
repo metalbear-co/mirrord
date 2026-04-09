@@ -1,0 +1,40 @@
+name: Setup mirrord e2e environment
+description: Start the cluster runtime required by mirrord e2e tests
+
+inputs:
+  container-runtime:
+    description: Container runtime to setup with minikube
+    default: containerd
+  tests-image-artifact-name:
+    description: Artifact name containing the prebuilt mirrord tests image tarball
+    required: false
+    default: mirrord-tests-image
+  sccache-gcs-bucket:
+    description: GCS bucket for sccache (optional)
+    required: false
+    default: ""
+  sccache-gcp-credentials:
+    description: GCP credentials for sccache (optional)
+    required: false
+    default: ""
+  sccache-key-prefix:
+    description: sccache key prefix (optional)
+    required: false
+    default: e2e-setup
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ inputs.tests-image-artifact-name }}
+        path: ${{ github.workspace }}
+    - name: load mirrord tests image
+      run: docker load --input "${{ github.workspace }}/mirrord-tests-image.tar"
+      shell: bash
+    - name: start minikube
+      uses: metalbear-co/setup-minikube@3fa06c2257eb48a3ca8e24fedece59ee2479255a
+      with:
+        container-runtime: ${{ inputs.container-runtime }}
+        cpus: max
+        memory: 4gb

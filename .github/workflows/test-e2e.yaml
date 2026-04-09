@@ -20,23 +20,10 @@ jobs:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
-      - name: build mirrord tests image
-        uses: docker/bake-action@82490499d2e5613fcead7e128237ef0b0ea210f7
-        env:
-          DOCKER_BUILD_RECORD_UPLOAD: "false"
-          TESTS_IMAGE_TAGS: "mirrord-tests-image"
-        with:
-          source: .
-          files: ci/docker-bake.hcl
-          targets: mirrord-tests-image
-          set: |
-            mirrord-tests-image.output=type=docker,dest=${{ github.workspace }}/mirrord-tests-image.tar
-      - name: load mirrord tests image
-        run: docker load --input "${{ github.workspace }}/mirrord-tests-image.tar"
       - uses: ./.github/actions/e2e-setup
         with:
           container-runtime: ${{matrix.container-runtime}}
+          tests-image-artifact-name: mirrord-tests-image
       - name: create e2e temp dir
         run: mkdir -p "${{ runner.temp }}/e2e-tmp"
       - name: download image
