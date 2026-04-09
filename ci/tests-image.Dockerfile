@@ -14,9 +14,7 @@ ARG RUST_TOOLCHAIN=nightly-2026-02-24
 
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true \
     CARGO_TARGET_DIR=/workspace/target \
-    MIRRORD_LAYER_FILE=/workspace/target/debug/libmirrord_layer.so \
     MIRRORD_TELEMETRY=false \
-    MIRRORD_TESTS_USE_BINARY=/workspace/target/debug/mirrord \
     PATH=/root/.cargo/bin:/opt/go/1.24/bin:/opt/go/1.25/bin:/opt/go/1.26/bin:$PATH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
