@@ -935,6 +935,11 @@ pub(super) enum DiagnoseCommand {
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
         config_file: Option<PathBuf>,
     },
+    /// Print the user fingerprints from the local credentials file.
+    ///
+    /// The fingerprint is what the operator uses to identify individual users (e.g. for seat
+    /// counting). One fingerprint is shown per operator license the machine has connected to.
+    License,
 }
 
 // `mirrord container` command
