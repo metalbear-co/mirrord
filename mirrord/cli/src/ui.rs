@@ -148,8 +148,12 @@ fn localhost_cors() -> CorsLayer {
                 false
             }
         }))
-        .allow_methods(tower_http::cors::Any)
-        .allow_headers(tower_http::cors::Any)
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::OPTIONS,
+        ])
+        .allow_headers([header::CONTENT_TYPE, header::COOKIE, header::AUTHORIZATION])
         .allow_credentials(true)
 }
 
