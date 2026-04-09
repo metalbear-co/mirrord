@@ -52,7 +52,7 @@ tokio-util.workspace = true
 axum.workspace = true
 serde_json.workspace = true
 home.workspace = true
-mirrord-session-monitor-protocol = { path = "../session-monitor-protocol" }
+mirrord-session-monitor-protocol.workspace = true
 
 [dev-dependencies]
 rcgen.workspace = true

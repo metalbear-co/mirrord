@@ -17,7 +17,7 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-mirrord-session-monitor-protocol = { path = "../session-monitor-protocol" }
+mirrord-session-monitor-protocol.workspace = true
 reqwest.workspace = true
 home.workspace = true
 thiserror.workspace = true
