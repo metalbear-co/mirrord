@@ -340,6 +340,9 @@ mod wsl;
 mod wizard;
 
 #[cfg(unix)]
+mod session;
+
+#[cfg(unix)]
 mod ui;
 
 mod fix;
@@ -1142,6 +1145,10 @@ fn main() -> miette::Result<()> {
             Commands::Fix(args) => fix::fix_command(args).await?,
             #[cfg(unix)]
             Commands::Ui(args) => ui::ui_command(args).await?,
+            #[cfg(unix)]
+            Commands::Session(args) => session::session_command(*args).await?,
+            #[cfg(unix)]
+            Commands::Kill(args) => session::delete_command(*args).await?,
         };
 
         Ok(())

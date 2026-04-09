@@ -156,6 +156,8 @@ mid = "3.0.0"
 miette = "7"
 mime_guess = "2"
 minhook-detours-rs = { git = "https://github.com/metalbear-co/minhook-detours-rs.git", rev = "4bfbf5717c6829f91b527180a038ec591b8265ca" }
+mirrord-session-monitor-client = { path = "mirrord/session-monitor-client" }
+mirrord-session-monitor-protocol = { path = "mirrord/session-monitor-protocol" }
 mirrord-test-macros = { path = "mirrord/test-macros" }
 mockall = "0.13"
 nix = { version = "0.29", features = ["net"] }
