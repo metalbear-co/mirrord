@@ -114,7 +114,7 @@ target "mirrord-tests-image" {
 target "ci-agent-builder" {
   context    = "./ci"
   dockerfile = "agent-build/builder.Dockerfile"
-  platforms  = ["linux/amd64", "linux/arm64"]
+  platforms  = split(",", PLATFORMS)
   tags = compact([
     "${REGISTRY}/ci-agent-build:latest",
     SHA != "" ? "${REGISTRY}/ci-agent-build:${SHA}" : "",
