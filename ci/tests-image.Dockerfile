@@ -117,6 +117,8 @@ RUN --mount=type=cache,target=/root/.cargo/registry,id=mirrord-tests-cargo-regis
     cargo build -p mirrord-layer -p mirrord; \
     touch /workspace/wizard-frontend.tar.gz; \
     cargo build -p mirrord --features wizard; \
+    export MIRRORD_LAYER_FILE=/cargo-target/debug/libmirrord_layer.so; \
+    export MIRRORD_TESTS_USE_BINARY=/cargo-target/debug/mirrord; \
     cargo test -p mirrord-layer-tests --no-default-features --no-run; \
     cargo test -p mirrord-tests --no-default-features --features "cli targetless job ephemeral" --no-run; \
     rm -rf /workspace/target; \
