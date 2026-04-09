@@ -32,6 +32,11 @@ variable "PLATFORMS" {
   default = "linux/amd64,linux/arm64"
 }
 
+# Platform used for build-context helper images that run on the builder host.
+variable "BUILDER_PLATFORM" {
+  default = "linux/amd64"
+}
+
 # Shared buildx cache settings for product images. Override to empty strings to disable
 # importing from and exporting to the GitHub Actions cache backend.
 variable "PRODUCT_CACHE_FROM" {
@@ -114,7 +119,7 @@ target "mirrord-tests-image" {
 target "ci-agent-builder" {
   context    = "./ci"
   dockerfile = "agent-build/builder.Dockerfile"
-  platforms  = split(",", PLATFORMS)
+  platforms  = [BUILDER_PLATFORM]
   tags = compact([
     "${REGISTRY}/ci-agent-build:latest",
     SHA != "" ? "${REGISTRY}/ci-agent-build:${SHA}" : "",
