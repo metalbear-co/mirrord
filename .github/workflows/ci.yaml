@@ -121,7 +121,7 @@ jobs:
             mirrord-schema.json
       - id: release-branch
         run: |
-          echo "branch=$([[ "${{ github.head_ref || github.ref_name }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
+          echo "branch=$([[ "${{ github.head_ref || github.ref_name }}" =~ ^releases/[0-9]+\.[0-9]+\.[0-9]+$ ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
 
   # ── checks (no build deps) ─────────────────────────────────────────
 
