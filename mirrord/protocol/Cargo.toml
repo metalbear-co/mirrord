@@ -1,6 +1,6 @@
 [package]
 name = "mirrord-protocol"
-version = "1.26.2"
+version = "1.26.3"
 authors.workspace = true
 description.workspace = true
 documentation.workspace = true
@@ -29,8 +29,8 @@ serde_json_path_macros.workspace = true
 tracing = { workspace = true, optional = true }
 http.workspace = true
 http-body.workspace = true
-http-serde = "2"
-http-body-util = { workspace = true }
+http-serde.workspace = true
+http-body-util.workspace = true
 fancy-regex = { workspace = true, optional = true }
 socket2 = { workspace = true, optional = true }
 semver = { workspace = true, features = ["serde"] }

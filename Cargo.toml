@@ -40,7 +40,7 @@ resolver = "2"
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.198.0"
+version = "3.200.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -66,36 +66,78 @@ keywords = [
 categories = ["development-tools", "backend", "devtool"]
 
 [workspace.dependencies]
-axum = "0.8"
 actix-codec = { version = "0.5", default-features = false }
+actix-web = "4"
+anyhow = "1.0"
+apple-codesign = { version = "0.29", default-features = false }
+assert-json-diff = "2"
 async-pidfd = "0.1.5"
-
-# Used by `operator`, `layer`, `console`, `protocol`, `intproxy-protocol`, `auth`.
+async-stream = "0.3"
+async-trait = "0.1"
+aws-config = { version = "1.5", features = ["behavior-version-latest"] }
+aws-credential-types = "1.2"
+aws-sdk-sqs = "1.39"
+aws-types = "1.3"
+axum = "0.8"
+base64 = "0.22"
+bcder = "0.7"
+bimap = "0.6"
 bincode = { version = "2", features = ["serde"] }
+bitflags = "2"
+bollard = "0.18"
 bytes = "1"
-
-# Used by `protocol`
-derive_more = "2.0.1"
-
-tokio = { version = "1", features = ["fs", "net", "io-util"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_yaml = "0.9"
-nix = { version = "0.29", features = ["net"] }
+caps = "0.5"
+chrono = "0.4"
+ci_info = "0.14"
 clap = { version = "4", features = ["derive", "env"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+clap_complete = "4.4.1"
+const-random = "0.1.15"
+containerd-client = "0.6"
+ctor = "0.2"
+derive_more = "2.0.1"
+dll-syringe = "0.16.0"
+dns-lookup = "3"
+dotenvy = "0.15"
+drain = "0.1"
+enum_dispatch = "0.3"
+env_logger = "0.11"
+errno = "0.3"
+eventsource-stream = "0.2"
+exec = "0.3"
+faccess = "0.2"
+fancy-regex = { version = "0.14" }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+frida-gum = { version = "0.17", features = ["auto-download", "std"] }
+fs4 = { version = "0.13", features = ["tokio", "sync"], default-features = false }
 futures = "0.3"
-thiserror = "2"
+futures-util = "0.3"
+glob = "0.3"
+hex = "0.4"
+hickory-proto = "0.24.3"
+hickory-resolver = { version = "0.24.3", features = ["serde", "tokio-runtime"] }
+home = "0.5"
+http = { version = "1" }
+http-body = "1"
+http-body-util = "0.1"
+http-serde = "2"
+httparse = "1"
+humantime = "2"
+# If you update `hyper`, check that `h2` version is compatible in `intproxy/Cargo.toml`.
+# There is a test for this: `cargo test -p mirrord-intproxy hyper_and_h2_versions_in_sync`
+hyper = { version = "1.7", features = ["full"] }
+hyper-util = { version = "0.1" }
+indicatif = "0.18"
+ipnet = "2.8"
+iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }
+itertools = "0.14.0"
+jaq-core = "2.2.1"
+jaq-json = "1.1.3"
+jaq-parse = "1.0.3"
+jaq-std = "2.1.2"
+json-patch = "4.0"
+jsonptr = "0.7"
+k8s-cri = "0.9"
 k8s-openapi = { version = "0.27", features = ["v1_31"] }
-reqwest = { version = "0.13", default-features = false, features = [
-    "blocking",
-    "rustls",
-    "json",
-    "socks",
-    "http2",
-] }
 kube = { version = "3.1", default-features = false, features = [
     "runtime",
     "derive",
@@ -107,127 +149,92 @@ kube = { version = "3.1", default-features = false, features = [
     "socks5",
     "http-proxy",
 ] }
-hickory-resolver = { version = "0.24.3", features = ["serde", "tokio-runtime"] }
-hickory-proto = "0.24.3"
-tokio-util = { version = "0.7", features = ["net", "codec"] }
-
-# Used by `layer`, `intproxy`, `tests`, `medschool`, `cli`, `agent`, `operator`.
+libc = "0.2"
+local-ip-address = "0.6"
+log = { version = "0.4", features = ["std"] }
+mid = "3.0.0"
+miette = "7"
+mime_guess = "2"
+minhook-detours-rs = { git = "https://github.com/metalbear-co/minhook-detours-rs.git", rev = "4bfbf5717c6829f91b527180a038ec591b8265ca" }
+mirrord-session-monitor-client = { path = "mirrord/session-monitor-client" }
+mirrord-session-monitor-protocol = { path = "mirrord/session-monitor-protocol" }
+mirrord-test-macros = { path = "mirrord/test-macros" }
+mockall = "0.13"
+nix = { version = "0.29", features = ["net"] }
+nom = "7.1"
+notify = { version = "8", features = ["macos_fsevent"] }
+null-terminated = { git = "https://github.com/metalbear-co/null-terminated.rs", default-features = false }
+num-traits = "0.2"
+objc2-core-foundation = "0.3"
+object = "0.36"
+oci-spec = "0.7.0"
+once_cell = "1"
+opener = "0.8.3"
+pem = "3"
+phnt = "0.1.2"
+pnet_packet = "0.35"
+prettytable-rs = "0.10"
+proc-macro2 = "1"
+proc-macro2-diagnostics = "0.10"
+procfs = "0.17.0"
+prometheus = { version = "0.14", features = ["process"] }
+quote = "1"
 rand = "0.9"
-streammap-ext = "0.1"
+rcgen = "0.13"
 regex = { version = "1", features = ["unicode-case"] }
-fancy-regex = { version = "0.14" }
-enum_dispatch = "0.3"
-dotenvy = "0.15"
-
-# Used by `agent`, `protocol`
+reqwest = { version = "0.13", default-features = false, features = [
+    "blocking",
+    "rustls",
+    "json",
+    "socks",
+    "http2",
+] }
+resolv-conf = "0.7"
+rstest = "0.23"
+rust-embed = "8"
+rustls = "0.23"
+rustls-pemfile = "2"
+schemars = { version = "1.0" }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 serde_json_path = { version = "0.7.2", default-features = false }
 serde_json_path_core = { version = "0.2.2", default-features = false }
 serde_json_path_macros = "0.1.6"
-
-# If you update `hyper`, check that `h2` version is compatible in `intproxy/Cargo.toml`.
-# There is a test for this: `cargo test -p mirrord-intproxy hyper_and_h2_versions_in_sync`
-hyper = { version = "1.7", features = ["full"] }
-hyper-util = { version = "0.1" }
-http-body = "1"
-http-body-util = "0.1"
-libc = "0.2"
+serde_urlencoded = "0.7"
+serde_yaml = "0.9"
+sha2 = "0.10"
+shellexpand = "3"
 socket2 = { version = "0.5", features = ["all"] }
-which = "7"
-semver = "1"
-exec = "0.3"
-drain = "0.1"
-base64 = "0.22"
-rustls = "0.23"
-
-# Used by `operator`, `tests`.
-tokio-tungstenite = { version = "0.24" }
-
-# Used by `operator`, `agent`, `kube`.
-http = { version = "1" }
-
-# Used by `intproxy`, `cli`.
-rustls-pemfile = "2"
-
-# Used by `tests`, `layer`, `cli`, `kube`, `agent`, `config`, `operator`.
-rstest = "0.23"
-
-# Used by `layer`, `tests`, `sip`, `cli`.
-tempfile = "3"
-
-# Used by `cli`, `vpn`.
-tun2 = { version = "4", features = ["async"] }
-
-# Used by `layer`, `operator`, `tests`, `auth`.
-chrono = "0.4"
-
-# Used by `kube`, `agent`, `layer`.
-tower = "0.5"
-
-# Used by `agent`, `intproxy`, `cli`.
-tokio-rustls = "0.26"
-
-# Used by `agent`, `cli`.
-rcgen = "0.13"
-
-# Used by `config`, `operator`.
-schemars = { version = "1.0" }
-
-# Used by `config`, `vpn`.
-ipnet = "2.8"
-
-# Used by `macros`, `layer-macro`, `config-derive`.
-proc-macro2 = "1"
-
-# Used by `macros`, `config-derive`.
-proc-macro2-diagnostics = "0.10"
-
-# Used by `macros`, `layer-macro`, `config-derive`, `medschool`.
-syn = { version = "2", features = ["full", "extra-traits"] }
-
-# Used by `layer-macro`, `config-derive`.
-quote = "1"
-
-# Used by `jaq` tests.
-mirrord-test-macros = { path = "mirrord/test-macros" }
-
-# Used by `console`, `cli`.
-miette = "7"
-
-# Used by `kube`, `intproxy`.
-tokio-retry = "0.3"
-
-# Used by `agent`, `tls-util`.
-x509-parser = "0.17"
-
-# Used by `agent`, `auth`, `tls-util`, `tests`
-pem = "3"
-
-# Used by `cli`, `auth`
-home = "0.5"
-fs4 = { version = "0.13", features = ["tokio"], default-features = false }
-
-# Used by `cli`, `analytics`, `protocol`
-uuid = { version = "1.18", default-features = false }
-
-# Used by `cli`, `sip`
-hex = "0.4"
-
-# Used by `config`, `protocol`, `agent`
+streammap-ext = "0.1"
 strum = "0.27.1"
 strum_macros = "0.27.1"
-
-# Used by `cli`
-dll-syringe = "0.16.0"
-
-# Used by `layer` and `layerlib`
-frida-gum = { version = "0.17", features = ["auto-download", "std"] }
-
-# Used by `layer-win`
-anyhow = "1.0"
-minhook-detours-rs = { git = "https://github.com/metalbear-co/minhook-detours-rs.git", rev = "4bfbf5717c6829f91b527180a038ec591b8265ca" }
-windows-strings = "0.4"
-
-# Used by `cli`, `intproxy`
+syn = { version = "2", features = ["full", "extra-traits"] }
+syscalls = { version = "0.6", features = ["full"] }
+tar = "0.4"
+tempfile = "3"
+tera = "1"
+test-cdylib = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "net", "io-util"] }
+tokio-retry = "0.3"
+tokio-rustls = "0.26"
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-tungstenite = { version = "0.24" }
+tokio-util = { version = "0.7", features = ["net", "codec"] }
+toml = "0.8"
+tonic = "0.12"
+tower = "0.5"
+tower-http = { version = "0.6.6", features = ["fs", "set-header"] }
+tower-test = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tun2 = { version = "4", features = ["async"] }
+url = "2.5.8"
+uuid = { version = "1.18", features = ["v4", "serde"] }
+which = "7"
+whoami = "1"
+wildmatch = "2"
 windows = { version = "0.61", features = [
     "Win32_Security",
     "Win32_System_Pipes",
@@ -235,14 +242,7 @@ windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Networking_WinSock",
 ] }
-
-# Used by `cli`, `kube`
-itertools = "0.14.0"
-
-# Used by `cli`
-url = "2.5.8"
-
-# Used by `layer-win`
+windows-strings = "0.4"
 winapi = { version = "0.3.9", features = [
     "winbase",
     "minwindef",
@@ -269,24 +269,12 @@ winapi = { version = "0.3.9", features = [
     "namedpipeapi",
     "impl-default",
 ] }
-
-# Used by `analytics`, `cli`
-ci_info = "0.14"
-
-# Used by `cli`
+wsl = "0.1"
+x509-certificate = "0.24"
+x509-parser = "0.17"
+xmas-elf = "0.10"
 yamlpatch = "0.9.0"
 yamlpath = "0.32.0"
-
-# Used by `agent`, `protocol`
-jaq-core = "2.2.1"
-jaq-parse = "1.0.3"
-jaq-std = "2.1.2"
-jaq-json = "1.1.3"
-
-# Used by `cli`, `auth`, `sip`
-flate2 = { version = "1", default-features = false, features = ["rust_backend"]}
-# Used by `cli`, `sip`
-tar = "0.4"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"

@@ -1,0 +1,76 @@
+name: Scheduled Release
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  evaluate_release_conditions:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      should_trigger: ${{ steps.evaluate.outputs.should_trigger }}
+      changelog_entry_count: ${{ steps.evaluate.outputs.changelog_entry_count }}
+      last_release_date: ${{ steps.evaluate.outputs.last_release_date }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Evaluate changelog and release status
+        id: evaluate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          changelog_entry_count=$(find changelog.d -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')
+          last_release_date=$(
+            gh release view --repo "${{ github.repository }}" --json publishedAt --jq '.publishedAt[:10]' 2>/dev/null || true
+          )
+          release_older_than_seven_days=true
+
+          if [ -n "${last_release_date}" ]; then
+            seven_days_ago_epoch=$(date -u -d '7 days ago' +%s)
+            last_release_epoch=$(date -u -d "${last_release_date}" +%s)
+
+            if [ "${last_release_epoch}" -gt "${seven_days_ago_epoch}" ]; then
+              release_older_than_seven_days=false
+            fi
+          fi
+
+          should_trigger=false
+          reason="conditions not met"
+
+          if [ "${changelog_entry_count}" -gt 0 ] && [ "${release_older_than_seven_days}" = "true" ]; then
+            should_trigger=true
+            reason="changelog entries exist and the latest release is older than seven days"
+          fi
+
+          {
+            echo "should_trigger=${should_trigger}"
+            echo "changelog_entry_count=${changelog_entry_count}"
+            echo "last_release_date=${last_release_date}"
+            echo "reason=${reason}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Report decision
+        run: |
+          echo "changelog entries: ${{ steps.evaluate.outputs.changelog_entry_count }}"
+          if [ -n "${{ steps.evaluate.outputs.last_release_date }}" ]; then
+            echo "last release date: ${{ steps.evaluate.outputs.last_release_date }}"
+          else
+            echo "last release date: none"
+          fi
+          echo "should trigger auto-release-pr: ${{ steps.evaluate.outputs.should_trigger }}"
+
+  auto_release_pr:
+    needs: evaluate_release_conditions
+    if: needs.evaluate_release_conditions.outputs.should_trigger == 'true'
+    uses: ./.github/workflows/auto-release-pr.yaml
+    permissions:
+      contents: read
+    secrets: inherit

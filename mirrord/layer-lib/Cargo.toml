@@ -48,7 +48,7 @@ tokio = { workspace = true, features = ["rt", "macros"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
-frida-gum = { version = "0.17", features = ["auto-download", "std"] }
+frida-gum.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

@@ -9,6 +9,8 @@ use regex::RegexSetBuilder;
 pub fn regex_set_builder() -> RegexSetBuilder {
     let mut patterns: Vec<String> = [
         r".\.so$",
+        r".\.sh$",
+        r".\.rb$",
         r".\.d$",
         r".\.pyc$",
         r".\.py$",

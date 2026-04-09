@@ -30,14 +30,14 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 serde_yaml.workspace = true
-toml = "0.8"
+toml.workspace = true
 schemars.workspace = true
-bimap = { version = "0.6" }
-nom = "7.1"
+bimap.workspace = true
+nom.workspace = true
 ipnet.workspace = true
-bitflags = "2"
+bitflags.workspace = true
 k8s-openapi = { workspace = true, features = ["schemars", "v1_31"] }
-tera = "1"
+tera.workspace = true
 fancy-regex.workspace = true
 base64.workspace = true
 rand.workspace = true

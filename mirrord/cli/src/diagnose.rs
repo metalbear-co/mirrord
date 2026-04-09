@@ -1,6 +1,7 @@
 use std::{path::Path, time::Duration};
 
 use mirrord_analytics::NullReporter;
+use mirrord_auth::credential_store::CredentialStore;
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
@@ -89,9 +90,28 @@ async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
     Ok(())
 }
 
+/// Print the user fingerprints stored in the local credentials file.
+///
+/// Each entry corresponds to an operator license the machine has authenticated against. The
+/// fingerprint is what the operator uses as `client_hash` to identify users (e.g. seat counting).
+async fn diagnose_license() -> CliResult<()> {
+    let store = CredentialStore::load_from_default_path().await?;
+    let mut count = 0usize;
+    for (operator_fp, user_fp) in store.user_fingerprints() {
+        println!("operator: {operator_fp}");
+        println!("  user fingerprint: {user_fp}");
+        count += 1;
+    }
+    if count == 0 {
+        println!("No credentials found in ~/.mirrord/credentials.");
+    }
+    Ok(())
+}
+
 /// Handle commands related to the operator `mirrord diagnose ...`
 pub(crate) async fn diagnose_command(args: DiagnoseArgs) -> CliResult<()> {
     match args.command {
         DiagnoseCommand::Latency { config_file } => diagnose_latency(config_file.as_deref()).await,
+        DiagnoseCommand::License => diagnose_license().await,
     }
 }

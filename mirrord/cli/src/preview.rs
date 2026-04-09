@@ -28,10 +28,14 @@ use mirrord_analytics::{
     preview::{PreviewEvent, PreviewEventKind},
 };
 use mirrord_config::{
-    LayerConfig, config::ConfigContext, feature::preview::PreviewTtlMins, target::Target,
+    LayerConfig,
+    config::ConfigContext,
+    feature::preview::PreviewTtlMins,
+    target::{Target, TargetDisplay},
 };
+use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
-    client::{OperatorApi, PreparedClientCert},
+    client::{NoClientCert, OperatorApi},
     crd::{
         NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
@@ -130,10 +134,10 @@ async fn preview_start(
         CliError::PreviewListFailed(e.to_string())
     })?;
 
-    // Check if there's an existing session with the same key and warns the user about it.
+    // Check if there's an existing session with the same key and warn the user about it.
     if existing_sessions.items.is_empty().not() {
         progress.warning(&format!(
-            "This key {key} is already part of an existing environment. \
+            "the key '{key}' is already part of an existing preview environment. \
             If that’s not what you intended, please switch to a different key."
         ));
     }
@@ -377,7 +381,7 @@ async fn preview_start(
         .as_deref()
         .unwrap_or(operator_api.client().default_namespace());
 
-    progress.success(None);
+    progress.success(Some("preview environment created successfully"));
 
     let key = layer_config.key.as_str();
 
@@ -660,6 +664,9 @@ async fn preview_stop(
 /// Resolves a [`Target`] to a [`SessionTarget`] by fetching the target from the
 /// operator's GET TargetCrd API. The operator validates the target exists and resolves
 /// the container if not specified. Works for both single-cluster and multi-cluster.
+///
+/// Falls back to local `runtime_data` resolution if the operator didn't resolve the
+/// container (backwards compatibility with older operators).
 async fn resolve_config_target(
     config_target: &Target,
     client: &kube::Client,
@@ -671,15 +678,26 @@ async fn resolve_config_target(
         .get(&TargetCrd::urlfied_name(config_target))
         .await
         .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?;
-    let target = target_crd
+    let mut target = target_crd
         .spec
         .target
         .as_known()
         .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?
         .clone();
 
-    SessionTarget::from_config(target)
-        .ok_or_else(|| CliError::PreviewTargetResolutionFailed(config_target.to_string()))
+    // Older operators don't resolve the container in GET TargetCrd. Fall back to
+    // querying the cluster directly so the CLI stays compatible with them.
+    if target.container().is_none() {
+        let runtime_data = config_target
+            .runtime_data(client, namespace)
+            .await
+            .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?;
+        target.set_container(runtime_data.container_name);
+    }
+
+    SessionTarget::from_config(target).ok_or_else(|| {
+        CliError::PreviewTargetResolutionFailed("no valid container found".to_owned())
+    })
 }
 
 fn load_preview_config(
@@ -713,7 +731,7 @@ async fn create_preview_api(
     all_namespaces: bool,
     progress: &ProgressTracker,
     analytics: &mut AnalyticsReporter,
-) -> CliResult<(OperatorApi<PreparedClientCert>, Api<PreviewSession>)> {
+) -> CliResult<(OperatorApi<NoClientCert>, Api<PreviewSession>)> {
     let mut subtask = progress.subtask("connecting to operator");
 
     let operator_api = OperatorApi::try_new(config, analytics, progress)
@@ -729,14 +747,6 @@ async fn create_preview_api(
         .operator()
         .spec
         .require_feature(NewOperatorFeature::PreviewEnv)
-        .inspect_err(|_| {
-            subtask.failure(None);
-        })?;
-
-    let operator_api = operator_api
-        .with_client_certificate(analytics, progress, config)
-        .await
-        .into_certified()
         .inspect_err(|_| {
             subtask.failure(None);
         })?;

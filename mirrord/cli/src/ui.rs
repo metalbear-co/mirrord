@@ -26,7 +26,10 @@ use axum::{
 };
 use eventsource_stream::Eventsource;
 use futures::stream::StreamExt as _;
-use mirrord_intproxy::session_monitor::api::SessionInfo;
+use mirrord_session_monitor_client::{
+    SessionError, connect_to_session, session_socket_entries, sessions_dir,
+};
+use mirrord_session_monitor_protocol::SessionInfo;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 #[cfg(not(debug_assertions))]
 use rust_embed::Embed;
@@ -39,15 +42,6 @@ use crate::{config::UiArgs, error::CliError};
 
 const MAX_EVENTS_PER_SESSION: usize = 500;
 
-/// Errors from communicating with a per-session monitor API over its Unix socket.
-#[derive(Debug, thiserror::Error)]
-enum SessionError {
-    #[error("HTTP request failed: {0}")]
-    Request(#[from] reqwest::Error),
-    #[error("unexpected status {0} from session API")]
-    BadStatus(reqwest::StatusCode),
-}
-
 #[cfg(not(debug_assertions))]
 #[derive(Embed)]
 #[folder = "../../monitor-frontend/dist/"]
@@ -56,7 +50,7 @@ struct FrontendAssets;
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum SessionNotification {
-    SessionAdded { session: TrackedSession },
+    SessionAdded { session: Box<TrackedSession> },
     SessionRemoved { session_id: String },
 }
 
@@ -77,21 +71,6 @@ impl Serialize for TrackedSession {
 struct AppState {
     sessions: RwLock<HashMap<String, TrackedSession>>,
     notify_tx: broadcast::Sender<SessionNotification>,
-}
-
-/// Creates a reqwest client configured to connect via the given Unix socket.
-fn unix_client(socket_path: &std::path::Path) -> Result<reqwest::Client, SessionError> {
-    Ok(reqwest::Client::builder()
-        .unix_socket(socket_path)
-        .build()?)
-}
-
-async fn fetch_session_info(client: &reqwest::Client) -> Result<SessionInfo, SessionError> {
-    let resp = client.get("http://localhost/info").send().await?;
-    if !resp.status().is_success() {
-        return Err(SessionError::BadStatus(resp.status()));
-    }
-    Ok(resp.json().await?)
 }
 
 /// Opens an SSE connection to a session's Unix socket /events endpoint and returns
@@ -168,19 +147,8 @@ async fn stream_session_events(session_id: String, client: reqwest::Client, stat
 }
 
 async fn scan_existing_sessions(sessions_dir: &std::path::Path, state: &Arc<AppState>) {
-    let entries = match std::fs::read_dir(sessions_dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("sock")
-            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-        {
-            let session_id = stem.to_owned();
-            add_session(session_id, path, state.clone()).await;
-        }
+    for (session_id, socket_path) in session_socket_entries(sessions_dir) {
+        add_session(session_id, socket_path, state.clone()).await;
     }
 }
 
@@ -189,19 +157,8 @@ async fn add_session(session_id: String, socket_path: PathBuf, state: Arc<AppSta
         return;
     }
 
-    let client = match unix_client(&socket_path) {
-        Ok(c) => c,
-        Err(err) => {
-            debug!(%session_id, ?err, "Could not create client for session socket");
-            if let Err(err) = std::fs::remove_file(&socket_path) {
-                warn!(%session_id, ?err, "Failed to remove stale socket");
-            }
-            return;
-        }
-    };
-
-    let info = match fetch_session_info(&client).await {
-        Ok(i) => i,
+    let connection = match connect_to_session(&socket_path).await {
+        Ok(connection) => connection,
         Err(err) => {
             debug!(%session_id, ?err, "Could not fetch session info, removing stale socket");
             if let Err(err) = std::fs::remove_file(&socket_path) {
@@ -212,15 +169,15 @@ async fn add_session(session_id: String, socket_path: PathBuf, state: Arc<AppSta
     };
 
     let tracked = TrackedSession {
-        socket_path: socket_path.clone(),
-        info,
+        socket_path: connection.socket_path.clone(),
+        info: connection.info,
         events: Vec::new(),
-        client,
+        client: connection.client,
     };
 
     let session_client = tracked.client.clone();
     let notification = SessionNotification::SessionAdded {
-        session: tracked.clone(),
+        session: Box::new(tracked.clone()),
     };
 
     {
@@ -358,7 +315,7 @@ async fn ws_connection(mut socket: WebSocket, state: Arc<AppState>) {
         let sessions = state.sessions.read().await;
         for session in sessions.values() {
             let notification = SessionNotification::SessionAdded {
-                session: session.clone(),
+                session: Box::new(session.clone()),
             };
             let msg = serde_json::to_string(&notification)
                 .expect("notification serialization cannot fail");
@@ -501,10 +458,8 @@ fn build_router(state: Arc<AppState>) -> Router {
 }
 
 pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
-    let sessions_dir = home::home_dir()
-        .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?
-        .join(".mirrord")
-        .join("sessions");
+    let sessions_dir = sessions_dir()
+        .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
 
     std::fs::create_dir_all(&sessions_dir)
         .map_err(|e| CliError::UiError(format!("failed to create sessions directory: {e}")))?;

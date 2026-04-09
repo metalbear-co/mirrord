@@ -79,7 +79,7 @@ case "$CONTINUE" in
 esac
 
 # Create new branch
-BRANCH_NAME="${VERSION}"
+BRANCH_NAME="releases/${VERSION}"
 git checkout -b "$BRANCH_NAME"
 echo "Created and switched to branch '$BRANCH_NAME'"
 

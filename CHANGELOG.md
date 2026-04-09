@@ -8,6 +8,43 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.200.0](https://github.com/metalbear-co/mirrord/tree/3.200.0) - 2026-04-09
+
+
+### Changed
+
+- Add Ruby and sh files to default local filter
+- Moved agent container command line arguments from `command` to `args` in
+  order to enable matching with GKE Autopilot WorkloadAllowlist.
+- Identify local redis database branch instances by db branch id instead of by
+  port.
+
+### Fixed
+
+- Fix preview environments failure when using it in CI contexts where a mirrord
+  user isn't configured.
+- Preview env resolve target backwards compatible fix.
+
+## [3.199.0](https://github.com/metalbear-co/mirrord/tree/3.199.0) - 2026-04-06
+
+
+### Added
+
+- Emit a warning when agent settings are configured but ignored because the
+  mirrord operator is managing the session.
+
+
+### Changed
+
+- Adjusted error message for client failure to connect to operator
+
+
+### Fixed
+
+- fixed regression of mirrord container introduced in 3.196.0
+  [#4126](https://github.com/metalbear-co/mirrord/issues/4126)
+- mirrord container on colima now works without disabling TLS
+
 ## [3.198.0](https://github.com/metalbear-co/mirrord/tree/3.198.0) - 2026-04-02
 
 
