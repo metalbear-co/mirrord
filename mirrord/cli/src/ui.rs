@@ -660,6 +660,7 @@ fn build_router(state: Arc<AppState>) -> Router {
     let authenticated_routes = Router::new()
         .nest("/api", api_routes)
         .route("/ws", get(ws_handler))
+        .fallback(static_handler)
         .layer(middleware::from_fn_with_state(state.clone(), token_auth));
 
     let csp_value = HeaderValue::from_static(
@@ -690,7 +691,6 @@ fn build_router(state: Arc<AppState>) -> Router {
             csp_value,
         ))
         .with_state(state)
-        .fallback(static_handler)
 }
 
 pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
