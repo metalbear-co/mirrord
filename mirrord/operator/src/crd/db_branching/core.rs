@@ -129,9 +129,7 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
                     },
                 },
                 ParamSource::Env { variable, value } => {
-                    let var_name = variable
-                        .clone()
-                        .unwrap_or_else(|| format!("MIRRORD_DB_{}", role.to_uppercase()));
+                    let var_name = variable.clone().unwrap_or_else(|| role.to_uppercase());
                     match config.source_type.as_ref() {
                         Some(ConnectionSourceType::EnvFrom) => ConnectionSourceKind::EnvFrom {
                             container: None,
