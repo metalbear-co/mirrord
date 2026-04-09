@@ -378,16 +378,16 @@ pub struct ConnectionParamsConfig {
 #[serde(untagged)]
 pub enum ParamSource {
     Variable(String),
+    Secret {
+        #[serde(rename = "secret")]
+        name: String,
+        key: String,
+    },
     Env {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         variable: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         value: Option<String>,
-    },
-    Secret {
-        #[serde(rename = "secret")]
-        name: String,
-        key: String,
     },
 }
 
@@ -768,14 +768,28 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_param_source_invalid_object_fails() {
+    fn deserialize_param_source_unknown_fields_parsed_as_env() {
+        // With both `variable` and `value` optional, any object that doesn't
+        // match Secret (missing `secret`+`key`) falls through to Env with
+        // both fields as None.
         let json = r#"{
             "type": "env",
             "params": {
                 "host": { "invalid": "object" }
             }
         }"#;
-        let result = serde_json::from_str::<ConnectionSource>(json);
-        assert!(result.is_err());
+        let result = serde_json::from_str::<ConnectionSource>(json).unwrap();
+        match result {
+            ConnectionSource::Params(config) => {
+                assert_eq!(
+                    config.params.host,
+                    Some(ParamSource::Env {
+                        variable: None,
+                        value: None
+                    })
+                );
+            }
+            other => panic!("expected Params, got {other:?}"),
+        }
     }
 }
