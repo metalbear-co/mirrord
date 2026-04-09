@@ -67,6 +67,7 @@ struct TrackedSession {
     info: SessionInfo,
     events: Vec<serde_json::Value>,
     client: reqwest::Client,
+    token: Option<String>,
 }
 
 impl Serialize for TrackedSession {
@@ -161,6 +162,7 @@ fn localhost_cors() -> CorsLayer {
 /// a pinned `Eventsource` stream that yields parsed SSE events.
 async fn open_sse_stream(
     client: &reqwest::Client,
+    token: Option<&str>,
 ) -> Result<
     std::pin::Pin<
         Box<
@@ -174,8 +176,12 @@ async fn open_sse_stream(
     >,
     SessionError,
 > {
+    let url = match token {
+        Some(t) => format!("http://localhost/events?token={t}"),
+        None => "http://localhost/events".to_owned(),
+    };
     let resp = client
-        .get("http://localhost/events")
+        .get(&url)
         .header("accept", "text/event-stream")
         .send()
         .await?;
@@ -199,8 +205,13 @@ async fn buffer_session_events(session_id: &str, values: Vec<serde_json::Value>,
 }
 
 /// Connects to a session's SSE /events endpoint and buffers events into the shared state.
-async fn stream_session_events(session_id: String, client: reqwest::Client, state: Arc<AppState>) {
-    let mut sse_stream = match open_sse_stream(&client).await {
+async fn stream_session_events(
+    session_id: String,
+    client: reqwest::Client,
+    token: Option<String>,
+    state: Arc<AppState>,
+) {
+    let mut sse_stream = match open_sse_stream(&client, token.as_deref()).await {
         Ok(s) => s,
         Err(err) => {
             warn!(%session_id, ?err, "Failed to open SSE stream");
@@ -257,9 +268,11 @@ async fn add_session(session_id: String, socket_path: PathBuf, state: Arc<AppSta
         info: connection.info,
         events: Vec::new(),
         client: connection.client,
+        token: connection.token,
     };
 
     let session_client = tracked.client.clone();
+    let session_token = tracked.token.clone();
     let notification = SessionNotification::SessionAdded {
         session: Box::new(tracked.clone()),
     };
@@ -276,7 +289,12 @@ async fn add_session(session_id: String, socket_path: PathBuf, state: Arc<AppSta
     let _ = state.notify_tx.send(notification);
     info!(%session_id, "Session added");
 
-    tokio::spawn(stream_session_events(session_id, session_client, state));
+    tokio::spawn(stream_session_events(
+        session_id,
+        session_client,
+        session_token,
+        state,
+    ));
 }
 
 async fn remove_session(session_id: &str, state: &AppState) {
@@ -332,10 +350,14 @@ async fn session_events_sse(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    let (buffered_events, client) = {
+    let (buffered_events, client, session_token) = {
         let sessions = state.sessions.read().await;
         match sessions.get(&id) {
-            Some(session) => (session.events.clone(), session.client.clone()),
+            Some(session) => (
+                session.events.clone(),
+                session.client.clone(),
+                session.token.clone(),
+            ),
             None => return StatusCode::NOT_FOUND.into_response(),
         }
     };
@@ -351,7 +373,7 @@ async fn session_events_sse(
             }
         }
 
-        let mut sse_stream = match open_sse_stream(&client).await {
+        let mut sse_stream = match open_sse_stream(&client, session_token.as_deref()).await {
             Ok(s) => s,
             Err(err) => {
                 warn!(?err, "Failed to open SSE stream for proxy");
@@ -389,15 +411,23 @@ async fn session_events_sse(
 }
 
 async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    let (client, socket_path) = {
+    let (client, socket_path, session_token) = {
         let sessions = state.sessions.read().await;
         match sessions.get(&id) {
-            Some(session) => (session.client.clone(), session.socket_path.clone()),
+            Some(session) => (
+                session.client.clone(),
+                session.socket_path.clone(),
+                session.token.clone(),
+            ),
             None => return StatusCode::NOT_FOUND.into_response(),
         }
     };
 
-    match client.post("http://localhost/kill").send().await {
+    let kill_url = match session_token.as_deref() {
+        Some(token) => format!("http://localhost/kill?token={token}"),
+        None => "http://localhost/kill".to_owned(),
+    };
+    match client.post(&kill_url).send().await {
         Ok(resp) => {
             let val: serde_json::Value = resp.json().await.unwrap_or_else(|err| {
                 warn!(?err, "Failed to parse kill response body");

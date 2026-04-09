@@ -57,6 +57,7 @@ struct SocketCleanup {
 #[cfg(unix)]
 impl Drop for SocketCleanup {
     fn drop(&mut self) {
+        tracing::info!(path = ?self.socket_path, "SocketCleanup dropping, removing socket and token files");
         if let Err(err) = fs::remove_file(&self.socket_path) {
             tracing::warn!(?err, path = ?self.socket_path, "Failed to remove session socket");
         }

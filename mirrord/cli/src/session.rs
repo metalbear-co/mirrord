@@ -270,12 +270,14 @@ async fn kill_local_then_remote(
     session_id: &str,
 ) -> Result<(), CliError> {
     let local_killed = if let Some(session) = local_session {
-        kill_session(&session.client).await.map_err(|error| {
-            CliError::UiError(format!(
-                "failed to kill local session `{}`: {error}",
-                session.info.session_id
-            ))
-        })?;
+        kill_session(&session.client, session.token.as_deref())
+            .await
+            .map_err(|error| {
+                CliError::UiError(format!(
+                    "failed to kill local session `{}`: {error}",
+                    session.info.session_id
+                ))
+            })?;
         true
     } else {
         false
