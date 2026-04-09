@@ -83,7 +83,6 @@ struct AppState {
     /// Stored for `read_session_token` to resolve per-session token files.
     #[allow(dead_code)]
     sessions_dir: PathBuf,
-    kube_client: Option<kube::Client>,
 }
 
 #[derive(Deserialize)]
@@ -513,38 +512,6 @@ async fn ws_connection(mut socket: WebSocket, state: Arc<AppState>) {
     }
 }
 
-/// Proxies GET /topology to the operator via k8s API server service proxy.
-async fn proxy_topology(State(state): State<Arc<AppState>>) -> Response {
-    let client = match &state.kube_client {
-        Some(client) => client.clone(),
-        None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                axum::Json(serde_json::json!({"error": "kube client not available"})),
-            )
-                .into_response();
-        }
-    };
-
-    let request = axum::http::Request::builder()
-        .uri("/api/v1/namespaces/mirrord/services/mirrord-operator:3000/proxy/topology")
-        .header(header::ACCEPT, "application/json")
-        .body(Vec::new())
-        .expect("static topology request should always be valid");
-
-    match client.request::<serde_json::Value>(request).await {
-        Ok(value) => axum::Json(value).into_response(),
-        Err(err) => {
-            warn!(?err, "Failed to proxy topology request");
-            (
-                StatusCode::BAD_GATEWAY,
-                axum::Json(serde_json::json!({"error": err.to_string()})),
-            )
-                .into_response()
-        }
-    }
-}
-
 fn guess_mime(path: &str) -> &'static str {
     mime_guess::from_path(path)
         .first_raw()
@@ -654,8 +621,7 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/sessions", get(list_sessions))
         .route("/sessions/{id}", get(get_session))
         .route("/sessions/{id}/events", get(session_events_sse))
-        .route("/sessions/{id}/kill", post(kill_session))
-        .route("/topology", get(proxy_topology));
+        .route("/sessions/{id}/kill", post(kill_session));
 
     let authenticated_routes = Router::new()
         .nest("/api", api_routes)
@@ -706,24 +672,11 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
     let token_bytes: [u8; 32] = rand::rng().random();
     let token = hex::encode(token_bytes);
 
-    // Try to create a kube client for topology proxy
-    let kube_client = match kube::Client::try_default().await {
-        Ok(client) => Some(client),
-        Err(err) => {
-            warn!(
-                ?err,
-                "Failed to create kube client, topology proxy will be unavailable"
-            );
-            None
-        }
-    };
-
     let state = Arc::new(AppState {
         sessions: RwLock::new(HashMap::new()),
         notify_tx,
         token: token.clone(),
         sessions_dir: sessions_dir.clone(),
-        kube_client,
     });
 
     scan_existing_sessions(&sessions_dir, &state).await;
