@@ -1,1 +1,1 @@
-Added for oubleshooting mirrord for Teams license usage.
+Added `mirrord diagnose license` for troubleshooting mirrord for Teams license usage.
