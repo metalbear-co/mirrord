@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 use std::path::{Path, PathBuf};
 
 // This prefix is a way to explicitly indicate that we're looking in

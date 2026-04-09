@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 use str_win::*;
 
 #[test]
