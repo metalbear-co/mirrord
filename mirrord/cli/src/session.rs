@@ -38,11 +38,6 @@ enum RemoteKillResult {
     Unavailable,
 }
 
-enum RemoteSessionsLoad {
-    Loaded(Vec<OperatorStatusSession>),
-    OperatorNotFound,
-}
-
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 pub async fn session_command(args: SessionArgs) -> Result<(), CliError> {
     match args.command.unwrap_or(LocalSessionCommand::List) {
@@ -125,35 +120,33 @@ pub async fn delete_command(args: SessionDeleteArgs) -> Result<(), CliError> {
         .key
         .expect("clap enforces that either id or key is provided");
 
-    let selected_sessions: Vec<_> = sessions
+    let (selected_sessions, deleted_ids): (Vec<_>, Vec<_>) = sessions
         .into_iter()
-        .filter(|session| session.info.key.as_deref() == Some(key.as_str()))
-        .collect();
+        .filter_map(|session| {
+            (session.info.key.as_deref() == Some(key.as_str())).then(|| {
+                let id = session.info.session_id.clone();
+                (session, id)
+            })
+        })
+        .unzip();
 
-    if selected_sessions.is_empty() {
+    if deleted_ids.is_empty() {
         return Err(CliError::UiError(format!(
             "no local sessions found with key `{key}`"
         )));
     }
 
-    let deleted_ids: Vec<_> = selected_sessions
-        .iter()
-        .map(|session| session.info.session_id.clone())
-        .collect();
-
-    for session in selected_sessions {
-        let session_id = session.info.session_id.clone();
-        kill_local_then_remote(Some(session), &session_id).await?;
+    for (session, session_id) in std::iter::zip(selected_sessions, &deleted_ids) {
+        kill_local_then_remote(Some(session), session_id).await?;
     }
 
-    match deleted_ids.len() {
-        1 => println!(
-            "Killed session {}.",
-            deleted_ids
-                .first()
-                .expect("one deleted session id should exist")
+    match &deleted_ids[..] {
+        [single] => println!("Killed session {single}."),
+        _ => println!(
+            "Killed {} sessions: {}.",
+            deleted_ids.len(),
+            deleted_ids.join(", ")
         ),
-        count => println!("Killed {count} sessions: {}.", deleted_ids.join(", ")),
     }
 
     Ok(())
@@ -161,10 +154,9 @@ pub async fn delete_command(args: SessionDeleteArgs) -> Result<(), CliError> {
 
 async fn merged_sessions() -> Result<(Vec<MergedSessionRow>, bool), CliError> {
     let local_sessions = load_sessions().await?;
-    let (remote_sessions, operator_not_found) = match try_load_remote_sessions().await {
-        RemoteSessionsLoad::Loaded(sessions) => (sessions, false),
-        RemoteSessionsLoad::OperatorNotFound => (Vec::new(), true),
-    };
+    let remote_result = try_load_remote_sessions().await;
+    let operator_not_found = remote_result.is_none();
+    let remote_sessions = remote_result.unwrap_or_default();
 
     let mut rows: HashMap<String, MergedSessionRow> = HashMap::new();
 
@@ -218,13 +210,15 @@ async fn load_sessions() -> Result<Vec<SessionConnection>, CliError> {
     Ok(sessions)
 }
 
-async fn try_load_remote_sessions() -> RemoteSessionsLoad {
+/// Returns `None` if the operator is not found (signals operator-not-found to callers),
+/// or `Some` with whatever sessions were loaded (empty on other errors).
+async fn try_load_remote_sessions() -> Option<Vec<OperatorStatusSession>> {
     match load_remote_sessions().await {
-        Ok(sessions) => RemoteSessionsLoad::Loaded(sessions),
-        Err(CliError::OperatorNotInstalled) => RemoteSessionsLoad::OperatorNotFound,
+        Ok(sessions) => Some(sessions),
+        Err(CliError::OperatorNotInstalled) => None,
         Err(error) => {
             tracing::debug!(?error, "Failed to load remote operator sessions");
-            RemoteSessionsLoad::Loaded(Vec::new())
+            Some(Vec::new())
         }
     }
 }

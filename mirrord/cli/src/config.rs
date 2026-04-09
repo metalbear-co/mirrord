@@ -1420,13 +1420,9 @@ pub enum LocalSessionCommand {
 /// Arguments for deleting local mirrord sessions.
 #[cfg(unix)]
 #[derive(Args, Debug)]
-#[command(group(
-    ArgGroup::new("session-delete-target")
-        .args(["id", "key"])
-        .required(true)
-))]
 pub struct SessionDeleteArgs {
     /// Session ID to kill.
+    #[arg(required_unless_present = "key")]
     pub id: Option<String>,
 
     /// Kill all local sessions with this key.

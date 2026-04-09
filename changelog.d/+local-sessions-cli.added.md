@@ -1,1 +1,1 @@
-add local and remote session management commands
+Added local and remote session management commands under `mirrord session`.
