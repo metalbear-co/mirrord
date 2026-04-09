@@ -29,7 +29,7 @@ jobs:
 
       - run: rm rust-toolchain.toml
         if: github.event_name == 'pull_request'
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@d197c158264056996cfba74a9c2d93886346edc3
         if: github.event_name == 'pull_request'
         with:
           toolchain: ${{ env.PINNED_NIGHTLY }}
@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@d197c158264056996cfba74a9c2d93886346edc3
         with:
           cache: false
           rustflags: ""
@@ -134,7 +134,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@d197c158264056996cfba74a9c2d93886346edc3
         with:
           cache: false
           rustflags: ""
@@ -172,7 +172,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@d197c158264056996cfba74a9c2d93886346edc3
         with:
           cache: false
           rustflags: ""
@@ -364,7 +364,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@d197c158264056996cfba74a9c2d93886346edc3
         with:
           target: x86_64-apple-darwin
           toolchain: ${{ env.PINNED_NIGHTLY }}
@@ -398,7 +398,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@d197c158264056996cfba74a9c2d93886346edc3
         with:
           target: aarch64-apple-darwin
           toolchain: ${{ env.PINNED_NIGHTLY }}
@@ -478,7 +478,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@d197c158264056996cfba74a9c2d93886346edc3
         with:
           target: x86_64-apple-darwin
           toolchain: ${{ env.PINNED_NIGHTLY }}
@@ -527,7 +527,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@d197c158264056996cfba74a9c2d93886346edc3
         with:
           target: aarch64-apple-darwin
           toolchain: ${{ env.PINNED_NIGHTLY }}
@@ -808,7 +808,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@d197c158264056996cfba74a9c2d93886346edc3
         with:
           toolchain: ${{ env.PINNED_NIGHTLY }}
           cache: false

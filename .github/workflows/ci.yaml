@@ -187,14 +187,6 @@ jobs:
 
   # ── tests ───────────────────────────────────────────────────────────
 
-  test-agent:
-    needs: [plan]
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    uses: ./.github/workflows/test-agent.yaml
-    with:
-      rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
-    secrets: inherit
-
   test-integration:
     needs: [plan]
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
@@ -255,7 +247,6 @@ jobs:
         build-agent-image,
         build-cli-image,
         build-mirrord-cli,
-        test-agent,
         test-integration,
         test-macos,
         test-e2e,

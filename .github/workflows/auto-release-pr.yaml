@@ -34,7 +34,7 @@ jobs:
         run: uv pip install towncrier==23.11.0
 
       - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@d197c158264056996cfba74a9c2d93886346edc3
         with:
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
           toolchain: ${{ env.PINNED_NIGHTLY }}
