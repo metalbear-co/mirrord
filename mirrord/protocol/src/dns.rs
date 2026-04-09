@@ -11,6 +11,10 @@ use crate::RemoteResult;
 pub static ADDRINFO_V2_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.15.0".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that allows [`ReverseDnsLookupRequest`].
+pub static REVERSE_DNS_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.25.0".parse().expect("Bad Identifier"));
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct LookupRecord {
     pub name: String,

@@ -3,7 +3,9 @@ use std::{borrow::Cow, collections::BTreeMap};
 use k8s_openapi::api::{
     apps::v1::{Deployment, ReplicaSet, StatefulSet},
     batch::v1::{CronJob, Job},
-    core::v1::{EnvFromSource, EnvVar, PersistentVolumeClaim, Pod, PodSpec, Service},
+    core::v1::{
+        EnvFromSource, EnvVar, PersistentVolumeClaim, Pod, PodSpec, PodTemplateSpec, Service,
+    },
 };
 use kube::{Client, Resource, ResourceExt};
 use mirrord_config::target::Target;
@@ -518,6 +520,44 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
                 .spec
                 .as_ref(),
             ResolvedTarget::Pod(inner) => inner.resource.spec.as_ref(),
+            ResolvedTarget::Targetless(..) => None,
+        }
+    }
+
+    /// Get the pod template of the target k8s resource.
+    pub fn get_pod_template(&self) -> Option<Cow<'_, PodTemplateSpec>> {
+        match self {
+            ResolvedTarget::Deployment(inner) => {
+                Some(Cow::Borrowed(&inner.resource.spec.as_ref()?.template))
+            }
+            ResolvedTarget::Rollout(inner) => Some(Cow::Borrowed(
+                inner.resource.spec.as_ref()?.template.as_ref()?.as_ref(),
+            )),
+
+            ResolvedTarget::Job(inner) => {
+                Some(Cow::Borrowed(&inner.resource.spec.as_ref()?.template))
+            }
+            ResolvedTarget::CronJob(inner) => Some(Cow::Borrowed(
+                &inner
+                    .resource
+                    .spec
+                    .as_ref()?
+                    .job_template
+                    .spec
+                    .as_ref()?
+                    .template,
+            )),
+            ResolvedTarget::StatefulSet(inner) => {
+                Some(Cow::Borrowed(&inner.resource.spec.as_ref()?.template))
+            }
+            ResolvedTarget::Service(..) => None,
+            ResolvedTarget::ReplicaSet(inner) => Some(Cow::Borrowed(
+                inner.resource.spec.as_ref()?.template.as_ref()?,
+            )),
+            ResolvedTarget::Pod(inner) => Some(Cow::Owned(PodTemplateSpec {
+                metadata: Some(inner.resource.metadata.clone()),
+                spec: inner.resource.spec.clone(),
+            })),
             ResolvedTarget::Targetless(..) => None,
         }
     }
