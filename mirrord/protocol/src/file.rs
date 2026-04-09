@@ -247,6 +247,7 @@ pub struct DirEntryInternal {
 }
 
 #[cfg(all(target_os = "linux", feature = "libc"))]
+#[cfg_attr(docsrs, doc(cfg(all(target_os = "linux", feature = "libc"))))]
 impl TryFrom<(usize, io::Result<DirEntry>)> for DirEntryInternal {
     type Error = io::Error;
 

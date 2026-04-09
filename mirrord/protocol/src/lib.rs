@@ -49,9 +49,10 @@
 //! * [`ClientCodec`] and [`ProtocolCodec`] implement [`actix_codec::Decoder`] can be used with
 //!   [`actix_codec::Framed`] transform an IO stream into
 //!   [`Sink`](futures::Sink)+[`Stream`](futures::Stream) of mirrord-protocol messages.
-//! * Some mirrord-protocol types implement conversion to/from [`socket2`] and [`hyper`] types.
-//!   These should probably be implemented elsewhere (to remove dependencies from this crate), but
-//!   right now we have these deps everywhere anyway, so it's not a big deal.
+//! * Some mirrord-protocol types implement conversion to/from [`socket2`] and
+//!   [`http`]/[`http_body`] types. These should probably be implemented elsewhere (to remove
+//!   dependencies from this crate), but right now we have these deps everywhere anyway, so it's not
+//!   a big deal.
 
 #![feature(const_trait_impl)]
 #![feature(io_error_more)]
@@ -60,6 +61,8 @@
 // windows features for protocol/file.rs in From<Metadata> for MetadataInternal
 #![cfg_attr(target_os = "windows", feature(windows_change_time))]
 #![cfg_attr(target_os = "windows", feature(windows_by_handle))]
+// Allow to show "feature gated" warnings when docs are generated
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod batched_body;
 pub mod codec;

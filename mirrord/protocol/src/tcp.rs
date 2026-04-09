@@ -188,8 +188,9 @@ pub struct ChunkedRequestErrorV2 {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Deref, Display)]
 pub struct Filter(String);
 
-#[cfg(feature = "regex")]
 impl Filter {
+    #[cfg(feature = "regex")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "regex")))]
     pub fn new(filter_str: String) -> Result<Self, Box<fancy_regex::Error>> {
         let _ = fancy_regex::Regex::new(&filter_str).inspect_err(|fail| {
             tracing::error!(
@@ -283,8 +284,9 @@ fn type_of(nodes: NodesType) -> ValueType {
 #[derive(Debug, Clone, Deref, PartialEq, Eq, Encode, Decode, Display)]
 pub struct JqQuery(String);
 
-#[cfg(feature = "jaq")]
 impl JqQuery {
+    #[cfg(feature = "jaq")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "jaq")))]
     pub fn new(expr: &str) -> Result<Self, String> {
         let inner = || {
             let program = File {

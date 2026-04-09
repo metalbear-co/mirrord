@@ -49,6 +49,7 @@ impl From<net::SocketAddr> for SocketAddress {
 }
 
 #[cfg(all(unix, feature = "socket2"))]
+#[cfg_attr(docsrs, doc(cfg(all(unix, feature = "socket2"))))]
 impl TryFrom<UnixAddr> for socket2::SockAddr {
     type Error = io::Error;
 
@@ -80,6 +81,7 @@ impl TryFrom<SocketAddress> for net::SocketAddr {
 }
 
 #[cfg(feature = "socket2")]
+#[cfg_attr(docsrs, doc(cfg(feature = "socket2")))]
 impl TryFrom<socket2::SockAddr> for SocketAddress {
     type Error = crate::error::SerializationError;
 
@@ -108,6 +110,7 @@ impl TryFrom<socket2::SockAddr> for SocketAddress {
 }
 
 #[cfg(feature = "socket2")]
+#[cfg_attr(docsrs, doc(cfg(feature = "socket2")))]
 impl TryFrom<SocketAddress> for socket2::SockAddr {
     type Error = io::Error;
 
