@@ -12,7 +12,7 @@ runs:
     - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
       with:
         repo-token: ${{ inputs.github-token }}
-    - uses: metalbear-co/setup-rust-toolchain@d197c158264056996cfba74a9c2d93886346edc3
+    - uses: metalbear-co/setup-rust-toolchain@bb0a05a1b7e260b5081982438f974879f47940f4
       with:
         cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
     - name: build mirrord CLI

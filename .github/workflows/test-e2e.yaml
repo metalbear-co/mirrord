@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
         with:
           node-version: 22
-      - uses: metalbear-co/setup-rust-toolchain@d197c158264056996cfba74a9c2d93886346edc3
+      - uses: metalbear-co/setup-rust-toolchain@bb0a05a1b7e260b5081982438f974879f47940f4
         with:
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
       - uses: metalbear-co/ci/e2e-setup-action@main

@@ -18,7 +18,7 @@ jobs:
       MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # Checkout the mirrord repo.
-      - uses: metalbear-co/setup-rust-toolchain@d197c158264056996cfba74a9c2d93886346edc3
+      - uses: metalbear-co/setup-rust-toolchain@bb0a05a1b7e260b5081982438f974879f47940f4
         with:
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623

@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
       - run: Remove-Item rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@d197c158264056996cfba74a9c2d93886346edc3
+      - uses: metalbear-co/setup-rust-toolchain@bb0a05a1b7e260b5081982438f974879f47940f4
         with:
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
           components: rustfmt, clippy
