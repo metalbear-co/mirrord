@@ -8,6 +8,28 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.200.0](https://github.com/metalbear-co/mirrord/tree/3.200.0) - 2026-04-09
+
+
+### Added
+
+- Identify local redis database branch instances by db branch id instead of by
+  port.
+
+
+### Changed
+
+- Add Ruby and sh files to default local filter
+- Moved agent container command line arguments from `command` to `args` in
+  order to enable matching with GKE Autopilot WorkloadAllowlist.
+
+
+### Fixed
+
+- Fix preview environments failure when using it in CI contexts where a mirrord
+  user isn't configured.
+- Preview env resolve target backwards compatible fix.
+
 ## [3.199.0](https://github.com/metalbear-co/mirrord/tree/3.199.0) - 2026-04-06
 
 
