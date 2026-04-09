@@ -564,7 +564,7 @@ mod tests {
 
     #[test]
     fn extract_params_all_variables() {
-        let conn = ConnectionSource::Params(ConnectionParamsConfig {
+        let conn = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: None,
             params: ConnectionParamsVars {
                 host: Some(ParamSource::Variable("H".to_owned())),
@@ -573,7 +573,7 @@ mod tests {
                 password: Some(ParamSource::Variable("PW".to_owned())),
                 database: Some(ParamSource::Variable("DB".to_owned())),
             },
-        });
+        }));
         let config = DatabaseBranchesConfig(vec![mysql(Some("db5"), conn)]);
         let result = extract_portforward_configs(&config, "key");
 

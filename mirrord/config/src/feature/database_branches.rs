@@ -306,7 +306,7 @@ pub enum ConnectionSource {
         source_type: Option<ConnectionSourceType>,
         url: String,
     },
-    Params(ConnectionParamsConfig),
+    Params(Box<ConnectionParamsConfig>),
 }
 
 impl Serialize for ConnectionSource {
@@ -640,7 +640,7 @@ mod tests {
         let result = serde_json::from_str::<ConnectionSource>(json).unwrap();
         assert_eq!(
             result,
-            ConnectionSource::Params(ConnectionParamsConfig {
+            ConnectionSource::Params(Box::new(ConnectionParamsConfig {
                 source_type: Some(ConnectionSourceType::Env),
                 params: ConnectionParamsVars {
                     host: None,
@@ -649,7 +649,7 @@ mod tests {
                     password: None,
                     database: None,
                 },
-            })
+            }))
         );
     }
 
@@ -696,7 +696,7 @@ mod tests {
 
     #[test]
     fn serialize_roundtrip_params() {
-        let source = ConnectionSource::Params(ConnectionParamsConfig {
+        let source = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: Some(ConnectionSourceType::Env),
             params: ConnectionParamsVars {
                 host: Some(ParamSource::Variable("DB_HOST".to_string())),
@@ -705,7 +705,7 @@ mod tests {
                 password: None,
                 database: Some(ParamSource::Variable("DB_NAME".to_string())),
             },
-        });
+        }));
         let json = serde_json::to_string(&source).unwrap();
         let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
         assert_eq!(source, deserialized);
@@ -749,7 +749,7 @@ mod tests {
 
     #[test]
     fn serialize_roundtrip_params_with_secret() {
-        let source = ConnectionSource::Params(ConnectionParamsConfig {
+        let source = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: Some(ConnectionSourceType::Env),
             params: ConnectionParamsVars {
                 host: Some(ParamSource::Variable("DB_HOST".to_string())),
@@ -761,7 +761,7 @@ mod tests {
                 }),
                 database: Some(ParamSource::Variable("DB_NAME".to_string())),
             },
-        });
+        }));
         let json = serde_json::to_string(&source).unwrap();
         let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
         assert_eq!(source, deserialized);

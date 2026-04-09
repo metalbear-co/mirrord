@@ -686,13 +686,13 @@ pub fn replace_values_with_secret_refs(
         secret_name: &str,
         keys: &std::collections::HashMap<String, String>,
     ) {
-        if let ConnectionSourceKind::Env { variable, .. } = kind {
-            if keys.contains_key(variable.as_str()) {
-                *kind = ConnectionSourceKind::Secret {
-                    name: secret_name.to_string(),
-                    key: variable.clone(),
-                };
-            }
+        if let ConnectionSourceKind::Env { variable, .. } = kind
+            && keys.contains_key(variable.as_str())
+        {
+            *kind = ConnectionSourceKind::Secret {
+                name: secret_name.to_string(),
+                key: variable.clone(),
+            };
         }
     }
 
@@ -735,7 +735,7 @@ fn convert_connection_source(source: &ConnectionSource) -> CrdConnectionSource {
             CrdConnectionSource::Url(Box::new((&kind).into()))
         }
         ConnectionSource::Params(config) => {
-            CrdConnectionSource::Params(Box::new(ConnectionParamsSpec::from(config)))
+            CrdConnectionSource::Params(Box::new(ConnectionParamsSpec::from(config.as_ref())))
         }
     }
 }
