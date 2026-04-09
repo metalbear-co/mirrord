@@ -212,6 +212,10 @@ impl HttpFilterConfig {
             || self.header_filter_jq.is_some()
     }
 
+    /// Rejects configured filter values that are present but empty.
+    ///
+    /// Empty HTTP filters are ambiguous: they still look configured, but can end up matching
+    /// everything or only failing later during parsing.
     pub fn ensure_no_empty_strings(&self) -> Result<(), HttpFilterValidationError> {
         ensure_non_empty(self.header_filter.as_deref(), "header_filter".to_owned())?;
         ensure_non_empty(self.path_filter.as_deref(), "path_filter".to_owned())?;
@@ -614,6 +618,9 @@ pub enum BodyFilter {
 }
 
 impl BodyFilter {
+    /// Checks body-filter strings for empty values.
+    ///
+    /// The prefix keeps errors pointing at the right nested config field.
     fn ensure_no_empty_strings(&self, prefix: &str) -> Result<(), HttpFilterValidationError> {
         match self {
             BodyFilter::Json { query, matches } => {
@@ -637,6 +644,9 @@ impl BodyFilter {
 }
 
 impl InnerFilter {
+    /// Checks composite filter entries for empty values.
+    ///
+    /// The prefix lets nested errors report the exact entry that failed.
     fn ensure_no_empty_strings(&self, prefix: &str) -> Result<(), HttpFilterValidationError> {
         match self {
             InnerFilter::Header { header } => {
@@ -656,6 +666,10 @@ impl InnerFilter {
     }
 }
 
+/// Returns the shared validation error for a present-but-empty string value.
+///
+/// Empty strings are rejected so HTTP filters do not silently behave like broad catch-all filters
+/// or make validation fail later in a less obvious place.
 fn ensure_non_empty(value: Option<&str>, field: String) -> Result<(), HttpFilterValidationError> {
     match value {
         Some("") => Err(HttpFilterValidationError::EmptyString { field })?,
