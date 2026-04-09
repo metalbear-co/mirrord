@@ -132,6 +132,7 @@ async fn token_auth(
             .http_only(true)
             .same_site(SameSite::Strict)
             .path("/")
+            .secure(true)
             .build();
         let response = next.run(request).await;
         return (jar.add(cookie), response).into_response();
