@@ -33,6 +33,7 @@ jobs:
         if: github.event_name == 'pull_request'
         with:
           toolchain: ${{ env.PINNED_NIGHTLY }}
+          cache: false
           rustflags: ""
 
       - name: Install cargo-get
@@ -95,6 +96,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
+          cache: false
           rustflags: ""
 
       #      - uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
@@ -134,6 +136,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
+          cache: false
           rustflags: ""
       #      - uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
       #        with:
@@ -171,6 +174,7 @@ jobs:
 
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
+          cache: false
           rustflags: ""
 
       - name: Install WiX Toolset
@@ -692,7 +696,9 @@ jobs:
         if: needs.validate_release_request.outputs.should_release == 'true'
         env:
           AGENT_TAGS: "ghcr.io/metalbear-co/mirrord:latest,ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}"
-        run: docker buildx bake -f ci/docker-bake.hcl agent --push
+          PRODUCT_CACHE_FROM: ""
+          PRODUCT_CACHE_TO: ""
+        run: docker buildx bake -f ci/docker-bake.hcl agent --push --no-cache
 
   release_cli_docker_image:
     needs: [validate_release_request]
@@ -767,7 +773,9 @@ jobs:
         if: needs.validate_release_request.outputs.should_release == 'true'
         env:
           CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }},ghcr.io/metalbear-co/mirrord-cli:latest"
-        run: docker buildx bake -f ci/docker-bake.hcl cli --push
+          PRODUCT_CACHE_FROM: ""
+          PRODUCT_CACHE_TO: ""
+        run: docker buildx bake -f ci/docker-bake.hcl cli --push --no-cache
 
   check_for_new_docs:
     needs: [validate_release_request]
