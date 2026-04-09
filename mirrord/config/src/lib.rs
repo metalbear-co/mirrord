@@ -893,6 +893,12 @@ impl LayerConfig {
             context.add_warning(ignored("feature.network.incoming.ignore_localhost"));
         }
 
+        if self.feature.network.incoming.http_filter.ports
+            != default.feature.network.incoming.http_filter.ports
+        {
+            context.add_warning(ignored("feature.network.incoming.http_filter.ports"));
+        }
+
         // feature.fs - unsupported
 
         if self.feature.fs != default.feature.fs {

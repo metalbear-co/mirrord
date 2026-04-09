@@ -5300,7 +5300,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-session-monitor-client"
-version = "3.199.0"
+version = "3.200.0"
 dependencies = [
  "home",
  "mirrord-session-monitor-protocol",
@@ -5310,7 +5310,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-session-monitor-protocol"
-version = "3.199.0"
+version = "3.200.0"
 dependencies = [
  "serde",
  "serde_json",
