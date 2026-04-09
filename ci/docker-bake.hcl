@@ -23,6 +23,10 @@ variable "SQS_PRINTER_TAGS" {
   default = "${REGISTRY}/test-sqs-printer:dev"
 }
 
+variable "TESTS_IMAGE_TAGS" {
+  default = "${REGISTRY}/mirrord-tests-image:dev"
+}
+
 # Platforms for product images. Override to target a single platform (e.g. linux/amd64 for local test builds).
 variable "PLATFORMS" {
   default = "linux/amd64,linux/arm64"
@@ -45,7 +49,7 @@ group "default" {
 
 # Test helper images.
 group "test-images" {
-  targets = ["sqs-printer"]
+  targets = ["sqs-printer", "mirrord-tests-image"]
 }
 
 # CI base images used by build and test jobs.
@@ -95,6 +99,15 @@ target "sqs-printer" {
   contexts = {
     "ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21" = "target:ci-agent-builder"
   }
+}
+
+target "mirrord-tests-image" {
+  context    = "."
+  dockerfile = "ci/tests-image.Dockerfile"
+  platforms  = ["linux/amd64"]
+  tags       = split(",", TESTS_IMAGE_TAGS)
+  cache-from = compact([PRODUCT_CACHE_FROM])
+  cache-to   = compact([PRODUCT_CACHE_TO])
 }
 
 # Builder image: Rust toolchain + cross-compilation tools for building the agent.

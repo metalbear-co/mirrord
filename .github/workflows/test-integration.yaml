@@ -7,141 +7,62 @@ permissions:
   contents: read
 
 env:
-  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
 
 jobs:
   integration-tests:
     runs-on: ubuntu-24.04
-    env:
-      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord
-      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # Checkout the mirrord repo.
-      - uses: metalbear-co/setup-rust-toolchain@bb0a05a1b7e260b5081982438f974879f47940f4
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+      - name: build mirrord tests image
+        uses: docker/bake-action@82490499d2e5613fcead7e128237ef0b0ea210f7
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
+          TESTS_IMAGE_TAGS: "mirrord-tests-image"
         with:
-          add-rust-environment-hash-key: ""
-          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1123
-          rustc issue1123.rs --out-dir target
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1054
-          rustc issue1054.rs --out-dir target
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1458
-          rustc issue1458.rs --out-dir target
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1458portnot53
-          rustc issue1458portnot53.rs --out-dir target
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue2058
-          rustc issue2058.rs --out-dir target
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue2204
-          rustc issue2204.rs --out-dir target
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
-        with:
-          node-version: 24
-      - run: npm install express
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
-      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
-      # don't use "cache" for other Gos since it will try to overwrite and have bad results.
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-        with:
-          go-version: "1.24"
-          cache-dependency-path: tests/go-e2e/go.sum
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          cd mirrord/layer-tests/tests
-          ../../../scripts/build_go_apps.sh 24
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-        with:
-          go-version: "1.25"
-          cache: false
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          cd mirrord/layer-tests/tests
-          ../../../scripts/build_go_apps.sh 25
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-        with:
-          go-version: "1.26"
-          cache: false
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          cd mirrord/layer-tests/tests
-          ../../../scripts/build_go_apps.sh 26
-      - run: |
-          cd mirrord/layer-tests/tests/apps/fileops
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/outgoing
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/recv_from
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/dns_resolve
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/listen_ports
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1776
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1776portnot53
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1899
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue2001
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue2438
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue3248
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/rebind0
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/dup_listen
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/double_listen
-          cargo build
-      - run: ./mirrord/layer-tests/tests/apps/dlopen_cgo/build_test_app.sh
-      - run: ./scripts/build_c_apps.sh
-      - run: cargo build -p mirrord-layer -p mirrord
-      - name: create dummy file to compile wizard feature
-        run: touch wizard-frontend.tar.gz
-      - uses: metalbear-co/install-action@98dac1828614f016bb6346e86fa46318e9328a07
-        with:
-          tool: cargo-nextest
+          source: .
+          files: ci/docker-bake.hcl
+          targets: mirrord-tests-image
+          set: |
+            mirrord-tests-image.output=type=docker,dest=${{ github.workspace }}/mirrord-tests-image.tar
+      - name: load mirrord tests image
+        run: docker load --input "${{ github.workspace }}/mirrord-tests-image.tar"
+      - name: create intproxy logs dir
+        run: mkdir -p "${{ runner.temp }}/intproxy_logs"
       - name: layer tests
-        run: cargo nextest run -p mirrord-layer-tests --no-default-features
+        run: >-
+          docker run --rm
+          -v "${{ runner.temp }}/intproxy_logs:/tmp/intproxy_logs"
+          mirrord-tests-image
       - name: unit tests (exclude e2e)
         run: >-
+          docker run --rm
+          -v "${{ runner.temp }}/intproxy_logs:/tmp/intproxy_logs"
+          mirrord-tests-image
           cargo nextest run --workspace --exclude mirrord-tests
       - name: mirrord-kube UT
-        run: cargo nextest run -p mirrord-kube --all-features
+        run: >-
+          docker run --rm
+          -v "${{ runner.temp }}/intproxy_logs:/tmp/intproxy_logs"
+          mirrord-tests-image
+          cargo nextest run -p mirrord-kube --all-features
       - name: mirrord-operator UT
-        run: cargo nextest run -p mirrord-operator --features "crd, client"
+        run: >-
+          docker run --rm
+          -v "${{ runner.temp }}/intproxy_logs:/tmp/intproxy_logs"
+          mirrord-tests-image
+          cargo nextest run -p mirrord-operator --features "crd, client"
       - name: mirrord cli UT
-        run: cargo nextest run -p mirrord --features "wizard"
+        run: >-
+          docker run --rm
+          -v "${{ runner.temp }}/intproxy_logs:/tmp/intproxy_logs"
+          mirrord-tests-image
+          bash -lc 'touch wizard-frontend.tar.gz && cargo nextest run -p mirrord --features "wizard"'
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: intproxy_logs_linux
-          path: /tmp/intproxy_logs/linux
+          path: ${{ runner.temp }}/intproxy_logs/linux
