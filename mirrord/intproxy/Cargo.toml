@@ -50,9 +50,12 @@ tokio-util.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 axum.workspace = true
+axum-extra = { workspace = true }
+hex.workspace = true
 serde_json.workspace = true
 home.workspace = true
 mirrord-session-monitor-protocol.workspace = true
+tower-http = { workspace = true, features = ["cors"] }
 
 [dev-dependencies]
 rcgen.workspace = true

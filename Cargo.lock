@@ -148,7 +148,7 @@ dependencies = [
  "bytes",
  "bytestring",
  "cfg-if",
- "cookie",
+ "cookie 0.16.2",
  "derive_more",
  "encoding_rs",
  "foldhash 0.1.5",
@@ -1140,6 +1140,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "axum-extra"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9963ff19f40c6102c76756ef0a46004c0d58957d87259fc9208ff8441c12ab96"
+dependencies = [
+ "axum 0.8.8",
+ "axum-core 0.5.6",
+ "bytes",
+ "cookie 0.18.1",
+ "futures-util",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "mime",
+ "pin-project-lite",
+ "rustversion",
+ "serde_core",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
 name = "axum-macros"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1842,6 +1865,17 @@ name = "cookie"
 version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e859cd57d0710d9e06c381b550c06e76992472a8c6d527aecd2fc673dcc231fb"
+dependencies = [
+ "percent-encoding",
+ "time",
+ "version_check",
+]
+
+[[package]]
+name = "cookie"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ddef33a339a91ea89fb53151bd0a4689cfce27055c291dfa69945475d22c747"
 dependencies = [
  "percent-encoding",
  "time",
@@ -4667,6 +4701,7 @@ version = "3.200.0"
 dependencies = [
  "actix-codec",
  "axum 0.8.8",
+ "axum-extra",
  "base64",
  "ci_info",
  "clap",
@@ -4944,8 +4979,10 @@ name = "mirrord-intproxy"
 version = "3.200.0"
 dependencies = [
  "axum 0.8.8",
+ "axum-extra",
  "bytes",
  "futures",
+ "hex",
  "home",
  "http-body-util",
  "hyper 1.8.1",
@@ -4975,6 +5012,7 @@ dependencies = [
  "tokio-rustls 0.26.4",
  "tokio-stream",
  "tokio-util",
+ "tower-http",
  "tracing",
 ]
 
@@ -5299,7 +5337,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-session-monitor-client"
-version = "3.199.0"
+version = "3.200.0"
 dependencies = [
  "home",
  "mirrord-session-monitor-protocol",
@@ -5309,7 +5347,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-session-monitor-protocol"
-version = "3.199.0"
+version = "3.200.0"
 dependencies = [
  "serde",
  "serde_json",

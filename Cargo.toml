@@ -79,6 +79,7 @@ aws-credential-types = "1.2"
 aws-sdk-sqs = "1.39"
 aws-types = "1.3"
 axum = "0.8"
+axum-extra = { version = "0.10", features = ["cookie"] }
 base64 = "0.22"
 bcder = "0.7"
 bimap = "0.6"

@@ -17,13 +17,15 @@ use std::{
 use axum::{
     Router,
     extract::{
-        Path, State,
+        Path, Query, Request, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response, sse},
     routing::{get, post},
 };
+use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use eventsource_stream::Eventsource;
 use futures::stream::StreamExt as _;
 use mirrord_session_monitor_client::{
@@ -31,11 +33,16 @@ use mirrord_session_monitor_client::{
 };
 use mirrord_session_monitor_protocol::SessionInfo;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use rand::Rng;
 #[cfg(not(debug_assertions))]
 use rust_embed::Embed;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    set_header::SetResponseHeaderLayer,
+};
 use tracing::{debug, error, info, warn};
 
 use crate::{config::UiArgs, error::CliError};
@@ -71,6 +78,79 @@ impl Serialize for TrackedSession {
 struct AppState {
     sessions: RwLock<HashMap<String, TrackedSession>>,
     notify_tx: broadcast::Sender<SessionNotification>,
+    token: String,
+    /// Stored for `read_session_token` to resolve per-session token files.
+    #[allow(dead_code)]
+    sessions_dir: PathBuf,
+    kube_client: Option<kube::Client>,
+}
+
+#[derive(Deserialize)]
+struct TokenQuery {
+    token: Option<String>,
+}
+
+/// Middleware that validates the request carries a valid auth token, either via the `mirrord_token`
+/// cookie or the `?token=` query parameter.
+async fn token_auth(
+    State(state): State<Arc<AppState>>,
+    jar: CookieJar,
+    Query(query): Query<TokenQuery>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if let Some(cookie) = jar.get("mirrord_token")
+        && cookie.value() == state.token
+    {
+        return next.run(request).await;
+    }
+
+    if let Some(token) = &query.token
+        && token == &state.token
+    {
+        let mut response = next.run(request).await;
+        let cookie = Cookie::build(("mirrord_token", state.token.clone()))
+            .http_only(true)
+            .same_site(SameSite::Strict)
+            .path("/")
+            .build();
+        if let Ok(value) = HeaderValue::from_str(&cookie.to_string()) {
+            response.headers_mut().append(header::SET_COOKIE, value);
+        }
+        return response;
+    }
+
+    StatusCode::UNAUTHORIZED.into_response()
+}
+
+/// Middleware that rejects requests with a Host header that is not localhost, 127.0.0.1, or [::1].
+async fn host_validation(request: Request, next: Next) -> Response {
+    if let Some(host) = request.headers().get(header::HOST)
+        && let Ok(host_str) = host.to_str()
+    {
+        let host_without_port = host_str.split(':').next().unwrap_or(host_str);
+        match host_without_port {
+            "localhost" | "127.0.0.1" | "[::1]" | "::1" => {}
+            _ => return StatusCode::FORBIDDEN.into_response(),
+        }
+    }
+    next.run(request).await
+}
+
+fn localhost_cors() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
+            if let Ok(origin_str) = origin.to_str() {
+                origin_str.starts_with("http://localhost")
+                    || origin_str.starts_with("http://127.0.0.1")
+                    || origin_str.starts_with("http://[::1]")
+            } else {
+                false
+            }
+        }))
+        .allow_methods(tower_http::cors::Any)
+        .allow_headers(tower_http::cors::Any)
+        .allow_credentials(true)
 }
 
 /// Opens an SSE connection to a session's Unix socket /events endpoint and returns
@@ -204,6 +284,32 @@ async fn remove_session(session_id: &str, state: &AppState) {
     }
 }
 
+/// Reads a session token from `~/.mirrord/sessions/<id>.token`, with path traversal protection.
+/// Used when connecting to per-session APIs that require token auth.
+#[allow(dead_code)]
+fn read_session_token(sessions_dir: &std::path::Path, session_id: &str) -> Option<String> {
+    if session_id.contains('/') || session_id.contains('\\') || session_id.contains("..") {
+        return None;
+    }
+
+    let token_path = sessions_dir.join(format!("{session_id}.token"));
+
+    // Canonicalize and verify the path is within sessions_dir
+    let canonical = match token_path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return None,
+    };
+    let canonical_dir = match sessions_dir.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return None,
+    };
+    if !canonical.starts_with(&canonical_dir) {
+        return None;
+    }
+
+    std::fs::read_to_string(&canonical).ok()
+}
+
 async fn list_sessions(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let sessions = state.sessions.read().await;
     let list: Vec<SessionInfo> = sessions.values().map(|s| s.info.clone()).collect();
@@ -279,10 +385,10 @@ async fn session_events_sse(
 }
 
 async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    let client = {
+    let (client, socket_path) = {
         let sessions = state.sessions.read().await;
         match sessions.get(&id) {
-            Some(session) => session.client.clone(),
+            Some(session) => (session.client.clone(), session.socket_path.clone()),
             None => return StatusCode::NOT_FOUND.into_response(),
         }
     };
@@ -293,6 +399,13 @@ async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>
                 warn!(?err, "Failed to parse kill response body");
                 serde_json::json!({"status": "ok"})
             });
+
+            // Clean up socket file and remove session from tracking
+            if let Err(err) = std::fs::remove_file(&socket_path) {
+                warn!(%id, ?err, "Failed to remove session socket after kill");
+            }
+            remove_session(&id, &state).await;
+
             axum::Json(val).into_response()
         }
         Err(err) => {
@@ -306,7 +419,30 @@ async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>
     }
 }
 
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
+/// Validates the WebSocket upgrade Origin header, rejecting non-localhost origins.
+fn validate_ws_origin(headers: &HeaderMap) -> bool {
+    match headers.get(header::ORIGIN) {
+        None => true, // No origin header is acceptable for non-browser clients
+        Some(origin) => {
+            if let Ok(origin_str) = origin.to_str() {
+                origin_str.starts_with("http://localhost")
+                    || origin_str.starts_with("http://127.0.0.1")
+                    || origin_str.starts_with("http://[::1]")
+            } else {
+                false
+            }
+        }
+    }
+}
+
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if !validate_ws_origin(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     ws.on_upgrade(|socket| ws_connection(socket, state))
 }
 
@@ -339,6 +475,38 @@ async fn ws_connection(mut socket: WebSocket, state: Arc<AppState>) {
                 warn!(n, "WebSocket client lagged, dropped messages");
             }
             Err(broadcast::error::RecvError::Closed) => break,
+        }
+    }
+}
+
+/// Proxies GET /topology to the operator via k8s API server service proxy.
+async fn proxy_topology(State(state): State<Arc<AppState>>) -> Response {
+    let client = match &state.kube_client {
+        Some(client) => client.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(serde_json::json!({"error": "kube client not available"})),
+            )
+                .into_response();
+        }
+    };
+
+    let request = axum::http::Request::builder()
+        .uri("/api/v1/namespaces/mirrord/services/mirrord-operator:3000/proxy/topology")
+        .header(header::ACCEPT, "application/json")
+        .body(Vec::new())
+        .expect("static topology request should always be valid");
+
+    match client.request::<serde_json::Value>(request).await {
+        Ok(value) => axum::Json(value).into_response(),
+        Err(err) => {
+            warn!(?err, "Failed to proxy topology request");
+            (
+                StatusCode::BAD_GATEWAY,
+                axum::Json(serde_json::json!({"error": err.to_string()})),
+            )
+                .into_response()
         }
     }
 }
@@ -443,16 +611,50 @@ fn start_filesystem_watcher(
     Ok(())
 }
 
+async fn health() -> impl IntoResponse {
+    axum::Json(serde_json::json!({"status": "ok"}))
+}
+
 fn build_router(state: Arc<AppState>) -> Router {
     let api_routes = Router::new()
         .route("/sessions", get(list_sessions))
         .route("/sessions/{id}", get(get_session))
         .route("/sessions/{id}/events", get(session_events_sse))
-        .route("/sessions/{id}/kill", post(kill_session));
+        .route("/sessions/{id}/kill", post(kill_session))
+        .route("/topology", get(proxy_topology));
 
-    Router::new()
+    let authenticated_routes = Router::new()
         .nest("/api", api_routes)
         .route("/ws", get(ws_handler))
+        .layer(middleware::from_fn_with_state(state.clone(), token_auth));
+
+    let csp_value = HeaderValue::from_static(
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; \
+         connect-src 'self' ws://localhost:* ws://127.0.0.1:* ws://[::1]:*; \
+         img-src 'self' data:; object-src 'none'; frame-ancestors 'none'",
+    );
+
+    Router::new()
+        .route("/health", get(health))
+        .merge(authenticated_routes)
+        .layer(middleware::from_fn(host_validation))
+        .layer(localhost_cors())
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::REFERRER_POLICY,
+            HeaderValue::from_static("no-referrer"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CONTENT_SECURITY_POLICY,
+            csp_value,
+        ))
         .with_state(state)
         .fallback(static_handler)
 }
@@ -466,9 +668,28 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
 
     let (notify_tx, _) = broadcast::channel::<SessionNotification>(256);
 
+    // Generate auth token for this UI server instance
+    let token_bytes: [u8; 32] = rand::rng().random();
+    let token = hex::encode(token_bytes);
+
+    // Try to create a kube client for topology proxy
+    let kube_client = match kube::Client::try_default().await {
+        Ok(client) => Some(client),
+        Err(err) => {
+            warn!(
+                ?err,
+                "Failed to create kube client, topology proxy will be unavailable"
+            );
+            None
+        }
+    };
+
     let state = Arc::new(AppState {
         sessions: RwLock::new(HashMap::new()),
         notify_tx,
+        token: token.clone(),
+        sessions_dir: sessions_dir.clone(),
+        kube_client,
     });
 
     scan_existing_sessions(&sessions_dir, &state).await;
@@ -486,7 +707,7 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
     let addr = listener
         .local_addr()
         .map_err(|e| CliError::UiError(format!("failed to get listener address: {e}")))?;
-    let url = format!("http://{addr}");
+    let url = format!("http://{addr}?token={token}");
     eprintln!("mirrord session monitor: {url}");
 
     if let Err(err) = opener::open(&url) {

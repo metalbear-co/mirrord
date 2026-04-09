@@ -115,20 +115,33 @@ async fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> Monit
             mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
             is_operator,
             processes: Vec::new(),
+            port_subscriptions: Vec::new(),
             config: config_value,
         };
 
         let shutdown = CancellationToken::new();
 
+        let api_session_id = session_id.clone();
         tokio::spawn(async move {
-            if let Err(error) = mirrord_intproxy::session_monitor::api::start_api_server(
+            match mirrord_intproxy::session_monitor::api::start_api_server(
                 session_info,
                 api_monitor_tx,
                 shutdown,
             )
             .await
             {
-                tracing::warn!(%error, "Session monitor API server failed");
+                Ok(token) => {
+                    tracing::info!(
+                        session_id = %api_session_id,
+                        url = %format!(
+                            "http://localhost/info?token={token}"
+                        ),
+                        "Session monitor API server started with token auth"
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "Session monitor API server failed");
+                }
             }
         });
 
