@@ -31,6 +31,7 @@ jobs:
       windows_changed: ${{ steps.changed-windows.outputs.any_changed }}
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
+      ide_e2e_changed: ${{ steps.changed-ide-e2e.outputs.any_changed }}
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
@@ -48,6 +49,19 @@ jobs:
         with:
           files: |
             .github/**
+      - name: get IDE e2e changes
+        id: changed-ide-e2e
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        with:
+          files: |
+            .github/workflows/ci.yaml
+            .github/workflows/build-agent-image.yaml
+            .github/workflows/build-cli-image.yaml
+            .github/workflows/build-mirrord-cli.yaml
+            .github/actions/build-agent-image/action.yml
+            ci/docker-bake.hcl
+            mirrord/agent/Dockerfile
+            mirrord/cli/Dockerfile
       - name: get changed rs files
         id: changed-rs
         uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
@@ -180,8 +194,8 @@ jobs:
     uses: ./.github/workflows/build-cli-image.yaml
 
   build-mirrord-cli:
-    needs: [plan]
-    if: ${{ needs.plan.outputs.release_branch == 'true' }}
+    needs: [plan, build-cli-image]
+    if: ${{ needs.plan.outputs.release_branch == 'true' || needs.plan.outputs.ide_e2e_changed == 'true' }}
     uses: ./.github/workflows/build-mirrord-cli.yaml
     secrets: inherit
 
@@ -218,12 +232,14 @@ jobs:
 
   intellij-e2e-on-release-branch:
     needs: [build-mirrord-cli, build-agent-image]
+    if: ${{ needs.plan.outputs.release_branch == 'true' || needs.plan.outputs.ide_e2e_changed == 'true' }}
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
 
   vscode-e2e-on-release-branch:
     needs: [build-mirrord-cli, build-agent-image]
+    if: ${{ needs.plan.outputs.release_branch == 'true' || needs.plan.outputs.ide_e2e_changed == 'true' }}
     uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
