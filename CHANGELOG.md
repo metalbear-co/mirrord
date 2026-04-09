@@ -11,18 +11,13 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 ## [3.200.0](https://github.com/metalbear-co/mirrord/tree/3.200.0) - 2026-04-09
 
 
-### Added
-
-- Identify local redis database branch instances by db branch id instead of by
-  port.
-
-
 ### Changed
 
 - Add Ruby and sh files to default local filter
 - Moved agent container command line arguments from `command` to `args` in
   order to enable matching with GKE Autopilot WorkloadAllowlist.
-
+- Identify local redis database branch instances by db branch id instead of by
+  port.
 
 ### Fixed
 
