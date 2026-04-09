@@ -69,16 +69,16 @@ RUN set -eux; \
     done
 
 RUN set -eux; \
-    cd /workspace/mirrord/layer-tests/tests; \
+    cd /workspace; \
     export PATH="/opt/go/1.24/bin:$PATH"; \
     go version; \
-    ../../../scripts/build_go_apps.sh 24; \
+    ./scripts/build_go_apps.sh 24; \
     export PATH="/opt/go/1.25/bin:$PATH"; \
     go version; \
-    ../../../scripts/build_go_apps.sh 25; \
+    ./scripts/build_go_apps.sh 25; \
     export PATH="/opt/go/1.26/bin:$PATH"; \
     go version; \
-    ../../../scripts/build_go_apps.sh 26
+    ./scripts/build_go_apps.sh 26
 
 RUN export PATH="/opt/go/1.26/bin:$PATH" \
     && ./mirrord/layer-tests/tests/apps/dlopen_cgo/build_test_app.sh \
@@ -104,14 +104,26 @@ RUN --mount=type=cache,target=/root/.cargo/registry,id=mirrord-tests-cargo-regis
         mirrord/layer-tests/tests/apps/rebind0 \
         mirrord/layer-tests/tests/apps/dup_listen \
         mirrord/layer-tests/tests/apps/double_listen \
+        tests/issue1317 \
+        tests/rust-bypassed-unix-socket \
+        tests/rust-e2e-fileops \
+        tests/rust-sqs-printer \
+        tests/rust-unix-socket-client \
+        tests/rust-websockets \
     ); \
     for app in "${cargo_apps[@]}"; do \
         cargo build --manifest-path "/workspace/${app}/Cargo.toml"; \
     done; \
     cargo build -p mirrord-layer -p mirrord; \
+    touch /workspace/wizard-frontend.tar.gz; \
+    cargo build -p mirrord --features wizard; \
     cargo test -p mirrord-layer-tests --no-default-features --no-run; \
+    cargo test -p mirrord-tests --no-default-features --features "cli targetless job ephemeral" --no-run; \
     rm -rf /workspace/target; \
     mkdir -p /workspace/target; \
     cp -a /cargo-target/. /workspace/target/
+
+ENV MIRRORD_LAYER_FILE=/workspace/target/debug/libmirrord_layer.so \
+    MIRRORD_TESTS_USE_BINARY=/workspace/target/debug/mirrord
 
 CMD ["cargo", "nextest", "run", "-p", "mirrord-layer-tests", "--no-default-features"]
