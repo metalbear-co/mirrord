@@ -3,6 +3,8 @@ ARG TARGETARCH
 ARG BUILDARCH
 WORKDIR /build
 
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm && rm -rf /var/lib/apt/lists/*
+
 COPY ./mirrord/agent/platform.sh /build/
 RUN ./platform.sh
 
@@ -33,7 +35,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-cli-$T
     echo "sccache failed to start, continuing without cache"; \
     unset RUSTC_WRAPPER; \
     fi && \
-    cargo +nightly-2026-02-24 zigbuild -p mirrord -p mirrord-layer -Z bindeps --target $(cat /.platform) --release && \
+    cargo +nightly-2026-02-24 zigbuild -p mirrord -Z bindeps --target $(cat /.platform) --release --features wizard && \
     if [ "$TARGETARCH" = "arm64" ]; then \
     cargo +nightly-2026-02-24 zigbuild -p mirrord-layer -Z bindeps --target x86_64-unknown-linux-gnu --release --locked && \
     cp /build/target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so /libmirrord_layer_x86_64.so; \
