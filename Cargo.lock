@@ -2441,7 +2441,7 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "double_listen"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "libc",
 ]
@@ -2767,7 +2767,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "libc",
 ]
@@ -3809,9 +3809,9 @@ checksum = "c8fae54786f62fb2918dcfae3d568594e50eb9b5c25bf04371af6fe7516452fb"
 
 [[package]]
 name = "inotify"
-version = "0.11.1"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd5b3eaf1a28b758ac0faa5a4254e8ab2705605496f1b1f3fbbc3988ad73d199"
+checksum = "f37dccff2791ab604f9babef0ba14fbe0be30bd368dc541e2b08d07c8aa908f3"
 dependencies = [
  "bitflags 2.11.0",
  "inotify-sys",
@@ -3848,15 +3848,14 @@ dependencies = [
 
 [[package]]
 name = "ipconfig"
-version = "0.3.4"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d40460c0ce33d6ce4b0630ad68ff63d6661961c48b6dba35e5a4d81cfb48222"
+checksum = "b58db92f96b720de98181bbbe63c831e87005ab460c1bf306eb2622b4707997f"
 dependencies = [
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "widestring",
- "windows-registry",
- "windows-result 0.4.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
+ "winreg",
 ]
 
 [[package]]
@@ -3919,7 +3918,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "issue1317"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "actix-web",
  "env_logger",
@@ -3929,7 +3928,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "errno 0.3.14",
  "libc",
@@ -3938,7 +3937,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "libc",
  "socket2 0.5.10",
@@ -3946,14 +3945,14 @@ dependencies = [
 
 [[package]]
 name = "issue1899"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "issue2001"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "libc",
 ]
@@ -4076,7 +4075,7 @@ dependencies = [
  "cesu8",
  "cfg-if",
  "combine",
- "jni-sys 0.3.1",
+ "jni-sys",
  "log",
  "thiserror 1.0.69",
  "walkdir",
@@ -4085,31 +4084,9 @@ dependencies = [
 
 [[package]]
 name = "jni-sys"
-version = "0.3.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41a652e1f9b6e0275df1f15b32661cf0d4b78d4d87ddec5e0c3c20f097433258"
-dependencies = [
- "jni-sys 0.4.1",
-]
-
-[[package]]
-name = "jni-sys"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6377a88cb3910bee9b0fa88d4f42e1d2da8e79915598f65fb0c7ee14c878af2"
-dependencies = [
- "jni-sys-macros",
-]
-
-[[package]]
-name = "jni-sys-macros"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264"
-dependencies = [
- "quote",
- "syn 2.0.117",
-]
+checksum = "8eaf4bc02d17cbdd7ff4c7438cafcdf7fb9a4613313ad11b4f8fefe7d3fa0130"
 
 [[package]]
 name = "jobserver"
@@ -4123,9 +4100,9 @@ dependencies = [
 
 [[package]]
 name = "js-sys"
-version = "0.3.91"
+version = "0.3.90"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b49715b7073f385ba4bc528e5747d02e66cb39c6146efb66b781f131f0fb399c"
+checksum = "14dc6f6450b3f6d4ed5b16327f38fed626d375a886159ca555bd7822c0c3a5a6"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
@@ -4396,14 +4373,13 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libredox"
-version = "0.1.15"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ddbf48fd451246b1f8c2610bd3b4ac0cc6e149d89832867093ab69a17194f08"
+checksum = "3d0b95e02c851351f877147b7deea7b1afb1df71b63aa5f8270716e0c5720616"
 dependencies = [
  "bitflags 2.11.0",
  "libc",
- "plain",
- "redox_syscall 0.7.3",
+ "redox_syscall 0.7.2",
 ]
 
 [[package]]
@@ -4436,7 +4412,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "listen_ports"
-version = "3.200.0"
+version = "3.201.0"
 
 [[package]]
 name = "litemap"
@@ -4697,7 +4673,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "actix-codec",
  "axum 0.8.8",
@@ -4707,6 +4683,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "const-random",
+ "dll-syringe",
  "dotenvy",
  "drain",
  "eventsource-stream",
@@ -4783,7 +4760,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "actix-codec",
  "async-pidfd",
@@ -4845,7 +4822,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-env"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "base64",
  "k8s-openapi",
@@ -4858,7 +4835,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-iptables"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "async-trait",
  "caps",
@@ -4874,7 +4851,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "assert-json-diff",
  "base64",
@@ -4891,7 +4868,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "base64",
  "bcder",
@@ -4917,7 +4894,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "base64",
  "bimap",
@@ -4950,7 +4927,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4960,7 +4937,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "bincode",
  "drain",
@@ -4976,7 +4953,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "axum 0.8.8",
  "bytes",
@@ -5015,7 +4992,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy-protocol"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "bincode",
  "mirrord-protocol",
@@ -5025,7 +5002,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-jaq"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "jaq-core",
  "jaq-json",
@@ -5038,7 +5015,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "async-stream",
  "futures",
@@ -5064,7 +5041,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "actix-codec",
  "apple-codesign",
@@ -5104,7 +5081,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-lib"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -5141,7 +5118,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5150,7 +5127,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-tests"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "actix-codec",
  "apple-codesign",
@@ -5174,7 +5151,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-win"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -5202,7 +5179,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -5212,7 +5189,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "base64",
  "bincode",
@@ -5252,7 +5229,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "enum_dispatch",
  "indicatif",
@@ -5294,7 +5271,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol-api"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "bytes",
  "futures",
@@ -5317,7 +5294,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol-io"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -5334,7 +5311,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-session-monitor-client"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "home",
  "mirrord-session-monitor-protocol",
@@ -5344,7 +5321,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-session-monitor-protocol"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5352,7 +5329,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "apple-codesign",
  "flate2",
@@ -5370,7 +5347,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-test-macros"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5379,7 +5356,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-test-utils"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "chrono",
  "fancy-regex",
@@ -5430,7 +5407,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-tls-util"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "home",
  "http 1.4.0",
@@ -5448,7 +5425,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-vpn"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "futures",
  "ipnet",
@@ -5918,7 +5895,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "tokio",
 ]
@@ -6329,9 +6306,9 @@ checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "portable-atomic-util"
-version = "0.2.6"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "091397be61a01d4be58e7841595bd4bfedb15f1cd54977d79b8271e94ed799a3"
+checksum = "7a9db96d7fa8782dd8c15ce32ffe8680bbd1e978a43bf51a34d39483540495f5"
 dependencies = [
  "portable-atomic",
 ]
@@ -6840,9 +6817,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.7.3"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ce70a74e890531977d37e532c34d45e9055d2409ed08ddba14529471ed0be16"
+checksum = "6d94dd2f7cd932d4dc02cc8b2b50dfd38bd079a4e5d79198b99743d7fcf9a4b4"
 dependencies = [
  "bitflags 2.11.0",
 ]
@@ -7086,14 +7063,14 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "libc",
 ]
@@ -7144,7 +7121,7 @@ dependencies = [
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "tokio",
 ]
@@ -7373,9 +7350,9 @@ dependencies = [
 
 [[package]]
 name = "schannel"
-version = "0.1.29"
+version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
+checksum = "891d81b926048e76efe18581bf793546b4c0eaf8448d72be8de2bbee5fd166e1"
 dependencies = [
  "windows-sys 0.61.2",
 ]
@@ -9141,9 +9118,9 @@ checksum = "b8dad83b4f25e74f184f64c43b150b91efe7647395b42289f38e50566d82855b"
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.114"
+version = "0.2.113"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6532f9a5c1ece3798cb1c2cfdba640b9b3ba884f5db45973a6f442510a87d38e"
+checksum = "60722a937f594b7fde9adb894d7c092fc1bb6612897c46368d18e7a20208eff2"
 dependencies = [
  "cfg-if",
  "once_cell",
@@ -9154,9 +9131,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-futures"
-version = "0.4.64"
+version = "0.4.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9c5522b3a28661442748e09d40924dfb9ca614b21c00d3fd135720e48b67db8"
+checksum = "8a89f4650b770e4521aa6573724e2aed4704372151bd0de9d16a3bbabb87441a"
 dependencies = [
  "cfg-if",
  "futures-util",
@@ -9168,9 +9145,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.114"
+version = "0.2.113"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18a2d50fcf105fb33bb15f00e7a77b772945a2ee45dcf454961fd843e74c18e6"
+checksum = "0fac8c6395094b6b91c4af293f4c79371c163f9a6f56184d2c9a85f5a95f3950"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -9178,9 +9155,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.114"
+version = "0.2.113"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03ce4caeaac547cdf713d280eda22a730824dd11e6b8c3ca9e42247b25c631e3"
+checksum = "ab3fabce6159dc20728033842636887e4877688ae94382766e00b180abac9d60"
 dependencies = [
  "bumpalo",
  "proc-macro2",
@@ -9191,9 +9168,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.114"
+version = "0.2.113"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75a326b8c223ee17883a4251907455a2431acc2791c98c26279376490c378c16"
+checksum = "de0e091bdb824da87dc01d967388880d017a0a9bc4f3bdc0d86ee9f9336e3bb5"
 dependencies = [
  "unicode-ident",
 ]
@@ -9247,9 +9224,9 @@ dependencies = [
 
 [[package]]
 name = "web-sys"
-version = "0.3.91"
+version = "0.3.90"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "854ba17bb104abfb26ba36da9729addc7ce7f06f5c0f90f3c391f8461cca21f9"
+checksum = "705eceb4ce901230f8625bd1d665128056ccbe4b7408faa625eec1ba80f59a97"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
@@ -9450,17 +9427,6 @@ checksum = "9150af68066c4c5c07ddc0ce30421554771e528bde427614c61038bc2c92c2b1"
 dependencies = [
  "windows-core 0.61.2",
  "windows-link 0.1.3",
-]
-
-[[package]]
-name = "windows-registry"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02752bf7fbdcce7f2a27a742f798510f3e5ad88dbe84871e5168e2120c3d5720"
-dependencies = [
- "windows-link 0.2.1",
- "windows-result 0.4.1",
- "windows-strings 0.5.1",
 ]
 
 [[package]]
@@ -9824,6 +9790,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "winreg"
+version = "0.50.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
+dependencies = [
+ "cfg-if",
+ "windows-sys 0.48.0",
+]
+
+[[package]]
 name = "winsafe"
 version = "0.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10032,7 +10008,7 @@ checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
 
 [[package]]
 name = "xtask"
-version = "3.200.0"
+version = "3.201.0"
 dependencies = [
  "anyhow",
  "clap",
