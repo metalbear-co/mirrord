@@ -109,7 +109,7 @@ target "sqs-printer" {
 target "mirrord-tests-image" {
   context    = "."
   dockerfile = "ci/tests-image.Dockerfile"
-  platforms  = ["linux/amd64"]
+  platforms  = split(",", PLATFORMS)
   tags       = split(",", TESTS_IMAGE_TAGS)
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])

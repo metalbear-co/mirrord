@@ -16,6 +16,13 @@ fi
 for go_mod in $(find . -name "go\.mod")
 do
     directory=$(dirname $go_mod)
+
+    if [ "$(go env GOARCH)" = "arm64" ] && grep -q "rogchap.com/v8go" "$go_mod"
+    then
+        1>&2 echo "Skipping $directory on arm64 due to v8go x86_64-only dependency"
+        continue
+    fi
+
     cd $directory
 
     1>&2 echo "Building test app $directory/$1.go_test_app"

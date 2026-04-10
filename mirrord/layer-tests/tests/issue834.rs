@@ -1,4 +1,5 @@
 #![cfg(target_family = "unix")]
+#![cfg(target_arch = "x86_64")]
 #![cfg(target_os = "linux")]
 #![warn(clippy::indexing_slicing)]
 
