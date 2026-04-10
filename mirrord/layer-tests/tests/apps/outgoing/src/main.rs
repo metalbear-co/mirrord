@@ -49,29 +49,6 @@ fn parse_args() -> Option<Args> {
     })
 }
 
-fn test_tcp(socket: SocketAddr, peer: SocketAddr) {
-    let mut conn = TcpStream::connect(peer).unwrap();
-
-    let local = conn.local_addr().unwrap();
-    if local != socket {
-        panic!("Invalid local address from local_addr: {local}.")
-    }
-
-    let remote = conn.peer_addr().unwrap();
-    if remote != peer {
-        panic!("Invalid peer address from peer_addr: {peer}.");
-    }
-
-    conn.write_all(MESSAGE).unwrap();
-    conn.flush().unwrap();
-
-    let mut response = vec![];
-    conn.read_to_end(&mut response).unwrap();
-
-    if response != MESSAGE {
-        panic!("Invalid response received: {response:?}");
-    }
-}
 
 fn test_udp(socket: SocketAddr, peer: SocketAddr) {
     let udp_socket = UdpSocket::bind(socket).unwrap();
