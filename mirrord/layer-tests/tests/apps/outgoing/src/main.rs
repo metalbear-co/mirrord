@@ -2,8 +2,7 @@
 
 use std::{
     env,
-    io::{Read, Write},
-    net::{SocketAddr, TcpStream, UdpSocket},
+    net::{SocketAddr, UdpSocket},
 };
 
 use tokio::{
@@ -17,7 +16,6 @@ struct Args {
     tcp: bool,
     expected_local_addr: SocketAddr,
     peers: Vec<SocketAddr>,
-    non_blocking: bool,
 }
 
 fn parse_args() -> Option<Args> {
@@ -45,10 +43,8 @@ fn parse_args() -> Option<Args> {
         tcp,
         expected_local_addr,
         peers,
-        non_blocking,
     })
 }
-
 
 fn test_udp(socket: SocketAddr, peer: SocketAddr) {
     let udp_socket = UdpSocket::bind(socket).unwrap();
@@ -124,28 +120,17 @@ fn main() {
         );
     };
 
-    match (args.tcp, args.non_blocking) {
-        (true, true) => {
-            // The runtime **must** be single-threaded, otherwise this app will not verify what it's
-            // supposed to verify. See the corresponding integration test for reference.
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap();
-            runtime.block_on(test_tcp_non_blocking(args.peers));
-        }
-        (true, false) => {
-            args.peers
-                .into_iter()
-                .for_each(|peer| test_tcp(args.expected_local_addr, peer));
-        }
-        (false, true) => {
-            panic!("--non-blocking flag is not supported with --udp")
-        }
-        (false, false) => {
-            args.peers
-                .into_iter()
-                .for_each(|peer| test_udp(args.expected_local_addr, peer));
-        }
+    if args.tcp {
+        // The runtime **must** be single-threaded, otherwise this app will not verify what it's
+        // supposed to verify. See the corresponding integration test for reference.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(test_tcp_non_blocking(args.peers));
+    } else {
+        args.peers
+            .into_iter()
+            .for_each(|peer| test_udp(args.expected_local_addr, peer));
     }
 }
