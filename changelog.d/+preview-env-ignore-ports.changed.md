@@ -1,1 +1,0 @@
-Preview environments now ignore the config option `feature.network.incoming.http_filter.ports` to prevent accidentally stealing traffic without a filter. This means that all HTTP filters now unconditionally apply to all intercepted ports.

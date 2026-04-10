@@ -1,1 +1,0 @@
-Implemented `mirrord attach` on Windows to support IDE extensions.
