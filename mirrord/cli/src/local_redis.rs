@@ -110,17 +110,29 @@ pub fn build_local_connection_string(port: u16, config: &RedisConnectionConfig) 
 pub async fn start<P: Progress>(
     progress: &P,
     local_config: &RedisLocalConfig,
+    container_name: String,
 ) -> CliResult<LocalRedis> {
     match local_config.runtime {
         RedisRuntime::Container => {
-            start_container(progress, local_config, local_config.container_runtime).await
+            start_container(
+                progress,
+                local_config,
+                local_config.container_runtime,
+                container_name,
+            )
+            .await
         }
         RedisRuntime::RedisServer => start_server(progress, local_config).await,
         RedisRuntime::Auto => {
             // Try configured container runtime first, then fall back to redis-server
-            start_container(progress, local_config, local_config.container_runtime)
-                .await
-                .or_else(|_| futures::executor::block_on(start_server(progress, local_config)))
+            start_container(
+                progress,
+                local_config,
+                local_config.container_runtime,
+                container_name,
+            )
+            .await
+            .or_else(|_| futures::executor::block_on(start_server(progress, local_config)))
         }
     }
 }
@@ -130,6 +142,7 @@ async fn start_container<P: Progress>(
     progress: &P,
     config: &RedisLocalConfig,
     container_runtime: ContainerRuntime,
+    container_name: String,
 ) -> CliResult<LocalRedis> {
     let runtime_name = container_runtime.command();
     let mut sub = progress.subtask("starting local Redis");
@@ -139,7 +152,6 @@ async fn start_container<P: Progress>(
     let runtime_cmd = config.container_command.as_deref().unwrap_or(runtime_name);
 
     let port = config.port;
-    let container_name = format!("mirrord-redis-{port}");
     let image = format!("redis:{}", config.version);
 
     // Remove any existing container with same name
@@ -148,19 +160,20 @@ async fn start_container<P: Progress>(
         .output();
 
     // Build container run command
+    let port_map = &format!("{port}:6379");
     let mut container_args = vec![
-        "run".to_string(),
-        "--rm".to_string(),
-        "-d".to_string(),
-        "--name".to_string(),
-        container_name.clone(),
-        "-p".to_string(),
-        format!("{port}:6379"),
-        image,
+        "run",
+        "--rm",
+        "-d",
+        "--name",
+        &container_name,
+        "-p",
+        port_map,
+        &image,
     ];
 
     // Add any custom Redis args (passed as CMD to the container)
-    container_args.extend(config.options.args.iter().cloned());
+    container_args.extend(config.options.args.iter().map(String::as_str));
 
     let output = Command::new(runtime_cmd)
         .args(&container_args)

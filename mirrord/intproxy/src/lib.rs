@@ -390,7 +390,11 @@ impl IntProxy {
 
                 self.monitor_tx.emit(MonitorEvent::LayerConnected {
                     pid: new_layer.process_info.pid as u32,
+                    parent_pid: u32::try_from(new_layer.process_info.parent_pid)
+                        .ok()
+                        .filter(|parent_pid| *parent_pid > 0),
                     process_name: new_layer.process_info.name.clone(),
+                    cmdline: new_layer.process_info.cmdline.clone(),
                 });
                 self.connected_layers
                     .insert(new_layer.id, new_layer.process_info);

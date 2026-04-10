@@ -1,18 +1,95 @@
 name: Release
 on:
-  push:
-    tags:
-      - "*.*.*"
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
   # Running from workflow dispatch (AKA manual) will not publish anything.
   # This is intended for testing changes to this flow.
   workflow_dispatch:
-    inputs:
 
 env:
   PINNED_NIGHTLY: nightly-2026-02-24
 
 jobs:
+  validate_release_request:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      should_release: ${{ steps.validate.outputs.should_release }}
+      version: ${{ steps.validate.outputs.version }}
+    steps:
+      - name: Checkout
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - run: rm rust-toolchain.toml
+        if: github.event_name == 'pull_request'
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        if: github.event_name == 'pull_request'
+        with:
+          toolchain: ${{ env.PINNED_NIGHTLY }}
+          rustflags: ""
+
+      - name: Install cargo-get
+        if: github.event_name == 'pull_request'
+        run: cargo install cargo-get
+
+      - name: Validate release conditions
+        id: validate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "Manual dispatch — skipping release validation."
+            echo "should_release=false" >> "${GITHUB_OUTPUT}"
+            echo "version=" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          merged="${{ github.event.pull_request.merged }}"
+          head_ref="${{ github.head_ref }}"
+
+          if [ "${merged}" != "true" ]; then
+            echo "PR was not merged, skipping."
+            echo "should_release=false" >> "${GITHUB_OUTPUT}"
+            echo "version=" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [[ "${head_ref}" != releases/* ]]; then
+            echo "PR is not from a releases/* branch (head: ${head_ref}), skipping."
+            echo "should_release=false" >> "${GITHUB_OUTPUT}"
+            echo "version=" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          version=$(cargo get workspace.package.version)
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version format in Cargo.toml: ${version}"
+            exit 1
+          fi
+
+          if gh release view "${version}" &>/dev/null; then
+            echo "Release ${version} already exists, skipping."
+            echo "should_release=false" >> "${GITHUB_OUTPUT}"
+            echo "version=${version}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "All checks passed — will release ${version}."
+          echo "should_release=true" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
   build_binaries_aarch64-unknown-linux-gnu:
+    needs: [validate_release_request]
+    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -50,6 +127,8 @@ jobs:
             target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
           if-no-files-found: error
   build_binaries_x86_64-unknown-linux-gnu:
+    needs: [validate_release_request]
+    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -82,6 +161,8 @@ jobs:
             target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so
           if-no-files-found: error
   build_binaries_windows:
+    needs: [validate_release_request]
+    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -273,6 +354,8 @@ jobs:
 
   # Stage 1: Build x86_64 layer (runs in parallel)
   build_layer_macos_x86_64:
+    needs: [validate_release_request]
+    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
@@ -305,6 +388,8 @@ jobs:
 
   # Stage 1: Build aarch64 layer + shim (runs in parallel)
   build_layer_macos_aarch64:
+    needs: [validate_release_request]
+    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -340,7 +425,8 @@ jobs:
   # Stage 2: Link universal layer from pre-built layers
   link_layer_macos_universal:
     runs-on: macos-15
-    needs: [build_layer_macos_x86_64, build_layer_macos_aarch64]
+    needs: [validate_release_request, build_layer_macos_x86_64, build_layer_macos_aarch64]
+    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -383,7 +469,8 @@ jobs:
   # Stage 3: Build x86_64 CLI (runs in parallel)
   build_cli_macos_x86_64:
     runs-on: macos-15-intel
-    needs: [link_layer_macos_universal]
+    needs: [validate_release_request, link_layer_macos_universal]
+    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@v4
       - run: rm rust-toolchain.toml
@@ -431,7 +518,8 @@ jobs:
   # Stage 3: Build aarch64 CLI (runs in parallel)
   build_cli_macos_aarch64:
     runs-on: macos-15
-    needs: [link_layer_macos_universal]
+    needs: [validate_release_request, link_layer_macos_universal]
+    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@v4
       - run: rm rust-toolchain.toml
@@ -481,10 +569,12 @@ jobs:
     runs-on: macos-15
     needs:
       [
+        validate_release_request,
         build_cli_macos_x86_64,
         build_cli_macos_aarch64,
         link_layer_macos_universal,
       ]
+    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -530,6 +620,8 @@ jobs:
           if-no-files-found: error
 
   release_docker_image:
+    needs: [validate_release_request]
+    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: ubuntu-24.04
     permissions:
       packages: write
@@ -592,32 +684,19 @@ jobs:
 
       - name: Build and push (test)
         if: github.event_name == 'workflow_dispatch'
-        uses: docker/build-push-action@v6
-        with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          context: .
-          file: mirrord/agent/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}
+        env:
+          AGENT_TAGS: "ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}"
+        run: docker buildx bake -f ci/docker-bake.hcl agent --push
 
       - name: Build and push (final/release)
-        if: github.event_name != 'workflow_dispatch'
-        uses: docker/build-push-action@v6
-        with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          context: .
-          file: mirrord/agent/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/metalbear-co/mirrord:latest
-            ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        env:
+          AGENT_TAGS: "ghcr.io/metalbear-co/mirrord:latest,ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}"
+        run: docker buildx bake -f ci/docker-bake.hcl agent --push
 
   release_cli_docker_image:
+    needs: [validate_release_request]
+    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: ubuntu-24.04
     permissions:
       packages: write
@@ -680,32 +759,19 @@ jobs:
 
       - name: Build and push (test)
         if: github.event_name == 'workflow_dispatch'
-        uses: docker/build-push-action@v6
-        with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          context: .
-          file: mirrord/cli/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/metalbear-co/mirrord-cli-staging:${{ github.sha }}
+        env:
+          CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli-staging:${{ github.sha }}"
+        run: docker buildx bake -f ci/docker-bake.hcl cli --push
 
       - name: Build and push (final/release)
-        if: github.event_name != 'workflow_dispatch'
-        uses: docker/build-push-action@v6
-        with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          context: .
-          file: mirrord/cli/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }}
-            ghcr.io/metalbear-co/mirrord-cli:latest
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        env:
+          CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }},ghcr.io/metalbear-co/mirrord-cli:latest"
+        run: docker buildx bake -f ci/docker-bake.hcl cli --push
 
   check_for_new_docs:
+    needs: [validate_release_request]
+    if: needs.validate_release_request.outputs.should_release == 'true'
     runs-on: ubuntu-24.04
     outputs:
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
@@ -724,8 +790,8 @@ jobs:
 
   update_config_docs:
     runs-on: ubuntu-24.04
-    needs: check_for_new_docs
-    if: ${{needs.check_for_new_docs.outputs.config_schema_changed == 'true'}}
+    needs: [validate_release_request, check_for_new_docs]
+    if: needs.validate_release_request.outputs.should_release == 'true' && needs.check_for_new_docs.outputs.config_schema_changed == 'true'
     permissions:
       contents: write
     env:
@@ -750,7 +816,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: docs
           clean: false # prevent SUMMARY.md in target folder from being removed
-          dry-run: ${{ github.event_name == 'workflow_dispatch' }} # dry run on manual dispatch
+          dry-run: false
       - name: Cleanup temp files from script
         continue-on-error: true
         if: ${{ always() }}
@@ -760,6 +826,7 @@ jobs:
   release_gh:
     needs:
       [
+        validate_release_request,
         build_binaries_aarch64-unknown-linux-gnu,
         build_binaries_x86_64-unknown-linux-gnu,
         build_binaries_windows,
@@ -768,7 +835,7 @@ jobs:
         release_cli_docker_image,
       ]
     runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch'
+    if: needs.validate_release_request.outputs.should_release == 'true'
     permissions:
       packages: write
       contents: write
@@ -830,16 +897,28 @@ jobs:
           mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord_layer_win.dll.sha256 /tmp/release/mirrord_layer_win.dll.sha256
           mv /tmp/artifacts/x86_64-pc-windows-msvc/_temp/wix/mirrord.msi.sha256 /tmp/release/mirrord.msi.sha256
 
-      # Consider to add changelog generation..
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          version="${{ needs.validate_release_request.outputs.version }}"
+          # Extract content between the version heading and the next heading
+          awk -v v="${version}" '
+            /^## \[/ { if (found) exit; if (index($0, "[" v "]")) { found=1; next } }
+            found { print }
+          ' CHANGELOG.md > /tmp/release-notes.md
+          cat /tmp/release-notes.md
+
       - name: Release
         uses: metalbear-co/action-gh-release@ab50eebb6488051c6788d97fa95232267c6a4e23
         with:
+          tag_name: ${{ needs.validate_release_request.outputs.version }}
+          name: ${{ needs.validate_release_request.outputs.version }}
+          body_path: /tmp/release-notes.md
           files: /tmp/release/**
 
   release_homebrew:
-    needs: release_gh
+    needs: [validate_release_request, release_gh]
     runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch'
+    if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -876,9 +955,9 @@ jobs:
           git push
 
   release_chocolatey:
-    needs: release_gh
+    needs: [validate_release_request, release_gh]
     runs-on: windows-latest
-    if: github.event_name != 'workflow_dispatch'
+    if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -1002,9 +1081,9 @@ jobs:
           Write-Host "Successfully published to Chocolatey"
 
   release_winget:
-    needs: release_gh
+    needs: [validate_release_request, release_gh]
     runs-on: windows-latest
-    if: github.event_name != 'workflow_dispatch'
+    if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -1067,22 +1146,20 @@ jobs:
           Write-Host "Successfully updated WinGet manifest"
 
   update_latest:
-    needs: [release_homebrew, check_for_new_docs]
+    needs: [validate_release_request, release_homebrew, check_for_new_docs]
     runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch'
+    if: needs.validate_release_request.outputs.should_release == 'true'
     permissions:
       contents: write
     steps:
       - name: Check out code
         uses: actions/checkout@v4
         with:
-          # Get complete history
           fetch-depth: 0
 
       - name: Update major version and latest tags in git
         uses: metalbear-co/release-tracker-action@main
         env:
-          # GitHub token to enable pushing tags
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           # Move "latest" tag
@@ -1091,14 +1168,14 @@ jobs:
           update-minor: false
 
       - name: Update latest release on GitHub (not latest git tag).
-        run: gh release edit "${{ github.ref_name }}" --latest
+        run: gh release edit "${{ needs.validate_release_request.outputs.version }}" --latest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   update_infra_cli_version:
     runs-on: ubuntu-24.04
-    needs: [release_homebrew, check_for_new_docs, update_latest]
-    if: github.event_name != 'workflow_dispatch'
+    needs: [validate_release_request, release_homebrew, check_for_new_docs, update_latest]
+    if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - name: Create app token for infra workflow dispatch
         id: app_token
@@ -1120,4 +1197,4 @@ jobs:
             --method POST \
             repos/metalbear-co/infra/actions/workflows/update-cli-version.yml/dispatches \
             -f ref=main \
-            -f inputs[cli_version]=${{ github.ref_name }}
+            -f inputs[cli_version]=${{ needs.validate_release_request.outputs.version }}

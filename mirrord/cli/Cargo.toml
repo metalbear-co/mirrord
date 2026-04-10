@@ -88,9 +88,12 @@ rust-embed.workspace = true
 notify.workspace = true
 mime_guess.workspace = true
 eventsource-stream.workspace = true
+mirrord-session-monitor-protocol.workspace = true
+mirrord-session-monitor-client.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
+dll-syringe = { workspace = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { workspace = true, features = ["process", "resource", "signal"] }

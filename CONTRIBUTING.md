@@ -56,13 +56,11 @@ minikube start --driver=docker
 
 ### Prepare a cluster
 
- Build mirrord-agent Docker Image.
+Build the mirrord-agent image. Images are defined in `ci/docker-bake.hcl`.
+For a local development build (single platform, loaded into the local Docker daemon):
 
-Make sure you're [logged in to GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
-
-Then run:
 ```bash
-docker buildx build -t test . --file mirrord/agent/Dockerfile
+PLATFORMS="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" AGENT_TAGS=test docker buildx bake -f ci/docker-bake.hcl agent --load
 ```
 
 ```bash
@@ -839,25 +837,42 @@ flowchart TB
 
 # Release mirrord
 
-## Release PR
+Releases are fully automated. Under normal circumstances no manual steps are required.
 
-1. Create a new branch named after the new version, e.g. `3.333.0`. This will trigger additional CI jobs.
-	1. If the new release only contains `internal` and `fixed` changes, bump a patch version. Otherwise, bump a minor version.
-2. On the new branch, bump the workspace version in `Cargo.toml` and run `cargo update -w` to update `Cargo.lock`.
-3. Generate the changelog with: `towncrier build --version <new-version>`.
-4. Review the generated changelog and fix any issues or typos.
-5. Push the release branch and open a PR.
+## Automated flow
 
-**Note:** All the steps above can also be completed by running: `./scripts/release.sh 3.333.0`.
-Before running the script, ensure there are no uncommitted changes in your repository.
+1. Once daily, the [Scheduled Release workflow](/.github/workflows/scheduled-release.yaml) evaluates whether a release is due:
+   - There is at least one entry in `changelog.d/`.
+   - The last release is older than 7 days.
+2. When both conditions are met, the [Auto Release PR workflow](/.github/workflows/auto-release-pr.yaml) opens (or updates) a PR from `releases/<version>` to `main`. The PR:
+   - Bumps the workspace version in `Cargo.toml` (patch bump if all changes are `fixed`/`internal`; minor bump otherwise).
+   - Updates `Cargo.lock`.
+   - Generates `CHANGELOG.md` by consuming the `changelog.d/` fragments.
+3. Review the release PR, fix any changelog issues or typos, then merge it.
+4. Merging triggers the [Release workflow](/.github/workflows/release.yaml), which:
+   - Validates the PR came from a `releases/*` branch.
+   - Builds all platform binaries (Linux x86\_64 / aarch64, macOS universal, Windows).
+   - Publishes the Docker images to GHCR.
+   - Creates the GitHub release (with tag and release notes from `CHANGELOG.md`).
+   - Publishes to Homebrew, Chocolatey, and winget.
+   - Updates the `latest` git tag and notifies the infra repository.
 
-## Create a new GitHub release
+## Triggering a release PR manually
 
-1. After the release PR is merged, create a new GitHub release with a new tag. Use the new version for both
-   the tag name and the release title. Use the changelog from the release PR as the release description,
-   excluding the `Internal` section if present.
+If you don't want to wait for the daily schedule, you can trigger the [Auto Release PR workflow](/.github/workflows/auto-release-pr.yaml) directly from the [Actions tab](https://github.com/metalbear-co/mirrord/actions/workflows/auto-release-pr.yaml) using the "Run workflow" button. It will create (or update) the release PR immediately.
 
-   **Note**: Ensure the tag is attached to the release commit.
+## Manual release
 
-2. Creating the release will trigger the `Release` workflow, which builds and publishes all artifacts, including images.
-3. When the `Release` workflow completes successfully, update the relevant environment variables in the analytics server.
+If you need to create a release outside the automated flow entirely, run:
+
+```bash
+./scripts/release.sh 3.333.0
+```
+
+Ensure there are no uncommitted changes before running the script. It will:
+- Create a `releases/3.333.0` branch off `main`.
+- Bump the workspace version in `Cargo.toml` and refresh `Cargo.lock`.
+- Generate the changelog with `towncrier`.
+- Push the branch.
+
+Open a PR from that branch to `main`, then merge it — the Release workflow will fire automatically.
