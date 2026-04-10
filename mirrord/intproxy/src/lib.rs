@@ -206,7 +206,7 @@ impl IntProxy {
         );
         let outgoing = background_tasks.register(
             OutgoingProxy::new(
-                experimental.non_blocking_tcp_connect.unwrap_or_default(),
+                experimental.non_blocking_tcp_connect,
                 experimental.latency.receive_delay,
                 experimental.latency.transmit_delay,
             ),

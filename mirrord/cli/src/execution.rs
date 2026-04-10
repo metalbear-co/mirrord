@@ -294,7 +294,7 @@ impl MirrordExecution {
                             args,
                             load_type: None,
                         });
-                if config.experimental.sip_utils.unwrap_or_default() {
+                if config.experimental.sip_utils {
                     extract_sip_binaries(&MIRRORD_BINARIES_DIR_PATH_BUF, COMPRESSED_SIP_BINARIES)?;
                 }
 
@@ -312,7 +312,6 @@ impl MirrordExecution {
                                 sip_binaries_dir: config
                                     .experimental
                                     .sip_utils
-                                    .unwrap_or_default()
                                     .then(|| MIRRORD_BINARIES_DIR_PATH_BUF.as_path()),
                             },
                             log_info,
