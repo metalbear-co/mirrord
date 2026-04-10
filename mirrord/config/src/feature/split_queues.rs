@@ -104,6 +104,13 @@ impl SplitQueuesConfig {
         })
     }
 
+    pub fn gcp_pubsub(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ QueueMessageFilter)> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::GcpPubSub { message_filter } => Some((name.as_str(), message_filter)),
+            _ => None,
+        })
+    }
+
     fn verify_message_attribute_filter(
         queue_id: &QueueId,
         filter: &QueueMessageFilter,
@@ -153,6 +160,9 @@ impl SplitQueuesConfig {
                     Self::verify_message_attribute_filter(queue_name, message_filter)?;
                 }
                 QueueFilter::Rmq { message_filter } => {
+                    Self::verify_message_attribute_filter(queue_name, message_filter)?;
+                }
+                QueueFilter::GcpPubSub { message_filter } => {
                     Self::verify_message_attribute_filter(queue_name, message_filter)?;
                 }
                 QueueFilter::Unknown => {
@@ -251,6 +261,14 @@ pub enum QueueFilter {
         message_filter: QueueMessageFilter,
     },
 
+    #[serde(rename = "GcpPubSub")]
+    GcpPubSub {
+        /// A filter is a mapping between Pub/Sub message attribute names and regexes they
+        /// should match. The local application will only receive messages whose attributes
+        /// match **all** of the given patterns.
+        message_filter: QueueMessageFilter,
+    },
+
     // When a newer client sends a new filter kind to an older operator, that does not yet know
     // about that filter type, the filter will be deserialized to unknown.
     #[schemars(skip)]
@@ -267,6 +285,7 @@ impl CollectAnalytics for &SplitQueuesConfig {
         analytics.add("sqs_jq_filter_count", self.sqs_jq_filters().count());
         analytics.add("kafka_queue_count", self.kafka().count());
         analytics.add("rmq_queue_count", self.rmq().count());
+        analytics.add("gcp_pubsub_queue_count", self.gcp_pubsub().count());
     }
 }
 

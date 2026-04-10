@@ -498,6 +498,10 @@ pub enum NewOperatorFeature {
 
     /// This operator can perform queue splitting on RabbitMQ
     RmqQueueSplitting,
+
+    /// This operator can perform queue splitting on Google Cloud Pub/Sub
+    GcpPubSubQueueSplitting,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -536,6 +540,7 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::UnifiedBranchDbCrd => "unified branch database CRD",
             NewOperatorFeature::RmqQueueSplitting => "RabbitMQ queue splitting",
+            NewOperatorFeature::GcpPubSubQueueSplitting => "GCP Pub/Sub queue splitting",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
