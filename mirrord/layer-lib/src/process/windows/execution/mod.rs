@@ -29,7 +29,7 @@ use winapi::{
     },
 };
 
-use super::sync::{LayerInitEvent, MIRRORD_LAYER_INIT_EVENT_NAME};
+use super::sync::LayerInitEvent;
 use crate::{
     error::{LayerError, LayerResult, windows::WindowsError},
     logging::MIRRORD_LAYER_LOG_PATH,
@@ -121,14 +121,8 @@ impl LayerManagedProcess {
         windows_environment
     }
 
-    /// Add mirrord-specific environment variables to caller's environment
-    fn add_mirrord_env_vars(env_vars: &mut HashMap<String, String>, parent_event: &LayerInitEvent) {
-        // Add mirrord layer initialization event
-        env_vars.insert(
-            MIRRORD_LAYER_INIT_EVENT_NAME.to_string(),
-            parent_event.name().to_string(),
-        );
-
+    /// Add mirrord-specific environment variables to caller's environment.
+    fn add_mirrord_env_vars(env_vars: &mut HashMap<String, String>) {
         // Forward explicitly configured environment variables from parent to child
         for &env_var in FORWARDED_ENV_VARS {
             if let Ok(value) = std::env::var(env_var) {
@@ -339,8 +333,6 @@ impl LayerManagedProcess {
             )));
         }
 
-        let parent_event = LayerInitEvent::for_parent()?;
-
         // Determine the final environment: either caller's custom environment or parent environment
         // + mirrord vars Always create environment block since we need mirrord variables in
         // both cases
@@ -352,7 +344,7 @@ impl LayerManagedProcess {
                 // Caller provided custom environment variables
                 caller_env_vars
             };
-            Self::add_mirrord_env_vars(&mut env, &parent_event);
+            Self::add_mirrord_env_vars(&mut env);
             env
         };
         let mut env_storage = Self::build_windows_env_block(&environment);
@@ -373,6 +365,9 @@ impl LayerManagedProcess {
 
         // Call the original function with processed parameters
         let process_info = create_process_fn(creation_flags, environment_ptr, caller_startup_info)?;
+
+        // The child is suspended, so we can create the PID-based event before injection.
+        let parent_event = LayerInitEvent::for_parent(process_info.dwProcessId)?;
 
         let managed_process = Self {
             process_info,

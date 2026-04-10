@@ -79,7 +79,6 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 }
 
 fn layer_start() -> LayerResult<()> {
-    // Create layer initialization event first
     let init_event = LayerInitEvent::for_child()?;
 
     let config = read_resolved_config().map_err(LayerError::Config)?;
@@ -100,7 +99,7 @@ fn layer_start() -> LayerResult<()> {
     initialize_hooks(guard)?;
     tracing::info!("Hooks initialized");
 
-    // Signal that initialization is complete
+    // Signal that initialization is complete.
     init_event.signal_complete()?;
 
     if is_trace_only_mode() {
