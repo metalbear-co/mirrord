@@ -1,10 +1,46 @@
 # syntax=docker/dockerfile:1.7
 
-FROM golang:1.24-bookworm AS go124
+FROM golang:1.24-bookworm AS go124-build
 
-FROM golang:1.25-bookworm AS go125
+WORKDIR /workspace
 
-FROM golang:1.26-bookworm AS go126
+COPY . /workspace/
+
+RUN set -eux; \
+    ./scripts/build_go_apps.sh 24; \
+    mkdir -p /go-test-apps; \
+    find /workspace -name '24.go_test_app' -exec sh -c '\
+        relative_path="${1#/workspace/}"; \
+        mkdir -p "/go-test-apps/$(dirname "$relative_path")"; \
+        cp "$1" "/go-test-apps/$relative_path"' sh {} \;
+
+FROM golang:1.25-bookworm AS go125-build
+
+WORKDIR /workspace
+
+COPY . /workspace/
+
+RUN set -eux; \
+    ./scripts/build_go_apps.sh 25; \
+    mkdir -p /go-test-apps; \
+    find /workspace -name '25.go_test_app' -exec sh -c '\
+        relative_path="${1#/workspace/}"; \
+        mkdir -p "/go-test-apps/$(dirname "$relative_path")"; \
+        cp "$1" "/go-test-apps/$relative_path"' sh {} \;
+
+FROM golang:1.26-bookworm AS go126-build
+
+WORKDIR /workspace
+
+COPY . /workspace/
+
+RUN set -eux; \
+    ./scripts/build_go_apps.sh 26; \
+    mkdir -p /go-test-apps; \
+    find /workspace -name '26.go_test_app' -exec sh -c '\
+        relative_path="${1#/workspace/}"; \
+        mkdir -p "/go-test-apps/$(dirname "$relative_path")"; \
+        cp "$1" "/go-test-apps/$relative_path"' sh {} \;
 
 FROM node:24-bookworm
 
@@ -15,7 +51,7 @@ ARG RUST_TOOLCHAIN=nightly-2026-02-24
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true \
     CARGO_TARGET_DIR=/workspace/target \
     MIRRORD_TELEMETRY=false \
-    PATH=/root/.cargo/bin:/opt/go/1.24/bin:/opt/go/1.25/bin:/opt/go/1.26/bin:$PATH
+    PATH=/root/.cargo/bin:$PATH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -30,10 +66,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-venv \
     && rm -rf /var/lib/apt/lists/*
-
-COPY --from=go124 /usr/local/go /opt/go/1.24
-COPY --from=go125 /usr/local/go /opt/go/1.25
-COPY --from=go126 /usr/local/go /opt/go/1.26
 
 RUN --mount=type=cache,target=/root/.cargo/registry,id=mirrord-tests-cargo-registry \
     --mount=type=cache,target=/root/.cargo/git,id=mirrord-tests-cargo-git \
@@ -50,6 +82,9 @@ RUN --mount=type=cache,target=/root/.cargo/registry,id=mirrord-tests-cargo-regis
 WORKDIR /workspace
 
 COPY . /workspace/
+COPY --from=go124-build /go-test-apps/ /workspace/
+COPY --from=go125-build /go-test-apps/ /workspace/
+COPY --from=go126-build /go-test-apps/ /workspace/
 
 RUN python3 -m pip install --break-system-packages flask fastapi 'uvicorn[standard]' \
     && npm install --no-save --no-package-lock express
@@ -68,20 +103,7 @@ RUN set -eux; \
         rustc "/workspace/${app}/"*.rs --out-dir "/workspace/${app}/target"; \
     done
 
-RUN set -eux; \
-    cd /workspace; \
-    export PATH="/opt/go/1.24/bin:$PATH"; \
-    go version; \
-    ./scripts/build_go_apps.sh 24; \
-    export PATH="/opt/go/1.25/bin:$PATH"; \
-    go version; \
-    ./scripts/build_go_apps.sh 25; \
-    export PATH="/opt/go/1.26/bin:$PATH"; \
-    go version; \
-    ./scripts/build_go_apps.sh 26
-
-RUN export PATH="/opt/go/1.26/bin:$PATH" \
-    && ./mirrord/layer-tests/tests/apps/dlopen_cgo/build_test_app.sh \
+RUN ./mirrord/layer-tests/tests/apps/dlopen_cgo/build_test_app.sh \
     && ./scripts/build_c_apps.sh
 
 RUN --mount=type=cache,target=/root/.cargo/registry,id=mirrord-tests-cargo-registry \
@@ -132,9 +154,7 @@ RUN rm -rf \
     /root/.rustup/downloads \
     /root/.rustup/tmp \
     /root/.npm \
-    /root/.cache/pip \
-    /root/go/pkg/mod \
-    /root/go/pkg/sumdb
+    /root/.cache/pip
 
 ENV MIRRORD_LAYER_FILE=/workspace/target/debug/libmirrord_layer.so \
     MIRRORD_TESTS_USE_BINARY=/workspace/target/debug/mirrord
