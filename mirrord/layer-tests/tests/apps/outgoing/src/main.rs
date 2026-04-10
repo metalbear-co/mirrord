@@ -33,11 +33,6 @@ fn parse_args() -> Option<Args> {
         .map(|s| s.parse::<SocketAddr>())
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
-    let non_blocking = match args.get(4).map(String::as_str) {
-        Some("--non-blocking") => true,
-        None => false,
-        Some(..) => None?,
-    };
 
     Some(Args {
         tcp,
@@ -115,7 +110,7 @@ async fn test_tcp_non_blocking(peers: Vec<SocketAddr>) {
 fn main() {
     let Some(args) = parse_args() else {
         panic!(
-            "USAGE: {} --tcp/--udp <local socket> <peer sockets> [--non-blocking]",
+            "USAGE: {} --tcp/--udp <local socket> <peer sockets>",
             env::args().next().unwrap()
         );
     };

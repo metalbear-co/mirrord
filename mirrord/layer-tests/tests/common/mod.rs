@@ -133,9 +133,7 @@ pub enum Application {
     GoFAccessAt(GoVersion),
     GoSelfOpen(GoVersion),
     RustOutgoingUdp,
-    RustOutgoingTcp {
-        non_blocking: bool,
-    },
+    RustOutgoingTcp,
     RustIssue1123,
     RustIssue1054,
     RustIssue1458,
@@ -506,21 +504,10 @@ impl Application {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
-            Application::RustOutgoingTcp {
-                non_blocking: false,
-            } => ["--tcp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
+            Application::RustOutgoingTcp => ["--tcp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
                 .collect(),
-            Application::RustOutgoingTcp { non_blocking: true } => [
-                "--tcp",
-                RUST_OUTGOING_LOCAL,
-                RUST_OUTGOING_PEERS,
-                "--non-blocking",
-            ]
-            .into_iter()
-            .map(Into::into)
-            .collect(),
             Application::GoOpen {
                 path, flags, mode, ..
             } => {

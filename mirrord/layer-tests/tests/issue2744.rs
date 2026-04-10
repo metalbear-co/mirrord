@@ -3,7 +3,7 @@
 
 mod common;
 
-use std::{io::Write, net::SocketAddr, ops::Not, time::Duration};
+use std::{net::SocketAddr, ops::Not, time::Duration};
 
 pub use common::*;
 use mirrord_protocol::{
@@ -15,27 +15,15 @@ use mirrord_protocol::{
     uid::Uid,
 };
 use rstest::rstest;
-use tempfile::NamedTempFile;
 
-/// Verifies that `experimental.non_blocking_tcp_connect` works - a single threaded async
-/// application can concurrently start multiple outgoing connections.
+/// Verifies that a single-threaded async application can concurrently start multiple outgoing
+/// connections (non-blocking TCP connect is always enabled).
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(15))]
 async fn issue_2744_non_blocking_outgoing_tcp() {
-    let config = serde_json::json!({
-        "experimental": {
-            "non_blocking_tcp_connect": true
-        }
-    });
-    let mut config_file = NamedTempFile::with_suffix("json").unwrap();
-    config_file
-        .as_file_mut()
-        .write_all(config.to_string().as_bytes())
-        .unwrap();
-
-    let (mut test_process, mut intproxy) = Application::RustOutgoingTcp { non_blocking: true }
-        .start_process(vec![], Some(config_file.path()))
+    let (mut test_process, mut intproxy) = Application::RustOutgoingTcp
+        .start_process(vec![], None)
         .await;
 
     let peers = RUST_OUTGOING_PEERS
