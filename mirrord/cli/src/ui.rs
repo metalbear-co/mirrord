@@ -608,3 +608,218 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode, header},
+    };
+    use tower::ServiceExt;
+
+    use super::*;
+
+    const TEST_TOKEN: &str = "test-token-1234567890abcdef";
+
+    fn test_state() -> Arc<AppState> {
+        let (notify_tx, _) = broadcast::channel(16);
+        Arc::new(AppState {
+            sessions: RwLock::new(HashMap::new()),
+            notify_tx,
+            token: TEST_TOKEN.to_owned(),
+        })
+    }
+
+    fn req(uri: &str) -> Request<Body> {
+        Request::builder().uri(uri).body(Body::empty()).unwrap()
+    }
+
+    async fn status_of(req: Request<Body>) -> StatusCode {
+        build_router(test_state())
+            .oneshot(req)
+            .await
+            .unwrap()
+            .status()
+    }
+
+    /// `/health` is intentionally outside the auth middleware so k8s probes can hit it.
+    #[tokio::test]
+    async fn health_endpoint_does_not_require_token() {
+        assert_eq!(status_of(req("/health")).await, StatusCode::OK);
+    }
+
+    /// Without a token, every API request should be rejected. This is the core protection
+    /// against malicious local processes and CSRF from other browser tabs.
+    #[tokio::test]
+    async fn api_without_token_returns_unauthorized() {
+        assert_eq!(
+            status_of(req("/api/sessions")).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    /// A request with the wrong token must also be rejected (no timing oracle, just a
+    /// constant-time string compare via `==` is fine because the token is high-entropy).
+    #[tokio::test]
+    async fn api_with_wrong_token_returns_unauthorized() {
+        assert_eq!(
+            status_of(req("/api/sessions?token=wrong")).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    /// First request with a valid `?token=` query param should both succeed AND set the
+    /// `mirrord_token` cookie so subsequent requests can authenticate via cookie alone.
+    #[tokio::test]
+    async fn api_with_valid_token_query_param_sets_cookie() {
+        let response = build_router(test_state())
+            .oneshot(req(&format!("/api/sessions?token={TEST_TOKEN}")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let cookie = response
+            .headers()
+            .get(header::SET_COOKIE)
+            .expect("auth middleware should set the mirrord_token cookie");
+        let cookie_str = cookie.to_str().unwrap();
+        assert!(cookie_str.contains(&format!("mirrord_token={TEST_TOKEN}")));
+        assert!(
+            cookie_str.contains("HttpOnly"),
+            "cookie must be HttpOnly to prevent XSS exfiltration"
+        );
+        assert!(
+            cookie_str.contains("SameSite=Strict"),
+            "cookie must be SameSite=Strict to prevent CSRF"
+        );
+    }
+
+    /// Once the cookie is set, requests should authenticate via cookie without needing
+    /// the query param. This is what the React frontend does after the initial page load.
+    #[tokio::test]
+    async fn api_with_valid_cookie_succeeds() {
+        let request = Request::builder()
+            .uri("/api/sessions")
+            .header(header::COOKIE, format!("mirrord_token={TEST_TOKEN}"))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status_of(request).await, StatusCode::OK);
+    }
+
+    /// A wrong cookie must be rejected. Without this, an attacker who guesses or steals
+    /// a stale token could impersonate the user.
+    #[tokio::test]
+    async fn api_with_wrong_cookie_returns_unauthorized() {
+        let request = Request::builder()
+            .uri("/api/sessions")
+            .header(header::COOKIE, "mirrord_token=wrong")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status_of(request).await, StatusCode::UNAUTHORIZED);
+    }
+
+    /// All authenticated responses should carry the security headers from the RFC.
+    /// These protect against clickjacking, MIME sniffing, referrer leaks, and XSS.
+    #[tokio::test]
+    async fn responses_include_security_headers() {
+        let response = build_router(test_state())
+            .oneshot(req(&format!("/api/sessions?token={TEST_TOKEN}")))
+            .await
+            .unwrap();
+
+        let headers = response.headers();
+        assert_eq!(headers.get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
+        assert_eq!(
+            headers.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
+            "nosniff"
+        );
+        assert_eq!(headers.get(header::REFERRER_POLICY).unwrap(), "no-referrer");
+
+        // Per the RFC, CSP must restrict scripts to 'self' (no inline scripts).
+        let csp = headers.get(header::CONTENT_SECURITY_POLICY).unwrap();
+        let csp_str = csp.to_str().unwrap();
+        assert!(csp_str.contains("script-src 'self'"));
+        assert!(!csp_str.contains("script-src 'self' 'unsafe-inline'"));
+        assert!(csp_str.contains("frame-ancestors 'none'"));
+        assert!(csp_str.contains("object-src 'none'"));
+    }
+
+    /// WebSocket upgrades from a non-localhost Origin must be rejected. WebSocket
+    /// connections do NOT enforce same-origin policy by default, so without this check
+    /// any malicious website the user visits could open `ws://localhost:59281/ws` and
+    /// stream every session event in real time.
+    #[test]
+    fn validate_ws_origin_rejects_non_localhost() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::ORIGIN, "http://evil.com".parse().unwrap());
+        assert!(!validate_ws_origin(&headers));
+
+        headers.insert(header::ORIGIN, "https://localhost:59281".parse().unwrap());
+        assert!(
+            !validate_ws_origin(&headers),
+            "https origin must be rejected, mirrord ui only serves http"
+        );
+    }
+
+    /// Localhost origins (in any common form) should be accepted.
+    #[test]
+    fn validate_ws_origin_accepts_localhost() {
+        for origin in [
+            "http://localhost",
+            "http://localhost:59281",
+            "http://127.0.0.1:59281",
+            "http://[::1]:59281",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::ORIGIN, origin.parse().unwrap());
+            assert!(
+                validate_ws_origin(&headers),
+                "should accept origin: {origin}"
+            );
+        }
+    }
+
+    /// Non-browser clients (curl, native code) typically omit the Origin header. We accept
+    /// these because the Unix socket and TCP localhost binding are the access control there.
+    #[test]
+    fn validate_ws_origin_accepts_missing_origin() {
+        let headers = HeaderMap::new();
+        assert!(validate_ws_origin(&headers));
+    }
+
+    /// CSRF check: a malicious form-POST from another origin would not include the cookie
+    /// (because of SameSite=Strict), so any state-changing endpoint must reject it.
+    #[tokio::test]
+    async fn kill_endpoint_without_token_returns_unauthorized() {
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/sessions/some-id/kill")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status_of(request).await, StatusCode::UNAUTHORIZED);
+    }
+
+    /// Static assets are served behind the auth middleware so the token cookie is set on
+    /// the very first page load (the user clicks `?token=...` in their browser, the static
+    /// HTML response sets the cookie, and subsequent API/WS calls authenticate via cookie).
+    #[tokio::test]
+    async fn static_handler_without_token_returns_unauthorized() {
+        assert_eq!(status_of(req("/")).await, StatusCode::UNAUTHORIZED);
+    }
+
+    /// The `?token=` query param works for any path, including the root, so the initial
+    /// page load establishes the cookie.
+    #[tokio::test]
+    async fn static_handler_with_token_sets_cookie() {
+        let response = build_router(test_state())
+            .oneshot(req(&format!("/?token={TEST_TOKEN}")))
+            .await
+            .unwrap();
+        // Status may be 200 (if asset embedded) or 404 (if no embedded assets in test build)
+        // either way, the cookie should be set.
+        assert!(
+            response.headers().get(header::SET_COOKIE).is_some(),
+            "cookie must be set on the first authenticated request, even if the body is 404"
+        );
+    }
+}
