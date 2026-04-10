@@ -1,5 +1,7 @@
 target/
 **/target/
+!mirrord/config/src/target/
+!mirrord/config/src/target/**
 **/node_modules/
 **/dist/
 build/
