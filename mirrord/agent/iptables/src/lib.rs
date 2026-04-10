@@ -47,6 +47,7 @@ pub struct ChainNames {
 }
 
 impl ChainNames {
+    #[tracing::instrument(level = Level::DEBUG, ret)]
     pub fn from_env() -> Self {
         match mirrord_agent_env::envs::IPTABLES_IDENTIFIER.try_from_env() {
             Ok(Some(id)) => Self {
