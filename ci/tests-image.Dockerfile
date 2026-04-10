@@ -4,37 +4,59 @@ FROM golang:1.24-bookworm AS go124-build
 
 WORKDIR /workspace
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY . /workspace/
 
-RUN set -eux; \
+RUN --mount=type=cache,target=/go/pkg/mod,id=mirrord-tests-go124-mod \
+    --mount=type=cache,target=/root/.cache/go-build,id=mirrord-tests-go124-build \
+    set -eux; \
     ./scripts/build_go_apps.sh 24; \
     mkdir -p /go-test-apps; \
     find /workspace -name '24.go_test_app' -exec sh -c '\
         relative_path="${1#/workspace/}"; \
         mkdir -p "/go-test-apps/$(dirname "$relative_path")"; \
-        cp "$1" "/go-test-apps/$relative_path"' sh {} \;
+        cp "$1" "/go-test-apps/$relative_path"' sh {} \; && \
+    touch /go-stage-complete
 
 FROM golang:1.25-bookworm AS go125-build
 
 WORKDIR /workspace
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=go124-build /go-stage-complete /tmp/go-stage-complete
 COPY . /workspace/
 
-RUN set -eux; \
+RUN --mount=type=cache,target=/go/pkg/mod,id=mirrord-tests-go125-mod \
+    --mount=type=cache,target=/root/.cache/go-build,id=mirrord-tests-go125-build \
+    set -eux; \
     ./scripts/build_go_apps.sh 25; \
     mkdir -p /go-test-apps; \
     find /workspace -name '25.go_test_app' -exec sh -c '\
         relative_path="${1#/workspace/}"; \
         mkdir -p "/go-test-apps/$(dirname "$relative_path")"; \
-        cp "$1" "/go-test-apps/$relative_path"' sh {} \;
+        cp "$1" "/go-test-apps/$relative_path"' sh {} \; && \
+    touch /go-stage-complete
 
 FROM golang:1.26-bookworm AS go126-build
 
 WORKDIR /workspace
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=go125-build /go-stage-complete /tmp/go-stage-complete
 COPY . /workspace/
 
-RUN set -eux; \
+RUN --mount=type=cache,target=/go/pkg/mod,id=mirrord-tests-go126-mod \
+    --mount=type=cache,target=/root/.cache/go-build,id=mirrord-tests-go126-build \
+    set -eux; \
     ./scripts/build_go_apps.sh 26; \
     mkdir -p /go-test-apps; \
     find /workspace -name '26.go_test_app' -exec sh -c '\
@@ -42,16 +64,31 @@ RUN set -eux; \
         mkdir -p "/go-test-apps/$(dirname "$relative_path")"; \
         cp "$1" "/go-test-apps/$relative_path"' sh {} \;
 
+RUN --mount=type=cache,target=/go/pkg/mod,id=mirrord-tests-go126-mod \
+    --mount=type=cache,target=/root/.cache/go-build,id=mirrord-tests-go126-build \
+    set -eux; \
+    ./mirrord/layer-tests/tests/apps/dlopen_cgo/build_test_app.sh; \
+    mkdir -p /go-test-apps/mirrord/layer-tests/tests/apps/dlopen_cgo; \
+    cp /workspace/mirrord/layer-tests/tests/apps/dlopen_cgo/libgo_server.so \
+        /go-test-apps/mirrord/layer-tests/tests/apps/dlopen_cgo/; \
+    cp /workspace/mirrord/layer-tests/tests/apps/dlopen_cgo/out.cpp_dlopen_cgo \
+        /go-test-apps/mirrord/layer-tests/tests/apps/dlopen_cgo/; \
+    touch /go-stage-complete
+
 FROM node:24-bookworm
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG RUST_TOOLCHAIN=nightly-2026-02-24
+ARG CARGO_BUILD_JOBS=2
 
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true \
+    CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS} \
     CARGO_TARGET_DIR=/workspace/target \
     MIRRORD_TELEMETRY=false \
     PATH=/root/.cargo/bin:$PATH
+
+COPY --from=go126-build /go-stage-complete /tmp/go-stage-complete
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -103,8 +140,7 @@ RUN set -eux; \
         rustc "/workspace/${app}/"*.rs --out-dir "/workspace/${app}/target"; \
     done
 
-RUN ./mirrord/layer-tests/tests/apps/dlopen_cgo/build_test_app.sh \
-    && ./scripts/build_c_apps.sh
+RUN ./scripts/build_c_apps.sh
 
 RUN --mount=type=cache,target=/root/.cargo/registry,id=mirrord-tests-cargo-registry \
     --mount=type=cache,target=/root/.cargo/git,id=mirrord-tests-cargo-git \

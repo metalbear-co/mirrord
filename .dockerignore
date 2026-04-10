@@ -1,4 +1,15 @@
-target/*
+target/
+**/target/
+**/node_modules/
+**/dist/
+build/
+**/.DS_Store
+*.go_test_app
+*.go_test_app.exe
+*.c_test_app
+*.c_test_app.exe
+*.test_app
+wizard-frontend.tar.gz
 **/.vscode*
 **/.git*
 **/.github*
