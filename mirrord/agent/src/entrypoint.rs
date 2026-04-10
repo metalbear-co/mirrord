@@ -17,7 +17,7 @@ use futures::{TryFutureExt, future::OptionFuture};
 use metrics::{CLIENT_COUNT, start_metrics};
 use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{
-    IPTablesWrapper, SafeIpTables,
+    ChainNames, IPTablesWrapper, SafeIpTables,
     error::{IPTablesError, IPTablesResult},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
@@ -680,17 +680,18 @@ fn monitor_main_container(cancel: CancellationToken, pid: libc::pid_t) {
 async fn get_rules(
     iptables: &IPTablesWrapper,
     ip6tables: Option<&IPTablesWrapper>,
+    chain_names: &ChainNames,
 ) -> IPTablesResult<Vec<String>> {
-    let rules_v4 = SafeIpTables::list_mirrord_rules(iptables).await?;
+    let rules_v4 = SafeIpTables::list_mirrord_rules(iptables, chain_names).await?;
     if let Some(ip6tables) = ip6tables {
-        let rules_v6 = SafeIpTables::list_mirrord_rules(ip6tables).await?;
+        let rules_v6 = SafeIpTables::list_mirrord_rules(ip6tables, chain_names).await?;
         Ok([rules_v4, rules_v6].concat())
     } else {
         Ok(rules_v4)
     }
 }
 
-/// Get existing iptable rules created by another (potentially still running) agent.
+/// Get existing iptable rules created by this agent instance (matching its chain names).
 ///
 /// If `clean_existing_rules` is set, the iptables will be cleaned after fetching the existing
 /// rules. The rules from before the cleanup will be returned for logging.
@@ -700,10 +701,11 @@ async fn check_existing_rules(
     clean_existing_rules: bool,
     with_mesh_exclusion: bool,
 ) -> IPTablesResult<Vec<String>> {
+    let chain_names = ChainNames::from_env();
     let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
     let iptables = mirrord_agent_iptables::get_iptables(nftables, false);
     let ip6tables = support_ipv6.then(|| mirrord_agent_iptables::get_iptables(nftables, true));
-    let rules = get_rules(&iptables, ip6tables.as_ref()).await?;
+    let rules = get_rules(&iptables, ip6tables.as_ref(), &chain_names).await?;
     if clean_existing_rules
         && rules.is_empty().not()
         && let Err(err) = clear_iptable_chain(support_ipv6, with_mesh_exclusion).await
@@ -711,7 +713,7 @@ async fn check_existing_rules(
         // the error could be because we tried to remove two rules and only one of them was
         // present to begin with, so removing the other, non-existent one failed.
         // So we check the rules after cleaning and only fail if there are still rules.
-        let rules = get_rules(&iptables, ip6tables.as_ref()).await?;
+        let rules = get_rules(&iptables, ip6tables.as_ref(), &chain_names).await?;
         if rules.is_empty().not() {
             // There are still rules after the cleanup, the cleanup was not successful.
             return Err(err);
@@ -948,14 +950,18 @@ async fn clear_iptable_chain(
     ipv6_enabled: bool,
     with_mesh_exclusion: bool,
 ) -> Result<(), IPTablesError> {
+    let chain_names = ChainNames::from_env();
     let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
 
     let v4_result: Result<(), IPTablesError> = try {
         let ipt = mirrord_agent_iptables::get_iptables(nftables, false);
-        if SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
+        if SafeIpTables::list_mirrord_rules(&ipt, &chain_names)
+            .await?
+            .is_empty()
+        {
             trace!("No iptables mirrord rules found, skipping iptables cleanup.");
         } else {
-            let tables = SafeIpTables::load(ipt, false, with_mesh_exclusion).await?;
+            let tables = SafeIpTables::load(ipt, &chain_names, false, with_mesh_exclusion).await?;
             tables.cleanup().await?
         }
     };
@@ -963,10 +969,14 @@ async fn clear_iptable_chain(
     let v6_result: Result<(), IPTablesError> = if ipv6_enabled {
         try {
             let ipt = mirrord_agent_iptables::get_iptables(nftables, true);
-            if SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
+            if SafeIpTables::list_mirrord_rules(&ipt, &chain_names)
+                .await?
+                .is_empty()
+            {
                 trace!("No ip6tables mirrord rules found, skipping ip6tables cleanup.");
             } else {
-                let tables = SafeIpTables::load(ipt, true, with_mesh_exclusion).await?;
+                let tables =
+                    SafeIpTables::load(ipt, &chain_names, true, with_mesh_exclusion).await?;
                 tables.cleanup().await?
             }
         }

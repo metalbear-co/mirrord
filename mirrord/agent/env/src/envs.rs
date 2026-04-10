@@ -97,3 +97,8 @@ pub const CLEAN_IPTABLES_ON_START: CheckedEnv<bool> =
 
 /// Jaq process time limit (ms)
 pub const JAQ_TIME_LIMIT: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_JAQ_TIME_LIMIT");
+
+/// Unique identifier for iptables chain names, allowing multiple agents in the same network
+/// namespace.
+pub const IPTABLES_IDENTIFIER: CheckedEnv<String> =
+    CheckedEnv::new("MIRRORD_AGENT_IPTABLES_IDENTIFIER");

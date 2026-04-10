@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL, IPTABLE_MESH, IPTables, error::IPTablesResult,
+    ChainNames, IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL, IPTables, error::IPTablesResult,
     output::OutputRedirect, prerouting::PreroutingRedirect, redirect::Redirect,
 };
 
@@ -16,16 +16,20 @@ impl<IPT> AmbientRedirect<IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(ipt: Arc<IPT>, pod_ips: Option<&str>) -> IPTablesResult<Self> {
-        let prerouting = PreroutingRedirect::create(ipt.clone())?;
-        let output = OutputRedirect::create(ipt, IPTABLE_MESH.to_string(), pod_ips)?;
+    pub fn create(
+        ipt: Arc<IPT>,
+        chain_names: &ChainNames,
+        pod_ips: Option<&str>,
+    ) -> IPTablesResult<Self> {
+        let prerouting = PreroutingRedirect::create(ipt.clone(), chain_names.prerouting.clone())?;
+        let output = OutputRedirect::create(ipt, chain_names.mesh.clone(), pod_ips)?;
 
         Ok(AmbientRedirect { prerouting, output })
     }
 
-    pub fn load(ipt: Arc<IPT>) -> IPTablesResult<Self> {
-        let prerouting = PreroutingRedirect::load(ipt.clone())?;
-        let output = OutputRedirect::load(ipt, IPTABLE_MESH.to_string())?;
+    pub fn load(ipt: Arc<IPT>, chain_names: &ChainNames) -> IPTablesResult<Self> {
+        let prerouting = PreroutingRedirect::load(ipt.clone(), chain_names.prerouting.clone())?;
+        let output = OutputRedirect::load(ipt, chain_names.mesh.clone())?;
 
         Ok(AmbientRedirect { prerouting, output })
     }

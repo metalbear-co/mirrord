@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    IPTABLE_STANDARD, IPTables, Redirect, error::IPTablesResult, output::OutputRedirect,
+    ChainNames, IPTables, Redirect, error::IPTablesResult, output::OutputRedirect,
     prerouting::PreroutingRedirect,
 };
 
@@ -16,16 +16,20 @@ impl<IPT> StandardRedirect<IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(ipt: Arc<IPT>, pod_ips: Option<&str>) -> IPTablesResult<Self> {
-        let prerouting = PreroutingRedirect::create(ipt.clone())?;
-        let output = OutputRedirect::create(ipt, IPTABLE_STANDARD.to_string(), pod_ips)?;
+    pub fn create(
+        ipt: Arc<IPT>,
+        chain_names: &ChainNames,
+        pod_ips: Option<&str>,
+    ) -> IPTablesResult<Self> {
+        let prerouting = PreroutingRedirect::create(ipt.clone(), chain_names.prerouting.clone())?;
+        let output = OutputRedirect::create(ipt, chain_names.standard.clone(), pod_ips)?;
 
         Ok(StandardRedirect { prerouting, output })
     }
 
-    pub fn load(ipt: Arc<IPT>) -> IPTablesResult<Self> {
-        let prerouting = PreroutingRedirect::load(ipt.clone())?;
-        let output = OutputRedirect::load(ipt, IPTABLE_STANDARD.to_string())?;
+    pub fn load(ipt: Arc<IPT>, chain_names: &ChainNames) -> IPTablesResult<Self> {
+        let prerouting = PreroutingRedirect::load(ipt.clone(), chain_names.prerouting.clone())?;
+        let output = OutputRedirect::load(ipt, chain_names.standard.clone())?;
 
         Ok(StandardRedirect { prerouting, output })
     }
