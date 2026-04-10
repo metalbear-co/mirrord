@@ -4979,10 +4979,8 @@ name = "mirrord-intproxy"
 version = "3.200.0"
 dependencies = [
  "axum 0.8.8",
- "axum-extra",
  "bytes",
  "futures",
- "hex",
  "home",
  "http-body-util",
  "hyper 1.8.1",
@@ -5012,7 +5010,6 @@ dependencies = [
  "tokio-rustls 0.26.4",
  "tokio-stream",
  "tokio-util",
- "tower-http",
  "tracing",
 ]
 

@@ -39,10 +39,7 @@ use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
-use tower_http::{
-    cors::{AllowOrigin, CorsLayer},
-    set_header::SetResponseHeaderLayer,
-};
+use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::{debug, error, info, warn};
 
 use crate::{config::UiArgs, error::CliError};
@@ -67,7 +64,6 @@ struct TrackedSession {
     info: SessionInfo,
     events: Vec<serde_json::Value>,
     client: reqwest::Client,
-    token: Option<String>,
 }
 
 impl Serialize for TrackedSession {
@@ -80,9 +76,6 @@ struct AppState {
     sessions: RwLock<HashMap<String, TrackedSession>>,
     notify_tx: broadcast::Sender<SessionNotification>,
     token: String,
-    /// Stored for `read_session_token` to resolve per-session token files.
-    #[allow(dead_code)]
-    sessions_dir: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -123,45 +116,10 @@ async fn token_auth(
     StatusCode::UNAUTHORIZED.into_response()
 }
 
-/// Middleware that rejects requests with a Host header that is not localhost, 127.0.0.1, or [::1].
-async fn host_validation(request: Request, next: Next) -> Response {
-    if let Some(host) = request.headers().get(header::HOST)
-        && let Ok(host_str) = host.to_str()
-    {
-        let host_without_port = host_str.split(':').next().unwrap_or(host_str);
-        match host_without_port {
-            "localhost" | "127.0.0.1" | "[::1]" | "::1" => {}
-            _ => return StatusCode::FORBIDDEN.into_response(),
-        }
-    }
-    next.run(request).await
-}
-
-fn localhost_cors() -> CorsLayer {
-    CorsLayer::new()
-        .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
-            if let Ok(origin_str) = origin.to_str() {
-                origin_str.starts_with("http://localhost")
-                    || origin_str.starts_with("http://127.0.0.1")
-                    || origin_str.starts_with("http://[::1]")
-            } else {
-                false
-            }
-        }))
-        .allow_methods([
-            axum::http::Method::GET,
-            axum::http::Method::POST,
-            axum::http::Method::OPTIONS,
-        ])
-        .allow_headers([header::CONTENT_TYPE, header::COOKIE, header::AUTHORIZATION])
-        .allow_credentials(true)
-}
-
 /// Opens an SSE connection to a session's Unix socket /events endpoint and returns
 /// a pinned `Eventsource` stream that yields parsed SSE events.
 async fn open_sse_stream(
     client: &reqwest::Client,
-    token: Option<&str>,
 ) -> Result<
     std::pin::Pin<
         Box<
@@ -175,12 +133,8 @@ async fn open_sse_stream(
     >,
     SessionError,
 > {
-    let url = match token {
-        Some(t) => format!("http://localhost/events?token={t}"),
-        None => "http://localhost/events".to_owned(),
-    };
     let resp = client
-        .get(&url)
+        .get("http://localhost/events")
         .header("accept", "text/event-stream")
         .send()
         .await?;
@@ -204,13 +158,8 @@ async fn buffer_session_events(session_id: &str, values: Vec<serde_json::Value>,
 }
 
 /// Connects to a session's SSE /events endpoint and buffers events into the shared state.
-async fn stream_session_events(
-    session_id: String,
-    client: reqwest::Client,
-    token: Option<String>,
-    state: Arc<AppState>,
-) {
-    let mut sse_stream = match open_sse_stream(&client, token.as_deref()).await {
+async fn stream_session_events(session_id: String, client: reqwest::Client, state: Arc<AppState>) {
+    let mut sse_stream = match open_sse_stream(&client).await {
         Ok(s) => s,
         Err(err) => {
             warn!(%session_id, ?err, "Failed to open SSE stream");
@@ -267,11 +216,9 @@ async fn add_session(session_id: String, socket_path: PathBuf, state: Arc<AppSta
         info: connection.info,
         events: Vec::new(),
         client: connection.client,
-        token: connection.token,
     };
 
     let session_client = tracked.client.clone();
-    let session_token = tracked.token.clone();
     let notification = SessionNotification::SessionAdded {
         session: Box::new(tracked.clone()),
     };
@@ -288,12 +235,7 @@ async fn add_session(session_id: String, socket_path: PathBuf, state: Arc<AppSta
     let _ = state.notify_tx.send(notification);
     info!(%session_id, "Session added");
 
-    tokio::spawn(stream_session_events(
-        session_id,
-        session_client,
-        session_token,
-        state,
-    ));
+    tokio::spawn(stream_session_events(session_id, session_client, state));
 }
 
 async fn remove_session(session_id: &str, state: &AppState) {
@@ -303,32 +245,6 @@ async fn remove_session(session_id: &str, state: &AppState) {
         });
         info!(%session_id, "Session removed");
     }
-}
-
-/// Reads a session token from `~/.mirrord/sessions/<id>.token`, with path traversal protection.
-/// Used when connecting to per-session APIs that require token auth.
-#[allow(dead_code)]
-fn read_session_token(sessions_dir: &std::path::Path, session_id: &str) -> Option<String> {
-    if session_id.contains('/') || session_id.contains('\\') || session_id.contains("..") {
-        return None;
-    }
-
-    let token_path = sessions_dir.join(format!("{session_id}.token"));
-
-    // Canonicalize and verify the path is within sessions_dir
-    let canonical = match token_path.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return None,
-    };
-    let canonical_dir = match sessions_dir.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return None,
-    };
-    if !canonical.starts_with(&canonical_dir) {
-        return None;
-    }
-
-    std::fs::read_to_string(&canonical).ok()
 }
 
 async fn list_sessions(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -349,14 +265,10 @@ async fn session_events_sse(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    let (buffered_events, client, session_token) = {
+    let (buffered_events, client) = {
         let sessions = state.sessions.read().await;
         match sessions.get(&id) {
-            Some(session) => (
-                session.events.clone(),
-                session.client.clone(),
-                session.token.clone(),
-            ),
+            Some(session) => (session.events.clone(), session.client.clone()),
             None => return StatusCode::NOT_FOUND.into_response(),
         }
     };
@@ -372,7 +284,7 @@ async fn session_events_sse(
             }
         }
 
-        let mut sse_stream = match open_sse_stream(&client, session_token.as_deref()).await {
+        let mut sse_stream = match open_sse_stream(&client).await {
             Ok(s) => s,
             Err(err) => {
                 warn!(?err, "Failed to open SSE stream for proxy");
@@ -410,23 +322,15 @@ async fn session_events_sse(
 }
 
 async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    let (client, socket_path, session_token) = {
+    let (client, socket_path) = {
         let sessions = state.sessions.read().await;
         match sessions.get(&id) {
-            Some(session) => (
-                session.client.clone(),
-                session.socket_path.clone(),
-                session.token.clone(),
-            ),
+            Some(session) => (session.client.clone(), session.socket_path.clone()),
             None => return StatusCode::NOT_FOUND.into_response(),
         }
     };
 
-    let kill_url = match session_token.as_deref() {
-        Some(token) => format!("http://localhost/kill?token={token}"),
-        None => "http://localhost/kill".to_owned(),
-    };
-    match client.post(&kill_url).send().await {
+    match client.post("http://localhost/kill").send().await {
         Ok(resp) => {
             let val: serde_json::Value = resp.json().await.unwrap_or_else(|err| {
                 warn!(?err, "Failed to parse kill response body");
@@ -630,16 +534,14 @@ fn build_router(state: Arc<AppState>) -> Router {
         .layer(middleware::from_fn_with_state(state.clone(), token_auth));
 
     let csp_value = HeaderValue::from_static(
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; \
-         connect-src 'self' ws://localhost:* ws://127.0.0.1:* ws://[::1]:*; \
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+         connect-src 'self' ws://localhost:* ws://127.0.0.1:*; \
          img-src 'self' data:; object-src 'none'; frame-ancestors 'none'",
     );
 
     Router::new()
         .route("/health", get(health))
         .merge(authenticated_routes)
-        .layer(middleware::from_fn(host_validation))
-        .layer(localhost_cors())
         .layer(SetResponseHeaderLayer::overriding(
             header::X_FRAME_OPTIONS,
             HeaderValue::from_static("DENY"),
@@ -676,7 +578,6 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
         sessions: RwLock::new(HashMap::new()),
         notify_tx,
         token: token.clone(),
-        sessions_dir: sessions_dir.clone(),
     });
 
     scan_existing_sessions(&sessions_dir, &state).await;
