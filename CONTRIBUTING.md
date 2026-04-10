@@ -101,9 +101,15 @@ layer injected into it. Some test apps need to be compiled before they can be us
 > go build -o "$1.go_test_app" || echo "Failed to build $directory/$1.go_test_app"
 > ```
 
+The test harness now always expects an external `mirrord` binary and layer file to already exist.
+Point the tests at those artifacts with `MIRRORD_TESTS_USE_BINARY` and `MIRRORD_LAYER_FILE`, or
+pass them to `xtask` with `--binary` and `--layer`.
+
 The basic command to run the E2E tests is:
 ```bash
-cargo test --package mirrord-tests
+MIRRORD_TESTS_USE_BINARY=target/debug/mirrord \
+MIRRORD_LAYER_FILE=target/debug/libmirrord_layer.so \
+cargo xtask test-e2e
 ```
 
 However, when running on macOS a universal binary has to be created first. You can use xtask:
@@ -118,7 +124,9 @@ scripts/build_fat_mac.sh
 
 And then in order to use that binary in the tests, run the tests like this:
 ```bash
-MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord cargo test -p mirrord-tests
+MIRRORD_TESTS_USE_BINARY=target/universal-apple-darwin/debug/mirrord \
+MIRRORD_LAYER_FILE=target/universal-apple-darwin/debug/libmirrord_layer.dylib \
+cargo xtask test-e2e
 ```
 
 If new tests are added, decorate them with `cfg_attr` attribute macro to define what the tests target.
@@ -166,7 +174,10 @@ IPv6 tests (they currently don't run in the CI):
 The Kubernetes resources created by the E2E tests are automatically deleted when the test exits. However, you can preserve resources from failed tests for debugging. To do this, set the `MIRRORD_E2E_PRESERVE_FAILED` variable to any value.
 
 ```bash
-MIRRORD_E2E_PRESERVE_FAILED=y cargo test --package mirrord-tests
+MIRRORD_E2E_PRESERVE_FAILED=y \
+MIRRORD_TESTS_USE_BINARY=target/debug/mirrord \
+MIRRORD_LAYER_FILE=target/debug/libmirrord_layer.so \
+cargo xtask test-e2e
 ```
 
 All test resources share a common label `mirrord-e2e-test-resource=true`. To delete them, simply run:
@@ -192,21 +203,25 @@ Therefore, whenever possible we create integration tests, and only resort to E2E
 Some test apps need to be compiled before they can be used in the tests
 ([this should be automated in the future](https://github.com/metalbear-co/mirrord/issues/982)).
 
+The integration test harness also requires an external `mirrord` binary and layer file.
+
 The basic command to run the integration tests is:
 ```bash
-cargo test --package mirrord-layer-tests
+MIRRORD_TESTS_USE_BINARY=target/debug/mirrord \
+MIRRORD_LAYER_FILE=target/debug/libmirrord_layer.so \
+cargo xtask test-integration
 ```
 
-#### Running the Integration Tests using pre-compiled Binaries (Optional)
-If you want to avoid building the CLI as a build dependency (or speed up iteration), you can run the integration tests against prebuilt artifacts. This requires `--no-default-features` and pointing to the CLI binary and layer library.
+#### Running the Integration Tests using pre-compiled Binaries
+The tests no longer build `mirrord` as a test dependency. You must point them at prebuilt
+artifacts.
 
 ```bash
-MIRRORD_TESTS_USE_BINARY=../../target/x86_64-unknown-linux-gnu/debug/mirrord \
-MIRRORD_LAYER_FILE=../../target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so \
-cargo test -p mirrord-layer-tests --no-default-features
+MIRRORD_TESTS_USE_BINARY=target/x86_64-unknown-linux-gnu/debug/mirrord \
+MIRRORD_LAYER_FILE=target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so \
+cargo xtask test-integration
 ```
 Swap `x86_64-unknown-linux-gnu` with your target triplet, or omit the triplet if you built for the host default.
-Paths use `../..` because `cargo test -p mirrord-layer-tests` runs tests with `mirrord/layer-tests` as the working directory.
 
 For macOS with pre-compiled binaries, build the universal CLI (which embeds both arch compilations):
 ```bash
@@ -220,9 +235,9 @@ scripts/build_fat_mac.sh
 
 And then use it in the tests as follows:
 ```bash
-MIRRORD_TESTS_USE_BINARY=../../target/universal-apple-darwin/debug/mirrord \
-MIRRORD_LAYER_FILE=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib \
-cargo test -p mirrord-layer-tests --no-default-features
+MIRRORD_TESTS_USE_BINARY=target/universal-apple-darwin/debug/mirrord \
+MIRRORD_LAYER_FILE=target/universal-apple-darwin/debug/libmirrord_layer.dylib \
+cargo xtask test-integration
 ```
 
 ### Integration Tests logs and you

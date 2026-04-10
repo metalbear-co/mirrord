@@ -18,36 +18,64 @@ jobs:
         with:
           name: mirrord-tests-image
           path: ${{ github.workspace }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: cli-image-linux-amd64
+          path: ${{ runner.temp }}/cli-image
       - name: load mirrord tests image
         run: docker load --input "${{ github.workspace }}/mirrord-tests-image.tar"
+      - name: extract mirrord test artifacts
+        run: |
+          docker load --input "${{ runner.temp }}/cli-image/cli_image.tar"
+          mkdir -p "${{ runner.temp }}/mirrord-artifacts"
+          container_id=$(docker create cli_image)
+          docker cp "${container_id}:/opt/mirrord/bin/mirrord" "${{ runner.temp }}/mirrord-artifacts/mirrord"
+          docker cp "${container_id}:/opt/mirrord/lib/x86_64/libmirrord_layer.so" "${{ runner.temp }}/mirrord-artifacts/libmirrord_layer.so"
+          docker rm "${container_id}"
+          chmod u+x "${{ runner.temp }}/mirrord-artifacts/mirrord"
       - name: create intproxy logs dir
         run: mkdir -p "${{ runner.temp }}/intproxy_logs"
       - name: layer tests
         run: >-
           docker run --rm
+          -e MIRRORD_TESTS_USE_BINARY=/opt/test-artifacts/mirrord
+          -e MIRRORD_LAYER_FILE=/opt/test-artifacts/libmirrord_layer.so
+          -v "${{ runner.temp }}/mirrord-artifacts:/opt/test-artifacts:ro"
           -v "${{ runner.temp }}/intproxy_logs:/tmp/intproxy_logs"
           mirrord-tests-image
       - name: unit tests (exclude e2e)
         run: >-
           docker run --rm
+          -e MIRRORD_TESTS_USE_BINARY=/opt/test-artifacts/mirrord
+          -e MIRRORD_LAYER_FILE=/opt/test-artifacts/libmirrord_layer.so
+          -v "${{ runner.temp }}/mirrord-artifacts:/opt/test-artifacts:ro"
           -v "${{ runner.temp }}/intproxy_logs:/tmp/intproxy_logs"
           mirrord-tests-image
           cargo nextest run --workspace --exclude mirrord-tests
       - name: mirrord-kube UT
         run: >-
           docker run --rm
+          -e MIRRORD_TESTS_USE_BINARY=/opt/test-artifacts/mirrord
+          -e MIRRORD_LAYER_FILE=/opt/test-artifacts/libmirrord_layer.so
+          -v "${{ runner.temp }}/mirrord-artifacts:/opt/test-artifacts:ro"
           -v "${{ runner.temp }}/intproxy_logs:/tmp/intproxy_logs"
           mirrord-tests-image
           cargo nextest run -p mirrord-kube --all-features
       - name: mirrord-operator UT
         run: >-
           docker run --rm
+          -e MIRRORD_TESTS_USE_BINARY=/opt/test-artifacts/mirrord
+          -e MIRRORD_LAYER_FILE=/opt/test-artifacts/libmirrord_layer.so
+          -v "${{ runner.temp }}/mirrord-artifacts:/opt/test-artifacts:ro"
           -v "${{ runner.temp }}/intproxy_logs:/tmp/intproxy_logs"
           mirrord-tests-image
           cargo nextest run -p mirrord-operator --features "crd, client"
       - name: mirrord cli UT
         run: >-
           docker run --rm
+          -e MIRRORD_TESTS_USE_BINARY=/opt/test-artifacts/mirrord
+          -e MIRRORD_LAYER_FILE=/opt/test-artifacts/libmirrord_layer.so
+          -v "${{ runner.temp }}/mirrord-artifacts:/opt/test-artifacts:ro"
           -v "${{ runner.temp }}/intproxy_logs:/tmp/intproxy_logs"
           mirrord-tests-image
           bash -lc 'touch wizard-frontend.tar.gz && cargo nextest run -p mirrord --features "wizard"'

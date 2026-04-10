@@ -24,8 +24,21 @@ jobs:
         with:
           container-runtime: ${{matrix.container-runtime}}
           tests-image-artifact-name: mirrord-tests-image
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: cli-image-linux-amd64
+          path: ${{ runner.temp }}/cli-image
       - name: create e2e temp dir
         run: mkdir -p "${{ runner.temp }}/e2e-tmp"
+      - name: extract mirrord test artifacts
+        run: |
+          docker load --input "${{ runner.temp }}/cli-image/cli_image.tar"
+          mkdir -p "${{ runner.temp }}/mirrord-artifacts"
+          container_id=$(docker create cli_image)
+          docker cp "${container_id}:/opt/mirrord/bin/mirrord" "${{ runner.temp }}/mirrord-artifacts/mirrord"
+          docker cp "${container_id}:/opt/mirrord/lib/x86_64/libmirrord_layer.so" "${{ runner.temp }}/mirrord-artifacts/libmirrord_layer.so"
+          docker rm "${container_id}"
+          chmod u+x "${{ runner.temp }}/mirrord-artifacts/mirrord"
       - name: download image
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
@@ -39,8 +52,11 @@ jobs:
           docker run --rm --network host
           -e KUBECONFIG=/home/runner/.kube/config
           -e MIRRORD_AGENT_RUST_LOG="${{ env.MIRRORD_AGENT_RUST_LOG }}"
+          -e MIRRORD_TESTS_USE_BINARY=/opt/test-artifacts/mirrord
+          -e MIRRORD_LAYER_FILE=/opt/test-artifacts/libmirrord_layer.so
           -v "${HOME}/.kube:/home/runner/.kube:ro"
           -v "${HOME}/.minikube:/home/runner/.minikube:ro"
+          -v "${{ runner.temp }}/mirrord-artifacts:/opt/test-artifacts:ro"
           -v "${{ runner.temp }}/e2e-tmp:/tmp"
           mirrord-tests-image
           cargo nextest run -p mirrord-tests --no-default-features --features cli --test-threads 6
@@ -50,19 +66,25 @@ jobs:
           docker run --rm --network host
           -e KUBECONFIG=/home/runner/.kube/config
           -e MIRRORD_AGENT_RUST_LOG="${{ env.MIRRORD_AGENT_RUST_LOG }}"
+          -e MIRRORD_TESTS_USE_BINARY=/opt/test-artifacts/mirrord
+          -e MIRRORD_LAYER_FILE=/opt/test-artifacts/libmirrord_layer.so
           -v "${HOME}/.kube:/home/runner/.kube:ro"
           -v "${HOME}/.minikube:/home/runner/.minikube:ro"
+          -v "${{ runner.temp }}/mirrord-artifacts:/opt/test-artifacts:ro"
           -v "${{ runner.temp }}/e2e-tmp:/tmp"
           mirrord-tests-image
-          bash -lc './target/debug/mirrord wizard & sleep 2 && curl localhost:3000'
+          bash -lc '"$MIRRORD_TESTS_USE_BINARY" wizard & sleep 2 && curl localhost:3000'
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test
         run: >-
           docker run --rm --network host
           -e KUBECONFIG=/home/runner/.kube/config
           -e MIRRORD_AGENT_RUST_LOG="${{ env.MIRRORD_AGENT_RUST_LOG }}"
+          -e MIRRORD_TESTS_USE_BINARY=/opt/test-artifacts/mirrord
+          -e MIRRORD_LAYER_FILE=/opt/test-artifacts/libmirrord_layer.so
           -v "${HOME}/.kube:/home/runner/.kube:ro"
           -v "${HOME}/.minikube:/home/runner/.minikube:ro"
+          -v "${{ runner.temp }}/mirrord-artifacts:/opt/test-artifacts:ro"
           -v "${{ runner.temp }}/e2e-tmp:/tmp"
           mirrord-tests-image
           cargo nextest run -p mirrord-tests --no-default-features --features targetless --test-threads 6 -E 'test(targetless)'
@@ -74,8 +96,11 @@ jobs:
           docker run --rm --network host
           -e KUBECONFIG=/home/runner/.kube/config
           -e MIRRORD_AGENT_RUST_LOG="${{ env.MIRRORD_AGENT_RUST_LOG }}"
+          -e MIRRORD_TESTS_USE_BINARY=/opt/test-artifacts/mirrord
+          -e MIRRORD_LAYER_FILE=/opt/test-artifacts/libmirrord_layer.so
           -v "${HOME}/.kube:/home/runner/.kube:ro"
           -v "${HOME}/.minikube:/home/runner/.minikube:ro"
+          -v "${{ runner.temp }}/mirrord-artifacts:/opt/test-artifacts:ro"
           -v "${{ runner.temp }}/e2e-tmp:/tmp"
           mirrord-tests-image
           bash -lc 'cargo nextest run -p mirrord-tests --no-default-features --features job --test-threads 6 && cargo nextest run -p mirrord-tests --no-default-features --features ephemeral --test-threads 6'

@@ -207,7 +207,7 @@ jobs:
   # ── tests ───────────────────────────────────────────────────────────
 
   test-integration:
-    needs: [plan, build-tests-image]
+    needs: [plan, build-tests-image, build-cli-image]
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
     uses: ./.github/workflows/test-integration.yaml
     secrets: inherit
@@ -221,7 +221,7 @@ jobs:
     secrets: inherit
 
   test-e2e:
-    needs: [plan, build-agent-image, build-tests-image]
+    needs: [plan, build-agent-image, build-tests-image, build-cli-image]
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
     uses: ./.github/workflows/test-e2e.yaml
     secrets: inherit

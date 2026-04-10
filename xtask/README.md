@@ -67,6 +67,32 @@ cargo xtask build-layer --platform macos-universal --release
 cargo xtask build-layer --platform linux-x86_64 --release
 ```
 
+### `test-e2e`
+
+Runs the e2e test suite with externally provided `mirrord` artifacts. The command requires both
+the CLI binary and the layer path, either via flags or via `MIRRORD_TESTS_USE_BINARY` and
+`MIRRORD_LAYER_FILE`.
+
+```bash
+MIRRORD_TESTS_USE_BINARY=target/debug/mirrord \
+MIRRORD_LAYER_FILE=target/debug/libmirrord_layer.so \
+cargo xtask test-e2e
+
+cargo xtask test-e2e -- --no-default-features --features cli
+```
+
+### `test-integration`
+
+Runs the integration test suite with externally provided `mirrord` artifacts.
+
+```bash
+MIRRORD_TESTS_USE_BINARY=target/debug/mirrord \
+MIRRORD_LAYER_FILE=target/debug/libmirrord_layer.so \
+cargo xtask test-integration
+
+cargo xtask test-integration -- issue834
+```
+
 ## Examples
 
 ### Local Development on macOS
@@ -109,6 +135,7 @@ The xtask is organized into modules:
 - `tasks/wizard.rs` - Builds the wizard frontend (npm install + build)
 - `tasks/layer.rs` - Builds mirrord-layer for various platforms
 - `tasks/cli.rs` - Builds mirrord CLI binary
+- `tasks/test.rs` - Runs e2e and integration tests with external mirrord artifacts
 - `tasks/release.rs` - Orchestrates the full build process
 
 Each task can be run independently or composed together.

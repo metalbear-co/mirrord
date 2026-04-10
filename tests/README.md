@@ -4,7 +4,7 @@ To run the tests locally with the latest mirrord-agent image, run the following 
 
 - `docker build -t test . --file mirrord/agent/Dockerfile`
 - `minikube image load test` (you might have to specify `-p <PROFILE-NAME>` as well)
-- `cargo test --package mirrord-tests`
+- `MIRRORD_TESTS_USE_BINARY=<path-to-mirrord> MIRRORD_LAYER_FILE=<path-to-layer> cargo xtask test-e2e`
 
 The name `test` is hardcoded for the CI, and the tests will fail with an `Elapsed` error if the image named `test` is
 not found.
@@ -20,7 +20,7 @@ preserve resources from failed tests for debugging. To do this, set the `MIRRORD
 value.
 
 ```bash
-MIRRORD_E2E_PRESERVE_FAILED=y cargo test --package mirrord-tests
+MIRRORD_E2E_PRESERVE_FAILED=y MIRRORD_TESTS_USE_BINARY=<path-to-mirrord> MIRRORD_LAYER_FILE=<path-to-layer> cargo xtask test-e2e
 ```
 
 All test resources share a common label `mirrord-e2e-test-resource=true`. To delete them, simply run:

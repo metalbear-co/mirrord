@@ -172,11 +172,6 @@ RUN --mount=type=cache,target=/root/.cargo/registry,id=mirrord-tests-cargo-regis
     for app in "${cargo_apps[@]}"; do \
         cargo build --manifest-path "/workspace/${app}/Cargo.toml"; \
     done; \
-    cargo build -p mirrord-layer -p mirrord; \
-    touch /workspace/wizard-frontend.tar.gz; \
-    cargo build -p mirrord --features wizard; \
-    export MIRRORD_LAYER_FILE=/cargo-target/debug/libmirrord_layer.so; \
-    export MIRRORD_TESTS_USE_BINARY=/cargo-target/debug/mirrord; \
     cargo test -p mirrord-layer-tests --no-default-features --no-run; \
     cargo test -p mirrord-tests --no-default-features --features "cli targetless job ephemeral" --no-run; \
     rm -rf /workspace/target; \
@@ -191,8 +186,5 @@ RUN rm -rf \
     /root/.rustup/tmp \
     /root/.npm \
     /root/.cache/pip
-
-ENV MIRRORD_LAYER_FILE=/workspace/target/debug/libmirrord_layer.so \
-    MIRRORD_TESTS_USE_BINARY=/workspace/target/debug/mirrord
 
 CMD ["cargo", "nextest", "run", "-p", "mirrord-layer-tests", "--no-default-features"]
