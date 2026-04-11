@@ -861,6 +861,18 @@ where
                 .require_feature(NewOperatorFeature::RmqQueueSplitting)?;
         }
 
+        if layer_config
+            .feature
+            .split_queues
+            .gcp_pubsub()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GcpPubSubQueueSplitting)?;
+        }
+
         Ok(())
     }
 
