@@ -284,6 +284,13 @@ strip = "debuginfo"
 # Enabling LTO causes this issue https://github.com/metalbear-co/mirrord/issues/906
 lto = false
 
+[profile.ci]
+inherits = "dev"
+opt-level = 0
+strip = "debuginfo"
+incremental = true
+
+
 [patch.crates-io]
 tree-sitter = { git = "https://github.com/metalbear-co/tree-sitter.git", tag = "hotfix" }
 tree-sitter-language = { git = "https://github.com/metalbear-co/tree-sitter.git", tag = "hotfix" }

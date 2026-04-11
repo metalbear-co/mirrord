@@ -88,9 +88,6 @@ target "cli" {
   tags       = split(",", CLI_TAGS)
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
-  contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21" = "target:ci-agent-builder"
-  }
 }
 
 # Test utility that prints SQS messages; used for manual SQS integration testing.

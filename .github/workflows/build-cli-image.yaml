@@ -13,13 +13,58 @@ jobs:
       matrix:
         include:
           - artifact_name: cli-image-linux-amd64
+            cli_artifacts_name: cli-artifacts-linux-amd64
             platform: linux/amd64
+            rust_target: x86_64-unknown-linux-gnu
             runs_on: ubuntu-24.04
           - artifact_name: cli-image-linux-arm64
+            cli_artifacts_name: cli-artifacts-linux-arm64
             platform: linux/arm64
+            rust_target: aarch64-unknown-linux-gnu
             runs_on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+        with:
+          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+          target: ${{ matrix.rust_target }}
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install cross from a recent commit
+        run: cargo install --git https://github.com/cross-rs/cross cross --rev 154b4ead7e639c7597d9e4e626b9c1c1e37608c0
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+        with:
+          node-version: 24
+      - run: npm install
+        working-directory: ./wizard-frontend
+      - run: npm run build
+        working-directory: ./wizard-frontend
+      - name: build mirrord-layer
+        run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord-layer --target=${{ matrix.rust_target }}
+      - name: build x86_64 mirrord-layer
+        if: ${{ matrix.rust_target != 'x86_64-unknown-linux-gnu' }}
+        run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord-layer --target=x86_64-unknown-linux-gnu
+      - name: build mirrord CLI
+        env:
+          MIRRORD_LAYER_FILE: ../../../target/${{ matrix.rust_target }}/release/libmirrord_layer.so
+          WIZARD_DIST_DIR: ./wizard-frontend/dist
+        run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord --target=${{ matrix.rust_target }} --features "wizard"
+      - name: stage CLI image artifacts
+        run: |
+          mkdir -p .docker/cli-image
+          cp "target/${{ matrix.rust_target }}/release/mirrord" .docker/cli-image/mirrord
+          cp "target/${{ matrix.rust_target }}/release/libmirrord_layer.so" .docker/cli-image/libmirrord_layer.so
+          cp "target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so" .docker/cli-image/libmirrord_layer_x86_64.so
+          chmod u+x .docker/cli-image/mirrord
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: ${{ matrix.cli_artifacts_name }}
+          path: |
+            .docker/cli-image/mirrord
+            .docker/cli-image/libmirrord_layer.so
+            .docker/cli-image/libmirrord_layer_x86_64.so
+          if-no-files-found: error
       - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
       - name: build and export
         uses: docker/bake-action@82490499d2e5613fcead7e128237ef0b0ea210f7

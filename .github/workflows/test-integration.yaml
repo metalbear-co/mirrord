@@ -20,19 +20,12 @@ jobs:
           path: ${{ github.workspace }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: cli-image-linux-amd64
-          path: ${{ runner.temp }}/cli-image
+          name: cli-artifacts-linux-amd64
+          path: ${{ runner.temp }}/mirrord-artifacts
       - name: load mirrord tests image
         run: docker load --input "${{ github.workspace }}/mirrord-tests-image.tar"
-      - name: extract mirrord test artifacts
-        run: |
-          docker load --input "${{ runner.temp }}/cli-image/cli_image.tar"
-          mkdir -p "${{ runner.temp }}/mirrord-artifacts"
-          container_id=$(docker create cli_image)
-          docker cp "${container_id}:/opt/mirrord/bin/mirrord" "${{ runner.temp }}/mirrord-artifacts/mirrord"
-          docker cp "${container_id}:/opt/mirrord/lib/x86_64/libmirrord_layer.so" "${{ runner.temp }}/mirrord-artifacts/libmirrord_layer.so"
-          docker rm "${container_id}"
-          chmod u+x "${{ runner.temp }}/mirrord-artifacts/mirrord"
+      - name: prepare mirrord test artifacts
+        run: chmod u+x "${{ runner.temp }}/mirrord-artifacts/mirrord"
       - name: create intproxy logs dir
         run: mkdir -p "${{ runner.temp }}/intproxy_logs"
       - name: layer tests

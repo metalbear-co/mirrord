@@ -12,15 +12,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: cli-image-linux-amd64
-          path: /tmp/cli-image
-      - name: extract mirrord CLI from docker image
-        run: |
-          docker load -i /tmp/cli-image/cli_image.tar
-          container_id=$(docker create cli_image)
-          docker cp "${container_id}:/opt/mirrord/bin/mirrord" ./mirrord
-          docker rm "${container_id}"
-          chmod u+x ./mirrord
+          name: cli-artifacts-linux-amd64
+          path: /tmp/cli-artifacts
+      - run: cp /tmp/cli-artifacts/mirrord ./mirrord && chmod u+x ./mirrord
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: mirrord-artifacts
