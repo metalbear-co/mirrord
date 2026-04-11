@@ -106,7 +106,27 @@ impl SplitQueuesConfig {
 
     pub fn gcp_pubsub(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ QueueMessageFilter)> {
         self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::GcpPubSub { message_filter } => Some((name.as_str(), message_filter)),
+            QueueFilter::GcpPubSub {
+                message_filter: Some(message_filter),
+                ..
+            } => Some((name.as_str(), message_filter)),
+            _ => None,
+        })
+    }
+
+    pub fn gcp_pubsub_jq_filters(&self) -> impl '_ + Iterator<Item = (&'_ str, &str)> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::GcpPubSub {
+                jq_filter: Some(jq),
+                ..
+            } => Some((name.as_str(), jq.as_str())),
+            _ => None,
+        })
+    }
+
+    pub fn gcp_pubsub_queues(&self) -> impl '_ + Iterator<Item = &'_ str> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::GcpPubSub { .. } => Some(name.as_str()),
             _ => None,
         })
     }
@@ -162,8 +182,16 @@ impl SplitQueuesConfig {
                 QueueFilter::Rmq { message_filter } => {
                     Self::verify_message_attribute_filter(queue_name, message_filter)?;
                 }
-                QueueFilter::GcpPubSub { message_filter } => {
-                    Self::verify_message_attribute_filter(queue_name, message_filter)?;
+                QueueFilter::GcpPubSub {
+                    message_filter,
+                    jq_filter,
+                } => {
+                    if let Some(filter) = message_filter {
+                        Self::verify_message_attribute_filter(queue_name, filter)?;
+                    }
+                    if let Some(jq_filter) = jq_filter {
+                        Self::verify_jq_program(queue_name, jq_filter)?;
+                    }
                 }
                 QueueFilter::Unknown => {
                     return Err(QueueSplittingVerificationError::UnknownQueueType(
@@ -266,7 +294,17 @@ pub enum QueueFilter {
         /// A filter is a mapping between Pub/Sub message attribute names and regexes they
         /// should match. The local application will only receive messages whose attributes
         /// match **all** of the given patterns.
-        message_filter: QueueMessageFilter,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message_filter: Option<QueueMessageFilter>,
+
+        /// A jq filter.
+        ///
+        /// When this is specified, for each Pub/Sub message, the jq filter runs on a JSON
+        /// representation of the message body.
+        ///
+        /// If the jq program outputs `true`, that message is considered as matching the filter.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        jq_filter: Option<String>,
     },
 
     // When a newer client sends a new filter kind to an older operator, that does not yet know
@@ -285,7 +323,11 @@ impl CollectAnalytics for &SplitQueuesConfig {
         analytics.add("sqs_jq_filter_count", self.sqs_jq_filters().count());
         analytics.add("kafka_queue_count", self.kafka().count());
         analytics.add("rmq_queue_count", self.rmq().count());
-        analytics.add("gcp_pubsub_queue_count", self.gcp_pubsub().count());
+        analytics.add("gcp_pubsub_queue_count", self.gcp_pubsub_queues().count());
+        analytics.add(
+            "gcp_pubsub_jq_filter_count",
+            self.gcp_pubsub_jq_filters().count(),
+        );
     }
 }
 

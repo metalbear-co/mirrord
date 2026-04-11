@@ -864,7 +864,7 @@ where
         if layer_config
             .feature
             .split_queues
-            .gcp_pubsub()
+            .gcp_pubsub_queues()
             .next()
             .is_some()
         {
@@ -1562,6 +1562,7 @@ impl OperatorApi<PreparedClientCert> {
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
+            gcp_pubsub_jq_filters: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
