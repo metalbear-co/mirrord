@@ -152,7 +152,8 @@ pub(super) async fn wait_for_agent_startup(
     Ok(None)
 }
 
-/// Check to see if there is an error pulling the image
+/// Returns an error message if the container is in an image pull failure state
+/// (e.g. ImagePullBackOff, ErrImagePull).
 pub(super) fn is_image_pull_error(container_state: &ContainerStateWaiting) -> Option<String> {
     let reason = container_state.reason.as_deref();
     if matches!(reason, Some("ImagePullBackOff" | "ErrImagePull")) {
@@ -165,6 +166,11 @@ pub(super) fn is_image_pull_error(container_state: &ContainerStateWaiting) -> Op
     None
 }
 
+/// Inspects the ephemeral container status and returns an error message if the
+/// container is stuck in an image pull failure state.
+///
+/// These states do not transition the pod to `Failed`, so they must be handled
+/// explicitly to avoid waiting indefinitely.
 pub(super) fn get_ephemeral_container_image_pull_error(
     pod: &Pod,
     container_name: &str,
