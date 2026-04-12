@@ -8,29 +8,17 @@ RUN ./platform.sh
 # this takes around 1 minute since libgit2 is slow https://github.com/rust-lang/cargo/issues/9167
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
-# cargo-chef 0.1.69 breaks the build
-RUN cargo install cargo-chef@0.1.72
-
-FROM chef AS planner
-
-COPY . /build/
-RUN cargo +nightly-2026-02-24 chef prepare --recipe-path recipe.json
-
-FROM chef AS builder
-
-COPY --from=planner /build/recipe.json recipe.json
-RUN cargo +nightly-2026-02-24 chef cook --release --zigbuild --target $(cat /.platform) --recipe-path recipe.json
 
 COPY . /build/
 RUN echo INITIAL CARGO LOCK --- && cat Cargo.lock && echo INITIAL CARGO LOCK OVER ----
-RUN cargo +nightly-2026-02-24 zigbuild -p mirrord -p mirrord-layer -Z bindeps --target $(cat /.platform) --release
+RUN cargo xtask build-cli --target $(cat /.platform) --release
 RUN echo MODIFIED CARGO LOCK --- && cat Cargo.lock && echo MODIFIED CARGO LOCK OVER ----
 RUN cp /build/target/$(cat /.platform)/release/mirrord /mirrord
 RUN cp /build/target/$(cat /.platform)/release/libmirrord_layer.so /libmirrord_layer.so
 
 # For ARM64 builds, also build x86_64 version to support cross-platform containers
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
-    cargo +nightly-2026-02-24 zigbuild -p mirrord-layer -Z bindeps --target x86_64-unknown-linux-gnu --release --locked && \
+    cargo xtask build-layer --target x86_64-unknown-linux-gnu --release --locked && \
     cp /build/target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so /libmirrord_layer_x86_64.so; \
     fi
 

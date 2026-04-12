@@ -47,6 +47,7 @@ pub struct BuildOptions {
     pub platform: Platform,
     pub release: bool,
     pub with_wizard: bool,
+    pub cargo_args: Vec<String>,
 }
 
 /// Main task: builds release CLI for the specified platform
@@ -76,12 +77,19 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
                 );
                 std::path::PathBuf::from(existing_layer)
             } else {
-                layer::build_layer(target, options.release).context("Failed to build layer")?
+                layer::build_layer(target, options.release, &options.cargo_args)
+                    .context("Failed to build layer")?
             };
             println!();
 
-            cli::build_cli(target, options.release, &layer_path, options.with_wizard)
-                .context("Failed to build CLI")?;
+            cli::build_cli(
+                target,
+                options.release,
+                &layer_path,
+                options.with_wizard,
+                &options.cargo_args,
+            )
+            .context("Failed to build CLI")?;
         }
         Platform::MacosAarch64 => {
             let target = Target::MacosAarch64;
@@ -95,54 +103,88 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
             } else {
                 // Build layer
                 let layer_path =
-                    layer::build_layer(target, options.release).context("Failed to build layer")?;
+                    layer::build_layer(target, options.release, &options.cargo_args)
+                        .context("Failed to build layer")?;
                 // Build shim
                 layer::build_shim(options.release).context("Failed to build shim")?;
                 layer_path
             };
             println!();
 
-            cli::build_cli(target, options.release, &layer_path, options.with_wizard)
-                .context("Failed to build CLI")?;
+            cli::build_cli(
+                target,
+                options.release,
+                &layer_path,
+                options.with_wizard,
+                &options.cargo_args,
+            )
+            .context("Failed to build CLI")?;
         }
         Platform::MacosUniversal => {
             // Build universal layer
-            let layer_path = layer::build_macos_universal_layer(options.release)
-                .context("Failed to build macOS universal layer")?;
+            let layer_path =
+                layer::build_macos_universal_layer(options.release, &options.cargo_args)
+                    .context("Failed to build macOS universal layer")?;
             println!();
 
             // Build universal CLI
-            cli::build_macos_universal_cli(options.release, &layer_path, options.with_wizard)
-                .context("Failed to build macOS universal CLI")?;
+            cli::build_macos_universal_cli(
+                options.release,
+                &layer_path,
+                options.with_wizard,
+                &options.cargo_args,
+            )
+            .context("Failed to build macOS universal CLI")?;
         }
         Platform::LinuxX86_64 => {
             let target = Target::LinuxX86_64;
             let layer_path =
-                layer::build_layer(target, options.release).context("Failed to build layer")?;
+                layer::build_layer(target, options.release, &options.cargo_args)
+                    .context("Failed to build layer")?;
             println!();
 
-            cli::build_cli(target, options.release, &layer_path, options.with_wizard)
-                .context("Failed to build CLI")?;
+            cli::build_cli(
+                target,
+                options.release,
+                &layer_path,
+                options.with_wizard,
+                &options.cargo_args,
+            )
+            .context("Failed to build CLI")?;
         }
         Platform::LinuxAarch64 => {
             let target = Target::LinuxAarch64;
             // Note: On Linux ARM64, we need to build layer separately from CLI
             // to avoid cross-compilation issues with embedded layer
             let layer_path =
-                layer::build_layer(target, options.release).context("Failed to build layer")?;
+                layer::build_layer(target, options.release, &options.cargo_args)
+                    .context("Failed to build layer")?;
             println!();
 
-            cli::build_cli(target, options.release, &layer_path, options.with_wizard)
-                .context("Failed to build CLI")?;
+            cli::build_cli(
+                target,
+                options.release,
+                &layer_path,
+                options.with_wizard,
+                &options.cargo_args,
+            )
+            .context("Failed to build CLI")?;
         }
         Platform::Windows => {
             let target = Target::Windows;
             let layer_path =
-                layer::build_layer(target, options.release).context("Failed to build layer")?;
+                layer::build_layer(target, options.release, &options.cargo_args)
+                    .context("Failed to build layer")?;
             println!();
 
-            cli::build_cli(target, options.release, &layer_path, options.with_wizard)
-                .context("Failed to build CLI")?;
+            cli::build_cli(
+                target,
+                options.release,
+                &layer_path,
+                options.with_wizard,
+                &options.cargo_args,
+            )
+            .context("Failed to build CLI")?;
         }
     }
 

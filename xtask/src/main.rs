@@ -28,6 +28,10 @@ enum Commands {
         /// Build without wizard frontend
         #[arg(long)]
         no_wizard: bool,
+
+        /// Additional arguments passed to cargo
+        #[arg(last = true)]
+        cargo_args: Vec<String>,
     },
 
     /// Build wizard frontend only
@@ -42,6 +46,10 @@ enum Commands {
         /// Build in release mode
         #[arg(short, long)]
         release: bool,
+
+        /// Additional arguments passed to cargo
+        #[arg(last = true)]
+        cargo_args: Vec<String>,
     },
 
     /// Link pre-built architecture-specific layers into universal binary
@@ -119,6 +127,7 @@ fn main() -> Result<()> {
             platform,
             release,
             no_wizard,
+            cargo_args,
         } => {
             let platform = platform.unwrap_or_else(|| {
                 Platform::detect().unwrap_or_else(|e| {
@@ -132,6 +141,7 @@ fn main() -> Result<()> {
                 platform,
                 release,
                 with_wizard: !no_wizard,
+                cargo_args,
             };
 
             tasks::release::build_release_cli(options)?;
@@ -141,7 +151,11 @@ fn main() -> Result<()> {
             tasks::wizard::build_wizard()?;
         }
 
-        Commands::BuildLayer { platform, release } => {
+        Commands::BuildLayer {
+            platform,
+            release,
+            cargo_args,
+        } => {
             let platform = platform.unwrap_or_else(|| {
                 Platform::detect().unwrap_or_else(|e| {
                     eprintln!("Failed to detect platform: {}", e);
@@ -152,23 +166,43 @@ fn main() -> Result<()> {
 
             match platform {
                 Platform::MacosX86_64 => {
-                    tasks::layer::build_layer(tasks::layer::Target::MacosX86_64, release)?;
+                    tasks::layer::build_layer(
+                        tasks::layer::Target::MacosX86_64,
+                        release,
+                        &cargo_args,
+                    )?;
                 }
                 Platform::MacosAarch64 => {
-                    tasks::layer::build_layer(tasks::layer::Target::MacosAarch64, release)?;
+                    tasks::layer::build_layer(
+                        tasks::layer::Target::MacosAarch64,
+                        release,
+                        &cargo_args,
+                    )?;
                     tasks::layer::build_shim(release)?;
                 }
                 Platform::MacosUniversal => {
-                    tasks::layer::build_macos_universal_layer(release)?;
+                    tasks::layer::build_macos_universal_layer(release, &cargo_args)?;
                 }
                 Platform::LinuxX86_64 => {
-                    tasks::layer::build_layer(tasks::layer::Target::LinuxX86_64, release)?;
+                    tasks::layer::build_layer(
+                        tasks::layer::Target::LinuxX86_64,
+                        release,
+                        &cargo_args,
+                    )?;
                 }
                 Platform::LinuxAarch64 => {
-                    tasks::layer::build_layer(tasks::layer::Target::LinuxAarch64, release)?;
+                    tasks::layer::build_layer(
+                        tasks::layer::Target::LinuxAarch64,
+                        release,
+                        &cargo_args,
+                    )?;
                 }
                 Platform::Windows => {
-                    tasks::layer::build_layer(tasks::layer::Target::Windows, release)?;
+                    tasks::layer::build_layer(
+                        tasks::layer::Target::Windows,
+                        release,
+                        &cargo_args,
+                    )?;
                 }
             }
         }

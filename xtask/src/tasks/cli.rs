@@ -13,17 +13,30 @@ pub fn build_cli(
     release: bool,
     layer_path: &Path,
     with_wizard: bool,
+    cargo_args: &[String],
 ) -> Result<PathBuf> {
     println!("Building mirrord CLI for {}...", target.triple());
 
+    let is_linux = matches!(target, Target::LinuxX86_64 | Target::LinuxAarch64);
+
     let mut cmd = Command::new("cargo");
-    cmd.arg("build").arg("-p").arg("mirrord");
+    if is_linux {
+        cmd.arg("zigbuild");
+    } else {
+        cmd.arg("build");
+    }
+    cmd.arg("-p").arg("mirrord");
 
     if release {
         cmd.arg("--release");
     }
 
-    cmd.arg("--target").arg(target.triple());
+    let target_triple = if is_linux {
+        format!("{}.2.17", target.triple())
+    } else {
+        target.triple().to_owned()
+    };
+    cmd.arg("--target").arg(&target_triple);
 
     if with_wizard {
         cmd.arg("--features").arg("wizard");
@@ -75,6 +88,8 @@ pub fn build_cli(
                 .context("Failed to canonicalize ARM64 layer path")?,
         );
     }
+
+    cmd.args(cargo_args);
 
     let status = cmd.status().context("Failed to run cargo build")?;
 
@@ -151,6 +166,7 @@ pub fn build_macos_universal_cli(
     release: bool,
     universal_layer_path: &Path,
     with_wizard: bool,
+    cargo_args: &[String],
 ) -> Result<PathBuf> {
     println!("Building macOS universal CLI...");
 
@@ -160,12 +176,14 @@ pub fn build_macos_universal_cli(
         release,
         universal_layer_path,
         with_wizard,
+        cargo_args,
     )?;
     let arm_cli = build_cli(
         Target::MacosAarch64,
         release,
         universal_layer_path,
         with_wizard,
+        cargo_args,
     )?;
 
     // Sign architecture-specific CLIs (can batch sign with gon in CI)

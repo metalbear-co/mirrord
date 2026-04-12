@@ -123,12 +123,12 @@ fn host_target() -> Result<Target> {
 
 fn build_layer_for_host() -> Result<PathBuf> {
     let target = host_target()?;
-    layer::build_layer(target, false)
+    layer::build_layer(target, false, &[])
 }
 
 fn build_binary_for_host(layer_path: &Path) -> Result<PathBuf> {
     let target = host_target()?;
-    super::cli::build_cli(target, false, layer_path, false)
+    super::cli::build_cli(target, false, layer_path, false, &[])
 }
 
 fn cargo_nextest_available() -> bool {
