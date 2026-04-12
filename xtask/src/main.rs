@@ -57,6 +57,36 @@ enum Commands {
         #[arg(short, long)]
         release: bool,
     },
+
+    /// Run the e2e test suite with externally provided mirrord artifacts
+    TestE2e {
+        /// Path to an external mirrord CLI binary
+        #[arg(long)]
+        binary: Option<std::path::PathBuf>,
+
+        /// Path to an external mirrord layer file
+        #[arg(long)]
+        layer: Option<std::path::PathBuf>,
+
+        /// Additional arguments passed to `cargo test` or `cargo nextest run`
+        #[arg(last = true)]
+        cargo_args: Vec<String>,
+    },
+
+    /// Run the integration test suite with externally provided mirrord artifacts
+    TestIntegration {
+        /// Path to an external mirrord CLI binary
+        #[arg(long)]
+        binary: Option<std::path::PathBuf>,
+
+        /// Path to an external mirrord layer file
+        #[arg(long)]
+        layer: Option<std::path::PathBuf>,
+
+        /// Additional arguments passed to `cargo test` or `cargo nextest run`
+        #[arg(last = true)]
+        cargo_args: Vec<String>,
+    },
 }
 
 fn parse_platform(s: &str) -> Result<Platform, String> {
@@ -142,6 +172,22 @@ fn main() -> Result<()> {
 
         Commands::MergeCliUniversal { release } => {
             tasks::cli::merge_macos_universal_cli(release)?;
+        }
+
+        Commands::TestE2e {
+            binary,
+            layer,
+            cargo_args,
+        } => {
+            tasks::test::run(tasks::test::Suite::E2e, binary, layer, cargo_args)?;
+        }
+
+        Commands::TestIntegration {
+            binary,
+            layer,
+            cargo_args,
+        } => {
+            tasks::test::run(tasks::test::Suite::Integration, binary, layer, cargo_args)?;
         }
     }
 

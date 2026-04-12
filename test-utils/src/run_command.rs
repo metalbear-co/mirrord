@@ -112,18 +112,8 @@ pub async fn run_mirrord(
     env: HashMap<&str, &str>,
     env_remove: Option<&[&str]>,
 ) -> TestProcess {
-    // compile-time assertion for cfg(feature="build-cli") || env(MIRRORD_TESTS_USE_BINARY)
-    #[cfg(not(feature = "build-cli"))]
-    const _: &str = env!(
-        "MIRRORD_TESTS_USE_BINARY",
-        "Either set the MIRRORD_TESTS_USE_BINARY environment variable or enable mirrord build-dependancy via `build-cli` feature"
-    );
-
-    // Note: env! above ensures in compile time that either of them will exists,
-    //  unwrap cannot panic in runtime
-    let path = option_env!("CARGO_BIN_FILE_MIRRORD")
-        .or(option_env!("MIRRORD_TESTS_USE_BINARY"))
-        .unwrap();
+    let path = std::env::var("MIRRORD_TESTS_USE_BINARY")
+        .expect("MIRRORD_TESTS_USE_BINARY must point to an external mirrord binary");
     let temp_dir = tempdir().unwrap();
 
     // Print the mirrord path used to ease MIRRORD_TESTS_USE_BINARY possible misuse investigation
@@ -133,7 +123,7 @@ pub async fn run_mirrord(
 
     // Used for debugging with breakpoint on `let server` to debug mirrord execution
     println!("executing mirrord with args {args:?}",);
-    let mut server = Command::new(path);
+    let mut server = Command::new(&path);
     server
         .args(&args)
         .envs(env)
