@@ -102,9 +102,8 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
                 std::path::PathBuf::from(existing_layer)
             } else {
                 // Build layer
-                let layer_path =
-                    layer::build_layer(target, options.release, &options.cargo_args)
-                        .context("Failed to build layer")?;
+                let layer_path = layer::build_layer(target, options.release, &options.cargo_args)
+                    .context("Failed to build layer")?;
                 // Build shim
                 layer::build_shim(options.release).context("Failed to build shim")?;
                 layer_path
@@ -138,9 +137,8 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
         }
         Platform::LinuxX86_64 => {
             let target = Target::LinuxX86_64;
-            let layer_path =
-                layer::build_layer(target, options.release, &options.cargo_args)
-                    .context("Failed to build layer")?;
+            let layer_path = layer::build_layer(target, options.release, &options.cargo_args)
+                .context("Failed to build layer")?;
             println!();
 
             cli::build_cli(
@@ -156,9 +154,8 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
             let target = Target::LinuxAarch64;
             // Note: On Linux ARM64, we need to build layer separately from CLI
             // to avoid cross-compilation issues with embedded layer
-            let layer_path =
-                layer::build_layer(target, options.release, &options.cargo_args)
-                    .context("Failed to build layer")?;
+            let layer_path = layer::build_layer(target, options.release, &options.cargo_args)
+                .context("Failed to build layer")?;
             println!();
 
             cli::build_cli(
@@ -172,9 +169,8 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
         }
         Platform::Windows => {
             let target = Target::Windows;
-            let layer_path =
-                layer::build_layer(target, options.release, &options.cargo_args)
-                    .context("Failed to build layer")?;
+            let layer_path = layer::build_layer(target, options.release, &options.cargo_args)
+                .context("Failed to build layer")?;
             println!();
 
             cli::build_cli(

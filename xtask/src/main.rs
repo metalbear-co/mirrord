@@ -198,11 +198,7 @@ fn main() -> Result<()> {
                     )?;
                 }
                 Platform::Windows => {
-                    tasks::layer::build_layer(
-                        tasks::layer::Target::Windows,
-                        release,
-                        &cargo_args,
-                    )?;
+                    tasks::layer::build_layer(tasks::layer::Target::Windows, release, &cargo_args)?;
                 }
             }
         }
