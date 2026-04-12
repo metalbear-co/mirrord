@@ -1,7 +1,7 @@
 use std::{ops::Not, sync::LazyLock};
 
 use futures::{AsyncBufReadExt, TryStreamExt};
-use k8s_openapi::api::core::v1::{ContainerState, ContainerStateWaiting, EnvVar, Pod, Toleration};
+use k8s_openapi::api::core::v1::{ContainerStateWaiting, EnvVar, Pod, Toleration};
 use kube::{Api, api::LogParams};
 use mirrord_agent_env::envs;
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
