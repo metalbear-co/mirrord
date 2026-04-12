@@ -3,7 +3,7 @@ use std::env;
 use anyhow::{Context, Result};
 use layer::Target;
 
-use super::{cli, layer, wizard};
+use super::{cli, layer, monitor, wizard};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Platform {
@@ -47,6 +47,7 @@ pub struct BuildOptions {
     pub platform: Platform,
     pub release: bool,
     pub with_wizard: bool,
+    pub build_wizard: bool,
     pub cargo_args: Vec<String>,
 }
 
@@ -56,16 +57,29 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
     println!("Building release CLI for {}", options.platform.name());
     println!("  Release mode: {}", options.release);
     println!("  With wizard: {}", options.with_wizard);
+    println!("  Build wizard frontend: {}", options.build_wizard);
     println!("════════════════════════════════════════════════════════");
     println!();
 
-    // Step 1: Build wizard frontend if needed
-    if options.with_wizard {
-        wizard::build_wizard().context("Failed to build wizard frontend")?;
-        println!();
-    }
+    // Step 1: Prepare monitor frontend assets required by rust-embed.
+    monitor::build_monitor().context("Failed to prepare monitor frontend assets")?;
+    println!();
 
-    // Step 2: Build layer and CLI based on platform
+    // Step 2: Prepare wizard frontend assets if needed.
+    let wizard_archive = if options.with_wizard {
+        let archive = if options.build_wizard {
+            wizard::build_wizard()
+        } else {
+            wizard::package_wizard()
+        }
+        .context("Failed to prepare wizard frontend assets")?;
+        println!();
+        Some(archive)
+    } else {
+        None
+    };
+
+    // Step 3: Build layer and CLI based on platform
     match options.platform {
         Platform::MacosX86_64 => {
             let target = Target::MacosX86_64;
@@ -86,7 +100,7 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
                 target,
                 options.release,
                 &layer_path,
-                options.with_wizard,
+                wizard_archive.as_deref(),
                 &options.cargo_args,
             )
             .context("Failed to build CLI")?;
@@ -114,7 +128,7 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
                 target,
                 options.release,
                 &layer_path,
-                options.with_wizard,
+                wizard_archive.as_deref(),
                 &options.cargo_args,
             )
             .context("Failed to build CLI")?;
@@ -130,7 +144,7 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
             cli::build_macos_universal_cli(
                 options.release,
                 &layer_path,
-                options.with_wizard,
+                wizard_archive.as_deref(),
                 &options.cargo_args,
             )
             .context("Failed to build macOS universal CLI")?;
@@ -145,7 +159,7 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
                 target,
                 options.release,
                 &layer_path,
-                options.with_wizard,
+                wizard_archive.as_deref(),
                 &options.cargo_args,
             )
             .context("Failed to build CLI")?;
@@ -162,7 +176,7 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
                 target,
                 options.release,
                 &layer_path,
-                options.with_wizard,
+                wizard_archive.as_deref(),
                 &options.cargo_args,
             )
             .context("Failed to build CLI")?;
@@ -177,7 +191,7 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
                 target,
                 options.release,
                 &layer_path,
-                options.with_wizard,
+                wizard_archive.as_deref(),
                 &options.cargo_args,
             )
             .context("Failed to build CLI")?;

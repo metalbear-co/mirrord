@@ -44,8 +44,7 @@ use crate::{
 };
 
 #[cfg(target_os = "macos")]
-const COMPRESSED_SIP_BINARIES: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/apple-utils.tar.gz"));
+const COMPRESSED_SIP_BINARIES: &[u8] = include_bytes!(env!("MIRRORD_SIP_BINARIES_TAR"));
 
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";

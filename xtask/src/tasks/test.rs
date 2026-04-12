@@ -128,7 +128,7 @@ fn build_layer_for_host() -> Result<PathBuf> {
 
 fn build_binary_for_host(layer_path: &Path) -> Result<PathBuf> {
     let target = host_target()?;
-    super::cli::build_cli(target, false, layer_path, false, &[])
+    super::cli::build_cli(target, false, layer_path, None, &[])
 }
 
 fn cargo_nextest_available() -> bool {

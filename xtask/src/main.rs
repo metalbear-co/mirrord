@@ -29,6 +29,10 @@ enum Commands {
         #[arg(long)]
         no_wizard: bool,
 
+        /// Use the existing wizard dist without rebuilding frontend assets
+        #[arg(long, conflicts_with = "no_wizard")]
+        skip_build_wizard: bool,
+
         /// Additional arguments passed to cargo
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         cargo_args: Vec<String>,
@@ -36,6 +40,9 @@ enum Commands {
 
     /// Build wizard frontend only
     BuildWizard,
+
+    /// Prepare monitor frontend assets only
+    BuildMonitor,
 
     /// Build layer only
     BuildLayer {
@@ -127,6 +134,7 @@ fn main() -> Result<()> {
             platform,
             release,
             no_wizard,
+            skip_build_wizard,
             cargo_args,
         } => {
             let platform = platform.unwrap_or_else(|| {
@@ -141,6 +149,7 @@ fn main() -> Result<()> {
                 platform,
                 release,
                 with_wizard: !no_wizard,
+                build_wizard: !no_wizard && !skip_build_wizard,
                 cargo_args,
             };
 
@@ -149,6 +158,10 @@ fn main() -> Result<()> {
 
         Commands::BuildWizard => {
             tasks::wizard::build_wizard()?;
+        }
+
+        Commands::BuildMonitor => {
+            tasks::monitor::build_monitor()?;
         }
 
         Commands::BuildLayer {

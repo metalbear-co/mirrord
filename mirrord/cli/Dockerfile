@@ -11,7 +11,7 @@ ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 COPY . /build/
 
-RUN cargo xtask build-cli --target $(cat /.platform) --release
+RUN cargo xtask build-cli --no-wizard --target $(cat /.platform) --release
 
 RUN cp /build/target/$(cat /.platform)/release/mirrord /mirrord
 RUN cp /build/target/$(cat /.platform)/release/libmirrord_layer.so /libmirrord_layer.so

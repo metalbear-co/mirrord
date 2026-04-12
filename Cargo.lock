@@ -9999,8 +9999,10 @@ version = "3.201.0"
 dependencies = [
  "anyhow",
  "clap",
+ "flate2",
  "reqwest 0.13.2",
  "serde_json",
+ "tar",
  "which",
 ]
 

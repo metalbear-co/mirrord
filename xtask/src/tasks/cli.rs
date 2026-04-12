@@ -5,17 +5,19 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use super::{layer::Target, signing, sip_binaries};
+use super::{layer::Target, monitor, signing, sip_binaries};
 
 /// Builds the mirrord CLI for the specified target
 pub fn build_cli(
     target: Target,
     release: bool,
     layer_path: &Path,
-    with_wizard: bool,
+    wizard_archive: Option<&Path>,
     cargo_args: &[String],
 ) -> Result<PathBuf> {
     println!("Building mirrord CLI for {}...", target.triple());
+
+    monitor::build_monitor()?;
 
     let is_linux = matches!(target, Target::LinuxX86_64 | Target::LinuxAarch64);
 
@@ -38,21 +40,20 @@ pub fn build_cli(
     };
     cmd.arg("--target").arg(&target_triple);
 
-    if with_wizard {
+    if let Some(wizard_archive) = wizard_archive {
         cmd.arg("--features").arg("wizard");
-        // Use absolute path for wizard dist directory
-        let wizard_dist = std::env::current_dir()
-            .context("Failed to get current directory")?
-            .join("wizard-frontend/dist");
+        let wizard_archive = wizard_archive
+            .canonicalize()
+            .context("Failed to canonicalize wizard archive path")?;
 
-        if !wizard_dist.exists() {
+        if !wizard_archive.is_file() {
             anyhow::bail!(
-                "Wizard dist directory not found at {}. Run 'cargo xtask build-wizard' first.",
-                wizard_dist.display()
+                "Wizard archive not found at {}. Run 'cargo xtask build-wizard' first.",
+                wizard_archive.display()
             );
         }
 
-        cmd.env("WIZARD_DIST_DIR", wizard_dist);
+        cmd.env("MIRRORD_WIZARD_TAR", wizard_archive);
     }
 
     // Set layer file environment variable
@@ -165,7 +166,7 @@ pub fn merge_macos_universal_cli(release: bool) -> Result<PathBuf> {
 pub fn build_macos_universal_cli(
     release: bool,
     universal_layer_path: &Path,
-    with_wizard: bool,
+    wizard_archive: Option<&Path>,
     cargo_args: &[String],
 ) -> Result<PathBuf> {
     println!("Building macOS universal CLI...");
@@ -175,14 +176,14 @@ pub fn build_macos_universal_cli(
         Target::MacosX86_64,
         release,
         universal_layer_path,
-        with_wizard,
+        wizard_archive,
         cargo_args,
     )?;
     let arm_cli = build_cli(
         Target::MacosAarch64,
         release,
         universal_layer_path,
-        with_wizard,
+        wizard_archive,
         cargo_args,
     )?;
 

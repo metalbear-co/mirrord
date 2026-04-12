@@ -107,17 +107,14 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 24
-      - run: npm install
-        working-directory: ./wizard-frontend
-      - run: npm run build
-        working-directory: ./wizard-frontend
+      - run: cargo xtask build-wizard
       # building layer and cli together leads to weird situation where embedded layer is x64, so split.
       - name: build mirrord-layer
         run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord-layer --target=aarch64-unknown-linux-gnu
       - name: build mirrord cli
         env:
           MIRRORD_LAYER_FILE: ../../../target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
-          WIZARD_DIST_DIR: ./wizard-frontend/dist
+          MIRRORD_WIZARD_TAR: ${{ github.workspace }}/target/wizard/wizard-frontend.tar.gz
         run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord --target=aarch64-unknown-linux-gnu --features "wizard"
       - uses: actions/upload-artifact@v4
         with:
@@ -145,13 +142,11 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 24
-      - run: npm install
-        working-directory: ./wizard-frontend
-      - run: npm run build
-        working-directory: ./wizard-frontend
+      - run: cargo xtask build-wizard
       - name: build mirrord-layer and cli
         env:
-          WIZARD_DIST_DIR: ./wizard-frontend/dist
+          MIRRORD_LAYER_FILE: ../../../target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so
+          MIRRORD_WIZARD_TAR: ${{ github.workspace }}/target/wizard/wizard-frontend.tar.gz
         run: cross build --release -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu --features "wizard"
       - uses: actions/upload-artifact@v4
         with:

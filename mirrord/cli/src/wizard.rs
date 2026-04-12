@@ -17,8 +17,8 @@
 //!
 //! Note: To compile the backend, you need to enable the `wizard` feature.
 //!
-//! The build script `build.rs` installs node modules, builds the frontend, and compresses it so it
-//! can be accessed by [`COMPRESSED_FRONTEND`].
+//! `xtask` builds the frontend and packages it so it can be accessed by
+//! [`COMPRESSED_FRONTEND`].
 //!
 //! Node modules are installed into the `wizard-frontend` top level dir (and are `.gitignore`d)
 
@@ -70,8 +70,7 @@ use crate::{
 
 /// The frontend `dist` dir, compressed (as bytes). The CI runs this step automatically, so you only
 /// need to do it manually if making changes to the wizard.
-const COMPRESSED_FRONTEND: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/wizard-frontend.tar.gz"));
+const COMPRESSED_FRONTEND: &[u8] = include_bytes!(env!("MIRRORD_WIZARD_TAR"));
 
 /// Used to store State for endpoint handling
 struct BackendState {

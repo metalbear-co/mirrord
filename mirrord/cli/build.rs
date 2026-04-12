@@ -1,164 +1,17 @@
 use std::process::exit;
 
-/// Ensure `monitor-frontend/dist` exists so rust-embed doesn't fail during compilation.
-fn ensure_monitor_frontend_dist() {
-    let dist_dir = std::path::Path::new("../../monitor-frontend/dist");
-    if !dist_dir.exists() {
-        std::fs::create_dir_all(dist_dir).ok();
-    }
-}
-
-fn recheck_and_setup_layer_file() {
-    println!("cargo::rerun-if-env-changed=MIRRORD_LAYER_FILE");
-
-    #[cfg(target_os = "macos")]
-    println!("cargo::rerun-if-env-changed=MIRRORD_LAYER_FILE_MACOS_ARM64");
-
-    if std::env::var("MIRRORD_LAYER_FILE").is_err() {
-        eprintln!("error: MIRRORD_LAYER_FILE must be set to the path of the mirrord layer library");
-        eprintln!("       Build the layer first and pass its path via MIRRORD_LAYER_FILE,");
-        eprintln!("       or use `cargo xtask build-cli` which handles this automatically.");
-        exit(1);
-    }
-}
-
-#[cfg(feature = "wizard")]
-fn build_wizard_frontend() {
-    use std::{env, path::Path, process::Command};
-
-    let out_dir = env::var_os("OUT_DIR").unwrap();
-    let out_dir = Path::new(&out_dir);
-
-    // override used for the release workflow so the frontend can be built before compilation
-    // env var: WIZARD_DIST_DIR
-    let dist_path = if let Ok(frontend_dist_override) = env::var("WIZARD_DIST_DIR") {
-        Path::new(&frontend_dist_override).to_path_buf()
-    } else {
-        let input_path = Path::new("../../wizard-frontend");
-        let dist_path = out_dir.join("dist");
-
-        // rerun if the wizard frontend has any changes
-        println!("cargo::rerun-if-changed={}", input_path.display());
-        // restore default behaviour (see
-        // https://doc.rust-lang.org/cargo/reference/build-scripts.html#rerun-if-changed)
-        println!("cargo::rerun-if-changed=.");
-
-        let status = Command::new("npm")
-            .args(["install"])
-            .current_dir(input_path)
-            .status()
-            .expect("npm install command should finish");
-        assert!(status.success(), "npm install command should succeed");
-
-        let status = Command::new("npm")
-            .args([
-                "run",
-                "build",
-                "--",
-                "--emptyOutDir",
-                "--outDir",
-                &dist_path.display().to_string(),
-            ])
-            .current_dir(input_path)
-            .status()
-            .expect("npm build command should finish");
-        assert!(status.success(), "npm build command should succeed");
-        dist_path
-    };
-
-    let tar_path = out_dir.join("wizard-frontend.tar.gz");
-    let mut tar_command = Command::new("tar");
-    let status = tar_command
-        .arg("czf")
-        .arg(tar_path)
-        .arg("--directory")
-        .arg(dist_path)
-        .arg(".")
-        .status()
-        .expect("tar command should finish");
-    assert!(status.success(), "tar command should succeed");
-}
-
-fn package_sip_binaries() {
-    use std::{env, path::Path};
-
-    println!("cargo::rerun-if-env-changed=MIRRORD_SIP_BINARIES_TAR");
-
-    let out_dir = env::var_os("OUT_DIR").unwrap();
-    let out_dir = Path::new(&out_dir);
-    let tar_path = out_dir.join("apple-utils.tar.gz");
-
-    match env::var("MIRRORD_SIP_BINARIES_TAR") {
-        Ok(source_path) => {
-            println!("cargo::rerun-if-changed={source_path}");
-            std::fs::copy(&source_path, &tar_path)
-                .expect("copying embedded SIP utilities bundle should succeed");
-        }
-        Err(_) => {
-            if !std::fs::exists(&tar_path).unwrap_or(false) {
-                std::fs::write(&tar_path, "")
-                    .expect("creating placeholder SIP archive should work");
-            }
-        }
-    }
-}
-
 fn main() {
-    // don't run on clippy
-    if std::env::var("CLIPPY_ARGS").is_ok() {
-        // stupid hack so we don't need dependencies or anything
-        println!(
-            "cargo:rustc-env=MIRRORD_LAYER_FILE={}",
-            std::env::var("CARGO_MANIFEST_PATH").unwrap()
-        );
-        println!(
-            "cargo:rustc-env=MIRRORD_LAYER_FILE_MACOS_ARM64={}",
-            std::env::var("CARGO_MANIFEST_PATH").unwrap()
-        );
-
-        let frontend_path = format!(
-            "{}/wizard-frontend.tar.gz",
-            std::env::var("OUT_DIR").unwrap()
-        );
-
-        if !std::fs::exists(&frontend_path).unwrap_or(false) {
-            std::fs::write(frontend_path, "").unwrap();
-        };
-
-        if std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|target| target == "macos") {
-            let sip_path = format!("{}/apple-utils.tar.gz", std::env::var("OUT_DIR").unwrap());
-
-            if !std::fs::exists(&sip_path).unwrap_or(false) {
-                std::fs::write(sip_path, "").unwrap();
-            };
-        }
-
-        ensure_monitor_frontend_dist();
-
+    if std::env::var("CLIPPY_ARGS").is_err() {
         return;
     }
-    // Make sure `MIRRORD_LAYER_FILE` is provided either by user, or computed.
-    recheck_and_setup_layer_file();
 
-    // Build the wizard frontend
-    #[cfg(feature = "wizard")]
-    build_wizard_frontend();
-
-    if std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|target| target == "macos") {
-        package_sip_binaries();
-    }
-
-    ensure_monitor_frontend_dist();
-
-    // this check uses cargo env vars instead of conditional compilation due to cfg! not respecting
-    // the target flag on a build
-    if std::env::var("MIRRORD_LAYER_FILE_MACOS_ARM64").is_err()
-        && std::env::var("CARGO_CFG_TARGET_ARCH").is_ok_and(|t| t.eq("aarch64") || t.eq("x86_64"))
-        && std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|t| t.eq("macos"))
-    {
-        println!(
-            "cargo::warning=No environment variable 'MIRRORD_LAYER_FILE_MACOS_ARM64' found - it should contain the path to the mirrord layer compiled for the `aarch64-apple-darwin` target"
-        );
-        exit(1);
+    let manifest_path = match std::env::var("CARGO_MANIFEST_PATH") {
+        Ok(path) => path,
+        Err(_) => exit(1),
     };
+
+    println!("cargo:rustc-env=MIRRORD_LAYER_FILE={manifest_path}");
+    println!("cargo:rustc-env=MIRRORD_LAYER_FILE_MACOS_ARM64={manifest_path}");
+    println!("cargo:rustc-env=MIRRORD_WIZARD_TAR={manifest_path}");
+    println!("cargo:rustc-env=MIRRORD_SIP_BINARIES_TAR={manifest_path}");
 }
