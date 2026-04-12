@@ -15,13 +15,11 @@ fn recheck_and_setup_layer_file() {
     println!("cargo::rerun-if-env-changed=MIRRORD_LAYER_FILE_MACOS_ARM64");
 
     if std::env::var("MIRRORD_LAYER_FILE").is_err() {
-        let layer_path = if cfg!(windows) {
-            std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER_WIN").unwrap()
-        } else {
-            std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER").unwrap()
-        };
-        println!("cargo:rustc-env=MIRRORD_LAYER_FILE={}", layer_path);
-    };
+        eprintln!("error: MIRRORD_LAYER_FILE must be set to the path of the mirrord layer library");
+        eprintln!("       Build the layer first and pass its path via MIRRORD_LAYER_FILE,");
+        eprintln!("       or use `cargo xtask build-cli` which handles this automatically.");
+        std::process::exit(1);
+    }
 }
 
 #[cfg(feature = "wizard")]
