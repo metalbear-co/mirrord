@@ -499,8 +499,6 @@ jobs:
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-lib
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
-      - name: create dummy file to compile wizard feature
-        run: touch wizard-frontend.tar.gz
       - name: mirrord protocol UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
       - name: mirrord config UT
@@ -514,7 +512,7 @@ jobs:
       - name: mirrord operator UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
       - name: mirrord cli UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord --features "wizard"
+        run: cargo xtask test-ut -- --target x86_64-unknown-linux-gnu
       - name: mirrord protocol-io UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
       - name: mirrord jaq UT

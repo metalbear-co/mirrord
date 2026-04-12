@@ -131,11 +131,65 @@ fn build_binary_for_host(layer_path: &Path) -> Result<PathBuf> {
     super::cli::build_cli(target, false, layer_path, None, &[])
 }
 
+/// Runs CLI unit tests with placeholder embedded assets.
+///
+/// The unit tests exercise argument parsing and other logic, not the embedded layer or wizard
+/// payloads. Supplying small placeholder files keeps the test job independent from frontend and
+/// layer build steps while still satisfying the compile-time `include_bytes!` requirements.
+pub fn run_unit(cargo_args: Vec<String>) -> Result<()> {
+    let assets = create_dummy_cli_artifacts()?;
+
+    let mut cmd = Command::new("cargo");
+    cmd.args(["test", "-p", "mirrord", "--features", "wizard"]);
+    cmd.args(cargo_args);
+    cmd.env("MIRRORD_LAYER_FILE", &assets.layer);
+    cmd.env("MIRRORD_LAYER_FILE_MACOS_ARM64", &assets.arm64_layer);
+    cmd.env("MIRRORD_WIZARD_TAR", &assets.wizard_archive);
+    cmd.env("MIRRORD_SIP_BINARIES_TAR", &assets.sip_binaries_archive);
+
+    let status = cmd.status().context("Failed to run cargo test command")?;
+    if !status.success() {
+        bail!("unit tests failed");
+    }
+
+    Ok(())
+}
+
 fn cargo_nextest_available() -> bool {
     Command::new("cargo")
         .args(["nextest", "--version"])
         .status()
         .is_ok_and(|status| status.success())
+}
+
+struct DummyCliArtifacts {
+    layer: PathBuf,
+    arm64_layer: PathBuf,
+    wizard_archive: PathBuf,
+    sip_binaries_archive: PathBuf,
+}
+
+fn create_dummy_cli_artifacts() -> Result<DummyCliArtifacts> {
+    let dir = env::temp_dir().join("mirrord-xtask-unit");
+    std::fs::create_dir_all(&dir).context("Failed to create temp dir for dummy CLI assets")?;
+
+    let layer = create_dummy_file(&dir.join("libmirrord_layer.so"))?;
+    let arm64_layer = create_dummy_file(&dir.join("libmirrord_layer.dylib"))?;
+    let wizard_archive = create_dummy_file(&dir.join("wizard-frontend.tar.gz"))?;
+    let sip_binaries_archive = create_dummy_file(&dir.join("sip-binaries.tar.gz"))?;
+
+    Ok(DummyCliArtifacts {
+        layer,
+        arm64_layer,
+        wizard_archive,
+        sip_binaries_archive,
+    })
+}
+
+fn create_dummy_file(path: &Path) -> Result<PathBuf> {
+    std::fs::write(path, []).with_context(|| format!("Failed to write {}", path.display()))?;
+    path.canonicalize()
+        .with_context(|| format!("Failed to canonicalize {}", path.display()))
 }
 
 fn validate_path(path: &Path, env_name: &str, description: &str) -> Result<PathBuf> {

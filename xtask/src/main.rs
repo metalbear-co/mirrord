@@ -95,6 +95,13 @@ enum Commands {
         cargo_args: Vec<String>,
     },
 
+    /// Run unit tests for the mirrord CLI with placeholder embedded assets
+    TestUt {
+        /// Additional arguments passed to `cargo test`
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        cargo_args: Vec<String>,
+    },
+
     /// Run the integration test suite with externally provided mirrord artifacts
     TestIntegration {
         /// Path to an external mirrord CLI binary
@@ -234,6 +241,10 @@ fn main() -> Result<()> {
             cargo_args,
         } => {
             tasks::test::run(tasks::test::Suite::E2e, binary, layer, cargo_args)?;
+        }
+
+        Commands::TestUt { cargo_args } => {
+            tasks::test::run_unit(cargo_args)?;
         }
 
         Commands::TestIntegration {
