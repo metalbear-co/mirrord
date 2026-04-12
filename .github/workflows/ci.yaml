@@ -698,11 +698,11 @@ jobs:
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - run: cargo build --manifest-path=./Cargo.toml -p mirrord --features wizard
+      - run: cargo xtask build-cli --platform linux-x86_64
       # This needs improving to prevent flakiness! e.g. examining output for progress messages
       # `sleep` is used here to give the wizard enough time to start before curl
       - run: |
-          ./target/debug/mirrord wizard &
+          ./target/x86_64-unknown-linux-gnu/debug/mirrord wizard &
           sleep 2 && curl localhost:3000
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test

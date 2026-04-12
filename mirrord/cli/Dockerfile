@@ -11,7 +11,12 @@ ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 COPY . /build/
 
-RUN cargo xtask build-cli --no-wizard --target $(cat /.platform) --release
+RUN case "$(cat /.platform)" in \
+    x86_64-unknown-linux-gnu) platform=linux-x86_64 ;; \
+    aarch64-unknown-linux-gnu) platform=linux-aarch64 ;; \
+    *) echo "unsupported xtask platform for $(cat /.platform)" >&2; exit 1 ;; \
+    esac; \
+    cargo xtask build-cli --no-wizard --platform "$platform" --release
 
 RUN cp /build/target/$(cat /.platform)/release/mirrord /mirrord
 RUN cp /build/target/$(cat /.platform)/release/libmirrord_layer.so /libmirrord_layer.so
