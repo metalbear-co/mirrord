@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21 AS chef
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21 AS builder
 ARG TARGETARCH
 WORKDIR /build
 
@@ -10,9 +10,9 @@ ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 
 COPY . /build/
-RUN echo INITIAL CARGO LOCK --- && cat Cargo.lock && echo INITIAL CARGO LOCK OVER ----
+
 RUN cargo xtask build-cli --target $(cat /.platform) --release
-RUN echo MODIFIED CARGO LOCK --- && cat Cargo.lock && echo MODIFIED CARGO LOCK OVER ----
+
 RUN cp /build/target/$(cat /.platform)/release/mirrord /mirrord
 RUN cp /build/target/$(cat /.platform)/release/libmirrord_layer.so /libmirrord_layer.so
 
