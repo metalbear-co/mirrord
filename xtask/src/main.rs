@@ -30,7 +30,7 @@ enum Commands {
         no_wizard: bool,
 
         /// Additional arguments passed to cargo
-        #[arg(last = true)]
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         cargo_args: Vec<String>,
     },
 
@@ -48,7 +48,7 @@ enum Commands {
         release: bool,
 
         /// Additional arguments passed to cargo
-        #[arg(last = true)]
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         cargo_args: Vec<String>,
     },
 
@@ -69,7 +69,7 @@ enum Commands {
     /// Run `cargo doc --document-private-items --no-deps` with dummy layer artifacts
     TestDoc {
         /// Additional arguments passed to `cargo doc`
-        #[arg(last = true)]
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         cargo_args: Vec<String>,
     },
 
@@ -84,7 +84,7 @@ enum Commands {
         layer: Option<std::path::PathBuf>,
 
         /// Additional arguments passed to `cargo test` or `cargo nextest run`
-        #[arg(last = true)]
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         cargo_args: Vec<String>,
     },
 
@@ -99,7 +99,7 @@ enum Commands {
         layer: Option<std::path::PathBuf>,
 
         /// Additional arguments passed to `cargo test` or `cargo nextest run`
-        #[arg(last = true)]
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         cargo_args: Vec<String>,
     },
 }
