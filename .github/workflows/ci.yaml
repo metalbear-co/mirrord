@@ -329,7 +329,7 @@ jobs:
           toolchain: ${{ env.PINNED_NIGHTLY }}
           cache: false
       # TODO(alex): `no-deps` here due to an issue in `futures-util`.
-      - run: cargo doc --document-private-items --no-deps
+      - run: cargo xtask test-doc
 
   test_agent:
     runs-on: ubuntu-24.04

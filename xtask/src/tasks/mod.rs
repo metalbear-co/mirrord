@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod doc;
 pub mod layer;
 pub mod release;
 pub mod signing;

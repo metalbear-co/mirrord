@@ -18,7 +18,7 @@ fn recheck_and_setup_layer_file() {
         eprintln!("error: MIRRORD_LAYER_FILE must be set to the path of the mirrord layer library");
         eprintln!("       Build the layer first and pass its path via MIRRORD_LAYER_FILE,");
         eprintln!("       or use `cargo xtask build-cli` which handles this automatically.");
-        std::process::exit(1);
+        exit(1);
     }
 }
 

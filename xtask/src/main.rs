@@ -58,6 +58,13 @@ enum Commands {
         release: bool,
     },
 
+    /// Run `cargo doc --document-private-items --no-deps` with dummy layer artifacts
+    TestDoc {
+        /// Additional arguments passed to `cargo doc`
+        #[arg(last = true)]
+        cargo_args: Vec<String>,
+    },
+
     /// Run the e2e test suite with externally provided mirrord artifacts
     TestE2e {
         /// Path to an external mirrord CLI binary
@@ -172,6 +179,10 @@ fn main() -> Result<()> {
 
         Commands::MergeCliUniversal { release } => {
             tasks::cli::merge_macos_universal_cli(release)?;
+        }
+
+        Commands::TestDoc { cargo_args } => {
+            tasks::doc::run(cargo_args)?;
         }
 
         Commands::TestE2e {
