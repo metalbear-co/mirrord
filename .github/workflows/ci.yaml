@@ -535,7 +535,7 @@ jobs:
     env:
       MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/universal-apple-darwin/debug/libmirrord_layer.dylib
       MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/aarch64-apple-darwin/debug/libmirrord_layer.dylib
-      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/universal-apple-darwin/debug/mirrord
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -551,10 +551,8 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: verify SIP status
         run: csrutil status
-      - name: build universal layer files
-        run: cargo xtask build-layer --platform macos-universal
-      - name: build cli
-        run: cargo build -p mirrord
+      - name: build cli and universal layer
+        run: cargo xtask build-cli --platform macos-universal --no-wizard
       - name: mirrord-sip UT
         run: cargo test -p mirrord-sip
       - name: mirrord-intproxy UT
