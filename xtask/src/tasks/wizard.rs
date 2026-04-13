@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 pub fn build_wizard() -> Result<()> {
     println!("Building wizard frontend...");
 
-    let wizard_dir = Path::new("wizard-frontend");
+    let wizard_dir = Path::new("packages/wizard");
 
     if !wizard_dir.exists() {
         anyhow::bail!(
