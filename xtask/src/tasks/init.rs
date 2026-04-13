@@ -68,18 +68,12 @@ impl PythonLauncher {
 
 enum UvLauncher {
     Binary(PathBuf),
-    PythonModule(PythonLauncher),
 }
 
 impl UvLauncher {
     fn command(&self) -> Command {
         match self {
             UvLauncher::Binary(path) => Command::new(path),
-            UvLauncher::PythonModule(python) => {
-                let mut cmd = python.command();
-                cmd.args(["-m", "uv"]);
-                cmd
-            }
         }
     }
 }
@@ -109,26 +103,35 @@ fn ensure_uv(python: &PythonLauncher) -> Result<UvLauncher> {
     fs::create_dir_all(&requirements_dir)
         .with_context(|| format!("Failed to create {}", requirements_dir.display()))?;
 
+    let bootstrap_environment = uv_bootstrap_environment()?;
     let requirements = requirements_dir.join("uv.txt");
     write_hashed_requirements(&requirements, &[("uv", versions::UV_VERSION, hash)])?;
 
     println!("Installing uv {}...", versions::UV_VERSION);
-    let mut cmd = python.command();
-    cmd.args([
-        "-m",
-        "pip",
-        "install",
-        "--user",
-        "--disable-pip-version-check",
-        "--only-binary=:all:",
-        "--require-hashes",
-        "-r",
-    ])
-    .arg(&requirements);
-    run_command(&mut cmd, "Failed to install uv")?;
+    let mut create_venv = python.command();
+    create_venv.args(["-m", "venv"]).arg(&bootstrap_environment);
+    run_command(
+        &mut create_venv,
+        "Failed to create uv bootstrap virtual environment",
+    )?;
 
-    let mut verify = python.command();
-    verify.args(["-m", "uv", "--version"]);
+    let mut install = Command::new(venv_python(&bootstrap_environment));
+    install
+        .args([
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "--only-binary=:all:",
+            "--require-hashes",
+            "-r",
+        ])
+        .arg(&requirements);
+    run_command(&mut install, "Failed to install uv")?;
+
+    let uv = venv_executable(&bootstrap_environment, "uv");
+    let mut verify = Command::new(&uv);
+    verify.arg("--version");
     let version = command_stdout(&mut verify)?;
     if !version
         .trim()
@@ -141,7 +144,7 @@ fn ensure_uv(python: &PythonLauncher) -> Result<UvLauncher> {
         );
     }
 
-    Ok(UvLauncher::PythonModule(python.clone()))
+    Ok(UvLauncher::Binary(uv))
 }
 
 fn sync_python_tools(python: &PythonLauncher, uv: &UvLauncher) -> Result<()> {
@@ -236,8 +239,24 @@ fn python_tools_environment() -> Result<PathBuf> {
     Ok(tool_root()?.join("python-tools"))
 }
 
+fn uv_bootstrap_environment() -> Result<PathBuf> {
+    Ok(tool_root()?.join("uv-bootstrap"))
+}
+
 fn python_tools_project_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("python-tools")
+}
+
+fn venv_python(venv_dir: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        venv_dir.join("Scripts").join("python.exe")
+    }
+
+    #[cfg(not(windows))]
+    {
+        venv_dir.join("bin").join("python")
+    }
 }
 
 fn home_dir() -> Result<PathBuf> {
