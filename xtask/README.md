@@ -44,6 +44,16 @@ cargo xtask build-cli --release --no-wizard
 cargo xtask build-cli --release --skip-build-wizard
 ```
 
+### `init`
+
+Installs pinned external tools used by xtask. Today this bootstraps `uv` and installs
+`cargo-zigbuild` through a managed `uv` environment, then exposes it to Cargo via a wrapper in
+`$CARGO_HOME/bin`.
+
+```bash
+cargo xtask init
+```
+
 **Supported platforms:**
 - `macos-universal` (or `macos`, `darwin`) - macOS universal binary (x86_64 + aarch64)
 - `linux-x86_64` (or `linux-amd64`) - Linux x86_64

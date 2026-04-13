@@ -44,6 +44,9 @@ enum Commands {
     /// Prepare monitor frontend assets only
     BuildMonitor,
 
+    /// Install pinned external tools required by xtask
+    Init,
+
     /// Build layer only
     BuildLayer {
         /// Target platform
@@ -169,6 +172,10 @@ fn main() -> Result<()> {
 
         Commands::BuildMonitor => {
             tasks::monitor::build_monitor()?;
+        }
+
+        Commands::Init => {
+            tasks::init::run()?;
         }
 
         Commands::BuildLayer {

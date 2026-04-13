@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use which::which;
 
 use super::signing;
 
@@ -60,6 +61,10 @@ pub fn build_layer(target: Target, release: bool, cargo_args: &[String]) -> Resu
     println!("Building mirrord-layer for {}...", target.triple());
 
     let is_linux = matches!(target, Target::LinuxX86_64 | Target::LinuxAarch64);
+
+    if is_linux && which("cargo-zigbuild").is_err() {
+        anyhow::bail!("cargo-zigbuild is required for Linux builds. Run `cargo xtask init` first.");
+    }
 
     let mut cmd = Command::new("cargo");
     if is_linux {

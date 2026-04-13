@@ -11,6 +11,8 @@ ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 COPY . /build/
 
+RUN cargo xtask init
+
 RUN case "$(cat /.platform)" in \
     x86_64-unknown-linux-gnu) platform=linux-x86_64 ;; \
     aarch64-unknown-linux-gnu) platform=linux-aarch64 ;; \

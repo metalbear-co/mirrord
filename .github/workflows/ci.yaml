@@ -696,7 +696,8 @@ jobs:
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - run: cargo xtask build-cli --platform linux-x86_64
+      - run: cargo xtask init
+      - run: cargo xtask build-cli
       # This needs improving to prevent flakiness! e.g. examining output for progress messages
       # `sleep` is used here to give the wizard enough time to start before curl
       - run: |
