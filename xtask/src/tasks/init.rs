@@ -211,7 +211,7 @@ fn install_wrapper(name: &str, target: &Path) -> Result<()> {
 fn venv_executable(venv_dir: &Path, executable: &str) -> PathBuf {
     #[cfg(windows)]
     {
-        return venv_dir.join("Scripts").join(format!("{executable}.exe"));
+        venv_dir.join("Scripts").join(format!("{executable}.exe"))
     }
 
     #[cfg(not(windows))]
