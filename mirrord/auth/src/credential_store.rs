@@ -271,7 +271,7 @@ impl CredentialStoreSync {
         let value = callback(
             store
                 .get_or_init::<_, Old, New>(
-                    &client.kube_client(),
+                    client,
                     operator_fingerprint,
                     operator_subscription_id,
                     support_new,
@@ -317,7 +317,7 @@ impl CredentialStoreSync {
 
         let result = self
             .access_credential::<_, Old, New, _, Certificate>(
-                &client.kube_client(),
+                client,
                 operator_fingerprint,
                 operator_subscription_id,
                 support_new,

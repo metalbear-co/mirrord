@@ -884,7 +884,7 @@ where
 
         credential_store
             .get_client_certificate::<_, MirrordOperatorCrd, MirrordClusterOperatorUserCredential>(
-                &self.client.kube_client(),
+                &self.client,
                 fingerprint,
                 subscription_id,
                 self.operator()
