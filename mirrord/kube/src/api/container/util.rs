@@ -7,7 +7,7 @@ use mirrord_agent_env::envs;
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
 use rand::distr::{Alphanumeric, SampleString};
 use regex::Regex;
-use tracing::warn;
+use tracing::{Level, warn};
 
 use crate::{api::container::ContainerParams, error::Result};
 
@@ -40,6 +40,7 @@ pub(super) fn get_capabilities(agent: &AgentConfig) -> Vec<LinuxCapability> {
 }
 
 /// Builds mirrord agent environment variables.
+#[tracing::instrument(level = Level::DEBUG, ret)]
 pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<EnvVar> {
     let mut env = vec![
         envs::LOG_LEVEL.as_k8s_spec(&agent.log_level),
@@ -52,7 +53,6 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
         envs::MAX_BODY_BUFFER_SIZE.as_k8s_spec(&agent.max_body_buffer_size),
         envs::MAX_BODY_BUFFER_TIMEOUT.as_k8s_spec(&agent.max_body_buffer_timeout),
         envs::JAQ_TIME_LIMIT.as_k8s_spec(&agent.jaq_time_limit),
-        envs::IPTABLES_IDENTIFIER.as_k8s_spec(&params.port.to_string()),
     ];
 
     if let Some(nftables) = agent.nftables {
@@ -95,10 +95,12 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
         env.push(envs::CLEAN_IPTABLES_ON_START.as_k8s_spec(&clean));
     }
 
-    let iptables_id = Alphanumeric
-        .sample_string(&mut rand::rng(), 10)
-        .to_lowercase();
-    env.push(envs::IPTABLES_IDENTIFIER.as_k8s_spec(&iptables_id));
+    if agent.single_pod_multi_container {
+        let iptables_id = Alphanumeric
+            .sample_string(&mut rand::rng(), 16)
+            .to_lowercase();
+        env.push(envs::IPTABLES_IDENTIFIER.as_k8s_spec(&iptables_id));
+    }
 
     env
 }

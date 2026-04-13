@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     fn default() {
-        let chain_names = ChainNames::legacy();
+        let chain_names = ChainNames::default();
         let mut mock = MockIPTables::new();
 
         mock.expect_create_chain()

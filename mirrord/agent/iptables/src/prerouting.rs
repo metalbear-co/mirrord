@@ -88,7 +88,7 @@ mod tests {
 
     #[tokio::test]
     async fn add_redirect() {
-        let chain_names = ChainNames::legacy();
+        let chain_names = ChainNames::default();
         let mut mock = MockIPTables::new();
 
         mock.expect_create_chain()
@@ -118,7 +118,7 @@ mod tests {
 
     #[tokio::test]
     async fn add_redirect_twice() {
-        let chain_names = ChainNames::legacy();
+        let chain_names = ChainNames::default();
         let mut mock = MockIPTables::new();
 
         mock.expect_create_chain()
@@ -158,7 +158,7 @@ mod tests {
 
     #[tokio::test]
     async fn remove_redirect() {
-        let chain_names = ChainNames::legacy();
+        let chain_names = ChainNames::default();
         let mut mock = MockIPTables::new();
 
         mock.expect_create_chain()

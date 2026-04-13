@@ -98,7 +98,13 @@ pub const CLEAN_IPTABLES_ON_START: CheckedEnv<bool> =
 /// Jaq process time limit (ms)
 pub const JAQ_TIME_LIMIT: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_JAQ_TIME_LIMIT");
 
-/// Unique identifier for iptables chain names, allowing multiple agents in the same network
-/// namespace.
+/// Identifier for the iptables chain names of the agent.
+///
+/// When this env var is set, we avoid conflicts with other agents in the same network namespace
+/// (i.e. when multiple agents are running in the same pod and targeting different containers).
+///
+/// If not set, we default to the legacy chain names (i.e. `MIRRORD_INPUT`, ...).
+///
+/// We decide to set this env var or not by checking `AgentConfig::single_pod_multi_container`.
 pub const IPTABLES_IDENTIFIER: CheckedEnv<String> =
     CheckedEnv::new("MIRRORD_AGENT_IPTABLES_IDENTIFIER");

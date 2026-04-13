@@ -701,7 +701,7 @@ async fn check_existing_rules(
     clean_existing_rules: bool,
     with_mesh_exclusion: bool,
 ) -> IPTablesResult<Vec<String>> {
-    let chain_names = ChainNames::from_env();
+    let chain_names = ChainNames::new();
     let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
     let iptables = mirrord_agent_iptables::get_iptables(nftables, false);
     let ip6tables = support_ipv6.then(|| mirrord_agent_iptables::get_iptables(nftables, true));
@@ -950,7 +950,7 @@ async fn clear_iptable_chain(
     ipv6_enabled: bool,
     with_mesh_exclusion: bool,
 ) -> Result<(), IPTablesError> {
-    let chain_names = ChainNames::from_env();
+    let chain_names = ChainNames::new();
     let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
 
     let v4_result: Result<(), IPTablesError> = try {

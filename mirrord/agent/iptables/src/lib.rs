@@ -33,22 +33,34 @@ mod prerouting;
 mod redirect;
 mod standard;
 
-/// Holds dynamically-generated iptables chain names for this agent instance.
+/// Holds the iptables chain names for this agent instance.
 ///
-/// When `MIRRORD_AGENT_IPTABLES_IDENTIFIER` is set, compact names with the identifier are used
-/// (e.g. `MRDIN_abc123`), allowing multiple agents to coexist in the same network namespace.
+/// When `MIRRORD_AGENT_IPTABLES_IDENTIFIER` is set, allows multiple agents to coexist in the same
+/// network namespace (single pod, multiple containers).
+///
 /// When the env var is absent, legacy names are used for backward compatibility.
 #[derive(Debug, Clone)]
 pub struct ChainNames {
-    pub prerouting: String,
-    pub mesh: String,
-    pub standard: String,
-    pub exclude_from_mesh: String,
+    prerouting: String,
+    mesh: String,
+    standard: String,
+    exclude_from_mesh: String,
+}
+
+impl Default for ChainNames {
+    fn default() -> Self {
+        Self {
+            prerouting: "MIRRORD_INPUT".to_owned(),
+            mesh: "MIRRORD_OUTPUT".to_owned(),
+            standard: "MIRRORD_STANDARD".to_owned(),
+            exclude_from_mesh: "MIRRORD_EXCLUDE_FROM_MESH".to_owned(),
+        }
+    }
 }
 
 impl ChainNames {
     #[tracing::instrument(level = Level::DEBUG, ret)]
-    pub fn from_env() -> Self {
+    pub fn new() -> Self {
         match mirrord_agent_env::envs::IPTABLES_IDENTIFIER.try_from_env() {
             Ok(Some(id)) => Self {
                 prerouting: format!("MRDIN_{id}"),
@@ -56,16 +68,7 @@ impl ChainNames {
                 standard: format!("MRDSTD_{id}"),
                 exclude_from_mesh: format!("MRDMSH_{id}"),
             },
-            _ => Self::legacy(),
-        }
-    }
-
-    pub fn legacy() -> Self {
-        Self {
-            prerouting: "MIRRORD_INPUT".to_owned(),
-            mesh: "MIRRORD_OUTPUT".to_owned(),
-            standard: "MIRRORD_STANDARD".to_owned(),
-            exclude_from_mesh: "MIRRORD_EXCLUDE_FROM_MESH".to_owned(),
+            _ => Self::default(),
         }
     }
 }
@@ -517,7 +520,7 @@ mod tests {
 
     #[tokio::test]
     async fn default() {
-        let cn = ChainNames::legacy();
+        let cn = ChainNames::default();
         let mut mock = MockIPTables::new();
 
         mock.expect_list_rules()
@@ -620,7 +623,7 @@ mod tests {
 
     #[tokio::test]
     async fn linkerd() {
-        let cn = ChainNames::legacy();
+        let cn = ChainNames::default();
         let mut mock = MockIPTables::new();
 
         mock.expect_list_rules()
@@ -754,7 +757,7 @@ mod tests {
 
     #[tokio::test]
     async fn with_mesh_exclusion() {
-        let cn = ChainNames::legacy();
+        let cn = ChainNames::default();
         let mut mock = MockIPTables::new();
 
         mock.expect_list_rules()
@@ -883,7 +886,7 @@ mod tests {
     /// A fresh IP table, or one with only non-agent names, should pass.
     #[tokio::test]
     async fn pass_on_clean() {
-        let cn = ChainNames::legacy();
+        let cn = ChainNames::default();
         let mut mock = MockIPTables::new();
 
         // clean table returns non-mirrord rules only
@@ -908,7 +911,7 @@ mod tests {
     /// If there are any chains in the IP table with names used by the agent, the check should fail.
     #[tokio::test]
     async fn fail_on_dirty() {
-        let cn = ChainNames::legacy();
+        let cn = ChainNames::default();
         let mut mock = MockIPTables::new();
 
         // dirty table returns non-mirrord rules, plus a leftover mirrord rule

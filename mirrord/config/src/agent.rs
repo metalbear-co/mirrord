@@ -483,6 +483,24 @@ pub struct AgentConfig {
     #[config(default = 1)]
     pub jaq_time_limit: u64,
 
+    /// ### agent.single_pod_multi_container {#agent-single_pod_multi_container}
+    ///
+    /// - **Experimental feature**
+    ///
+    /// Allows mirrord to target different containers of the same `pod`.
+    ///
+    /// Without this config, the following **does not** work:
+    ///
+    /// ```sh
+    /// mirrord exec --target "pod/cat/container/meow"
+    /// mirrord exec --target "pod/cat/container/rawr"
+    /// ```
+    ///
+    /// Setting it to `true` changes the iptables chain names to be dynamic, and thus allowing
+    /// multiple agents to work in the same network namespace.
+    #[config(default = false)]
+    pub single_pod_multi_container: bool,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
