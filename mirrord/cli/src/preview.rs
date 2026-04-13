@@ -335,6 +335,10 @@ async fn preview_start(
                                     subtask.success(Some("preview pod is ready"));
                                     break status.pod_name.clone().expect("Ready session must have pod_name");
                                 }
+                                PreviewSessionPhase::Paused => {
+                                    last_known_phase =
+                                        "preview paused while a local session is active";
+                                }
                                 PreviewSessionPhase::Failed => {
                                     let failure_message = status.failure_message.clone().expect("Failed session must have failure_message");
                                     // Sessions that fail to spawn should not be retained —
@@ -506,6 +510,7 @@ async fn preview_status(
                         }
                     }
                 }
+                Some(PreviewSessionPhase::Paused) => "paused (local session active)".to_owned(),
                 Some(PreviewSessionPhase::Failed) => {
                     let msg = session
                         .status
