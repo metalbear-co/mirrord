@@ -46,9 +46,9 @@ cargo xtask build-cli --release --skip-build-wizard
 
 ### `init`
 
-Installs pinned external tools used by xtask. Today this bootstraps `uv` and installs
-`cargo-zigbuild` through a managed `uv` environment, then exposes it to Cargo via a wrapper in
-`$CARGO_HOME/bin`.
+Installs xtask-managed external tools. `uv` and Python 3 are prerequisites for this command.
+Today it uses `uv` to sync the Python tool environment and exposes `cargo-zigbuild` to Cargo via a
+wrapper in `$CARGO_HOME/bin`.
 
 ```bash
 cargo xtask init

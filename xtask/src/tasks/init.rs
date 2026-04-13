@@ -7,12 +7,10 @@ use std::{
 use anyhow::{Context, Result, bail};
 use which::which;
 
-use super::versions;
-
 /// Bootstraps pinned external tools used by xtask so CI and local builds share one setup path.
 pub fn run() -> Result<()> {
     let python = PythonLauncher::detect()?;
-    let uv = ensure_uv(&python)?;
+    let uv = require_uv()?;
     sync_python_tools(&python, &uv)?;
     install_wrapper(
         "cargo-zigbuild",
@@ -53,101 +51,20 @@ impl PythonLauncher {
         bail!("Python 3 is required for `cargo xtask init`");
     }
 
-    fn command(&self) -> Command {
+    fn executable(&self) -> Result<PathBuf> {
         let mut cmd = Command::new(&self.program);
         cmd.args(&self.args);
-        cmd
-    }
-
-    fn executable(&self) -> Result<PathBuf> {
-        let mut cmd = self.command();
         cmd.args(["-c", "import sys; print(sys.executable)"]);
         Ok(PathBuf::from(command_stdout(&mut cmd)?.trim()))
     }
 }
 
-enum UvLauncher {
-    Binary(PathBuf),
+fn require_uv() -> Result<PathBuf> {
+    which("uv")
+        .context("`uv` is required for `cargo xtask init`. Install it before running this command.")
 }
 
-impl UvLauncher {
-    fn command(&self) -> Command {
-        match self {
-            UvLauncher::Binary(path) => Command::new(path),
-        }
-    }
-}
-
-fn ensure_uv(python: &PythonLauncher) -> Result<UvLauncher> {
-    if let Ok(path) = which("uv") {
-        let mut version = Command::new(&path);
-        version.arg("--version");
-        if command_stdout(&mut version)?
-            .trim()
-            .starts_with(&format!("uv {}", versions::UV_VERSION))
-        {
-            println!("Using uv {}", versions::UV_VERSION);
-            return Ok(UvLauncher::Binary(path));
-        }
-    }
-
-    let hash = versions::uv_hash().with_context(|| {
-        format!(
-            "Unsupported host for pinned uv install: {} {}",
-            env::consts::OS,
-            env::consts::ARCH
-        )
-    })?;
-
-    let requirements_dir = tool_root()?.join("requirements");
-    fs::create_dir_all(&requirements_dir)
-        .with_context(|| format!("Failed to create {}", requirements_dir.display()))?;
-
-    let bootstrap_environment = uv_bootstrap_environment()?;
-    let requirements = requirements_dir.join("uv.txt");
-    write_hashed_requirements(&requirements, &[("uv", versions::UV_VERSION, hash)])?;
-
-    println!("Installing uv {}...", versions::UV_VERSION);
-    let mut create_venv = python.command();
-    create_venv.args(["-m", "venv"]).arg(&bootstrap_environment);
-    run_command(
-        &mut create_venv,
-        "Failed to create uv bootstrap virtual environment",
-    )?;
-
-    let mut install = Command::new(venv_python(&bootstrap_environment));
-    install
-        .args([
-            "-m",
-            "pip",
-            "install",
-            "--disable-pip-version-check",
-            "--only-binary=:all:",
-            "--require-hashes",
-            "-r",
-        ])
-        .arg(&requirements);
-    run_command(&mut install, "Failed to install uv")?;
-
-    let uv = venv_executable(&bootstrap_environment, "uv");
-    let mut verify = Command::new(&uv);
-    verify.arg("--version");
-    let version = command_stdout(&mut verify)?;
-    if !version
-        .trim()
-        .starts_with(&format!("uv {}", versions::UV_VERSION))
-    {
-        bail!(
-            "Installed uv does not match pinned version {}: {}",
-            versions::UV_VERSION,
-            version.trim()
-        );
-    }
-
-    Ok(UvLauncher::Binary(uv))
-}
-
-fn sync_python_tools(python: &PythonLauncher, uv: &UvLauncher) -> Result<()> {
+fn sync_python_tools(python: &PythonLauncher, uv: &Path) -> Result<()> {
     let project_dir = python_tools_project_dir();
     let environment = python_tools_environment()?;
     let tool_root = tool_root()?;
@@ -160,21 +77,13 @@ fn sync_python_tools(python: &PythonLauncher, uv: &UvLauncher) -> Result<()> {
         project_dir.display()
     );
 
-    let mut cmd = uv.command();
+    let mut cmd = Command::new(uv);
     cmd.args(["sync", "--project"])
         .arg(&project_dir)
-        .args(["--frozen", "--no-dev", "--no-install-project", "--python"])
+        .args(["--no-dev", "--no-install-project", "--python"])
         .arg(python.executable()?)
         .env("UV_PROJECT_ENVIRONMENT", &environment);
     run_command(&mut cmd, "Failed to sync xtask Python tools")
-}
-
-fn write_hashed_requirements(path: &Path, requirements: &[(&str, &str, &str)]) -> Result<()> {
-    let contents = requirements
-        .iter()
-        .map(|(package, version, hash)| format!("{package}=={version} --hash=sha256:{hash}\n"))
-        .collect::<String>();
-    fs::write(path, contents).with_context(|| format!("Failed to write {}", path.display()))
 }
 
 fn install_wrapper(name: &str, target: &Path) -> Result<()> {
@@ -239,24 +148,11 @@ fn python_tools_environment() -> Result<PathBuf> {
     Ok(tool_root()?.join("python-tools"))
 }
 
-fn uv_bootstrap_environment() -> Result<PathBuf> {
-    Ok(tool_root()?.join("uv-bootstrap"))
-}
-
 fn python_tools_project_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("python-tools")
-}
-
-fn venv_python(venv_dir: &Path) -> PathBuf {
-    #[cfg(windows)]
-    {
-        venv_dir.join("Scripts").join("python.exe")
-    }
-
-    #[cfg(not(windows))]
-    {
-        venv_dir.join("bin").join("python")
-    }
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("xtask manifest dir should have a repository root parent")
+        .to_path_buf()
 }
 
 fn home_dir() -> Result<PathBuf> {
