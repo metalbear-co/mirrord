@@ -1,8 +1,8 @@
 use std::process::exit;
 
-/// Ensure `monitor-frontend/dist` exists so rust-embed doesn't fail during compilation.
+/// Ensure `packages/monitor/dist` exists so rust-embed doesn't fail during compilation.
 fn ensure_monitor_frontend_dist() {
-    let dist_dir = std::path::Path::new("../../monitor-frontend/dist");
+    let dist_dir = std::path::Path::new("../../packages/monitor/dist");
     if !dist_dir.exists() {
         std::fs::create_dir_all(dist_dir).ok();
     }
@@ -36,7 +36,7 @@ fn build_wizard_frontend() {
     let dist_path = if let Ok(frontend_dist_override) = env::var("WIZARD_DIST_DIR") {
         Path::new(&frontend_dist_override).to_path_buf()
     } else {
-        let input_path = Path::new("../../wizard-frontend");
+        let input_path = Path::new("../../packages/wizard");
         let dist_path = out_dir.join("dist");
 
         // rerun if the wizard frontend has any changes
