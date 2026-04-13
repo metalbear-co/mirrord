@@ -13,7 +13,7 @@ pub fn build_cli(
     target: Target,
     release: bool,
     layer_path: &Path,
-    wizard_archive: Option<&Path>,
+    wizard_dist: Option<&Path>,
     cargo_args: &[String],
 ) -> Result<PathBuf> {
     println!("Building mirrord CLI for {}...", target.triple());
@@ -45,20 +45,22 @@ pub fn build_cli(
     };
     cmd.arg("--target").arg(&target_triple);
 
-    if let Some(wizard_archive) = wizard_archive {
+    if let Some(wizard_dist) = wizard_dist {
         cmd.arg("--features").arg("wizard");
-        let wizard_archive = wizard_archive
-            .canonicalize()
-            .context("Failed to canonicalize wizard archive path")?;
 
-        if !wizard_archive.is_file() {
+        if !wizard_dist.is_dir() {
             anyhow::bail!(
-                "Wizard archive not found at {}. Run 'cargo xtask build-wizard' first.",
-                wizard_archive.display()
+                "Wizard dist directory not found at {}. Run 'cargo xtask build-wizard' first.",
+                wizard_dist.display()
             );
         }
 
-        cmd.env("MIRRORD_WIZARD_TAR", wizard_archive);
+        cmd.env(
+            "WIZARD_DIST_DIR",
+            wizard_dist
+                .canonicalize()
+                .context("Failed to canonicalize wizard dist path")?,
+        );
     }
 
     // Set layer file environment variable
@@ -171,7 +173,7 @@ pub fn merge_macos_universal_cli(release: bool) -> Result<PathBuf> {
 pub fn build_macos_universal_cli(
     release: bool,
     universal_layer_path: &Path,
-    wizard_archive: Option<&Path>,
+    wizard_dist: Option<&Path>,
     cargo_args: &[String],
 ) -> Result<PathBuf> {
     println!("Building macOS universal CLI...");
@@ -181,14 +183,14 @@ pub fn build_macos_universal_cli(
         Target::MacosX86_64,
         release,
         universal_layer_path,
-        wizard_archive,
+        wizard_dist,
         cargo_args,
     )?;
     let arm_cli = build_cli(
         Target::MacosAarch64,
         release,
         universal_layer_path,
-        wizard_archive,
+        wizard_dist,
         cargo_args,
     )?;
 

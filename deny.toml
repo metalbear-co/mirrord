@@ -17,7 +17,7 @@ ignore = [
   "RUSTSEC-2025-0134", # rustls-pemfile is unmaintained, but we cannot remove it yet.
   "RUSTSEC-2025-0141", # bincode is unmaintaned, but we cannot remove it yet.
   "RUSTSEC-2026-0049", # aws crates in tests/rust-sqs-printer depend on an old version of rustls-webpki
-  "RUSTSEC-2026-0097", # not relevant and upgrade doesn't exist without taking unsafer approach
+  "RUSTSEC-2026-0097", # rand: unsound only with a custom logger using `rand::rng()`; we don't use that pattern.
 ]
 
 [licenses]

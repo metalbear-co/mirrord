@@ -144,7 +144,7 @@ pub fn run_unit(cargo_args: Vec<String>) -> Result<()> {
     cmd.args(cargo_args);
     cmd.env("MIRRORD_LAYER_FILE", &assets.layer);
     cmd.env("MIRRORD_LAYER_FILE_MACOS_ARM64", &assets.arm64_layer);
-    cmd.env("MIRRORD_WIZARD_TAR", &assets.wizard_archive);
+    cmd.env("WIZARD_DIST_DIR", &assets.wizard_dist);
     cmd.env("MIRRORD_SIP_BINARIES_TAR", &assets.sip_binaries_archive);
 
     let status = cmd.status().context("Failed to run cargo test command")?;
@@ -165,7 +165,7 @@ fn cargo_nextest_available() -> bool {
 struct DummyCliArtifacts {
     layer: PathBuf,
     arm64_layer: PathBuf,
-    wizard_archive: PathBuf,
+    wizard_dist: PathBuf,
     sip_binaries_archive: PathBuf,
 }
 
@@ -175,19 +175,28 @@ fn create_dummy_cli_artifacts() -> Result<DummyCliArtifacts> {
 
     let layer = create_dummy_file(&dir.join("libmirrord_layer.so"))?;
     let arm64_layer = create_dummy_file(&dir.join("libmirrord_layer.dylib"))?;
-    let wizard_archive = create_dummy_file(&dir.join("wizard-frontend.tar.gz"))?;
+    let wizard_dist = create_dummy_wizard_dist(&dir.join("wizard-dist"))?;
     let sip_binaries_archive = create_dummy_file(&dir.join("sip-binaries.tar.gz"))?;
 
     Ok(DummyCliArtifacts {
         layer,
         arm64_layer,
-        wizard_archive,
+        wizard_dist,
         sip_binaries_archive,
     })
 }
 
 fn create_dummy_file(path: &Path) -> Result<PathBuf> {
     std::fs::write(path, []).with_context(|| format!("Failed to write {}", path.display()))?;
+    path.canonicalize()
+        .with_context(|| format!("Failed to canonicalize {}", path.display()))
+}
+
+fn create_dummy_wizard_dist(path: &Path) -> Result<PathBuf> {
+    std::fs::create_dir_all(path)
+        .with_context(|| format!("Failed to create {}", path.display()))?;
+    std::fs::write(path.join("index.html"), [])
+        .with_context(|| format!("Failed to write {}", path.join("index.html").display()))?;
     path.canonicalize()
         .with_context(|| format!("Failed to canonicalize {}", path.display()))
 }
