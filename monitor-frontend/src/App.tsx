@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
-import { MirrordIcon } from '@metalbear/ui'
-import { cn } from '@metalbear/ui'
+import { Button, MirrordIcon, cn } from '@metalbear/ui'
 import { Sun, Moon, Activity } from 'lucide-react'
 import type { SessionInfo, WsMessage } from './types'
 import SessionSidebar from './SessionSidebar'
 import SessionDetail from './SessionDetail'
 import StatusBar from './StatusBar'
 import { initAnalytics, trackEvent } from './analytics'
+import { api } from './api'
+import { strings } from './strings'
 
 const WS_RECONNECT_INTERVAL = 3000
 
@@ -47,24 +48,11 @@ export default function App() {
     }
   }, [sessions])
 
-  // Initial fetch
   useEffect(() => {
-    fetch('/api/sessions')
-      .then((r) => {
-        if (!r.ok) {
-          console.error('Failed to fetch sessions:', r.status, r.statusText)
-          return [] as SessionInfo[]
-        }
-        return r.json()
-      })
-      .then((data: SessionInfo[]) => {
-        setSessions(data)
-        setLoading(false)
-      })
-      .catch((err) => {
-        console.error(err)
-        setLoading(false)
-      })
+    api.listSessions()
+      .then((data) => setSessions(data))
+      .catch((err) => console.error(err))
+      .finally(() => setLoading(false))
   }, [])
 
   // WebSocket for live updates with reconnection
@@ -75,8 +63,7 @@ export default function App() {
 
     function connect() {
       if (stopped) return
-      const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
-      ws = new WebSocket(wsUrl)
+      ws = new WebSocket(api.wsUrl())
 
       ws.onopen = () => setConnected(true)
       ws.onclose = () => {
@@ -117,14 +104,13 @@ export default function App() {
   }, [])
 
   const handleKill = useCallback(async (id: string) => {
-    await fetch(`/api/sessions/${encodeURIComponent(id)}/kill`, { method: 'POST' })
+    await api.killSession(id)
   }, [])
 
   const handleKillAll = useCallback(async () => {
     trackEvent('session_monitor_kill_all', { count: sessions.length })
-    const current = sessions
-    for (const s of current) {
-      await fetch(`/api/sessions/${encodeURIComponent(s.session_id)}/kill`, { method: 'POST' })
+    for (const s of sessions) {
+      await api.killSession(s.session_id)
     }
   }, [sessions])
 
@@ -146,10 +132,10 @@ export default function App() {
                 alt="mirrord"
                 className="w-7 h-7 dark:invert"
               />
-              <span className="font-semibold text-base">mirrord</span>
+              <span className="font-semibold text-base">{strings.app.title}</span>
               <span className="opacity-30">|</span>
               <span className="text-sm font-medium opacity-80">
-                Session Monitor
+                {strings.app.subtitle}
               </span>
             </div>
             <div className="flex items-center gap-3">
@@ -161,17 +147,19 @@ export default function App() {
                   )}
                 />
                 <span className="text-xs opacity-60">
-                  {connected ? 'Connected' : 'Disconnected'}
+                  {connected ? strings.app.connected : strings.app.disconnected}
                 </span>
               </div>
               <span className="opacity-20">|</span>
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => setIsDarkMode(!isDarkMode)}
-                className="p-1.5 rounded-md transition-colors hover:bg-foreground/10 opacity-60 hover:opacity-100"
-                title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+                title={isDarkMode ? strings.app.themeLight : strings.app.themeDark}
+                className="h-7 w-7 opacity-60 hover:opacity-100"
               >
                 {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -194,9 +182,9 @@ export default function App() {
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
               <Activity className="h-8 w-8 opacity-20" />
-              <p className="text-sm font-medium">Select a session to get started</p>
+              <p className="text-sm font-medium">{strings.app.emptyTitle}</p>
               <p className="text-xs opacity-60 max-w-xs text-center">
-                Choose a session from the sidebar to see live activity, configuration, and intercepted traffic
+                {strings.app.emptyBody}
               </p>
             </div>
           )}

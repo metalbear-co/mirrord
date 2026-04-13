@@ -1,37 +1,31 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { cn } from '@metalbear/ui'
-import { Badge, Separator } from '@metalbear/ui'
+import { useState, useEffect } from 'react'
+import {
+  Badge, Button, Card, CardContent, CardHeader, Separator, Table, TableBody,
+  TableCell, TableHead, TableHeader, TableRow, cn,
+} from '@metalbear/ui'
 import {
   Clock, Cpu, Server, Settings, Activity, Radio, ChevronRight, Trash2,
 } from 'lucide-react'
 import type { SessionInfo, MonitorEvent } from './types'
 import EventStream from './EventStream'
-import defaultConfig from './defaultConfig.json'
 import { trackEvent } from './analytics'
+import { api } from './api'
+import { strings } from './strings'
+import { EventType } from './eventTypes'
 
 type DetailTab = 'overview' | 'events' | 'config'
 
-/** Recursively diff config against defaults, returning only values that differ. */
-function diffConfig(config: unknown, defaults: unknown): unknown {
-  if (config === null || config === undefined) return undefined
-  if (defaults === undefined || defaults === null) return config
-  if (typeof config !== typeof defaults) return config
-  if (Array.isArray(config)) {
-    if (!Array.isArray(defaults)) return config
-    if (JSON.stringify(config) === JSON.stringify(defaults)) return undefined
-    return config
+// Session config may carry the license `key` as either a plain string or an
+// object shape (e.g. { value: "..." }); flatten it to a displayable string.
+function extractLicenseKey(config: unknown): string | null {
+  const rawKey = (config as Record<string, unknown> | null)?.key
+  if (!rawKey) return null
+  if (typeof rawKey === 'string') return rawKey
+  if (typeof rawKey === 'object') {
+    const firstValue = Object.values(rawKey as Record<string, unknown>)[0]
+    return firstValue ? String(firstValue) : null
   }
-  if (typeof config === 'object') {
-    const result: Record<string, unknown> = {}
-    const cfgObj = config as Record<string, unknown>
-    const defObj = defaults as Record<string, unknown>
-    for (const [key, value] of Object.entries(cfgObj)) {
-      const diffed = diffConfig(value, defObj[key])
-      if (diffed !== undefined) result[key] = diffed
-    }
-    return Object.keys(result).length > 0 ? result : undefined
-  }
-  return config === defaults ? undefined : config
+  return String(rawKey)
 }
 
 interface Props {
@@ -77,11 +71,11 @@ function LiveDot({ active, className }: { active: boolean; className?: string })
   return (
     <span className={cn('relative flex h-2 w-2', className)}>
       {active && (
-        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
       )}
       <span className={cn(
         'relative inline-flex rounded-full h-2 w-2',
-        active ? 'bg-green-500' : 'bg-muted-foreground/30'
+        active ? 'bg-primary' : 'bg-muted-foreground/30'
       )} />
     </span>
   )
@@ -102,117 +96,126 @@ function OverviewTab({ session, portSubs, processes, eventCounts, onSwitchTab }:
     return () => clearInterval(interval)
   }, [session.started_at])
 
+  const licenseKey = extractLicenseKey(session.config)
+  const processLabel = processes.length !== 1 ? strings.session.processPlural : strings.session.processSingular
+  const portLabel = portSubs.length !== 1 ? strings.session.portPlural : strings.session.portSingular
+
   return (
     <div className="overflow-auto h-full">
       <div className="p-4 space-y-4 max-w-3xl">
         {/* Live status strip */}
-        <div className="flex items-center gap-6 px-4 py-3 rounded-lg bg-card/40 border border-border">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Clock className="h-3 w-3" />
-            <span className="font-mono tabular-nums">{uptimeStr}</span>
-          </div>
-          <Separator orientation="vertical" className="h-4" />
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Cpu className="h-3 w-3" />
-            <span>{processes.length} process{processes.length !== 1 ? 'es' : ''}</span>
-          </div>
-          <Separator orientation="vertical" className="h-4" />
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Radio className="h-3 w-3" />
-            <span>{portSubs.length} port{portSubs.length !== 1 ? 's' : ''}</span>
-          </div>
-          <Separator orientation="vertical" className="h-4" />
-          <button
-            onClick={() => onSwitchTab('events')}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <Activity className="h-3 w-3" />
-            <span className="font-mono tabular-nums">{eventCounts.total}</span>
-            <span>events</span>
-            <ChevronRight className="h-3 w-3 opacity-50" />
-          </button>
-        </div>
-
+        <Card className="bg-card/40">
+          <CardContent className="flex items-center gap-6 px-4 py-3">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Clock className="h-3 w-3" />
+              <span className="font-mono tabular-nums">{uptimeStr}</span>
+            </div>
+            <Separator orientation="vertical" className="h-4" />
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Cpu className="h-3 w-3" />
+              <span>{processes.length} {processLabel}</span>
+            </div>
+            <Separator orientation="vertical" className="h-4" />
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Radio className="h-3 w-3" />
+              <span>{portSubs.length} {portLabel}</span>
+            </div>
+            <Separator orientation="vertical" className="h-4" />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onSwitchTab('events')}
+              className="h-auto px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground gap-1.5"
+            >
+              <Activity className="h-3 w-3" />
+              <span className="font-mono tabular-nums">{eventCounts.total}</span>
+              <span>{strings.session.eventsLabel}</span>
+              <ChevronRight className="h-3 w-3 opacity-50" />
+            </Button>
+          </CardContent>
+        </Card>
 
         {/* Session identity */}
-        <div className="rounded-lg border border-border overflow-hidden">
-          <div className="px-4 py-2.5 bg-card/50 border-b border-border">
-            <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Session</span>
-          </div>
-          <div className="divide-y divide-border">
+        <Card className="overflow-hidden p-0">
+          <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
+            <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
+              {strings.session.sectionSession}
+            </span>
+          </CardHeader>
+          <CardContent className="p-0 divide-y divide-border">
             <div className="flex items-center justify-between px-4 py-2.5">
-              <span className="text-[10px] text-muted-foreground">Target</span>
+              <span className="text-[10px] text-muted-foreground">{strings.session.fieldTarget}</span>
               <span className="text-xs font-mono font-medium text-foreground">{session.target}</span>
             </div>
             <div className="flex items-center justify-between px-4 py-2.5">
-              <span className="text-[10px] text-muted-foreground">Session ID</span>
+              <span className="text-[10px] text-muted-foreground">{strings.session.fieldSessionId}</span>
               <span className="text-xs font-mono text-foreground">{session.session_id}</span>
             </div>
             <div className="flex items-center justify-between px-4 py-2.5">
-              <span className="text-[10px] text-muted-foreground">Version</span>
+              <span className="text-[10px] text-muted-foreground">{strings.session.fieldVersion}</span>
               <span className="text-xs font-mono text-foreground">v{session.mirrord_version}</span>
             </div>
-            {(() => {
-              const rawKey = (session.config as Record<string, unknown>)?.key
-              if (!rawKey) return null
-              let keyStr: string
-              if (typeof rawKey === 'string') keyStr = rawKey
-              else if (typeof rawKey === 'object' && rawKey !== null) {
-                keyStr = String(Object.values(rawKey as Record<string, unknown>)[0] ?? '')
-              } else keyStr = String(rawKey)
-              if (!keyStr) return null
-              return (
-                <div className="flex items-center justify-between px-4 py-2.5">
-                  <span className="text-[10px] text-muted-foreground">Key</span>
-                  <span className="text-xs font-mono text-foreground">{keyStr}</span>
-                </div>
-              )
-            })()}
-          </div>
-        </div>
+            {licenseKey && (
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-[10px] text-muted-foreground">{strings.session.fieldKey}</span>
+                <span className="text-xs font-mono text-foreground">{licenseKey}</span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Port Subscriptions */}
-        <div className="rounded-lg border border-border overflow-hidden">
-          <div className="px-4 py-2.5 bg-card/50 border-b border-border">
-            <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Port Subscriptions</span>
-          </div>
-          {portSubs.length > 0 ? (
-            <div className="divide-y divide-border">
-              {portSubs.map(p => (
-                <div key={p.port} className="flex items-center justify-between px-4 py-2.5">
-                  <span className="text-xs font-mono font-medium text-foreground">:{p.port}</span>
-                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-mono">{p.mode}</Badge>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="px-4 py-3 text-xs text-muted-foreground">No port subscriptions</div>
-          )}
-        </div>
+        <Card className="overflow-hidden p-0">
+          <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
+            <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
+              {strings.session.sectionPorts}
+            </span>
+          </CardHeader>
+          <CardContent className="p-0">
+            {portSubs.length > 0 ? (
+              <div className="divide-y divide-border">
+                {portSubs.map(p => (
+                  <div key={p.port} className="flex items-center justify-between px-4 py-2.5">
+                    <span className="text-xs font-mono font-medium text-foreground">:{p.port}</span>
+                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-mono">{p.mode}</Badge>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="px-4 py-3 text-xs text-muted-foreground">{strings.session.noPorts}</div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Processes */}
         {processes.length > 0 && (
-          <div className="rounded-lg border border-border overflow-hidden">
-            <div className="px-4 py-2.5 bg-card/50 border-b border-border">
-              <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Processes</span>
-            </div>
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border text-[10px] text-muted-foreground">
-                  <th className="text-left px-4 py-2 font-medium">Name</th>
-                  <th className="text-right px-4 py-2 font-medium">PID</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {processes.map(p => (
-                  <tr key={p.pid}>
-                    <td className="px-4 py-2.5 font-mono font-medium text-foreground">{p.process_name || 'unknown'}</td>
-                    <td className="px-4 py-2.5 font-mono text-muted-foreground text-right">{p.pid}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Card className="overflow-hidden p-0">
+            <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
+              <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
+                {strings.session.sectionProcesses}
+              </span>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{strings.session.columnName}</TableHead>
+                    <TableHead className="text-right">{strings.session.columnPid}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {processes.map(p => (
+                    <TableRow key={p.pid}>
+                      <TableCell className="font-mono font-medium text-foreground">
+                        {p.process_name || strings.session.unknownProcess}
+                      </TableCell>
+                      <TableCell className="font-mono text-muted-foreground text-right">{p.pid}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         )}
       </div>
     </div>
@@ -236,11 +239,9 @@ export default function SessionDetail({ session, onKill }: Props) {
       port_subscription: 0, env_var: 0, layer_connected: 0, layer_disconnected: 0, total: 0,
     })
 
-    const encodedId = encodeURIComponent(session.session_id)
     // Fetch fresh session info to get current processes and port subscriptions
-    fetch(`/api/sessions/${encodedId}`)
-      .then(r => r.ok ? r.json() : null)
-      .then((info: SessionInfo | null) => {
+    api.getSession(session.session_id)
+      .then((info) => {
         if (info?.processes?.length) {
           setProcesses(info.processes.map(p => ({ pid: p.pid, process_name: p.process_name })))
         }
@@ -250,7 +251,7 @@ export default function SessionDetail({ session, onKill }: Props) {
       })
       .catch(() => {})
 
-    const eventSource = new EventSource(`/api/sessions/${encodedId}/events`)
+    const eventSource = new EventSource(api.eventStreamUrl(session.session_id))
 
     eventSource.onmessage = (e) => {
       let event: MonitorEvent
@@ -266,17 +267,17 @@ export default function SessionDetail({ session, onKill }: Props) {
         total: prev.total + 1,
       }))
 
-      if (event.type === 'port_subscription') {
+      if (event.type === EventType.PortSubscription) {
         setPortSubs(prev => {
           if (prev.some(p => p.port === event.port)) return prev
           return [...prev, { port: event.port, mode: event.mode }]
         })
-      } else if (event.type === 'layer_connected') {
+      } else if (event.type === EventType.LayerConnected) {
         setProcesses(prev => {
           if (prev.some(p => p.pid === event.pid)) return prev
           return [...prev, { pid: event.pid, process_name: event.process_name }]
         })
-      } else if (event.type === 'layer_disconnected') {
+      } else if (event.type === EventType.LayerDisconnected) {
         setProcesses(prev => prev.filter(p => p.pid !== event.pid))
       }
     }
@@ -291,9 +292,9 @@ export default function SessionDetail({ session, onKill }: Props) {
   }, [session.session_id])
 
   const tabs: { id: DetailTab; label: string; icon: typeof Activity; count?: number }[] = [
-    { id: 'overview', label: 'Overview', icon: Server },
-    { id: 'events', label: 'Events', icon: Activity, count: eventCounts.total },
-    { id: 'config', label: 'Config', icon: Settings },
+    { id: 'overview', label: strings.session.overview, icon: Server },
+    { id: 'events', label: strings.session.eventsTab, icon: Activity, count: eventCounts.total },
+    { id: 'config', label: strings.session.configTab, icon: Settings },
   ]
 
   return (
@@ -305,15 +306,17 @@ export default function SessionDetail({ session, onKill }: Props) {
             <LiveDot active={processes.length > 0} />
             <span className="font-mono text-sm font-semibold text-foreground">{session.target}</span>
             <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4 tracking-wider">
-              {session.is_operator ? 'Operator' : 'Direct'}
+              {session.is_operator ? strings.session.operator : strings.session.direct}
             </Badge>
-            <button
+            <Button
+              variant="destructive"
+              size="sm"
               onClick={() => { trackEvent('session_monitor_kill_session'); onKill() }}
-              className="text-[10px] text-destructive bg-destructive/10 border border-destructive/25 px-2.5 py-1 rounded flex items-center gap-1 hover:bg-destructive/20 transition-colors"
+              className="h-6 text-[10px] gap-1 px-2.5"
             >
               <Trash2 className="h-3 w-3" />
-              Kill
-            </button>
+              {strings.session.kill}
+            </Button>
           </div>
           <span className="text-[10px] text-muted-foreground font-mono">v{session.mirrord_version}</span>
         </div>
@@ -361,7 +364,7 @@ export default function SessionDetail({ session, onKill }: Props) {
         {activeTab === 'config' && (
           <div className="p-4 overflow-auto h-full">
             <pre className="p-4 text-[11px] font-mono text-foreground/80 whitespace-pre-wrap overflow-auto rounded-lg border border-border bg-card/30">
-              {JSON.stringify(diffConfig(session.config, defaultConfig), null, 2)}
+              {JSON.stringify(session.config, null, 2)}
             </pre>
           </div>
         )}
