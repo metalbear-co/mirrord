@@ -13,23 +13,11 @@ use super::versions;
 pub fn run() -> Result<()> {
     let python = PythonLauncher::detect()?;
     let uv = ensure_uv(&python)?;
-
-    if let Some(hash) = versions::cargo_zigbuild_hash() {
-        install_python_tool(
-            &python,
-            &uv,
-            "cargo-zigbuild",
-            versions::CARGO_ZIGBUILD_VERSION,
-            hash,
-            "cargo-zigbuild",
-        )?;
-    } else {
-        println!(
-            "Skipping cargo-zigbuild install on unsupported host {} {}",
-            env::consts::OS,
-            env::consts::ARCH
-        );
-    }
+    sync_python_tools(&python, &uv)?;
+    install_wrapper(
+        "cargo-zigbuild",
+        &venv_executable(&python_tools_environment()?, "cargo-zigbuild"),
+    )?;
 
     println!("✓ xtask dependencies are ready");
     Ok(())
@@ -122,7 +110,7 @@ fn ensure_uv(python: &PythonLauncher) -> Result<UvLauncher> {
         .with_context(|| format!("Failed to create {}", requirements_dir.display()))?;
 
     let requirements = requirements_dir.join("uv.txt");
-    write_hashed_requirement(&requirements, "uv", versions::UV_VERSION, hash)?;
+    write_hashed_requirements(&requirements, &[("uv", versions::UV_VERSION, hash)])?;
 
     println!("Installing uv {}...", versions::UV_VERSION);
     let mut cmd = python.command();
@@ -156,45 +144,36 @@ fn ensure_uv(python: &PythonLauncher) -> Result<UvLauncher> {
     Ok(UvLauncher::PythonModule(python.clone()))
 }
 
-fn install_python_tool(
-    python: &PythonLauncher,
-    uv: &UvLauncher,
-    package: &str,
-    version: &str,
-    hash: &str,
-    executable: &str,
-) -> Result<()> {
-    let install_root = tool_root()?.join(format!("{package}-{version}"));
-    let venv_dir = install_root.join("venv");
-    let requirements = install_root.join("requirements.txt");
-    let tool_executable = venv_executable(&venv_dir, executable);
+fn sync_python_tools(python: &PythonLauncher, uv: &UvLauncher) -> Result<()> {
+    let project_dir = python_tools_project_dir();
+    let environment = python_tools_environment()?;
+    let tool_root = tool_root()?;
 
-    fs::create_dir_all(&install_root)
-        .with_context(|| format!("Failed to create {}", install_root.display()))?;
-    write_hashed_requirement(&requirements, package, version, hash)?;
+    fs::create_dir_all(&tool_root)
+        .with_context(|| format!("Failed to create {}", tool_root.display()))?;
 
-    if !tool_executable.is_file() {
-        println!("Installing {package} {version}...");
+    println!(
+        "Syncing xtask Python tools from {}...",
+        project_dir.display()
+    );
 
-        let mut venv = uv.command();
-        venv.arg("venv")
-            .arg(&venv_dir)
-            .arg("--python")
-            .arg(python.executable()?);
-        run_command(&mut venv, &format!("Failed to create venv for {package}"))?;
-
-        let mut install = uv.command();
-        install
-            .args(["pip", "install", "--python"])
-            .arg(venv_python(&venv_dir))
-            .args(["--only-binary=:all:", "--require-hashes", "-r"])
-            .arg(&requirements);
-        run_command(&mut install, &format!("Failed to install {package}"))?;
-    }
-
-    install_wrapper(executable, &tool_executable)?;
-    Ok(())
+    let mut cmd = uv.command();
+    cmd.args(["sync", "--project"])
+        .arg(&project_dir)
+        .args(["--frozen", "--no-dev", "--no-install-project", "--python"])
+        .arg(python.executable()?)
+        .env("UV_PROJECT_ENVIRONMENT", &environment);
+    run_command(&mut cmd, "Failed to sync xtask Python tools")
 }
+
+fn write_hashed_requirements(path: &Path, requirements: &[(&str, &str, &str)]) -> Result<()> {
+    let contents = requirements
+        .iter()
+        .map(|(package, version, hash)| format!("{package}=={version} --hash=sha256:{hash}\n"))
+        .collect::<String>();
+    fs::write(path, contents).with_context(|| format!("Failed to write {}", path.display()))
+}
+
 fn install_wrapper(name: &str, target: &Path) -> Result<()> {
     let bin_dir = cargo_home()?.join("bin");
     fs::create_dir_all(&bin_dir)
@@ -229,11 +208,6 @@ fn install_wrapper(name: &str, target: &Path) -> Result<()> {
     Ok(())
 }
 
-fn write_hashed_requirement(path: &Path, package: &str, version: &str, hash: &str) -> Result<()> {
-    let contents = format!("{package}=={version} --hash=sha256:{hash}\n");
-    fs::write(path, contents).with_context(|| format!("Failed to write {}", path.display()))
-}
-
 fn venv_executable(venv_dir: &Path, executable: &str) -> PathBuf {
     #[cfg(windows)]
     {
@@ -243,18 +217,6 @@ fn venv_executable(venv_dir: &Path, executable: &str) -> PathBuf {
     #[cfg(not(windows))]
     {
         venv_dir.join("bin").join(executable)
-    }
-}
-
-fn venv_python(venv_dir: &Path) -> PathBuf {
-    #[cfg(windows)]
-    {
-        return venv_dir.join("Scripts").join("python.exe");
-    }
-
-    #[cfg(not(windows))]
-    {
-        venv_dir.join("bin").join("python")
     }
 }
 
@@ -268,6 +230,14 @@ fn cargo_home() -> Result<PathBuf> {
 
 fn tool_root() -> Result<PathBuf> {
     Ok(cargo_home()?.join("mirrord-xtask"))
+}
+
+fn python_tools_environment() -> Result<PathBuf> {
+    Ok(tool_root()?.join("python-tools"))
+}
+
+fn python_tools_project_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("python-tools")
 }
 
 fn home_dir() -> Result<PathBuf> {
