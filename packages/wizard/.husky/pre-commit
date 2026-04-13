@@ -1,1 +1,1 @@
-cd wizard-frontend && npx lint-staged
+cd packages/wizard && npx lint-staged

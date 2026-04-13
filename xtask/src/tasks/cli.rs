@@ -30,7 +30,7 @@ pub fn build_cli(
         // Use absolute path for wizard dist directory
         let wizard_dist = std::env::current_dir()
             .context("Failed to get current directory")?
-            .join("wizard-frontend/dist");
+            .join("packages/wizard/dist");
 
         if !wizard_dist.exists() {
             anyhow::bail!(
