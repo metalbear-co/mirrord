@@ -117,14 +117,14 @@ export default function App() {
   }, [])
 
   const handleKill = useCallback(async (id: string) => {
-    await fetch(`/api/sessions/${id}/kill`, { method: 'POST' })
+    await fetch(`/api/sessions/${encodeURIComponent(id)}/kill`, { method: 'POST' })
   }, [])
 
   const handleKillAll = useCallback(async () => {
     trackEvent('session_monitor_kill_all', { count: sessions.length })
     const current = sessions
     for (const s of current) {
-      await fetch(`/api/sessions/${s.session_id}/kill`, { method: 'POST' })
+      await fetch(`/api/sessions/${encodeURIComponent(s.session_id)}/kill`, { method: 'POST' })
     }
   }, [sessions])
 

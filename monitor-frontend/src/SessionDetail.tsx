@@ -236,8 +236,9 @@ export default function SessionDetail({ session, onKill }: Props) {
       port_subscription: 0, env_var: 0, layer_connected: 0, layer_disconnected: 0, total: 0,
     })
 
+    const encodedId = encodeURIComponent(session.session_id)
     // Fetch fresh session info to get current processes and port subscriptions
-    fetch(`/api/sessions/${session.session_id}`)
+    fetch(`/api/sessions/${encodedId}`)
       .then(r => r.ok ? r.json() : null)
       .then((info: SessionInfo | null) => {
         if (info?.processes?.length) {
@@ -249,7 +250,7 @@ export default function SessionDetail({ session, onKill }: Props) {
       })
       .catch(() => {})
 
-    const eventSource = new EventSource(`/api/sessions/${session.session_id}/events`)
+    const eventSource = new EventSource(`/api/sessions/${encodedId}/events`)
 
     eventSource.onmessage = (e) => {
       let event: MonitorEvent

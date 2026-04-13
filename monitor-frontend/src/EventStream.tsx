@@ -83,7 +83,7 @@ export default function EventStream({ session }: Props) {
     setEvents([])
     setStreaming(true)
 
-    const eventSource = new EventSource(`/api/sessions/${session.session_id}/events`)
+    const eventSource = new EventSource(`/api/sessions/${encodeURIComponent(session.session_id)}/events`)
 
     eventSource.onmessage = (e) => {
       let event: MonitorEvent
