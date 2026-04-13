@@ -44,9 +44,6 @@ enum Commands {
     /// Prepare monitor frontend assets only
     BuildMonitor,
 
-    /// Install pinned external tools required by xtask
-    Init,
-
     /// Build layer only
     BuildLayer {
         /// Target platform
@@ -83,7 +80,7 @@ enum Commands {
         cargo_args: Vec<String>,
     },
 
-    /// Run the e2e test suite with externally provided mirrord artifacts
+    /// Run the e2e test suite, optionally with externally provided mirrord artifacts
     TestE2e {
         /// Path to an external mirrord CLI binary
         #[arg(long)]
@@ -105,7 +102,7 @@ enum Commands {
         cargo_args: Vec<String>,
     },
 
-    /// Run the integration test suite with externally provided mirrord artifacts
+    /// Run the integration test suite, optionally with externally provided mirrord artifacts
     TestIntegration {
         /// Path to an external mirrord CLI binary
         #[arg(long)]
@@ -172,10 +169,6 @@ fn main() -> Result<()> {
 
         Commands::BuildMonitor => {
             tasks::monitor::build_monitor()?;
-        }
-
-        Commands::Init => {
-            tasks::init::run()?;
         }
 
         Commands::BuildLayer {

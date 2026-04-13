@@ -11,7 +11,9 @@ ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 COPY . /build/
 
-RUN cargo xtask init
+RUN apt-get update && apt-get install -y python3-pip
+RUN python3 -m pip install --break-system-packages uv==0.11.3
+RUN cargo install cargo-zigbuild --version 0.22.1 --locked
 
 RUN case "$(cat /.platform)" in \
     x86_64-unknown-linux-gnu) platform=linux-x86_64 ;; \

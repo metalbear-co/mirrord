@@ -44,16 +44,6 @@ cargo xtask build-cli --release --no-wizard
 cargo xtask build-cli --release --skip-build-wizard
 ```
 
-### `init`
-
-Installs xtask-managed external tools. `uv` and Python 3 are prerequisites for this command.
-Today it uses `uv` to sync the Python tool environment and exposes `cargo-zigbuild` to Cargo via a
-wrapper in `$CARGO_HOME/bin`.
-
-```bash
-cargo xtask init
-```
-
 **Supported platforms:**
 - `macos-universal` (or `macos`, `darwin`) - macOS universal binary (x86_64 + aarch64)
 - `linux-x86_64` (or `linux-amd64`) - Linux x86_64
