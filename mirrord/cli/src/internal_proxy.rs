@@ -22,7 +22,10 @@ use std::{
 };
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
-use mirrord_config::LayerConfig;
+use mirrord_config::{
+    LayerConfig, LayerFileConfig,
+    config::{ConfigContext, MirrordConfig},
+};
 use mirrord_intproxy::{
     IntProxy,
     agent_conn::{AgentConnectInfo, AgentConnection},
@@ -51,6 +54,58 @@ use crate::{
     user_data::UserData,
     util::create_listen_socket,
 };
+
+/// Serializes the resolved [`LayerConfig`] as a JSON object containing only the fields that
+/// differ from a freshly generated default config. The session monitor shows the result in
+/// its Config tab, so users see only what they (or the environment) customized instead of
+/// the full resolved config.
+#[cfg(unix)]
+fn config_as_diff(config: &LayerConfig) -> serde_json::Value {
+    let actual = match serde_json::to_value(config) {
+        Ok(v) => v,
+        Err(_) => return serde_json::Value::Null,
+    };
+
+    let mut ctx = ConfigContext::default().strict_env(true);
+    let Ok(default_cfg) = LayerFileConfig::default().generate_config(&mut ctx) else {
+        return actual;
+    };
+    let default = match serde_json::to_value(&default_cfg) {
+        Ok(v) => v,
+        Err(_) => return actual,
+    };
+
+    json_diff(&actual, &default).unwrap_or(serde_json::Value::Object(Default::default()))
+}
+
+/// Recursive JSON diff. Returns `None` when `actual` equals `default`, otherwise returns an
+/// object containing only the keys whose values differ, descending into nested objects.
+#[cfg(unix)]
+fn json_diff(
+    actual: &serde_json::Value,
+    default: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    if actual == default {
+        return None;
+    }
+    match (actual, default) {
+        (serde_json::Value::Object(a), serde_json::Value::Object(d)) => {
+            let mut out = serde_json::Map::new();
+            for (k, v) in a {
+                let dv = d.get(k).unwrap_or(&serde_json::Value::Null);
+                if let Some(child) = json_diff(v, dv) {
+                    out.insert(k.clone(), child);
+                }
+            }
+            if out.is_empty() {
+                None
+            } else {
+                Some(serde_json::Value::Object(out))
+            }
+        }
+        _ => Some(actual.clone()),
+    }
+}
 
 /// Print the address for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
@@ -104,7 +159,7 @@ async fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> Monit
             },
         };
 
-        let config_value = serde_json::to_value(config).unwrap_or(serde_json::Value::Null);
+        let config_value = config_as_diff(config);
 
         let session_info = SessionInfo {
             session_id: session_id.clone(),
