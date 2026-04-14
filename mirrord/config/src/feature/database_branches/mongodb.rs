@@ -7,6 +7,7 @@ use super::DatabaseBranchBaseConfig;
 
 /// When configuring a branch for MongoDB, set `type` to `mongodb`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MongodbBranchConfig {
     #[serde(flatten)]
     pub base: DatabaseBranchBaseConfig,
@@ -29,7 +30,7 @@ pub struct MongodbBranchConfig {
 ///   Copies both schema and data of all collections. Supports optional collection filters
 ///   to copy only specific collections or filter documents within collections.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "lowercase")]
+#[serde(tag = "mode", rename_all = "lowercase", deny_unknown_fields)]
 pub enum MongodbBranchCopyConfig {
     Empty {
         collections: Option<BTreeMap<String, MongodbBranchCollectionCopyConfig>>,

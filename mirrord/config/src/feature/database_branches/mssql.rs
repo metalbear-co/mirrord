@@ -7,6 +7,7 @@ use super::DatabaseBranchBaseConfig;
 
 /// When configuring a branch for MSSQL, set `type` to `mssql`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MssqlBranchConfig {
     #[serde(flatten)]
     pub base: DatabaseBranchBaseConfig,
@@ -33,7 +34,7 @@ pub struct MssqlBranchConfig {
 ///   Copies both schema and data of all tables. This option shall only be used
 ///   when the data volume of the source database is minimal.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "lowercase")]
+#[serde(tag = "mode", rename_all = "lowercase", deny_unknown_fields)]
 pub enum MssqlBranchCopyConfig {
     Empty {
         tables: Option<BTreeMap<String, MssqlBranchTableCopyConfig>>,
