@@ -16,10 +16,11 @@ cargo xtask build-cli --release
 
 Builds the complete CLI with all dependencies. This is the main command that orchestrates:
 1. Building the wizard frontend (npm install + build)
-2. Building the mirrord layer for the target platform
-3. Building the mirrord CLI binary
-4. Creating universal binaries (on macOS)
-5. Signing binaries (on macOS)
+2. Preparing the monitor frontend assets used by the session monitor UI
+3. Building the mirrord layer for the target platform
+4. Building the mirrord CLI binary
+5. Creating universal binaries (on macOS)
+6. Signing binaries (on macOS)
 
 **Usage:**
 
@@ -38,6 +39,9 @@ cargo xtask build-cli --release --platform windows
 
 # Build without wizard frontend
 cargo xtask build-cli --release --no-wizard
+
+# Build with the wizard feature but reuse an existing dist directory
+cargo xtask build-cli --release --skip-build-wizard
 ```
 
 **Supported platforms:**
@@ -48,10 +52,18 @@ cargo xtask build-cli --release --no-wizard
 
 ### `build-wizard`
 
-Builds only the wizard frontend.
+Builds and packages the wizard frontend assets required by the CLI build.
 
 ```bash
 cargo xtask build-wizard
+```
+
+### `build-monitor`
+
+Prepares the monitor frontend assets required by the CLI build.
+
+```bash
+cargo xtask build-monitor
 ```
 
 ### `build-layer`
@@ -107,6 +119,7 @@ cargo xtask build-cli --release
 The xtask is organized into modules:
 
 - `tasks/wizard.rs` - Builds the wizard frontend (npm install + build)
+- `tasks/monitor.rs` - Prepares the monitor frontend assets
 - `tasks/layer.rs` - Builds mirrord-layer for various platforms
 - `tasks/cli.rs` - Builds mirrord CLI binary
 - `tasks/release.rs` - Orchestrates the full build process

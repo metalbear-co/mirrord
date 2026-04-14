@@ -51,7 +51,6 @@ chrono.workspace = true
 tempfile.workspace = true
 tokio-tungstenite.workspace = true
 
-# Note: always compiles mirrord as build dependancy
 mirrord-test-utils = { path = "../test-utils" }
 
 [target.'cfg(unix)'.dependencies]

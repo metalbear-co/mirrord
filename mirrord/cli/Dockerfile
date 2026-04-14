@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21 AS chef
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21 AS builder
 ARG TARGETARCH
 WORKDIR /build
 
@@ -8,29 +8,26 @@ RUN ./platform.sh
 # this takes around 1 minute since libgit2 is slow https://github.com/rust-lang/cargo/issues/9167
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
-# cargo-chef 0.1.69 breaks the build
-RUN cargo install cargo-chef@0.1.72
-
-FROM chef AS planner
 
 COPY . /build/
-RUN cargo +nightly-2026-02-24 chef prepare --recipe-path recipe.json
 
-FROM chef AS builder
+RUN apt-get update && apt-get install -y python3-pip
+RUN python3 -m pip install --break-system-packages uv==0.11.3
+RUN cargo install cargo-zigbuild --version 0.22.1 --locked
 
-COPY --from=planner /build/recipe.json recipe.json
-RUN cargo +nightly-2026-02-24 chef cook --release --zigbuild --target $(cat /.platform) --recipe-path recipe.json
+RUN case "$(cat /.platform)" in \
+    x86_64-unknown-linux-gnu) platform=linux-x86_64 ;; \
+    aarch64-unknown-linux-gnu) platform=linux-aarch64 ;; \
+    *) echo "unsupported xtask platform for $(cat /.platform)" >&2; exit 1 ;; \
+    esac; \
+    cargo xtask build-cli --no-wizard --platform "$platform" --release
 
-COPY . /build/
-RUN echo INITIAL CARGO LOCK --- && cat Cargo.lock && echo INITIAL CARGO LOCK OVER ----
-RUN cargo +nightly-2026-02-24 zigbuild -p mirrord -p mirrord-layer -Z bindeps --target $(cat /.platform) --release
-RUN echo MODIFIED CARGO LOCK --- && cat Cargo.lock && echo MODIFIED CARGO LOCK OVER ----
 RUN cp /build/target/$(cat /.platform)/release/mirrord /mirrord
 RUN cp /build/target/$(cat /.platform)/release/libmirrord_layer.so /libmirrord_layer.so
 
 # For ARM64 builds, also build x86_64 version to support cross-platform containers
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
-    cargo +nightly-2026-02-24 zigbuild -p mirrord-layer -Z bindeps --target x86_64-unknown-linux-gnu --release --locked && \
+    cargo xtask build-layer --target x86_64-unknown-linux-gnu --release --locked && \
     cp /build/target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so /libmirrord_layer_x86_64.so; \
     fi
 
