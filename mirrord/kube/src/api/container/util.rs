@@ -1,7 +1,7 @@
 use std::{ops::Not, sync::LazyLock};
 
 use futures::{AsyncBufReadExt, TryStreamExt};
-use k8s_openapi::api::core::v1::{EnvVar, Pod, Toleration};
+use k8s_openapi::api::core::v1::{ContainerStateWaiting, EnvVar, Pod, Toleration};
 use kube::{Api, api::LogParams};
 use mirrord_agent_env::envs;
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
@@ -150,6 +150,44 @@ pub(super) async fn wait_for_agent_startup(
 
     warn!("Agent did not print 'agent ready' message");
     Ok(None)
+}
+
+/// Returns an error message if the container is in an image pull failure state
+/// (e.g. ImagePullBackOff, ErrImagePull).
+pub(super) fn is_image_pull_error(container_state: &ContainerStateWaiting) -> Option<String> {
+    let reason = container_state.reason.as_deref();
+    if matches!(reason, Some("ImagePullBackOff" | "ErrImagePull")) {
+        return Some(format!(
+            "agent container failed to pull image ({}): {}",
+            reason.unwrap_or("<unknown reason>"),
+            container_state.message.as_deref().unwrap_or("<no message>"),
+        ));
+    }
+    None
+}
+
+/// Inspects the ephemeral container status and returns an error message if the
+/// container is stuck in an image pull failure state.
+///
+/// These states do not transition the pod to `Failed`, so they must be handled
+/// explicitly to avoid waiting indefinitely.
+pub(super) fn get_ephemeral_container_image_pull_error(
+    pod: &Pod,
+    container_name: &str,
+) -> Option<String> {
+    let waiting = pod
+        .status
+        .as_ref()
+        .and_then(|status| status.ephemeral_container_statuses.as_deref())
+        .and_then(|container_statuses| {
+            container_statuses
+                .iter()
+                .find(|status| status.name == container_name)
+                .and_then(|status| status.state.as_ref())
+                .and_then(|state| state.waiting.as_ref())
+        })?;
+
+    is_image_pull_error(waiting)
 }
 
 #[cfg(test)]

@@ -200,7 +200,7 @@ jobs:
         uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
         with:
           files: |
-            wizard-frontend/**
+            packages/wizard/**
       - name: verify protocol bump
         run: |
           if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
@@ -283,9 +283,9 @@ jobs:
         with:
           node-version: 24
       - run: npm install
-        working-directory: ./wizard-frontend
+        working-directory: ./packages/wizard
       - run: npm run lint
-        working-directory: ./wizard-frontend
+        working-directory: ./packages/wizard
 
   # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
   # the output of this test is a boolean indicating if it's a release branch

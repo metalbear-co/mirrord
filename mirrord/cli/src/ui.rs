@@ -48,7 +48,7 @@ const MAX_EVENTS_PER_SESSION: usize = 500;
 
 #[cfg(not(debug_assertions))]
 #[derive(Embed)]
-#[folder = "../../monitor-frontend/dist/"]
+#[folder = "../../packages/monitor/dist/"]
 struct FrontendAssets;
 
 #[derive(Clone, Debug, Serialize)]
@@ -425,7 +425,7 @@ fn guess_mime(path: &str) -> &'static str {
 fn get_asset(path: &str) -> Option<Vec<u8>> {
     #[cfg(debug_assertions)]
     {
-        let base = concat!(env!("CARGO_MANIFEST_DIR"), "/../../monitor-frontend/dist/");
+        let base = concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/monitor/dist/");
         std::fs::read(format!("{base}{path}")).ok()
     }
     #[cfg(not(debug_assertions))]
