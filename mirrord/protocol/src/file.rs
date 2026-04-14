@@ -1,8 +1,6 @@
 use core::fmt;
-#[cfg(target_os = "linux")]
-use std::os::unix::fs::DirEntryExt;
 #[cfg(all(target_os = "linux", feature = "libc"))]
-use std::{fs::DirEntry, io};
+use std::{fs::DirEntry, io, os::unix::fs::DirEntryExt};
 #[cfg(not(target_os = "windows"))]
 use std::{fs::Metadata, os::unix::prelude::MetadataExt};
 use std::{io::SeekFrom, path::PathBuf, sync::LazyLock};
