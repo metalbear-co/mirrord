@@ -698,7 +698,10 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: astral-sh/setup-uv@v2
       - run: uv --version
-      - run: uv tool install cargo-zigbuild==0.22.1 --with ziglang==0.15.2 --with-executables-from ziglang
+      - run: uv tool install cargo-zigbuild==0.22.1
+      - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
+      - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
+      - run: cargo zigbuild --version && zig version
       - run: cargo xtask build-cli
       # This needs improving to prevent flakiness! e.g. examining output for progress messages
       # `sleep` is used here to give the wizard enough time to start before curl
