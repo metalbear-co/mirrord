@@ -238,7 +238,7 @@ mod tests {
 
     #[tokio::test]
     async fn add_redirect() {
-        let chain_names = ChainNames::new();
+        let chain_names = ChainNames::legacy();
         let gid = getgid();
         let mut mock = MockIPTables::new();
 

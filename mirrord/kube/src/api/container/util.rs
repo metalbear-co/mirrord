@@ -5,7 +5,6 @@ use k8s_openapi::api::core::v1::{ContainerStateWaiting, EnvVar, Pod, Toleration}
 use kube::{Api, api::LogParams};
 use mirrord_agent_env::envs;
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
-use rand::distr::{Alphanumeric, SampleString};
 use regex::Regex;
 use tracing::warn;
 
@@ -92,13 +91,6 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
 
     if let Some(clean) = agent.clean_iptables_on_start {
         env.push(envs::CLEAN_IPTABLES_ON_START.as_k8s_spec(&clean));
-    }
-
-    if agent.single_pod_multi_container {
-        let iptables_id = Alphanumeric
-            .sample_string(&mut rand::rng(), 16)
-            .to_lowercase();
-        env.push(envs::IPTABLES_IDENTIFIER.as_k8s_spec(&iptables_id));
     }
 
     env

@@ -49,21 +49,18 @@ pub struct ChainNames {
 
 impl ChainNames {
     #[tracing::instrument(level = Level::DEBUG, ret)]
-    pub fn new() -> Self {
-        match mirrord_agent_env::envs::IPTABLES_IDENTIFIER.try_from_env() {
-            Ok(Some(id)) => Self {
-                prerouting: format!("MRDIN_{id}"),
-                mesh: format!("MRDOUT_{id}"),
-                standard: format!("MRDSTD_{id}"),
-                exclude_from_mesh: format!("MRDMSH_{id}"),
-            },
-            _ => Self::legacy(),
+    pub fn new(id: &str) -> Self {
+        Self {
+            prerouting: format!("MRDIN_{id}"),
+            mesh: format!("MRDOUT_{id}"),
+            standard: format!("MRDSTD_{id}"),
+            exclude_from_mesh: format!("MRDMSH_{id}"),
         }
     }
 
     /// [`mirrord_agent_env::envs::IPTABLES_IDENTIFIER`] is missing, so we use the default static
     /// names.
-    fn legacy() -> Self {
+    pub fn legacy() -> Self {
         Self {
             prerouting: "MIRRORD_INPUT".to_owned(),
             mesh: "MIRRORD_OUTPUT".to_owned(),
@@ -89,6 +86,7 @@ pub trait IPTables {
 
     fn create_chain(&self, name: &str) -> IPTablesResult<()>;
     fn remove_chain(&self, name: &str) -> IPTablesResult<()>;
+    fn chain_exists(&self, chain: &str) -> IPTablesResult<bool>;
 
     fn add_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()>;
     fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> IPTablesResult<()>;
@@ -102,6 +100,40 @@ pub trait IPTables {
 pub struct IPTablesWrapper {
     table_name: &'static str,
     tables: Arc<iptables::IPTables>,
+}
+
+impl IPTablesWrapper {
+    const IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_CHAIN_NAME: &str = "MRD_ORIG_ROUTE_LOCALNET";
+
+    pub async fn add_mesh_bullshit(&self) -> IPTablesResult<()> {
+        if self.chain_exists(Self::IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_CHAIN_NAME)? {
+        } else {
+            self.create_chain(Self::IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_CHAIN_NAME)?;
+
+            self.add_rule(
+                "MRD_ORIG_ROUTE_LOCALNET",
+                format!(
+                    r#"-p 255 -m comment --comment "{}" -j RETURN"#,
+                    IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL.to_string()
+                )
+                .as_str(),
+            )?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn remove_mesh_bullshit(&self) {
+        self.remove_rule(
+            "MRD_ORIG_ROUTE_LOCALNET",
+            format!(
+                r#"-p 255 -m comment --comment "{}" -j RETURN"#,
+                IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL.to_string()
+            )
+            .as_str(),
+        )
+        .unwrap();
+    }
 }
 
 impl Debug for IPTablesWrapper {
@@ -146,6 +178,11 @@ impl IPTables for IPTablesWrapper {
         self.tables.delete_chain(self.table_name, name)?;
 
         Ok(())
+    }
+
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
+    fn chain_exists(&self, chain: &str) -> IPTablesResult<bool> {
+        Ok(self.tables.chain_exists(self.table_name, chain)?)
     }
 
     #[tracing::instrument(level = Level::TRACE, ret, err)]
@@ -520,7 +557,7 @@ mod tests {
 
     #[tokio::test]
     async fn default() {
-        let chain_names = ChainNames::new();
+        let chain_names = ChainNames::legacy();
         let mut mock = MockIPTables::new();
 
         mock.expect_list_rules()
@@ -629,7 +666,7 @@ mod tests {
 
     #[tokio::test]
     async fn linkerd() {
-        let cn = ChainNames::new();
+        let cn = ChainNames::legacy();
         let mut mock = MockIPTables::new();
 
         mock.expect_list_rules()
@@ -763,7 +800,7 @@ mod tests {
 
     #[tokio::test]
     async fn with_mesh_exclusion() {
-        let chain_names = ChainNames::new();
+        let chain_names = ChainNames::legacy();
         let mut mock = MockIPTables::new();
 
         mock.expect_list_rules()
@@ -901,7 +938,7 @@ mod tests {
     /// A fresh IP table, or one with only non-agent names, should pass.
     #[tokio::test]
     async fn pass_on_clean() {
-        let chain_names = ChainNames::new();
+        let chain_names = ChainNames::legacy();
         let mut mock = MockIPTables::new();
 
         // clean table returns non-mirrord rules only
@@ -926,7 +963,7 @@ mod tests {
     /// If there are any chains in the IP table with names used by the agent, the check should fail.
     #[tokio::test]
     async fn fail_on_dirty() {
-        let chain_names = ChainNames::new();
+        let chain_names = ChainNames::legacy();
         let mut mock = MockIPTables::new();
 
         // dirty table returns non-mirrord rules, plus a leftover mirrord rule

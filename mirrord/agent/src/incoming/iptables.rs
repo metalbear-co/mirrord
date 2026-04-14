@@ -14,6 +14,7 @@ use tokio::net::TcpListener;
 use tracing::Level;
 
 use super::{PortRedirector, Redirected};
+use crate::entrypoint::IPTABLES_IDENTIFIER;
 
 /// A [`PortRedirector`] implementation that uses a [`TcpListener`]
 /// and an iptables/ip6tables wrapper to set rules that send traffic to that listener.
@@ -83,7 +84,11 @@ impl IpTablesRedirector {
 
     pub async fn init_iptables(&mut self) -> Result<(), IPTablesError> {
         let ntfables = envs::NFTABLES.try_from_env().unwrap_or_default();
-        let chain_names = ChainNames::new();
+        let chain_names = ChainNames::new(
+            IPTABLES_IDENTIFIER
+                .get()
+                .expect("Should be set during state initialization!"),
+        );
         let iptables = mirrord_agent_iptables::get_iptables(ntfables, self.ipv6);
         let iptables = SafeIpTables::create(
             iptables,
