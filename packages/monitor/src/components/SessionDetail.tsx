@@ -4,6 +4,7 @@ import type { SessionInfo, MonitorEvent, PortSubscription, ProcessInfo } from '.
 import { api } from '../api'
 import { strings } from '../strings'
 import { EventType } from '../eventTypes'
+import { expectArray } from '../utils'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
 import SessionTabs from './SessionTabs'
@@ -43,16 +44,14 @@ export default function SessionDetail({ session, onKill }: Props) {
           console.warn('Session info missing for', session.session_id)
           return
         }
-        if (!Array.isArray(info.processes)) {
-          console.warn('Session info has no `processes` array', info)
-        } else if (info.processes.length > 0) {
-          setProcesses(info.processes.map(p => ({ pid: p.pid, process_name: p.process_name })))
-        }
-        if (!Array.isArray(info.port_subscriptions)) {
-          console.warn('Session info has no `port_subscriptions` array', info)
-        } else if (info.port_subscriptions.length > 0) {
-          setPortSubs(info.port_subscriptions.map(p => ({ port: p.port, mode: p.mode })))
-        }
+
+        const procs = expectArray<ProcessInfo>(info.processes, 'processes', info)
+          .map(p => ({ pid: p.pid, process_name: p.process_name }))
+        if (procs.length > 0) setProcesses(procs)
+
+        const ports = expectArray<PortSubscription>(info.port_subscriptions, 'port_subscriptions', info)
+          .map(p => ({ port: p.port, mode: p.mode }))
+        if (ports.length > 0) setPortSubs(ports)
       } catch (err) {
         console.warn('Failed to fetch session snapshot', err)
       }

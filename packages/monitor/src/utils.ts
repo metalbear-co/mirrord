@@ -9,6 +9,15 @@ export function formatUptime(startedAt: string): string {
   return `${seconds}s`
 }
 
+// Expects `value` to be an array; logs a warning and returns `[]` if it isn't.
+// Used to defensively parse untyped JSON fields from the session monitor API,
+// so a malformed response doesn't crash the component.
+export function expectArray<T>(value: unknown, fieldName: string, context?: unknown): T[] {
+  if (Array.isArray(value)) return value as T[]
+  console.warn(`Session info missing expected \`${fieldName}\` array`, context ?? value)
+  return []
+}
+
 // Session config may carry the license `key` as either a plain string or an
 // object shape (e.g. { value: "..." }); flatten it to a displayable string.
 export function extractLicenseKey(config: unknown): string | null {
