@@ -2906,7 +2906,7 @@
                 "null"
               ]
             },
-            "fallback_value": {
+            "value": {
               "type": [
                 "string",
                 "null"

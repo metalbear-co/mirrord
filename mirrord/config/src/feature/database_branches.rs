@@ -387,7 +387,7 @@ pub enum ParamSource {
         #[serde(default, alias = "variable", skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        fallback_value: Option<String>,
+        value: Option<String>,
     },
 }
 
@@ -785,7 +785,7 @@ mod tests {
                     config.params.host,
                     Some(ParamSource::Env {
                         env_var_name: None,
-                        fallback_value: None
+                        value: None
                     })
                 );
             }

@@ -130,7 +130,7 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
                 },
                 ParamSource::Env {
                     env_var_name,
-                    fallback_value,
+                    value,
                 } => {
                     let var_name = env_var_name.clone().unwrap_or_else(|| role.to_uppercase());
                     match config.source_type.as_ref() {
@@ -141,7 +141,7 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
                         _ => ConnectionSourceKind::Env {
                             container: None,
                             variable: var_name,
-                            value: fallback_value.clone(),
+                            value: value.clone(),
                         },
                     }
                 }
