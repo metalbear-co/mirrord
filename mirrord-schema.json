@@ -2900,13 +2900,13 @@
         {
           "type": "object",
           "properties": {
-            "value": {
+            "env_var_name": {
               "type": [
                 "string",
                 "null"
               ]
             },
-            "variable": {
+            "fallback_value": {
               "type": [
                 "string",
                 "null"

@@ -384,10 +384,10 @@ pub enum ParamSource {
         key: String,
     },
     Env {
+        #[serde(default, alias = "variable", skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        variable: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        value: Option<String>,
+        fallback_value: Option<String>,
     },
 }
 
@@ -395,7 +395,7 @@ impl ParamSource {
     pub fn as_variable(&self) -> Option<&str> {
         match self {
             Self::Variable(v) => Some(v),
-            Self::Env { variable, .. } => variable.as_deref(),
+            Self::Env { env_var_name, .. } => env_var_name.as_deref(),
             Self::Secret { .. } => None,
         }
     }
@@ -784,8 +784,8 @@ mod tests {
                 assert_eq!(
                     config.params.host,
                     Some(ParamSource::Env {
-                        variable: None,
-                        value: None
+                        env_var_name: None,
+                        fallback_value: None
                     })
                 );
             }

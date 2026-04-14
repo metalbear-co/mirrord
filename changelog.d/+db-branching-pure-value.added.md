@@ -1,1 +1,1 @@
-Support for pure value credentials in db branching.
+Support for plain value credentials in db branching.
