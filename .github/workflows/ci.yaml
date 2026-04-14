@@ -698,7 +698,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: astral-sh/setup-uv@v2
       - run: uv --version
-      - run: cargo install cargo-zigbuild --version 0.22.1 --locked
+      - run: uv tool install cargo-zigbuild==0.22.1
       - run: cargo xtask build-cli
       # This needs improving to prevent flakiness! e.g. examining output for progress messages
       # `sleep` is used here to give the wizard enough time to start before curl
