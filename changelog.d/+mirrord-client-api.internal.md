@@ -1,1 +1,0 @@
-Added implementation of `mirrord-protocol` client.

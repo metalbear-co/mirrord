@@ -1,1 +1,0 @@
-cd wizard-frontend && npx lint-staged

@@ -28,8 +28,12 @@ use mirrord_analytics::{
     preview::{PreviewEvent, PreviewEventKind},
 };
 use mirrord_config::{
-    LayerConfig, config::ConfigContext, feature::preview::PreviewTtlMins, target::Target,
+    LayerConfig,
+    config::ConfigContext,
+    feature::preview::PreviewTtlMins,
+    target::{Target, TargetDisplay},
 };
+use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
     client::{NoClientCert, OperatorApi},
     crd::{
@@ -213,7 +217,10 @@ async fn preview_start(
             PreviewTtlMins::Finite(mins) => mins.saturating_mul(60),
             PreviewTtlMins::Infinite(_) => PreviewTtlMins::INFINITE_TTL_SECS,
         },
-        incoming: PreviewIncomingConfig::from_config(&layer_config.feature.network.incoming),
+        incoming: PreviewIncomingConfig::from_config(
+            &layer_config.feature.network.incoming,
+            layer_config.key.as_str(),
+        ),
         queue_splitting: PreviewQueueSplittingConfig::from_config(
             &layer_config.feature.split_queues,
         ),
@@ -660,6 +667,9 @@ async fn preview_stop(
 /// Resolves a [`Target`] to a [`SessionTarget`] by fetching the target from the
 /// operator's GET TargetCrd API. The operator validates the target exists and resolves
 /// the container if not specified. Works for both single-cluster and multi-cluster.
+///
+/// Falls back to local `runtime_data` resolution if the operator didn't resolve the
+/// container (backwards compatibility with older operators).
 async fn resolve_config_target(
     config_target: &Target,
     client: &kube::Client,
@@ -671,12 +681,22 @@ async fn resolve_config_target(
         .get(&TargetCrd::urlfied_name(config_target))
         .await
         .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?;
-    let target = target_crd
+    let mut target = target_crd
         .spec
         .target
         .as_known()
         .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?
         .clone();
+
+    // Older operators don't resolve the container in GET TargetCrd. Fall back to
+    // querying the cluster directly so the CLI stays compatible with them.
+    if target.container().is_none() {
+        let runtime_data = config_target
+            .runtime_data(client, namespace)
+            .await
+            .map_err(|e| CliError::PreviewTargetResolutionFailed(e.to_string()))?;
+        target.set_container(runtime_data.container_name);
+    }
 
     SessionTarget::from_config(target).ok_or_else(|| {
         CliError::PreviewTargetResolutionFailed("no valid container found".to_owned())

@@ -215,6 +215,14 @@ pub(super) enum Commands {
     /// Fix issues related to mirrord.
     Fix(FixArgs),
 
+    /// Attach mirrord layer to an already-running process by PID.
+    ///
+    /// Used by IDE extensions that spawn a process with mirrord env vars
+    /// already configured, then request the CLI to inject the layer DLL.
+    #[cfg(windows)]
+    #[command(hide = true)]
+    Attach(AttachArgs),
+
     /// Launch the session monitor UI.
     ///
     /// Watches active mirrord sessions and displays a web dashboard showing
@@ -222,6 +230,15 @@ pub(super) enum Commands {
     /// from all running mirrord sessions.
     #[cfg(unix)]
     Ui(UiArgs),
+
+    /// Manage local mirrord sessions.
+    #[cfg(unix)]
+    #[command(visible_alias = "sessions")]
+    Session(Box<SessionArgs>),
+
+    /// Kill a local mirrord session.
+    #[cfg(unix)]
+    Kill(Box<SessionDeleteArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -926,6 +943,11 @@ pub(super) enum DiagnoseCommand {
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
         config_file: Option<PathBuf>,
     },
+    /// Print the user fingerprints from the local credentials file.
+    ///
+    /// The fingerprint is what the operator uses to identify individual users (e.g. for seat
+    /// counting). One fingerprint is shown per operator license the machine has connected to.
+    License,
 }
 
 // `mirrord container` command
@@ -1377,6 +1399,14 @@ impl PreviewStopArgs {
     }
 }
 
+/// `mirrord attach` args.
+#[cfg(windows)]
+#[derive(Args, Debug)]
+pub(super) struct AttachArgs {
+    /// PID of the target process to attach to.
+    pub pid: u32,
+}
+
 /// Arguments for the `mirrord ui` command.
 #[cfg(unix)]
 #[derive(Args, Debug)]
@@ -1384,6 +1414,41 @@ pub struct UiArgs {
     /// Port to serve the UI on.
     #[arg(short = 'p', long, default_value_t = 59281)]
     pub port: u16,
+}
+
+/// Arguments for the `mirrord session` command.
+#[cfg(unix)]
+#[derive(Args, Debug)]
+pub struct SessionArgs {
+    /// Subcommand to use with `mirrord session`.
+    #[command(subcommand)]
+    pub command: Option<LocalSessionCommand>,
+}
+
+/// `mirrord session` subcommands.
+#[cfg(unix)]
+#[derive(Subcommand, Debug)]
+pub enum LocalSessionCommand {
+    /// List local mirrord sessions currently running on this machine.
+    #[command(visible_alias = "ls")]
+    List,
+
+    /// Kill a local mirrord session.
+    #[command(visible_alias = "kill")]
+    Delete(SessionDeleteArgs),
+}
+
+/// Arguments for deleting local mirrord sessions.
+#[cfg(unix)]
+#[derive(Args, Debug)]
+pub struct SessionDeleteArgs {
+    /// Session ID to kill.
+    #[arg(required_unless_present = "key")]
+    pub id: Option<String>,
+
+    /// Kill all local sessions with this key.
+    #[arg(long, conflicts_with = "id")]
+    pub key: Option<String>,
 }
 
 #[cfg(test)]

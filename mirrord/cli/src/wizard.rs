@@ -1,13 +1,13 @@
 //! # mirrord Wizard (aka onboarding Wizard)
 //!
 //! The `wizard` module contains everything needed to run the `mirrord wizard` CLI command, with the
-//! exception of the frontend code. This lives in a different top-level directory called
-//! `wizard-frontend`. More documentation specific to the frontend exists in
-//! `wizard-frontend/README.md`. The `wizard` module is gated by the `wizard` feature.
+//! exception of the frontend code. This lives in `packages/wizard`. More documentation specific to
+//! the frontend exists in `packages/wizard/README.md`. The `wizard` module is gated by the `wizard`
+//! feature.
 //!
 //! **The Wizard operates as follows**:
 //!
-//! 1. Build the TypeScript frontend and compress `wizard-frontend/dist` into a Gzipped file
+//! 1. Build the TypeScript frontend and compress `packages/wizard/dist` into a Gzipped file
 //! 2. Use the `include_bytes!` macro to make [`COMPRESSED_FRONTEND`] when compiled with the
 //!    `wizard` feature
 //! 3. When the command is run, the file is unzipped and the frontend served on localhost with axum.
@@ -20,7 +20,7 @@
 //! The build script `build.rs` installs node modules, builds the frontend, and compresses it so it
 //! can be accessed by [`COMPRESSED_FRONTEND`].
 //!
-//! Node modules are installed into the `wizard-frontend` top level dir (and are `.gitignore`d)
+//! Node modules are installed into the `packages/wizard` top level dir (and are `.gitignore`d)
 
 use std::{
     io::Cursor,
