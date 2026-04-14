@@ -1,10 +1,8 @@
 use core::fmt;
 #[cfg(target_os = "linux")]
-use std::fs::DirEntry;
-#[cfg(target_os = "linux")]
-use std::io;
-#[cfg(target_os = "linux")]
 use std::os::unix::fs::DirEntryExt;
+#[cfg(all(target_os = "linux", feature = "libc"))]
+use std::{fs::DirEntry, io};
 #[cfg(not(target_os = "windows"))]
 use std::{fs::Metadata, os::unix::prelude::MetadataExt};
 use std::{io::SeekFrom, path::PathBuf, sync::LazyLock};
@@ -212,7 +210,8 @@ impl From<FsMetadataInternalV2> for FsMetadataInternal {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "libc"))]
+#[cfg_attr(docsrs, doc(cfg(all(target_os = "linux", feature = "libc"))))]
 impl From<Statfs> for FsMetadataInternalV2 {
     fn from(stat: Statfs) -> Self {
         // The reason we need the inner `statfs64` struct is that nix's `Statfs` just does not give
