@@ -84,12 +84,14 @@ url.workspace = true
 [target.'cfg(unix)'.dependencies]
 rand.workspace = true
 axum = { workspace = true, features = ["ws"] }
+axum-extra = { workspace = true }
 rust-embed.workspace = true
 notify.workspace = true
 mime_guess.workspace = true
 eventsource-stream.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 mirrord-session-monitor-client.workspace = true
+tower-http = { workspace = true, features = ["cors"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
@@ -105,11 +107,6 @@ mirrord-sip = { path = "../sip" }
 [target.'cfg(target_os = "linux")'.dependencies]
 xmas-elf.workspace = true
 
-[target.'cfg(any(target_os = "macos", target_os = "linux"))'.build-dependencies]
-mirrord-layer = { artifact = "cdylib", path = "../layer" }
-
-[target.'cfg(target_os = "windows")'.build-dependencies]
-mirrord-layer-win = { artifact = "cdylib", path = "../layer-win" }
 
 [dev-dependencies]
 rstest.workspace = true

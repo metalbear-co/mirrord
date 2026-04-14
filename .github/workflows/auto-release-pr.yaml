@@ -36,6 +36,7 @@ jobs:
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
+          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
           toolchain: ${{ env.PINNED_NIGHTLY }}
           rustflags: ""
 
