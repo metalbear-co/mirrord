@@ -47,17 +47,6 @@ pub struct ChainNames {
     exclude_from_mesh: String,
 }
 
-impl Default for ChainNames {
-    fn default() -> Self {
-        Self {
-            prerouting: "MIRRORD_INPUT".to_owned(),
-            mesh: "MIRRORD_OUTPUT".to_owned(),
-            standard: "MIRRORD_STANDARD".to_owned(),
-            exclude_from_mesh: "MIRRORD_EXCLUDE_FROM_MESH".to_owned(),
-        }
-    }
-}
-
 impl ChainNames {
     #[tracing::instrument(level = Level::DEBUG, ret)]
     pub fn new() -> Self {
@@ -68,7 +57,18 @@ impl ChainNames {
                 standard: format!("MRDSTD_{id}"),
                 exclude_from_mesh: format!("MRDMSH_{id}"),
             },
-            _ => Self::default(),
+            _ => Self::legacy(),
+        }
+    }
+
+    /// [`mirrord_agent_env::envs::IPTABLES_IDENTIFIER`] is missing, so we use the default static
+    /// names.
+    fn legacy() -> Self {
+        Self {
+            prerouting: "MIRRORD_INPUT".to_owned(),
+            mesh: "MIRRORD_OUTPUT".to_owned(),
+            standard: "MIRRORD_STANDARD".to_owned(),
+            exclude_from_mesh: "MIRRORD_EXCLUDE_FROM_MESH".to_owned(),
         }
     }
 }
@@ -260,7 +260,7 @@ where
         Ok(Self { redirect })
     }
 
-    /// List rules from this agent that exist on the IP table.
+    /// List rules from previous mirrord agent that exist on the IP table
     #[tracing::instrument(level = Level::TRACE, skip(ipt, chain_names) ret, err)]
     pub async fn list_mirrord_rules(
         ipt: &IPT,
@@ -520,7 +520,7 @@ mod tests {
 
     #[tokio::test]
     async fn default() {
-        let cn = ChainNames::default();
+        let chain_names = ChainNames::new();
         let mut mock = MockIPTables::new();
 
         mock.expect_list_rules()
@@ -528,13 +528,13 @@ mod tests {
             .returning(|_| Ok(vec![]));
 
         mock.expect_create_chain()
-            .with(eq(cn.prerouting.clone()))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(cn.prerouting.clone()),
+                eq(chain_names.prerouting.clone()),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
@@ -542,13 +542,13 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_create_chain()
-            .with(eq(cn.standard.clone()))
+            .with(eq(chain_names.standard.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(cn.standard.clone()),
+                eq(chain_names.standard.clone()),
                 str::starts_with("-m owner --gid-owner"),
                 eq(1),
             )
@@ -557,7 +557,7 @@ mod tests {
 
         mock.expect_insert_rule()
             .with(
-                eq(cn.standard.clone()),
+                eq(chain_names.standard.clone()),
                 eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(2),
             )
@@ -565,18 +565,21 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_add_rule()
-            .with(eq("PREROUTING"), eq(format!("-j {}", cn.prerouting)))
+            .with(
+                eq("PREROUTING"),
+                eq(format!("-j {}", chain_names.prerouting)),
+            )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_add_rule()
-            .with(eq("OUTPUT"), eq(format!("-j {}", cn.standard)))
+            .with(eq("OUTPUT"), eq(format!("-j {}", chain_names.standard)))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
             .with(
-                eq(cn.prerouting.clone()),
+                eq(chain_names.prerouting.clone()),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
@@ -584,33 +587,36 @@ mod tests {
 
         mock.expect_remove_rule()
             .with(
-                eq(cn.standard.clone()),
+                eq(chain_names.standard.clone()),
                 eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
-            .with(eq("PREROUTING"), eq(format!("-j {}", cn.prerouting)))
+            .with(
+                eq("PREROUTING"),
+                eq(format!("-j {}", chain_names.prerouting)),
+            )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
-            .with(eq("OUTPUT"), eq(format!("-j {}", cn.standard)))
+            .with(eq("OUTPUT"), eq(format!("-j {}", chain_names.standard)))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(cn.prerouting.clone()))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(cn.standard.clone()))
+            .with(eq(chain_names.standard.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::create(mock, &cn, false, None, false, false)
+        let ipt = SafeIpTables::create(mock, &chain_names, false, None, false, false)
             .await
             .expect("Create Failed");
 
@@ -623,7 +629,7 @@ mod tests {
 
     #[tokio::test]
     async fn linkerd() {
-        let cn = ChainNames::default();
+        let cn = ChainNames::new();
         let mut mock = MockIPTables::new();
 
         mock.expect_list_rules()
@@ -757,7 +763,7 @@ mod tests {
 
     #[tokio::test]
     async fn with_mesh_exclusion() {
-        let cn = ChainNames::default();
+        let chain_names = ChainNames::new();
         let mut mock = MockIPTables::new();
 
         mock.expect_list_rules()
@@ -765,18 +771,18 @@ mod tests {
             .returning(|_| Ok(vec![]));
 
         mock.expect_create_chain()
-            .with(eq(cn.exclude_from_mesh.clone()))
+            .with(eq(chain_names.exclude_from_mesh.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_create_chain()
-            .with(eq(cn.prerouting.clone()))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(cn.prerouting.clone()),
+                eq(chain_names.prerouting.clone()),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
@@ -784,13 +790,13 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_create_chain()
-            .with(eq(cn.standard.clone()))
+            .with(eq(chain_names.standard.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(cn.standard.clone()),
+                eq(chain_names.standard.clone()),
                 str::starts_with("-m owner --gid-owner"),
                 eq(1),
             )
@@ -799,7 +805,7 @@ mod tests {
 
         mock.expect_insert_rule()
             .with(
-                eq(cn.standard.clone()),
+                eq(chain_names.standard.clone()),
                 eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(2),
             )
@@ -809,25 +815,28 @@ mod tests {
         mock.expect_insert_rule()
             .with(
                 eq("PREROUTING"),
-                eq(format!("-j {}", cn.exclude_from_mesh)),
+                eq(format!("-j {}", chain_names.exclude_from_mesh)),
                 eq(1),
             )
             .times(1)
             .returning(|_, _, _| Ok(()));
 
         mock.expect_add_rule()
-            .with(eq("PREROUTING"), eq(format!("-j {}", cn.prerouting)))
+            .with(
+                eq("PREROUTING"),
+                eq(format!("-j {}", chain_names.prerouting)),
+            )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_add_rule()
-            .with(eq("OUTPUT"), eq(format!("-j {}", cn.standard)))
+            .with(eq("OUTPUT"), eq(format!("-j {}", chain_names.standard)))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
             .with(
-                eq(cn.prerouting.clone()),
+                eq(chain_names.prerouting.clone()),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
@@ -835,43 +844,49 @@ mod tests {
 
         mock.expect_remove_rule()
             .with(
-                eq(cn.standard.clone()),
+                eq(chain_names.standard.clone()),
                 eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
-            .with(eq("PREROUTING"), eq(format!("-j {}", cn.exclude_from_mesh)))
+            .with(
+                eq("PREROUTING"),
+                eq(format!("-j {}", chain_names.exclude_from_mesh)),
+            )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
-            .with(eq("PREROUTING"), eq(format!("-j {}", cn.prerouting)))
+            .with(
+                eq("PREROUTING"),
+                eq(format!("-j {}", chain_names.prerouting)),
+            )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
-            .with(eq("OUTPUT"), eq(format!("-j {}", cn.standard)))
+            .with(eq("OUTPUT"), eq(format!("-j {}", chain_names.standard)))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(cn.exclude_from_mesh.clone()))
+            .with(eq(chain_names.exclude_from_mesh.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(cn.prerouting.clone()))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(cn.standard.clone()))
+            .with(eq(chain_names.standard.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::create(mock, &cn, false, None, false, true)
+        let ipt = SafeIpTables::create(mock, &chain_names, false, None, false, true)
             .await
             .expect("Create Failed");
 
@@ -886,7 +901,7 @@ mod tests {
     /// A fresh IP table, or one with only non-agent names, should pass.
     #[tokio::test]
     async fn pass_on_clean() {
-        let cn = ChainNames::default();
+        let chain_names = ChainNames::new();
         let mut mock = MockIPTables::new();
 
         // clean table returns non-mirrord rules only
@@ -899,7 +914,7 @@ mod tests {
             ])
         });
 
-        let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock, &cn).await;
+        let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock, &chain_names).await;
         assert_eq!(
             leftover_rules_res.unwrap().len(),
             0,
@@ -911,7 +926,7 @@ mod tests {
     /// If there are any chains in the IP table with names used by the agent, the check should fail.
     #[tokio::test]
     async fn fail_on_dirty() {
-        let cn = ChainNames::default();
+        let chain_names = ChainNames::new();
         let mut mock = MockIPTables::new();
 
         // dirty table returns non-mirrord rules, plus a leftover mirrord rule
@@ -925,7 +940,7 @@ mod tests {
             ])
         });
 
-        let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock, &cn).await;
+        let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock, &chain_names).await;
         assert_eq!(
             leftover_rules_res.unwrap().len(),
             1,

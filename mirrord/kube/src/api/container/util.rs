@@ -7,7 +7,7 @@ use mirrord_agent_env::envs;
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
 use rand::distr::{Alphanumeric, SampleString};
 use regex::Regex;
-use tracing::{Level, warn};
+use tracing::warn;
 
 use crate::{api::container::ContainerParams, error::Result};
 
@@ -40,7 +40,6 @@ pub(super) fn get_capabilities(agent: &AgentConfig) -> Vec<LinuxCapability> {
 }
 
 /// Builds mirrord agent environment variables.
-#[tracing::instrument(level = Level::DEBUG, ret)]
 pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<EnvVar> {
     let mut env = vec![
         envs::LOG_LEVEL.as_k8s_spec(&agent.log_level),

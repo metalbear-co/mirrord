@@ -1118,8 +1118,6 @@ pub async fn main() -> AgentResult<()> {
         env!("CARGO_PKG_VERSION")
     );
 
-    debug!("env vars for this agent! \n {:#?}", std::env::vars());
-
     let args = cli::parse_args();
     let second_process = std::env::var(CHILD_PROCESS_ENV).is_ok();
 

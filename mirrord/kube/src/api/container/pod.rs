@@ -10,7 +10,6 @@ use k8s_openapi::{
 use kube::api::ObjectMeta;
 use mirrord_agent_env::{envs, mesh::MeshVendor};
 use mirrord_config::agent::AgentConfig;
-use tracing::Level;
 
 use super::util::agent_env;
 use crate::api::{
@@ -57,7 +56,6 @@ impl ContainerVariant for PodVariant<'_> {
         self.params
     }
 
-    #[tracing::instrument(level = Level::DEBUG, skip(self), ret)]
     fn as_update(&self) -> Pod {
         let PodVariant {
             agent,
