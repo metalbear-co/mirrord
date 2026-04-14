@@ -4699,9 +4699,7 @@ dependencies = [
  "mirrord-intproxy",
  "mirrord-intproxy-protocol",
  "mirrord-kube",
- "mirrord-layer",
  "mirrord-layer-lib",
- "mirrord-layer-win",
  "mirrord-operator",
  "mirrord-progress",
  "mirrord-protocol",
@@ -5349,7 +5347,6 @@ version = "3.201.0"
 dependencies = [
  "chrono",
  "fancy-regex",
- "mirrord",
  "tempfile",
  "tokio",
 ]
@@ -10002,8 +9999,10 @@ version = "3.201.0"
 dependencies = [
  "anyhow",
  "clap",
+ "flate2",
  "reqwest 0.13.2",
  "serde_json",
+ "tar",
  "which",
 ]
 
