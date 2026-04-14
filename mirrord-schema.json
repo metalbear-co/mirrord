@@ -1148,7 +1148,7 @@
               "const": "env"
             },
             "value": {
-              "description": "Fallback value to use when the env var is not found on the target pod.\nUseful when the app gets credentials from Vault or other non-K8s sources.\nThe CLI encrypts this value before it reaches the CRD.",
+              "description": "Literal value for this connection parameter. The CLI sends it to the\noperator, which stores it in a Kubernetes Secret for the branch pod.",
               "type": [
                 "string",
                 "null"
@@ -2901,10 +2901,7 @@
           "type": "object",
           "properties": {
             "env_var_name": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             },
             "value": {
               "type": [
@@ -2912,7 +2909,10 @@
                 "null"
               ]
             }
-          }
+          },
+          "required": [
+            "env_var_name"
+          ]
         }
       ]
     },

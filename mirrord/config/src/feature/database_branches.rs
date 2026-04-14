@@ -384,8 +384,8 @@ pub enum ParamSource {
         key: String,
     },
     Env {
-        #[serde(default, alias = "variable", skip_serializing_if = "Option::is_none")]
-        env_var_name: Option<String>,
+        #[serde(alias = "variable")]
+        env_var_name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         value: Option<String>,
     },
@@ -395,7 +395,7 @@ impl ParamSource {
     pub fn as_variable(&self) -> Option<&str> {
         match self {
             Self::Variable(v) => Some(v),
-            Self::Env { env_var_name, .. } => env_var_name.as_deref(),
+            Self::Env { env_var_name, .. } => Some(env_var_name),
             Self::Secret { .. } => None,
         }
     }
@@ -767,28 +767,14 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_param_source_unknown_fields_parsed_as_env() {
-        // With both `variable` and `value` optional, any object that doesn't
-        // match Secret (missing `secret`+`key`) falls through to Env with
-        // both fields as None.
+    fn deserialize_param_source_invalid_object_fails() {
         let json = r#"{
             "type": "env",
             "params": {
                 "host": { "invalid": "object" }
             }
         }"#;
-        let result = serde_json::from_str::<ConnectionSource>(json).unwrap();
-        match result {
-            ConnectionSource::Params(config) => {
-                assert_eq!(
-                    config.params.host,
-                    Some(ParamSource::Env {
-                        env_var_name: None,
-                        value: None
-                    })
-                );
-            }
-            other => panic!("expected Params, got {other:?}"),
-        }
+        let result = serde_json::from_str::<ConnectionSource>(json);
+        assert!(result.is_err());
     }
 }
