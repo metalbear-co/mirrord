@@ -215,6 +215,14 @@ pub(super) enum Commands {
     /// Fix issues related to mirrord.
     Fix(FixArgs),
 
+    /// Attach mirrord layer to an already-running process by PID.
+    ///
+    /// Used by IDE extensions that spawn a process with mirrord env vars
+    /// already configured, then request the CLI to inject the layer DLL.
+    #[cfg(windows)]
+    #[command(hide = true)]
+    Attach(AttachArgs),
+
     /// Launch the session monitor UI.
     ///
     /// Watches active mirrord sessions and displays a web dashboard showing
@@ -1389,6 +1397,14 @@ impl PreviewStopArgs {
 
         envs
     }
+}
+
+/// `mirrord attach` args.
+#[cfg(windows)]
+#[derive(Args, Debug)]
+pub(super) struct AttachArgs {
+    /// PID of the target process to attach to.
+    pub pid: u32,
 }
 
 /// Arguments for the `mirrord ui` command.

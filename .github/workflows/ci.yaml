@@ -200,7 +200,7 @@ jobs:
         uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
         with:
           files: |
-            wizard-frontend/**
+            packages/wizard/**
       - name: verify protocol bump
         run: |
           if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
@@ -283,9 +283,9 @@ jobs:
         with:
           node-version: 24
       - run: npm install
-        working-directory: ./wizard-frontend
+        working-directory: ./packages/wizard
       - run: npm run lint
-        working-directory: ./wizard-frontend
+        working-directory: ./packages/wizard
 
   # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
   # the output of this test is a boolean indicating if it's a release branch
@@ -329,7 +329,7 @@ jobs:
           toolchain: ${{ env.PINNED_NIGHTLY }}
           cache: false
       # TODO(alex): `no-deps` here due to an issue in `futures-util`.
-      - run: cargo doc --document-private-items --no-deps
+      - run: cargo xtask test-doc
 
   test_agent:
     runs-on: ubuntu-24.04
@@ -499,8 +499,6 @@ jobs:
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-lib
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
-      - name: create dummy file to compile wizard feature
-        run: touch wizard-frontend.tar.gz
       - name: mirrord protocol UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
       - name: mirrord config UT
@@ -514,7 +512,7 @@ jobs:
       - name: mirrord operator UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
       - name: mirrord cli UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord --features "wizard"
+        run: cargo xtask test-ut -- --target x86_64-unknown-linux-gnu
       - name: mirrord protocol-io UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
       - name: mirrord jaq UT
@@ -535,7 +533,7 @@ jobs:
     env:
       MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/universal-apple-darwin/debug/libmirrord_layer.dylib
       MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/aarch64-apple-darwin/debug/libmirrord_layer.dylib
-      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/universal-apple-darwin/debug/mirrord
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -551,10 +549,8 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: verify SIP status
         run: csrutil status
-      - name: build universal layer files
-        run: cargo xtask build-layer --platform macos-universal
-      - name: build cli
-        run: cargo build -p mirrord
+      - name: build cli and universal layer
+        run: cargo xtask build-cli --platform macos-universal --no-wizard
       - name: mirrord-sip UT
         run: cargo test -p mirrord-sip
       - name: mirrord-intproxy UT
@@ -692,31 +688,37 @@ jobs:
           name: test
           path: /tmp
       - run: minikube image load /tmp/test.tar
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: astral-sh/setup-uv@v2
+      - run: uv --version
+      - run: uv tool install cargo-zigbuild==0.22.1
+      - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
+      - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
+      - run: cargo zigbuild --help >/dev/null && zig version
+      - run: cargo xtask build-cli
       # run the cli tests only once, i.e. docker runtime only
       - name: Run cli E2E tests
         if: ${{ matrix.container-runtime == 'docker' }}
         run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features cli -- --test-threads=6
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - run: cargo build --manifest-path=./Cargo.toml -p mirrord --features wizard
+          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features cli -- --test-threads=6
       # This needs improving to prevent flakiness! e.g. examining output for progress messages
       # `sleep` is used here to give the wizard enough time to start before curl
       - run: |
-          ./target/debug/mirrord wizard &
+          ./target/x86_64-unknown-linux-gnu/debug/mirrord wizard &
           sleep 2 && curl localhost:3000
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test
         run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features targetless -- --test-threads=6 targetless
+          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features targetless -- --test-threads=6 targetless
       # prepare argo rollouts
       - run: kubectl create namespace argo-rollouts
       - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
       - name: Run all E2E tests
         run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features job -- --test-threads=6
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features ephemeral -- --test-threads=6
+          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features job -- --test-threads=6
+          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features ephemeral -- --test-threads=6
       - name: Collect logs
         if: ${{ failure() }}
         run: |

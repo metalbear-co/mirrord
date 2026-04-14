@@ -26,7 +26,7 @@ use crate::{
         container::{
             ContainerParams, ContainerVariant,
             pod::{PodTargetedVariant, PodVariant},
-            util::wait_for_agent_startup,
+            util::{is_image_pull_error, wait_for_agent_startup},
         },
         kubernetes::{AgentKubernetesConnectInfo, get_k8s_resource_api},
         runtime::RuntimeData,
@@ -123,6 +123,17 @@ where
                             .find(|container| container.name == "mirrord-agent") else {
                             continue;
                         };
+
+                        // Fail fast on image pull errors (ImagePullBackOff, ErrImagePull) instead of
+                        // waiting indefinitely while the pod remains in Pending.
+                        // See: https://github.com/metalbear-co/mirrord/issues/366
+                        if let Some(state) = &agent_status.state
+                            && let Some(waiting) = &state.waiting
+                            && let Some(msg) = is_image_pull_error(waiting)
+                        {
+                                pod_progress.failure(Some(&msg));
+                                return Err(KubeApiError::AgentPodStartError(msg));
+                        }
 
                         // Ref: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase
                         match phase.as_str() {

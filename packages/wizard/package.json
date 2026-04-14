@@ -14,7 +14,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "prepare": "cd .. && husky wizard-frontend/.husky"
+    "prepare": "cd ../.. && husky packages/wizard/.husky"
   },
   "dependencies": {
     "@metalbear/ui": "^0.1.3",

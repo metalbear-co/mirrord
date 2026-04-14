@@ -28,10 +28,21 @@ enum Commands {
         /// Build without wizard frontend
         #[arg(long)]
         no_wizard: bool,
+
+        /// Use the existing wizard dist without rebuilding frontend assets
+        #[arg(long, conflicts_with = "no_wizard")]
+        skip_build_wizard: bool,
+
+        /// Additional arguments passed to cargo
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        cargo_args: Vec<String>,
     },
 
     /// Build wizard frontend only
     BuildWizard,
+
+    /// Prepare monitor frontend assets only
+    BuildMonitor,
 
     /// Build layer only
     BuildLayer {
@@ -42,6 +53,10 @@ enum Commands {
         /// Build in release mode
         #[arg(short, long)]
         release: bool,
+
+        /// Additional arguments passed to cargo
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        cargo_args: Vec<String>,
     },
 
     /// Link pre-built architecture-specific layers into universal binary
@@ -56,6 +71,50 @@ enum Commands {
         /// Build in release mode
         #[arg(short, long)]
         release: bool,
+    },
+
+    /// Run `cargo doc --document-private-items --no-deps` with dummy layer artifacts
+    TestDoc {
+        /// Additional arguments passed to `cargo doc`
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        cargo_args: Vec<String>,
+    },
+
+    /// Run the e2e test suite, optionally with externally provided mirrord artifacts
+    TestE2e {
+        /// Path to an external mirrord CLI binary
+        #[arg(long)]
+        binary: Option<std::path::PathBuf>,
+
+        /// Path to an external mirrord layer file
+        #[arg(long)]
+        layer: Option<std::path::PathBuf>,
+
+        /// Additional arguments passed to `cargo test` or `cargo nextest run`
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        cargo_args: Vec<String>,
+    },
+
+    /// Run unit tests for the mirrord CLI with placeholder embedded assets
+    TestUt {
+        /// Additional arguments passed to `cargo test`
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        cargo_args: Vec<String>,
+    },
+
+    /// Run the integration test suite, optionally with externally provided mirrord artifacts
+    TestIntegration {
+        /// Path to an external mirrord CLI binary
+        #[arg(long)]
+        binary: Option<std::path::PathBuf>,
+
+        /// Path to an external mirrord layer file
+        #[arg(long)]
+        layer: Option<std::path::PathBuf>,
+
+        /// Additional arguments passed to `cargo test` or `cargo nextest run`
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        cargo_args: Vec<String>,
     },
 }
 
@@ -82,6 +141,8 @@ fn main() -> Result<()> {
             platform,
             release,
             no_wizard,
+            skip_build_wizard,
+            cargo_args,
         } => {
             let platform = platform.unwrap_or_else(|| {
                 Platform::detect().unwrap_or_else(|e| {
@@ -95,6 +156,8 @@ fn main() -> Result<()> {
                 platform,
                 release,
                 with_wizard: !no_wizard,
+                build_wizard: !no_wizard && !skip_build_wizard,
+                cargo_args,
             };
 
             tasks::release::build_release_cli(options)?;
@@ -104,7 +167,15 @@ fn main() -> Result<()> {
             tasks::wizard::build_wizard()?;
         }
 
-        Commands::BuildLayer { platform, release } => {
+        Commands::BuildMonitor => {
+            tasks::monitor::build_monitor()?;
+        }
+
+        Commands::BuildLayer {
+            platform,
+            release,
+            cargo_args,
+        } => {
             let platform = platform.unwrap_or_else(|| {
                 Platform::detect().unwrap_or_else(|e| {
                     eprintln!("Failed to detect platform: {}", e);
@@ -115,23 +186,39 @@ fn main() -> Result<()> {
 
             match platform {
                 Platform::MacosX86_64 => {
-                    tasks::layer::build_layer(tasks::layer::Target::MacosX86_64, release)?;
+                    tasks::layer::build_layer(
+                        tasks::layer::Target::MacosX86_64,
+                        release,
+                        &cargo_args,
+                    )?;
                 }
                 Platform::MacosAarch64 => {
-                    tasks::layer::build_layer(tasks::layer::Target::MacosAarch64, release)?;
+                    tasks::layer::build_layer(
+                        tasks::layer::Target::MacosAarch64,
+                        release,
+                        &cargo_args,
+                    )?;
                     tasks::layer::build_shim(release)?;
                 }
                 Platform::MacosUniversal => {
-                    tasks::layer::build_macos_universal_layer(release)?;
+                    tasks::layer::build_macos_universal_layer(release, &cargo_args)?;
                 }
                 Platform::LinuxX86_64 => {
-                    tasks::layer::build_layer(tasks::layer::Target::LinuxX86_64, release)?;
+                    tasks::layer::build_layer(
+                        tasks::layer::Target::LinuxX86_64,
+                        release,
+                        &cargo_args,
+                    )?;
                 }
                 Platform::LinuxAarch64 => {
-                    tasks::layer::build_layer(tasks::layer::Target::LinuxAarch64, release)?;
+                    tasks::layer::build_layer(
+                        tasks::layer::Target::LinuxAarch64,
+                        release,
+                        &cargo_args,
+                    )?;
                 }
                 Platform::Windows => {
-                    tasks::layer::build_layer(tasks::layer::Target::Windows, release)?;
+                    tasks::layer::build_layer(tasks::layer::Target::Windows, release, &cargo_args)?;
                 }
             }
         }
@@ -142,6 +229,30 @@ fn main() -> Result<()> {
 
         Commands::MergeCliUniversal { release } => {
             tasks::cli::merge_macos_universal_cli(release)?;
+        }
+
+        Commands::TestDoc { cargo_args } => {
+            tasks::doc::run(cargo_args)?;
+        }
+
+        Commands::TestE2e {
+            binary,
+            layer,
+            cargo_args,
+        } => {
+            tasks::test::run(tasks::test::Suite::E2e, binary, layer, cargo_args)?;
+        }
+
+        Commands::TestUt { cargo_args } => {
+            tasks::test::run_unit(cargo_args)?;
+        }
+
+        Commands::TestIntegration {
+            binary,
+            layer,
+            cargo_args,
+        } => {
+            tasks::test::run(tasks::test::Suite::Integration, binary, layer, cargo_args)?;
         }
     }
 
