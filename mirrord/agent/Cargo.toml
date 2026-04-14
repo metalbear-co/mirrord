@@ -82,6 +82,7 @@ jaq-json = { workspace = true, features = ["serde_json"] }
 
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
+mirrord-protocol = { path = "../protocol", features = ["libc", "jaq", "regex"] }
 pem.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true
