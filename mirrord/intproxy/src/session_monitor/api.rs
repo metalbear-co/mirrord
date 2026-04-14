@@ -1,6 +1,11 @@
 #[cfg(unix)]
 use std::{
-    convert::Infallible, fs, os::unix::fs::PermissionsExt, path::PathBuf, sync::Arc, time::Duration,
+    convert::Infallible,
+    fs,
+    os::unix::fs::PermissionsExt,
+    path::{Component, Path, PathBuf},
+    sync::Arc,
+    time::Duration,
 };
 
 #[cfg(unix)]
@@ -127,9 +132,15 @@ async fn update_session_info_from_events(state: Arc<AppState>) {
             }
             Ok(MonitorEvent::PortSubscription { port, mode }) => {
                 let mut info = state.session_info.write().await;
-                if !info.port_subscriptions.iter().any(|ps| ps.port == port) {
-                    info.port_subscriptions
-                        .push(PortSubscription { port, mode });
+                match info
+                    .port_subscriptions
+                    .iter_mut()
+                    .find(|ps| ps.port == port)
+                {
+                    Some(existing) => existing.mode = mode,
+                    None => info
+                        .port_subscriptions
+                        .push(PortSubscription { port, mode }),
                 }
             }
             Ok(_) => {}
@@ -141,6 +152,18 @@ async fn update_session_info_from_events(state: Arc<AppState>) {
     }
 }
 
+/// Returns `true` when `session_id` is a single normal path component, so that joining it with
+/// the sessions directory cannot escape that directory or produce an absolute path.
+#[cfg(unix)]
+fn verify_session_id(session_id: &str) -> bool {
+    let as_path = Path::new(session_id);
+    let mut components = as_path.components();
+    matches!(
+        std::array::from_fn::<_, 2, _>(|_| components.next()),
+        [Some(Component::Normal(..)), None]
+    )
+}
+
 #[cfg(unix)]
 pub async fn start_api_server(
     session_info: SessionInfo,
@@ -149,7 +172,7 @@ pub async fn start_api_server(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let session_id = &session_info.session_id;
 
-    if session_id.contains('/') || session_id.contains('\\') || session_id.contains("..") {
+    if !verify_session_id(session_id) {
         return Err(format!("invalid session_id: {session_id}").into());
     }
 

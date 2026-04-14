@@ -91,7 +91,7 @@ pub struct InternalProxyConfig {
     /// The value should follow the RUST_LOG convention (i.e `mirrord=trace`).
     ///
     /// Defaults to `mirrord=info,warn`.
-    #[config(default = "mirrord=info,mirrord_intproxy=info,warn")]
+    #[config(default = "mirrord=info,warn")]
     pub log_level: String,
 
     /// ### internal_proxy.log_destination {#internal_proxy-log_destination}

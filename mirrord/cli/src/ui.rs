@@ -535,7 +535,7 @@ fn build_router(state: Arc<AppState>) -> Router {
 
     let csp_value = HeaderValue::from_static(
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
-         connect-src 'self' ws://localhost:* ws://127.0.0.1:*; \
+         connect-src 'self' ws://localhost:* ws://127.0.0.1:* ws://[::1]:*; \
          img-src 'self' data:; object-src 'none'; frame-ancestors 'none'",
     );
 
