@@ -11,6 +11,12 @@ pub struct ProcessInfo {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PortSubscription {
+    pub port: u16,
+    pub mode: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionInfo {
     pub session_id: String,
     #[serde(default)]
@@ -23,5 +29,7 @@ pub struct SessionInfo {
     pub is_operator: bool,
     #[serde(default)]
     pub processes: Vec<ProcessInfo>,
+    #[serde(default)]
+    pub port_subscriptions: Vec<PortSubscription>,
     pub config: serde_json::Value,
 }
