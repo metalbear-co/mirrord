@@ -432,9 +432,8 @@ pub enum TargetEnvironmentVariableSource {
     Env {
         container: Option<String>,
         variable: String,
-        /// Fallback value to use when the env var is not found on the target pod.
-        /// Useful when the app gets credentials from Vault or other non-K8s sources.
-        /// The CLI encrypts this value before it reaches the CRD.
+        /// Literal value for this connection parameter. The CLI sends it to the
+        /// operator, which stores it in a Kubernetes Secret for the branch pod.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         value: Option<String>,
     },
