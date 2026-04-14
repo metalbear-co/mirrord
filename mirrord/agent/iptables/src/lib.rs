@@ -58,8 +58,10 @@ impl ChainNames {
         }
     }
 
-    /// [`mirrord_agent_env::envs::IPTABLES_IDENTIFIER`] is missing, so we use the default static
-    /// names.
+    /// Our legacy static iptables' rules.
+    ///
+    /// Mostly used to clean-up old rules from agents that do not support multi-container targeting
+    /// (and for tests).
     pub fn legacy() -> Self {
         Self {
             prerouting: "MIRRORD_INPUT".to_owned(),
