@@ -93,6 +93,7 @@ mirrord-session-monitor-client.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
+dll-syringe = { workspace = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { workspace = true, features = ["process", "resource", "signal"] }
@@ -104,11 +105,6 @@ mirrord-sip = { path = "../sip" }
 [target.'cfg(target_os = "linux")'.dependencies]
 xmas-elf.workspace = true
 
-[target.'cfg(any(target_os = "macos", target_os = "linux"))'.build-dependencies]
-mirrord-layer = { artifact = "cdylib", path = "../layer" }
-
-[target.'cfg(target_os = "windows")'.build-dependencies]
-mirrord-layer-win = { artifact = "cdylib", path = "../layer-win" }
 
 [dev-dependencies]
 rstest.workspace = true

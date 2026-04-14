@@ -4,42 +4,63 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use which::which;
 
-use super::{layer::Target, signing, sip_binaries};
+use super::{layer::Target, monitor, signing, sip_binaries};
 
 /// Builds the mirrord CLI for the specified target
 pub fn build_cli(
     target: Target,
     release: bool,
     layer_path: &Path,
-    with_wizard: bool,
+    wizard_dist: Option<&Path>,
+    cargo_args: &[String],
 ) -> Result<PathBuf> {
     println!("Building mirrord CLI for {}...", target.triple());
 
+    monitor::build_monitor()?;
+
+    let is_linux = matches!(target, Target::LinuxX86_64 | Target::LinuxAarch64);
+
+    if is_linux && which("cargo-zigbuild").is_err() {
+        anyhow::bail!("cargo-zigbuild is required for Linux builds.");
+    }
+
     let mut cmd = Command::new("cargo");
-    cmd.arg("build").arg("-p").arg("mirrord");
+    if is_linux {
+        cmd.arg("zigbuild");
+    } else {
+        cmd.arg("build");
+    }
+    cmd.arg("-p").arg("mirrord");
 
     if release {
         cmd.arg("--release");
     }
 
-    cmd.arg("--target").arg(target.triple());
+    let target_triple = if is_linux {
+        format!("{}.2.17", target.triple())
+    } else {
+        target.triple().to_owned()
+    };
+    cmd.arg("--target").arg(&target_triple);
 
-    if with_wizard {
+    if let Some(wizard_dist) = wizard_dist {
         cmd.arg("--features").arg("wizard");
-        // Use absolute path for wizard dist directory
-        let wizard_dist = std::env::current_dir()
-            .context("Failed to get current directory")?
-            .join("wizard-frontend/dist");
 
-        if !wizard_dist.exists() {
+        if !wizard_dist.is_dir() {
             anyhow::bail!(
                 "Wizard dist directory not found at {}. Run 'cargo xtask build-wizard' first.",
                 wizard_dist.display()
             );
         }
 
-        cmd.env("WIZARD_DIST_DIR", wizard_dist);
+        cmd.env(
+            "WIZARD_DIST_DIR",
+            wizard_dist
+                .canonicalize()
+                .context("Failed to canonicalize wizard dist path")?,
+        );
     }
 
     // Set layer file environment variable
@@ -75,6 +96,8 @@ pub fn build_cli(
                 .context("Failed to canonicalize ARM64 layer path")?,
         );
     }
+
+    cmd.args(cargo_args);
 
     let status = cmd.status().context("Failed to run cargo build")?;
 
@@ -150,7 +173,8 @@ pub fn merge_macos_universal_cli(release: bool) -> Result<PathBuf> {
 pub fn build_macos_universal_cli(
     release: bool,
     universal_layer_path: &Path,
-    with_wizard: bool,
+    wizard_dist: Option<&Path>,
+    cargo_args: &[String],
 ) -> Result<PathBuf> {
     println!("Building macOS universal CLI...");
 
@@ -159,13 +183,15 @@ pub fn build_macos_universal_cli(
         Target::MacosX86_64,
         release,
         universal_layer_path,
-        with_wizard,
+        wizard_dist,
+        cargo_args,
     )?;
     let arm_cli = build_cli(
         Target::MacosAarch64,
         release,
         universal_layer_path,
-        with_wizard,
+        wizard_dist,
+        cargo_args,
     )?;
 
     // Sign architecture-specific CLIs (can batch sign with gon in CI)

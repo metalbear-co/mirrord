@@ -8,6 +8,26 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.201.0](https://github.com/metalbear-co/mirrord/tree/3.201.0) - 2026-04-10
+
+
+### Added
+
+- Added `mirrord diagnose license` for troubleshooting mirrord for Teams
+  license usage.
+- Added local and remote session management commands under `mirrord session`.
+- Implemented `mirrord attach` on Windows to support IDE extensions.
+
+
+### Changed
+
+- Preview environments now have a default HTTP header filter, `baggage:
+  *.mirrord-session={{key}}.*`, which will be used if no filter is configured.
+- Preview environments now ignore the config option
+  `feature.network.incoming.http_filter.ports` to prevent accidentally stealing
+  traffic without a filter. This means that all HTTP filters now
+  unconditionally apply to all intercepted ports.
+
 ## [3.200.0](https://github.com/metalbear-co/mirrord/tree/3.200.0) - 2026-04-09
 
 
