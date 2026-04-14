@@ -22,8 +22,10 @@ use std::{
 };
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
+use mirrord_config::LayerConfig;
+#[cfg(unix)]
 use mirrord_config::{
-    LayerConfig, LayerFileConfig,
+    LayerFileConfig,
     config::{ConfigContext, MirrordConfig},
 };
 use mirrord_intproxy::{
