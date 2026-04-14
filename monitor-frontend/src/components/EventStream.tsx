@@ -2,10 +2,10 @@ import { useState, useEffect, useRef } from 'react'
 import { Badge, Button, Separator, cn } from '@metalbear/ui'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@metalbear/ui'
 import { FileText, Globe, Zap, Activity, Server, Info, Search, X, Trash2, ExternalLink } from 'lucide-react'
-import type { SessionInfo, MonitorEvent } from './types'
-import { EventType, type EventTypeValue } from './eventTypes'
-import { strings } from './strings'
-import { api } from './api'
+import type { SessionInfo, MonitorEvent } from '../types'
+import { EventType, type EventTypeValue } from '../eventTypes'
+import { strings } from '../strings'
+import { api } from '../api'
 
 // Badge colors use distinct per-category tokens (amber/blue/green/purple/sky) so
 // event kinds remain visually distinguishable. The UI kit's semantic Badge variants

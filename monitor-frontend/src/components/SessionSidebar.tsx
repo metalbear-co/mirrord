@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Loader, cn, Button } from '@metalbear/ui'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose, DialogTrigger } from '@metalbear/ui'
 import { Activity, PanelLeftClose, PanelLeftOpen, Trash2 } from 'lucide-react'
-import type { SessionInfo } from './types'
+import type { SessionInfo } from '../types'
 import SessionCard from './SessionCard'
 
 const SIDEBAR_MIN = 240

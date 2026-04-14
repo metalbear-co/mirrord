@@ -1,5 +1,5 @@
 import { cn } from '@metalbear/ui'
-import type { SessionInfo } from './types'
+import type { SessionInfo } from '../types'
 
 interface StatusBarProps {
   wsConnected: boolean
