@@ -32,16 +32,32 @@ export default function SessionDetail({ session, onKill }: Props) {
     setProcesses([])
     setEventCounts(initialEventCounts)
 
-    api.getSession(session.session_id)
-      .then((info) => {
-        if (info?.processes?.length) {
+    let cancelled = false
+
+    async function hydrateFromSnapshot() {
+      try {
+        const info = await api.getSession(session.session_id)
+        if (cancelled) return
+
+        if (!info) {
+          console.warn('Session info missing for', session.session_id)
+          return
+        }
+        if (!Array.isArray(info.processes)) {
+          console.warn('Session info has no `processes` array', info)
+        } else if (info.processes.length > 0) {
           setProcesses(info.processes.map(p => ({ pid: p.pid, process_name: p.process_name })))
         }
-        if (info?.port_subscriptions?.length) {
+        if (!Array.isArray(info.port_subscriptions)) {
+          console.warn('Session info has no `port_subscriptions` array', info)
+        } else if (info.port_subscriptions.length > 0) {
           setPortSubs(info.port_subscriptions.map(p => ({ port: p.port, mode: p.mode })))
         }
-      })
-      .catch(() => {})
+      } catch (err) {
+        console.warn('Failed to fetch session snapshot', err)
+      }
+    }
+    hydrateFromSnapshot()
 
     const eventSource = new EventSource(api.eventStreamUrl(session.session_id))
 
@@ -59,18 +75,26 @@ export default function SessionDetail({ session, onKill }: Props) {
         total: prev.total + 1,
       }))
 
-      if (event.type === EventType.PortSubscription) {
-        setPortSubs(prev => {
-          if (prev.some(p => p.port === event.port)) return prev
-          return [...prev, { port: event.port, mode: event.mode }]
-        })
-      } else if (event.type === EventType.LayerConnected) {
-        setProcesses(prev => {
-          if (prev.some(p => p.pid === event.pid)) return prev
-          return [...prev, { pid: event.pid, process_name: event.process_name }]
-        })
-      } else if (event.type === EventType.LayerDisconnected) {
-        setProcesses(prev => prev.filter(p => p.pid !== event.pid))
+      switch (event.type) {
+        case EventType.PortSubscription:
+          setPortSubs(prev => (
+            prev.some(p => p.port === event.port)
+              ? prev
+              : [...prev, { port: event.port, mode: event.mode }]
+          ))
+          break
+        case EventType.LayerConnected:
+          setProcesses(prev => (
+            prev.some(p => p.pid === event.pid)
+              ? prev
+              : [...prev, { pid: event.pid, process_name: event.process_name }]
+          ))
+          break
+        case EventType.LayerDisconnected:
+          setProcesses(prev => prev.filter(p => p.pid !== event.pid))
+          break
+        default:
+          break
       }
     }
 
@@ -79,6 +103,7 @@ export default function SessionDetail({ session, onKill }: Props) {
     }
 
     return () => {
+      cancelled = true
       eventSource.close()
     }
   }, [session.session_id])

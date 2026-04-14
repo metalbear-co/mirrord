@@ -30,6 +30,20 @@ export const strings = {
       info: 'Info',
     },
   },
+  sidebar: {
+    countSingular: 'session',
+    countPlural: 'sessions',
+    showSidebar: 'Show sidebar',
+    hideSidebar: 'Hide sidebar',
+    killAllTooltip: 'Kill all sessions',
+    killAllTitle: 'Kill all sessions?',
+    killAllDescription: (count: number) =>
+      `This will terminate ${count} active mirrord ${count === 1 ? 'session' : 'sessions'}. This action cannot be undone.`,
+    killAllButton: 'Kill All',
+    cancel: 'Cancel',
+    emptyTitle: 'No active sessions',
+    emptyBody: 'Start mirrord to see sessions here',
+  },
   session: {
     kill: 'Kill',
     operator: 'Operator',

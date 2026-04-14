@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader } from '@metalbear/ui'
 import type { SessionInfo } from '../types'
 import { strings } from '../strings'
-import { extractLicenseKey } from '../utils/extractLicenseKey'
+import { extractLicenseKey } from '../utils'
 
 export default function SessionIdentity({ session }: { session: SessionInfo }) {
   const licenseKey = extractLicenseKey(session.config)

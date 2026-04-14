@@ -1,8 +1,8 @@
-import { cn } from '@metalbear/ui'
-import { Badge } from '@metalbear/ui'
+import { Badge, Button, cn } from '@metalbear/ui'
 import { Clock, Trash2 } from 'lucide-react'
 import type { SessionInfo } from '../types'
-import { formatUptime } from '../utils/formatUptime'
+import { strings } from '../strings'
+import { formatUptime } from '../utils'
 
 interface Props {
   session: SessionInfo
@@ -35,20 +35,22 @@ export default function SessionCard({ session, selected, onSelect, onKill }: Pro
           <span className="font-mono">v{session.mirrord_version}</span>
           {session.is_operator && (
             <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4 tracking-wider">
-              Operator
+              {strings.session.operator}
             </Badge>
           )}
         </div>
-        <button
-          className="text-[9px] text-destructive bg-destructive/10 border border-destructive/25 px-2 py-0.5 rounded cursor-pointer transition-colors hover:bg-destructive/20"
+        <Button
+          variant="destructive"
+          size="sm"
           onClick={(e) => {
             e.stopPropagation()
             onKill()
           }}
+          className="h-5 text-[9px] gap-1 px-2"
         >
-          <Trash2 className="h-2.5 w-2.5 inline mr-0.5" />
-          Kill
-        </button>
+          <Trash2 className="h-2.5 w-2.5" />
+          {strings.session.kill}
+        </Button>
       </div>
     </div>
   )

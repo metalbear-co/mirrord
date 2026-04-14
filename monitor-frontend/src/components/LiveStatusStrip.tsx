@@ -3,7 +3,7 @@ import { Button, Card, CardContent, Separator } from '@metalbear/ui'
 import { Clock, Cpu, Radio, Activity, ChevronRight } from 'lucide-react'
 import type { SessionInfo, PortSubscription, ProcessInfo } from '../types'
 import { strings } from '../strings'
-import { formatUptime } from '../utils/formatUptime'
+import { formatUptime } from '../utils'
 import type { DetailTab, EventCounts } from './sessionDetailTypes'
 
 interface Props {
