@@ -91,12 +91,33 @@ async fn events(
     )
 }
 
-/// Cancels the API server's cancellation token, triggering graceful shutdown of the API server
-/// only. The mirrord session lifecycle is managed separately by the intproxy.
+/// Tears down the mirrord session: `SIGTERM`s every layer-connected process so the user
+/// application exits, then cancels the API server's shutdown token. Once the user app
+/// processes die, their layer connections close and the intproxy exits on its idle timeout.
+///
+/// Without this, `mirrord session delete` (or the UI Kill button) only removes the socket
+/// while the user app and intproxy keep running, leaving zombie steal/mirror subscriptions
+/// on the cluster pod.
 #[cfg(unix)]
 async fn kill(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let pids: Vec<u32> = {
+        let info = state.session_info.read().await;
+        info.processes.iter().map(|p| p.pid).collect()
+    };
+
+    for pid in &pids {
+        // SAFETY: `kill(2)` with a process-group or PID argument is a single syscall that
+        // cannot corrupt our process. If the PID is gone or we lack permission, kill returns
+        // -1 and sets errno; we log and continue.
+        let ret = unsafe { libc::kill(*pid as libc::pid_t, libc::SIGTERM) };
+        if ret != 0 {
+            let err = std::io::Error::last_os_error();
+            tracing::warn!(pid = *pid, %err, "Failed to SIGTERM layer-connected process");
+        }
+    }
+
     state.shutdown.cancel();
-    Json(serde_json::json!({"status": "shutting_down"}))
+    Json(serde_json::json!({"status": "shutting_down", "signaled_pids": pids}))
 }
 
 /// Subscribes to monitor events and updates session_info on LayerConnected, LayerDisconnected,

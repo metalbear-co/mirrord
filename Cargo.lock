@@ -4984,6 +4984,7 @@ dependencies = [
  "http-body-util",
  "hyper 1.8.1",
  "hyper-util",
+ "libc",
  "mirrord-analytics",
  "mirrord-config",
  "mirrord-intproxy-protocol",

@@ -1,0 +1,1 @@
+`mirrord session delete` and the Kill button in the session monitor UI now stop the user process. Previously they only removed the session socket, leaving the user process and intproxy alive and holding zombie steal/mirror subscriptions on the cluster pod.
