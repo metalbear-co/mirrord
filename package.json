@@ -1,0 +1,7 @@
+{
+  "name": "mirrord-frontends",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}
