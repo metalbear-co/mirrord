@@ -3,7 +3,7 @@
 use std::{
     fmt::Debug,
     ops::Not,
-    sync::{Arc, LazyLock, OnceLock},
+    sync::{Arc, OnceLock},
 };
 
 use caps::{CapSet, Capability};
@@ -70,11 +70,6 @@ impl ChainNames {
     }
 }
 
-pub static IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL: LazyLock<String> = LazyLock::new(|| {
-    std::fs::read_to_string("/proc/sys/net/ipv4/conf/all/route_localnet")
-        .unwrap_or_else(|_| "0".to_string())
-});
-
 const IPTABLES_TABLE_NAME: &str = "nat";
 
 #[cfg_attr(test, allow(clippy::indexing_slicing))] // `mockall::automock` violates our clippy rules
@@ -100,40 +95,6 @@ pub trait IPTables {
 pub struct IPTablesWrapper {
     table_name: &'static str,
     tables: Arc<iptables::IPTables>,
-}
-
-impl IPTablesWrapper {
-    const IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_CHAIN_NAME: &str = "MRD_ORIG_ROUTE_LOCALNET";
-
-    pub async fn add_mesh_bullshit(&self) -> IPTablesResult<()> {
-        if self.chain_exists(Self::IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_CHAIN_NAME)? {
-        } else {
-            self.create_chain(Self::IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_CHAIN_NAME)?;
-
-            self.add_rule(
-                "MRD_ORIG_ROUTE_LOCALNET",
-                format!(
-                    r#"-p 255 -m comment --comment "{}" -j RETURN"#,
-                    IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL.to_string()
-                )
-                .as_str(),
-            )?;
-        }
-
-        Ok(())
-    }
-
-    pub async fn remove_mesh_bullshit(&self) {
-        self.remove_rule(
-            "MRD_ORIG_ROUTE_LOCALNET",
-            format!(
-                r#"-p 255 -m comment --comment "{}" -j RETURN"#,
-                IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL.to_string()
-            )
-            .as_str(),
-        )
-        .unwrap();
-    }
 }
 
 impl Debug for IPTablesWrapper {

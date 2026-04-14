@@ -17,7 +17,7 @@ use futures::{TryFutureExt, future::OptionFuture};
 use metrics::{CLIENT_COUNT, start_metrics};
 use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{
-    ChainNames, IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL, IPTables, IPTablesWrapper, SafeIpTables,
+    ChainNames, IPTablesWrapper, SafeIpTables,
     error::{IPTablesError, IPTablesResult},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
@@ -33,7 +33,6 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{Level, debug, error, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
-use x509_parser::asn1_rs::AsTaggedImplicit;
 
 use crate::{
     cli::{self, Args},
@@ -754,17 +753,6 @@ async fn check_existing_rules(
     }
 
     Ok(rules)
-}
-
-async fn prepare_mesh_bullshit(state: &State) {
-    let _runtime = state.network_runtime.handle().enter();
-
-    tokio::spawn(async {
-        let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
-        let iptables = mirrord_agent_iptables::get_iptables(nftables, false);
-
-        iptables.add_mesh_bullshit().await;
-    });
 }
 
 async fn check_leftover_rules(
