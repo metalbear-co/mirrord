@@ -81,10 +81,7 @@ fn config_as_diff(config: &LayerConfig) -> serde_json::Value {
 /// Recursive JSON diff. Returns `None` when `actual` equals `default`, otherwise returns an
 /// object containing only the keys whose values differ, descending into nested objects.
 #[cfg(unix)]
-fn json_diff(
-    actual: &serde_json::Value,
-    default: &serde_json::Value,
-) -> Option<serde_json::Value> {
+fn json_diff(actual: &serde_json::Value, default: &serde_json::Value) -> Option<serde_json::Value> {
     if actual == default {
         return None;
     }
