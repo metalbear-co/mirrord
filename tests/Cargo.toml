@@ -11,10 +11,6 @@ workspace = true
 doctest = false
 
 [dependencies]
-aws-config = { workspace = true, optional = true }
-aws-credential-types.workspace = true
-aws-sdk-sqs = { workspace = true, optional = true }
-aws-types.workspace = true
 json-patch.workspace = true
 jsonptr.workspace = true
 k8s-openapi.workspace = true
@@ -61,8 +57,6 @@ default = ["ephemeral", "job", "cli", "targetless"]
 ephemeral = []
 job = []
 operator = [
-    "dep:aws-config",
-    "dep:aws-sdk-sqs",
     "dep:rcgen",
     "dep:mirrord-agent-env",
     "dep:pem",
