@@ -109,10 +109,16 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 24
+      - name: Activate pnpm via Corepack
+        run: corepack enable
       - run: npm install
         working-directory: ./packages/wizard
       - run: npm run build
         working-directory: ./packages/wizard
+      - run: pnpm install
+        working-directory: ./packages/monitor
+      - run: pnpm run build
+        working-directory: ./packages/monitor
       # building layer and cli together leads to weird situation where embedded layer is x64, so split.
       - name: build mirrord-layer
         run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord-layer --target=aarch64-unknown-linux-gnu
@@ -148,10 +154,16 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 24
+      - name: Activate pnpm via Corepack
+        run: corepack enable
       - run: npm install
         working-directory: ./packages/wizard
       - run: npm run build
         working-directory: ./packages/wizard
+      - run: pnpm install
+        working-directory: ./packages/monitor
+      - run: pnpm run build
+        working-directory: ./packages/monitor
       - name: build mirrord-layer and cli
         env:
           WIZARD_DIST_DIR: ./packages/wizard/dist
@@ -487,6 +499,8 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 24
+      - name: Activate pnpm via Corepack
+        run: corepack enable
       - uses: actions/download-artifact@v4
         with:
           name: layer-universal-apple-darwin
@@ -536,6 +550,8 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 24
+      - name: Activate pnpm via Corepack
+        run: corepack enable
       - uses: actions/download-artifact@v4
         with:
           name: layer-universal-apple-darwin

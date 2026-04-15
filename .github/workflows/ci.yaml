@@ -552,6 +552,11 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: verify SIP status
         run: csrutil status
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 24
+      - name: Activate pnpm via Corepack
+        run: corepack enable
       - name: build cli and universal layer
         run: cargo xtask build-cli --platform macos-universal --no-wizard
       - name: mirrord-sip UT
@@ -702,6 +707,8 @@ jobs:
       - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
       - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
       - run: cargo zigbuild --help >/dev/null && zig version
+      - name: Activate pnpm via Corepack
+        run: corepack enable
       - run: cargo xtask build-cli
       # run the cli tests only once, i.e. docker runtime only
       - name: Run cli E2E tests

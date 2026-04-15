@@ -7,10 +7,10 @@ use anyhow::{Context, Result};
 
 /// Builds the monitor frontend (pnpm install + build).
 ///
-/// If `pnpm` is not available on `PATH`, falls back to creating an empty dist directory so
-/// rust-embed doesn't panic at compile time. This keeps CI jobs that don't need the UI
-/// (agent image, macos unit tests, e2e runners) from having to install a node toolchain.
-/// The resulting binary's `mirrord ui` will 404, which is fine for those contexts.
+/// Fails loudly if `pnpm` is not on PATH so we don't silently ship a binary with an
+/// empty `packages/monitor/dist` (which would 404 every UI request). On CI use
+/// `corepack enable` to activate the pnpm shim from the `packageManager` pin in the
+/// root `package.json`.
 pub fn build_monitor() -> Result<PathBuf> {
     println!("Building monitor frontend...");
 
@@ -23,21 +23,13 @@ pub fn build_monitor() -> Result<PathBuf> {
         );
     }
 
-    let dist_dir = monitor_dir.join("dist");
-
     if !pnpm_available() {
-        eprintln!(
-            "warning: `pnpm` not found on PATH — skipping monitor frontend build. \
-             `mirrord ui` will return 404 from this binary. Install pnpm (e.g. \
-             `corepack enable`) to produce a working UI."
+        anyhow::bail!(
+            "`pnpm` not found on PATH — required to build the monitor frontend. \
+             On CI, add a `corepack enable` step before `cargo xtask build-cli` so \
+             the packageManager pin in the root package.json activates pnpm. \
+             Locally, install with `corepack enable` or `npm install -g pnpm`."
         );
-        std::fs::create_dir_all(&dist_dir).with_context(|| {
-            format!(
-                "failed to create placeholder dist directory at {}",
-                dist_dir.display()
-            )
-        })?;
-        return Ok(dist_dir);
     }
 
     println!("  → Running pnpm install...");
@@ -60,6 +52,7 @@ pub fn build_monitor() -> Result<PathBuf> {
         anyhow::bail!("pnpm run build failed");
     }
 
+    let dist_dir = monitor_dir.join("dist");
     if !dist_dir.exists() {
         anyhow::bail!(
             "pnpm run build completed but dist directory not found at {}",
