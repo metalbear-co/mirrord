@@ -53,7 +53,6 @@ pub enum Application {
     PythonCloseSocket,
     PythonCloseSocketKeepConnection,
     RustWebsockets,
-    RustSqs,
     /// Tries to open files in the remote target, but these operations should succeed or fail based
     /// on mirrord `FsPolicy`.
     ///
@@ -115,9 +114,6 @@ impl Application {
                     .to_vec()
             }
             Application::RustWebsockets => ["../target/debug/rust-websockets"]
-                .map(String::from)
-                .to_vec(),
-            Application::RustSqs => ["../target/debug/rust-sqs-printer"]
                 .map(String::from)
                 .to_vec(),
             Application::IntproxyChild => {

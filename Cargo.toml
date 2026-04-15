@@ -32,7 +32,6 @@ members = [
     "tests/rust-bypassed-unix-socket",
     "tests/issue1317",
     "tests/rust-websockets",
-    "tests/rust-sqs-printer",
     "xtask",
 ]
 resolver = "2"
@@ -84,8 +83,6 @@ assert-json-diff = "2"
 async-pidfd = "0.1.5"
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "1.5", default-features = false }
-aws-sdk-sqs = { version = "1.39", default-features = false }
 axum = "0.8"
 axum-extra = { version = "0.10", features = ["cookie"] }
 base64 = "0.22"
