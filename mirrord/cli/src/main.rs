@@ -330,6 +330,7 @@ mod port_forward;
 mod preview;
 mod profile;
 mod teams;
+mod up;
 mod user_data;
 mod util;
 mod verify_config;
@@ -1134,6 +1135,7 @@ fn main() -> miette::Result<()> {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
             Commands::Preview(args) => preview::preview_command(*args, watch, &user_data).await?,
+            Commands::Up(args) => up::up_command(*args).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             #[cfg(feature = "wizard")]
             Commands::Wizard(args) => {

@@ -1,0 +1,31 @@
+[package]
+name = "mirrord-up"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+documentation.workspace = true
+authors.workspace = true
+description.workspace = true
+homepage.workspace = true
+publish.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+mirrord-config = { path = "../config" }
+mirrord-config-derive = { path = "../config/derive" }
+mirrord-progress = { path = "../progress/" }
+
+serde = { workspace = true, features = ["derive"] }
+serde_yaml.workspace = true
+miette = { workspace = true, features = ["fancy"] }
+thiserror.workspace = true
+strum_macros.workspace = true
+tokio = { workspace = true, features = ["process"] }
+
+
+
+[lints]
+workspace = true

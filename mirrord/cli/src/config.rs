@@ -203,6 +203,10 @@ pub(super) enum Commands {
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Preview(Box<PreviewArgs>),
 
+    /// Run mirrord sessions for all services defined in `mirrord-up.yaml`.
+    #[cfg_attr(target_os = "windows", command(hide = true))]
+    Up(Box<UpArgs>),
+
     /// Launch the config wizard.
     ///
     /// The config wizard is a web app that allows the user to create a mirrord config file by
@@ -1399,6 +1403,21 @@ impl PreviewStopArgs {
     }
 }
 
+/// Arguments for the `mirrord up` command.
+#[derive(Args, Debug)]
+pub(super) struct UpArgs {
+    /// Path to the mirrord-up config file.
+    ///
+    /// When using this argument without a value, defaults to `mirrord-up.yaml`
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml")]
+    pub config_file: PathBuf,
+
+    /// Session key, used as the `{{ key }}` template variable.
+    ///
+    /// If not provided, a key is generated automatically from the system username.
+    #[arg(long)]
+    pub key: Option<String>,
+}
 /// `mirrord attach` args.
 #[cfg(windows)]
 #[derive(Args, Debug)]
