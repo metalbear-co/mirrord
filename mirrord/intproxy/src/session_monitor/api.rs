@@ -99,15 +99,11 @@ async fn kill(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     Json(serde_json::json!({"status": "shutting_down"}))
 }
 
-/// Subscribes to monitor events and updates session_info on LayerConnected, LayerDisconnected,
-/// and PortSubscription events.
 #[cfg(unix)]
-async fn update_session_info_from_events(state: Arc<AppState>) {
-    let mut rx = match state.monitor_tx.subscribe() {
-        Some(rx) => rx,
-        None => return,
-    };
-
+async fn update_session_info_from_events(
+    state: Arc<AppState>,
+    mut rx: tokio::sync::broadcast::Receiver<MonitorEvent>,
+) {
     loop {
         match rx.recv().await {
             Ok(MonitorEvent::LayerConnected {
@@ -168,6 +164,7 @@ fn verify_session_id(session_id: &str) -> bool {
 pub async fn start_api_server(
     session_info: SessionInfo,
     monitor_tx: MonitorTx,
+    monitor_rx: tokio::sync::broadcast::Receiver<MonitorEvent>,
     shutdown: CancellationToken,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let session_id = &session_info.session_id;
@@ -205,7 +202,7 @@ pub async fn start_api_server(
         shutdown: shutdown.clone(),
     });
 
-    tokio::spawn(update_session_info_from_events(state.clone()));
+    tokio::spawn(update_session_info_from_events(state.clone(), monitor_rx));
 
     let app = Router::new()
         .route("/health", get(health))
