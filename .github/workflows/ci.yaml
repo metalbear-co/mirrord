@@ -39,6 +39,7 @@ on:
     branches: [main, "*staging*", "windows-support"]
     types: [opened, synchronize, reopened, ready_for_review]
 
+# Cancel previous runs on the same PR.
 concurrency:
   group: ${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
@@ -52,17 +53,11 @@ env:
   PINNED_NIGHTLY: nightly-2026-02-24
 
 jobs:
-  towncrier_check:
-    uses: ./.github/workflows/check-towncrier.yaml
-
-  typos_check:
-    uses: ./.github/workflows/check-typos.yaml
-
-  vale_check:
-    uses: ./.github/workflows/check-vale.yaml
+  # ── plan ────────────────────────────────────────────────────────────
 
   plan:
     runs-on: ubuntu-24.04
+    # don't run CI on drafts
     if: github.event.pull_request.draft == false
     outputs:
       rust_toolchain: ${{ steps.toolchain.outputs.rust_toolchain }}
@@ -177,6 +172,17 @@ jobs:
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
           echo ${{ steps.release-branch.outputs.branch }};
 
+  # ── checks (no build deps) ─────────────────────────────────────────
+
+  towncrier_check:
+    uses: ./.github/workflows/check-towncrier.yaml
+
+  typos_check:
+    uses: ./.github/workflows/check-typos.yaml
+
+  vale_check:
+    uses: ./.github/workflows/check-vale.yaml
+
   lint:
     needs: plan
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
@@ -205,6 +211,34 @@ jobs:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
     secrets: inherit
 
+  lint_markdown:
+    needs: plan
+    if: ${{ needs.plan.outputs.markdown_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    uses: ./.github/workflows/check-lint-markdown.yaml
+
+  # ── builds ──────────────────────────────────────────────────────────
+
+  # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
+  # building concurrently can run faster the release ide tests
+  build_mirrord_on_release_branch:
+    name: build mirrord CLI
+    needs: plan
+    if: ${{ needs.plan.outputs.release_branch == 'true' }}
+    uses: ./.github/workflows/build-mirrord-cli.yaml
+    secrets: inherit
+
+  test_agent_image:
+    needs: plan
+    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
+    uses: ./.github/workflows/build-agent-image.yaml
+
+  test_cli_image:
+    needs: plan
+    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
+    uses: ./.github/workflows/build-cli-image.yaml
+
+  # ── tests ───────────────────────────────────────────────────────────
+
   test_agent:
     runs-on: ubuntu-24.04
     needs: plan
@@ -225,16 +259,6 @@ jobs:
       - name: mirrord-agent-iptables UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent-iptables
 
-  test_agent_image:
-    needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
-    uses: ./.github/workflows/build-agent-image.yaml
-
-  test_cli_image:
-    needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
-    uses: ./.github/workflows/build-cli-image.yaml
-
   integration_tests:
     needs: plan
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
@@ -254,11 +278,6 @@ jobs:
     uses: ./.github/workflows/test-e2e.yaml
     secrets: inherit
 
-  lint_markdown:
-    needs: plan
-    if: ${{ needs.plan.outputs.markdown_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    uses: ./.github/workflows/check-lint-markdown.yaml
-
   windows_tests:
     needs: plan
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.windows_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
@@ -266,13 +285,11 @@ jobs:
     with:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
 
-  build_mirrord_on_release_branch:
-    name: build mirrord CLI
-    needs: plan
-    if: ${{ needs.plan.outputs.release_branch == 'true' }}
-    uses: ./.github/workflows/build-mirrord-cli.yaml
-    secrets: inherit
+  # ── external calls ──────────────────────────────────────────────────
 
+  # depends on `build_mirrord_on_release_branch` which provides the binary on the current tag
+  # `build_mirrord_on_release_branch` depends on `plan`
+  # which checks if the branch is a release branch
   intellij_e2e_on_release_branch:
     needs: [build_mirrord_on_release_branch, test_agent_image]
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
@@ -285,8 +302,14 @@ jobs:
     with:
       mirrord_release_branch: true
 
+  # ── gate ────────────────────────────────────────────────────────────
+
+  # We need some "accumulation" job here because bors fails (timeouts) to
+  # listen on matrix builds.
+  # Hence, we have some kind of dummy here that bors can listen on
   ci-success:
     name: ci
+    # We want this to run even if some of the required jobs got skipped
     if: always()
     needs:
       [
@@ -311,6 +334,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check required jobs passed
+        # We have to do it in the shell since if it's in the if condition
+        # then skipping is considered success by branch protection rules
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
