@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use kube::{Resource, api::ListParams, client::ClientBuilder};
 use mirrord_config::LayerConfig;
-use mirrord_kube::{api::kubernetes::create_kube_config, retry::RetryKube};
+use mirrord_kube::{api::kubernetes::create_kube_config, retry::retry_policy_from_config};
 use mirrord_progress::Progress;
 use serde::de::DeserializeOwned;
 use tower::{buffer::BufferLayer, retry::RetryLayer};
@@ -23,7 +23,7 @@ pub(crate) async fn kube_client_from_layer_config(
     .and_then(|config| {
         Ok(ClientBuilder::try_from(config.clone())?
             .with_layer(&BufferLayer::new(1024))
-            .with_layer(&RetryLayer::new(RetryKube::try_from(
+            .with_layer(&RetryLayer::new(retry_policy_from_config(
                 &layer_config.startup_retry,
             )?))
             .build())
