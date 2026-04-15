@@ -1,0 +1,1 @@
+Fix the squashed mirrord logo in the session monitor header and align the monitor's typography, color tokens, and header layout with the operator-dashboard's design system so both apps share the same look.
