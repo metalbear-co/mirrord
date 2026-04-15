@@ -502,7 +502,7 @@ jobs:
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: mirrord protocol UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol --all-features
       - name: mirrord config UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-config
       - name: mirrord kube UT

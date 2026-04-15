@@ -215,7 +215,7 @@ pub struct DaemonConnectV2 {
     pub connect: RemoteResult<DaemonConnect>,
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(all(test, target_os = "linux", feature = "socket2"))]
 mod test {
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
 
