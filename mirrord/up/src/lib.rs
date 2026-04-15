@@ -16,6 +16,8 @@ use tokio::{
     task::{JoinError, JoinSet},
 };
 
+pub const RESOLVED_CONFIG_ENV: &str = "MIRRORD_UP_RESOLVED_CONFIG";
+
 /// Errors produced by `mirrord up` command.
 #[derive(Debug, Error, Diagnostic)]
 pub enum UpError {
@@ -55,6 +57,7 @@ pub async fn run(up_config: UpConfig, key: EnvKey) -> Result<(), UpError> {
             let encoded_cfg = config.encode()?;
 
             let mut cmd = Command::new(std::env::current_exe()?);
+            cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
                 .env(MIRRORD_PROGRESS_ENV, "simple")
                 .arg(Into::<&'static str>::into(run.r#type))
                 .arg("--")
