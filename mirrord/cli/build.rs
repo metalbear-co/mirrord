@@ -1,9 +1,55 @@
 /// Ensure `packages/monitor/dist` exists so rust-embed doesn't fail during compilation.
+///
+/// Used on the clippy path where we want to compile fast and don't need the real frontend.
 fn ensure_monitor_frontend_dist() {
     let dist_dir = std::path::Path::new("../../packages/monitor/dist");
     if !dist_dir.exists() {
         std::fs::create_dir_all(dist_dir).ok();
     }
+}
+
+/// Build the `packages/monitor` React frontend into `packages/monitor/dist/` so rust-embed
+/// can pick up the real assets. Without this, `mirrord ui` serves 404 for every request
+/// because the embedded asset directory is empty.
+fn build_monitor_frontend() {
+    use std::{path::Path, process::Command};
+
+    let input_path = Path::new("../../packages/monitor");
+
+    println!("cargo::rerun-if-changed={}/src", input_path.display());
+    println!("cargo::rerun-if-changed={}/index.html", input_path.display());
+    println!(
+        "cargo::rerun-if-changed={}/package.json",
+        input_path.display()
+    );
+    println!(
+        "cargo::rerun-if-changed={}/tailwind.config.js",
+        input_path.display()
+    );
+    println!(
+        "cargo::rerun-if-changed={}/vite.config.ts",
+        input_path.display()
+    );
+
+    let status = Command::new("npm")
+        .args(["install"])
+        .current_dir(input_path)
+        .status()
+        .expect("npm install command should finish (is npm installed?)");
+    assert!(
+        status.success(),
+        "npm install in packages/monitor should succeed"
+    );
+
+    let status = Command::new("npm")
+        .args(["run", "build"])
+        .current_dir(input_path)
+        .status()
+        .expect("npm run build command should finish");
+    assert!(
+        status.success(),
+        "npm run build in packages/monitor should succeed"
+    );
 }
 
 fn recheck_and_setup_layer_file() {
@@ -153,7 +199,7 @@ fn main() {
         package_sip_binaries();
     }
 
-    ensure_monitor_frontend_dist();
+    build_monitor_frontend();
 
     if std::env::var("MIRRORD_LAYER_FILE_MACOS_ARM64").is_err()
         && std::env::var("CARGO_CFG_TARGET_ARCH").is_ok_and(|t| t.eq("aarch64") || t.eq("x86_64"))

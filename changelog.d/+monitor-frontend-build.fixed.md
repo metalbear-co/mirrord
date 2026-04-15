@@ -1,0 +1,1 @@
+Build the `packages/monitor` React app as part of `cargo build` so `mirrord ui` serves the real UI. Previously the build script only created an empty `dist/` directory, so opening the UI returned 404.
