@@ -174,7 +174,7 @@ function Build-RustApps {
     param(
         [string]$RepoRoot,
         [string]$Target = $null,
-        [string[]]$Crates = @('rust-websockets', 'rust-sqs-printer')
+        [string[]]$Crates = @('rust-websockets')
     )
 
     Push-Location $RepoRoot

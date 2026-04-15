@@ -18,11 +18,6 @@ variable "CLI_TAGS" {
   default = "${REGISTRY}/mirrord-cli:dev"
 }
 
-# Comma-separated tags for the SQS printer test image.
-variable "SQS_PRINTER_TAGS" {
-  default = "${REGISTRY}/test-sqs-printer:dev"
-}
-
 # Platforms for product images. Override to target a single platform (e.g. linux/amd64 for local test builds).
 variable "PLATFORMS" {
   default = "linux/amd64,linux/arm64"
@@ -41,11 +36,6 @@ variable "PRODUCT_CACHE_TO" {
 # Product images built from this repo.
 group "default" {
   targets = ["agent", "cli"]
-}
-
-# Test helper images.
-group "test-images" {
-  targets = ["sqs-printer"]
 }
 
 # CI base images used by build and test jobs.
@@ -77,19 +67,6 @@ target "cli" {
   dockerfile = "mirrord/cli/Dockerfile"
   platforms  = split(",", PLATFORMS)
   tags       = split(",", CLI_TAGS)
-  cache-from = compact([PRODUCT_CACHE_FROM])
-  cache-to   = compact([PRODUCT_CACHE_TO])
-  contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21" = "target:ci-agent-builder"
-  }
-}
-
-# Test utility that prints SQS messages; used for manual SQS integration testing.
-target "sqs-printer" {
-  context    = "./tests/rust-sqs-printer"
-  dockerfile = "Dockerfile"
-  platforms  = split(",", PLATFORMS)
-  tags       = split(",", SQS_PRINTER_TAGS)
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
