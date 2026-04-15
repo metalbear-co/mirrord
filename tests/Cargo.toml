@@ -11,9 +11,16 @@ workspace = true
 doctest = false
 
 [dependencies]
-aws-config = { workspace = true, optional = true }
+aws-config = { workspace = true, optional = true, default-features = false, features = [
+    "behavior-version-latest",
+    "default-https-client",
+    "rt-tokio",
+] }
 aws-credential-types.workspace = true
-aws-sdk-sqs = { workspace = true, optional = true }
+aws-sdk-sqs = { workspace = true, optional = true, default-features = false, features = [
+    "default-https-client",
+    "rt-tokio",
+] }
 aws-types.workspace = true
 json-patch.workspace = true
 jsonptr.workspace = true
