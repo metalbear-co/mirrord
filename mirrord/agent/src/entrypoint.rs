@@ -827,7 +827,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         }
     };
 
-    let dns = setup::start_dns(&args, &state.network_runtime, cancellation_token.clone());
+    let dns = setup::start_dns(&state.network_runtime, cancellation_token.clone());
 
     let bg_tasks = BackgroundTasks {
         stealer,

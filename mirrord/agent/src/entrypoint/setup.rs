@@ -75,7 +75,6 @@ pub(super) fn start_stealer(
 }
 
 pub(super) fn start_dns(
-    args: &super::Args,
     runtime: &BgTaskRuntime,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<DnsCommand> {
@@ -86,7 +85,7 @@ pub(super) fn start_dns(
     let (command_tx, command_rx) = mpsc::channel::<DnsCommand>(1000);
 
     let task_status = tokio::spawn(
-        DnsWorker::new(runtime.target_pid(), command_rx, args.ipv6).run(cancellation_token.clone()),
+        DnsWorker::new(runtime.target_pid(), command_rx).run(cancellation_token.clone()),
     )
     .into_status("DnsTask");
 
