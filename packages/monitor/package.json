@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/poppins": "^5.2.7",
     "@metalbear/ui": "^0.1.5",
     "@xyflow/react": "^12.10.2",
     "elkjs": "^0.11.1",

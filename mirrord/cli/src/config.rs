@@ -223,7 +223,7 @@ pub(super) enum Commands {
     #[command(hide = true)]
     Attach(AttachArgs),
 
-    /// Launch the session monitor UI.
+    /// Launch the mirrord local UI.
     ///
     /// Watches active mirrord sessions and displays a web dashboard showing
     /// real-time events (file operations, DNS queries, HTTP requests, etc.)

@@ -34,7 +34,7 @@ use crate::{
         runtime::{RuntimeData, RuntimeDataProvider},
     },
     error::{KubeApiError, Result},
-    retry::RetryKube,
+    retry::retry_policy_from_config,
 };
 
 #[cfg(feature = "portforward")]
@@ -63,7 +63,7 @@ impl KubernetesAPI {
         let client = progress
             .suspend(|| ClientBuilder::try_from(client_config.clone()))?
             .with_layer(&BufferLayer::new(1024))
-            .with_layer(&RetryLayer::new(RetryKube::try_from(
+            .with_layer(&RetryLayer::new(retry_policy_from_config(
                 &config.startup_retry,
             )?))
             .build();
