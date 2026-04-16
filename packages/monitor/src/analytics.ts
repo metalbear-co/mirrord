@@ -13,6 +13,14 @@ export function initAnalytics(telemetryEnabled: boolean) {
     person_profiles: 'identified_only',
     autocapture: false,
     capture_pageview: false,
+    // The session monitor UI renders file paths, pod names, DNS hostnames, HTTP URLs, and
+    // request/response bodies — all of which can contain customer data. Mask every visible
+    // text node and every input value in session replays; behavioral data (clicks, nav,
+    // scroll) is still useful without the raw content.
+    session_recording: {
+      maskAllInputs: true,
+      maskTextSelector: '*',
+    },
   })
   initialized = true
   posthog.capture('session_monitor_opened', { source: 'session-monitor' })

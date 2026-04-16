@@ -1,0 +1,1 @@
+Fix `mirrord ui` serving 404 in release builds: enable `corepack` on the macOS CLI release jobs so the xtask actually builds the monitor frontend. Also permit the PostHog telemetry host in the UI's `Content-Security-Policy`, and mask all text and inputs in session replays so they don't capture customer-sensitive content surfaced by the monitor.
