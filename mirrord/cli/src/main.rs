@@ -1156,7 +1156,7 @@ fn main() -> miette::Result<()> {
             #[cfg(unix)]
             Commands::Session(args) => session::session_command(*args).await?,
             #[cfg(unix)]
-            Commands::Kill(args) => session::delete_command(*args).await?,
+            Commands::Kill(args) => session::kill_command(*args).await?,
         };
 
         Ok(())

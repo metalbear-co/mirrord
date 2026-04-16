@@ -32,6 +32,10 @@ gcloud
 Tokio
 tokio
 serde
+serialize
+serialization
+deserialize
+deserialization
 reqwest
 rustls
 bincode
@@ -146,6 +150,7 @@ sccache
 LTO
 jq
 jaq
+towncrier
 
 # Cloud services
 SNS
