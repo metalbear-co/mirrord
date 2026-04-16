@@ -218,22 +218,21 @@ where
 
     /// List rules from other/ previous mirrord agents that exist on the IP table
     #[tracing::instrument(level = Level::TRACE, skip(ipt) ret, err)]
-    pub async fn list_mirrord_rules(ipt: &IPT) -> IPTablesResult<Vec<String>> {
+    pub async fn list_mirrord_rules(
+        ipt: &IPT,
+    ) -> IPTablesResult<impl Iterator<Item = String> + use<IPT>> {
         let rules = ipt.list_table()?;
 
-        Ok(rules
-            .into_iter()
-            .filter(|rule| {
-                [
-                    IPTABLE_PREROUTING,
-                    IPTABLE_MESH,
-                    IPTABLE_STANDARD,
-                    IPTABLE_EXCLUDE_FROM_MESH,
-                ]
-                .iter()
-                .any(|chain| rule.contains(*chain))
-            })
-            .collect())
+        Ok(rules.into_iter().filter(|rule| {
+            [
+                IPTABLE_PREROUTING,
+                IPTABLE_MESH,
+                IPTABLE_STANDARD,
+                IPTABLE_EXCLUDE_FROM_MESH,
+            ]
+            .iter()
+            .any(|chain| rule.contains(*chain))
+        }))
     }
 
     pub async fn load(
@@ -847,7 +846,7 @@ mod tests {
 
         let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock).await;
         assert_eq!(
-            leftover_rules_res.unwrap().len(),
+            leftover_rules_res.unwrap().count(),
             0,
             "Fresh IP table should successfully list table rules and list no existing mirrord rules"
         );
@@ -872,7 +871,7 @@ mod tests {
 
         let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock).await;
         assert_eq!(
-            leftover_rules_res.unwrap().len(),
+            leftover_rules_res.unwrap().count(),
             1,
             "Fresh IP table should successfully list table rules and list one existing mirrord rule"
         );
