@@ -15,7 +15,6 @@ categories.workspace = true
 
 [dependencies]
 mirrord-config = { path = "../config" }
-mirrord-config-derive = { path = "../config/derive" }
 mirrord-progress = { path = "../progress/" }
 
 serde = { workspace = true, features = ["derive"] }
@@ -24,8 +23,6 @@ miette = { workspace = true, features = ["fancy"] }
 thiserror.workspace = true
 strum_macros.workspace = true
 tokio = { workspace = true, features = ["process"] }
-
-
 
 [lints]
 workspace = true

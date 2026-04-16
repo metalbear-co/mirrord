@@ -1,3 +1,10 @@
+//! Implementation of the `mirrord up` command, which runs multiple mirrord sessions
+//! from a single configuration file.
+
+#![warn(clippy::indexing_slicing)]
+#![deny(unused_crate_dependencies)]
+#![deny(missing_docs)]
+
 use std::{
     path::PathBuf,
     process::{ExitStatus, Stdio},
@@ -16,24 +23,35 @@ use tokio::{
     task::{JoinError, JoinSet},
 };
 
+/// Environment variable used to pass the resolved configuration to child mirrord processes.
 pub const RESOLVED_CONFIG_ENV: &str = "MIRRORD_UP_RESOLVED_CONFIG";
 
 /// Errors produced by `mirrord up` command.
 #[derive(Debug, Error, Diagnostic)]
 pub enum UpError {
+    /// IO error.
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
+    /// Failed to parse the mirrord-up YAML configuration.
     #[error("failed to parse mirrord-up config: {0}")]
     #[diagnostic(help("Check the YAML syntax and field names in your mirrord-up.yaml."))]
     Parse(#[from] serde_yaml::Error),
 
+    /// Configuration validation failed.
     #[error("mirrord-up config validation failed: {0}")]
     Validation(#[from] ConfigError),
 
+    /// A child mirrord service exited with a non-zero status.
     #[error("Service {name} crashed with exit status {status}")]
-    ServiceCrashed { name: String, status: ExitStatus },
+    ServiceCrashed {
+        /// Name of the service that crashed.
+        name: String,
+        /// Exit status of the crashed service.
+        status: ExitStatus,
+    },
 
+    /// A child process handler task panicked.
     #[error("Child process handler task panicked: {0:?}")]
     Panic(JoinError),
 }
@@ -44,6 +62,12 @@ pub fn load_up_config(path: &PathBuf) -> Result<UpConfig, UpError> {
     Ok(serde_yaml::from_str(&content)?)
 }
 
+/// Genererate [`mirrord_config::LayerConfig`]s based on the provided [`UpConfig`] and
+/// [`EnvKey`] and spawn child mirrord processes. Stdout/stderr from
+/// children will be printed to the console, prefixed with the name of
+/// the session.
+///
+/// Returns when one of the child mirrord sessions exits.
 pub async fn run(up_config: UpConfig, key: EnvKey) -> Result<(), UpError> {
     let commands: Vec<_> = up_config
         .service_configs(&key)

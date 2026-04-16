@@ -5420,7 +5420,6 @@ version = "3.201.0"
 dependencies = [
  "miette",
  "mirrord-config",
- "mirrord-config-derive",
  "mirrord-progress",
  "serde",
  "serde_yaml",

@@ -250,6 +250,14 @@
 //! - [`fix::fix_command`]
 //!
 //! > Contains fixes for commonly occuring issues that prevent mirrord from working optimally.
+//!
+//! ### `mirrord up`
+//!
+//! Spawns and manage multiple child mirrord sessions, based on a single `mirrord-up.yaml`
+//! configuration file.
+//! - [`up::up_command`]
+//!
+//! > Think docker compose but for mirrord.
 
 #![feature(try_blocks)]
 #![feature(iterator_try_collect)]

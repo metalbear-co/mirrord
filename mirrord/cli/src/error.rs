@@ -18,7 +18,6 @@ use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
 use mirrord_protocol_io::ProtocolError;
 use mirrord_tls_util::SecureChannelError;
-use mirrord_up::UpError;
 use mirrord_vpn::error::VpnError;
 use reqwest::StatusCode;
 use thiserror::Error;
@@ -30,6 +29,7 @@ use crate::{
     fix::FixKubeconfigError,
     port_forward::PortForwardError,
     profile::ProfileError,
+    up::UpCliError,
 };
 
 pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
@@ -610,7 +610,7 @@ pub(crate) enum CliError {
     /// Errors produced by the `mirrord up` command.
     #[error(transparent)]
     #[diagnostic(transparent)]
-    Up(#[from] UpError),
+    Up(#[from] UpCliError),
 
     /// Errors produced by the `mirrord ui` command.
     #[cfg(unix)]
