@@ -727,30 +727,17 @@ async fn check_existing_rules(
 /// starts background tasks and listens for client connections.
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent(args: Args) -> AgentResult<()> {
-    // Prepares a TCP listener for accepting client connections.
-    let setup_listener = |ipv6: bool| -> AgentResult<TcpListener> {
-        let (socket, ip) = if ipv6 {
-            (TcpSocket::new_v6()?, Ipv6Addr::UNSPECIFIED.into())
-        } else {
-            (TcpSocket::new_v4()?, Ipv4Addr::UNSPECIFIED.into())
-        };
+    let listener = {
+        let listener = TcpSocket::new_v6()?;
         // SO_REUSEADDR is required to handle rapid agent restarts.
-        socket.set_reuseaddr(true)?;
-        socket.bind(SocketAddr::new(ip, args.communicate_port))?;
-        socket.listen(1024).map_err(From::from)
+        listener.set_reuseaddr(true)?;
+        listener.bind(SocketAddr::new(
+            Ipv6Addr::UNSPECIFIED.into(),
+            args.communicate_port,
+        ))?;
+        listener.listen(1024).map_err(AgentError::from)?
     };
 
-    // Listen for client connections
-    let listener = setup_listener(false).or_else(|error| {
-        if args.ipv6.not() {
-            return Err(error);
-        }
-        debug!(
-            "IPv6 support is enabled, and IPv4 bind failed. \
-            Creating an IPv6 listener for accepting client connections.",
-        );
-        setup_listener(true)
-    })?;
     let client_listener_address = listener.local_addr()?;
     debug!(address = %client_listener_address, "Created the client listener.");
 
