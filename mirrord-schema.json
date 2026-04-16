@@ -3028,6 +3028,7 @@
               ]
             }
           },
+          "additionalProperties": false,
           "required": [
             "env_var_name"
           ]
