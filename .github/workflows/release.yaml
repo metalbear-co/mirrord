@@ -98,22 +98,38 @@ jobs:
         with:
           cache: false
           rustflags: ""
+
+      #      - uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
+      #        with:
+      #          tool: cross
+      # We used to install the latest cross version (0.2.5) but it's too old (Feb 2023) and is missing essential bug fixes
+      # When 0.3.0 (or 0.2.6, but it seems unlikely) is released, we should use that
+      - name: Install cross from a recent commit
+        run: cargo install --git https://github.com/cross-rs/cross cross --rev 154b4ead7e639c7597d9e4e626b9c1c1e37608c0
       - uses: actions/setup-node@v3
         with:
           node-version: 24
       - name: Enable corepack (pnpm-only)
         run: corepack enable pnpm
-      - uses: astral-sh/setup-uv@v2
-      - run: uv tool install cargo-zigbuild==0.22.1
-      - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
-      - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
-      - run: cargo xtask build-cli --platform linux-aarch64 --release
+      - run: npm install
+        working-directory: ./packages/wizard
+      - run: npm run build
+        working-directory: ./packages/wizard
+      - run: cargo xtask build-monitor
+      # building layer and cli together leads to weird situation where embedded layer is x64, so split.
+      - name: build mirrord-layer
+        run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord-layer --target=aarch64-unknown-linux-gnu
+      - name: build mirrord cli
+        env:
+          MIRRORD_LAYER_FILE: ../../../target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
+          WIZARD_DIST_DIR: ./packages/wizard/dist
+        run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord --target=aarch64-unknown-linux-gnu --features "wizard"
       - uses: actions/upload-artifact@v4
         with:
           name: aarch64-unknown-linux-gnu
           path: |
-            target/aarch64-unknown-linux-gnu.2.17/release/mirrord
-            target/aarch64-unknown-linux-gnu.2.17/release/libmirrord_layer.so
+            target/aarch64-unknown-linux-gnu/release/mirrord
+            target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
           if-no-files-found: error
   build_binaries_x86_64-unknown-linux-gnu:
     needs: [validate_release_request]
@@ -125,22 +141,33 @@ jobs:
         with:
           cache: false
           rustflags: ""
+      #      - uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
+      #        with:
+      #          tool: cross
+      # We used to install the latest cross version (0.2.5) but it's too old (Feb 2023) and is missing essential bug fixes
+      # When 0.3.0 (or 0.2.6, but it seems unlikely) is released, we should use that
+      - name: Install cross from a recent commit
+        run: cargo install --git https://github.com/cross-rs/cross cross --rev 154b4ead7e639c7597d9e4e626b9c1c1e37608c0
       - uses: actions/setup-node@v3
         with:
           node-version: 24
       - name: Enable corepack (pnpm-only)
         run: corepack enable pnpm
-      - uses: astral-sh/setup-uv@v2
-      - run: uv tool install cargo-zigbuild==0.22.1
-      - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
-      - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
-      - run: cargo xtask build-cli --platform linux-x86_64 --release
+      - run: npm install
+        working-directory: ./packages/wizard
+      - run: npm run build
+        working-directory: ./packages/wizard
+      - run: cargo xtask build-monitor
+      - name: build mirrord-layer and cli
+        env:
+          WIZARD_DIST_DIR: ./packages/wizard/dist
+        run: cross build --release -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu --features "wizard"
       - uses: actions/upload-artifact@v4
         with:
           name: x86_64-unknown-linux-gnu
           path: |
-            target/x86_64-unknown-linux-gnu.2.17/release/mirrord
-            target/x86_64-unknown-linux-gnu.2.17/release/libmirrord_layer.so
+            target/x86_64-unknown-linux-gnu/release/mirrord
+            target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so
           if-no-files-found: error
   build_binaries_windows:
     needs: [validate_release_request]
