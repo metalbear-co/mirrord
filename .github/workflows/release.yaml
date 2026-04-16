@@ -109,22 +109,13 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 24
-      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
+      - name: Enable corepack (pnpm-only)
         run: corepack enable pnpm
       - run: npm install
         working-directory: ./packages/wizard
       - run: npm run build
         working-directory: ./packages/wizard
-      # `--ignore-workspace` keeps pnpm out of the repo-root workspace so it doesn't touch
-      # packages/wizard/node_modules. Deleting packages/monitor/node_modules after the dist
-      # is built avoids npm's workspace resolver crashing on pnpm's tree layout on any
-      # later npm install in this workflow. See xtask/src/tasks/monitor.rs for the same
-      # logic on the macOS CLI path.
-      - run: pnpm install --ignore-workspace --frozen-lockfile
-        working-directory: ./packages/monitor
-      - run: pnpm run build
-        working-directory: ./packages/monitor
-      - run: rm -rf packages/monitor/node_modules
+      - run: cargo xtask build-monitor
       # building layer and cli together leads to weird situation where embedded layer is x64, so split.
       - name: build mirrord-layer
         run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord-layer --target=aarch64-unknown-linux-gnu
@@ -160,18 +151,13 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 24
-      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
+      - name: Enable corepack (pnpm-only)
         run: corepack enable pnpm
       - run: npm install
         working-directory: ./packages/wizard
       - run: npm run build
         working-directory: ./packages/wizard
-      # See aarch64 job above for why `--ignore-workspace` + node_modules cleanup.
-      - run: pnpm install --ignore-workspace --frozen-lockfile
-        working-directory: ./packages/monitor
-      - run: pnpm run build
-        working-directory: ./packages/monitor
-      - run: rm -rf packages/monitor/node_modules
+      - run: cargo xtask build-monitor
       - name: build mirrord-layer and cli
         env:
           WIZARD_DIST_DIR: ./packages/wizard/dist
