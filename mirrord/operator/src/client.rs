@@ -1,7 +1,6 @@
 use std::{fmt, ops::Not, time::Duration};
 
 use base64::{Engine, engine::general_purpose};
-use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use connect_params::{BranchDbNames, ConnectParams};
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
@@ -1849,7 +1848,7 @@ impl OperatorApi<PreparedClientCert> {
         };
 
         let request = request_builder
-            .body(Bytes::new())
+            .body(vec![])
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
 
         #[derive(thiserror::Error, Debug)]
@@ -1874,7 +1873,7 @@ impl OperatorApi<PreparedClientCert> {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
             })?
-            .with(|e: Bytes| async {
+            .with(|e: Vec<u8>| async {
                 Ok::<_, OperatorClientError>(tungstenite::Message::Binary(e))
             })
             .map(|i| match i.map_err(OperatorClientError::from)? {

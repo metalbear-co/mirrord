@@ -15,7 +15,7 @@ use std::{
 
 use actix_codec::{AsyncRead, AsyncWrite, Decoder, Encoder, Framed};
 use bincode::error::DecodeError;
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt, future::Either};
 use mirrord_protocol::{ClientMessage, DaemonMessage, ProtocolCodec};
 use rand::seq::IteratorRandom;
@@ -83,9 +83,9 @@ impl<I: bincode::Decode<()>> Decoder for Codec<I> {
     }
 }
 
-impl<I> Encoder<Bytes> for Codec<I> {
+impl<I> Encoder<Vec<u8>> for Codec<I> {
     type Error = io::Error;
-    fn encode(&mut self, encoded: Bytes, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, encoded: Vec<u8>, dst: &mut BytesMut) -> Result<(), Self::Error> {
         dst.reserve(encoded.len());
         dst.put(&encoded[..]);
         Ok(())
@@ -143,7 +143,7 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         filter: Option<Filter>,
     ) -> Result<Self, ProtocolError>
     where
-        C: Transport<Bytes, Bytes>,
+        C: Transport<Vec<u8>, Vec<u8>>,
         Filter: Fn(Type::OutMsg) -> Either<Type::OutMsg, Type::InMsg> + Send + Sync + 'static,
         C::Error: From<DecodeError> + std::error::Error + Send + 'static,
     {
@@ -315,7 +315,7 @@ async fn io_task<Channel, Type>(
     tx: mpsc::Sender<Type::InMsg>,
 ) where
     Type: ProtocolEndpoint,
-    Channel: Transport<Type::InMsg, Bytes>,
+    Channel: Transport<Type::InMsg, Vec<u8>>,
     Channel::Error: std::error::Error + Send,
 {
     pin!(framed);
@@ -364,7 +364,7 @@ async fn io_task<Channel, Type>(
 
 #[derive(Debug, Default)]
 struct OutQueue {
-    messages: VecDeque<Bytes>,
+    messages: VecDeque<Vec<u8>>,
     used_bytes: usize,
 
     free: Arc<Notify>,
@@ -433,7 +433,11 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
     /// creating it if it doesn't exist. If the queue is full, return
     /// the message and an `OwnedNotified` that will resolve when the
     /// queue has free capacity.
-    fn try_push(&self, queue_id: QueueId, encoded: Bytes) -> Result<(), (Bytes, OwnedNotified)> {
+    fn try_push(
+        &self,
+        queue_id: QueueId,
+        encoded: Vec<u8>,
+    ) -> Result<(), (Vec<u8>, OwnedNotified)> {
         let mut lock = self.queues.lock().unwrap();
 
         // Garbage-collect unused queues
@@ -487,9 +491,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
             }
         }
 
-        let mut encoded = bincode::encode_to_vec(msg, bincode::config::standard())
-            .unwrap() // Is this Ok???
-            .into();
+        let mut encoded = bincode::encode_to_vec(msg, bincode::config::standard()).unwrap();
 
         loop {
             match self.try_push(id, encoded) {
@@ -504,7 +506,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
 
     /// Check for enqueued messages and return one from a
     /// randomly-picked nonempty queue.
-    fn poll_next(&self) -> Option<Bytes> {
+    fn poll_next(&self) -> Option<Vec<u8>> {
         let mut lock = self.queues.lock().unwrap();
 
         // If `ready` is empty then we have nothing to do.
@@ -537,7 +539,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
     }
 
     /// Wait for a new message to be enqueued and return it.
-    async fn next(&self) -> Bytes {
+    async fn next(&self) -> Vec<u8> {
         loop {
             match self.poll_next() {
                 Some(msg) => break msg,

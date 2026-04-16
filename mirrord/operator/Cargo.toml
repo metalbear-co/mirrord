@@ -22,7 +22,6 @@ client = [
   "crd",
   "dep:base64",
   "dep:bincode",
-  "dep:bytes",
   "dep:http",
   "dep:http-body-util",
   "dep:hyper",
@@ -65,7 +64,6 @@ mirrord-protocol = { path = "../protocol", optional = true }
 mirrord-protocol-io = { path = "../protocol-io", optional = true}
 
 base64 = { workspace = true, optional = true }
-bytes = { workspace = true, optional = true }
 dotenvy = { workspace = true, optional = true }
 bincode = { workspace = true, features = ["serde"], optional = true }
 chrono = { workspace = true, features = ["clock", "serde"] }
