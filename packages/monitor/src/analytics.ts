@@ -21,15 +21,18 @@ export function initAnalytics(telemetryEnabled: boolean) {
       maskAllInputs: true,
       maskTextSelector: '*',
     },
+    // The PostHog project's remote config gates session replay on URL triggers matching
+    // public marketing/app domains — which never match the local monitor UI. Force-start
+    // the recorder in the `loaded` callback (after the recorder bundle is actually
+    // available) so we do capture replays from the UI; the masking above keeps the content
+    // safe regardless of where the recorder runs. Overriding every gate (sampling,
+    // linked_flag, url_trigger) makes this robust to future project-config changes too.
+    loaded: (ph) => {
+      ph.startSessionRecording({ sampling: true, linked_flag: true, url_trigger: true })
+    },
   })
   initialized = true
   posthog.capture('session_monitor_opened', { source: 'session-monitor' })
-  // The PostHog project's remote config gates session replay on URL triggers matching
-  // public marketing/app domains — which never match the local monitor UI. Force-start the
-  // recorder here so we do capture replays from the UI; the masking above keeps the content
-  // safe regardless of where the recorder runs. Overriding every gate (sampling,
-  // linked_flag, trigger) makes this robust to future project-config changes too.
-  posthog.startSessionRecording({ sampling: true, linked_flag: true, url_trigger: true })
 }
 
 /**
