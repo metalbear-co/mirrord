@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-04-02T00:00:00.000Z
+lastmod: 2026-04-16T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -2865,9 +2865,9 @@ Priority (highest to lowest):
 Session key for traffic filtering.
 
 Distinguishes between user-provided keys (from CLI or config file)
-and auto-generated keys (UUID v4).
+and auto-generated keys.
 
-Auto-generated UUID v4 when no key was provided.
+Auto-generated random key when no key was provided.
 
 Key provided by user via CLI argument or config file.
 
