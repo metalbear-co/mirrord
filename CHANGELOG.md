@@ -8,6 +8,27 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.203.0](https://github.com/metalbear-co/mirrord/tree/3.203.0) - 2026-04-16
+
+
+### Added
+
+- Add a Settings dialog to the session monitor UI (accessed via the gear icon
+  in the header) with a toggle for anonymous usage analytics. The preference
+  persists in the browser's local storage. When turned off, the client calls
+  `posthog.opt_out_capturing` and stops any active session recording
+  immediately; the session's own `config.telemetry = false` still vetoes
+  telemetry regardless of the UI toggle.
+
+
+### Fixed
+
+- Fix `mirrord ui` serving 404 in release builds: enable `corepack` on the
+  macOS CLI release jobs so the xtask actually builds the monitor frontend.
+  Also permit the PostHog telemetry host in the UI `Content-Security-Policy`,
+  and mask all text and inputs in session replays so they do not capture
+  customer-sensitive content surfaced by the UI.
+
 ## [3.202.0](https://github.com/metalbear-co/mirrord/tree/3.202.0) - 2026-04-16
 
 
