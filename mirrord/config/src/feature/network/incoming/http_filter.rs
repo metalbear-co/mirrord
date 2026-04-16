@@ -467,7 +467,7 @@ impl HttpFilterConfig {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum InnerFilter {
     /// ##### feature.network.incoming.inner_filter.header_filter {#feature-network-incoming-inner-header-filter}
     ///
@@ -519,7 +519,7 @@ pub enum InnerFilter {
 
 /// Currently only JSON body filtering is supported.
 #[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
-#[serde(tag = "body", rename_all = "lowercase")]
+#[serde(tag = "body", rename_all = "lowercase", deny_unknown_fields)]
 pub enum BodyFilter {
     /// ##### feature.network.incoming.inner_filter.body_filter.json {#feature-network-incoming-inner-body-filter-json}
     ///

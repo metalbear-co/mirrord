@@ -1,0 +1,27 @@
+name: Check Vale
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  vale:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: install vale
+        run: |
+          wget "https://github.com/errata-ai/vale/releases/download/v3.13.1/vale_3.13.1_Linux_64-bit.tar.gz" -O /tmp/vale.tgz
+          echo '99bd899f0ac52054444ffe3df571c749cc811f3b606cf5ef740c9a5a2db33df6 /tmp/vale.tgz' | sha256sum -c
+          mkdir -p /tmp/vale
+          tar -xzf /tmp/vale.tgz -C /tmp/vale
+          chmod +x /tmp/vale/vale
+          mv /tmp/vale/vale /usr/local/bin
+      - name: check root markdown files
+        run: vale $(find . -name '*.md' -maxdepth 1 -not -name CLAUDE.md -not -name CHANGELOG.md) --output=report.tmpl
+      - name: check changelog.d files
+        run: vale $(git ls-files 'changelog.d/*.md') --output=report.tmpl

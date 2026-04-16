@@ -1,0 +1,54 @@
+name: Check Lint
+
+on:
+  workflow_call:
+    inputs:
+      rust_toolchain:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  MIRRORD_TELEMETRY: false
+
+jobs:
+  lint:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rm rust-toolchain.toml
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+        with:
+          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+          toolchain: ${{ inputs.rust_toolchain }}
+          components: rustfmt, clippy
+          target: ${{ matrix.target }}
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: cargo fmt (run only on one platform)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        run: cargo fmt --all -- --check
+      - if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        run: cargo check -p mirrord-operator --features crd --target ${{ matrix.target }}
+      - if: ${{ matrix.os == 'macos-latest' }}
+        run: touch /tmp/not-really-layer.dylib
+      - run: cargo clippy --workspace --lib --bins --all-features --target ${{ matrix.target }} --tests -- "-Wclippy::indexing_slicing" -D warnings
+        env:
+          MIRRORD_LAYER_FILE_MACOS_ARM64: /tmp/not-really-layer.dylib

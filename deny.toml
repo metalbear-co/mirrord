@@ -16,8 +16,6 @@ ignore = [
   "RUSTSEC-2024-0436", # paste is unmaintained but we should not have an issue with it.
   "RUSTSEC-2025-0134", # rustls-pemfile is unmaintained, but we cannot remove it yet.
   "RUSTSEC-2025-0141", # bincode is unmaintaned, but we cannot remove it yet.
-  "RUSTSEC-2026-0098", # no fix available yet since it's only from aws package tree.
-  "RUSTSEC-2026-0099", # no fix available yet since it's only from aws package tree.
 ]
 
 [licenses]
@@ -48,10 +46,15 @@ license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 [bans]
 # enable this when dependencies are a bit more stable
 # multiple-versions = "deny"
-skip = []
+skip = [
+  "hashbrown"
+]
 skip-tree = [
   "apple-codesign",
   "asn1-rs",
+  "issue1317", # The only use of actix-web
+  "darling:<0.23",
+  "tokio-tungstenite:<0.29" # will be updated next kube release (already in main)
 ]
 
 [sources]
