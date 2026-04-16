@@ -1,17 +1,31 @@
 import { Button, MirrordIcon, cn } from '@metalbear/ui'
-import { Sun, Moon } from 'lucide-react'
+import { Moon, Settings, Sun } from 'lucide-react'
+import { useState } from 'react'
 import { strings } from '../strings'
+import SettingsDialog from './SettingsDialog'
 
 interface Props {
   connected: boolean
   isDarkMode: boolean
   onToggleTheme: () => void
+  telemetryEnabled: boolean
+  onTelemetryChange: (enabled: boolean) => void
 }
 
-export default function AppHeader({ connected, isDarkMode, onToggleTheme }: Props) {
+export default function AppHeader({
+  connected,
+  isDarkMode,
+  onToggleTheme,
+  telemetryEnabled,
+  onTelemetryChange,
+}: Props) {
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
   return (
-    <header className="relative shrink-0 bg-background border-b border-border text-foreground">
-      <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-primary to-transparent opacity-40" />
+    <header className="relative shrink-0 bg-background border-b border-border text-foreground shadow-[0_1px_2px_-1px_rgb(0_0_0_/_0.04)]">
+      {/* Hair-thin inner top highlight — a soft rim of light that gives the header a
+          glassy finish in both themes, replacing the prior brand-colored accent line. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-foreground/10 to-transparent" />
       <div className="px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14">
           <div className="flex items-center gap-3">
@@ -49,9 +63,26 @@ export default function AppHeader({ connected, isDarkMode, onToggleTheme }: Prop
             >
               {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
+
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setSettingsOpen(true)}
+              title={strings.app.settings}
+              className="h-8 w-8 text-foreground/60 hover:text-foreground"
+            >
+              <Settings className="h-4 w-4" />
+            </Button>
           </div>
         </div>
       </div>
+
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        telemetryEnabled={telemetryEnabled}
+        onTelemetryChange={onTelemetryChange}
+      />
     </header>
   )
 }
