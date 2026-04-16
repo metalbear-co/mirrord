@@ -212,6 +212,7 @@ impl CollectAnalytics for &ExperimentalConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
 pub struct AppleVariablesConfig {}
 
 /// Configuration for adding artificial latency to outgoing network operations.
