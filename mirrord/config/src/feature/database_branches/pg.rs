@@ -7,6 +7,7 @@ use super::{DatabaseBranchBaseConfig, IamAuthConfig};
 
 /// When configuring a branch for PostgreSQL, set `type` to `pg`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PgBranchConfig {
     #[serde(flatten)]
     pub base: DatabaseBranchBaseConfig,
@@ -41,7 +42,7 @@ pub struct PgBranchConfig {
 ///   Copies both schema and data of all tables. This option shall only be used
 ///   when the data volume of the source database is minimal.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "lowercase")]
+#[serde(tag = "mode", rename_all = "lowercase", deny_unknown_fields)]
 pub enum PgBranchCopyConfig {
     Empty {
         tables: Option<BTreeMap<String, PgBranchTableCopyConfig>>,

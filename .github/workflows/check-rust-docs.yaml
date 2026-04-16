@@ -1,0 +1,29 @@
+name: Check Rust Docs
+
+on:
+  workflow_call:
+    inputs:
+      rust_toolchain:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  RUSTDOCFLAGS: "--enable-index-page -Zunstable-options -Dwarnings"
+
+jobs:
+  rust-docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+        with:
+          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+          toolchain: ${{ inputs.rust_toolchain }}
+      - run: cargo xtask test-doc
