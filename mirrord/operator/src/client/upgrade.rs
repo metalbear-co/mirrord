@@ -9,6 +9,7 @@
 //! response body and deserialize it.
 
 use base64::Engine;
+use bytes::Bytes;
 use http::{HeaderValue, Request, Response, StatusCode};
 use http_body_util::BodyExt;
 use hyper_util::rt::TokioIo;
@@ -106,7 +107,7 @@ fn sec_websocket_key() -> HeaderValue {
 
 pub async fn connect_ws(
     client: &Client,
-    request: Request<Vec<u8>>,
+    request: Request<Bytes>,
 ) -> kube::Result<WebSocketStream<TokioIo<hyper::upgrade::Upgraded>>> {
     let (mut parts, body) = request.into_parts();
     parts.headers.insert(
