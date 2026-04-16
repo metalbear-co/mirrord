@@ -1,0 +1,148 @@
+name: Test Integration
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  MIRRORD_TELEMETRY: false
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-24.04
+    env:
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/debug/mirrord
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so
+    steps:
+      - uses: actions/checkout@v4
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+        with:
+          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+          target: x86_64-unknown-linux-gnu
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue1123
+          rustc issue1123.rs --out-dir target
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue1054
+          rustc issue1054.rs --out-dir target
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue1458
+          rustc issue1458.rs --out-dir target
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue1458portnot53
+          rustc issue1458portnot53.rs --out-dir target
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue2058
+          rustc issue2058.rs --out-dir target
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue2204
+          rustc issue2204.rs --out-dir target
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 24
+      - run: npm install express
+      - uses: actions/setup-python@v5
+      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: tests/go-e2e/go.sum
+      - run: |
+          go version
+      - run: |
+          cd mirrord/layer-tests/tests
+          ../../../scripts/build_go_apps.sh 24
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - run: |
+          go version
+      - run: |
+          cd mirrord/layer-tests/tests
+          ../../../scripts/build_go_apps.sh 25
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: false
+      - run: |
+          go version
+      - run: |
+          cd mirrord/layer-tests/tests
+          ../../../scripts/build_go_apps.sh 26
+      - run: |
+          cd mirrord/layer-tests/tests/apps/fileops
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/outgoing
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/recv_from
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/dns_resolve
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/listen_ports
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue1776
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue1776portnot53
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue1899
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue2001
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue2438
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue3248
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/rebind0
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/dup_listen
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/double_listen
+          cargo build
+      - run: ./mirrord/layer-tests/tests/apps/dlopen_cgo/build_test_app.sh
+      - run: ./scripts/build_c_apps.sh
+      - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord-layer
+      - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-lib
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
+      - name: mirrord protocol UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
+      - name: mirrord config UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-config
+      - name: mirrord kube UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
+      - name: mirrord intproxy UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-intproxy
+      - name: mirrord auth UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-auth
+      - name: mirrord operator UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
+      - name: mirrord cli UT
+        run: cargo xtask test-ut -- --target x86_64-unknown-linux-gnu
+      - name: mirrord protocol-io UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
+      - name: mirrord jaq UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-jaq
+      - name: save intproxy logs
+        continue-on-error: true
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: intproxy_logs_linux
+          path: /tmp/intproxy_logs/linux

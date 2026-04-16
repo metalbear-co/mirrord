@@ -131,6 +131,7 @@ async fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> Monit
 
         let (tx, _rx) =
             tokio::sync::broadcast::channel::<mirrord_intproxy::session_monitor::MonitorEvent>(256);
+        let api_monitor_rx = tx.subscribe();
         let proxy_monitor_tx = MonitorTx::from_sender(tx.clone());
         let api_monitor_tx = MonitorTx::from_sender(tx);
 
@@ -179,6 +180,7 @@ async fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> Monit
             if let Err(error) = mirrord_intproxy::session_monitor::api::start_api_server(
                 session_info,
                 api_monitor_tx,
+                api_monitor_rx,
                 shutdown,
             )
             .await
