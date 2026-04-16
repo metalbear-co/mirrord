@@ -1,13 +1,19 @@
+@import '@fontsource/poppins/400.css';
+@import '@fontsource/poppins/500.css';
+@import '@fontsource/poppins/600.css';
+@import '@fontsource/poppins/700.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 body {
   margin: 0;
+  font-family: 'Poppins', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom scrollbar for dark theme */
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -19,7 +25,6 @@ body {
   border-radius: 3px;
 }
 
-/* Event row fade-in animation */
 @keyframes eventFadeIn {
   from {
     opacity: 0;
@@ -34,4 +39,3 @@ body {
 .event-row-animate {
   animation: eventFadeIn 0.2s ease-out;
 }
-

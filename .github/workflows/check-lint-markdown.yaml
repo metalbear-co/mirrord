@@ -1,0 +1,17 @@
+name: Check Lint Markdown
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-markdown:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: metalbear-co/markdownlint-cli2-action@0fb2cca662f67f99dfdb04fce7d81bb2904ee404
+        with:
+          config: ".markdownlint.json"
+          globs: "README.md"

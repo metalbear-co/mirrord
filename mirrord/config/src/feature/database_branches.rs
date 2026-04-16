@@ -29,6 +29,7 @@ pub type PgIamAuthConfig = IamAuthConfig;
 /// Shared copy config for individual items (tables, collections, etc.).
 /// All database engines use this same struct for per-item copy configuration.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BranchItemCopyConfig {
     pub filter: Option<String>,
 }
@@ -41,7 +42,7 @@ pub struct BranchItemCopyConfig {
 /// - `{ "type": "env", "variable": "VAR_NAME" }` - direct env var from pod spec
 /// - `{ "type": "env_from", "variable": "VAR_NAME" }` - from configMapRef/secretRef
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum IamAuthConfig {
     /// For AWS RDS/Aurora IAM authentication, set `type` to `"aws_rds"`.
     ///
@@ -214,7 +215,7 @@ impl DatabaseBranchesConfig {
 /// }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum DatabaseBranchConfig {
     Mongodb(Box<MongodbBranchConfig>),
     Mssql(Box<MssqlBranchConfig>),
@@ -296,7 +297,7 @@ pub struct DatabaseBranchBaseConfig {
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSource")]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum ConnectionSource {
     Url {
         url: TargetEnvironmentVariableSource,
@@ -354,6 +355,7 @@ pub enum ConnectionSourceType {
 /// The `type` field is optional - when omitted, the operator auto-detects
 /// whether the variable comes from `env` or `envFrom` on the target pod.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectionParamsConfig {
     #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     pub source_type: Option<ConnectionSourceType>,
@@ -375,7 +377,7 @@ pub struct ConnectionParamsConfig {
 /// As a Secret ref: `{ "secret": "my-secret", "key": "password" }` - read directly from a
 /// Kubernetes Secret.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum ParamSource {
     Variable(String),
     Secret {
@@ -405,6 +407,7 @@ impl ParamSource {
 /// At least one parameter must be specified.
 /// Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectionParamsVars {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<ParamSource>,
@@ -427,7 +430,7 @@ pub struct ConnectionParamsVars {
 /// - `secret` read directly from a Kubernetes Secret.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSourceKind")]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TargetEnvironmentVariableSource {
     Env {
         container: Option<String>,

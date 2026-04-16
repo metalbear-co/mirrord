@@ -31,7 +31,7 @@ use mirrord_kube::{
     },
     error::KubeApiError,
     resolved::{ResolvedResource, ResolvedTarget},
-    retry::RetryKube,
+    retry::retry_policy_from_config,
 };
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
@@ -252,7 +252,7 @@ impl OperatorApi<NoClientCert> {
             .suspend(|| ClientBuilder::try_from(base_config.clone()))
             .map_err(KubeApiError::from)?
             .with_layer(&BufferLayer::new(1024))
-            .with_layer(&RetryLayer::new(RetryKube::try_from(
+            .with_layer(&RetryLayer::new(retry_policy_from_config(
                 &config.startup_retry,
             )?))
             .build();
@@ -358,7 +358,7 @@ impl OperatorApi<NoClientCert> {
                 .map_err(OperatorApiError::CreateKubeClient)?
                 .with_layer(&BufferLayer::new(1024))
                 .with_layer(&RetryLayer::new(
-                    RetryKube::try_from(&layer_config.startup_retry).map_err(From::from)?,
+                    retry_policy_from_config(&layer_config.startup_retry).map_err(From::from)?,
                 ))
                 .build();
 
@@ -1878,7 +1878,7 @@ impl OperatorApi<PreparedClientCert> {
             .map_err(KubeApiError::from)
             .map_err(OperatorApiError::CreateKubeClient)?
             .with_layer(&BufferLayer::new(1024))
-            .with_layer(&RetryLayer::new(RetryKube::try_from(
+            .with_layer(&RetryLayer::new(retry_policy_from_config(
                 &layer_config.startup_retry,
             )?))
             .build();

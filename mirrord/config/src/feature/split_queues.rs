@@ -196,7 +196,7 @@ pub type QueueMessageFilter = BTreeMap<String, String>;
 /// The type of queue to be split, currently `SQS` and `Kafka` are supported. More queue types might
 /// be added in the future.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
-#[serde(tag = "queue_type")]
+#[serde(tag = "queue_type", deny_unknown_fields)]
 pub enum QueueFilter {
     /// ### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
     /// Only supported with `queue_type` of `SQS`.

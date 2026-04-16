@@ -32,6 +32,7 @@ use crate::container::ContainerRuntime;
 /// }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RedisBranchConfig {
     /// #### feature.db_branches[].id (type: redis) {#feature-db_branches-redis-id}
     ///
@@ -87,6 +88,7 @@ pub enum RedisBranchLocation {
 /// }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct RedisConnectionConfig {
     /// ##### feature.db_branches[].connection.url (type: redis)
     ///
@@ -161,7 +163,7 @@ impl RedisConnectionConfig {
 ///
 /// Values can be specified directly or sourced from environment variables.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum RedisValueSource {
     Direct(String),
     Env(RedisEnvSource),
@@ -180,6 +182,7 @@ impl RedisValueSource {
 /// <!--${internal}-->
 /// Environment variable source for Redis values.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RedisEnvSource {
     #[serde(rename = "type")]
     pub source_type: RedisEnvSourceType,
@@ -200,6 +203,7 @@ pub enum RedisEnvSourceType {
 
 /// Configuration for local Redis runtime.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RedisLocalConfig {
     /// ##### feature.db_branches[].local.port (type: redis)
     ///
@@ -288,6 +292,7 @@ pub enum RedisRuntime {
 /// }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct RedisOptions {
     /// Raw arguments passed directly to redis-server or as Docker CMD args.
     /// Use standard Redis config syntax (e.g., "--maxmemory 256mb").

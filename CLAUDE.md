@@ -22,6 +22,13 @@ cargo clippy -- --deny warnings
 
 Use `cargo check -p <crate> --keep-going` to surface all errors at once rather than stopping at the first.
 
+## Contribution Notes
+
+- Add a towncrier fragment for code changes in `changelog.d/`, named `<identifier>.<category>.md`.
+- Use a public GitHub issue number when one exists, otherwise use `+some-name`.
+- Valid categories are `added`, `fixed`, `internal`, and `changed`.
+- Use `internal` for test-only, CI-only, and other changes users do not care about.
+
 ## Project Overview
 
 mirrord is a tool that lets developers run local processes in the context of their cloud environment.
