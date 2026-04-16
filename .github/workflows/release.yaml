@@ -487,8 +487,8 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 24
-      - name: Enable corepack (pnpm for monitor frontend build)
-        run: corepack enable
+      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
+        run: corepack enable pnpm
       - uses: actions/download-artifact@v4
         with:
           name: layer-universal-apple-darwin
@@ -538,8 +538,8 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 24
-      - name: Enable corepack (pnpm for monitor frontend build)
-        run: corepack enable
+      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
+        run: corepack enable pnpm
       - uses: actions/download-artifact@v4
         with:
           name: layer-universal-apple-darwin
