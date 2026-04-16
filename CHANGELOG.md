@@ -8,6 +8,42 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.202.0](https://github.com/metalbear-co/mirrord/tree/3.202.0) - 2026-04-16
+
+
+### Added
+
+- Add -n and -f flags to session commands
+- Add token-based authentication, CORS, Host header validation, and security
+  response headers to the session monitor API to protect against cross-origin
+  attacks on localhost.
+- Added a web frontend for the local session monitor API under
+  `monitor-frontend/`.
+
+
+### Changed
+
+- Fix the squashed mirrord logo in the session monitor header and align the
+  monitor's typography, color tokens, and header layout with the
+  operator-dashboard's design system so both apps share the same look.
+
+
+### Fixed
+
+- Fix an issue where mirrord would wait indefinitely if the agent image could
+  not be pulled (e.g. ImagePullBackOff, ErrImagePull). The CLI now surfaces a
+  clear error instead of hanging.
+  [#366](https://github.com/metalbear-co/mirrord/issues/366)
+- Adds agent support for multiple mirrord sessions that have the same target
+  pod, but they're targeting different containers of this pod. Previously the
+  second agent iptables' would take over the first agent's, now iptables' chain
+  names are dynamic, and thus avoid this problem.
+- Fix a bug where unknown fields in some nested mirrord config sections were
+  accepted during deserialization instead of being rejected.
+- Fix the root layer process being absent from the local UI processes list.
+  Also update the `mirrord ui` help text from "Launch the session monitor UI"
+  to "Launch the mirrord local UI".
+
 ## [3.201.0](https://github.com/metalbear-co/mirrord/tree/3.201.0) - 2026-04-10
 
 

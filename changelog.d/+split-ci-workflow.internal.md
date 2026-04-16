@@ -1,1 +1,0 @@
-Split the main CI workflow into reusable workflow files while keeping the current xtask-based docs, unit test, e2e, and macOS flows. Adopt the `plan` job plus JSON-based result aggregation pattern in the top-level CI workflow.
