@@ -16,7 +16,7 @@ export default function PortSubscriptionsCard({ portSubs }: { portSubs: PortSubs
             {portSubs.map((p) => (
               <div key={p.port} className="flex items-center justify-between px-4 py-2.5">
                 <span className="text-xs font-mono font-medium text-foreground">:{p.port}</span>
-                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-mono">
+                <Badge variant="outline" className="text-xs px-2 py-0 font-mono font-normal">
                   {p.mode}
                 </Badge>
               </div>

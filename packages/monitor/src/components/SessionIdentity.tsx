@@ -15,20 +15,20 @@ export default function SessionIdentity({ session }: { session: SessionInfo }) {
       </CardHeader>
       <CardContent className="p-0 divide-y divide-border">
         <div className="flex items-center justify-between px-4 py-2.5">
-          <span className="text-[10px] text-muted-foreground">{strings.session.fieldTarget}</span>
+          <span className="text-xs text-muted-foreground">{strings.session.fieldTarget}</span>
           <span className="text-xs font-mono font-medium text-foreground">{session.target}</span>
         </div>
         <div className="flex items-center justify-between px-4 py-2.5">
-          <span className="text-[10px] text-muted-foreground">{strings.session.fieldSessionId}</span>
+          <span className="text-xs text-muted-foreground">{strings.session.fieldSessionId}</span>
           <span className="text-xs font-mono text-foreground">{session.session_id}</span>
         </div>
         <div className="flex items-center justify-between px-4 py-2.5">
-          <span className="text-[10px] text-muted-foreground">{strings.session.fieldVersion}</span>
+          <span className="text-xs text-muted-foreground">{strings.session.fieldVersion}</span>
           <span className="text-xs font-mono text-foreground">v{session.mirrord_version}</span>
         </div>
         {licenseKey && (
           <div className="flex items-center justify-between px-4 py-2.5">
-            <span className="text-[10px] text-muted-foreground">{strings.session.fieldKey}</span>
+            <span className="text-xs text-muted-foreground">{strings.session.fieldKey}</span>
             <span className="text-xs font-mono text-foreground">{licenseKey}</span>
           </div>
         )}
