@@ -53,11 +53,13 @@ pub struct Args {
     )]
     pub is_mesh: bool,
 
-    /// Enable support for IPv6-only clusters
+    /// DEPRECATED AND UNUSED
     ///
-    /// Only when this option is set will take the needed steps to run on an IPv6 single stack
-    /// cluster.
-    #[arg(long, default_value_t = false, env = envs::IPV6_SUPPORT.name)]
+    /// IPv6 support will be enabled automatically when a usable IPv6
+    /// address is found on an interface.
+    ///
+    /// Kept here for backwards compatibility.
+    #[arg(long, default_value_t = false)]
     pub ipv6: bool,
 
     /// Clean leftover iptables rules and start the new agent instead of erroring out when there

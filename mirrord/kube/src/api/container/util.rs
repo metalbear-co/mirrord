@@ -44,7 +44,6 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
         envs::LOG_LEVEL.as_k8s_spec(&agent.log_level),
         envs::STEALER_FLUSH_CONNECTIONS.as_k8s_spec(&agent.flush_connections),
         envs::JSON_LOG.as_k8s_spec(&agent.json_log),
-        envs::IPV6_SUPPORT.as_k8s_spec(&params.support_ipv6),
         // TODO remove after some time.
         // Left for compatibility with older agents.
         envs::PASSTHROUGH_MIRRORING.as_k8s_spec(&true),
