@@ -26,6 +26,23 @@ export function initAnalytics(telemetryEnabled: boolean) {
   posthog.capture('session_monitor_opened', { source: 'session-monitor' })
 }
 
+/**
+ * Runtime toggle for the user telemetry preference. If init has already happened, this
+ * flips posthog's opt-in state and starts or stops the session recorder. If init has not
+ * run yet (no active sessions, or the user opened with telemetry off), this is a no-op —
+ * the `telemetryEnabled` argument passed to `initAnalytics` later will be authoritative.
+ */
+export function setTelemetryEnabled(enabled: boolean) {
+  if (!initialized) return
+  if (enabled) {
+    posthog.opt_in_capturing()
+    posthog.startSessionRecording()
+  } else {
+    posthog.stopSessionRecording()
+    posthog.opt_out_capturing()
+  }
+}
+
 export function trackEvent(event: string, properties?: Record<string, unknown>) {
   if (!initialized) return
   posthog.capture(event, { source: 'session-monitor', ...properties })
