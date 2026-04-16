@@ -642,39 +642,36 @@ where
             .contains(&NewOperatorFeature::UnifiedBranchDbCrd);
 
         if use_unified_crd {
+            let mut db_branches = layer_config.feature.db_branches.clone();
             let UnifiedDatabaseBranchParams {
                 branches: mut create_params,
             } = UnifiedDatabaseBranchParams::new(
-                &layer_config.feature.db_branches,
+                &mut db_branches,
                 &target,
                 layer_config.key.as_str(),
                 &subtask,
             )?;
 
-            // For each branch that has literal `value` fields in its connection
-            // source, ask the operator to create a K8s Secret and replace the
-            // values with Secret references. The Secret name is derived from the
-            // branch ID, so branches with the same ID share the same Secret.
+            // For each branch that had literal `value` fields in its config,
+            // create a K8s Secret and replace the CRD connection entries with
+            // Secret references. Values were already extracted from the config
+            // inside `new()` before CRD conversion.
             for (branch_id, params) in create_params.iter_mut() {
-                let mut values = std::collections::HashMap::new();
-                database_branches::extract_literal_values(
-                    &mut params.spec.connection_source,
-                    &mut values,
-                );
-                if !values.is_empty() {
-                    let secret_name = self
-                        .create_credential_secret(
-                            target_namespace,
-                            branch_id.as_ref(),
-                            values.clone(),
-                        )
-                        .await?;
-                    database_branches::replace_values_with_secret_refs(
-                        &mut params.spec.connection_source,
-                        &secret_name,
-                        &values,
-                    );
+                if params.literal_values.is_empty() {
+                    continue;
                 }
+                let secret_name = self
+                    .create_credential_secret(
+                        target_namespace,
+                        branch_id.as_ref(),
+                        params.literal_values.clone(),
+                    )
+                    .await?;
+                database_branches::replace_values_with_secret_refs(
+                    &mut params.spec.connection_source,
+                    &secret_name,
+                    &params.literal_values,
+                );
             }
 
             if let Some(ref ns) = target_ns_annotation {
