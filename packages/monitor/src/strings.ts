@@ -6,6 +6,7 @@ export const strings = {
     disconnected: 'Disconnected',
     themeLight: 'Switch to light mode',
     themeDark: 'Switch to dark mode',
+    settings: 'Settings',
     emptyTitle: 'Select a session to get started',
     emptyBody:
       'Choose a session from the sidebar to see live activity, configuration, and intercepted traffic',

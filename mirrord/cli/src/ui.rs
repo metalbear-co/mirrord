@@ -533,9 +533,15 @@ fn build_router(state: Arc<AppState>) -> Router {
         .fallback(static_handler)
         .layer(middleware::from_fn_with_state(state.clone(), token_auth));
 
+    // posthog-js lazy-loads its session recorder bundle from the api host at runtime, so the
+    // PostHog origin must be listed in both `script-src` (for the recorder bundle) and
+    // `connect-src` (for `/e/` event capture and `/s/` session replay ingest). Without these,
+    // telemetry is silently dropped by the browser's CSP enforcement.
     let csp_value = HeaderValue::from_static(
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
-         connect-src 'self' ws://localhost:* ws://127.0.0.1:* ws://[::1]:*; \
+        "default-src 'self'; script-src 'self' https://hog.metalbear.com; \
+         style-src 'self' 'unsafe-inline'; \
+         connect-src 'self' https://hog.metalbear.com \
+         ws://localhost:* ws://127.0.0.1:* ws://[::1]:*; \
          img-src 'self' data:; object-src 'none'; frame-ancestors 'none'",
     );
 

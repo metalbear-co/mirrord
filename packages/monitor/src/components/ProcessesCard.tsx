@@ -25,17 +25,17 @@ export default function ProcessesCard({ processes }: { processes: ProcessInfo[] 
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{strings.session.columnName}</TableHead>
-              <TableHead className="text-right">{strings.session.columnPid}</TableHead>
+              <TableHead className="text-xs">{strings.session.columnName}</TableHead>
+              <TableHead className="text-xs text-right">{strings.session.columnPid}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {processes.map((p) => (
               <TableRow key={p.pid}>
-                <TableCell className="font-mono font-medium text-foreground">
+                <TableCell className="text-xs font-mono font-medium text-foreground">
                   {p.process_name || strings.session.unknownProcess}
                 </TableCell>
-                <TableCell className="font-mono text-muted-foreground text-right">{p.pid}</TableCell>
+                <TableCell className="text-xs font-mono text-muted-foreground text-right">{p.pid}</TableCell>
               </TableRow>
             ))}
           </TableBody>
