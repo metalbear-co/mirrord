@@ -12,6 +12,8 @@ __pycache__
 build/
 .mirrord
 .helix/
+.porchlight/
+.claude/settings.local.json
 
 ### go tests ###
 *.go_test_app

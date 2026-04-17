@@ -223,6 +223,24 @@ pub(super) enum Commands {
     #[command(hide = true)]
     Attach(AttachArgs),
 
+    /// Process In The Middle: create a target process suspended, inject the
+    /// mirrord layer DLL, and resume execution.
+    ///
+    /// Used by IDE extensions that cannot start the target process in a
+    /// suspended state themselves (e.g. IntelliJ run configurations). Like
+    /// `attach`, this assumes intproxy and the rest of the session have
+    /// already been set up by the plugin via `mirrord ext`; `pitm` itself
+    /// does no k8s or agent work. The plugin prepends `mirrord pitm --` to
+    /// the user command line and delivers the child's mirrord environment
+    /// through a single side-channel env var (`MIRRORD_CHILD_ENV`,
+    /// base64-encoded JSON with `set` and `unset` keys), which `pitm`
+    /// extracts and applies to the child process's environment. `pitm`
+    /// owns the child lifecycle end-to-end, so there is no race between
+    /// process start and layer injection.
+    #[cfg(windows)]
+    #[command(hide = true)]
+    Pitm(PitmArgs),
+
     /// Launch the session monitor UI.
     ///
     /// Watches active mirrord sessions and displays a web dashboard showing
@@ -1405,6 +1423,21 @@ impl PreviewStopArgs {
 pub(super) struct AttachArgs {
     /// PID of the target process to attach to.
     pub pid: u32,
+}
+
+/// `mirrord pitm` args.
+#[cfg(windows)]
+#[derive(Args, Debug)]
+pub(super) struct PitmArgs {
+    /// Target executable followed by its arguments. Everything after `--`
+    /// is forwarded verbatim to the child process.
+    #[arg(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        required = true,
+        num_args = 1..,
+    )]
+    pub command: Vec<String>,
 }
 
 /// Arguments for the `mirrord ui` command.
