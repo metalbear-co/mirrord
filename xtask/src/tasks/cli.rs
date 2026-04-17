@@ -6,7 +6,7 @@ use std::{
 use anyhow::{Context, Result};
 use which::which;
 
-use super::{layer::Target, monitor, signing, sip_binaries};
+use super::{layer::Target, signing, sip_binaries};
 
 /// Builds the mirrord CLI for the specified target
 pub fn build_cli(
@@ -17,8 +17,6 @@ pub fn build_cli(
     cargo_args: &[String],
 ) -> Result<PathBuf> {
     println!("Building mirrord CLI for {}...", target.triple());
-
-    monitor::build_monitor()?;
 
     let is_linux = matches!(target, Target::LinuxX86_64 | Target::LinuxAarch64);
 

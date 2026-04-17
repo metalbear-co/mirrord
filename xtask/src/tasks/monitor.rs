@@ -7,10 +7,8 @@ use anyhow::{Context, Result};
 
 /// Builds the monitor frontend (pnpm install + build).
 ///
-/// If `pnpm` is not available on `PATH`, falls back to creating an empty dist directory so
-/// rust-embed doesn't panic at compile time. This keeps CI jobs that don't need the UI
-/// (agent image, macos unit tests, e2e runners) from having to install a node toolchain.
-/// The resulting binary's `mirrord ui` will 404, which is fine for those contexts.
+/// The CLI embeds these assets, so a missing `pnpm` means the resulting binary would have a
+/// broken `mirrord ui`.
 pub fn build_monitor() -> Result<PathBuf> {
     println!("Building monitor frontend...");
 
@@ -23,22 +21,14 @@ pub fn build_monitor() -> Result<PathBuf> {
         );
     }
 
-    let dist_dir = monitor_dir.join("dist");
-
     if !pnpm_available() {
-        eprintln!(
-            "warning: `pnpm` not found on PATH — skipping monitor frontend build. \
-             `mirrord ui` will return 404 from this binary. Install pnpm (e.g. \
-             `corepack enable`) to produce a working UI."
+        anyhow::bail!(
+            "`pnpm` not found on PATH. Install it before building the monitor frontend \
+             (for example with `corepack enable pnpm`)."
         );
-        std::fs::create_dir_all(&dist_dir).with_context(|| {
-            format!(
-                "failed to create placeholder dist directory at {}",
-                dist_dir.display()
-            )
-        })?;
-        return Ok(dist_dir);
     }
+
+    let dist_dir = monitor_dir.join("dist");
 
     // `--ignore-workspace` stops pnpm from walking up to the repo root and installing for all
     // workspaces (the root `package.json` has `workspaces: ["packages/*"]`). Without it, pnpm

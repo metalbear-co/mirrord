@@ -20,7 +20,7 @@ RUN case "$(cat /.platform)" in \
     aarch64-unknown-linux-gnu) platform=linux-aarch64 ;; \
     *) echo "unsupported xtask platform for $(cat /.platform)" >&2; exit 1 ;; \
     esac; \
-    cargo xtask build-cli --no-wizard --platform "$platform" --release
+    cargo xtask build-cli --no-wizard --no-monitor --platform "$platform" --release
 
 RUN cp /build/target/$(cat /.platform)/release/mirrord /mirrord
 RUN cp /build/target/$(cat /.platform)/release/libmirrord_layer.so /libmirrord_layer.so
