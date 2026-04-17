@@ -48,3 +48,6 @@ itertools.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true
+
+[lib]
+doctest = false

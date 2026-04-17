@@ -13,4 +13,6 @@ categories.workspace = true
 publish.workspace = true
 edition.workspace = true
 
-[dependencies]
+[lib]
+test = false
+doctest = false

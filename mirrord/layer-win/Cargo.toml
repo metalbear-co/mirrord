@@ -23,9 +23,6 @@ mirrord-protocol = { path = "../protocol" }
 mirrord-progress = { path = "../progress" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
 mirrord-config = { path = "../config" }
-
-# Used for internal error type set-up
-thiserror.workspace = true 
 socket2.workspace = true
 
 # Used for logging and tracing
@@ -34,12 +31,6 @@ tracing.workspace = true
 libc.workspace = true
 [target.'cfg(windows)'.dependencies]
 phnt.workspace = true
-
-# Additional dependencies for proxy connection
-tokio.workspace = true
-bincode.workspace = true
-base64.workspace = true
-tokio-util.workspace = true
 once_cell.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -47,9 +38,6 @@ winapi.workspace = true
 str-win = { path = "../str-win" }
 minhook-detours-rs.workspace = true
 windows-strings.workspace = true
-anyhow.workspace = true 
-
-dll-syringe.workspace = true
 
 [lints]
 workspace = true

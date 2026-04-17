@@ -30,3 +30,6 @@ mirrord-test-macros.workspace = true
 [features]
 default = ["eval"]
 eval = ["dep:tokio", "dep:serde_json"]
+
+[lib]
+doctest = false

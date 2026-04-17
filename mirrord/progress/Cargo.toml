@@ -28,3 +28,7 @@ indicatif = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json.workspace = true
 enum_dispatch = { workspace = true, optional = true }
+
+[lib]
+test = false
+doctest = false

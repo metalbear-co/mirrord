@@ -11,14 +11,9 @@ workspace = true
 doctest = false
 
 [dependencies]
-aws-credential-types.workspace = true
-aws-types.workspace = true
-json-patch.workspace = true
-jsonptr.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
 reqwest.workspace = true
-regex.workspace = true
 tokio = { workspace = true, features = [
     "rt",
     "rt-multi-thread",
@@ -31,7 +26,6 @@ mirrord-operator = { path = "../mirrord/operator", features = ["crd"] }
 serde.workspace = true
 futures.workspace = true
 rand.workspace = true
-bytes.workspace = true
 fancy-regex.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
@@ -41,7 +35,6 @@ rstest.workspace = true
 mirrord-kube = { path = "../mirrord/kube" }
 
 futures-util.workspace = true
-wsl.workspace = true
 chrono.workspace = true
 tempfile.workspace = true
 tokio-tungstenite.workspace = true
@@ -52,7 +45,6 @@ mirrord-test-utils = { path = "../test-utils" }
 default = ["ephemeral", "job", "cli", "targetless"]
 ephemeral = []
 job = []
-operator = [
-]
+operator = []
 cli = []
 targetless = []

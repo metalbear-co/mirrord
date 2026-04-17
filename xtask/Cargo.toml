@@ -16,8 +16,6 @@ edition.workspace = true
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-flate2.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
-tar.workspace = true
 which.workspace = true

@@ -21,3 +21,7 @@ mirrord-session-monitor-protocol.workspace = true
 reqwest.workspace = true
 home.workspace = true
 thiserror.workspace = true
+
+[lib]
+test = false
+doctest = false
