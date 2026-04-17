@@ -34,6 +34,11 @@ jobs:
         uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 24
+      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
+        run: corepack enable pnpm
       - name: verify SIP status
         run: csrutil status
       - name: build cli and universal layer

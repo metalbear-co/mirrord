@@ -103,10 +103,14 @@ jobs:
       - run: uv --version
       - run: uv tool install cargo-zigbuild==0.22.1
       - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
+      - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
+      - run: rustup target add aarch64-unknown-linux-gnu
       - uses: actions/setup-node@v3
         with:
           node-version: 24
+      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
+        run: corepack enable pnpm
       - name: Build mirrord CLI
         env:
           RUSTFLAGS: ${{ env.RUSTFLAGS }} -A dead_code
@@ -132,10 +136,13 @@ jobs:
       - run: uv --version
       - run: uv tool install cargo-zigbuild==0.22.1
       - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
+      - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
       - uses: actions/setup-node@v3
         with:
           node-version: 24
+      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
+        run: corepack enable pnpm
       - name: Build mirrord CLI
         run: cargo xtask build-cli --platform linux-x86_64 --release
       - uses: actions/upload-artifact@v4
@@ -158,7 +165,6 @@ jobs:
         with:
           cache: false
           rustflags: ""
-
       - name: Install WiX Toolset
         run: |
           choco install wixtoolset -y
@@ -175,7 +181,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          cargo xtask build-cli --platform windows --release --no-wizard
+          cargo xtask build-cli --platform windows --release --no-wizard --no-monitor
 
           $dll = "target\x86_64-pc-windows-msvc\release\mirrord_layer_win.dll"
           if (-not (Test-Path $dll)) {
