@@ -49,7 +49,6 @@ crd = [
   "dep:mirrord-kube",
   "dep:semver",
   "dep:serde_json",
-  "dep:strum",
   "dep:strum_macros",
   "dep:thiserror",
 ]
@@ -78,7 +77,6 @@ rand = { workspace = true, optional = true }
 schemars = { workspace = true, features = ["chrono04", "url2"] }
 semver = { workspace = true, features = ["serde"], optional = true }
 strum_macros = { workspace = true, optional = true }
-strum = { workspace = true, optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 serde_urlencoded = { workspace = true, optional = true }

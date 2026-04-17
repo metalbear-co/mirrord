@@ -11,16 +11,7 @@ workspace = true
 doctest = false
 
 [dependencies]
-aws-config = { workspace = true, optional = true, default-features = false, features = [
-    "behavior-version-latest",
-    "default-https-client",
-    "rt-tokio",
-] }
 aws-credential-types.workspace = true
-aws-sdk-sqs = { workspace = true, optional = true, default-features = false, features = [
-    "default-https-client",
-    "rt-tokio",
-] }
 aws-types.workspace = true
 json-patch.workspace = true
 jsonptr.workspace = true
@@ -37,7 +28,6 @@ tokio = { workspace = true, features = [
 ] }
 serde_json.workspace = true
 mirrord-operator = { path = "../mirrord/operator", features = ["crd"] }
-mirrord-tls-util = { path = "../mirrord/tls-util", optional = true }
 serde.workspace = true
 futures.workspace = true
 rand.workspace = true
@@ -46,8 +36,6 @@ fancy-regex.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 http-body-util.workspace = true
-pem = { workspace = true, optional = true }
-rcgen = { workspace = true, optional = true }
 rustls.workspace = true
 rstest.workspace = true
 mirrord-kube = { path = "../mirrord/kube" }
@@ -60,20 +48,11 @@ tokio-tungstenite.workspace = true
 
 mirrord-test-utils = { path = "../test-utils" }
 
-[target.'cfg(unix)'.dependencies]
-mirrord-agent-env = { path = "../mirrord/agent/env", optional = true }
-
 [features]
 default = ["ephemeral", "job", "cli", "targetless"]
 ephemeral = []
 job = []
 operator = [
-    "dep:aws-config",
-    "dep:aws-sdk-sqs",
-    "dep:rcgen",
-    "dep:mirrord-agent-env",
-    "dep:pem",
-    "dep:mirrord-tls-util",
 ]
 cli = []
 targetless = []

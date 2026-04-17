@@ -37,6 +37,18 @@ members = [
 ]
 resolver = "2"
 
+[workspace.metadata.cargo-shear]
+ignored-paths = [
+    "mirrord/cli/src/cr.rs",
+    "mirrord/intproxy/src/local_agent.rs",
+    "mirrord/layer-tests/tests/apps/issue1054/issue1054.rs",
+    "mirrord/layer-tests/tests/apps/issue1123/issue1123.rs",
+    "mirrord/layer-tests/tests/apps/issue1458/issue1458.rs",
+    "mirrord/layer-tests/tests/apps/issue1458portnot53/issue1458portnot53.rs",
+    "mirrord/layer-tests/tests/apps/issue2058/issue2058.rs",
+    "mirrord/layer-tests/tests/apps/issue2204/issue2204.rs",
+]
+
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
