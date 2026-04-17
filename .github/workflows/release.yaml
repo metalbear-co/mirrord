@@ -99,8 +99,11 @@ jobs:
           cache: false
           rustflags: ""
 
-      - name: Install cargo-zigbuild
-        run: cargo install cargo-zigbuild --version 0.22.1 --locked
+      - uses: astral-sh/setup-uv@v2
+      - run: uv --version
+      - run: uv tool install cargo-zigbuild==0.22.1
+      - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
+      - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
       - uses: actions/setup-node@v3
         with:
           node-version: 24
@@ -125,8 +128,11 @@ jobs:
         with:
           cache: false
           rustflags: ""
-      - name: Install cargo-zigbuild
-        run: cargo install cargo-zigbuild --version 0.22.1 --locked
+      - uses: astral-sh/setup-uv@v2
+      - run: uv --version
+      - run: uv tool install cargo-zigbuild==0.22.1
+      - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
+      - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
       - uses: actions/setup-node@v3
         with:
           node-version: 24
