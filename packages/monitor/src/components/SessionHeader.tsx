@@ -18,17 +18,24 @@ export default function SessionHeader({ session, processes, onKill }: Props) {
         <div className="flex items-center gap-2.5">
           <LiveDot active={processes.length > 0} />
           <span className="font-mono text-sm font-semibold text-foreground">{session.target}</span>
-          <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4 tracking-wider">
+          <Badge
+            variant="outline"
+            className={
+              session.is_operator
+                ? 'text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal text-primary border-primary/40'
+                : 'text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal'
+            }
+          >
             {session.is_operator ? strings.session.operator : strings.session.direct}
           </Badge>
           <Button
-            variant="destructive"
+            variant="outline"
             size="sm"
             onClick={() => {
               trackEvent('session_monitor_kill_session')
               onKill()
             }}
-            className="h-6 text-[10px] gap-1 px-2.5"
+            className="h-6 text-[10px] gap-1 px-2.5 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/60"
           >
             <Trash2 className="h-3 w-3" />
             {strings.session.kill}

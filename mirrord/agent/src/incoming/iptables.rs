@@ -5,7 +5,7 @@ use std::{
 };
 
 use mirrord_agent_env::envs;
-use mirrord_agent_iptables::{IPTablesWrapper, SafeIpTables, error::IPTablesError};
+use mirrord_agent_iptables::{ChainNames, IPTablesWrapper, SafeIpTables, error::IPTablesError};
 use nix::sys::socket::{
     self, SockaddrIn, SockaddrIn6,
     sockopt::{Ip6tOriginalDst, OriginalDst},
@@ -14,6 +14,7 @@ use tokio::net::TcpListener;
 use tracing::Level;
 
 use super::{PortRedirector, Redirected};
+use crate::entrypoint::IPTABLES_IDENTIFIER;
 
 /// A [`PortRedirector`] implementation that uses a [`TcpListener`]
 /// and an iptables/ip6tables wrapper to set rules that send traffic to that listener.
@@ -83,9 +84,15 @@ impl IpTablesRedirector {
 
     pub async fn init_iptables(&mut self) -> Result<(), IPTablesError> {
         let ntfables = envs::NFTABLES.try_from_env().unwrap_or_default();
+        let chain_names = ChainNames::new(
+            IPTABLES_IDENTIFIER
+                .get()
+                .expect("Should be set during state initialization!"),
+        );
         let iptables = mirrord_agent_iptables::get_iptables(ntfables, self.ipv6);
         let iptables = SafeIpTables::create(
             iptables,
+            &chain_names,
             self.flush_connections,
             self.pod_ips.as_deref(),
             self.ipv6,

@@ -35,19 +35,19 @@ export default function SessionCard({ session, selected, onSelect, onKill }: Pro
             </span>
             <span className="font-mono">v{session.mirrord_version}</span>
             {session.is_operator && (
-              <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4 tracking-wider">
+              <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal text-primary border-primary/40">
                 {strings.session.operator}
               </Badge>
             )}
           </div>
           <Button
-            variant="destructive"
+            variant="outline"
             size="sm"
             onClick={(e) => {
               e.stopPropagation()
               onKill()
             }}
-            className="h-5 text-[9px] gap-1 px-2"
+            className="h-5 text-[9px] gap-1 px-2 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/60"
           >
             <Trash2 className="h-2.5 w-2.5" />
             {strings.session.kill}

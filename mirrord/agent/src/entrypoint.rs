@@ -5,7 +5,7 @@ use std::{
     ops::Not,
     path::PathBuf,
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicU32, Ordering},
     },
 };
@@ -17,7 +17,7 @@ use futures::{TryFutureExt, future::OptionFuture};
 use metrics::{CLIENT_COUNT, start_metrics};
 use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{
-    IPTablesWrapper, SafeIpTables,
+    ChainNames, IPTablesWrapper, SafeIpTables,
     error::{IPTablesError, IPTablesResult},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
@@ -77,6 +77,16 @@ or the previous agent failed to clean up before exit. \
 The leftover rules were cleaned and the agent is starting. \
 To allow concurrent sessions, consider using the operator available in mirrord for Teams: https://app.metalbear.com/?utm_source=dirtyiptables&utm_medium=agent";
 
+/// Identifier for the iptables chain names of the agent.
+///
+/// When this env var is set, we avoid conflicts with other agents in the same network namespace
+/// (i.e. when multiple agents are running in the same pod and targeting different containers).
+///
+/// If not set, we default to the legacy chain names (i.e. `MIRRORD_INPUT`, ...).
+///
+/// We decide to set this env var or not by checking `AgentConfig::single_pod_multi_container`.
+pub(crate) static IPTABLES_IDENTIFIER: OnceLock<String> = OnceLock::new();
+
 /// Keeps track of next client id.
 /// Stores common data used when serving client connections.
 /// Can be cheaply cloned and passed to per-client background tasks.
@@ -98,7 +108,7 @@ struct State {
 
 impl State {
     /// Return [`Err`] if container runtime operations failed.
-    #[tracing::instrument(level = Level::TRACE, err)]
+    #[tracing::instrument(level = Level::DEBUG, err)]
     pub async fn new(args: &Args) -> AgentResult<State> {
         let tls_connector = args
             .operator_tls_cert_pem
@@ -114,6 +124,12 @@ impl State {
                 container_runtime,
                 ..
             } => {
+                IPTABLES_IDENTIFIER.get_or_init(|| {
+                    let mut container_id = container_id.clone();
+                    container_id.truncate(20);
+                    container_id
+                });
+
                 let container = get_container(container_id.clone(), container_runtime).await?;
 
                 let container_handle = ContainerHandle::new(container).await?;
@@ -123,6 +139,17 @@ impl State {
                 (false, Some(container_handle))
             }
             cli::Mode::Ephemeral { .. } => {
+                IPTABLES_IDENTIFIER.get_or_init(|| {
+                    let mut container_id = envs::EPHEMERAL_TARGET_CONTAINER_ID
+                        .try_from_env()
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+
+                    container_id.truncate(20);
+                    container_id
+                });
+
                 let container_handle = ContainerHandle::new(runtime::Container::Ephemeral(
                     runtime::EphemeralContainer {
                         container_id: envs::EPHEMERAL_TARGET_CONTAINER_ID
@@ -141,6 +168,8 @@ impl State {
             }
             cli::Mode::Targetless => (false, None),
         };
+
+        tracing::debug!("THE ID IS: {IPTABLES_IDENTIFIER:?}");
 
         let network_runtime = match container.as_ref().map(ContainerHandle::pid) {
             Some(pid) if ephemeral.not() => {
@@ -680,17 +709,18 @@ fn monitor_main_container(cancel: CancellationToken, pid: libc::pid_t) {
 async fn get_rules(
     iptables: &IPTablesWrapper,
     ip6tables: Option<&IPTablesWrapper>,
+    chain_names: &ChainNames,
 ) -> IPTablesResult<Vec<String>> {
-    let rules_v4 = SafeIpTables::list_mirrord_rules(iptables).await?;
+    let rules_v4 = SafeIpTables::list_mirrord_rules(iptables, chain_names).await?;
     if let Some(ip6tables) = ip6tables {
-        let rules_v6 = SafeIpTables::list_mirrord_rules(ip6tables).await?;
+        let rules_v6 = SafeIpTables::list_mirrord_rules(ip6tables, chain_names).await?;
         Ok([rules_v4, rules_v6].concat())
     } else {
         Ok(rules_v4)
     }
 }
 
-/// Get existing iptable rules created by another (potentially still running) agent.
+/// Get existing iptable rules created by this agent instance.
 ///
 /// If `clean_existing_rules` is set, the iptables will be cleaned after fetching the existing
 /// rules. The rules from before the cleanup will be returned for logging.
@@ -699,19 +729,23 @@ async fn check_existing_rules(
     support_ipv6: bool,
     clean_existing_rules: bool,
     with_mesh_exclusion: bool,
+    chain_names: ChainNames,
 ) -> IPTablesResult<Vec<String>> {
     let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
     let iptables = mirrord_agent_iptables::get_iptables(nftables, false);
     let ip6tables = support_ipv6.then(|| mirrord_agent_iptables::get_iptables(nftables, true));
-    let rules = get_rules(&iptables, ip6tables.as_ref()).await?;
+
+    let rules = get_rules(&iptables, ip6tables.as_ref(), &chain_names).await?;
+
     if clean_existing_rules
         && rules.is_empty().not()
-        && let Err(err) = clear_iptable_chain(support_ipv6, with_mesh_exclusion).await
+        && let Err(err) =
+            clear_iptable_chain(support_ipv6, with_mesh_exclusion, ChainNames::legacy()).await
     {
         // the error could be because we tried to remove two rules and only one of them was
         // present to begin with, so removing the other, non-existent one failed.
         // So we check the rules after cleaning and only fail if there are still rules.
-        let rules = get_rules(&iptables, ip6tables.as_ref()).await?;
+        let rules = get_rules(&iptables, ip6tables.as_ref(), &chain_names).await?;
         if rules.is_empty().not() {
             // There are still rules after the cleanup, the cleanup was not successful.
             return Err(err);
@@ -719,6 +753,50 @@ async fn check_existing_rules(
     }
 
     Ok(rules)
+}
+
+async fn check_leftover_rules(
+    state: &State,
+    args: &Args,
+    target_pid: u64,
+    chain_names: ChainNames,
+    cancellation_token: CancellationToken,
+) -> AgentResult<()> {
+    let leftover_rules = state
+        .network_runtime
+        .handle()
+        .spawn(check_existing_rules(
+            args.ipv6,
+            args.clean_iptables_on_start,
+            state.is_with_mesh_exclusion(),
+            chain_names,
+        ))
+        .await
+        .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
+        .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
+
+    if leftover_rules.is_empty().not() {
+        if args.clean_iptables_on_start {
+            warn!(
+                leftover_rules = ?leftover_rules,
+                "{}",
+                DIRTY_IPTABLES_CLEANUP_WARNING_MESSAGE
+            );
+        } else {
+            error!(
+                leftover_rules = ?leftover_rules,
+                "{}",
+                DIRTY_IPTABLES_ERROR_MESSAGE
+            );
+            return Err(AgentError::IPTablesDirty);
+        }
+    }
+
+    // Casting u64 to i32 but linux pids shouldn't exceed 2^22
+    let pid = target_pid.try_into().unwrap();
+    monitor_main_container(cancellation_token.clone(), pid);
+
+    Ok(())
 }
 
 /// Real mirrord-agent routine.
@@ -763,31 +841,32 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     // If we don't have any target, the agent should be running in a fresh network namespace,
     // and you should **not** expect that it can access iptables.
     if let Some(target_pid) = state.container_pid() {
-        let leftover_rules = state
-            .network_runtime
-            .handle()
-            .spawn(check_existing_rules(
-                args.ipv6,
-                args.clean_iptables_on_start,
-                state.is_with_mesh_exclusion(),
-            ))
-            .await
-            .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
-            .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
-
-        if leftover_rules.is_empty().not() {
-            if args.clean_iptables_on_start {
-                warn!(
-                    leftover_rules = ?leftover_rules,
-                    "{}",
-                    DIRTY_IPTABLES_CLEANUP_WARNING_MESSAGE
-                );
-            } else {
-                error!(
-                    leftover_rules = ?leftover_rules,
-                    "{}",
-                    DIRTY_IPTABLES_ERROR_MESSAGE
-                );
+        // check legacy rules
+        match check_leftover_rules(
+            &state,
+            &args,
+            target_pid,
+            ChainNames::legacy(),
+            cancellation_token.clone(),
+        )
+        // check new rules
+        .and_then(|()| {
+            check_leftover_rules(
+                &state,
+                &args,
+                target_pid,
+                ChainNames::new(
+                    IPTABLES_IDENTIFIER
+                        .get()
+                        .expect("Should be set during state initialization!"),
+                ),
+                cancellation_token.clone(),
+            )
+        })
+        .await
+        {
+            Ok(_) => (),
+            Err(AgentError::IPTablesDirty) => {
                 let _ = notify_client_about_dirty_iptables(
                     listener,
                     args.communication_timeout,
@@ -796,11 +875,8 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                 .await;
                 return Err(AgentError::IPTablesDirty);
             }
+            Err(fail) => return Err(fail),
         }
-
-        // Casting u64 to i32 but linux pids shouldn't exceed 2^22
-        let pid = target_pid.try_into().unwrap();
-        monitor_main_container(cancellation_token.clone(), pid);
     }
 
     // To make sure that background tasks are cancelled when we exit early from this function.
@@ -947,15 +1023,19 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 async fn clear_iptable_chain(
     ipv6_enabled: bool,
     with_mesh_exclusion: bool,
+    chain_names: ChainNames,
 ) -> Result<(), IPTablesError> {
     let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
 
     let v4_result: Result<(), IPTablesError> = try {
         let ipt = mirrord_agent_iptables::get_iptables(nftables, false);
-        if SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
+        if SafeIpTables::list_mirrord_rules(&ipt, &chain_names)
+            .await?
+            .is_empty()
+        {
             trace!("No iptables mirrord rules found, skipping iptables cleanup.");
         } else {
-            let tables = SafeIpTables::load(ipt, false, with_mesh_exclusion).await?;
+            let tables = SafeIpTables::load(ipt, &chain_names, false, with_mesh_exclusion).await?;
             tables.cleanup().await?
         }
     };
@@ -963,10 +1043,14 @@ async fn clear_iptable_chain(
     let v6_result: Result<(), IPTablesError> = if ipv6_enabled {
         try {
             let ipt = mirrord_agent_iptables::get_iptables(nftables, true);
-            if SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
+            if SafeIpTables::list_mirrord_rules(&ipt, &chain_names)
+                .await?
+                .is_empty()
+            {
                 trace!("No ip6tables mirrord rules found, skipping ip6tables cleanup.");
             } else {
-                let tables = SafeIpTables::load(ipt, true, with_mesh_exclusion).await?;
+                let tables =
+                    SafeIpTables::load(ipt, &chain_names, true, with_mesh_exclusion).await?;
                 tables.cleanup().await?
             }
         }
@@ -1035,7 +1119,15 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
     state
         .network_runtime
         .handle()
-        .spawn(clear_iptable_chain(args.ipv6, with_mesh_exclusion))
+        .spawn(clear_iptable_chain(
+            args.ipv6,
+            with_mesh_exclusion,
+            ChainNames::new(
+                IPTABLES_IDENTIFIER
+                    .get()
+                    .expect("Should be set during state initialization!"),
+            ),
+        ))
         .await
         .map_err(|error| AgentError::BackgroundTaskFailed {
             task: "IPTablesCleaner",
