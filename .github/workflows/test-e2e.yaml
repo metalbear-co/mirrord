@@ -23,6 +23,8 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 22
+      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
+        run: corepack enable pnpm
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
@@ -43,7 +45,6 @@ jobs:
       - run: uv tool install cargo-zigbuild==0.22.1
       - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
       - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
-      - run: cargo zigbuild --help >/dev/null && zig version
       - run: cargo xtask build-cli
       - name: Run cli E2E tests
         if: ${{ matrix.container-runtime == 'docker' }}
