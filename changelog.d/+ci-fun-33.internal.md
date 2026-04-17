@@ -1,1 +1,1 @@
-Add shear for ci, bump actions in check-lint.yaml
+Add shear for CI, bump actions in `check-lint.yaml`
