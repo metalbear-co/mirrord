@@ -1241,6 +1241,14 @@ mod tests {
                 }
             }
         }
+
+        fn parse_result(&self, value: &str) -> Result<LayerFileConfig, String> {
+            match self {
+                ConfigType::Json => serde_json::from_str(value).map_err(|err| err.to_string()),
+                ConfigType::Toml => toml::from_str(value).map_err(|err| err.to_string()),
+                ConfigType::Yaml => serde_yaml::from_str(value).map_err(|err| err.to_string()),
+            }
+        }
     }
 
     #[rstest]
@@ -1378,6 +1386,105 @@ mod tests {
         };
 
         assert_eq!(config, expect);
+    }
+
+    #[test]
+    fn rejects_unknown_fields_in_agent_pull_secrets() {
+        let input = r#"
+        {
+            "agent": {
+                "image_pull_secrets": [
+                    {
+                        "name": "testsecret",
+                        "unknown": "value"
+                    }
+                ]
+            }
+        }
+        "#;
+
+        let error = ConfigType::Json
+            .parse_result(input)
+            .expect_err("agent.image_pull_secrets should reject unknown fields");
+
+        assert!(error.contains("unknown field"));
+    }
+
+    #[test]
+    fn rejects_unknown_fields_in_split_queues() {
+        let input = r#"
+        {
+            "feature": {
+                "split_queues": {
+                    "orders": {
+                        "queue_type": "Kafka",
+                        "message_filter": {
+                            "customer-id": ".+"
+                        },
+                        "unknown": true
+                    }
+                }
+            }
+        }
+        "#;
+
+        let error = ConfigType::Json
+            .parse_result(input)
+            .expect_err("feature.split_queues.orders should reject unknown fields");
+
+        assert!(error.contains("unknown field"));
+    }
+
+    #[test]
+    fn rejects_unknown_fields_in_db_branches() {
+        let input = r#"
+        {
+            "feature": {
+                "db_branches": [
+                    {
+                        "type": "mysql",
+                        "connection": {
+                            "type": "env",
+                            "params": {
+                                "host": "DB_HOST"
+                            }
+                        },
+                        "unknown": true
+                    }
+                ]
+            }
+        }
+        "#;
+
+        let error = ConfigType::Json
+            .parse_result(input)
+            .expect_err("feature.db_branches[] should reject unknown fields");
+
+        assert!(error.contains("unknown field"));
+    }
+
+    #[test]
+    fn rejects_unknown_fields_in_tls_delivery() {
+        let input = r#"
+        {
+            "feature": {
+                "network": {
+                    "incoming": {
+                        "tls_delivery": {
+                            "protocol": "tls",
+                            "unknown": true
+                        }
+                    }
+                }
+            }
+        }
+        "#;
+
+        let error = ConfigType::Json
+            .parse_result(input)
+            .expect_err("feature.network.incoming.tls_delivery should reject unknown fields");
+
+        assert!(error.contains("unknown field"));
     }
 
     /// <!--${internal}-->

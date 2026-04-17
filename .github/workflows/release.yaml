@@ -29,10 +29,11 @@ jobs:
 
       - run: rm rust-toolchain.toml
         if: github.event_name == 'pull_request'
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         if: github.event_name == 'pull_request'
         with:
           toolchain: ${{ env.PINNED_NIGHTLY }}
+          cache: false
           rustflags: ""
 
       - name: Install cargo-get
@@ -93,8 +94,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
+          cache: false
           rustflags: ""
 
       #      - uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
@@ -108,16 +110,16 @@ jobs:
         with:
           node-version: 24
       - run: npm install
-        working-directory: ./wizard-frontend
+        working-directory: ./packages/wizard
       - run: npm run build
-        working-directory: ./wizard-frontend
+        working-directory: ./packages/wizard
       # building layer and cli together leads to weird situation where embedded layer is x64, so split.
       - name: build mirrord-layer
         run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord-layer --target=aarch64-unknown-linux-gnu
       - name: build mirrord cli
         env:
           MIRRORD_LAYER_FILE: ../../../target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
-          WIZARD_DIST_DIR: ./wizard-frontend/dist
+          WIZARD_DIST_DIR: ./packages/wizard/dist
         run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord --target=aarch64-unknown-linux-gnu --features "wizard"
       - uses: actions/upload-artifact@v4
         with:
@@ -132,8 +134,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
+          cache: false
           rustflags: ""
       #      - uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
       #        with:
@@ -146,12 +149,12 @@ jobs:
         with:
           node-version: 24
       - run: npm install
-        working-directory: ./wizard-frontend
+        working-directory: ./packages/wizard
       - run: npm run build
-        working-directory: ./wizard-frontend
+        working-directory: ./packages/wizard
       - name: build mirrord-layer and cli
         env:
-          WIZARD_DIST_DIR: ./wizard-frontend/dist
+          WIZARD_DIST_DIR: ./packages/wizard/dist
         run: cross build --release -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu --features "wizard"
       - uses: actions/upload-artifact@v4
         with:
@@ -169,8 +172,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
+          cache: false
           rustflags: ""
 
       - name: Install WiX Toolset
@@ -360,7 +364,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           target: x86_64-apple-darwin
           toolchain: ${{ env.PINNED_NIGHTLY }}
@@ -394,7 +398,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           target: aarch64-apple-darwin
           toolchain: ${{ env.PINNED_NIGHTLY }}
@@ -474,7 +478,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           target: x86_64-apple-darwin
           toolchain: ${{ env.PINNED_NIGHTLY }}
@@ -483,6 +487,8 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 24
+      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
+        run: corepack enable pnpm
       - uses: actions/download-artifact@v4
         with:
           name: layer-universal-apple-darwin
@@ -523,7 +529,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           target: aarch64-apple-darwin
           toolchain: ${{ env.PINNED_NIGHTLY }}
@@ -532,6 +538,8 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 24
+      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
+        run: corepack enable pnpm
       - uses: actions/download-artifact@v4
         with:
           name: layer-universal-apple-darwin
@@ -692,7 +700,9 @@ jobs:
         if: needs.validate_release_request.outputs.should_release == 'true'
         env:
           AGENT_TAGS: "ghcr.io/metalbear-co/mirrord:latest,ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}"
-        run: docker buildx bake -f ci/docker-bake.hcl agent --push
+          PRODUCT_CACHE_FROM: ""
+          PRODUCT_CACHE_TO: ""
+        run: docker buildx bake -f ci/docker-bake.hcl agent --push --no-cache
 
   release_cli_docker_image:
     needs: [validate_release_request]
@@ -767,7 +777,9 @@ jobs:
         if: needs.validate_release_request.outputs.should_release == 'true'
         env:
           CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }},ghcr.io/metalbear-co/mirrord-cli:latest"
-        run: docker buildx bake -f ci/docker-bake.hcl cli --push
+          PRODUCT_CACHE_FROM: ""
+          PRODUCT_CACHE_TO: ""
+        run: docker buildx bake -f ci/docker-bake.hcl cli --push --no-cache
 
   check_for_new_docs:
     needs: [validate_release_request]
@@ -800,7 +812,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           toolchain: ${{ env.PINNED_NIGHTLY }}
           cache: false

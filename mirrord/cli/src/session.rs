@@ -19,7 +19,7 @@ use prettytable::{Table, row};
 use tracing::Level;
 
 use crate::{
-    config::{LocalSessionCommand, SessionArgs, SessionDeleteArgs},
+    config::{KillArgs, LocalSessionCommand, SessionArgs, SessionCommonArgs, SessionDeleteArgs},
     error::CliError,
     util::remove_proxy_env,
 };
@@ -40,15 +40,22 @@ enum RemoteKillResult {
 
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 pub async fn session_command(args: SessionArgs) -> Result<(), CliError> {
-    match args.command.unwrap_or(LocalSessionCommand::List) {
-        LocalSessionCommand::List => list_command().await,
-        LocalSessionCommand::Delete(args) => delete_command(args).await,
+    let SessionArgs { common, command } = args;
+
+    match command.unwrap_or(LocalSessionCommand::List) {
+        LocalSessionCommand::List => list_command(&common).await,
+        LocalSessionCommand::Delete(args) => delete_command(&common, args).await,
     }
 }
 
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
-async fn list_command() -> Result<(), CliError> {
-    let (rows, operator_not_found) = merged_sessions().await?;
+pub async fn kill_command(args: KillArgs) -> Result<(), CliError> {
+    delete_command(&args.common, args.delete).await
+}
+
+#[tracing::instrument(level = Level::TRACE, ret, skip_all)]
+async fn list_command(args: &SessionCommonArgs) -> Result<(), CliError> {
+    let (rows, operator_not_found) = merged_sessions(args).await?;
 
     if operator_not_found {
         println!(
@@ -102,7 +109,10 @@ async fn list_command() -> Result<(), CliError> {
 }
 
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
-pub async fn delete_command(args: SessionDeleteArgs) -> Result<(), CliError> {
+async fn delete_command(
+    common: &SessionCommonArgs,
+    args: SessionDeleteArgs,
+) -> Result<(), CliError> {
     let sessions = load_sessions().await?;
 
     if let Some(id) = args.id {
@@ -110,7 +120,7 @@ pub async fn delete_command(args: SessionDeleteArgs) -> Result<(), CliError> {
             .into_iter()
             .find(|session| session.info.session_id == id);
 
-        kill_local_then_remote(local_session, &id).await?;
+        kill_local_then_remote(common, local_session, &id).await?;
         println!("Killed session {id}.");
 
         return Ok(());
@@ -137,7 +147,7 @@ pub async fn delete_command(args: SessionDeleteArgs) -> Result<(), CliError> {
     }
 
     for (session, session_id) in std::iter::zip(selected_sessions, &deleted_ids) {
-        kill_local_then_remote(Some(session), session_id).await?;
+        kill_local_then_remote(common, Some(session), session_id).await?;
     }
 
     match &deleted_ids[..] {
@@ -152,9 +162,11 @@ pub async fn delete_command(args: SessionDeleteArgs) -> Result<(), CliError> {
     Ok(())
 }
 
-async fn merged_sessions() -> Result<(Vec<MergedSessionRow>, bool), CliError> {
+async fn merged_sessions(
+    args: &SessionCommonArgs,
+) -> Result<(Vec<MergedSessionRow>, bool), CliError> {
     let local_sessions = load_sessions().await?;
-    let remote_result = try_load_remote_sessions().await;
+    let remote_result = try_load_remote_sessions(args).await;
     let operator_not_found = remote_result.is_none();
     let remote_sessions = remote_result.unwrap_or_default();
 
@@ -212,8 +224,8 @@ async fn load_sessions() -> Result<Vec<SessionConnection>, CliError> {
 
 /// Returns `None` if the operator is not found (signals operator-not-found to callers),
 /// or `Some` with whatever sessions were loaded (empty on other errors).
-async fn try_load_remote_sessions() -> Option<Vec<OperatorStatusSession>> {
-    match load_remote_sessions().await {
+async fn try_load_remote_sessions(args: &SessionCommonArgs) -> Option<Vec<OperatorStatusSession>> {
+    match load_remote_sessions(args).await {
         Ok(sessions) => Some(sessions),
         Err(CliError::OperatorNotInstalled) => None,
         Err(error) => {
@@ -223,9 +235,10 @@ async fn try_load_remote_sessions() -> Option<Vec<OperatorStatusSession>> {
     }
 }
 
-async fn load_remote_sessions() -> Result<Vec<OperatorStatusSession>, CliError> {
-    let mut cfg_context = ConfigContext::default();
-    let layer_config = LayerConfig::resolve(&mut cfg_context)?;
+async fn load_remote_sessions(
+    args: &SessionCommonArgs,
+) -> Result<Vec<OperatorStatusSession>, CliError> {
+    let layer_config = resolve_layer_config(args)?;
 
     if !layer_config.use_proxy {
         remove_proxy_env();
@@ -266,6 +279,7 @@ async fn load_remote_sessions() -> Result<Vec<OperatorStatusSession>, CliError> 
 }
 
 async fn kill_local_then_remote(
+    common: &SessionCommonArgs,
     local_session: Option<SessionConnection>,
     session_id: &str,
 ) -> Result<(), CliError> {
@@ -281,7 +295,7 @@ async fn kill_local_then_remote(
         false
     };
 
-    match try_kill_remote_session(session_id).await {
+    match try_kill_remote_session(common, session_id).await {
         Ok(RemoteKillResult::Killed) => Ok(()),
         Ok(RemoteKillResult::NotFound | RemoteKillResult::Unavailable) if local_killed => Ok(()),
         Ok(RemoteKillResult::NotFound | RemoteKillResult::Unavailable) => Err(CliError::UiError(
@@ -295,31 +309,59 @@ async fn kill_local_then_remote(
     }
 }
 
-async fn try_kill_remote_session(session_id: &str) -> Result<RemoteKillResult, CliError> {
-    let operator_api = match operator_api_with_client_certificate().await? {
+async fn try_kill_remote_session(
+    common: &SessionCommonArgs,
+    session_id: &str,
+) -> Result<RemoteKillResult, CliError> {
+    let alternate_id = alternate_remote_session_id(session_id);
+    let session_ids = match load_remote_sessions(common).await {
+        Ok(remote_sessions) => {
+            let matching_session = remote_sessions.into_iter().find(|session| {
+                session
+                    .id
+                    .as_deref()
+                    .is_some_and(|id| id == session_id || alternate_id.as_deref() == Some(id))
+            });
+
+            let Some(remote_session_id) = matching_session.and_then(|session| session.id) else {
+                return Ok(RemoteKillResult::NotFound);
+            };
+
+            vec![remote_session_id]
+        }
+        Err(CliError::OperatorStatusNotFound) => {
+            let mut session_ids = vec![session_id.to_owned()];
+
+            if let Some(alternate_id) = alternate_id {
+                session_ids.push(alternate_id);
+            }
+
+            session_ids
+        }
+        Err(CliError::OperatorNotInstalled) => return Ok(RemoteKillResult::Unavailable),
+        Err(error) => return Err(error),
+    };
+
+    let operator_api = match operator_api_with_client_certificate(common).await? {
         Some(api) => api,
         None => return Ok(RemoteKillResult::Unavailable),
     };
 
     let session_api: Api<SessionCrd> = Api::all(operator_api.client().clone());
 
-    if delete_remote_session_with_name(&session_api, session_id).await? {
-        return Ok(RemoteKillResult::Killed);
-    }
-
-    if let Some(alternate_id) = alternate_remote_session_id(session_id)
-        && delete_remote_session_with_name(&session_api, &alternate_id).await?
-    {
-        return Ok(RemoteKillResult::Killed);
+    for session_id in session_ids {
+        if delete_remote_session_with_name(&session_api, &session_id).await? {
+            return Ok(RemoteKillResult::Killed);
+        }
     }
 
     Ok(RemoteKillResult::NotFound)
 }
 
-async fn operator_api_with_client_certificate()
--> Result<Option<OperatorApi<MaybeClientCert>>, CliError> {
-    let mut cfg_context = ConfigContext::default();
-    let layer_config = LayerConfig::resolve(&mut cfg_context)?;
+async fn operator_api_with_client_certificate(
+    args: &SessionCommonArgs,
+) -> Result<Option<OperatorApi<MaybeClientCert>>, CliError> {
+    let layer_config = resolve_layer_config(args)?;
 
     if !layer_config.use_proxy {
         remove_proxy_env();
@@ -346,6 +388,14 @@ async fn operator_api_with_client_certificate()
     });
 
     Ok(Some(api))
+}
+
+fn resolve_layer_config(args: &SessionCommonArgs) -> Result<LayerConfig, CliError> {
+    let mut cfg_context = ConfigContext::default()
+        .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.clone())
+        .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace.clone());
+
+    LayerConfig::resolve(&mut cfg_context).map_err(Into::into)
 }
 
 async fn delete_remote_session_with_name(

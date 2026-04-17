@@ -3,7 +3,7 @@
 use std::{
     fmt::Debug,
     ops::Not,
-    sync::{Arc, LazyLock, OnceLock},
+    sync::{Arc, OnceLock},
 };
 
 use caps::{CapSet, Capability};
@@ -33,18 +33,44 @@ mod prerouting;
 mod redirect;
 mod standard;
 
-pub const IPTABLE_PREROUTING: &str = "MIRRORD_INPUT";
+/// Holds the iptables chain names for this agent instance.
+///
+/// When `MIRRORD_AGENT_IPTABLES_IDENTIFIER` is set, allows multiple agents to coexist in the same
+/// network namespace (single pod, multiple containers).
+///
+/// When the env var is absent, legacy names are used for backward compatibility.
+#[derive(Debug, Clone)]
+pub struct ChainNames {
+    prerouting: String,
+    mesh: String,
+    standard: String,
+    exclude_from_mesh: String,
+}
 
-pub const IPTABLE_MESH: &str = "MIRRORD_OUTPUT";
+impl ChainNames {
+    #[tracing::instrument(level = Level::DEBUG, ret)]
+    pub fn new(id: &str) -> Self {
+        Self {
+            prerouting: format!("MRDIN_{id}"),
+            mesh: format!("MRDOUT_{id}"),
+            standard: format!("MRDSTD_{id}"),
+            exclude_from_mesh: format!("MRDMSH_{id}"),
+        }
+    }
 
-pub const IPTABLE_STANDARD: &str = "MIRRORD_STANDARD";
-
-pub const IPTABLE_EXCLUDE_FROM_MESH: &str = "MIRRORD_EXCLUDE_FROM_MESH";
-
-pub static IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL: LazyLock<String> = LazyLock::new(|| {
-    std::fs::read_to_string("/proc/sys/net/ipv4/conf/all/route_localnet")
-        .unwrap_or_else(|_| "0".to_string())
-});
+    /// Our legacy static iptables' rules.
+    ///
+    /// Mostly used to clean-up old rules from agents that do not support multi-container targeting
+    /// (and for tests).
+    pub fn legacy() -> Self {
+        Self {
+            prerouting: "MIRRORD_INPUT".to_owned(),
+            mesh: "MIRRORD_OUTPUT".to_owned(),
+            standard: "MIRRORD_STANDARD".to_owned(),
+            exclude_from_mesh: "MIRRORD_EXCLUDE_FROM_MESH".to_owned(),
+        }
+    }
+}
 
 const IPTABLES_TABLE_NAME: &str = "nat";
 
@@ -57,6 +83,7 @@ pub trait IPTables {
 
     fn create_chain(&self, name: &str) -> IPTablesResult<()>;
     fn remove_chain(&self, name: &str) -> IPTablesResult<()>;
+    fn chain_exists(&self, chain: &str) -> IPTablesResult<bool>;
 
     fn add_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()>;
     fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> IPTablesResult<()>;
@@ -117,6 +144,11 @@ impl IPTables for IPTablesWrapper {
     }
 
     #[tracing::instrument(level = Level::TRACE, ret, err)]
+    fn chain_exists(&self, chain: &str) -> IPTablesResult<bool> {
+        Ok(self.tables.chain_exists(self.table_name, chain)?)
+    }
+
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     fn add_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()> {
         self.tables
             .append(self.table_name, chain, rule)
@@ -174,6 +206,7 @@ where
 {
     pub async fn create(
         ipt: IPT,
+        chain_names: &ChainNames,
         flush_connections: bool,
         pod_ips: Option<&str>,
         ipv6: bool,
@@ -184,17 +217,25 @@ where
         let mut redirect = match MeshVendor::detect(ipt.as_ref())? {
             Some(vendor) => match &vendor {
                 MeshVendor::IstioAmbient => {
-                    Redirects::Ambient(AmbientRedirect::create(ipt.clone(), pod_ips)?)
+                    Redirects::Ambient(AmbientRedirect::create(ipt.clone(), chain_names, pod_ips)?)
                 }
-                _ => Redirects::Mesh(MeshRedirect::create(ipt.clone(), vendor, pod_ips)?),
+                _ => Redirects::Mesh(MeshRedirect::create(
+                    ipt.clone(),
+                    chain_names,
+                    vendor,
+                    pod_ips,
+                )?),
             },
             _ => {
                 tracing::trace!(ipv6 = ipv6, "creating standard redirect");
-                match StandardRedirect::create(ipt.clone(), pod_ips) {
+                match StandardRedirect::create(ipt.clone(), chain_names, pod_ips) {
                     Err(err) => {
                         warn!("Unable to create StandardRedirect chain: {err}");
 
-                        Redirects::PrerouteFallback(PreroutingRedirect::create(ipt.clone())?)
+                        Redirects::PrerouteFallback(PreroutingRedirect::create(
+                            ipt.clone(),
+                            chain_names.prerouting.clone(),
+                        )?)
                     }
                     Ok(standard) => Redirects::Standard(standard),
                 }
@@ -207,8 +248,11 @@ where
 
         // Should be always the last composed redirect because it handles the order internally.
         if with_mesh_exclusion {
-            redirect =
-                Redirects::WithMeshExclusion(WithMeshExclusion::create(ipt, Box::new(redirect))?)
+            redirect = Redirects::WithMeshExclusion(WithMeshExclusion::create(
+                ipt,
+                &chain_names.exclude_from_mesh,
+                Box::new(redirect),
+            )?)
         }
 
         redirect.mount_entrypoint().await?;
@@ -216,28 +260,32 @@ where
         Ok(Self { redirect })
     }
 
-    /// List rules from other/ previous mirrord agents that exist on the IP table
-    #[tracing::instrument(level = Level::TRACE, skip(ipt) ret, err)]
-    pub async fn list_mirrord_rules(ipt: &IPT) -> IPTablesResult<Vec<String>> {
+    /// List rules from previous mirrord agent that exist on the IP table
+    #[tracing::instrument(level = Level::TRACE, skip(ipt, chain_names) ret, err)]
+    pub async fn list_mirrord_rules(
+        ipt: &IPT,
+        chain_names: &ChainNames,
+    ) -> IPTablesResult<Vec<String>> {
         let rules = ipt.list_table()?;
 
         Ok(rules
             .into_iter()
             .filter(|rule| {
                 [
-                    IPTABLE_PREROUTING,
-                    IPTABLE_MESH,
-                    IPTABLE_STANDARD,
-                    IPTABLE_EXCLUDE_FROM_MESH,
+                    &chain_names.prerouting,
+                    &chain_names.mesh,
+                    &chain_names.standard,
+                    &chain_names.exclude_from_mesh,
                 ]
                 .iter()
-                .any(|chain| rule.contains(*chain))
+                .any(|chain| rule.contains(chain.as_str()))
             })
             .collect())
     }
 
     pub async fn load(
         ipt: IPT,
+        chain_names: &ChainNames,
         flush_connections: bool,
         with_mesh_exclusion: bool,
     ) -> IPTablesResult<Self> {
@@ -245,14 +293,19 @@ where
 
         let mut redirect = match MeshVendor::detect(ipt.as_ref())? {
             Some(vendor) => match &vendor {
-                MeshVendor::IstioAmbient => Redirects::Ambient(AmbientRedirect::load(ipt.clone())?),
-                _ => Redirects::Mesh(MeshRedirect::load(ipt.clone(), vendor)?),
+                MeshVendor::IstioAmbient => {
+                    Redirects::Ambient(AmbientRedirect::load(ipt.clone(), chain_names)?)
+                }
+                _ => Redirects::Mesh(MeshRedirect::load(ipt.clone(), chain_names, vendor)?),
             },
-            _ => match StandardRedirect::load(ipt.clone()) {
+            _ => match StandardRedirect::load(ipt.clone(), chain_names) {
                 Err(err) => {
                     warn!("Unable to load StandardRedirect chain: {err}");
 
-                    Redirects::PrerouteFallback(PreroutingRedirect::load(ipt.clone())?)
+                    Redirects::PrerouteFallback(PreroutingRedirect::load(
+                        ipt.clone(),
+                        chain_names.prerouting.clone(),
+                    )?)
                 }
                 Ok(standard) => Redirects::Standard(standard),
             },
@@ -264,8 +317,11 @@ where
 
         // Should be always the last composed redirect because it handles the order internally.
         if with_mesh_exclusion {
-            redirect =
-                Redirects::WithMeshExclusion(WithMeshExclusion::load(ipt, Box::new(redirect))?)
+            redirect = Redirects::WithMeshExclusion(WithMeshExclusion::load(
+                ipt,
+                &chain_names.exclude_from_mesh,
+                Box::new(redirect),
+            )?)
         }
 
         Ok(Self { redirect })
@@ -460,13 +516,11 @@ fn try_drop_cap_sys_module() {
 mod tests {
     use mockall::predicate::{eq, str};
 
-    use crate::{
-        IPTABLE_EXCLUDE_FROM_MESH, IPTABLE_MESH, IPTABLE_PREROUTING, IPTABLE_STANDARD,
-        MockIPTables, SafeIpTables,
-    };
+    use crate::{ChainNames, MockIPTables, SafeIpTables};
 
     #[tokio::test]
     async fn default() {
+        let chain_names = ChainNames::legacy();
         let mut mock = MockIPTables::new();
 
         mock.expect_list_rules()
@@ -474,13 +528,13 @@ mod tests {
             .returning(|_| Ok(vec![]));
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_PREROUTING))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_PREROUTING),
+                eq(chain_names.prerouting.clone()),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
@@ -488,13 +542,13 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_STANDARD))
+            .with(eq(chain_names.standard.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_STANDARD),
+                eq(chain_names.standard.clone()),
                 str::starts_with("-m owner --gid-owner"),
                 eq(1),
             )
@@ -503,7 +557,7 @@ mod tests {
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_STANDARD),
+                eq(chain_names.standard.clone()),
                 eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(2),
             )
@@ -511,18 +565,21 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_add_rule()
-            .with(eq("PREROUTING"), eq(format!("-j {}", IPTABLE_PREROUTING)))
+            .with(
+                eq("PREROUTING"),
+                eq(format!("-j {}", chain_names.prerouting)),
+            )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_add_rule()
-            .with(eq("OUTPUT"), eq(format!("-j {}", IPTABLE_STANDARD)))
+            .with(eq("OUTPUT"), eq(format!("-j {}", chain_names.standard)))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
             .with(
-                eq(IPTABLE_PREROUTING),
+                eq(chain_names.prerouting.clone()),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
@@ -530,33 +587,36 @@ mod tests {
 
         mock.expect_remove_rule()
             .with(
-                eq(IPTABLE_STANDARD),
+                eq(chain_names.standard.clone()),
                 eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
-            .with(eq("PREROUTING"), eq(format!("-j {}", IPTABLE_PREROUTING)))
+            .with(
+                eq("PREROUTING"),
+                eq(format!("-j {}", chain_names.prerouting)),
+            )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
-            .with(eq("OUTPUT"), eq(format!("-j {}", IPTABLE_STANDARD)))
+            .with(eq("OUTPUT"), eq(format!("-j {}", chain_names.standard)))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_PREROUTING))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_STANDARD))
+            .with(eq(chain_names.standard.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::create(mock, false, None, false, false)
+        let ipt = SafeIpTables::create(mock, &chain_names, false, None, false, false)
             .await
             .expect("Create Failed");
 
@@ -569,6 +629,7 @@ mod tests {
 
     #[tokio::test]
     async fn linkerd() {
+        let cn = ChainNames::legacy();
         let mut mock = MockIPTables::new();
 
         mock.expect_list_rules()
@@ -598,13 +659,13 @@ mod tests {
             });
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_PREROUTING))
+            .with(eq(cn.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_PREROUTING),
+                eq(cn.prerouting.clone()),
                 eq("-m multiport -p tcp ! --dports 22 -j RETURN"),
                 eq(1),
             )
@@ -612,18 +673,18 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_add_rule()
-            .with(eq("PREROUTING"), eq(format!("-j {}", IPTABLE_PREROUTING)))
+            .with(eq("PREROUTING"), eq(format!("-j {}", cn.prerouting)))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_MESH))
+            .with(eq(cn.mesh.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_MESH),
+                eq(cn.mesh.clone()),
                 str::starts_with("-m owner --gid-owner"),
                 eq(1),
             )
@@ -631,13 +692,13 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_add_rule()
-            .with(eq("OUTPUT"), eq(format!("-j {}", IPTABLE_MESH)))
+            .with(eq("OUTPUT"), eq(format!("-j {}", cn.mesh)))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_PREROUTING),
+                eq(cn.prerouting.clone()),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(2),
             )
@@ -646,7 +707,7 @@ mod tests {
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_MESH),
+                eq(cn.mesh.clone()),
                 eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(2),
             )
@@ -655,7 +716,7 @@ mod tests {
 
         mock.expect_remove_rule()
             .with(
-                eq(IPTABLE_PREROUTING),
+                eq(cn.prerouting.clone()),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
@@ -663,33 +724,33 @@ mod tests {
 
         mock.expect_remove_rule()
             .with(
-                eq(IPTABLE_MESH),
+                eq(cn.mesh.clone()),
                 eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
-            .with(eq("PREROUTING"), eq(format!("-j {}", IPTABLE_PREROUTING)))
+            .with(eq("PREROUTING"), eq(format!("-j {}", cn.prerouting)))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_PREROUTING))
+            .with(eq(cn.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_remove_rule()
-            .with(eq("OUTPUT"), eq(format!("-j {}", IPTABLE_MESH)))
+            .with(eq("OUTPUT"), eq(format!("-j {}", cn.mesh)))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_MESH))
+            .with(eq(cn.mesh.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::create(mock, false, None, false, false)
+        let ipt = SafeIpTables::create(mock, &cn, false, None, false, false)
             .await
             .expect("Create Failed");
 
@@ -702,6 +763,7 @@ mod tests {
 
     #[tokio::test]
     async fn with_mesh_exclusion() {
+        let chain_names = ChainNames::legacy();
         let mut mock = MockIPTables::new();
 
         mock.expect_list_rules()
@@ -709,18 +771,18 @@ mod tests {
             .returning(|_| Ok(vec![]));
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_EXCLUDE_FROM_MESH))
+            .with(eq(chain_names.exclude_from_mesh.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_PREROUTING))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_PREROUTING),
+                eq(chain_names.prerouting.clone()),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
@@ -728,13 +790,13 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_STANDARD))
+            .with(eq(chain_names.standard.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_STANDARD),
+                eq(chain_names.standard.clone()),
                 str::starts_with("-m owner --gid-owner"),
                 eq(1),
             )
@@ -743,7 +805,7 @@ mod tests {
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_STANDARD),
+                eq(chain_names.standard.clone()),
                 eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(2),
             )
@@ -753,25 +815,28 @@ mod tests {
         mock.expect_insert_rule()
             .with(
                 eq("PREROUTING"),
-                eq(format!("-j {}", IPTABLE_EXCLUDE_FROM_MESH)),
+                eq(format!("-j {}", chain_names.exclude_from_mesh)),
                 eq(1),
             )
             .times(1)
             .returning(|_, _, _| Ok(()));
 
         mock.expect_add_rule()
-            .with(eq("PREROUTING"), eq(format!("-j {}", IPTABLE_PREROUTING)))
+            .with(
+                eq("PREROUTING"),
+                eq(format!("-j {}", chain_names.prerouting)),
+            )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_add_rule()
-            .with(eq("OUTPUT"), eq(format!("-j {}", IPTABLE_STANDARD)))
+            .with(eq("OUTPUT"), eq(format!("-j {}", chain_names.standard)))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
             .with(
-                eq(IPTABLE_PREROUTING),
+                eq(chain_names.prerouting.clone()),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
@@ -779,7 +844,7 @@ mod tests {
 
         mock.expect_remove_rule()
             .with(
-                eq(IPTABLE_STANDARD),
+                eq(chain_names.standard.clone()),
                 eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
@@ -788,37 +853,40 @@ mod tests {
         mock.expect_remove_rule()
             .with(
                 eq("PREROUTING"),
-                eq(format!("-j {}", IPTABLE_EXCLUDE_FROM_MESH)),
+                eq(format!("-j {}", chain_names.exclude_from_mesh)),
             )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
-            .with(eq("PREROUTING"), eq(format!("-j {}", IPTABLE_PREROUTING)))
+            .with(
+                eq("PREROUTING"),
+                eq(format!("-j {}", chain_names.prerouting)),
+            )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
-            .with(eq("OUTPUT"), eq(format!("-j {}", IPTABLE_STANDARD)))
+            .with(eq("OUTPUT"), eq(format!("-j {}", chain_names.standard)))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_EXCLUDE_FROM_MESH))
+            .with(eq(chain_names.exclude_from_mesh.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_PREROUTING))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_STANDARD))
+            .with(eq(chain_names.standard.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::create(mock, false, None, false, true)
+        let ipt = SafeIpTables::create(mock, &chain_names, false, None, false, true)
             .await
             .expect("Create Failed");
 
@@ -833,6 +901,7 @@ mod tests {
     /// A fresh IP table, or one with only non-agent names, should pass.
     #[tokio::test]
     async fn pass_on_clean() {
+        let chain_names = ChainNames::legacy();
         let mut mock = MockIPTables::new();
 
         // clean table returns non-mirrord rules only
@@ -845,7 +914,7 @@ mod tests {
             ])
         });
 
-        let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock).await;
+        let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock, &chain_names).await;
         assert_eq!(
             leftover_rules_res.unwrap().len(),
             0,
@@ -857,6 +926,7 @@ mod tests {
     /// If there are any chains in the IP table with names used by the agent, the check should fail.
     #[tokio::test]
     async fn fail_on_dirty() {
+        let chain_names = ChainNames::legacy();
         let mut mock = MockIPTables::new();
 
         // dirty table returns non-mirrord rules, plus a leftover mirrord rule
@@ -866,11 +936,11 @@ mod tests {
                 "-P INPUT ACCEPT".to_owned(),
                 "-P OUTPUT ACCEPT".to_owned(),
                 "-P POSTROUTING ACCEPT".to_owned(),
-                format!("-N {IPTABLE_PREROUTING}"),
+                "-N MIRRORD_INPUT".to_owned(),
             ])
         });
 
-        let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock).await;
+        let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock, &chain_names).await;
         assert_eq!(
             leftover_rules_res.unwrap().len(),
             1,
