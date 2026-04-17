@@ -8,6 +8,15 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.203.1](https://github.com/metalbear-co/mirrord/tree/3.203.1) - 2026-04-17
+
+
+### Fixed
+
+- Changed the release workflow to build Linux and Windows CLI artifacts through
+  `cargo xtask build-cli` instead of handwritten cargo build steps.
+  Fixes regression with wrong artifact on Linux causing mirrord to not work
+
 ## [3.203.0](https://github.com/metalbear-co/mirrord/tree/3.203.0) - 2026-04-16
 
 
