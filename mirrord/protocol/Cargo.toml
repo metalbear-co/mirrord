@@ -25,6 +25,7 @@ futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_json_path.workspace = true
+serde_json_path_macros.workspace = true
 tracing.workspace = true
 hyper = { workspace = true, features = ["client"] }
 http-serde.workspace = true
@@ -41,6 +42,7 @@ derive_more = { workspace = true, features = [
 uuid = { workspace = true, features = ["v4"] }
 
 mirrord-macros = { path = "../macros" }
+strum.workspace = true
 strum_macros.workspace = true
 jaq-core.workspace = true
 jaq-std.workspace = true

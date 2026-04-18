@@ -65,4 +65,4 @@ jobs:
         uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
         with:
           tool: cargo-shear
-      - run: cargo shear --deny-warnings
+      - run: ./scripts/cargo-shear.sh --deny-warnings

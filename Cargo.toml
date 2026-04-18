@@ -206,6 +206,7 @@ semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_json_path = "0.7.2"
+serde_json_path_macros = "0.1.6"
 serde_urlencoded = "0.7"
 serde_yaml = "0.9"
 sha2 = "0.10"
