@@ -29,8 +29,12 @@ fn build_wizard_frontend() {
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let out_dir = Path::new(&out_dir);
 
+    println!("cargo::rerun-if-env-changed=WIZARD_DIST_DIR");
+
     let dist_path = if let Ok(frontend_dist_override) = env::var("WIZARD_DIST_DIR") {
-        Path::new(&frontend_dist_override).to_path_buf()
+        let dist = Path::new(&frontend_dist_override).to_path_buf();
+        println!("cargo::rerun-if-changed={}", dist.display());
+        dist
     } else {
         let input_path = Path::new("../../packages/wizard");
         let dist_path = out_dir.join("dist");
