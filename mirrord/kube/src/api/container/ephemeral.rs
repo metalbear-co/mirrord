@@ -18,7 +18,10 @@ use crate::{
     api::{
         container::{
             ContainerParams, ContainerVariant,
-            util::{agent_base_args, get_capabilities, wait_for_agent_startup},
+            util::{
+                agent_base_args, get_capabilities, get_ephemeral_container_image_pull_error,
+                wait_for_agent_startup,
+            },
         },
         kubernetes::AgentKubernetesConnectInfo,
         runtime::RuntimeData,
@@ -133,6 +136,14 @@ where
     pin!(stream);
 
     while let Some(Ok(pod)) = stream.next().await {
+        // Fail fast on image pull errors on ephemeral containers (ImagePullBackOff, ErrImagePull)
+        // instead of waiting indefinitely while the pod remains in Pending.
+        // See: https://github.com/metalbear-co/mirrord/issues/366
+        if let Some(msg) = get_ephemeral_container_image_pull_error(&pod, &params.name) {
+            container_progress.failure(Some(&msg));
+            return Err(KubeApiError::AgentPodStartError(msg));
+        }
+
         if is_ephemeral_container_running(pod, &params.name) {
             debug!("container ready");
             break;
