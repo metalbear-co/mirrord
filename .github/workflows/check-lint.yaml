@@ -61,6 +61,9 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: "Install cargo shear"
         uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
         with:
