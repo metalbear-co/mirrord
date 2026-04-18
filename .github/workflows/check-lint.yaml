@@ -3,6 +3,18 @@ name: Check Lint
 on:
   workflow_call:
     inputs:
+      run_markdown:
+        required: true
+        type: boolean
+      run_rust:
+        required: true
+        type: boolean
+      run_vale:
+        required: true
+        type: boolean
+      run_wizard_frontend:
+        required: true
+        type: boolean
       rust_toolchain:
         required: true
         type: string
@@ -17,7 +29,68 @@ env:
   RUSTUP_MAX_RETRIES: 10
 
 jobs:
+  typos:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
+        with:
+          fetch-depth: 0
+      - name: install typos
+        uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267
+        with:
+          tool: typos-cli
+      - name: print typos version
+        run: echo $(typos --version)
+      - name: list markdown files
+        run: echo $(git ls-files '*.md')
+      - name: spell check markdown files
+        run: typos --format brief $(git ls-files '*.md')
+      - name: spell check mirrord/config crate
+        run: typos --format brief $(git ls-files 'mirrord/config/*.rs')
+  lint-markdown:
+    if: ${{ inputs.run_markdown }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
+      - uses: metalbear-co/markdownlint-cli2-action@4db3dfc2cb719a5a152cb38efef6e2e50db98973
+        with:
+          config: ".markdownlint.json"
+          globs: "README.md"
+  wizard-frontend-lint:
+    if: ${{ inputs.run_wizard_frontend }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
+      - uses: actions/setup-node@ab72c7e7eba0eaa11f8cab0f5679243900c2cac9
+        with:
+          node-version: 24
+      - run: npm install
+        working-directory: ./packages/wizard
+      - run: npm run lint
+        working-directory: ./packages/wizard
+  vale:
+    if: ${{ inputs.run_vale }}
+    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: install vale
+        run: |
+          wget "https://github.com/errata-ai/vale/releases/download/v3.13.1/vale_3.13.1_Linux_64-bit.tar.gz" -O /tmp/vale.tgz
+          echo '99bd899f0ac52054444ffe3df571c749cc811f3b606cf5ef740c9a5a2db33df6 /tmp/vale.tgz' | sha256sum -c
+          mkdir -p /tmp/vale
+          tar -xzf /tmp/vale.tgz -C /tmp/vale
+          chmod +x /tmp/vale/vale
+          mv /tmp/vale/vale /usr/local/bin
+      - name: check root markdown files
+        run: vale $(find . -maxdepth 1 -name '*.md' -not -name CLAUDE.md -not -name CHANGELOG.md) --output=report.tmpl
+      - name: check changelog.d files
+        run: vale $(git ls-files 'changelog.d/*.md') --output=report.tmpl
   lint:
+    if: ${{ inputs.run_rust }}
     timeout-minutes: 10
     strategy:
       matrix:
@@ -34,7 +107,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
         with:
           persist-credentials: false
       - run: rm rust-toolchain.toml
@@ -54,11 +127,12 @@ jobs:
         run: cargo check -p mirrord-operator --features crd --target ${{ matrix.target }}
       - run: cargo clippy --workspace --lib --bins --all-features --tests -- "-Wclippy::indexing_slicing" -D warnings
   shear:
+    if: ${{ inputs.run_rust }}
     name: "cargo shear"
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
         with:
           persist-credentials: false
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
