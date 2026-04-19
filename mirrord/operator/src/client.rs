@@ -1572,6 +1572,7 @@ impl OperatorApi<PreparedClientCert> {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
+            output_tmp_resources: Vec::new(),
             key: Some(key),
         };
 

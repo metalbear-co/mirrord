@@ -93,9 +93,28 @@ pub struct ConnectParams<'a> {
     )]
     pub rmq_output_queues: HashMap<String, String>,
 
+    /// Multi-cluster: prefilled temporary resource names from the default cluster.
+    /// The envoy reads these from the default cluster's Ready status and passes
+    /// them to remote clusters so they reuse the same broker resources.
+    #[serde(with = "force_json_ser", skip_serializing_if = "Vec::is_empty")]
+    pub output_tmp_resources: Vec<OutputTmpResource>,
+
     /// Key for this session
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<&'a str>,
+}
+
+/// Same as TmpResourceEntry for serialization
+/// in connect params. The envoy converts from the CRD type into this when
+/// building the connect URL for remote clusters.
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputTmpResource {
+    pub queue_id: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub topic: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub subscription: BTreeMap<String, String>,
 }
 
 /// Per-dialect branch database names, used to keep the connect params
@@ -148,6 +167,7 @@ impl<'a> ConnectParams<'a> {
             is_default_cluster: None,
             sqs_output_queues: HashMap::new(),
             rmq_output_queues: HashMap::new(),
+            output_tmp_resources: Vec::new(),
             key: Some(key),
         }
     }
