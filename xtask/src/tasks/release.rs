@@ -46,6 +46,7 @@ impl Platform {
 pub struct BuildOptions {
     pub platform: Platform,
     pub release: bool,
+    pub build_monitor: bool,
     pub with_wizard: bool,
     pub build_wizard: bool,
     pub cargo_args: Vec<String>,
@@ -56,14 +57,17 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
     println!("════════════════════════════════════════════════════════");
     println!("Building release CLI for {}", options.platform.name());
     println!("  Release mode: {}", options.release);
+    println!("  Build monitor frontend: {}", options.build_monitor);
     println!("  With wizard: {}", options.with_wizard);
     println!("  Build wizard frontend: {}", options.build_wizard);
     println!("════════════════════════════════════════════════════════");
     println!();
 
     // Step 1: Prepare monitor frontend assets required by rust-embed.
-    monitor::build_monitor().context("Failed to prepare monitor frontend assets")?;
-    println!();
+    if options.build_monitor {
+        monitor::build_monitor().context("Failed to prepare monitor frontend assets")?;
+        println!();
+    }
 
     // Step 2: Prepare wizard frontend assets if needed.
     let wizard_archive = if options.with_wizard {

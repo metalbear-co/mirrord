@@ -29,6 +29,10 @@ enum Commands {
         #[arg(long)]
         no_wizard: bool,
 
+        /// Build without monitor frontend
+        #[arg(long)]
+        no_monitor: bool,
+
         /// Use the existing wizard dist without rebuilding frontend assets
         #[arg(long, conflicts_with = "no_wizard")]
         skip_build_wizard: bool,
@@ -141,6 +145,7 @@ fn main() -> Result<()> {
             platform,
             release,
             no_wizard,
+            no_monitor,
             skip_build_wizard,
             cargo_args,
         } => {
@@ -155,6 +160,7 @@ fn main() -> Result<()> {
             let options = BuildOptions {
                 platform,
                 release,
+                build_monitor: !no_monitor,
                 with_wizard: !no_wizard,
                 build_wizard: !no_wizard && !skip_build_wizard,
                 cargo_args,

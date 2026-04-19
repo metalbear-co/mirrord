@@ -5,8 +5,9 @@ import SessionDetail from './components/SessionDetail'
 import StatusBar from './components/StatusBar'
 import AppHeader from './components/AppHeader'
 import EmptySessionState from './components/EmptySessionState'
-import { initAnalytics, trackEvent } from './analytics'
+import { initAnalytics, setTelemetryEnabled, trackEvent } from './analytics'
 import { api } from './api'
+import { useTelemetryPref } from './hooks/useTelemetryPref'
 
 const WS_RECONNECT_INTERVAL = 3000
 
@@ -20,6 +21,7 @@ export default function App() {
     if (saved) return saved === 'dark'
     return window.matchMedia('(prefers-color-scheme: dark)').matches
   })
+  const [telemetryPref, setTelemetryPref] = useTelemetryPref()
 
   // Strip auth token from URL bar after page load (cookie is already set)
   useEffect(() => {
@@ -37,15 +39,18 @@ export default function App() {
     localStorage.setItem('session-monitor-theme', isDarkMode ? 'dark' : 'light')
   }, [isDarkMode])
 
-  // Initialize PostHog analytics (respects telemetry opt-out)
+  // Init PostHog once a session exists and both the session's own `config.telemetry` and
+  // the user's local preference allow it. After init, `setTelemetryEnabled` flips opt-in
+  // at runtime so toggling from Settings takes effect without a reload.
   useEffect(() => {
-    if (sessions.length > 0) {
-      const telemetryEnabled = sessions.every(
-        s => (s.config as Record<string, unknown>)?.telemetry !== false
-      )
-      initAnalytics(telemetryEnabled)
-    }
-  }, [sessions])
+    if (sessions.length === 0) return
+    const sessionAllowsTelemetry = sessions.every(
+      s => (s.config as Record<string, unknown>)?.telemetry !== false
+    )
+    const shouldCapture = sessionAllowsTelemetry && telemetryPref
+    initAnalytics(shouldCapture)
+    setTelemetryEnabled(shouldCapture)
+  }, [sessions, telemetryPref])
 
   useEffect(() => {
     api.listSessions()
@@ -125,6 +130,8 @@ export default function App() {
         connected={connected}
         isDarkMode={isDarkMode}
         onToggleTheme={() => setIsDarkMode(!isDarkMode)}
+        telemetryEnabled={telemetryPref}
+        onTelemetryChange={setTelemetryPref}
       />
       <div className="flex flex-1 overflow-hidden">
         <SessionSidebar

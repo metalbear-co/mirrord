@@ -40,6 +40,9 @@ cargo xtask build-cli --release --platform windows
 # Build without wizard frontend
 cargo xtask build-cli --release --no-wizard
 
+# Build without monitor frontend
+cargo xtask build-cli --release --no-monitor
+
 # Build with the wizard feature but reuse an existing dist directory
 cargo xtask build-cli --release --skip-build-wizard
 ```

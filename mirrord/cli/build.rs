@@ -12,19 +12,6 @@ fn recheck_and_setup_layer_file() {
     #[cfg(target_os = "macos")]
     println!("cargo::rerun-if-env-changed=MIRRORD_LAYER_FILE_MACOS_ARM64");
 
-    if std::env::var("MIRRORD_LAYER_FILE").is_err() {
-        let layer_path = if cfg!(windows) {
-            std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER_WIN")
-                .or_else(|_| std::env::var("CARGO_MANIFEST_PATH"))
-                .unwrap()
-        } else {
-            std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER")
-                .or_else(|_| std::env::var("CARGO_MANIFEST_PATH"))
-                .unwrap()
-        };
-        println!("cargo:rustc-env=MIRRORD_LAYER_FILE={}", layer_path);
-    };
-
     if std::env::var("MIRRORD_LAYER_FILE_MACOS_ARM64").is_err()
         && std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|target| target == "macos")
     {
@@ -42,8 +29,12 @@ fn build_wizard_frontend() {
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let out_dir = Path::new(&out_dir);
 
+    println!("cargo::rerun-if-env-changed=WIZARD_DIST_DIR");
+
     let dist_path = if let Ok(frontend_dist_override) = env::var("WIZARD_DIST_DIR") {
-        Path::new(&frontend_dist_override).to_path_buf()
+        let dist = Path::new(&frontend_dist_override).to_path_buf();
+        println!("cargo::rerun-if-changed={}", dist.display());
+        dist
     } else {
         let input_path = Path::new("../../packages/wizard");
         let dist_path = out_dir.join("dist");
