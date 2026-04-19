@@ -3224,6 +3224,36 @@
             "queue_type",
             "message_filter"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each Pub/Sub message, the jq filter runs on a JSON\nrepresentation of the message body.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between Pub/Sub message attribute names and regexes they\nshould match. The local application will only receive messages whose attributes\nmatch **all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "GcpPubSub"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "queue_type"
+          ]
         }
       ]
     },
