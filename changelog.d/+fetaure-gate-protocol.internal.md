@@ -1,0 +1,1 @@
+Introduce new features to `mirrord-protocol` to minimise minimal required dependencies operator will need to use. New feature flags are `libc`, `jaq`, `regex`, `socket2` and `uuid_gen` (`uuid_gen` is for `getrandom` dependency).

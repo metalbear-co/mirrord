@@ -9,7 +9,7 @@ use std::{
 use bincode::{Decode, Encode};
 use semver::VersionReq;
 
-use crate::{ConnectionId, Payload, RemoteResult, SerializationError, uid::Uid};
+use crate::{ConnectionId, Payload, RemoteResult, uid::Uid};
 
 pub mod tcp;
 pub mod udp;
@@ -48,7 +48,8 @@ impl From<net::SocketAddr> for SocketAddress {
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "socket2"))]
+#[cfg_attr(docsrs, doc(cfg(all(unix, feature = "socket2"))))]
 impl TryFrom<UnixAddr> for socket2::SockAddr {
     type Error = io::Error;
 
@@ -79,14 +80,16 @@ impl TryFrom<SocketAddress> for net::SocketAddr {
     }
 }
 
+#[cfg(feature = "socket2")]
+#[cfg_attr(docsrs, doc(cfg(feature = "socket2")))]
 impl TryFrom<socket2::SockAddr> for SocketAddress {
-    type Error = SerializationError;
+    type Error = crate::error::SerializationError;
 
     #[cfg(windows)]
     fn try_from(addr: socket2::SockAddr) -> Result<Self, Self::Error> {
         addr.as_socket()
             .map(Self::Ip)
-            .ok_or(SerializationError::SocketAddress)
+            .ok_or(crate::error::SerializationError::SocketAddress)
     }
 
     #[cfg(unix)]
@@ -102,10 +105,12 @@ impl TryFrom<socket2::SockAddr> for SocketAddress {
                     .map(|slice| Self::Unix(UnixAddr::Abstract(slice.to_vec())))
             })
             .or_else(|| addr.is_unnamed().then_some(Self::Unix(UnixAddr::Unnamed)))
-            .ok_or(SerializationError::SocketAddress)
+            .ok_or(crate::error::SerializationError::SocketAddress)
     }
 }
 
+#[cfg(feature = "socket2")]
+#[cfg_attr(docsrs, doc(cfg(feature = "socket2")))]
 impl TryFrom<SocketAddress> for socket2::SockAddr {
     type Error = io::Error;
 
@@ -117,7 +122,7 @@ impl TryFrom<SocketAddress> for socket2::SockAddr {
             #[cfg(windows)]
             _ => Err(Self::Error::new(
                 io::ErrorKind::InvalidInput,
-                SerializationError::SocketAddress,
+                crate::error::SerializationError::SocketAddress,
             )),
         }
     }
@@ -210,7 +215,7 @@ pub struct DaemonConnectV2 {
     pub connect: RemoteResult<DaemonConnect>,
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(all(test, target_os = "linux", feature = "socket2"))]
 mod test {
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
 

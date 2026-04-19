@@ -12,11 +12,10 @@ use std::{
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use derive_more::{Deref, Display};
+use http::{HeaderMap, Method, Request, Response, StatusCode, Uri, Version};
+use http_body::{Body, Frame};
 use http_body_util::BodyExt;
-use hyper::{
-    HeaderMap, Method, Request, Response, StatusCode, Uri, Version,
-    body::{Body, Frame},
-};
+#[cfg(feature = "jaq")]
 use jaq_core::{
     Compiler,
     load::{Arena, File, Loader},
@@ -190,6 +189,8 @@ pub struct ChunkedRequestErrorV2 {
 pub struct Filter(String);
 
 impl Filter {
+    #[cfg(feature = "regex")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "regex")))]
     pub fn new(filter_str: String) -> Result<Self, Box<fancy_regex::Error>> {
         let _ = fancy_regex::Regex::new(&filter_str).inspect_err(|fail| {
             tracing::error!(
@@ -279,10 +280,13 @@ fn type_of(nodes: NodesType) -> ValueType {
 
     first_type.into()
 }
+
 #[derive(Debug, Clone, Deref, PartialEq, Eq, Encode, Decode, Display)]
 pub struct JqQuery(String);
 
 impl JqQuery {
+    #[cfg(feature = "jaq")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "jaq")))]
     pub fn new(expr: &str) -> Result<Self, String> {
         let inner = || {
             let program = File {

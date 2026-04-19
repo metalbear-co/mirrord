@@ -19,7 +19,7 @@ workspace = true
 [dependencies]
 mirrord-config-derive = { path = "./derive" }
 mirrord-analytics = { path = "../analytics" }
-mirrord-protocol = { path = "../protocol" }
+mirrord-protocol = { path = "../protocol", features = ["jaq", "regex"] }
 # We don't need the `eval` feature here because we only want to compile
 # the `jaq` code to verify its validity, but we don't need to run it here.
 mirrord-jaq = { path = "../jaq", default-features = false}

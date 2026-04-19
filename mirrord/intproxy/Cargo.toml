@@ -22,7 +22,7 @@ workspace = true
 mirrord-config = { path = "../config" }
 mirrord-kube = { path = "../kube", features = ["portforward"] }
 mirrord-operator = { path = "../operator", features = ["client"] }
-mirrord-protocol = { path = "../protocol" }
+mirrord-protocol = { path = "../protocol", features = ["uuid_gen"] }
 mirrord-intproxy-protocol = { path = "./protocol", features = ["codec-async"] }
 mirrord-analytics = { path = "../analytics" }
 mirrord-tls-util = { path = "../tls-util" }

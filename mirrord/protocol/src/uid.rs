@@ -17,6 +17,8 @@ impl Uid {
     ///
     /// Generally, random v4 UIDs are considered to be "safe",
     /// as collision probability is negligible.
+    #[cfg(feature = "uuid_gen")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "uuid_gen")))]
     pub fn new_v4() -> Self {
         Self(Uuid::new_v4())
     }

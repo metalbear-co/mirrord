@@ -19,7 +19,7 @@ workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [target.'cfg(target_os = "linux")'.dependencies]
-mirrord-protocol = { path = "../protocol" }
+mirrord-protocol = { path = "../protocol", features = ["libc", "jaq"] }
 mirrord-agent-env = { path = "./env", default-features = false }
 mirrord-agent-iptables = { path = "./iptables" }
 mirrord-tls-util = { path = "../tls-util" }
@@ -82,6 +82,7 @@ jaq-json = { workspace = true, features = ["serde_json"] }
 
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
+mirrord-protocol = { path = "../protocol", features = ["libc", "jaq", "regex"] }
 pem.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true
