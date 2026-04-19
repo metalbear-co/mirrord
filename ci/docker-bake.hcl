@@ -28,6 +28,16 @@ variable "PLATFORMS" {
   default = "linux/amd64,linux/arm64"
 }
 
+# Shared buildx cache settings for product images. Override to empty strings to disable
+# importing from and exporting to the GitHub Actions cache backend.
+variable "PRODUCT_CACHE_FROM" {
+  default = "type=gha"
+}
+
+variable "PRODUCT_CACHE_TO" {
+  default = "type=gha,mode=max"
+}
+
 # Product images built from this repo.
 group "default" {
   targets = ["agent", "cli"]
@@ -54,8 +64,8 @@ target "agent" {
   dockerfile = "mirrord/agent/Dockerfile"
   platforms  = split(",", PLATFORMS)
   tags       = split(",", AGENT_TAGS)
-  cache-from = ["type=gha"]
-  cache-to   = ["type=gha,mode=max"]
+  cache-from = compact([PRODUCT_CACHE_FROM])
+  cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
     "ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21"  = "target:ci-agent-builder"
     "ghcr.io/metalbear-co/ci-agent-runtime:30dca9bcb32306a028178cac371b1e47e403916c" = "target:ci-agent-runtime"
@@ -67,8 +77,8 @@ target "cli" {
   dockerfile = "mirrord/cli/Dockerfile"
   platforms  = split(",", PLATFORMS)
   tags       = split(",", CLI_TAGS)
-  cache-from = ["type=gha"]
-  cache-to   = ["type=gha,mode=max"]
+  cache-from = compact([PRODUCT_CACHE_FROM])
+  cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
     "ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21" = "target:ci-agent-builder"
   }
@@ -80,8 +90,8 @@ target "sqs-printer" {
   dockerfile = "Dockerfile"
   platforms  = split(",", PLATFORMS)
   tags       = split(",", SQS_PRINTER_TAGS)
-  cache-from = ["type=gha"]
-  cache-to   = ["type=gha,mode=max"]
+  cache-from = compact([PRODUCT_CACHE_FROM])
+  cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
     "ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21" = "target:ci-agent-builder"
   }
@@ -141,4 +151,3 @@ target "ci-rust-build" {
     SHA != "" ? "${REGISTRY}/ci-rust-build:${SHA}" : "",
   ])
 }
-

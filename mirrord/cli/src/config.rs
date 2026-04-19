@@ -223,7 +223,7 @@ pub(super) enum Commands {
     #[command(hide = true)]
     Attach(AttachArgs),
 
-    /// Launch the session monitor UI.
+    /// Launch the mirrord local UI.
     ///
     /// Watches active mirrord sessions and displays a web dashboard showing
     /// real-time events (file operations, DNS queries, HTTP requests, etc.)
@@ -238,7 +238,7 @@ pub(super) enum Commands {
 
     /// Kill a local mirrord session.
     #[cfg(unix)]
-    Kill(Box<SessionDeleteArgs>),
+    Kill(Box<KillArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -1420,16 +1420,42 @@ pub struct UiArgs {
 #[cfg(unix)]
 #[derive(Args, Debug)]
 pub struct SessionArgs {
+    /// Arguments shared across `mirrord session` commands.
+    #[command(flatten)]
+    pub common: SessionCommonArgs,
+
     /// Subcommand to use with `mirrord session`.
     #[command(subcommand)]
     pub command: Option<LocalSessionCommand>,
+}
+
+/// Arguments shared across `mirrord session` commands.
+#[cfg(unix)]
+#[derive(Args, Clone, Debug)]
+pub struct SessionCommonArgs {
+    /// Namespace to operate on. Can also be set via `target.namespace` in the mirrord config.
+    #[arg(short = 'n', long = "namespace", global = true)]
+    pub namespace: Option<String>,
+
+    /// Load config from config file.
+    ///
+    /// When using `-f` without a value, defaults to `"./.mirrord/mirrord.json"`.
+    #[arg(
+        short = 'f',
+        long,
+        value_hint = ValueHint::FilePath,
+        default_missing_value = "./.mirrord/mirrord.json",
+        num_args = 0..=1,
+        global = true
+    )]
+    pub config_file: Option<PathBuf>,
 }
 
 /// `mirrord session` subcommands.
 #[cfg(unix)]
 #[derive(Subcommand, Debug)]
 pub enum LocalSessionCommand {
-    /// List local mirrord sessions currently running on this machine.
+    /// List mirrord sessions currently running locally and in cluster (in same namespace).
     #[command(visible_alias = "ls")]
     List,
 
@@ -1449,6 +1475,19 @@ pub struct SessionDeleteArgs {
     /// Kill all local sessions with this key.
     #[arg(long, conflicts_with = "id")]
     pub key: Option<String>,
+}
+
+/// Arguments for the `mirrord kill` command.
+#[cfg(unix)]
+#[derive(Args, Debug)]
+pub struct KillArgs {
+    /// Arguments shared across `mirrord session` commands.
+    #[command(flatten)]
+    pub common: SessionCommonArgs,
+
+    /// Session selection for the kill operation.
+    #[command(flatten)]
+    pub delete: SessionDeleteArgs,
 }
 
 #[cfg(test)]

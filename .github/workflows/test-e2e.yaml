@@ -1,0 +1,71 @@
+name: Test E2E
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  MIRRORD_TELEMETRY: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        container-runtime: ["docker", "containerd"]
+    name: e2e
+    env:
+      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22
+      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
+        run: corepack enable pnpm
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+        with:
+          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+      - uses: metalbear-co/ci/e2e-setup-action@main
+        with:
+          container-runtime: ${{ matrix.container-runtime }}
+      - name: download image
+        uses: actions/download-artifact@v4
+        with:
+          name: test
+          path: /tmp
+      - run: minikube image load /tmp/test.tar
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: astral-sh/setup-uv@v2
+      - run: uv --version
+      - run: uv tool install cargo-zigbuild==0.22.1
+      - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
+      - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
+      - run: cargo xtask build-cli
+      - name: Run cli E2E tests
+        if: ${{ matrix.container-runtime == 'docker' }}
+        run: |
+          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features cli -- --test-threads=6
+      - run: |
+          ./target/x86_64-unknown-linux-gnu/debug/mirrord wizard &
+          sleep 2 && curl localhost:3000
+      - name: Run targetless E2E test
+        run: |
+          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features targetless -- --test-threads=6 targetless
+      - run: kubectl create namespace argo-rollouts
+      - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+      - name: Run all E2E tests
+        run: |
+          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features job -- --test-threads=6
+          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features ephemeral -- --test-threads=6
+      - name: Collect logs
+        if: ${{ failure() }}
+        run: |
+          find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \;
+          kubectl get all
+          kubectl describe pods
+          docker exec minikube find /var/log/pods -print -exec cat {} \;

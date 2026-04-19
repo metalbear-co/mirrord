@@ -10,7 +10,9 @@ use mirrord_config::{
     feature::{FeatureConfig, network::incoming::IncomingMode},
     util::VecOrSingle,
 };
-use mirrord_kube::{api::kubernetes::create_kube_config, error::KubeApiError, retry::RetryKube};
+use mirrord_kube::{
+    api::kubernetes::create_kube_config, error::KubeApiError, retry::retry_policy_from_config,
+};
 use mirrord_operator::crd::profile::{
     FeatureAdjustment, FeatureChange, MirrordClusterProfile, MirrordProfile,
 };
@@ -241,7 +243,7 @@ async fn fetch_profile(
     let client = ClientBuilder::try_from(config)
         .map_err(KubeApiError::from)?
         .with_layer(&BufferLayer::new(1024))
-        .with_layer(&RetryLayer::new(RetryKube::try_from(
+        .with_layer(&RetryLayer::new(retry_policy_from_config(
             &layer_config.startup_retry,
         )?))
         .build();

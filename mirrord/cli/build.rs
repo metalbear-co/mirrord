@@ -1,8 +1,6 @@
-use std::process::exit;
-
-/// Ensure `monitor-frontend/dist` exists so rust-embed doesn't fail during compilation.
+/// Ensure `packages/monitor/dist` exists so rust-embed doesn't fail during compilation.
 fn ensure_monitor_frontend_dist() {
-    let dist_dir = std::path::Path::new("../../monitor-frontend/dist");
+    let dist_dir = std::path::Path::new("../../packages/monitor/dist");
     if !dist_dir.exists() {
         std::fs::create_dir_all(dist_dir).ok();
     }
@@ -14,14 +12,14 @@ fn recheck_and_setup_layer_file() {
     #[cfg(target_os = "macos")]
     println!("cargo::rerun-if-env-changed=MIRRORD_LAYER_FILE_MACOS_ARM64");
 
-    if std::env::var("MIRRORD_LAYER_FILE").is_err() {
-        let layer_path = if cfg!(windows) {
-            std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER_WIN").unwrap()
-        } else {
-            std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER").unwrap()
-        };
-        println!("cargo:rustc-env=MIRRORD_LAYER_FILE={}", layer_path);
-    };
+    if std::env::var("MIRRORD_LAYER_FILE_MACOS_ARM64").is_err()
+        && std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|target| target == "macos")
+    {
+        println!(
+            "cargo:rustc-env=MIRRORD_LAYER_FILE_MACOS_ARM64={}",
+            std::env::var("CARGO_MANIFEST_PATH").unwrap()
+        );
+    }
 }
 
 #[cfg(feature = "wizard")]
@@ -31,18 +29,17 @@ fn build_wizard_frontend() {
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let out_dir = Path::new(&out_dir);
 
-    // override used for the release workflow so the frontend can be built before compilation
-    // env var: WIZARD_DIST_DIR
+    println!("cargo::rerun-if-env-changed=WIZARD_DIST_DIR");
+
     let dist_path = if let Ok(frontend_dist_override) = env::var("WIZARD_DIST_DIR") {
-        Path::new(&frontend_dist_override).to_path_buf()
+        let dist = Path::new(&frontend_dist_override).to_path_buf();
+        println!("cargo::rerun-if-changed={}", dist.display());
+        dist
     } else {
-        let input_path = Path::new("../../wizard-frontend");
+        let input_path = Path::new("../../packages/wizard");
         let dist_path = out_dir.join("dist");
 
-        // rerun if the wizard frontend has any changes
         println!("cargo::rerun-if-changed={}", input_path.display());
-        // restore default behaviour (see
-        // https://doc.rust-lang.org/cargo/reference/build-scripts.html#rerun-if-changed)
         println!("cargo::rerun-if-changed=.");
 
         let status = Command::new("npm")
@@ -106,9 +103,7 @@ fn package_sip_binaries() {
 }
 
 fn main() {
-    // don't run on clippy
     if std::env::var("CLIPPY_ARGS").is_ok() {
-        // stupid hack so we don't need dependencies or anything
         println!(
             "cargo:rustc-env=MIRRORD_LAYER_FILE={}",
             std::env::var("CARGO_MANIFEST_PATH").unwrap()
@@ -139,10 +134,9 @@ fn main() {
 
         return;
     }
-    // Make sure `MIRRORD_LAYER_FILE` is provided either by user, or computed.
+
     recheck_and_setup_layer_file();
 
-    // Build the wizard frontend
     #[cfg(feature = "wizard")]
     build_wizard_frontend();
 
@@ -152,15 +146,12 @@ fn main() {
 
     ensure_monitor_frontend_dist();
 
-    // this check uses cargo env vars instead of conditional compilation due to cfg! not respecting
-    // the target flag on a build
     if std::env::var("MIRRORD_LAYER_FILE_MACOS_ARM64").is_err()
         && std::env::var("CARGO_CFG_TARGET_ARCH").is_ok_and(|t| t.eq("aarch64") || t.eq("x86_64"))
         && std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|t| t.eq("macos"))
     {
         println!(
-            "cargo::warning=No environment variable 'MIRRORD_LAYER_FILE_MACOS_ARM64' found - it should contain the path to the mirrord layer compiled for the `aarch64-apple-darwin` target"
+            "cargo::warning=No environment variable 'MIRRORD_LAYER_FILE_MACOS_ARM64' found - using a placeholder path; release builds should provide the compiled `aarch64-apple-darwin` layer"
         );
-        exit(1);
     };
 }
