@@ -506,17 +506,40 @@ mod main {
         NoSip,
     }
 
-    /// Checks if binary is signed with `RESTRICTED` flags.
+    /// Checks if binary is signed with `RESTRICTED` or `RUNTIME` flags.
     /// The code ignores error to allow smoother fallbacks.
     fn is_code_signed(data: &[u8]) -> bool {
         if let Ok(mach) = MachFile::parse(data) {
             for macho in mach.into_iter() {
                 if let Ok(Some(signature)) = macho.code_signature()
                     && let Ok(Some(blob)) = signature.code_directory()
-                    && blob.flags.intersects(CodeSignatureFlags::RESTRICT)
+                    && blob
+                        .flags
+                        .intersects(CodeSignatureFlags::RESTRICT | CodeSignatureFlags::RUNTIME)
                 {
                     return true;
                 }
+            }
+        }
+        false
+    }
+
+    /// Checks if the binary has the `com.apple.security.cs.allow-dyld-environment-variables`
+    /// entitlement. Binaries with this entitlement allow `DYLD_INSERT_LIBRARIES` even when
+    /// restricted, so they don't need SIP patching (node for example, probably for loading 3rd
+    /// party dylibs).
+    fn has_dyld_entitlement(data: &[u8]) -> bool {
+        let Ok(mach) = MachFile::parse(data) else {
+            return false;
+        };
+        for macho in mach.into_iter() {
+            if let Ok(Some(signature)) = macho.code_signature()
+                && let Ok(Some(entitlements)) = signature.entitlements()
+                && entitlements
+                    .as_str()
+                    .contains("com.apple.security.cs.allow-dyld-environment-variables")
+            {
+                return true;
             }
         }
         false
@@ -530,10 +553,16 @@ mod main {
             return Ok(false);
         }
         // Patch binary if it is in the list of binaries to patch.
-        // See `ends_with` docs for understanding better when it returns true.
-        Ok(opts.patch.iter().any(|x| path.ends_with(x))
-            || is_code_signed(data)
-            || (std::fs::metadata(path)?.st_flags() & SF_RESTRICTED) > 0)
+        if opts.patch.iter().any(|x| path.ends_with(x)) {
+            return Ok(true);
+        }
+
+        let is_restricted =
+            is_code_signed(data) || (std::fs::metadata(path)?.st_flags() & SF_RESTRICTED) > 0;
+
+        // Binaries that are restricted but have the DYLD environment variables entitlement
+        // don't need patching — macOS will honor DYLD_INSERT_LIBRARIES for them.
+        Ok(is_restricted && !has_dyld_entitlement(data))
     }
 
     fn get_complete_path<P: AsRef<OsStr> + std::marker::Copy>(path: P) -> Result<PathBuf> {
@@ -912,9 +941,14 @@ mod main {
             patch_binary_and_verify_dyld_print("/bin/ls");
         }
 
+        /// `/usr/bin/aa` is restricted but has the `allow-dyld-environment-variables`
+        /// entitlement, so DYLD_INSERT_LIBRARIES works without patching.
         #[test]
-        fn patch_entitled_binary() {
-            patch_sip_and_verify_dyld_print("/usr/bin/aa");
+        fn entitled_binary_is_not_sip() {
+            let result = sip_patch("/usr/bin/aa", SipPatchOptions::default(), None).unwrap();
+            assert!(result.is_none(), "entitled binary should not need patching");
+            // Verify DYLD_* features work on the original binary:
+            run_and_verify_dyld_print(Path::new("/usr/bin/aa"));
         }
 
         /// Test that after patching we can Successfully use DYLD features on a binary that had
