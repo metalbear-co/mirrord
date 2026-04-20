@@ -506,7 +506,7 @@ mod main {
         NoSip,
     }
 
-    /// Checks if binary is signed with `RESTRICTED` flags.
+    /// Checks if binary is signed with `RESTRICTED` or `RUNTIME` flags.
     /// The code ignores error to allow smoother fallbacks.
     fn is_code_signed(data: &[u8]) -> bool {
         if let Ok(mach) = MachFile::parse(data) {
@@ -526,7 +526,8 @@ mod main {
 
     /// Checks if the binary has the `com.apple.security.cs.allow-dyld-environment-variables`
     /// entitlement. Binaries with this entitlement allow `DYLD_INSERT_LIBRARIES` even when
-    /// restricted, so they don't need SIP patching.
+    /// restricted, so they don't need SIP patching (node for example, probably for loading 3rd
+    /// party dylibs).
     fn has_dyld_entitlement(data: &[u8]) -> bool {
         let Ok(mach) = MachFile::parse(data) else {
             return false;
