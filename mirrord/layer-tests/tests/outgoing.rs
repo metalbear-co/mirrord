@@ -113,31 +113,42 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, config_dir: &Path) {
         .map(|s| s.parse::<SocketAddr>().unwrap())
         .collect::<Vec<_>>();
 
-    for peer in peers {
+    for (connection_id, peer) in peers.into_iter().enumerate() {
+        let connection_id = connection_id as u64;
+
         let (uid, addr) = intproxy.recv_tcp_connect().await;
         assert_eq!(addr, peer);
         intproxy
-            .send_tcp_connect_ok(uid, 0, addr, RUST_OUTGOING_LOCAL.parse().unwrap())
+            .send_tcp_connect_ok(
+                uid,
+                connection_id,
+                addr,
+                RUST_OUTGOING_LOCAL.parse().unwrap(),
+            )
             .await;
 
         let msg = intproxy.recv().await;
         let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
-            connection_id: 0,
+            connection_id: returned_connection_id,
             bytes,
         })) = msg
         else {
             panic!("Invalid message received from layer: {msg:?}");
         };
+        assert_eq!(returned_connection_id, connection_id);
+
         intproxy
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
-                    connection_id: 0,
+                    connection_id,
                     bytes,
                 },
             ))))
             .await;
         intproxy
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(0)))
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(
+                connection_id,
+            )))
             .await;
     }
 
@@ -191,33 +202,36 @@ async fn outgoing_tcp_bound_socket() {
     let expected_peer_address = "1.1.1.1:4567".parse::<SocketAddr>().unwrap();
 
     // Test apps runs logic twice for 2 bind addresses.
-    for _ in 0..2 {
+    for connection_id in 0_u64..2 {
         let (uid, addr) = intproxy.recv_tcp_connect().await;
         assert_eq!(addr, expected_peer_address);
         intproxy
-            .send_tcp_connect_ok(uid, 0, addr, "1.2.3.4:6000".parse().unwrap())
+            .send_tcp_connect_ok(uid, connection_id, addr, "1.2.3.4:6000".parse().unwrap())
             .await;
 
         let msg = intproxy.recv().await;
         let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
-            connection_id: 0,
+            connection_id: returned_connection_id,
             bytes,
         })) = msg
         else {
             panic!("Invalid message received from layer: {msg:?}");
         };
+        assert_eq!(returned_connection_id, connection_id);
 
         intproxy
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
-                    connection_id: 0,
+                    connection_id,
                     bytes,
                 },
             ))))
             .await;
 
         intproxy
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(0)))
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(
+                connection_id,
+            )))
             .await;
     }
 
