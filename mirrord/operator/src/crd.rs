@@ -968,6 +968,7 @@ mod tests {
         preview::PreviewSession,
         profile::{MirrordClusterProfile, MirrordProfile},
         rabbitmq::MirrordRmqSession,
+        session::MirrordClusterSession,
     };
 
     fn write_crd_yaml<T: CustomResourceExt>() {
@@ -999,6 +1000,12 @@ mod tests {
         write_crd_yaml::<MirrordClusterProfile>();
         write_crd_yaml::<MirrordProfile>();
         write_crd_yaml::<PreviewSession>();
+        write_crd_yaml::<MirrordClusterSession>();
+    }
+
+    #[test]
+    fn dump_mirrord_cluster_session() {
+        write_crd_yaml::<MirrordClusterSession>();
     }
 
     #[test]
