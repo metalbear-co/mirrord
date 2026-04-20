@@ -513,7 +513,29 @@ mod main {
             for macho in mach.into_iter() {
                 if let Ok(Some(signature)) = macho.code_signature()
                     && let Ok(Some(blob)) = signature.code_directory()
-                    && blob.flags.intersects(CodeSignatureFlags::RESTRICT)
+                    && blob.flags.intersects(CodeSignatureFlags::RESTRICT | CodeSignatureFlags::RUNTIME)
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Checks if the binary has the `com.apple.security.cs.allow-dyld-environment-variables`
+    /// entitlement. Binaries with this entitlement allow `DYLD_INSERT_LIBRARIES` even when
+    /// restricted, so they don't need SIP patching.
+    fn has_dyld_entitlement(data: &[u8]) -> bool {
+        let Ok(mach) = MachFile::parse(data) else {
+            return false;
+        };
+        for macho in mach.into_iter() {
+            if let Ok(Some(signature)) = macho.code_signature()
+                && let Ok(Some(entitlements)) = signature.entitlements()
+            {
+                if entitlements
+                    .as_str()
+                    .contains("com.apple.security.cs.allow-dyld-environment-variables")
                 {
                     return true;
                 }
@@ -530,10 +552,16 @@ mod main {
             return Ok(false);
         }
         // Patch binary if it is in the list of binaries to patch.
-        // See `ends_with` docs for understanding better when it returns true.
-        Ok(opts.patch.iter().any(|x| path.ends_with(x))
-            || is_code_signed(data)
-            || (std::fs::metadata(path)?.st_flags() & SF_RESTRICTED) > 0)
+        if opts.patch.iter().any(|x| path.ends_with(x)) {
+            return Ok(true);
+        }
+
+        let is_restricted =
+            is_code_signed(data) || (std::fs::metadata(path)?.st_flags() & SF_RESTRICTED) > 0;
+
+        // Binaries that are restricted but have the DYLD environment variables entitlement
+        // don't need patching — macOS will honor DYLD_INSERT_LIBRARIES for them.
+        Ok(is_restricted && !has_dyld_entitlement(data))
     }
 
     fn get_complete_path<P: AsRef<OsStr> + std::marker::Copy>(path: P) -> Result<PathBuf> {
