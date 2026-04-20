@@ -28,6 +28,8 @@ use axum::{
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use eventsource_stream::Eventsource;
 use futures::stream::StreamExt as _;
+use kube::{Api, Client, api::ListParams, runtime::watcher};
+use mirrord_operator::crd::session::MirrordClusterSession;
 use mirrord_session_monitor_client::{
     SessionError, connect_to_session, session_socket_entries, sessions_dir,
 };
@@ -602,6 +604,87 @@ fn start_filesystem_watcher(
     Ok(())
 }
 
+/// Starts a tokio task that watches `MirrordClusterSession` CRs via `kube::Api` and
+/// updates `AppState::operator_sessions`. Broadcasts `OperatorSession*` events on
+/// `notify_tx`. If the cluster isn't reachable or the CRD isn't installed, logs a
+/// warning and sets `operator_watch_status` to `Unavailable { reason }`. The `mirrord
+/// ui` daemon continues running for local sessions either way.
+fn start_operator_watcher(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        let client = match Client::try_default().await {
+            Ok(client) => client,
+            Err(err) => {
+                let reason = format!("kube client init failed: {err}");
+                warn!("{reason}");
+                *state.operator_watch_status.write().await =
+                    OperatorWatchStatus::Unavailable { reason };
+                return;
+            }
+        };
+
+        let api: Api<MirrordClusterSession> = Api::all(client);
+
+        // Probe the CRD with a single list; if this fails because the CRD isn't
+        // installed or access is denied, surface a clean "unavailable" status
+        // instead of retrying forever.
+        if let Err(err) = api.list(&ListParams::default().limit(1)).await {
+            let reason = format!("operator CRD not available: {err}");
+            warn!("{reason}");
+            *state.operator_watch_status.write().await =
+                OperatorWatchStatus::Unavailable { reason };
+            return;
+        }
+
+        *state.operator_watch_status.write().await = OperatorWatchStatus::Watching;
+
+        let mut stream = watcher(api, watcher::Config::default()).boxed();
+        while let Some(ev) = stream.next().await {
+            match ev {
+                Ok(watcher::Event::Apply(cr)) => {
+                    if let Some(summary) = OperatorSessionSummary::from_cr(&cr) {
+                        let key = summary.name.clone();
+                        let is_new = {
+                            let mut map = state.operator_sessions.write().await;
+                            let prior = map.insert(key.clone(), summary.clone());
+                            prior.is_none()
+                        };
+                        let _ = state.notify_tx.send(if is_new {
+                            SessionNotification::OperatorSessionAdded {
+                                session: Box::new(summary),
+                            }
+                        } else {
+                            SessionNotification::OperatorSessionUpdated {
+                                session: Box::new(summary),
+                            }
+                        });
+                    }
+                }
+                Ok(watcher::Event::Delete(cr)) => {
+                    if let Some(name) = cr.metadata.name {
+                        state.operator_sessions.write().await.remove(&name);
+                        let _ = state
+                            .notify_tx
+                            .send(SessionNotification::OperatorSessionRemoved { name });
+                    }
+                }
+                Ok(watcher::Event::Init)
+                | Ok(watcher::Event::InitApply(_))
+                | Ok(watcher::Event::InitDone) => {
+                    // watcher relist lifecycle; no action needed.
+                }
+                Err(err) => {
+                    let reason = format!("watcher error: {err}");
+                    warn!("{reason}");
+                    *state.operator_watch_status.write().await =
+                        OperatorWatchStatus::Error { message: reason };
+                }
+            }
+        }
+
+        warn!("operator session watcher stream ended unexpectedly");
+    });
+}
+
 async fn health() -> impl IntoResponse {
     axum::Json(serde_json::json!({"status": "ok"}))
 }
@@ -678,6 +761,7 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
     #[cfg(target_os = "macos")]
     start_periodic_rescan(sessions_dir.clone(), state.clone());
     start_filesystem_watcher(&sessions_dir, state.clone())?;
+    start_operator_watcher(state.clone());
 
     let app = build_router(state);
 
