@@ -513,7 +513,9 @@ mod main {
             for macho in mach.into_iter() {
                 if let Ok(Some(signature)) = macho.code_signature()
                     && let Ok(Some(blob)) = signature.code_directory()
-                    && blob.flags.intersects(CodeSignatureFlags::RESTRICT | CodeSignatureFlags::RUNTIME)
+                    && blob
+                        .flags
+                        .intersects(CodeSignatureFlags::RESTRICT | CodeSignatureFlags::RUNTIME)
                 {
                     return true;
                 }
