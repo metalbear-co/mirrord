@@ -8,6 +8,20 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.204.0](https://github.com/metalbear-co/mirrord/tree/3.204.0) - 2026-04-20
+
+
+### Added
+
+- Added `pitm` subcommand for Windows as a necessity to support JetBrains IDE
+  extensions.
+- Support for plain value credentials in db branching.
+
+
+### Fixed
+
+- tailwind wrong config didn't bundle `metalbear-ui`.
+
 ## [3.203.1](https://github.com/metalbear-co/mirrord/tree/3.203.1) - 2026-04-17
 
 
