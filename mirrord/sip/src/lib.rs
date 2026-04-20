@@ -535,13 +535,11 @@ mod main {
         for macho in mach.into_iter() {
             if let Ok(Some(signature)) = macho.code_signature()
                 && let Ok(Some(entitlements)) = signature.entitlements()
-            {
-                if entitlements
+                && entitlements
                     .as_str()
                     .contains("com.apple.security.cs.allow-dyld-environment-variables")
-                {
-                    return true;
-                }
+            {
+                return true;
             }
         }
         false
@@ -943,9 +941,14 @@ mod main {
             patch_binary_and_verify_dyld_print("/bin/ls");
         }
 
+        /// `/usr/bin/aa` is restricted but has the `allow-dyld-environment-variables`
+        /// entitlement, so DYLD_INSERT_LIBRARIES works without patching.
         #[test]
-        fn patch_entitled_binary() {
-            patch_sip_and_verify_dyld_print("/usr/bin/aa");
+        fn entitled_binary_is_not_sip() {
+            let result = sip_patch("/usr/bin/aa", SipPatchOptions::default(), None).unwrap();
+            assert!(result.is_none(), "entitled binary should not need patching");
+            // Verify DYLD_* features work on the original binary:
+            run_and_verify_dyld_print(Path::new("/usr/bin/aa"));
         }
 
         /// Test that after patching we can Successfully use DYLD features on a binary that had
