@@ -54,8 +54,78 @@ struct FrontendAssets;
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum SessionNotification {
-    SessionAdded { session: Box<TrackedSession> },
-    SessionRemoved { session_id: String },
+    SessionAdded {
+        session: Box<TrackedSession>,
+    },
+    SessionRemoved {
+        session_id: String,
+    },
+    OperatorSessionAdded {
+        session: Box<OperatorSessionSummary>,
+    },
+    OperatorSessionRemoved {
+        name: String,
+    },
+    OperatorSessionUpdated {
+        session: Box<OperatorSessionSummary>,
+    },
+}
+
+/// Wire-format summary of an operator-side session that the browser extension
+/// and local UI tab can render. Derived from `MirrordClusterSession`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorSessionSummary {
+    /// Kubernetes object name of the underlying `MirrordClusterSession` CR.
+    pub name: String,
+    /// Session key (grouping identity). `None` if the session was started by an
+    /// older CLI that didn't send a key, or by an operator that doesn't persist it yet.
+    pub key: Option<String>,
+    pub namespace: String,
+    pub owner: Option<OperatorSessionOwner>,
+    pub target: Option<OperatorSessionTarget>,
+    pub created_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorSessionOwner {
+    pub username: String,
+    pub k8s_username: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorSessionTarget {
+    pub kind: String,
+    pub name: String,
+    pub container: String,
+}
+
+impl OperatorSessionSummary {
+    fn from_cr(cr: &mirrord_operator::crd::session::MirrordClusterSession) -> Option<Self> {
+        let name = cr.metadata.name.clone()?;
+        let spec = &cr.spec;
+        Some(Self {
+            name,
+            key: spec.key.clone(),
+            namespace: spec.namespace.clone(),
+            owner: Some(OperatorSessionOwner {
+                username: spec.owner.username.clone(),
+                k8s_username: spec.owner.k8s_username.clone(),
+            }),
+            target: spec.target.as_ref().map(|t| OperatorSessionTarget {
+                kind: t.kind.clone(),
+                name: t.name.clone(),
+                container: t.container.clone(),
+            }),
+            created_at: cr
+                .metadata
+                .creation_timestamp
+                .as_ref()
+                .map(|ts| ts.0.to_string()),
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -74,8 +144,24 @@ impl Serialize for TrackedSession {
 
 struct AppState {
     sessions: RwLock<HashMap<String, TrackedSession>>,
+    operator_sessions: RwLock<std::collections::BTreeMap<String, OperatorSessionSummary>>,
+    operator_watch_status: RwLock<OperatorWatchStatus>,
     notify_tx: broadcast::Sender<SessionNotification>,
     token: String,
+}
+
+#[derive(Clone, Debug, Serialize, Default)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum OperatorWatchStatus {
+    #[default]
+    NotStarted,
+    Watching,
+    Error {
+        message: String,
+    },
+    Unavailable {
+        reason: String,
+    },
 }
 
 #[derive(Deserialize)]
@@ -582,6 +668,8 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
 
     let state = Arc::new(AppState {
         sessions: RwLock::new(HashMap::new()),
+        operator_sessions: RwLock::new(std::collections::BTreeMap::new()),
+        operator_watch_status: RwLock::new(OperatorWatchStatus::NotStarted),
         notify_tx,
         token: token.clone(),
     });
