@@ -540,6 +540,44 @@ where
         Ok(encoded)
     }
 
+    /// Ask the operator to create a K8s Secret with the given credential values
+    /// in the target namespace. The Secret name is derived from `branch_id` so
+    /// branches sharing the same ID reuse the same Secret.
+    async fn create_credential_secret(
+        &self,
+        namespace: &str,
+        branch_id: &str,
+        values: std::collections::HashMap<String, String>,
+    ) -> OperatorApiResult<String> {
+        use crate::crd::{CreateCredentialSecretRequest, CreateCredentialSecretResponse};
+
+        let request_body = CreateCredentialSecretRequest {
+            namespace: namespace.to_string(),
+            branch_id: branch_id.to_string(),
+            values,
+        };
+
+        let body = serde_json::to_vec(&request_body)
+            .map_err(|e| OperatorApiError::CredentialSecretCreation(format!("serialize: {e}")))?;
+
+        let request = http::Request::builder()
+            .method("POST")
+            .uri("/apis/operator.metalbear.co/v1/branchcredentials")
+            .header("content-type", "application/json")
+            .body(body)
+            .map_err(|e| {
+                OperatorApiError::CredentialSecretCreation(format!("build request: {e}"))
+            })?;
+
+        let response: CreateCredentialSecretResponse = self
+            .client
+            .request(request)
+            .await
+            .map_err(|e| OperatorApiError::CredentialSecretCreation(e.to_string()))?;
+
+        Ok(response.secret_name)
+    }
+
     /// Prepare branch databases, and return database resource names.
     ///
     /// 1. List reusable branch databases.
@@ -604,14 +642,37 @@ where
             .contains(&NewOperatorFeature::UnifiedBranchDbCrd);
 
         if use_unified_crd {
+            let mut db_branches = layer_config.feature.db_branches.clone();
             let UnifiedDatabaseBranchParams {
                 branches: mut create_params,
             } = UnifiedDatabaseBranchParams::new(
-                &layer_config.feature.db_branches,
+                &mut db_branches,
                 &target,
                 layer_config.key.as_str(),
                 &subtask,
             )?;
+
+            // For each branch that had literal `value` fields in its config,
+            // create a K8s Secret and replace the CRD connection entries with
+            // Secret references. Values were already extracted from the config
+            // inside `new()` before CRD conversion.
+            for (branch_id, params) in create_params.iter_mut() {
+                if params.literal_values.is_empty() {
+                    continue;
+                }
+                let secret_name = self
+                    .create_credential_secret(
+                        target_namespace,
+                        branch_id.as_ref(),
+                        params.literal_values.clone(),
+                    )
+                    .await?;
+                database_branches::replace_values_with_secret_refs(
+                    &mut params.spec.connection_source,
+                    &secret_name,
+                    &params.literal_values,
+                );
+            }
 
             if let Some(ref ns) = target_ns_annotation {
                 for params in create_params.values_mut() {

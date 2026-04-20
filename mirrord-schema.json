@@ -1429,6 +1429,13 @@
               "type": "string",
               "const": "env"
             },
+            "value": {
+              "description": "Literal value for this connection parameter. The CLI sends it to the\noperator, which stores it in a Kubernetes Secret for the branch pod.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "variable": {
               "type": "string"
             }
@@ -2987,7 +2994,7 @@
       ]
     },
     "ParamSource": {
-      "description": "<!--${internal}-->\nA connection parameter source: either a plain env var name (string) or a Kubernetes Secret\nreference (object).\n\nAs a string: `\"DB_HOST\"` — resolved using the parent `type` field (env or env_from).\n\nAs an object: `{ \"secret\": \"my-secret\", \"key\": \"password\" }` — read directly from a\nKubernetes Secret.",
+      "description": "<!--${internal}-->\nA connection parameter source: a plain env var name (string), an env var with a literal\nvalue override (object with `variable` and optional `value`), or a Kubernetes Secret\nreference.\n\nAs a string: `\"DB_HOST\"` - resolved using the parent `type` field (env or env_from).\n\nAs an object with a literal value: `{ \"variable\": \"DB_HOST\", \"value\": \"myhost.com\" }` -\nuses the provided `value` directly instead of reading the env var from the target pod.\nThe `variable` names the key in the credential Secret that the CLI creates.\n\nAs a value-only object: `{ \"value\": \"myhost.com\" }` - provides the value directly without\nreferencing any env var on the target pod.\n\nAs a Secret ref: `{ \"secret\": \"my-secret\", \"key\": \"password\" }` - read directly from a\nKubernetes Secret.",
       "anyOf": [
         {
           "type": "string"
@@ -3006,6 +3013,24 @@
           "required": [
             "secret",
             "key"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "env_var_name": {
+              "type": "string"
+            },
+            "value": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "env_var_name"
           ]
         }
       ]
