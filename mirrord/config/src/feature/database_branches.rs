@@ -363,13 +363,15 @@ pub struct ConnectionParamsConfig {
 }
 
 /// <!--${internal}-->
-/// A connection parameter source: a plain env var name (string), an env var with a fallback
-/// value (object with `variable` and optional `value`), or a Kubernetes Secret reference.
+/// A connection parameter source: a plain env var name (string), an env var with a literal
+/// value override (object with `variable` and optional `value`), or a Kubernetes Secret
+/// reference.
 ///
 /// As a string: `"DB_HOST"` - resolved using the parent `type` field (env or env_from).
 ///
-/// As an object with fallback: `{ "variable": "DB_HOST", "value": "myhost.com" }` - tries the
-/// env var first, falls back to the literal value when the var is not on the target pod.
+/// As an object with a literal value: `{ "variable": "DB_HOST", "value": "myhost.com" }` -
+/// uses the provided `value` directly instead of reading the env var from the target pod.
+/// The `variable` names the key in the credential Secret that the CLI creates.
 ///
 /// As a value-only object: `{ "value": "myhost.com" }` - provides the value directly without
 /// referencing any env var on the target pod.
