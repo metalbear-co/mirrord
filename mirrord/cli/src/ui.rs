@@ -409,6 +409,40 @@ async fn session_events_sse(
         .into_response()
 }
 
+#[derive(Serialize)]
+struct OperatorSessionsResponse {
+    /// Sessions grouped by key. The key is the map key; value is the list
+    /// of sessions under that key. Sessions whose `spec.key` is `None` are
+    /// collected under a sentinel key `""` (empty string).
+    by_key: std::collections::BTreeMap<String, Vec<OperatorSessionSummary>>,
+    /// Flat list of all sessions, for clients that prefer not to consume
+    /// the grouped view.
+    sessions: Vec<OperatorSessionSummary>,
+    /// Current watch status (for UI diagnostics).
+    watch_status: OperatorWatchStatus,
+}
+
+async fn list_operator_sessions(
+    State(state): State<Arc<AppState>>,
+) -> axum::Json<OperatorSessionsResponse> {
+    let map = state.operator_sessions.read().await;
+    let watch_status = state.operator_watch_status.read().await.clone();
+
+    let mut by_key: std::collections::BTreeMap<String, Vec<OperatorSessionSummary>> =
+        std::collections::BTreeMap::new();
+    let sessions: Vec<OperatorSessionSummary> = map.values().cloned().collect();
+    for s in &sessions {
+        let k = s.key.clone().unwrap_or_default();
+        by_key.entry(k).or_default().push(s.clone());
+    }
+
+    axum::Json(OperatorSessionsResponse {
+        by_key,
+        sessions,
+        watch_status,
+    })
+}
+
 async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     let (client, socket_path) = {
         let sessions = state.sessions.read().await;
@@ -694,7 +728,8 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/sessions", get(list_sessions))
         .route("/sessions/{id}", get(get_session))
         .route("/sessions/{id}/events", get(session_events_sse))
-        .route("/sessions/{id}/kill", post(kill_session));
+        .route("/sessions/{id}/kill", post(kill_session))
+        .route("/operator-sessions", get(list_operator_sessions));
 
     let authenticated_routes = Router::new()
         .nest("/api", api_routes)
