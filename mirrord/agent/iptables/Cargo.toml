@@ -15,8 +15,6 @@ edition.workspace = true
 
 [features]
 
-[dependencies]
-
 
 [target.'cfg(target_os = "linux")'.dependencies]
 iptables.workspace = true
@@ -32,3 +30,6 @@ tracing.workspace = true
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 mockall.workspace = true
+
+[lib]
+doctest = false

@@ -62,6 +62,7 @@ jobs:
     outputs:
       rust_toolchain: ${{ steps.toolchain.outputs.rust_toolchain }}
       rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
+      vale_changed: ${{ steps.changed-vale.outputs.any_changed }}
       windows_changed: ${{ steps.changed-windows.outputs.any_changed }}
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
@@ -71,20 +72,20 @@ jobs:
       wizard_frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
       release_branch: ${{ steps.release-branch.outputs.branch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
         with:
           fetch-depth: 0
       - id: toolchain
         run: echo "rust_toolchain=${{ env.PINNED_NIGHTLY }}" >> "$GITHUB_OUTPUT"
       - name: get CI changes
         id: changed-ci
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             .github/workflows/**
       - name: get changed rs files
         id: changed-rs
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             **/*.rs
@@ -97,9 +98,16 @@ jobs:
             rustfmt.toml
             deny.toml
             .cargo/**
+      - name: get vale changes
+        id: changed-vale
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        with:
+          files: |
+            *.md
+            changelog.d/*.md
       - name: get changed windows files
         id: changed-windows
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             mirrord/layer-win/**
@@ -112,32 +120,32 @@ jobs:
             .github/workflows/windows-build.yaml
       - name: get markdown changes
         id: changed-markdown
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             README.md
       - name: get protocol changes
         id: changed-protocol
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             mirrord/protocol/**
       - name: get protocol toml changes
         id: changed-protocol-toml
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             mirrord/protocol/Cargo.toml
       - name: get dockerfile changes
         id: changed-dockerfile
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             mirrord/agent/Dockerfile
             mirrord/cli/Dockerfile
       - name: get wizard frontend changes
         id: changed-wizard-frontend
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             packages/wizard/**
@@ -149,7 +157,7 @@ jobs:
           fi
       - name: get config changes
         id: changed-config-schema
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             mirrord-schema.json
@@ -160,6 +168,8 @@ jobs:
         run: |
           echo ${{ steps.changed-rs.outputs.any_changed }};
           echo ${{ steps.changed-rs.outputs.all_changed_files }};
+          echo ${{ steps.changed-vale.outputs.any_changed }};
+          echo ${{ steps.changed-vale.outputs.all_changed_files }};
           echo ${{ steps.changed-markdown.outputs.any_changed }};
           echo ${{ steps.changed-markdown.outputs.all_changed_files }};
           echo ${{ steps.changed-ci.outputs.any_changed }};
@@ -177,24 +187,16 @@ jobs:
   towncrier_check:
     uses: ./.github/workflows/check-towncrier.yaml
 
-  typos_check:
-    uses: ./.github/workflows/check-typos.yaml
-
-  vale_check:
-    uses: ./.github/workflows/check-vale.yaml
-
   lint:
     needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
     uses: ./.github/workflows/check-lint.yaml
     with:
+      run_markdown: ${{ needs.plan.outputs.markdown_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+      run_rust: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+      run_vale: ${{ needs.plan.outputs.vale_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+      run_wizard_frontend: ${{ needs.plan.outputs.wizard_frontend_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
     secrets: inherit
-
-  wizard-frontend-lint:
-    needs: plan
-    if: ${{ needs.plan.outputs.wizard_frontend_changed == 'true' }}
-    uses: ./.github/workflows/check-wizard-frontend-lint.yaml
 
   cargo-deny:
     needs: plan
@@ -210,11 +212,6 @@ jobs:
     with:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
     secrets: inherit
-
-  lint_markdown:
-    needs: plan
-    if: ${{ needs.plan.outputs.markdown_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    uses: ./.github/workflows/check-lint-markdown.yaml
 
   # ── builds ──────────────────────────────────────────────────────────
 
@@ -246,7 +243,7 @@ jobs:
     container:
       image: ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -314,8 +311,6 @@ jobs:
     needs:
       [
         towncrier_check,
-        typos_check,
-        vale_check,
         plan,
         intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
@@ -326,7 +321,6 @@ jobs:
         e2e,
         test_agent,
         lint,
-        lint_markdown,
         check-rust-docs,
         cargo-deny,
         windows_tests,
