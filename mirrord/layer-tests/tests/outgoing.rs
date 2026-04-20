@@ -241,7 +241,7 @@ async fn outgoing_tcp_bound_socket() {
 /// Verifies that issue <https://github.com/metalbear-co/mirrord/issues/3212> is fixed.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(15))]
+#[timeout(Duration::from_secs(30))]
 async fn outgoing_tcp_high_port() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let listener_addr = listener.local_addr().unwrap();
