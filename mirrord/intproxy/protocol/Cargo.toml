@@ -28,3 +28,6 @@ tokio = { workspace = true, optional = true }
 [features]
 codec = ["dep:thiserror"]
 codec-async = ["codec", "dep:tokio"]
+
+[lib]
+test = false
