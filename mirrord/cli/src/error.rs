@@ -726,6 +726,9 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::TargetResolutionFailed(msg) => {
                 Self::OperatorTargetResolution(KubeApiError::MalformedResource(msg))
             }
+            OperatorApiError::CredentialSecretCreation(msg) => {
+                Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
+            }
         }
     }
 }

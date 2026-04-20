@@ -60,6 +60,7 @@ impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
             TargetEnvironmentVariableSource::Env {
                 container,
                 variable,
+                ..
             } => ConnectionSourceKind::Env {
                 container,
                 variable,
@@ -84,6 +85,7 @@ impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
             TargetEnvironmentVariableSource::Env {
                 container,
                 variable,
+                ..
             } => ConnectionSourceKind::Env {
                 container: container.clone(),
                 variable: variable.clone(),
@@ -112,11 +114,19 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
                         container: None,
                         variable: v.clone(),
                     },
-                    // None or Env: default to Env. The operator auto-detects
-                    // envFrom at resolution time if the variable isn't in env[].
                     _ => ConnectionSourceKind::Env {
                         container: None,
                         variable: v.clone(),
+                    },
+                },
+                ParamSource::Env { env_var_name, .. } => match config.source_type.as_ref() {
+                    Some(ConnectionSourceType::EnvFrom) => ConnectionSourceKind::EnvFrom {
+                        container: None,
+                        variable: env_var_name.clone(),
+                    },
+                    _ => ConnectionSourceKind::Env {
+                        container: None,
+                        variable: env_var_name.clone(),
                     },
                 },
                 ParamSource::Secret { name, key } => ConnectionSourceKind::Secret {
