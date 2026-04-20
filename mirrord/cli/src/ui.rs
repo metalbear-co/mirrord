@@ -838,6 +838,8 @@ mod tests {
         let (notify_tx, _) = broadcast::channel(16);
         Arc::new(AppState {
             sessions: RwLock::new(HashMap::new()),
+            operator_sessions: RwLock::new(std::collections::BTreeMap::new()),
+            operator_watch_status: RwLock::new(OperatorWatchStatus::default()),
             notify_tx,
             token: TEST_TOKEN.to_owned(),
         })
@@ -1034,5 +1036,86 @@ mod tests {
             response.headers().get(header::SET_COOKIE).is_some(),
             "cookie must be set on the first authenticated request, even if the body is 404"
         );
+    }
+
+    mod operator_sessions {
+        use mirrord_operator::crd::session::{
+            MirrordClusterSession, MirrordClusterSessionSpec, SessionOwner, SessionTarget,
+        };
+
+        use super::*;
+
+        fn sample_cr(name: &str, key: Option<&str>) -> MirrordClusterSession {
+            MirrordClusterSession::new(
+                name,
+                MirrordClusterSessionSpec {
+                    jira_metrics: None,
+                    owner: SessionOwner {
+                        user_id: "u".into(),
+                        username: "alice".into(),
+                        hostname: "h".into(),
+                        k8s_username: "alice@ex".into(),
+                    },
+                    namespace: "default".into(),
+                    target: Some(SessionTarget {
+                        api_version: "apps/v1".into(),
+                        kind: "Deployment".into(),
+                        name: "web".into(),
+                        container: "app".into(),
+                    }),
+                    ci_info: None,
+                    copy_target: None,
+                    multi_cluster_parent_name: None,
+                    key: key.map(|s| s.to_owned()),
+                },
+            )
+        }
+
+        #[test]
+        fn summary_from_cr_extracts_key() {
+            let cr = sample_cr("cr-1", Some("alice-session"));
+            let summary = OperatorSessionSummary::from_cr(&cr).unwrap();
+            assert_eq!(summary.name, "cr-1");
+            assert_eq!(summary.key.as_deref(), Some("alice-session"));
+            assert_eq!(summary.namespace, "default");
+            assert_eq!(
+                summary.target.as_ref().map(|t| t.name.as_str()),
+                Some("web")
+            );
+        }
+
+        #[test]
+        fn summary_from_cr_preserves_none_key() {
+            let cr = sample_cr("cr-2", None);
+            let summary = OperatorSessionSummary::from_cr(&cr).unwrap();
+            assert!(summary.key.is_none());
+        }
+
+        #[tokio::test]
+        async fn operator_sessions_groups_by_key_with_none_bucket() {
+            let (tx, _rx) = broadcast::channel::<SessionNotification>(16);
+            let state = Arc::new(AppState {
+                sessions: RwLock::new(HashMap::new()),
+                operator_sessions: RwLock::new({
+                    let mut m = std::collections::BTreeMap::new();
+                    let s1 = OperatorSessionSummary::from_cr(&sample_cr("a", Some("k"))).unwrap();
+                    let s2 = OperatorSessionSummary::from_cr(&sample_cr("b", Some("k"))).unwrap();
+                    let s3 = OperatorSessionSummary::from_cr(&sample_cr("c", None)).unwrap();
+                    m.insert("a".into(), s1);
+                    m.insert("b".into(), s2);
+                    m.insert("c".into(), s3);
+                    m
+                }),
+                operator_watch_status: RwLock::new(OperatorWatchStatus::Watching),
+                notify_tx: tx,
+                token: "t".into(),
+            });
+
+            let resp = list_operator_sessions(axum::extract::State(state)).await.0;
+            assert_eq!(resp.sessions.len(), 3);
+            assert_eq!(resp.by_key.get("k").map(|v| v.len()), Some(2));
+            assert_eq!(resp.by_key.get("").map(|v| v.len()), Some(1));
+            assert!(matches!(resp.watch_status, OperatorWatchStatus::Watching));
+        }
     }
 }
