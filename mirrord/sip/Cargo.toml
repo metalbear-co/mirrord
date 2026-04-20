@@ -34,3 +34,6 @@ tar.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 tempfile.workspace = true
+
+[lib]
+doctest = false

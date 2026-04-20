@@ -57,3 +57,6 @@ mirrord-session-monitor-protocol.workspace = true
 [dev-dependencies]
 rcgen.workspace = true
 rstest.workspace = true
+
+[lib]
+doctest = false

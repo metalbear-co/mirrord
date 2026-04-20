@@ -350,6 +350,9 @@ mod fix;
 #[cfg(windows)]
 mod attach;
 
+#[cfg(windows)]
+mod pitm;
+
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
 use mirrord_layer_lib::process::windows::{console, execution::LayerManagedProcess};
@@ -989,6 +992,14 @@ fn main() -> miette::Result<()> {
     #[cfg(target_os = "windows")]
     console::ensure_vt_or_dumb_progress();
 
+    // IDEA plugin dispatches Java runs through a fake JDK whose `bin/java.exe`
+    // is a copy of this binary. When invoked under that name, skip clap entirely
+    // and run the `pitm` flow on the real java.exe (path passed via env var).
+    #[cfg(target_os = "windows")]
+    if let Some(result) = pitm::run_as_java_launcher() {
+        return result;
+    }
+
     let cli = Cli::parse();
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -1151,6 +1162,8 @@ fn main() -> miette::Result<()> {
                 let progress = ProgressTracker::from_env("mirrord attach");
                 attach::attach_command(args, &progress)?;
             }
+            #[cfg(windows)]
+            Commands::Pitm(args) => pitm::pitm_command(args)?,
             #[cfg(unix)]
             Commands::Ui(args) => ui::ui_command(args).await?,
             #[cfg(unix)]

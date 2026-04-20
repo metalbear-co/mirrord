@@ -28,3 +28,6 @@ tokio = { workspace = true, features = ["rt", "net"] }
 tokio-rustls.workspace = true
 tracing.workspace = true
 x509-parser.workspace = true
+
+[lib]
+doctest = false

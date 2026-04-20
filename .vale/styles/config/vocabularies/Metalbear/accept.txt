@@ -69,6 +69,7 @@ consts
 fd
 fds
 syscalls
+subcommand
 
 # Linux syscalls and C API
 openat

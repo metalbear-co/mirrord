@@ -18,6 +18,9 @@ cargo fmt
 
 # Always lint after edits
 cargo clippy -- --deny warnings
+
+# cargo-shear needs macro expansion and placeholder layer env for CLI crates
+./scripts/cargo-shear.sh --deny-warnings
 ```
 
 Use `cargo check -p <crate> --keep-going` to surface all errors at once rather than stopping at the first.
@@ -102,4 +105,4 @@ When changing how something works, don't leave comments like "this replaces how 
 - Prefer `to_owned` for `&str` → `String`.
 - Always use `foo.rs` instead of `foo/mod.rs` for module roots.
 - When extending existing declarations (consts, methods, enum variants, match arms), append new entries below the existing ones. If the new entry is related to a specific existing one, place it directly below that one instead of at the end.
-- Run `cargo fmt` and `cargo clippy -- --deny warnings` after every edit.
+- Run `cargo fmt`, `cargo clippy -- --deny warnings`, and `./scripts/cargo-shear.sh --deny-warnings` after every edit.
