@@ -1,10 +1,3 @@
-//! # mirrord UI (Session Monitor)
-//!
-//! The `mirrord ui` command launches a web-based session monitor that aggregates events from all
-//! active mirrord sessions. It watches `~/.mirrord/sessions/` for Unix socket files, connects
-//! to each session's HTTP API, and serves a React frontend plus REST/SSE/WebSocket endpoints on
-//! localhost.
-
 use std::{
     collections::{HashMap, hash_map::Entry},
     convert::Infallible,
@@ -181,8 +174,6 @@ struct TokenQuery {
     token: Option<String>,
 }
 
-/// Middleware that validates the request carries a valid auth token, either via the `mirrord_token`
-/// cookie or the `?token=` query parameter.
 async fn token_auth(
     State(state): State<Arc<AppState>>,
     jar: CookieJar,
@@ -214,8 +205,6 @@ async fn token_auth(
     StatusCode::UNAUTHORIZED.into_response()
 }
 
-/// Opens an SSE connection to a session's Unix socket /events endpoint and returns
-/// a pinned `Eventsource` stream that yields parsed SSE events.
 async fn open_sse_stream(
     client: &reqwest::Client,
 ) -> Result<
@@ -240,8 +229,6 @@ async fn open_sse_stream(
     Ok(Box::pin(byte_stream.eventsource()))
 }
 
-/// Appends parsed SSE values to the session's event buffer, capping at
-/// [`MAX_EVENTS_PER_SESSION`].
 async fn buffer_session_events(session_id: &str, values: Vec<serde_json::Value>, state: &AppState) {
     let mut sessions = state.sessions.write().await;
     let Some(session) = sessions.get_mut(session_id) else {
@@ -255,7 +242,6 @@ async fn buffer_session_events(session_id: &str, values: Vec<serde_json::Value>,
     }
 }
 
-/// Connects to a session's SSE /events endpoint and buffers events into the shared state.
 async fn stream_session_events(session_id: String, client: reqwest::Client, state: Arc<AppState>) {
     let mut sse_stream = match open_sse_stream(&client).await {
         Ok(s) => s,
@@ -421,14 +407,8 @@ async fn session_events_sse(
 
 #[derive(Serialize)]
 struct OperatorSessionsResponse {
-    /// Sessions grouped by key. The key is the map key; value is the list
-    /// of sessions under that key. Sessions whose `spec.key` is `None` are
-    /// collected under a sentinel key `""` (empty string).
     by_key: std::collections::BTreeMap<String, Vec<OperatorSessionSummary>>,
-    /// Flat list of all sessions, for clients that prefer not to consume
-    /// the grouped view.
     sessions: Vec<OperatorSessionSummary>,
-    /// Current watch status (for UI diagnostics).
     watch_status: OperatorWatchStatus,
 }
 
@@ -469,7 +449,6 @@ async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>
                 serde_json::json!({"status": "ok"})
             });
 
-            // Clean up socket file and remove session from tracking
             if let Err(err) = std::fs::remove_file(&socket_path) {
                 warn!(%id, ?err, "Failed to remove session socket after kill");
             }
@@ -488,7 +467,6 @@ async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>
     }
 }
 
-/// Validates the WebSocket upgrade Origin header, rejecting non-localhost origins.
 fn validate_ws_origin(headers: &HeaderMap) -> bool {
     match headers.get(header::ORIGIN) {
         None => true, // No origin header is acceptable for non-browser clients
@@ -574,15 +552,12 @@ async fn static_handler(uri: axum::http::Uri) -> impl IntoResponse {
         return ([(header::CONTENT_TYPE, mime)], data).into_response();
     }
 
-    // SPA fallback
     match get_asset("index.html") {
         Some(data) => ([(header::CONTENT_TYPE, "text/html")], data).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
-/// Spawns a background task that rescans the sessions directory every 2 seconds.
-/// Filesystem watchers can miss events on macOS, so this serves as a fallback.
 #[cfg(target_os = "macos")]
 fn start_periodic_rescan(sessions_dir: PathBuf, state: Arc<AppState>) {
     tokio::spawn(async move {
@@ -593,8 +568,6 @@ fn start_periodic_rescan(sessions_dir: PathBuf, state: Arc<AppState>) {
     });
 }
 
-/// Sets up a filesystem watcher on the sessions directory and spawns a background task
-/// to handle socket file creation and removal events.
 fn start_filesystem_watcher(
     sessions_dir: &std::path::Path,
     state: Arc<AppState>,
@@ -648,11 +621,6 @@ fn start_filesystem_watcher(
     Ok(())
 }
 
-/// Starts a tokio task that watches `MirrordClusterSession` CRs via `kube::Api` and
-/// updates `AppState::operator_sessions`. Broadcasts `OperatorSession*` events on
-/// `notify_tx`. If the cluster isn't reachable or the CRD isn't installed, logs a
-/// warning and sets `operator_watch_status` to `Unavailable { reason }`. The `mirrord
-/// ui` daemon continues running for local sessions either way.
 fn start_operator_watcher(state: Arc<AppState>) {
     tokio::spawn(async move {
         let client = match Client::try_default().await {
@@ -668,9 +636,6 @@ fn start_operator_watcher(state: Arc<AppState>) {
 
         let api: Api<MirrordSession> = Api::all(client);
 
-        // Probe the CRD with a single list; if this fails because the CRD isn't
-        // installed or access is denied, surface a clean "unavailable" status
-        // instead of retrying forever.
         if let Err(err) = api.list(&ListParams::default().limit(1)).await {
             let reason = format!("operator CRD not available: {err}");
             warn!("{reason}");
@@ -713,9 +678,7 @@ fn start_operator_watcher(state: Arc<AppState>) {
                 }
                 Ok(watcher::Event::Init)
                 | Ok(watcher::Event::InitApply(_))
-                | Ok(watcher::Event::InitDone) => {
-                    // watcher relist lifecycle; no action needed.
-                }
+                | Ok(watcher::Event::InitDone) => {}
                 Err(err) => {
                     let reason = format!("watcher error: {err}");
                     warn!("{reason}");
@@ -747,10 +710,6 @@ fn build_router(state: Arc<AppState>) -> Router {
         .fallback(static_handler)
         .layer(middleware::from_fn_with_state(state.clone(), token_auth));
 
-    // posthog-js lazy-loads its session recorder bundle from the api host at runtime, so the
-    // PostHog origin must be listed in both `script-src` (for the recorder bundle) and
-    // `connect-src` (for `/e/` event capture and `/s/` session replay ingest). Without these,
-    // telemetry is silently dropped by the browser's CSP enforcement.
     let csp_value = HeaderValue::from_static(
         "default-src 'self'; script-src 'self' https://hog.metalbear.com; \
          style-src 'self' 'unsafe-inline'; \
@@ -790,7 +749,6 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
 
     let (notify_tx, _) = broadcast::channel::<SessionNotification>(256);
 
-    // Generate auth token for this UI server instance
     let token_bytes: [u8; 32] = rand::rng().random();
     let token = hex::encode(token_bytes);
 
@@ -885,14 +843,11 @@ mod tests {
             .status()
     }
 
-    /// `/health` is intentionally outside the auth middleware so k8s probes can hit it.
     #[tokio::test]
     async fn health_endpoint_does_not_require_token() {
         assert_eq!(status_of(req("/health")).await, StatusCode::OK);
     }
 
-    /// Without a token, every API request should be rejected. This is the core protection
-    /// against malicious local processes and CSRF from other browser tabs.
     #[tokio::test]
     async fn api_without_token_returns_unauthorized() {
         assert_eq!(
@@ -901,8 +856,6 @@ mod tests {
         );
     }
 
-    /// A request with the wrong token must also be rejected (no timing oracle, just a
-    /// constant-time string compare via `==` is fine because the token is high-entropy).
     #[tokio::test]
     async fn api_with_wrong_token_returns_unauthorized() {
         assert_eq!(
@@ -911,8 +864,6 @@ mod tests {
         );
     }
 
-    /// First request with a valid `?token=` query param should both succeed AND set the
-    /// `mirrord_token` cookie so subsequent requests can authenticate via cookie alone.
     #[tokio::test]
     async fn api_with_valid_token_query_param_sets_cookie() {
         let response = build_router(test_state())
@@ -937,8 +888,6 @@ mod tests {
         );
     }
 
-    /// Once the cookie is set, requests should authenticate via cookie without needing
-    /// the query param. This is what the React frontend does after the initial page load.
     #[tokio::test]
     async fn api_with_valid_cookie_succeeds() {
         let request = Request::builder()
@@ -949,8 +898,6 @@ mod tests {
         assert_eq!(status_of(request).await, StatusCode::OK);
     }
 
-    /// A wrong cookie must be rejected. Without this, an attacker who guesses or steals
-    /// a stale token could impersonate the user.
     #[tokio::test]
     async fn api_with_wrong_cookie_returns_unauthorized() {
         let request = Request::builder()
@@ -961,8 +908,6 @@ mod tests {
         assert_eq!(status_of(request).await, StatusCode::UNAUTHORIZED);
     }
 
-    /// All authenticated responses should carry the security headers from the RFC.
-    /// These protect against clickjacking, MIME sniffing, referrer leaks, and XSS.
     #[tokio::test]
     async fn responses_include_security_headers() {
         let response = build_router(test_state())
@@ -978,7 +923,6 @@ mod tests {
         );
         assert_eq!(headers.get(header::REFERRER_POLICY).unwrap(), "no-referrer");
 
-        // Per the RFC, CSP must restrict scripts to 'self' (no inline scripts).
         let csp = headers.get(header::CONTENT_SECURITY_POLICY).unwrap();
         let csp_str = csp.to_str().unwrap();
         assert!(csp_str.contains("script-src 'self'"));
@@ -987,10 +931,6 @@ mod tests {
         assert!(csp_str.contains("object-src 'none'"));
     }
 
-    /// WebSocket upgrades from a non-localhost Origin must be rejected. WebSocket
-    /// connections do NOT enforce same-origin policy by default, so without this check
-    /// any malicious website the user visits could open `ws://localhost:59281/ws` and
-    /// stream every session event in real time.
     #[test]
     fn validate_ws_origin_rejects_non_localhost() {
         let mut headers = HeaderMap::new();
@@ -1004,7 +944,6 @@ mod tests {
         );
     }
 
-    /// Localhost origins (in any common form) should be accepted.
     #[test]
     fn validate_ws_origin_accepts_localhost() {
         for origin in [
@@ -1022,16 +961,12 @@ mod tests {
         }
     }
 
-    /// Non-browser clients (curl, native code) typically omit the Origin header. We accept
-    /// these because the Unix socket and TCP localhost binding are the access control there.
     #[test]
     fn validate_ws_origin_accepts_missing_origin() {
         let headers = HeaderMap::new();
         assert!(validate_ws_origin(&headers));
     }
 
-    /// CSRF check: a malicious form-POST from another origin would not include the cookie
-    /// (because of SameSite=Strict), so any state-changing endpoint must reject it.
     #[tokio::test]
     async fn kill_endpoint_without_token_returns_unauthorized() {
         let request = Request::builder()
@@ -1042,24 +977,17 @@ mod tests {
         assert_eq!(status_of(request).await, StatusCode::UNAUTHORIZED);
     }
 
-    /// Static assets are served behind the auth middleware so the token cookie is set on
-    /// the very first page load (the user clicks `?token=...` in their browser, the static
-    /// HTML response sets the cookie, and subsequent API/WS calls authenticate via cookie).
     #[tokio::test]
     async fn static_handler_without_token_returns_unauthorized() {
         assert_eq!(status_of(req("/")).await, StatusCode::UNAUTHORIZED);
     }
 
-    /// The `?token=` query param works for any path, including the root, so the initial
-    /// page load establishes the cookie.
     #[tokio::test]
     async fn static_handler_with_token_sets_cookie() {
         let response = build_router(test_state())
             .oneshot(req(&format!("/?token={TEST_TOKEN}")))
             .await
             .unwrap();
-        // Status may be 200 (if asset embedded) or 404 (if no embedded assets in test build)
-        // either way, the cookie should be set.
         assert!(
             response.headers().get(header::SET_COOKIE).is_some(),
             "cookie must be set on the first authenticated request, even if the body is 404"

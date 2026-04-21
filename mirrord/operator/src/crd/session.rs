@@ -15,17 +15,12 @@ use mirrord_kube::api::kubernetes::rollout::Rollout;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Describes an owner of a mirrord session.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionOwner {
-    /// Unique ID.
     pub user_id: String,
-    /// Name of the POSIX user that executed the CLI command.
     pub username: String,
-    /// Hostname of the machine where the CLI command was executed.
     pub hostname: String,
-    /// Name of the Kubernetes user who's identity was assumed by the CLI.
     pub k8s_username: String,
 }
 
@@ -39,17 +34,12 @@ impl fmt::Display for SessionOwner {
     }
 }
 
-/// Describes a target of a mirrord session.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTarget {
-    /// Kubernetes resource apiVersion.
     pub api_version: String,
-    /// Kubernetes resource kind.
     pub kind: String,
-    /// Kubernetes resource name.
     pub name: String,
-    /// Name of the container defined in the Pod spec.
     pub container: String,
 }
 
@@ -64,9 +54,6 @@ impl fmt::Display for SessionTarget {
 }
 
 impl SessionTarget {
-    /// Create a [`SessionTarget`] from a [`Target`] with a resolved container.
-    ///
-    /// Returns `None` for [`Target::Targetless`] or if the [`Target`] doesn't have a container.
     pub fn from_config(target: Target) -> Option<Self> {
         match target {
             Target::Deployment(t) => Some(Self {
@@ -121,7 +108,6 @@ impl SessionTarget {
         }
     }
 
-    /// Parse back into a [`Target`] by reconstructing the canonical target path string.
     pub fn into_config(self) -> Option<Target> {
         format!(
             "{}/{}/container/{}",
@@ -134,38 +120,22 @@ impl SessionTarget {
     }
 }
 
-/// Information about the CI session started from `mirrord ci start`.
-///
-/// We try to get some of these fields automatically, but for some that we cannot, the user may
-/// pass them as cli args to `mirrord ci start`, see `cli::ci::StartArgs`.
-///
-/// These values are passed to the operator, and handled by the `ci_controller`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionCiInfo {
-    /// CI provider, e.g. "github", "gitlab", ...
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
 
-    /// Staging, production, test, nightly, ...
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<String>,
 
-    /// Pipeline/job name, e.g. "e2e-tests".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pipeline: Option<String>,
 
-    /// PR, manual, push, ...
     #[serde(skip_serializing_if = "Option::is_none")]
     pub triggered_by: Option<String>,
 }
 
-/// Mirror of `operator_crd::crd::session::MirrordClusterSession`.
-///
-/// Defined here so the mirrord CLI (and any other client in this repo) can use
-/// `kube::Api<MirrordClusterSession>` without depending on the operator repo.
-/// Wire-compatibility with the operator-side definition is maintained by keeping
-/// this struct's field set and serde attributes in lockstep.
 #[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[kube(
     group = "mirrord.metalbear.co",
@@ -175,23 +145,16 @@ pub struct SessionCiInfo {
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterSessionSpec {
-    /// Resources needed to report session metrics to the mirrord Jira app.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jira_metrics: Option<SessionJiraMetrics>,
-    /// Owner of this session.
     pub owner: SessionOwner,
-    /// Kubernetes namespace of the session.
     pub namespace: String,
-    /// Target of the session. None for targetless sessions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<SessionTarget>,
-    /// CI info when a session is started with `mirrord ci start`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ci_info: Option<SessionCiInfo>,
-    /// Copy target configuration for this session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub copy_target: Option<SessionCopyTarget>,
-    /// Multi-cluster: name of the parent MirrordMultiClusterSession.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub multi_cluster_parent_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -227,41 +190,31 @@ pub struct MirrordSessionSpec {
     pub http_filter: Option<SessionHttpFilter>,
 }
 
-/// Resources needed to report session metrics to the mirrord Jira app.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionJiraMetrics {
-    /// The user's current git branch.
     pub branch_name: String,
 }
 
-/// Describes copy target configuration for a session.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionCopyTarget {
-    /// Whether the original target should be scaled down.
     pub scaledown: bool,
 }
 
-/// Status of a mirrord cluster session.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterSessionStatus {
-    /// Last time when the session was observed to have an open user connection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connected_timestamp: Option<MicroTime>,
-    /// If the session has been closed, describes the reason.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closed: Option<SessionClosed>,
 }
 
-/// Describes the reason for which a mirrord session was closed.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionClosed {
-    /// Short reason in PascalCase.
     pub reason: String,
-    /// Optional human friendly message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
