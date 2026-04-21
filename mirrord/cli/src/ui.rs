@@ -4,7 +4,6 @@
 //! active mirrord sessions. It watches `~/.mirrord/sessions/` for Unix socket files, connects
 //! to each session's HTTP API, and serves a React frontend plus REST/SSE/WebSocket endpoints on
 //! localhost.
-//!
 
 use std::{
     collections::{HashMap, hash_map::Entry},
