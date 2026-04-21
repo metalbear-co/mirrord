@@ -35,7 +35,7 @@ use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use eventsource_stream::Eventsource;
 use futures::stream::StreamExt as _;
 use kube::{Api, Client, api::ListParams, runtime::watcher};
-use mirrord_operator::crd::session::MirrordClusterSession;
+use mirrord_operator::crd::session::MirrordSession;
 use mirrord_session_monitor_client::{
     SessionError, connect_to_session, session_socket_entries, sessions_dir,
 };
@@ -124,7 +124,10 @@ pub struct OperatorSessionTarget {
 }
 
 impl OperatorSessionSummary {
-    fn from_cr(cr: &mirrord_operator::crd::session::MirrordClusterSession) -> Option<Self> {
+    /// Builds a summary from the namespaced [`MirrordSession`] projection.
+    /// We watch this CRD (not the cluster-scoped parent) so RBAC can be scoped
+    /// per namespace on shared clusters.
+    fn from_cr(cr: &MirrordSession) -> Option<Self> {
         let name = cr.metadata.name.clone()?;
         let spec = &cr.spec;
         Some(Self {
@@ -681,7 +684,11 @@ fn start_operator_watcher(state: Arc<AppState>) {
             }
         };
 
-        let api: Api<MirrordClusterSession> = Api::all(client);
+        // Watch the namespaced `MirrordSession` projection instead of the
+        // cluster-scoped `MirrordClusterSession`. `Api::all` still spans every
+        // namespace for the list/watch; callers only see sessions their RBAC
+        // permits.
+        let api: Api<MirrordSession> = Api::all(client);
 
         // Probe the CRD with a single list; if this fails because the CRD isn't
         // installed or access is denied, surface a clean "unavailable" status
@@ -1088,16 +1095,15 @@ mod tests {
 
     mod operator_sessions {
         use mirrord_operator::crd::session::{
-            MirrordClusterSession, MirrordClusterSessionSpec, SessionOwner, SessionTarget,
+            MirrordSession, MirrordSessionSpec, SessionOwner, SessionTarget,
         };
 
         use super::*;
 
-        fn sample_cr(name: &str, key: Option<&str>) -> MirrordClusterSession {
-            MirrordClusterSession::new(
+        fn sample_cr(name: &str, key: Option<&str>) -> MirrordSession {
+            MirrordSession::new(
                 name,
-                MirrordClusterSessionSpec {
-                    jira_metrics: None,
+                MirrordSessionSpec {
                     owner: SessionOwner {
                         user_id: "u".into(),
                         username: "alice".into(),
@@ -1111,10 +1117,9 @@ mod tests {
                         name: "web".into(),
                         container: "app".into(),
                     }),
-                    ci_info: None,
-                    copy_target: None,
-                    multi_cluster_parent_name: None,
                     key: key.map(|s| s.to_owned()),
+                    http_filter: None,
+                    cluster_session_name: name.to_owned(),
                 },
             )
         }

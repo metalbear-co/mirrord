@@ -217,6 +217,32 @@ pub struct SessionHttpFilter {
     pub header_filter: Option<String>,
 }
 
+/// Namespaced projection of a CLI-initiated session.
+///
+/// The operator dual-writes this alongside the cluster-scoped
+/// [`MirrordClusterSession`] so external consumers (browser extension,
+/// `mirrord ui`) can discover sessions via RBAC scoped to the target's
+/// namespace, instead of relying on cluster-wide permissions.
+#[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[kube(
+    group = "mirrord.metalbear.co",
+    version = "v1alpha",
+    kind = "MirrordSession",
+    namespaced
+)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrordSessionSpec {
+    pub owner: SessionOwner,
+    pub namespace: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<SessionTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_filter: Option<SessionHttpFilter>,
+    pub cluster_session_name: String,
+}
+
 /// Resources needed to report session metrics to the mirrord Jira app.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
