@@ -1559,6 +1559,7 @@ impl OperatorApi<PreparedClientCert> {
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
             key: Some(key),
+            header_filter: None,
         };
 
         if use_proxy {

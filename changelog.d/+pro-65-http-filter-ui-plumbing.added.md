@@ -1,0 +1,1 @@
+`mirrord ui` now surfaces each operator session's `http_filter.header_filter` in the `/api/operator-sessions` response, letting the browser extension derive the header it needs to inject instead of assuming a fixed baggage convention.
