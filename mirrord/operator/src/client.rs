@@ -2211,6 +2211,7 @@ mod test {
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
             key,
+            header_filter: None,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
@@ -2331,6 +2332,7 @@ mod test {
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
             key,
+            header_filter: None,
         };
         let produced =
             OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);
