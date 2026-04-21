@@ -1,1 +1,1 @@
-`mirrord ui` now watches the namespaced `MirrordSession` CRD (a projection the operator writes alongside each `MirrordClusterSession`) instead of the cluster-scoped CRD. Consumers see the same `OperatorSessionSummary` shape but RBAC on shared clusters can now be scoped per namespace.
+`mirrord ui` now watches the `MirrordSession` CRD, which the operator writes into the target's namespace alongside each `MirrordClusterSession`. Consumers see the same `OperatorSessionSummary` shape, and access on shared clusters can scope per namespace through role-based access control.
