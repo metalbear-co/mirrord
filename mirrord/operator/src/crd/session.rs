@@ -240,7 +240,6 @@ pub struct MirrordSessionSpec {
     pub key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_filter: Option<SessionHttpFilter>,
-    pub cluster_session_name: String,
 }
 
 /// Resources needed to report session metrics to the mirrord Jira app.
