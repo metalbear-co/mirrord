@@ -262,25 +262,22 @@ where
 
     /// List rules from previous mirrord agent that exist on the IP table
     #[tracing::instrument(level = Level::TRACE, skip(ipt, chain_names) ret, err)]
-    pub async fn list_mirrord_rules(
-        ipt: &IPT,
-        chain_names: &ChainNames,
-    ) -> IPTablesResult<Vec<String>> {
+    pub async fn list_mirrord_rules<'a>(
+        ipt: &'_ IPT,
+        chain_names: &'a ChainNames,
+    ) -> IPTablesResult<impl Iterator<Item = String> + use<IPT, 'a>> {
         let rules = ipt.list_table()?;
 
-        Ok(rules
-            .into_iter()
-            .filter(|rule| {
-                [
-                    &chain_names.prerouting,
-                    &chain_names.mesh,
-                    &chain_names.standard,
-                    &chain_names.exclude_from_mesh,
-                ]
-                .iter()
-                .any(|chain| rule.contains(chain.as_str()))
-            })
-            .collect())
+        Ok(rules.into_iter().filter(|rule| {
+            [
+                &chain_names.prerouting,
+                &chain_names.mesh,
+                &chain_names.standard,
+                &chain_names.exclude_from_mesh,
+            ]
+            .iter()
+            .any(|chain| rule.contains(chain.as_str()))
+        }))
     }
 
     pub async fn load(
@@ -916,7 +913,7 @@ mod tests {
 
         let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock, &chain_names).await;
         assert_eq!(
-            leftover_rules_res.unwrap().len(),
+            leftover_rules_res.unwrap().count(),
             0,
             "Fresh IP table should successfully list table rules and list no existing mirrord rules"
         );
@@ -942,7 +939,7 @@ mod tests {
 
         let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock, &chain_names).await;
         assert_eq!(
-            leftover_rules_res.unwrap().len(),
+            leftover_rules_res.unwrap().count(),
             1,
             "Fresh IP table should successfully list table rules and list one existing mirrord rule"
         );
