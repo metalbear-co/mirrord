@@ -194,20 +194,35 @@ pub struct MirrordClusterSessionSpec {
     /// Multi-cluster: name of the parent MirrordMultiClusterSession.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub multi_cluster_parent_name: Option<String>,
+    /// Session key as supplied by the CLI at connect time.
+    /// Consumers (browser extension, dashboard) group sessions by this value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
 
+    /// HTTP filter configuration applied by the agent on incoming traffic.
+    /// Surfaced so external consumers (e.g. the browser extension) can derive
+    /// the exact header they need to inject without requiring the developer
+    /// to declare the injection pattern separately.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_filter: Option<SessionHttpFilter>,
 }
 
+/// Subset of the CLI's `HttpFilterConfig` stored on the session CR for
+/// external consumers. Only fields the extension can act on are surfaced.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionHttpFilter {
+    /// Raw `feature.network.incoming.http_filter.header_filter` regex.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub header_filter: Option<String>,
 }
 
+/// Namespaced projection of a CLI-initiated session.
+///
+/// The operator dual-writes this alongside the cluster-scoped
+/// [`MirrordClusterSession`] so external consumers (browser extension,
+/// `mirrord ui`) can discover sessions via RBAC scoped to the target's
+/// namespace, instead of relying on cluster-wide permissions.
 #[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[kube(
     group = "mirrord.metalbear.co",

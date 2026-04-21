@@ -4,6 +4,12 @@
 //! active mirrord sessions. It watches `~/.mirrord/sessions/` for Unix socket files, connects
 //! to each session's HTTP API, and serves a React frontend plus REST/SSE/WebSocket endpoints on
 //! localhost.
+//!
+//! ## Browser extension handoff
+//!
+//! On startup, `mirrord ui` prints both the web UI URL and a `chrome-extension://` configure URL.
+//! The extension id is pinned in the mirrord-browser manifest's `"key"` field, which produces a
+//! deterministic id when loaded unpacked or published to the Chrome Web Store.
 
 use std::{
     collections::{HashMap, hash_map::Entry},
@@ -73,15 +79,24 @@ enum SessionNotification {
     },
 }
 
+/// Wire-format summary of an operator-side session that the browser extension
+/// and local UI tab can render. Derived from `MirrordClusterSession`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OperatorSessionSummary {
+    /// Kubernetes object name of the underlying `MirrordClusterSession` CR.
     pub name: String,
+    /// Session key (grouping identity). `None` if the session was started by an
+    /// older CLI that didn't send a key, or by an operator that doesn't persist it yet.
     pub key: Option<String>,
     pub namespace: String,
     pub owner: Option<OperatorSessionOwner>,
     pub target: Option<OperatorSessionTarget>,
     pub created_at: Option<String>,
+    /// Subset of the dev's `http_filter` needed by external consumers (the
+    /// browser extension parses `header_filter` to build a matching DNR rule).
+    /// `None` if the session was started by an older CLI or operator that
+    /// didn't persist it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_filter: Option<OperatorSessionHttpFilter>,
 }
@@ -109,6 +124,9 @@ pub struct OperatorSessionTarget {
 }
 
 impl OperatorSessionSummary {
+    /// Builds a summary from the namespaced [`MirrordSession`] projection.
+    /// We watch this CRD (not the cluster-scoped parent) so RBAC can be scoped
+    /// per namespace on shared clusters.
     fn from_cr(cr: &MirrordSession) -> Option<Self> {
         let name = cr.metadata.name.clone()?;
         let spec = &cr.spec;
@@ -666,6 +684,10 @@ fn start_operator_watcher(state: Arc<AppState>) {
             }
         };
 
+        // Watch the namespaced `MirrordSession` projection instead of the
+        // cluster-scoped `MirrordClusterSession`. `Api::all` still spans every
+        // namespace for the list/watch; callers only see sessions their RBAC
+        // permits.
         let api: Api<MirrordSession> = Api::all(client);
 
         // Probe the CRD with a single list; if this fails because the CRD isn't
@@ -838,8 +860,13 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
     Ok(())
 }
 
+/// Chrome extension id produced by the `"key"` field in the mirrord-browser
+/// manifest. Stable across dev (unpacked) and production (Chrome Web Store)
+/// installs, so the CLI can hand a clickable configure URL to the user.
 const MIRRORD_EXTENSION_ID: &str = "bijejadnnfgjkfdocgocklekjhnhkhkf";
 
+/// Build a `chrome-extension://…/pages/configure.html?backend=…&token=…` URL
+/// that configures the browser extension to talk to this UI server.
 fn build_extension_configure_url(addr: &SocketAddr, token: &str) -> String {
     let backend = format!("http://{addr}");
     let backend_encoded: String =

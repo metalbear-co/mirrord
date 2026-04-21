@@ -87,6 +87,10 @@ pub struct ConnectParams<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<&'a str>,
 
+    /// Raw `feature.network.incoming.http_filter.header_filter` value.
+    /// Persisted on `MirrordClusterSession.spec.httpFilter.headerFilter` so
+    /// consumers like the browser extension can compute the injection pattern
+    /// without the dev declaring it twice.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub header_filter: Option<&'a str>,
 }
