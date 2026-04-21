@@ -1119,7 +1119,6 @@ mod tests {
                     }),
                     key: key.map(|s| s.to_owned()),
                     http_filter: None,
-                    cluster_session_name: name.to_owned(),
                 },
             )
         }
