@@ -703,6 +703,9 @@ pub fn replace_values_with_secret_refs(
         if let ConnectionSourceKind::Env { variable, .. } = kind
             && literal_values.contains_key(variable.as_str())
         {
+            // We reuse the original variable name for both fields: the CLI
+            // already stored the value under that name in the Secret (so it's
+            // the data key), and that's also the env var the user's app reads.
             *kind = ConnectionSourceKind::Secret {
                 name: secret_name.to_owned(),
                 key: variable.clone(),

@@ -1,0 +1,1 @@
+DB branch credentials from a literal value or Secret reference now override the local env vars correctly, even when the target pod does not set them.
