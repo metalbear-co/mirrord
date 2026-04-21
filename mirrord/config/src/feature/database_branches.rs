@@ -377,7 +377,10 @@ pub struct ConnectionParamsConfig {
 /// referencing any env var on the target pod.
 ///
 /// As a Secret ref: `{ "secret": "my-secret", "key": "password" }` - read directly from a
-/// Kubernetes Secret.
+/// Kubernetes Secret. Add `"env_var_name": "DB_PASSWORD"` to also expose the resolved
+/// value to the local process under that name. Without `env_var_name` the Secret is
+/// only consumed by the operator for branch provisioning; the local app must get the
+/// credential from the target pod's environment.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum ParamSource {
@@ -386,6 +389,11 @@ pub enum ParamSource {
         #[serde(rename = "secret")]
         name: String,
         key: String,
+        /// Name of the env var to set on the local process from the resolved
+        /// Secret value. When `None`, the operator only uses the Secret for
+        /// branch provisioning and does not inject anything locally.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
     },
     Env {
         #[serde(alias = "variable")]
@@ -449,6 +457,10 @@ pub enum TargetEnvironmentVariableSource {
     Secret {
         name: String,
         key: String,
+        /// Name of the env var to set on the local process from the resolved
+        /// Secret value. Same semantics as on `ParamSource::Secret`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
     },
 }
 
@@ -740,6 +752,7 @@ mod tests {
                     Some(ParamSource::Secret {
                         name: "rds-credentials".to_string(),
                         key: "password".to_string(),
+                        env_var_name: None,
                     })
                 );
                 assert_eq!(
@@ -762,6 +775,7 @@ mod tests {
                 password: Some(ParamSource::Secret {
                     name: "my-secret".to_string(),
                     key: "pass".to_string(),
+                    env_var_name: None,
                 }),
                 database: Some(ParamSource::Variable("DB_NAME".to_string())),
             },

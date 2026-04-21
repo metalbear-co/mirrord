@@ -706,6 +706,7 @@ pub fn replace_values_with_secret_refs(
             *kind = ConnectionSourceKind::Secret {
                 name: secret_name.to_owned(),
                 key: variable.clone(),
+                env_var_name: Some(variable.clone()),
             };
         }
     }
