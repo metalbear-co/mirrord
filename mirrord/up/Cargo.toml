@@ -26,3 +26,6 @@ tokio = { workspace = true, features = ["process"] }
 
 [lints]
 workspace = true
+
+[lib]
+doctest = false

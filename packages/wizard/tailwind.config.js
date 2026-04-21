@@ -1,3 +1,10 @@
+import { dirname, join } from "path";
+import { createRequire } from "module";
+
+const require = createRequire(import.meta.url);
+// resolve e.g. …/node_modules/@metalbear/ui/dist/index.js → package root
+const uiPackageDir = dirname(dirname(require.resolve("@metalbear/ui")));
+
 import {
   brandColors,
   lightModeColors,
@@ -30,7 +37,7 @@ export default {
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
-    "./node_modules/@metalbear/ui/**/*.{js,ts,jsx,tsx}",
+    join(uiPackageDir, "**/*.{js,ts,jsx,tsx}"),
   ],
   darkMode: "class",
   theme: {

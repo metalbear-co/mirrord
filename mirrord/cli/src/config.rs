@@ -227,7 +227,25 @@ pub(super) enum Commands {
     #[command(hide = true)]
     Attach(AttachArgs),
 
-    /// Launch the session monitor UI.
+    /// Process In The Middle: create a target process suspended, inject the
+    /// mirrord layer DLL, and resume execution.
+    ///
+    /// Used by IDE extensions that cannot start the target process in a
+    /// suspended state themselves (e.g. IntelliJ run configurations). Like
+    /// `attach`, this assumes intproxy and the rest of the session have
+    /// already been set up by the plugin via `mirrord ext`; `pitm` itself
+    /// does no k8s or agent work. The plugin prepends `mirrord pitm --` to
+    /// the user command line and delivers the child's mirrord environment
+    /// through a single side-channel env var (`MIRRORD_CHILD_ENV`,
+    /// base64-encoded JSON with `set` and `unset` keys), which `pitm`
+    /// extracts and applies to the child process's environment. `pitm`
+    /// owns the child lifecycle end-to-end, so there is no race between
+    /// process start and layer injection.
+    #[cfg(windows)]
+    #[command(hide = true)]
+    Pitm(PitmArgs),
+
+    /// Launch the mirrord local UI.
     ///
     /// Watches active mirrord sessions and displays a web dashboard showing
     /// real-time events (file operations, DNS queries, HTTP requests, etc.)
@@ -242,7 +260,7 @@ pub(super) enum Commands {
 
     /// Kill a local mirrord session.
     #[cfg(unix)]
-    Kill(Box<SessionDeleteArgs>),
+    Kill(Box<KillArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -1426,6 +1444,21 @@ pub(super) struct AttachArgs {
     pub pid: u32,
 }
 
+/// `mirrord pitm` args.
+#[cfg(windows)]
+#[derive(Args, Debug)]
+pub(super) struct PitmArgs {
+    /// Target executable followed by its arguments. Everything after `--`
+    /// is forwarded verbatim to the child process.
+    #[arg(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        required = true,
+        num_args = 1..,
+    )]
+    pub command: Vec<String>,
+}
+
 /// Arguments for the `mirrord ui` command.
 #[cfg(unix)]
 #[derive(Args, Debug)]
@@ -1439,16 +1472,42 @@ pub struct UiArgs {
 #[cfg(unix)]
 #[derive(Args, Debug)]
 pub struct SessionArgs {
+    /// Arguments shared across `mirrord session` commands.
+    #[command(flatten)]
+    pub common: SessionCommonArgs,
+
     /// Subcommand to use with `mirrord session`.
     #[command(subcommand)]
     pub command: Option<LocalSessionCommand>,
+}
+
+/// Arguments shared across `mirrord session` commands.
+#[cfg(unix)]
+#[derive(Args, Clone, Debug)]
+pub struct SessionCommonArgs {
+    /// Namespace to operate on. Can also be set via `target.namespace` in the mirrord config.
+    #[arg(short = 'n', long = "namespace", global = true)]
+    pub namespace: Option<String>,
+
+    /// Load config from config file.
+    ///
+    /// When using `-f` without a value, defaults to `"./.mirrord/mirrord.json"`.
+    #[arg(
+        short = 'f',
+        long,
+        value_hint = ValueHint::FilePath,
+        default_missing_value = "./.mirrord/mirrord.json",
+        num_args = 0..=1,
+        global = true
+    )]
+    pub config_file: Option<PathBuf>,
 }
 
 /// `mirrord session` subcommands.
 #[cfg(unix)]
 #[derive(Subcommand, Debug)]
 pub enum LocalSessionCommand {
-    /// List local mirrord sessions currently running on this machine.
+    /// List mirrord sessions currently running locally and in cluster (in same namespace).
     #[command(visible_alias = "ls")]
     List,
 
@@ -1468,6 +1527,19 @@ pub struct SessionDeleteArgs {
     /// Kill all local sessions with this key.
     #[arg(long, conflicts_with = "id")]
     pub key: Option<String>,
+}
+
+/// Arguments for the `mirrord kill` command.
+#[cfg(unix)]
+#[derive(Args, Debug)]
+pub struct KillArgs {
+    /// Arguments shared across `mirrord session` commands.
+    #[command(flatten)]
+    pub common: SessionCommonArgs,
+
+    /// Session selection for the kill operation.
+    #[command(flatten)]
+    pub delete: SessionDeleteArgs,
 }
 
 #[cfg(test)]

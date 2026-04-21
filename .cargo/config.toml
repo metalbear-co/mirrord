@@ -1,6 +1,3 @@
-[unstable]
-bindeps = true
-
 [alias]
 xtask = "run --package xtask --"
 

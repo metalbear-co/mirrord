@@ -517,6 +517,26 @@ pub(crate) enum CliError {
     )]
     AttachLayerTimeout(u32),
 
+    #[cfg(windows)]
+    #[error("`mirrord pitm` requires the `MIRRORD_CHILD_ENV` environment variable to be set")]
+    #[diagnostic(help(
+        "`pitm` is intended to be invoked by the IntelliJ plugin, which base64-encodes the JSON \
+         payload of env vars from `mirrord ext` into `MIRRORD_CHILD_ENV`."
+    ))]
+    PitmMissingChildEnv,
+
+    #[cfg(windows)]
+    #[error("Failed to decode `MIRRORD_CHILD_ENV`: {0}")]
+    PitmInvalidChildEnv(String),
+
+    #[cfg(windows)]
+    #[error("`mirrord pitm` was invoked without a target executable")]
+    PitmMissingExe,
+
+    #[cfg(windows)]
+    #[error("`mirrord pitm` failed to launch target process `{0}`: {1}")]
+    PitmExecuteFailed(String, String),
+
     #[error(transparent)]
     ApiKey(#[from] ApiKeyError),
 
@@ -731,6 +751,9 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::SerdeJson(fail) => Self::JsonSerializeError(fail),
             OperatorApiError::TargetResolutionFailed(msg) => {
                 Self::OperatorTargetResolution(KubeApiError::MalformedResource(msg))
+            }
+            OperatorApiError::CredentialSecretCreation(msg) => {
+                Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }
         }
     }

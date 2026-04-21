@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use which::which;
 
 use super::signing;
 
@@ -51,16 +52,27 @@ impl Target {
 }
 
 /// Builds the mirrord layer for the specified target
-pub fn build_layer(target: Target, release: bool) -> Result<PathBuf> {
+pub fn build_layer(target: Target, release: bool, cargo_args: &[String]) -> Result<PathBuf> {
     // Special case: MacosUniversal needs to build both architectures + shim
     if matches!(target, Target::MacosUniversal) {
-        return build_macos_universal_layer(release);
+        return build_macos_universal_layer(release, cargo_args);
     }
 
     println!("Building mirrord-layer for {}...", target.triple());
 
+    let is_linux = matches!(target, Target::LinuxX86_64 | Target::LinuxAarch64);
+
+    if is_linux && which("cargo-zigbuild").is_err() {
+        anyhow::bail!("cargo-zigbuild is required for Linux builds.");
+    }
+
     let mut cmd = Command::new("cargo");
-    cmd.arg("build").arg("-p");
+    if is_linux {
+        cmd.arg("zigbuild");
+    } else {
+        cmd.arg("build");
+    }
+    cmd.arg("-p");
 
     match target {
         Target::Windows => cmd.arg("mirrord-layer-win"),
@@ -71,7 +83,13 @@ pub fn build_layer(target: Target, release: bool) -> Result<PathBuf> {
         cmd.arg("--release");
     }
 
-    cmd.arg("--target").arg(target.triple());
+    let target_triple = if is_linux {
+        format!("{}.2.17", target.triple())
+    } else {
+        target.triple().to_owned()
+    };
+    cmd.arg("--target").arg(&target_triple);
+    cmd.args(cargo_args);
 
     let status = cmd.status().context("Failed to run cargo build")?;
 
@@ -167,12 +185,12 @@ pub fn link_macos_universal_layer(release: bool) -> Result<PathBuf> {
 }
 
 /// Builds the macOS universal layer (combines x86_64, aarch64, and shim)
-pub fn build_macos_universal_layer(release: bool) -> Result<PathBuf> {
+pub fn build_macos_universal_layer(release: bool, cargo_args: &[String]) -> Result<PathBuf> {
     println!("Building macOS universal layer...");
 
     // Build both architectures
-    let x86_layer = build_layer(Target::MacosX86_64, release)?;
-    let arm_layer = build_layer(Target::MacosAarch64, release)?;
+    let x86_layer = build_layer(Target::MacosX86_64, release, cargo_args)?;
+    let arm_layer = build_layer(Target::MacosAarch64, release, cargo_args)?;
 
     // Build shim
     let shim_path = build_shim(release)?;
