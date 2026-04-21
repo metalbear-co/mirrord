@@ -96,8 +96,8 @@ static IP_VERSION_AVAILABILITY: LazyLock<IpVersionAvailability> = LazyLock::new(
         }
     };
 
-    let mut have_v4 = false;
-    let mut have_v6 = false;
+    let mut has_v4 = false;
+    let mut has_v6 = false;
 
     for addr in addrs {
         let Some(addr) = addr.address else {
@@ -108,7 +108,7 @@ static IP_VERSION_AVAILABILITY: LazyLock<IpVersionAvailability> = LazyLock::new(
             && v4.ip().is_broadcast().not()
             && v4.ip().is_unspecified().not()
         {
-            have_v4 = true;
+            has_v4 = true;
         }
 
         if let Some(v6) = addr.as_sockaddr_in6()
@@ -118,17 +118,17 @@ static IP_VERSION_AVAILABILITY: LazyLock<IpVersionAvailability> = LazyLock::new(
             // anything
             && v6.ip().is_unicast_link_local().not()
         {
-            have_v6 = true;
+            has_v6 = true;
         }
     }
 
-    if have_v4.not() && have_v6.not() {
+    if has_v4.not() && has_v6.not() {
         tracing::warn!("No usable IPv4 or IPv6 addresses were found on any interface");
     }
 
     IpVersionAvailability {
-        v4: have_v4,
-        v6: have_v6,
+        v4: has_v4,
+        v6: has_v6,
     }
 });
 
