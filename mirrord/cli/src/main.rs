@@ -250,6 +250,14 @@
 //! - [`fix::fix_command`]
 //!
 //! > Contains fixes for commonly occuring issues that prevent mirrord from working optimally.
+//!
+//! ### `mirrord up`
+//!
+//! Spawns and manage multiple child mirrord sessions, based on a single `mirrord-up.yaml`
+//! configuration file.
+//! - [`up::up_command`]
+//!
+//! > Think docker compose but for mirrord.
 
 #![feature(try_blocks)]
 #![feature(iterator_try_collect)]
@@ -330,6 +338,7 @@ mod port_forward;
 mod preview;
 mod profile;
 mod teams;
+mod up;
 mod user_data;
 mod util;
 mod verify_config;
@@ -763,8 +772,17 @@ async fn exec(
 
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     cfg_context = apply_test_env_overrides(cfg_context);
-    let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
-    let mut config = LayerConfig::resolve(&mut cfg_context)?;
+
+    let (config_file_path, mut config) =
+        if let Ok(encoded) = std::env::var(mirrord_up::RESOLVED_CONFIG_ENV) {
+            // Running as a child of `mirrord up`, resolve config from env
+            let config = LayerConfig::decode(&encoded)?;
+            (None, config)
+        } else {
+            let path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
+            let config = LayerConfig::resolve(&mut cfg_context)?;
+            (path, config)
+        };
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
@@ -1145,6 +1163,7 @@ fn main() -> miette::Result<()> {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
             Commands::Preview(args) => preview::preview_command(*args, watch, &user_data).await?,
+            Commands::Up(args) => up::up_command(*args).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             #[cfg(feature = "wizard")]
             Commands::Wizard(args) => {
