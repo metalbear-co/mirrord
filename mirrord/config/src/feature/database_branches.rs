@@ -920,8 +920,8 @@ mod tests {
             ConnectionSource::Params(config) => {
                 let hosts = config.params.host.as_ref().unwrap();
                 assert_eq!(hosts.len(), 2);
-                assert!(matches!(&hosts[0], ParamSource::Variable(_)));
-                assert!(matches!(&hosts[1], ParamSource::Pattern { .. }));
+                assert!(matches!(hosts.first(), Some(ParamSource::Variable(_))));
+                assert!(matches!(hosts.get(1), Some(ParamSource::Pattern { .. })));
             }
             other => panic!("expected Params, got {:?}", other),
         }
