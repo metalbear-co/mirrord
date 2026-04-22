@@ -806,7 +806,7 @@
         "database": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ParamSource"
+              "$ref": "#/$defs/OneOrMany_ParamSource"
             },
             {
               "type": "null"
@@ -816,7 +816,7 @@
         "host": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ParamSource"
+              "$ref": "#/$defs/OneOrMany_ParamSource"
             },
             {
               "type": "null"
@@ -826,7 +826,7 @@
         "password": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ParamSource"
+              "$ref": "#/$defs/OneOrMany_ParamSource"
             },
             {
               "type": "null"
@@ -836,7 +836,7 @@
         "port": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ParamSource"
+              "$ref": "#/$defs/OneOrMany_ParamSource"
             },
             {
               "type": "null"
@@ -846,7 +846,7 @@
         "user": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ParamSource"
+              "$ref": "#/$defs/OneOrMany_ParamSource"
             },
             {
               "type": "null"
@@ -1400,7 +1400,7 @@
               ]
             },
             "url": {
-              "type": "string"
+              "$ref": "#/$defs/OneOrMany_string"
             }
           },
           "additionalProperties": false,
@@ -2914,6 +2914,32 @@
       },
       "additionalProperties": false
     },
+    "OneOrMany_ParamSource": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ParamSource"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ParamSource"
+          }
+        }
+      ]
+    },
+    "OneOrMany_string": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
     "OutgoingFileConfig": {
       "description": "Tunnel outgoing network operations through mirrord.\n\nSee the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic/#outgoing) for more\ndetails.\n\nYou can use either the `true` or `false` values to turn outgoing traffic tunneling on or off.\n\n```json\n{\n  \"feature\": {\n    \"network\": {\n      \"outgoing\": true\n    }\n  }\n}\n```\n\nAlternatively, you can use more fine-grained configuration.\n\n```json\n{\n  \"feature\": {\n    \"network\": {\n      \"outgoing\": {\n        \"tcp\": true,\n        \"udp\": true,\n        \"ignore_localhost\": false,\n        \"filter\": {\n          \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"]\n        },\n        \"unix_streams\": \"bear.+\"\n      }\n    }\n  }\n}\n```",
       "type": "object",
@@ -3027,6 +3053,22 @@
           "required": [
             "secret",
             "key"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "env_var_name": {
+              "type": "string"
+            },
+            "value_pattern": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "env_var_name",
+            "value_pattern"
           ]
         },
         {
