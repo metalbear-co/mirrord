@@ -303,7 +303,6 @@ mod test {
             gid: 13,
             tls_cert: None,
             pod_ips: None,
-            support_ipv6: false,
             steal_tls_config: Default::default(),
             idle_ttl: Default::default(),
         };
@@ -351,7 +350,6 @@ mod test {
             gid: 13,
             tls_cert: None,
             pod_ips: None,
-            support_ipv6: false,
             steal_tls_config: Default::default(),
             idle_ttl: Default::default(),
         };

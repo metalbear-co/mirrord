@@ -96,46 +96,57 @@ impl fmt::Debug for Redirected {
 ///
 /// * `flush_connections` - passed to inner redirectors.
 /// * `pod_ips` - passed to inner redirectors.
-/// * `support_ipv6` - if set, this function will attempt to create both an IPv4 and an IPv6
-///   redirector. Otherwise, it will only attempt to create an IPv4 redirector.
+/// * `support_ipv4` / `support_ipv6` - control whether we should try to create IPv4 and IPv6
+///   redirectors.
 pub async fn create_iptables_redirector(
     flush_connections: bool,
     pod_ips: &[IpAddr],
-    support_ipv6: bool,
     with_mesh_exclusion: Option<u16>,
+    support_ipv4: bool,
+    support_ipv6: bool,
 ) -> io::Result<ComposedRedirector<IpTablesRedirector>> {
-    let ipv4 = IpTablesRedirector::create(flush_connections, pod_ips, false, with_mesh_exclusion)
-        .await
-        .inspect_err(|error| {
-            tracing::error!(
-                %error,
-                "Failed to create an IPv4 traffic redirector",
-            )
-        });
-
-    let ipv6 = if support_ipv6 {
-        IpTablesRedirector::create(flush_connections, pod_ips, true, with_mesh_exclusion)
-            .await
-            .inspect_err(|error| {
-                tracing::error!(
-                    %error,
-                    "Failed to create an IPv6 traffic redirector",
-                )
-            })
-            .into()
+    let ipv4 = if support_ipv4 {
+        Some(
+            IpTablesRedirector::create(flush_connections, pod_ips, false, with_mesh_exclusion)
+                .await
+                .inspect_err(
+                    |error| tracing::error!(%error, "Failed to create an IPv4 traffic redirector"),
+                ),
+        )
     } else {
         None
     };
 
-    let redirectors = match (ipv4, ipv6) {
-        (Ok(ipv4), ipv6) => {
-            let mut redirectors = vec![ipv4];
-            redirectors.extend(ipv6.transpose().ok().flatten());
-            redirectors
-        }
-        (Err(error), None | Some(Err(..))) => return Err(error),
-        (Err(..), Some(Ok(ipv6))) => vec![ipv6],
+    let ipv6 = if support_ipv6 {
+        Some(
+            IpTablesRedirector::create(flush_connections, pod_ips, true, with_mesh_exclusion)
+                .await
+                .inspect_err(
+                    |error| tracing::error!(%error, "Failed to create an IPv6 traffic redirector"),
+                ),
+        )
+    } else {
+        None
     };
+
+    let mut redirectors = Vec::new();
+    let mut last_error = None;
+
+    for result in [ipv4, ipv6].into_iter().flatten() {
+        match result {
+            Ok(redirector) => redirectors.push(redirector),
+            Err(error) => last_error = Some(error),
+        }
+    }
+
+    if redirectors.is_empty() {
+        return Err(last_error.unwrap_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "at least one of IPv4 or IPv6 must be supported",
+            )
+        }));
+    }
 
     Ok(ComposedRedirector::new(redirectors))
 }

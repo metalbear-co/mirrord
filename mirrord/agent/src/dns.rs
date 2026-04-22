@@ -73,8 +73,6 @@ pub(crate) struct DnsWorker {
     ///
     /// Configured via [`envs::DNS_TIMEOUT`].
     timeout: Option<Duration>,
-    /// Whether we want support querying for IPv6 addresses.
-    support_ipv6: bool,
     /// Background tasks that handle the DNS requests.
     ///
     /// Each of these builds a new [`TokioAsyncResolver`] and performs one lookup.
@@ -90,11 +88,7 @@ impl DnsWorker {
     ///
     /// `pid` is used to find the correct path of `etc` directory.
     #[tracing::instrument(level = Level::TRACE)]
-    pub(crate) fn new(
-        pid: Option<u64>,
-        request_rx: Receiver<DnsCommand>,
-        support_ipv6: bool,
-    ) -> Self {
+    pub(crate) fn new(pid: Option<u64>, request_rx: Receiver<DnsCommand>) -> Self {
         let etc_path = pid
             .map(|pid| {
                 PathBuf::from("/proc")
@@ -120,7 +114,6 @@ impl DnsWorker {
             request_rx,
             timeout,
             attempts,
-            support_ipv6,
             tasks: Default::default(),
             response_txs: Default::default(),
         }
@@ -140,7 +133,6 @@ impl DnsWorker {
         request: GetAddrInfoRequestV2,
         attempts: Option<usize>,
         timeout: Option<Duration>,
-        support_ipv6: bool,
     ) -> Result<DnsLookup, InternalLookupError> {
         // Prepares the `Resolver` after reading some `/etc` DNS files.
         //
@@ -162,15 +154,8 @@ impl DnsWorker {
             if let Some(attempts) = attempts {
                 options.attempts = attempts;
             }
-            options.ip_strategy = if support_ipv6 {
-                tracing::debug!(
-                    "IPv6 support enabled. Respecting client IP family when resolving DNS."
-                );
-                request.family.convert()
-            } else {
-                tracing::debug!("IPv6 support disabled. Resolving IPv4 only.");
-                LookupIpStrategy::Ipv4Only
-            };
+
+            options.ip_strategy = request.family.convert();
 
             tracing::debug!(?config, ?options, "Updated resolv configuration");
 
@@ -203,14 +188,12 @@ impl DnsWorker {
         let etc_path = self.etc_path.clone();
         let timeout = self.timeout;
         let attempts = self.attempts;
-        let support_ipv6 = self.support_ipv6;
 
         let handle = self.tasks.spawn(Self::do_lookup(
             etc_path,
             message.request.into_v2(),
             attempts,
             timeout,
-            support_ipv6,
         ));
         self.response_txs.insert(handle.id(), message.response_tx);
 

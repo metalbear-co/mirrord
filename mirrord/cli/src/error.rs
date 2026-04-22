@@ -29,6 +29,7 @@ use crate::{
     fix::FixKubeconfigError,
     port_forward::PortForwardError,
     profile::ProfileError,
+    up::UpCliError,
 };
 
 pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
@@ -625,6 +626,11 @@ pub(crate) enum CliError {
     #[error("Environment key is required for this command")]
     #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
     PreviewKeyRequired,
+
+    /// Errors produced by the `mirrord up` command.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Up(#[from] UpCliError),
 
     /// Errors produced by the `mirrord ui` command.
     #[cfg(unix)]

@@ -237,8 +237,12 @@ tun2 = { version = "4", features = ["async"] }
 url = "2.5.8"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 which = "7"
-whoami = "1"
 wildmatch = "2"
+
+# Used by `cli`
+whoami = "2.1.1"
+
+# Used by `layer-win`
 windows-strings = "0.4"
 winapi = { version = "0.3.9", features = [
     "winbase",

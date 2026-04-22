@@ -1,11 +1,11 @@
 use std::{
     collections::HashMap,
     mem,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{Ipv6Addr, SocketAddr},
     ops::Not,
     path::PathBuf,
     sync::{
-        Arc, OnceLock,
+        Arc, LazyLock, OnceLock,
         atomic::{AtomicU32, Ordering},
     },
 };
@@ -76,6 +76,61 @@ const DIRTY_IPTABLES_CLEANUP_WARNING_MESSAGE: &str = "Detected dirty iptables. E
 or the previous agent failed to clean up before exit. \
 The leftover rules were cleaned and the agent is starting. \
 To allow concurrent sessions, consider using the operator available in mirrord for Teams: https://app.metalbear.com/?utm_source=dirtyiptables&utm_medium=agent";
+
+struct IpVersionAvailability {
+    v4: bool,
+    v6: bool,
+}
+
+/// Checks whether or not IPv4 and IPv6 addresses are present on any
+/// available network interfaces.
+static IP_VERSION_AVAILABILITY: LazyLock<IpVersionAvailability> = LazyLock::new(|| {
+    let addrs = match nix::ifaddrs::getifaddrs() {
+        Ok(addrs) => addrs,
+        Err(err) => {
+            tracing::error!(?err, "failed to fetch ifaddrs: {}", err.desc());
+            return IpVersionAvailability {
+                v4: false,
+                v6: false,
+            };
+        }
+    };
+
+    let mut has_v4 = false;
+    let mut has_v6 = false;
+
+    for addr in addrs {
+        let Some(addr) = addr.address else {
+            continue;
+        };
+        if let Some(v4) = addr.as_sockaddr_in()
+            && v4.ip().is_loopback().not()
+            && v4.ip().is_broadcast().not()
+            && v4.ip().is_unspecified().not()
+        {
+            has_v4 = true;
+        }
+
+        if let Some(v6) = addr.as_sockaddr_in6()
+            && v6.ip().is_loopback().not()
+            && v6.ip().is_unspecified().not()
+            // these are automatically assigned, they don't mean
+            // anything
+            && v6.ip().is_unicast_link_local().not()
+        {
+            has_v6 = true;
+        }
+    }
+
+    if has_v4.not() && has_v6.not() {
+        tracing::warn!("No usable IPv4 or IPv6 addresses were found on any interface");
+    }
+
+    IpVersionAvailability {
+        v4: has_v4,
+        v6: has_v6,
+    }
+});
 
 /// Identifier for the iptables chain names of the agent.
 ///
@@ -707,17 +762,23 @@ fn monitor_main_container(cancel: CancellationToken, pid: libc::pid_t) {
 
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn get_rules(
-    iptables: &IPTablesWrapper,
+    iptables: Option<&IPTablesWrapper>,
     ip6tables: Option<&IPTablesWrapper>,
     chain_names: &ChainNames,
 ) -> IPTablesResult<Vec<String>> {
-    let rules_v4 = SafeIpTables::list_mirrord_rules(iptables, chain_names).await?;
+    let mut rules = Vec::new();
+
+    if let Some(iptables) = iptables {
+        let rules_v4 = SafeIpTables::list_mirrord_rules(iptables, chain_names).await?;
+        rules.extend(rules_v4);
+    }
+
     if let Some(ip6tables) = ip6tables {
         let rules_v6 = SafeIpTables::list_mirrord_rules(ip6tables, chain_names).await?;
-        Ok([rules_v4, rules_v6].concat())
-    } else {
-        Ok(rules_v4)
+        rules.extend(rules_v6);
     }
+
+    Ok(rules)
 }
 
 /// Get existing iptable rules created by this agent instance.
@@ -726,26 +787,26 @@ async fn get_rules(
 /// rules. The rules from before the cleanup will be returned for logging.
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn check_existing_rules(
-    support_ipv6: bool,
     clean_existing_rules: bool,
     with_mesh_exclusion: bool,
     chain_names: ChainNames,
 ) -> IPTablesResult<Vec<String>> {
     let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
-    let iptables = mirrord_agent_iptables::get_iptables(nftables, false);
-    let ip6tables = support_ipv6.then(|| mirrord_agent_iptables::get_iptables(nftables, true));
 
-    let rules = get_rules(&iptables, ip6tables.as_ref(), &chain_names).await?;
+    let IpVersionAvailability { v4, v6 } = &*IP_VERSION_AVAILABILITY;
 
+    let iptables = v4.then(|| mirrord_agent_iptables::get_iptables(nftables, false));
+    let ip6tables = v6.then(|| mirrord_agent_iptables::get_iptables(nftables, true));
+
+    let rules = get_rules(iptables.as_ref(), ip6tables.as_ref(), &chain_names).await?;
     if clean_existing_rules
         && rules.is_empty().not()
-        && let Err(err) =
-            clear_iptable_chain(support_ipv6, with_mesh_exclusion, ChainNames::legacy()).await
+        && let Err(err) = clear_iptable_chain(*v4, *v6, with_mesh_exclusion, &chain_names).await
     {
         // the error could be because we tried to remove two rules and only one of them was
         // present to begin with, so removing the other, non-existent one failed.
         // So we check the rules after cleaning and only fail if there are still rules.
-        let rules = get_rules(&iptables, ip6tables.as_ref(), &chain_names).await?;
+        let rules = get_rules(iptables.as_ref(), ip6tables.as_ref(), &chain_names).await?;
         if rules.is_empty().not() {
             // There are still rules after the cleanup, the cleanup was not successful.
             return Err(err);
@@ -766,7 +827,6 @@ async fn check_leftover_rules(
         .network_runtime
         .handle()
         .spawn(check_existing_rules(
-            args.ipv6,
             args.clean_iptables_on_start,
             state.is_with_mesh_exclusion(),
             chain_names,
@@ -805,30 +865,17 @@ async fn check_leftover_rules(
 /// starts background tasks and listens for client connections.
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent(args: Args) -> AgentResult<()> {
-    // Prepares a TCP listener for accepting client connections.
-    let setup_listener = |ipv6: bool| -> AgentResult<TcpListener> {
-        let (socket, ip) = if ipv6 {
-            (TcpSocket::new_v6()?, Ipv6Addr::UNSPECIFIED.into())
-        } else {
-            (TcpSocket::new_v4()?, Ipv4Addr::UNSPECIFIED.into())
-        };
+    let listener = {
+        let listener = TcpSocket::new_v6()?;
         // SO_REUSEADDR is required to handle rapid agent restarts.
-        socket.set_reuseaddr(true)?;
-        socket.bind(SocketAddr::new(ip, args.communicate_port))?;
-        socket.listen(1024).map_err(From::from)
+        listener.set_reuseaddr(true)?;
+        listener.bind(SocketAddr::new(
+            Ipv6Addr::UNSPECIFIED.into(),
+            args.communicate_port,
+        ))?;
+        listener.listen(1024).map_err(AgentError::from)?
     };
 
-    // Listen for client connections
-    let listener = setup_listener(false).or_else(|error| {
-        if args.ipv6.not() {
-            return Err(error);
-        }
-        debug!(
-            "IPv6 support is enabled, and IPv4 bind failed. \
-            Creating an IPv6 listener for accepting client connections.",
-        );
-        setup_listener(true)
-    })?;
     let client_listener_address = listener.local_addr()?;
     debug!(address = %client_listener_address, "Created the client listener.");
 
@@ -916,7 +963,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         }
     };
 
-    let dns = setup::start_dns(&args, &state.network_runtime, cancellation_token.clone());
+    let dns = setup::start_dns(&state.network_runtime, cancellation_token.clone());
 
     let bg_tasks = BackgroundTasks {
         stealer,
@@ -1021,39 +1068,39 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 }
 
 async fn clear_iptable_chain(
-    ipv6_enabled: bool,
+    clear_ipv4: bool,
+    clear_ipv6: bool,
     with_mesh_exclusion: bool,
-    chain_names: ChainNames,
+    chain_names: &ChainNames,
 ) -> Result<(), IPTablesError> {
     let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
 
-    let v4_result: Result<(), IPTablesError> = try {
-        let ipt = mirrord_agent_iptables::get_iptables(nftables, false);
-        if SafeIpTables::list_mirrord_rules(&ipt, &chain_names)
+    let clear = async |v6| -> Result<(), IPTablesError> {
+        let ipt = mirrord_agent_iptables::get_iptables(nftables, v6);
+        match SafeIpTables::list_mirrord_rules(&ipt, chain_names)
             .await?
-            .is_empty()
+            .next()
         {
-            trace!("No iptables mirrord rules found, skipping iptables cleanup.");
-        } else {
-            let tables = SafeIpTables::load(ipt, &chain_names, false, with_mesh_exclusion).await?;
-            tables.cleanup().await?
+            Some(_) => {
+                let tables =
+                    SafeIpTables::load(ipt, chain_names, false, with_mesh_exclusion).await?;
+                tables.cleanup().await
+            }
+            None => {
+                trace!("No iptables mirrord rules found, skipping iptables cleanup.");
+                Ok(())
+            }
         }
     };
 
-    let v6_result: Result<(), IPTablesError> = if ipv6_enabled {
-        try {
-            let ipt = mirrord_agent_iptables::get_iptables(nftables, true);
-            if SafeIpTables::list_mirrord_rules(&ipt, &chain_names)
-                .await?
-                .is_empty()
-            {
-                trace!("No ip6tables mirrord rules found, skipping ip6tables cleanup.");
-            } else {
-                let tables =
-                    SafeIpTables::load(ipt, &chain_names, true, with_mesh_exclusion).await?;
-                tables.cleanup().await?
-            }
-        }
+    let v4_result = if clear_ipv4 {
+        clear(false).await
+    } else {
+        Ok(())
+    };
+
+    let v6_result = if clear_ipv6 {
+        clear(true).await
     } else {
         Ok(())
     };
@@ -1116,18 +1163,24 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
         },
     };
 
+    let IpVersionAvailability { v4, v6 } = &*IP_VERSION_AVAILABILITY;
+
     state
         .network_runtime
         .handle()
-        .spawn(clear_iptable_chain(
-            args.ipv6,
-            with_mesh_exclusion,
-            ChainNames::new(
-                IPTABLES_IDENTIFIER
-                    .get()
-                    .expect("Should be set during state initialization!"),
-            ),
-        ))
+        .spawn(async move {
+            clear_iptable_chain(
+                *v4,
+                *v6,
+                with_mesh_exclusion,
+                &ChainNames::new(
+                    IPTABLES_IDENTIFIER
+                        .get()
+                        .expect("Should be set during state initialization!"),
+                ),
+            )
+            .await
+        })
         .await
         .map_err(|error| AgentError::BackgroundTaskFailed {
             task: "IPTablesCleaner",

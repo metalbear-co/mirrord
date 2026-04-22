@@ -381,14 +381,12 @@ mod test {
     fn targetless() -> Result<(), Box<dyn std::error::Error>> {
         let mut config_context = ConfigContext::default();
         let agent = AgentFileConfig::default().generate_config(&mut config_context)?;
-        let support_ipv6 = false;
         let params = ContainerParams {
             name: "foobar".to_string(),
             port: 3000,
             gid: 13,
             tls_cert: None,
             pod_ips: None,
-            support_ipv6,
             steal_tls_config: Default::default(),
             idle_ttl: Default::default(),
         };
@@ -439,7 +437,6 @@ mod test {
                                     { "name": envs::LOG_LEVEL.name, "value": agent.log_level },
                                     { "name": envs::STEALER_FLUSH_CONNECTIONS.name, "value": agent.flush_connections.to_string() },
                                     { "name": envs::JSON_LOG.name, "value": Some(agent.json_log.to_string()) },
-                                    { "name": envs::IPV6_SUPPORT.name, "value": Some(support_ipv6.to_string()) },
                                     { "name": envs::PASSTHROUGH_MIRRORING.name, "value": "true" },
                                     { "name": envs::MAX_BODY_BUFFER_SIZE.name, "value": "65535" },
                                     { "name": envs::MAX_BODY_BUFFER_TIMEOUT.name, "value": "1000" },
@@ -475,14 +472,12 @@ mod test {
         let mut config_context = ConfigContext::default();
         let mut agent = AgentFileConfig::default().generate_config(&mut config_context)?;
         agent.nftables = Some(true);
-        let support_ipv6 = false;
         let params = ContainerParams {
             name: "foobar".to_string(),
             port: 3000,
             gid: 13,
             tls_cert: None,
             pod_ips: None,
-            support_ipv6,
             steal_tls_config: Default::default(),
             idle_ttl: Default::default(),
         };
@@ -585,7 +580,6 @@ mod test {
                                     { "name": envs::LOG_LEVEL.name, "value": agent.log_level },
                                     { "name": envs::STEALER_FLUSH_CONNECTIONS.name, "value": agent.flush_connections.to_string() },
                                     { "name": envs::JSON_LOG.name, "value": Some(agent.json_log.to_string()) },
-                                    { "name": envs::IPV6_SUPPORT.name, "value": Some(support_ipv6.to_string()) },
                                     { "name": envs::PASSTHROUGH_MIRRORING.name, "value": "true" },
                                     { "name": envs::MAX_BODY_BUFFER_SIZE.name, "value": "65535" },
                                     { "name": envs::MAX_BODY_BUFFER_TIMEOUT.name, "value": "1000" },
