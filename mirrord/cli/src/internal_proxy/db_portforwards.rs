@@ -530,6 +530,7 @@ mod tests {
             url: TargetEnvironmentVariableSource::Secret {
                 name: "db-secret".to_owned(),
                 key: "url".to_owned(),
+                env_var_name: None,
             },
         };
         let config = DatabaseBranchesConfig(vec![mysql(Some("db3"), conn)]);
