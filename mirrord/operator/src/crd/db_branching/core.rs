@@ -62,22 +62,6 @@ pub enum ConnectionSourceKind {
     },
 }
 
-/// In case someone was using the old `secret` source kind without `env_var_name`,
-fn secret_kind(name: String, key: String, env_var_name: Option<String>) -> ConnectionSourceKind {
-    if env_var_name.is_none() {
-        tracing::warn!(
-            secret = %name,
-            key = %key,
-            "DB branch `secret` source has no `env_var_name`; local app will not use the branch credentials.",
-        );
-    }
-    ConnectionSourceKind::Secret {
-        name,
-        key,
-        env_var_name,
-    }
-}
-
 impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
     fn from(src: TargetEnvironmentVariableSource) -> Self {
         match src {
@@ -100,7 +84,11 @@ impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
                 name,
                 key,
                 env_var_name,
-            } => secret_kind(name, key, env_var_name),
+            } => ConnectionSourceKind::Secret {
+                name,
+                key,
+                env_var_name,
+            },
         }
     }
 }
@@ -127,7 +115,11 @@ impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
                 name,
                 key,
                 env_var_name,
-            } => secret_kind(name.clone(), key.clone(), env_var_name.clone()),
+            } => ConnectionSourceKind::Secret {
+                name: name.clone(),
+                key: key.clone(),
+                env_var_name: env_var_name.clone(),
+            },
         }
     }
 }
@@ -160,7 +152,11 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
                     name,
                     key,
                     env_var_name,
-                } => secret_kind(name.clone(), key.clone(), env_var_name.clone()),
+                } => ConnectionSourceKind::Secret {
+                    name: name.clone(),
+                    key: key.clone(),
+                    env_var_name: env_var_name.clone(),
+                },
             })
         };
         Self {
