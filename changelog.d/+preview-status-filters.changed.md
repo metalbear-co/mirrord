@@ -1,0 +1,2 @@
+Preview sessions are now deleted automatically when their TTL expires, and failed sessions are cleaned up automatically after the retention window configured by `operator.preview.cleanupAfterMins` in the chart configuration.
+Alongside this change, `mirrord preview status` now only shows active sessions by default, and a new `--failed` flag lets you inspect failed sessions that haven't been cleaned up yet.
