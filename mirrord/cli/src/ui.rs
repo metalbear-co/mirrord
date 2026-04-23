@@ -28,6 +28,8 @@ use axum::{
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use eventsource_stream::Eventsource;
 use futures::stream::StreamExt as _;
+use kube::{Api, Client};
+use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session};
 use mirrord_session_monitor_client::{
     SessionError, connect_to_session, session_socket_entries, sessions_dir,
 };
@@ -54,8 +56,115 @@ struct FrontendAssets;
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum SessionNotification {
-    SessionAdded { session: Box<TrackedSession> },
-    SessionRemoved { session_id: String },
+    SessionAdded {
+        session: Box<TrackedSession>,
+    },
+    SessionRemoved {
+        session_id: String,
+    },
+    OperatorSessionAdded {
+        session: Box<OperatorSessionSummary>,
+    },
+    OperatorSessionRemoved {
+        name: String,
+    },
+    OperatorSessionUpdated {
+        session: Box<OperatorSessionSummary>,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorSessionSummary {
+    pub name: String,
+    pub key: Option<String>,
+    pub namespace: String,
+    pub owner: Option<OperatorSessionOwner>,
+    pub target: Option<OperatorSessionTarget>,
+    pub created_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorSessionOwner {
+    pub username: String,
+    pub k8s_username: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorSessionTarget {
+    pub kind: String,
+    pub name: String,
+    pub container: String,
+}
+
+impl OperatorSessionSummary {
+    fn from_session(session: &Session) -> Option<Self> {
+        let name = session.id.clone()?;
+        let namespace = session.namespace.clone().unwrap_or_default();
+        let owner = parse_session_owner(&session.user);
+        let target = parse_session_target(&session.target);
+        let created_at = std::time::SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(session.duration_secs))
+            .map(|t| {
+                let secs = t
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
+                    k8s_openapi::jiff::Timestamp::from_second(i64::try_from(secs).unwrap_or(0))
+                        .unwrap_or(k8s_openapi::jiff::Timestamp::UNIX_EPOCH),
+                )
+                .0
+                .to_string()
+            });
+        Some(Self {
+            name,
+            key: session.key.clone(),
+            namespace,
+            owner,
+            target,
+            created_at,
+        })
+    }
+}
+
+fn parse_session_owner(user: &str) -> Option<OperatorSessionOwner> {
+    let (head, _hostname) = user.rsplit_once('@')?;
+    let (username, k8s_username) = head.split_once('/')?;
+    Some(OperatorSessionOwner {
+        username: username.to_owned(),
+        k8s_username: k8s_username.to_owned(),
+    })
+}
+
+fn parse_session_target(target: &str) -> Option<OperatorSessionTarget> {
+    if target == "targetless" {
+        return None;
+    }
+    let (kind_short, rest) = target.split_once('.')?;
+    let kind = match kind_short {
+        "deploy" => "Deployment",
+        "pod" => "Pod",
+        "rollout" => "Rollout",
+        "job" => "Job",
+        "cronjob" => "CronJob",
+        "statefulset" => "StatefulSet",
+        "service" => "Service",
+        "replicaset" => "ReplicaSet",
+        other => other,
+    }
+    .to_owned();
+    let (name, container) = rest
+        .split_once(".container.")
+        .map(|(n, c)| (n.to_owned(), c.to_owned()))
+        .unwrap_or_else(|| (rest.to_owned(), String::new()));
+    Some(OperatorSessionTarget {
+        kind,
+        name,
+        container,
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -74,8 +183,24 @@ impl Serialize for TrackedSession {
 
 struct AppState {
     sessions: RwLock<HashMap<String, TrackedSession>>,
+    operator_sessions: RwLock<std::collections::BTreeMap<String, OperatorSessionSummary>>,
+    operator_watch_status: RwLock<OperatorWatchStatus>,
     notify_tx: broadcast::Sender<SessionNotification>,
     token: String,
+}
+
+#[derive(Clone, Debug, Serialize, Default)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum OperatorWatchStatus {
+    #[default]
+    NotStarted,
+    Watching,
+    Error {
+        message: String,
+    },
+    Unavailable {
+        reason: String,
+    },
 }
 
 #[derive(Deserialize)]
@@ -321,6 +446,34 @@ async fn session_events_sse(
         .into_response()
 }
 
+#[derive(Serialize)]
+struct OperatorSessionsResponse {
+    by_key: std::collections::BTreeMap<String, Vec<OperatorSessionSummary>>,
+    sessions: Vec<OperatorSessionSummary>,
+    watch_status: OperatorWatchStatus,
+}
+
+async fn list_operator_sessions(
+    State(state): State<Arc<AppState>>,
+) -> axum::Json<OperatorSessionsResponse> {
+    let map = state.operator_sessions.read().await;
+    let watch_status = state.operator_watch_status.read().await.clone();
+
+    let mut by_key: std::collections::BTreeMap<String, Vec<OperatorSessionSummary>> =
+        std::collections::BTreeMap::new();
+    let sessions: Vec<OperatorSessionSummary> = map.values().cloned().collect();
+    for s in &sessions {
+        let k = s.key.clone().unwrap_or_default();
+        by_key.entry(k).or_default().push(s.clone());
+    }
+
+    axum::Json(OperatorSessionsResponse {
+        by_key,
+        sessions,
+        watch_status,
+    })
+}
+
 async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     let (client, socket_path) = {
         let sessions = state.sessions.read().await;
@@ -516,6 +669,83 @@ fn start_filesystem_watcher(
     Ok(())
 }
 
+fn start_operator_watcher(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        let client = match Client::try_default().await {
+            Ok(client) => client,
+            Err(err) => {
+                let reason = format!("kube client init failed: {err}");
+                warn!("{reason}");
+                *state.operator_watch_status.write().await =
+                    OperatorWatchStatus::Unavailable { reason };
+                return;
+            }
+        };
+
+        let api: Api<MirrordOperatorCrd> = Api::all(client);
+
+        if let Err(err) = api.get(OPERATOR_STATUS_NAME).await {
+            let reason = format!("operator not available: {err}");
+            warn!("{reason}");
+            *state.operator_watch_status.write().await =
+                OperatorWatchStatus::Unavailable { reason };
+            return;
+        }
+
+        *state.operator_watch_status.write().await = OperatorWatchStatus::Watching;
+
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            match api.get(OPERATOR_STATUS_NAME).await {
+                Ok(operator) => {
+                    let sessions = operator
+                        .status
+                        .as_ref()
+                        .map(|s| s.sessions.as_slice())
+                        .unwrap_or_default();
+                    let observed: HashMap<String, OperatorSessionSummary> = sessions
+                        .iter()
+                        .filter_map(OperatorSessionSummary::from_session)
+                        .map(|s| (s.name.clone(), s))
+                        .collect();
+                    let mut map = state.operator_sessions.write().await;
+                    for (name, summary) in &observed {
+                        let prior = map.insert(name.clone(), summary.clone());
+                        let _ = state.notify_tx.send(if prior.is_none() {
+                            SessionNotification::OperatorSessionAdded {
+                                session: Box::new(summary.clone()),
+                            }
+                        } else {
+                            SessionNotification::OperatorSessionUpdated {
+                                session: Box::new(summary.clone()),
+                            }
+                        });
+                    }
+                    let stale: Vec<String> = map
+                        .keys()
+                        .filter(|name| !observed.contains_key(*name))
+                        .cloned()
+                        .collect();
+                    for name in stale {
+                        map.remove(&name);
+                        let _ = state
+                            .notify_tx
+                            .send(SessionNotification::OperatorSessionRemoved { name });
+                    }
+                }
+                Err(err) => {
+                    let reason = format!("operator status fetch error: {err}");
+                    warn!("{reason}");
+                    *state.operator_watch_status.write().await =
+                        OperatorWatchStatus::Error { message: reason };
+                }
+            }
+        }
+    });
+}
+
 async fn health() -> impl IntoResponse {
     axum::Json(serde_json::json!({"status": "ok"}))
 }
@@ -525,7 +755,8 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/sessions", get(list_sessions))
         .route("/sessions/{id}", get(get_session))
         .route("/sessions/{id}/events", get(session_events_sse))
-        .route("/sessions/{id}/kill", post(kill_session));
+        .route("/sessions/{id}/kill", post(kill_session))
+        .route("/operator-sessions", get(list_operator_sessions));
 
     let authenticated_routes = Router::new()
         .nest("/api", api_routes)
@@ -582,6 +813,8 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
 
     let state = Arc::new(AppState {
         sessions: RwLock::new(HashMap::new()),
+        operator_sessions: RwLock::new(std::collections::BTreeMap::new()),
+        operator_watch_status: RwLock::new(OperatorWatchStatus::NotStarted),
         notify_tx,
         token: token.clone(),
     });
@@ -590,6 +823,7 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
     #[cfg(target_os = "macos")]
     start_periodic_rescan(sessions_dir.clone(), state.clone());
     start_filesystem_watcher(&sessions_dir, state.clone())?;
+    start_operator_watcher(state.clone());
 
     let app = build_router(state);
 
@@ -602,7 +836,13 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
         .local_addr()
         .map_err(|e| CliError::UiError(format!("failed to get listener address: {e}")))?;
     let url = format!("http://{addr}?token={token}");
-    eprintln!("mirrord session monitor: {url}");
+    let extension_url = build_extension_configure_url(&addr, &token);
+
+    eprintln!();
+    eprintln!("  mirrord session monitor");
+    eprintln!("    Web UI:             {url}");
+    eprintln!("    Browser extension:  {extension_url}");
+    eprintln!();
 
     if let Err(err) = opener::open(&url) {
         warn!(?err, "Failed to open browser");
@@ -613,6 +853,18 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
         .map_err(|e| CliError::UiError(format!("server error: {e}")))?;
 
     Ok(())
+}
+
+const MIRRORD_EXTENSION_ID: &str = "bijejadnnfgjkfdocgocklekjhnhkhkf";
+
+fn build_extension_configure_url(addr: &SocketAddr, token: &str) -> String {
+    let backend = format!("http://{addr}");
+    let backend_encoded: String =
+        url::form_urlencoded::byte_serialize(backend.as_bytes()).collect();
+    format!(
+        "chrome-extension://{id}/pages/configure.html?backend={backend_encoded}&token={token}",
+        id = MIRRORD_EXTENSION_ID
+    )
 }
 
 #[cfg(test)]
@@ -631,6 +883,8 @@ mod tests {
         let (notify_tx, _) = broadcast::channel(16);
         Arc::new(AppState {
             sessions: RwLock::new(HashMap::new()),
+            operator_sessions: RwLock::new(std::collections::BTreeMap::new()),
+            operator_watch_status: RwLock::new(OperatorWatchStatus::default()),
             notify_tx,
             token: TEST_TOKEN.to_owned(),
         })
@@ -827,5 +1081,86 @@ mod tests {
             response.headers().get(header::SET_COOKIE).is_some(),
             "cookie must be set on the first authenticated request, even if the body is 404"
         );
+    }
+
+    mod operator_sessions {
+        use mirrord_operator::crd::Session;
+
+        use super::*;
+
+        fn sample_session(id: &str, key: &str) -> Session {
+            Session {
+                id: Some(id.to_owned()),
+                duration_secs: 60,
+                user: "alice/alice@ex@host".to_owned(),
+                target: "deploy.web.container.app".to_owned(),
+                namespace: Some("default".to_owned()),
+                locked_ports: None,
+                user_id: Some("u".to_owned()),
+                sqs: None,
+                rmq: None,
+                kafka: None,
+                key: Some(key.to_owned()),
+            }
+        }
+
+        #[test]
+        fn summary_from_session_extracts_key_and_parses_target_owner() {
+            let session = sample_session("cr-1", "alice-session");
+            let summary = OperatorSessionSummary::from_session(&session).unwrap();
+            assert_eq!(summary.name, "cr-1");
+            assert_eq!(summary.key.as_deref(), Some("alice-session"));
+            assert_eq!(summary.namespace, "default");
+            assert_eq!(
+                summary.target.as_ref().map(|t| t.name.as_str()),
+                Some("web")
+            );
+            assert_eq!(
+                summary.target.as_ref().map(|t| t.kind.as_str()),
+                Some("Deployment")
+            );
+            assert_eq!(
+                summary.target.as_ref().map(|t| t.container.as_str()),
+                Some("app")
+            );
+            assert_eq!(
+                summary.owner.as_ref().map(|o| o.username.as_str()),
+                Some("alice")
+            );
+            assert_eq!(
+                summary.owner.as_ref().map(|o| o.k8s_username.as_str()),
+                Some("alice@ex")
+            );
+        }
+
+        #[tokio::test]
+        async fn operator_sessions_groups_by_key_with_none_bucket() {
+            let (tx, _rx) = broadcast::channel::<SessionNotification>(16);
+            let state = Arc::new(AppState {
+                sessions: RwLock::new(HashMap::new()),
+                operator_sessions: RwLock::new({
+                    let mut m = std::collections::BTreeMap::new();
+                    let s1 =
+                        OperatorSessionSummary::from_session(&sample_session("a", "k")).unwrap();
+                    let s2 =
+                        OperatorSessionSummary::from_session(&sample_session("b", "k")).unwrap();
+                    let s3 =
+                        OperatorSessionSummary::from_session(&sample_session("c", "k2")).unwrap();
+                    m.insert("a".into(), s1);
+                    m.insert("b".into(), s2);
+                    m.insert("c".into(), s3);
+                    m
+                }),
+                operator_watch_status: RwLock::new(OperatorWatchStatus::Watching),
+                notify_tx: tx,
+                token: "t".into(),
+            });
+
+            let resp = list_operator_sessions(axum::extract::State(state)).await.0;
+            assert_eq!(resp.sessions.len(), 3);
+            assert_eq!(resp.by_key.get("k").map(|v| v.len()), Some(2));
+            assert_eq!(resp.by_key.get("k2").map(|v| v.len()), Some(1));
+            assert!(matches!(resp.watch_status, OperatorWatchStatus::Watching));
+        }
     }
 }
