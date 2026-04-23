@@ -143,27 +143,16 @@ fn parse_session_target(target: &str) -> Option<OperatorSessionTarget> {
     if target == "targetless" {
         return None;
     }
-    let (kind_short, rest) = target.split_once('.')?;
-    let kind = match kind_short {
-        "deploy" => "Deployment",
-        "pod" => "Pod",
-        "rollout" => "Rollout",
-        "job" => "Job",
-        "cronjob" => "CronJob",
-        "statefulset" => "StatefulSet",
-        "service" => "Service",
-        "replicaset" => "ReplicaSet",
-        other => other,
-    }
-    .to_owned();
-    let (name, container) = rest
-        .split_once(".container.")
-        .map(|(n, c)| (n.to_owned(), c.to_owned()))
-        .unwrap_or_else(|| (rest.to_owned(), String::new()));
+    let (kind_lower, name) = target.split_once('/')?;
+    let mut chars = kind_lower.chars();
+    let kind = chars
+        .next()
+        .map(|c| c.to_ascii_uppercase().to_string() + chars.as_str())
+        .unwrap_or_else(|| kind_lower.to_owned());
     Some(OperatorSessionTarget {
         kind,
-        name,
-        container,
+        name: name.to_owned(),
+        container: String::new(),
     })
 }
 
@@ -1093,7 +1082,7 @@ mod tests {
                 id: Some(id.to_owned()),
                 duration_secs: 60,
                 user: "alice/alice@ex@host".to_owned(),
-                target: "deploy.web.container.app".to_owned(),
+                target: "deployment/web".to_owned(),
                 namespace: Some("default".to_owned()),
                 locked_ports: None,
                 user_id: Some("u".to_owned()),
@@ -1118,10 +1107,6 @@ mod tests {
             assert_eq!(
                 summary.target.as_ref().map(|t| t.kind.as_str()),
                 Some("Deployment")
-            );
-            assert_eq!(
-                summary.target.as_ref().map(|t| t.container.as_str()),
-                Some("app")
             );
             assert_eq!(
                 summary.owner.as_ref().map(|o| o.username.as_str()),

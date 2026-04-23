@@ -1,0 +1,1 @@
+Added `key` field to `MirrordOperator.status.sessions[]`, surfaced from the user's `key` value in mirrord.json. Lets clients (browser extension via `mirrord ui`) list joinable sessions grouped by this key.
