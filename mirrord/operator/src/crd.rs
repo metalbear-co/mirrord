@@ -443,6 +443,15 @@ pub struct Session {
     pub kafka: Option<Vec<MirrordKafkaEphemeralTopicSpec>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_filter: Option<SessionHttpFilter>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionHttpFilter {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header_filter: Option<String>,
 }
 
 /// Resource used to access the operator's session management routes.

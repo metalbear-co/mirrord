@@ -84,6 +84,15 @@ pub struct OperatorSessionSummary {
     pub owner: OperatorSessionOwner,
     pub target: Option<OperatorSessionTarget>,
     pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_filter: Option<OperatorSessionHttpFilter>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorSessionHttpFilter {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header_filter: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -115,6 +124,12 @@ impl OperatorSessionSummary {
             .and_then(|secs| i64::try_from(secs).ok())
             .and_then(|secs| k8s_openapi::jiff::Timestamp::from_second(secs).ok())
             .map(|ts| ts.to_string())?;
+        let http_filter = session
+            .http_filter
+            .as_ref()
+            .map(|f| OperatorSessionHttpFilter {
+                header_filter: f.header_filter.clone(),
+            });
         Some(Self {
             id,
             key,
@@ -122,6 +137,7 @@ impl OperatorSessionSummary {
             owner,
             target,
             created_at,
+            http_filter,
         })
     }
 }
@@ -1097,6 +1113,7 @@ mod tests {
                 rmq: None,
                 kafka: None,
                 key: Some(key.to_owned()),
+                http_filter: None,
             }
         }
 
