@@ -29,7 +29,9 @@ use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use eventsource_stream::Eventsource;
 use futures::stream::StreamExt as _;
 use kube::{Api, Client};
-use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session};
+use mirrord_operator::crd::{
+    MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, TARGETLESS_TARGET_NAME,
+};
 use mirrord_session_monitor_client::{
     SessionError, connect_to_session, session_socket_entries, sessions_dir,
 };
@@ -66,7 +68,7 @@ enum SessionNotification {
         session: Box<OperatorSessionSummary>,
     },
     OperatorSessionRemoved {
-        name: String,
+        id: String,
     },
     OperatorSessionUpdated {
         session: Box<OperatorSessionSummary>,
@@ -76,12 +78,12 @@ enum SessionNotification {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OperatorSessionSummary {
-    pub name: String,
-    pub key: Option<String>,
+    pub id: String,
+    pub key: String,
     pub namespace: String,
-    pub owner: Option<OperatorSessionOwner>,
+    pub owner: OperatorSessionOwner,
     pub target: Option<OperatorSessionTarget>,
-    pub created_at: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -101,27 +103,21 @@ pub struct OperatorSessionTarget {
 
 impl OperatorSessionSummary {
     fn from_session(session: &Session) -> Option<Self> {
-        let name = session.id.clone()?;
+        let id = session.id.clone()?;
+        let key = session.key.clone()?;
         let namespace = session.namespace.clone().unwrap_or_default();
-        let owner = parse_session_owner(&session.user);
+        let owner = parse_session_owner(&session.user)?;
         let target = parse_session_target(&session.target);
         let created_at = std::time::SystemTime::now()
             .checked_sub(std::time::Duration::from_secs(session.duration_secs))
-            .map(|t| {
-                let secs = t
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
-                    k8s_openapi::jiff::Timestamp::from_second(i64::try_from(secs).unwrap_or(0))
-                        .unwrap_or(k8s_openapi::jiff::Timestamp::UNIX_EPOCH),
-                )
-                .0
-                .to_string()
-            });
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .and_then(|secs| i64::try_from(secs).ok())
+            .and_then(|secs| k8s_openapi::jiff::Timestamp::from_second(secs).ok())
+            .map(|ts| ts.to_string())?;
         Some(Self {
-            name,
-            key: session.key.clone(),
+            id,
+            key,
             namespace,
             owner,
             target,
@@ -140,17 +136,12 @@ fn parse_session_owner(user: &str) -> Option<OperatorSessionOwner> {
 }
 
 fn parse_session_target(target: &str) -> Option<OperatorSessionTarget> {
-    if target == "targetless" {
+    if target == TARGETLESS_TARGET_NAME {
         return None;
     }
-    let (kind_lower, name) = target.split_once('/')?;
-    let mut chars = kind_lower.chars();
-    let kind = chars
-        .next()
-        .map(|c| c.to_ascii_uppercase().to_string() + chars.as_str())
-        .unwrap_or_else(|| kind_lower.to_owned());
+    let (kind, name) = target.split_once('/')?;
     Some(OperatorSessionTarget {
-        kind,
+        kind: kind.to_owned(),
         name: name.to_owned(),
         container: String::new(),
     })
@@ -452,8 +443,7 @@ async fn list_operator_sessions(
         std::collections::BTreeMap::new();
     let sessions: Vec<OperatorSessionSummary> = map.values().cloned().collect();
     for s in &sessions {
-        let k = s.key.clone().unwrap_or_default();
-        by_key.entry(k).or_default().push(s.clone());
+        by_key.entry(s.key.clone()).or_default().push(s.clone());
     }
 
     axum::Json(OperatorSessionsResponse {
@@ -708,13 +698,21 @@ async fn reconcile_operator_sessions(state: &AppState, operator: &MirrordOperato
         .unwrap_or_default()
         .iter()
         .filter_map(OperatorSessionSummary::from_session)
-        .map(|s| (s.name.clone(), s))
+        .map(|s| (s.id.clone(), s))
         .collect();
 
     let mut map = state.operator_sessions.write().await;
+    apply_observed_sessions(&mut map, &observed, &state.notify_tx);
+    drop_stale_sessions(&mut map, &observed, &state.notify_tx);
+}
 
-    for (name, summary) in &observed {
-        let prior = map.insert(name.clone(), summary.clone());
+fn apply_observed_sessions(
+    map: &mut std::collections::BTreeMap<String, OperatorSessionSummary>,
+    observed: &HashMap<String, OperatorSessionSummary>,
+    notify_tx: &broadcast::Sender<SessionNotification>,
+) {
+    for (id, summary) in observed {
+        let prior = map.insert(id.clone(), summary.clone());
         let event = if prior.is_none() {
             SessionNotification::OperatorSessionAdded {
                 session: Box::new(summary.clone()),
@@ -724,19 +722,23 @@ async fn reconcile_operator_sessions(state: &AppState, operator: &MirrordOperato
                 session: Box::new(summary.clone()),
             }
         };
-        let _ = state.notify_tx.send(event);
+        let _ = notify_tx.send(event);
     }
+}
 
+fn drop_stale_sessions(
+    map: &mut std::collections::BTreeMap<String, OperatorSessionSummary>,
+    observed: &HashMap<String, OperatorSessionSummary>,
+    notify_tx: &broadcast::Sender<SessionNotification>,
+) {
     let stale: Vec<String> = map
         .keys()
-        .filter(|name| !observed.contains_key(*name))
+        .filter(|id| !observed.contains_key(*id))
         .cloned()
         .collect();
-    for name in stale {
-        map.remove(&name);
-        let _ = state
-            .notify_tx
-            .send(SessionNotification::OperatorSessionRemoved { name });
+    for id in stale {
+        map.remove(&id);
+        let _ = notify_tx.send(SessionNotification::OperatorSessionRemoved { id });
     }
 }
 
@@ -1102,8 +1104,8 @@ mod tests {
         fn summary_from_session_extracts_key_and_parses_target_owner() {
             let session = sample_session("cr-1", "alice-session");
             let summary = OperatorSessionSummary::from_session(&session).unwrap();
-            assert_eq!(summary.name, "cr-1");
-            assert_eq!(summary.key.as_deref(), Some("alice-session"));
+            assert_eq!(summary.id, "cr-1");
+            assert_eq!(summary.key, "alice-session");
             assert_eq!(summary.namespace, "default");
             assert_eq!(
                 summary.target.as_ref().map(|t| t.name.as_str()),
@@ -1111,16 +1113,10 @@ mod tests {
             );
             assert_eq!(
                 summary.target.as_ref().map(|t| t.kind.as_str()),
-                Some("Deployment")
+                Some("deployment")
             );
-            assert_eq!(
-                summary.owner.as_ref().map(|o| o.username.as_str()),
-                Some("alice")
-            );
-            assert_eq!(
-                summary.owner.as_ref().map(|o| o.k8s_username.as_str()),
-                Some("alice@ex")
-            );
+            assert_eq!(summary.owner.username, "alice");
+            assert_eq!(summary.owner.k8s_username, "alice@ex");
         }
 
         #[tokio::test]
