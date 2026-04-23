@@ -87,9 +87,6 @@ pub struct ConnectParams<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<&'a str>,
 
-    /// Raw `feature.network.incoming.http_filter.header_filter` regex from the user's config.
-    /// Surfaced through `MirrordOperator.status.sessions[].http_filter` so the browser extension
-    /// can derive the matching header to inject when joining a session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub header_filter: Option<&'a str>,
 }
