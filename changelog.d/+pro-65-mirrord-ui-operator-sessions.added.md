@@ -1,0 +1,1 @@
+`mirrord ui` now polls `MirrordOperator.status.sessions` and exposes the result through a `/api/operator-sessions` HTTP endpoint, so the browser extension can list existing sessions and group them by key.
