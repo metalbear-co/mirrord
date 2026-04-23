@@ -8,6 +8,7 @@ use k8s_openapi::{
         core::v1::{Pod, Service},
     },
 };
+use kube::CustomResource;
 use mirrord_config::target::Target;
 use mirrord_kube::api::kubernetes::rollout::Rollout;
 use schemars::JsonSchema;
@@ -130,6 +131,37 @@ impl SessionTarget {
         .parse()
         .ok()
     }
+}
+
+/// Public projection of an active mirrord session, intended for users discovering
+/// joinable sessions. Served by the operator via API aggregation against
+/// `operator.metalbear.co/v1/mirrordsessions`. Never persisted in etcd; the operator
+/// computes the response from its internal session store on every request.
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[kube(
+    group = "operator.metalbear.co",
+    version = "v1",
+    kind = "MirrordSession",
+    namespaced
+)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrordSessionSpec {
+    pub owner: SessionOwner,
+
+    pub key: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<SessionTarget>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_filter: Option<MirrordSessionHttpFilter>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrordSessionHttpFilter {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header_filter: Option<String>,
 }
 
 /// Information about the CI session started from `mirrord ci start`.
