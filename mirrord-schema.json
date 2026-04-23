@@ -1429,6 +1429,13 @@
               "type": "string",
               "const": "env"
             },
+            "value": {
+              "description": "Literal value for this connection parameter. The CLI sends it to the\noperator, which stores it in a Kubernetes Secret for the branch pod.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "variable": {
               "type": "string"
             }
@@ -1465,6 +1472,13 @@
         {
           "type": "object",
           "properties": {
+            "env_var_name": {
+              "description": "Name of the env var to set on the local process from the resolved\nSecret value. Same semantics as on `ParamSource::Secret`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "key": {
               "type": "string"
             },
@@ -2987,7 +3001,7 @@
       ]
     },
     "ParamSource": {
-      "description": "<!--${internal}-->\nA connection parameter source: either a plain env var name (string) or a Kubernetes Secret\nreference (object).\n\nAs a string: `\"DB_HOST\"` — resolved using the parent `type` field (env or env_from).\n\nAs an object: `{ \"secret\": \"my-secret\", \"key\": \"password\" }` — read directly from a\nKubernetes Secret.",
+      "description": "<!--${internal}-->\nA connection parameter source: a plain env var name (string), an env var with a literal\nvalue override (object with `variable` and optional `value`), or a Kubernetes Secret\nreference.\n\nAs a string: `\"DB_HOST\"` - resolved using the parent `type` field (env or env_from).\n\nAs an object with a literal value: `{ \"variable\": \"DB_HOST\", \"value\": \"myhost.com\" }` -\nuses the provided `value` directly instead of reading the env var from the target pod.\nThe `variable` names the key in the credential Secret that the CLI creates.\n\nAs a value-only object: `{ \"value\": \"myhost.com\" }` - provides the value directly without\nreferencing any env var on the target pod.\n\nAs a Secret ref: `{ \"secret\": \"my-secret\", \"key\": \"password\" }` - read directly from a\nKubernetes Secret. Add `\"env_var_name\": \"DB_PASSWORD\"` to also expose the resolved\nvalue to the local process under that name. Without `env_var_name` the Secret is\nonly consumed by the operator for branch provisioning; the local app must get the\ncredential from the target pod's environment.",
       "anyOf": [
         {
           "type": "string"
@@ -2995,6 +3009,13 @@
         {
           "type": "object",
           "properties": {
+            "env_var_name": {
+              "description": "Name of the env var to set on the local process from the resolved\nSecret value. When `None`, the operator only uses the Secret for\nbranch provisioning and does not inject anything locally.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "key": {
               "type": "string"
             },
@@ -3006,6 +3027,24 @@
           "required": [
             "secret",
             "key"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "env_var_name": {
+              "type": "string"
+            },
+            "value": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "env_var_name"
           ]
         }
       ]

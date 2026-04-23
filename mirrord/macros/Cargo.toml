@@ -18,6 +18,7 @@ workspace = true
 
 [lib]
 proc-macro = true
+test = false
 
 [dependencies]
 proc-macro2.workspace = true

@@ -189,14 +189,10 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
                     continue;
                 };
 
-                let (host, port) = match (host, port) {
-                    (ParamSource::Variable(host), ParamSource::Variable(port)) => {
-                        (host.clone(), port.clone())
-                    }
-                    // Listing the secret case explicitly so variants
-                    // added in the future are not silently discarded.
-                    (ParamSource::Secret { .. }, _) | (_, ParamSource::Secret { .. }) => continue,
+                let (Some(host), Some(port)) = (host.as_variable(), port.as_variable()) else {
+                    continue;
                 };
+                let (host, port) = (host.to_owned(), port.to_owned());
 
                 let user = user
                     .as_ref()
@@ -510,6 +506,7 @@ mod tests {
             url: TargetEnvironmentVariableSource::Env {
                 container: None,
                 variable: var.to_owned(),
+                value: None,
             },
         }
     }
@@ -533,6 +530,7 @@ mod tests {
             url: TargetEnvironmentVariableSource::Secret {
                 name: "db-secret".to_owned(),
                 key: "url".to_owned(),
+                env_var_name: None,
             },
         };
         let config = DatabaseBranchesConfig(vec![mysql(Some("db3"), conn)]);
@@ -541,7 +539,7 @@ mod tests {
 
     #[test]
     fn extract_params_all_variables() {
-        let conn = ConnectionSource::Params(ConnectionParamsConfig {
+        let conn = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: None,
             params: ConnectionParamsVars {
                 host: Some(ParamSource::Variable("H".to_owned())),
@@ -550,7 +548,7 @@ mod tests {
                 password: Some(ParamSource::Variable("PW".to_owned())),
                 database: Some(ParamSource::Variable("DB".to_owned())),
             },
-        });
+        }));
         let config = DatabaseBranchesConfig(vec![mysql(Some("db5"), conn)]);
         let result = extract_portforward_configs(&config, "key");
 

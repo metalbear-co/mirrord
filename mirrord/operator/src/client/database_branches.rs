@@ -10,8 +10,9 @@ use kube::{
 };
 use mirrord_config::{
     feature::database_branches::{
-        ConnectionSource, ConnectionSourceType, DatabaseBranchConfig, DatabaseBranchesConfig,
-        MongodbBranchConfig, MysqlBranchConfig, PgBranchConfig, TargetEnvironmentVariableSource,
+        ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
+        DatabaseBranchesConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource,
+        PgBranchConfig, TargetEnvironmentVariableSource,
     },
     target::{Target, TargetDisplay},
 };
@@ -626,26 +627,131 @@ impl AsRef<str> for BranchDatabaseId {
     }
 }
 
-fn convert_connection_source(source: &ConnectionSource) -> CrdConnectionSource {
+/// Extract all literal `value` fields from a CRD connection source, collecting
+/// them into `values_out` keyed by variable name. Each extracted value is removed
+/// from the source kind so that `replace_values_with_secret_refs` can fill in the
+/// Secret reference afterwards.
+#[cfg(feature = "client")]
+/// Collects literal `value` fields from `ParamSource::Env` entries in the config
+pub fn extract_literal_values(
+    source: &mut ConfigConnectionSource,
+    values_out: &mut std::collections::HashMap<String, String>,
+) {
+    fn extract_from_param(
+        param: &mut ParamSource,
+        values_out: &mut std::collections::HashMap<String, String>,
+    ) {
+        if let ParamSource::Env {
+            env_var_name,
+            value: value @ Some(_),
+        } = param
+        {
+            values_out.insert(env_var_name.clone(), value.take().unwrap());
+        }
+    }
+
+    fn extract_from_env_source(
+        src: &mut TargetEnvironmentVariableSource,
+        values_out: &mut std::collections::HashMap<String, String>,
+    ) {
+        if let TargetEnvironmentVariableSource::Env {
+            variable,
+            value: value @ Some(_),
+            ..
+        } = src
+        {
+            values_out.insert(variable.clone(), value.take().unwrap());
+        }
+    }
+
     match source {
-        ConnectionSource::Url { url } => CrdConnectionSource::Url(Box::new(url.into())),
-        ConnectionSource::FlatUrl { source_type, url } => {
+        ConfigConnectionSource::Url { url } => extract_from_env_source(url, values_out),
+        ConfigConnectionSource::FlatUrl { .. } => {}
+        ConfigConnectionSource::Params(config) => {
+            for param in [
+                &mut config.params.host,
+                &mut config.params.port,
+                &mut config.params.user,
+                &mut config.params.password,
+                &mut config.params.database,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                extract_from_param(param, values_out);
+            }
+        }
+    }
+}
+
+/// Replaces `Env` source kinds whose variable name matches a key in `extracted_keys`
+/// with `Secret { name, key }` source kinds. Called after the operator has created
+/// the Secret and returned its name.
+#[cfg(feature = "client")]
+pub fn replace_values_with_secret_refs(
+    source: &mut CrdConnectionSource,
+    secret_name: &str,
+    literal_values: &std::collections::HashMap<String, String>,
+) {
+    use crate::crd::db_branching::core::ConnectionSourceKind;
+
+    fn replace_kind(
+        kind: &mut ConnectionSourceKind,
+        secret_name: &str,
+        literal_values: &std::collections::HashMap<String, String>,
+    ) {
+        if let ConnectionSourceKind::Env { variable, .. } = kind
+            && literal_values.contains_key(variable.as_str())
+        {
+            // We reuse the original variable name for both fields: the CLI
+            // already stored the value under that name in the Secret (so it's
+            // the data key), and that's also the env var the user's app reads.
+            *kind = ConnectionSourceKind::Secret {
+                name: secret_name.to_owned(),
+                key: variable.clone(),
+                env_var_name: Some(variable.clone()),
+            };
+        }
+    }
+
+    match source {
+        CrdConnectionSource::Url(kind) => replace_kind(kind, secret_name, literal_values),
+        CrdConnectionSource::Params(params) => {
+            for kind in [
+                &mut params.host,
+                &mut params.port,
+                &mut params.user,
+                &mut params.password,
+                &mut params.database,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                replace_kind(kind, secret_name, literal_values);
+            }
+        }
+    }
+}
+
+fn convert_connection_source(source: &ConfigConnectionSource) -> CrdConnectionSource {
+    match source {
+        ConfigConnectionSource::Url { url } => CrdConnectionSource::Url(Box::new(url.into())),
+        ConfigConnectionSource::FlatUrl { source_type, url } => {
             let kind = match source_type {
                 Some(ConnectionSourceType::EnvFrom) => TargetEnvironmentVariableSource::EnvFrom {
                     container: None,
                     variable: url.clone(),
                 },
-                // None or Env: default to Env. The operator auto-detects
-                // envFrom at resolution time if needed.
                 _ => TargetEnvironmentVariableSource::Env {
                     container: None,
                     variable: url.clone(),
+                    value: None,
                 },
             };
             CrdConnectionSource::Url(Box::new((&kind).into()))
         }
-        ConnectionSource::Params(config) => {
-            CrdConnectionSource::Params(Box::new(ConnectionParamsSpec::from(config)))
+        ConfigConnectionSource::Params(config) => {
+            CrdConnectionSource::Params(Box::new(ConnectionParamsSpec::from(config.as_ref())))
         }
     }
 }
@@ -1103,7 +1209,7 @@ impl UnifiedDatabaseBranchParams {
     /// When no branch `id` is provided, the session key is used as the branch ID so that
     /// sessions sharing the same key automatically reuse the same branch.
     pub fn new<P: Progress>(
-        config: &DatabaseBranchesConfig,
+        config: &mut DatabaseBranchesConfig,
         target: &Target,
         session_key: &str,
         progress: &P,
@@ -1117,50 +1223,51 @@ impl UnifiedDatabaseBranchParams {
             .ok_or_else(|| OperatorApiError::TargetResolutionFailed(target_display))?;
 
         let mut branches = HashMap::new();
-        for branch_db_config in config.0.iter() {
-            match branch_db_config {
-                DatabaseBranchConfig::Mongodb(mongodb_config) => {
-                    let id = resolve_branch_id(&mongodb_config.base.id, session_key, progress);
-                    let params = UnifiedBranchParams::from_mongodb(
-                        id.as_ref(),
-                        mongodb_config,
-                        target,
-                        &session_target,
-                    );
-                    branches.insert(id, params);
-                }
-                DatabaseBranchConfig::Mysql(mysql_config) => {
-                    let id = resolve_branch_id(&mysql_config.base.id, session_key, progress);
-                    let params = UnifiedBranchParams::from_mysql(
-                        id.as_ref(),
-                        mysql_config,
-                        target,
-                        &session_target,
-                    );
-                    branches.insert(id, params);
-                }
-                DatabaseBranchConfig::Pg(pg_config) => {
-                    let id = resolve_branch_id(&pg_config.base.id, session_key, progress);
-                    let params = UnifiedBranchParams::from_pg(
-                        id.as_ref(),
-                        pg_config,
-                        target,
-                        &session_target,
-                    );
-                    branches.insert(id, params);
-                }
-                DatabaseBranchConfig::Mssql(mssql_config) => {
-                    let id = resolve_branch_id(&mssql_config.base.id, session_key, progress);
-                    let params = UnifiedBranchParams::from_mssql(
-                        id.as_ref(),
-                        mssql_config,
-                        target,
-                        &session_target,
-                    );
-                    branches.insert(id, params);
-                }
-                DatabaseBranchConfig::Redis(_) => {}
+        for branch_db_config in config.0.iter_mut() {
+            let (id_source, connection) = match branch_db_config {
+                DatabaseBranchConfig::Pg(c) => (&c.base.id, &mut c.base.connection),
+                DatabaseBranchConfig::Mysql(c) => (&c.base.id, &mut c.base.connection),
+                DatabaseBranchConfig::Mongodb(c) => (&c.base.id, &mut c.base.connection),
+                DatabaseBranchConfig::Mssql(c) => (&c.base.id, &mut c.base.connection),
+                DatabaseBranchConfig::Redis(_) => continue,
             };
+
+            let id = resolve_branch_id(id_source, session_key, progress);
+            let mut literal_values = HashMap::new();
+            extract_literal_values(connection, &mut literal_values);
+
+            let params = match branch_db_config {
+                DatabaseBranchConfig::Pg(c) => UnifiedBranchParams::from_pg(
+                    id.as_ref(),
+                    c,
+                    target,
+                    &session_target,
+                    literal_values,
+                ),
+                DatabaseBranchConfig::Mysql(c) => UnifiedBranchParams::from_mysql(
+                    id.as_ref(),
+                    c,
+                    target,
+                    &session_target,
+                    literal_values,
+                ),
+                DatabaseBranchConfig::Mongodb(c) => UnifiedBranchParams::from_mongodb(
+                    id.as_ref(),
+                    c,
+                    target,
+                    &session_target,
+                    literal_values,
+                ),
+                DatabaseBranchConfig::Mssql(c) => UnifiedBranchParams::from_mssql(
+                    id.as_ref(),
+                    c,
+                    target,
+                    &session_target,
+                    literal_values,
+                ),
+                DatabaseBranchConfig::Redis(_) => unreachable!(),
+            };
+            branches.insert(id, params);
         }
 
         if let Ok(marker) = std::env::var(OPERATOR_ISOLATION_MARKER_ENV) {
@@ -1181,6 +1288,7 @@ pub struct UnifiedBranchParams {
     pub labels: BTreeMap<String, String>,
     pub annotations: BTreeMap<String, String>,
     pub spec: BranchDatabaseSpec,
+    pub literal_values: HashMap<String, String>,
 }
 
 impl UnifiedBranchParams {
@@ -1189,6 +1297,7 @@ impl UnifiedBranchParams {
         config: &PgBranchConfig,
         target: &Target,
         session_target: &SessionTarget,
+        literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
@@ -1217,6 +1326,7 @@ impl UnifiedBranchParams {
             labels,
             annotations: BTreeMap::new(),
             spec,
+            literal_values,
         }
     }
 
@@ -1225,6 +1335,7 @@ impl UnifiedBranchParams {
         config: &MysqlBranchConfig,
         target: &Target,
         session_target: &SessionTarget,
+        literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
@@ -1249,6 +1360,7 @@ impl UnifiedBranchParams {
             labels,
             annotations: BTreeMap::new(),
             spec,
+            literal_values,
         }
     }
 
@@ -1257,6 +1369,7 @@ impl UnifiedBranchParams {
         config: &MongodbBranchConfig,
         target: &Target,
         session_target: &SessionTarget,
+        literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
@@ -1281,6 +1394,7 @@ impl UnifiedBranchParams {
             labels,
             annotations: BTreeMap::new(),
             spec,
+            literal_values,
         }
     }
 
@@ -1289,6 +1403,7 @@ impl UnifiedBranchParams {
         config: &mirrord_config::feature::database_branches::MssqlBranchConfig,
         target: &Target,
         session_target: &SessionTarget,
+        literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-mssql-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
@@ -1313,6 +1428,7 @@ impl UnifiedBranchParams {
             labels,
             annotations: BTreeMap::new(),
             spec,
+            literal_values,
         }
     }
 }

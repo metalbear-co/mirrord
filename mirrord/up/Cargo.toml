@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-protocol-io"
+name = "mirrord-up"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -14,17 +14,15 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-mirrord-protocol = { path = "../protocol" }
+mirrord-config = { path = "../config" }
+mirrord-progress = { path = "../progress/" }
 
-tokio = { workspace = true, features = ["rt", "macros", "time"] }
-rand.workspace = true
-actix-codec.workspace = true
-bincode.workspace = true
-bytes.workspace = true
-tracing.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_yaml.workspace = true
+miette = { workspace = true, features = ["fancy"] }
 thiserror.workspace = true
-futures.workspace = true
-rstest.workspace = true
+strum_macros.workspace = true
+tokio = { workspace = true, features = ["process"] }
 
 [lints]
 workspace = true

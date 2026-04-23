@@ -203,6 +203,10 @@ pub(super) enum Commands {
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Preview(Box<PreviewArgs>),
 
+    /// Run mirrord sessions for all services defined in `mirrord-up.yaml`.
+    #[cfg_attr(target_os = "windows", command(hide = true))]
+    Up(Box<UpArgs>),
+
     /// Launch the config wizard.
     ///
     /// The config wizard is a web app that allows the user to create a mirrord config file by
@@ -222,6 +226,24 @@ pub(super) enum Commands {
     #[cfg(windows)]
     #[command(hide = true)]
     Attach(AttachArgs),
+
+    /// Process In The Middle: create a target process suspended, inject the
+    /// mirrord layer DLL, and resume execution.
+    ///
+    /// Used by IDE extensions that cannot start the target process in a
+    /// suspended state themselves (e.g. IntelliJ run configurations). Like
+    /// `attach`, this assumes intproxy and the rest of the session have
+    /// already been set up by the plugin via `mirrord ext`; `pitm` itself
+    /// does no k8s or agent work. The plugin prepends `mirrord pitm --` to
+    /// the user command line and delivers the child's mirrord environment
+    /// through a single side-channel env var (`MIRRORD_CHILD_ENV`,
+    /// base64-encoded JSON with `set` and `unset` keys), which `pitm`
+    /// extracts and applies to the child process's environment. `pitm`
+    /// owns the child lifecycle end-to-end, so there is no race between
+    /// process start and layer injection.
+    #[cfg(windows)]
+    #[command(hide = true)]
+    Pitm(PitmArgs),
 
     /// Launch the mirrord local UI.
     ///
@@ -1399,12 +1421,42 @@ impl PreviewStopArgs {
     }
 }
 
+/// Arguments for the `mirrord up` command.
+#[derive(Args, Debug)]
+pub(super) struct UpArgs {
+    /// Path to the mirrord-up config file.
+    ///
+    /// When using this argument without a value, defaults to `mirrord-up.yaml`
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml")]
+    pub config_file: PathBuf,
+
+    /// Session key, used as the `{{ key }}` template variable.
+    ///
+    /// If not provided, a key is generated automatically from the system username.
+    #[arg(long)]
+    pub key: Option<String>,
+}
 /// `mirrord attach` args.
 #[cfg(windows)]
 #[derive(Args, Debug)]
 pub(super) struct AttachArgs {
     /// PID of the target process to attach to.
     pub pid: u32,
+}
+
+/// `mirrord pitm` args.
+#[cfg(windows)]
+#[derive(Args, Debug)]
+pub(super) struct PitmArgs {
+    /// Target executable followed by its arguments. Everything after `--`
+    /// is forwarded verbatim to the child process.
+    #[arg(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        required = true,
+        num_args = 1..,
+    )]
+    pub command: Vec<String>,
 }
 
 /// Arguments for the `mirrord ui` command.

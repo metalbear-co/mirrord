@@ -69,6 +69,7 @@ consts
 fd
 fds
 syscalls
+subcommand
 
 # Linux syscalls and C API
 openat
@@ -118,6 +119,7 @@ gRPC
 HTTP
 HTTPS
 IP
+IPs
 TTL
 RTT
 VPN

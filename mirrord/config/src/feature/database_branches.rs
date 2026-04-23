@@ -307,7 +307,7 @@ pub enum ConnectionSource {
         source_type: Option<ConnectionSourceType>,
         url: String,
     },
-    Params(ConnectionParamsConfig),
+    Params(Box<ConnectionParamsConfig>),
 }
 
 impl Serialize for ConnectionSource {
@@ -363,13 +363,24 @@ pub struct ConnectionParamsConfig {
 }
 
 /// <!--${internal}-->
-/// A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-/// reference (object).
+/// A connection parameter source: a plain env var name (string), an env var with a literal
+/// value override (object with `variable` and optional `value`), or a Kubernetes Secret
+/// reference.
 ///
-/// As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
+/// As a string: `"DB_HOST"` - resolved using the parent `type` field (env or env_from).
 ///
-/// As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-/// Kubernetes Secret.
+/// As an object with a literal value: `{ "variable": "DB_HOST", "value": "myhost.com" }` -
+/// uses the provided `value` directly instead of reading the env var from the target pod.
+/// The `variable` names the key in the credential Secret that the CLI creates.
+///
+/// As a value-only object: `{ "value": "myhost.com" }` - provides the value directly without
+/// referencing any env var on the target pod.
+///
+/// As a Secret ref: `{ "secret": "my-secret", "key": "password" }` - read directly from a
+/// Kubernetes Secret. Add `"env_var_name": "DB_PASSWORD"` to also expose the resolved
+/// value to the local process under that name. Without `env_var_name` the Secret is
+/// only consumed by the operator for branch provisioning; the local app must get the
+/// credential from the target pod's environment.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum ParamSource {
@@ -378,6 +389,17 @@ pub enum ParamSource {
         #[serde(rename = "secret")]
         name: String,
         key: String,
+        /// Name of the env var to set on the local process from the resolved
+        /// Secret value. When `None`, the operator only uses the Secret for
+        /// branch provisioning and does not inject anything locally.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
+    Env {
+        #[serde(alias = "variable")]
+        env_var_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
     },
 }
 
@@ -385,6 +407,7 @@ impl ParamSource {
     pub fn as_variable(&self) -> Option<&str> {
         match self {
             Self::Variable(v) => Some(v),
+            Self::Env { env_var_name, .. } => Some(env_var_name),
             Self::Secret { .. } => None,
         }
     }
@@ -422,6 +445,10 @@ pub enum TargetEnvironmentVariableSource {
     Env {
         container: Option<String>,
         variable: String,
+        /// Literal value for this connection parameter. The CLI sends it to the
+        /// operator, which stores it in a Kubernetes Secret for the branch pod.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
     },
     EnvFrom {
         container: Option<String>,
@@ -430,6 +457,10 @@ pub enum TargetEnvironmentVariableSource {
     Secret {
         name: String,
         key: String,
+        /// Name of the env var to set on the local process from the resolved
+        /// Secret value. Same semantics as on `ParamSource::Secret`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
     },
 }
 
@@ -480,6 +511,7 @@ mod tests {
                 url: TargetEnvironmentVariableSource::Env {
                     container: None,
                     variable: "DB_URL".to_string(),
+                    value: None,
                 }
             }
         );
@@ -510,6 +542,7 @@ mod tests {
                 url: TargetEnvironmentVariableSource::Env {
                     container: Some("my-app".to_string()),
                     variable: "DB_URL".to_string(),
+                    value: None,
                 }
             }
         );
@@ -623,7 +656,7 @@ mod tests {
         let result = serde_json::from_str::<ConnectionSource>(json).unwrap();
         assert_eq!(
             result,
-            ConnectionSource::Params(ConnectionParamsConfig {
+            ConnectionSource::Params(Box::new(ConnectionParamsConfig {
                 source_type: Some(ConnectionSourceType::Env),
                 params: ConnectionParamsVars {
                     host: None,
@@ -632,7 +665,7 @@ mod tests {
                     password: None,
                     database: None,
                 },
-            })
+            }))
         );
     }
 
@@ -669,6 +702,7 @@ mod tests {
             url: TargetEnvironmentVariableSource::Env {
                 container: None,
                 variable: "DB_URL".to_string(),
+                value: None,
             },
         };
         let json = serde_json::to_string(&source).unwrap();
@@ -678,7 +712,7 @@ mod tests {
 
     #[test]
     fn serialize_roundtrip_params() {
-        let source = ConnectionSource::Params(ConnectionParamsConfig {
+        let source = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: Some(ConnectionSourceType::Env),
             params: ConnectionParamsVars {
                 host: Some(ParamSource::Variable("DB_HOST".to_string())),
@@ -687,7 +721,7 @@ mod tests {
                 password: None,
                 database: Some(ParamSource::Variable("DB_NAME".to_string())),
             },
-        });
+        }));
         let json = serde_json::to_string(&source).unwrap();
         let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
         assert_eq!(source, deserialized);
@@ -718,6 +752,7 @@ mod tests {
                     Some(ParamSource::Secret {
                         name: "rds-credentials".to_string(),
                         key: "password".to_string(),
+                        env_var_name: None,
                     })
                 );
                 assert_eq!(
@@ -731,7 +766,7 @@ mod tests {
 
     #[test]
     fn serialize_roundtrip_params_with_secret() {
-        let source = ConnectionSource::Params(ConnectionParamsConfig {
+        let source = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: Some(ConnectionSourceType::Env),
             params: ConnectionParamsVars {
                 host: Some(ParamSource::Variable("DB_HOST".to_string())),
@@ -740,10 +775,11 @@ mod tests {
                 password: Some(ParamSource::Secret {
                     name: "my-secret".to_string(),
                     key: "pass".to_string(),
+                    env_var_name: None,
                 }),
                 database: Some(ParamSource::Variable("DB_NAME".to_string())),
             },
-        });
+        }));
         let json = serde_json::to_string(&source).unwrap();
         let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
         assert_eq!(source, deserialized);

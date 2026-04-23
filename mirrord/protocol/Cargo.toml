@@ -42,7 +42,6 @@ derive_more = { workspace = true, features = [
 uuid = { workspace = true, features = ["v4"] }
 
 mirrord-macros = { path = "../macros" }
-
 strum.workspace = true
 strum_macros.workspace = true
 jaq-core.workspace = true
@@ -55,3 +54,6 @@ nix = { workspace = true, features = ["fs"] }
 
 [features]
 windows_build = []
+
+[lib]
+doctest = false

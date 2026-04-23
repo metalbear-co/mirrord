@@ -35,7 +35,7 @@
 ///
 /// - Replacing [`libc::close`] with [`close_detour`](crate::close_detour):
 ///
-/// ```rust, no_run
+/// ```text
 /// unsafe {
 ///     replace!(&mut hook_manager, "close", close_detour, FnClose, FN_CLOSE);
 /// }
@@ -86,7 +86,7 @@ macro_rules! replace {
 ///
 /// - Replacing [`libc::close`] with [`close_detour`](crate::close_detour):
 ///
-/// ```rust, no_run
+/// ```text
 /// unsafe {
 ///     replace_with_fallback!(
 ///         hook_manager,
@@ -137,7 +137,7 @@ macro_rules! replace_with_fallback {
 ///
 /// - Hooking go's `syscall.RawSyscall.abi0`:
 ///
-/// ```rust, no_run
+/// ```text
 /// hook_symbol!(
 ///     hook_manager,
 ///     "syscall.RawSyscall.abi0",
@@ -189,7 +189,7 @@ macro_rules! hook_symbol {
 ///
 /// - Exiting on IO failure:
 ///
-/// ```rust, no_run
+/// ```text
 /// if let Err(fail) = File::open("nothing.txt") {
 ///     graceful_exit!("mirrord failed to open file with {:#?}", fail);
 /// }

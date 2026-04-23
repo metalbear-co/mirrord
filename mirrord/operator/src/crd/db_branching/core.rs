@@ -51,7 +51,15 @@ pub enum ConnectionSourceKind {
     },
 
     /// Value read directly from a Kubernetes Secret at resolution time.
-    Secret { name: String, key: String },
+    /// When `env_var_name` is set, the operator resolves the Secret and emits
+    /// the value to the local mirrord process under that name. Without it,
+    /// the Secret is only used by the operator for branch provisioning.
+    Secret {
+        name: String,
+        key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
 }
 
 impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
@@ -60,6 +68,7 @@ impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
             TargetEnvironmentVariableSource::Env {
                 container,
                 variable,
+                ..
             } => ConnectionSourceKind::Env {
                 container,
                 variable,
@@ -71,9 +80,15 @@ impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
                 container,
                 variable,
             },
-            TargetEnvironmentVariableSource::Secret { name, key } => {
-                ConnectionSourceKind::Secret { name, key }
-            }
+            TargetEnvironmentVariableSource::Secret {
+                name,
+                key,
+                env_var_name,
+            } => ConnectionSourceKind::Secret {
+                name,
+                key,
+                env_var_name,
+            },
         }
     }
 }
@@ -84,6 +99,7 @@ impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
             TargetEnvironmentVariableSource::Env {
                 container,
                 variable,
+                ..
             } => ConnectionSourceKind::Env {
                 container: container.clone(),
                 variable: variable.clone(),
@@ -95,9 +111,14 @@ impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
                 container: container.clone(),
                 variable: variable.clone(),
             },
-            TargetEnvironmentVariableSource::Secret { name, key } => ConnectionSourceKind::Secret {
+            TargetEnvironmentVariableSource::Secret {
+                name,
+                key,
+                env_var_name,
+            } => ConnectionSourceKind::Secret {
                 name: name.clone(),
                 key: key.clone(),
+                env_var_name: env_var_name.clone(),
             },
         }
     }
@@ -112,16 +133,29 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
                         container: None,
                         variable: v.clone(),
                     },
-                    // None or Env: default to Env. The operator auto-detects
-                    // envFrom at resolution time if the variable isn't in env[].
                     _ => ConnectionSourceKind::Env {
                         container: None,
                         variable: v.clone(),
                     },
                 },
-                ParamSource::Secret { name, key } => ConnectionSourceKind::Secret {
+                ParamSource::Env { env_var_name, .. } => match config.source_type.as_ref() {
+                    Some(ConnectionSourceType::EnvFrom) => ConnectionSourceKind::EnvFrom {
+                        container: None,
+                        variable: env_var_name.clone(),
+                    },
+                    _ => ConnectionSourceKind::Env {
+                        container: None,
+                        variable: env_var_name.clone(),
+                    },
+                },
+                ParamSource::Secret {
+                    name,
+                    key,
+                    env_var_name,
+                } => ConnectionSourceKind::Secret {
                     name: name.clone(),
                     key: key.clone(),
+                    env_var_name: env_var_name.clone(),
                 },
             })
         };
