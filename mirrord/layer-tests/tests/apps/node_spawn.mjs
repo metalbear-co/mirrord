@@ -6,7 +6,7 @@ const asyncExec = promisify(exec);
 
 async function run() {
   try {
-    const { stdout, stderr } = await asyncExec('cat /app/test.txt');
+    const { stdout, stderr } = await asyncExec('/bin/cat /app/test.txt');
 
     console.log(stdout);
     if (stderr) {
