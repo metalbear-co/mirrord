@@ -1,40 +1,46 @@
-## Quick Reference
-
-```bash
-# layer
-cargo check -p mirrord-layer --keep-going
-# intproxy
-cargo check -p mirrord-intproxy --keep-going
-# agent (Linux-only)
-cargo check -p mirrord-agent --target x86_64-unknown-linux-gnu --keep-going
-# CLI
-cargo check -p mirrord --keep-going
-
-# Integration tests
-cargo test -p mirrord-layer-tests
-
-# Always format after edits
-cargo fmt
-
-# Always lint after edits
-cargo clippy -- --deny warnings
-
-# cargo-shear needs macro expansion and placeholder layer env for CLI crates
-./scripts/cargo-shear.sh --deny-warnings
-```
-
-Use `cargo check -p <crate> --keep-going` to surface all errors at once rather than stopping at the first.
-
-## Contribution Notes
-
-- Add a towncrier fragment for code changes in `changelog.d/`, named `<identifier>.<category>.md`.
-- Use a public GitHub issue number when one exists, otherwise use `+some-name`.
-- Valid categories are `added`, `fixed`, `internal`, and `changed`.
-- Use `internal` for test-only, CI-only, and other changes users do not care about.
-
 ## Project Overview
 
 mirrord is a tool that lets developers run local processes in the context of their cloud environment.
+
+## Quick Reference
+
+### Compiling
+
+```bash
+# CLI
+cargo xtask build-cli
+
+# layer
+cargo xtask build-layer
+
+# intproxy
+cargo check -p mirrord-intproxy --keep-going
+
+# agent (Linux only)
+cargo check -p mirrord-agent --target x86_64-unknown-linux-gnu --keep-going
+```
+
+### Testing
+
+```bash
+# Integration tests
+cargo xtask test-integration
+
+# Unit tests
+cargo xtask test-ut
+```
+
+### Styling
+
+```bash
+# Formatting
+cargo fmt
+
+# Linting
+cargo clippy -- --deny warnings
+```
+
+Use `cargo check -p <crate> --keep-going` to surface all errors at once rather than stopping at the first.
 
 ### How the Pieces Connect
 
@@ -105,4 +111,11 @@ When changing how something works, don't leave comments like "this replaces how 
 - Prefer `to_owned` for `&str` → `String`.
 - Always use `foo.rs` instead of `foo/mod.rs` for module roots.
 - When extending existing declarations (consts, methods, enum variants, match arms), append new entries below the existing ones. If the new entry is related to a specific existing one, place it directly below that one instead of at the end.
-- Run `cargo fmt`, `cargo clippy -- --deny warnings`, and `./scripts/cargo-shear.sh --deny-warnings` after every edit.
+- Run `cargo fmt` and `cargo clippy -- --deny warnings` after every edit.
+
+## Contribution Notes
+
+- Add a towncrier fragment for code changes in `changelog.d/`, named `<identifier>.<category>.md`.
+- Use a public GitHub issue number when one exists, otherwise use `+some-name`.
+- Valid categories are `added`, `fixed`, `internal`, and `changed`.
+- Use `internal` for test-only, CI-only, and other changes users do not care about.
