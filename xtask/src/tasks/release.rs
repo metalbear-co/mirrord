@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, ops::Not, path::PathBuf};
 
 use anyhow::{Context, Result};
 use layer::Target;
@@ -50,18 +50,21 @@ pub struct BuildOptions {
     pub with_wizard: bool,
     pub build_wizard: bool,
     pub cargo_args: Vec<String>,
+    pub quiet: bool,
 }
 
 /// Main task: builds release CLI for the specified platform
-pub fn build_release_cli(options: BuildOptions) -> Result<()> {
-    println!("════════════════════════════════════════════════════════");
-    println!("Building release CLI for {}", options.platform.name());
-    println!("  Release mode: {}", options.release);
-    println!("  Build monitor frontend: {}", options.build_monitor);
-    println!("  With wizard: {}", options.with_wizard);
-    println!("  Build wizard frontend: {}", options.build_wizard);
-    println!("════════════════════════════════════════════════════════");
-    println!();
+pub fn build_release_cli(options: BuildOptions) -> Result<PathBuf> {
+    if options.quiet.not() {
+        println!("════════════════════════════════════════════════════════");
+        println!("Building release CLI for {}", options.platform.name());
+        println!("  Release mode: {}", options.release);
+        println!("  Build monitor frontend: {}", options.build_monitor);
+        println!("  With wizard: {}", options.with_wizard);
+        println!("  Build wizard frontend: {}", options.build_wizard);
+        println!("════════════════════════════════════════════════════════");
+        println!();
+    }
 
     // Step 1: Prepare monitor frontend assets required by rust-embed.
     if options.build_monitor {
@@ -84,7 +87,7 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
     };
 
     // Step 3: Build layer and CLI based on platform
-    match options.platform {
+    let cli_path = match options.platform {
         Platform::MacosX86_64 => {
             let target = Target::MacosX86_64;
             // Check if layer already exists via environment variable
@@ -107,7 +110,7 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
                 wizard_archive.as_deref(),
                 &options.cargo_args,
             )
-            .context("Failed to build CLI")?;
+            .context("Failed to build CLI")?
         }
         Platform::MacosAarch64 => {
             let target = Target::MacosAarch64;
@@ -135,7 +138,7 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
                 wizard_archive.as_deref(),
                 &options.cargo_args,
             )
-            .context("Failed to build CLI")?;
+            .context("Failed to build CLI")?
         }
         Platform::MacosUniversal => {
             // Build universal layer
@@ -151,7 +154,7 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
                 wizard_archive.as_deref(),
                 &options.cargo_args,
             )
-            .context("Failed to build macOS universal CLI")?;
+            .context("Failed to build macOS universal CLI")?
         }
         Platform::LinuxX86_64 => {
             let target = Target::LinuxX86_64;
@@ -166,7 +169,7 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
                 wizard_archive.as_deref(),
                 &options.cargo_args,
             )
-            .context("Failed to build CLI")?;
+            .context("Failed to build CLI")?
         }
         Platform::LinuxAarch64 => {
             let target = Target::LinuxAarch64;
@@ -183,7 +186,7 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
                 wizard_archive.as_deref(),
                 &options.cargo_args,
             )
-            .context("Failed to build CLI")?;
+            .context("Failed to build CLI")?
         }
         Platform::Windows => {
             let target = Target::Windows;
@@ -198,14 +201,16 @@ pub fn build_release_cli(options: BuildOptions) -> Result<()> {
                 wizard_archive.as_deref(),
                 &options.cargo_args,
             )
-            .context("Failed to build CLI")?;
+            .context("Failed to build CLI")?
         }
+    };
+
+    if options.quiet.not() {
+        println!();
+        println!("════════════════════════════════════════════════════════");
+        println!("✓ Build complete for {}", options.platform.name());
+        println!("════════════════════════════════════════════════════════");
     }
 
-    println!();
-    println!("════════════════════════════════════════════════════════");
-    println!("✓ Build complete for {}", options.platform.name());
-    println!("════════════════════════════════════════════════════════");
-
-    Ok(())
+    Ok(cli_path)
 }
