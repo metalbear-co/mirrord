@@ -124,16 +124,17 @@ pub struct OperatorSessionTarget {
 }
 
 impl OperatorSessionSummary {
-    /// Builds a summary from the namespaced [`MirrordSession`] projection.
-    /// We watch this CRD (not the cluster-scoped parent) so RBAC can be scoped
-    /// per namespace on shared clusters.
+    /// Builds a summary from the [`MirrordSession`] served by the operator's API
+    /// aggregation endpoint. The metadata carries the namespace and creation
+    /// timestamp; the spec carries the joinable identity (key, target, filter).
     fn from_cr(cr: &MirrordSession) -> Option<Self> {
         let name = cr.metadata.name.clone()?;
+        let namespace = cr.metadata.namespace.clone()?;
         let spec = &cr.spec;
         Some(Self {
             name,
-            key: spec.key.clone(),
-            namespace: spec.namespace.clone(),
+            key: Some(spec.key.clone()),
+            namespace,
             owner: Some(OperatorSessionOwner {
                 username: spec.owner.username.clone(),
                 k8s_username: spec.owner.k8s_username.clone(),
@@ -1100,8 +1101,8 @@ mod tests {
 
         use super::*;
 
-        fn sample_cr(name: &str, key: Option<&str>) -> MirrordSession {
-            MirrordSession::new(
+        fn sample_cr(name: &str, key: &str) -> MirrordSession {
+            let mut cr = MirrordSession::new(
                 name,
                 MirrordSessionSpec {
                     owner: SessionOwner {
@@ -1110,22 +1111,23 @@ mod tests {
                         hostname: "h".into(),
                         k8s_username: "alice@ex".into(),
                     },
-                    namespace: "default".into(),
                     target: Some(SessionTarget {
                         api_version: "apps/v1".into(),
                         kind: "Deployment".into(),
                         name: "web".into(),
                         container: "app".into(),
                     }),
-                    key: key.map(|s| s.to_owned()),
+                    key: key.to_owned(),
                     http_filter: None,
                 },
-            )
+            );
+            cr.metadata.namespace = Some("default".into());
+            cr
         }
 
         #[test]
         fn summary_from_cr_extracts_key() {
-            let cr = sample_cr("cr-1", Some("alice-session"));
+            let cr = sample_cr("cr-1", "alice-session");
             let summary = OperatorSessionSummary::from_cr(&cr).unwrap();
             assert_eq!(summary.name, "cr-1");
             assert_eq!(summary.key.as_deref(), Some("alice-session"));
@@ -1136,13 +1138,6 @@ mod tests {
             );
         }
 
-        #[test]
-        fn summary_from_cr_preserves_none_key() {
-            let cr = sample_cr("cr-2", None);
-            let summary = OperatorSessionSummary::from_cr(&cr).unwrap();
-            assert!(summary.key.is_none());
-        }
-
         #[tokio::test]
         async fn operator_sessions_groups_by_key_with_none_bucket() {
             let (tx, _rx) = broadcast::channel::<SessionNotification>(16);
@@ -1150,9 +1145,9 @@ mod tests {
                 sessions: RwLock::new(HashMap::new()),
                 operator_sessions: RwLock::new({
                     let mut m = std::collections::BTreeMap::new();
-                    let s1 = OperatorSessionSummary::from_cr(&sample_cr("a", Some("k"))).unwrap();
-                    let s2 = OperatorSessionSummary::from_cr(&sample_cr("b", Some("k"))).unwrap();
-                    let s3 = OperatorSessionSummary::from_cr(&sample_cr("c", None)).unwrap();
+                    let s1 = OperatorSessionSummary::from_cr(&sample_cr("a", "k")).unwrap();
+                    let s2 = OperatorSessionSummary::from_cr(&sample_cr("b", "k")).unwrap();
+                    let s3 = OperatorSessionSummary::from_cr(&sample_cr("c", "k2")).unwrap();
                     m.insert("a".into(), s1);
                     m.insert("b".into(), s2);
                     m.insert("c".into(), s3);
@@ -1166,7 +1161,7 @@ mod tests {
             let resp = list_operator_sessions(axum::extract::State(state)).await.0;
             assert_eq!(resp.sessions.len(), 3);
             assert_eq!(resp.by_key.get("k").map(|v| v.len()), Some(2));
-            assert_eq!(resp.by_key.get("").map(|v| v.len()), Some(1));
+            assert_eq!(resp.by_key.get("k2").map(|v| v.len()), Some(1));
             assert!(matches!(resp.watch_status, OperatorWatchStatus::Watching));
         }
     }
