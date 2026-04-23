@@ -677,6 +677,7 @@ pub fn extract_literal_values(
             ]
             .into_iter()
             .flatten()
+            .flat_map(|om| om.0.iter_mut())
             {
                 extract_from_param(param, values_out);
             }
@@ -715,7 +716,11 @@ pub fn replace_values_with_secret_refs(
     }
 
     match source {
-        CrdConnectionSource::Url(kind) => replace_kind(kind, secret_name, literal_values),
+        CrdConnectionSource::Url(kinds) => {
+            for kind in kinds {
+                replace_kind(kind, secret_name, literal_values);
+            }
+        }
         CrdConnectionSource::Params(params) => {
             for kind in [
                 &mut params.host,
@@ -726,6 +731,7 @@ pub fn replace_values_with_secret_refs(
             ]
             .into_iter()
             .flatten()
+            .flatten()
             {
                 replace_kind(kind, secret_name, literal_values);
             }
@@ -735,20 +741,28 @@ pub fn replace_values_with_secret_refs(
 
 fn convert_connection_source(source: &ConfigConnectionSource) -> CrdConnectionSource {
     match source {
-        ConfigConnectionSource::Url { url } => CrdConnectionSource::Url(Box::new(url.into())),
+        ConfigConnectionSource::Url { url } => CrdConnectionSource::Url(vec![url.into()]),
         ConfigConnectionSource::FlatUrl { source_type, url } => {
-            let kind = match source_type {
-                Some(ConnectionSourceType::EnvFrom) => TargetEnvironmentVariableSource::EnvFrom {
-                    container: None,
-                    variable: url.clone(),
-                },
-                _ => TargetEnvironmentVariableSource::Env {
-                    container: None,
-                    variable: url.clone(),
-                    value: None,
-                },
-            };
-            CrdConnectionSource::Url(Box::new((&kind).into()))
+            let kinds = url
+                .iter()
+                .map(|u| {
+                    let kind = match source_type {
+                        Some(ConnectionSourceType::EnvFrom) => {
+                            TargetEnvironmentVariableSource::EnvFrom {
+                                container: None,
+                                variable: u.clone(),
+                            }
+                        }
+                        _ => TargetEnvironmentVariableSource::Env {
+                            container: None,
+                            variable: u.clone(),
+                            value: None,
+                        },
+                    };
+                    (&kind).into()
+                })
+                .collect();
+            CrdConnectionSource::Url(kinds)
         }
         ConfigConnectionSource::Params(config) => {
             CrdConnectionSource::Params(Box::new(ConnectionParamsSpec::from(config.as_ref())))
