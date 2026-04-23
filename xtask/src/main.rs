@@ -1,5 +1,7 @@
 mod tasks;
 
+use std::process::Command;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tasks::release::{BuildOptions, Platform};
@@ -120,6 +122,22 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         cargo_args: Vec<String>,
     },
+
+    /// Build and run the CLI, analogous to `cargo run`. Does not
+    /// build the wizard and monitor by default.
+    RunCli {
+        /// Build with wizard frontend
+        #[arg(long)]
+        build_wizard: bool,
+
+        /// Build with monitor frontend
+        #[arg(long)]
+        build_monitor: bool,
+
+        /// CLI args for mirrord
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        mirrord_args: Vec<String>,
+    },
 }
 
 fn parse_platform(s: &str) -> Result<Platform, String> {
@@ -164,6 +182,7 @@ fn main() -> Result<()> {
                 with_wizard: !no_wizard,
                 build_wizard: !no_wizard && !skip_build_wizard,
                 cargo_args,
+                quiet: false,
             };
 
             tasks::release::build_release_cli(options)?;
@@ -259,6 +278,41 @@ fn main() -> Result<()> {
             cargo_args,
         } => {
             tasks::test::run(tasks::test::Suite::Integration, binary, layer, cargo_args)?;
+        }
+
+        Commands::RunCli {
+            build_wizard,
+            build_monitor,
+            mirrord_args,
+        } => {
+            let platform = Platform::detect().unwrap_or_else(|e| {
+                eprintln!("Failed to detect platform: {}", e);
+                eprintln!("Please specify platform with --platform");
+                std::process::exit(1);
+            });
+
+            let options = BuildOptions {
+                platform,
+                release: false,
+                build_monitor,
+                with_wizard: build_wizard,
+                build_wizard,
+                cargo_args: vec![], // welp
+                quiet: true,
+            };
+
+            let cli_path = tasks::release::build_release_cli(options)?;
+
+            match Command::new(cli_path).args(mirrord_args).spawn() {
+                Ok(mut child) => {
+                    if let Err(err) = child.wait() {
+                        println!("error while waiting for child: {err}");
+                    };
+                }
+                Err(err) => {
+                    println!("failed to run child process: {err}");
+                }
+            }
         }
     }
 
