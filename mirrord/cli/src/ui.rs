@@ -688,42 +688,7 @@ fn start_operator_watcher(state: Arc<AppState>) {
         loop {
             interval.tick().await;
             match api.get(OPERATOR_STATUS_NAME).await {
-                Ok(operator) => {
-                    let sessions = operator
-                        .status
-                        .as_ref()
-                        .map(|s| s.sessions.as_slice())
-                        .unwrap_or_default();
-                    let observed: HashMap<String, OperatorSessionSummary> = sessions
-                        .iter()
-                        .filter_map(OperatorSessionSummary::from_session)
-                        .map(|s| (s.name.clone(), s))
-                        .collect();
-                    let mut map = state.operator_sessions.write().await;
-                    for (name, summary) in &observed {
-                        let prior = map.insert(name.clone(), summary.clone());
-                        let _ = state.notify_tx.send(if prior.is_none() {
-                            SessionNotification::OperatorSessionAdded {
-                                session: Box::new(summary.clone()),
-                            }
-                        } else {
-                            SessionNotification::OperatorSessionUpdated {
-                                session: Box::new(summary.clone()),
-                            }
-                        });
-                    }
-                    let stale: Vec<String> = map
-                        .keys()
-                        .filter(|name| !observed.contains_key(*name))
-                        .cloned()
-                        .collect();
-                    for name in stale {
-                        map.remove(&name);
-                        let _ = state
-                            .notify_tx
-                            .send(SessionNotification::OperatorSessionRemoved { name });
-                    }
-                }
+                Ok(operator) => reconcile_operator_sessions(&state, &operator).await,
                 Err(err) => {
                     let reason = format!("operator status fetch error: {err}");
                     warn!("{reason}");
@@ -733,6 +698,46 @@ fn start_operator_watcher(state: Arc<AppState>) {
             }
         }
     });
+}
+
+async fn reconcile_operator_sessions(state: &AppState, operator: &MirrordOperatorCrd) {
+    let observed: HashMap<String, OperatorSessionSummary> = operator
+        .status
+        .as_ref()
+        .map(|s| s.sessions.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(OperatorSessionSummary::from_session)
+        .map(|s| (s.name.clone(), s))
+        .collect();
+
+    let mut map = state.operator_sessions.write().await;
+
+    for (name, summary) in &observed {
+        let prior = map.insert(name.clone(), summary.clone());
+        let event = if prior.is_none() {
+            SessionNotification::OperatorSessionAdded {
+                session: Box::new(summary.clone()),
+            }
+        } else {
+            SessionNotification::OperatorSessionUpdated {
+                session: Box::new(summary.clone()),
+            }
+        };
+        let _ = state.notify_tx.send(event);
+    }
+
+    let stale: Vec<String> = map
+        .keys()
+        .filter(|name| !observed.contains_key(*name))
+        .cloned()
+        .collect();
+    for name in stale {
+        map.remove(&name);
+        let _ = state
+            .notify_tx
+            .send(SessionNotification::OperatorSessionRemoved { name });
+    }
 }
 
 async fn health() -> impl IntoResponse {
