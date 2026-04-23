@@ -2,7 +2,7 @@ use std::{borrow::Cow, collections::HashMap, fmt::Formatter};
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use mirrord_config::feature::database_branches::{
-    ConnectionParamsConfig, ConnectionSourceType, OneOrMany, ParamSource,
+    ConnectionParamsConfig, ConnectionSourceType, ParamSource, SingleOrVec,
     TargetEnvironmentVariableSource,
 };
 use schemars::JsonSchema;
@@ -134,56 +134,59 @@ impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
 
 impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
     fn from(config: &ConnectionParamsConfig) -> Self {
-        let wrap = |params: &Option<OneOrMany<ParamSource>>| -> Option<Vec<ConnectionSourceKind>> {
-            params.as_ref().map(|one_or_many| {
-                one_or_many
-                    .iter()
-                    .map(|p| match p {
-                        ParamSource::Variable(v) => match config.source_type.as_ref() {
-                            Some(ConnectionSourceType::EnvFrom) => ConnectionSourceKind::EnvFrom {
-                                container: None,
-                                variable: v.clone(),
-                            },
-                            _ => ConnectionSourceKind::Env {
-                                container: None,
-                                variable: v.clone(),
-                            },
-                        },
-                        ParamSource::Env { env_var_name, .. } => {
-                            match config.source_type.as_ref() {
+        let wrap =
+            |params: &Option<SingleOrVec<ParamSource>>| -> Option<Vec<ConnectionSourceKind>> {
+                params.as_ref().map(|one_or_many| {
+                    one_or_many
+                        .iter()
+                        .map(|p| match p {
+                            ParamSource::Variable(v) => match config.source_type.as_ref() {
                                 Some(ConnectionSourceType::EnvFrom) => {
                                     ConnectionSourceKind::EnvFrom {
                                         container: None,
-                                        variable: env_var_name.clone(),
+                                        variable: v.clone(),
                                     }
                                 }
                                 _ => ConnectionSourceKind::Env {
                                     container: None,
-                                    variable: env_var_name.clone(),
+                                    variable: v.clone(),
                                 },
+                            },
+                            ParamSource::Env { env_var_name, .. } => {
+                                match config.source_type.as_ref() {
+                                    Some(ConnectionSourceType::EnvFrom) => {
+                                        ConnectionSourceKind::EnvFrom {
+                                            container: None,
+                                            variable: env_var_name.clone(),
+                                        }
+                                    }
+                                    _ => ConnectionSourceKind::Env {
+                                        container: None,
+                                        variable: env_var_name.clone(),
+                                    },
+                                }
                             }
-                        }
-                        ParamSource::Pattern {
-                            env_var_name,
-                            value_pattern,
-                        } => ConnectionSourceKind::EnvPattern {
-                            container: None,
-                            variable: env_var_name.clone(),
-                            value_pattern: value_pattern.clone(),
-                        },
-                        ParamSource::Secret {
-                            name,
-                            key,
-                            env_var_name,
-                        } => ConnectionSourceKind::Secret {
-                            name: name.clone(),
-                            key: key.clone(),
-                            env_var_name: env_var_name.clone(),
-                        },
-                    })
-                    .collect()
-            })
-        };
+                            ParamSource::Pattern {
+                                env_var_name,
+                                value_pattern,
+                            } => ConnectionSourceKind::EnvPattern {
+                                container: None,
+                                variable: env_var_name.clone(),
+                                value_pattern: value_pattern.clone(),
+                            },
+                            ParamSource::Secret {
+                                name,
+                                key,
+                                env_var_name,
+                            } => ConnectionSourceKind::Secret {
+                                name: name.clone(),
+                                key: key.clone(),
+                                env_var_name: env_var_name.clone(),
+                            },
+                        })
+                        .collect()
+                })
+            };
         Self {
             host: wrap(&config.params.host),
             port: wrap(&config.params.port),

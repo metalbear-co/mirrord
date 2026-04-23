@@ -487,7 +487,7 @@ mod tests {
 
     use mirrord_config::feature::database_branches::{
         ConnectionParamsConfig, ConnectionParamsVars, ConnectionSource, DatabaseBranchBaseConfig,
-        DatabaseBranchConfig, DatabaseBranchesConfig, MysqlBranchConfig, OneOrMany, ParamSource,
+        DatabaseBranchConfig, DatabaseBranchesConfig, MysqlBranchConfig, ParamSource,
         TargetEnvironmentVariableSource,
     };
 
@@ -553,11 +553,11 @@ mod tests {
         let conn = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: None,
             params: ConnectionParamsVars {
-                host: Some(OneOrMany(vec![ParamSource::Variable("H".to_owned())])),
-                port: Some(OneOrMany(vec![ParamSource::Variable("P".to_owned())])),
-                user: Some(OneOrMany(vec![ParamSource::Variable("U".to_owned())])),
-                password: Some(OneOrMany(vec![ParamSource::Variable("PW".to_owned())])),
-                database: Some(OneOrMany(vec![ParamSource::Variable("DB".to_owned())])),
+                host: Some(ParamSource::Variable("H".to_owned()).into()),
+                port: Some(ParamSource::Variable("P".to_owned()).into()),
+                user: Some(ParamSource::Variable("U".to_owned()).into()),
+                password: Some(ParamSource::Variable("PW".to_owned()).into()),
+                database: Some(ParamSource::Variable("DB".to_owned()).into()),
             },
         }));
         let config = DatabaseBranchesConfig(vec![mysql(Some("db5"), conn)]);
