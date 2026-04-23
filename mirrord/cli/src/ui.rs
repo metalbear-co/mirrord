@@ -704,51 +704,56 @@ fn start_operator_watcher(state: Arc<AppState>) {
 
         *state.operator_watch_status.write().await = OperatorWatchStatus::Watching;
 
-        let mut stream = watcher(api, watcher::Config::default()).boxed();
-        while let Some(ev) = stream.next().await {
-            match ev {
-                Ok(watcher::Event::Apply(cr)) => {
-                    if let Some(summary) = OperatorSessionSummary::from_cr(&cr) {
-                        let key = summary.name.clone();
-                        let is_new = {
-                            let mut map = state.operator_sessions.write().await;
-                            let prior = map.insert(key.clone(), summary.clone());
-                            prior.is_none()
-                        };
-                        let _ = state.notify_tx.send(if is_new {
+        // Poll instead of watch: the API-aggregated endpoint serves LIST/GET only,
+        // not the streaming WATCH protocol (no resourceVersion, no chunked events).
+        // Reconcile the local map against each LIST and emit add/update/remove
+        // notifications. Five seconds is a UI-friendly cadence for a tab the user
+        // is actively looking at.
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            match api.list(&ListParams::default()).await {
+                Ok(list) => {
+                    let observed: HashMap<String, OperatorSessionSummary> = list
+                        .items
+                        .iter()
+                        .filter_map(OperatorSessionSummary::from_cr)
+                        .map(|s| (s.name.clone(), s))
+                        .collect();
+                    let mut map = state.operator_sessions.write().await;
+                    for (name, summary) in &observed {
+                        let prior = map.insert(name.clone(), summary.clone());
+                        let _ = state.notify_tx.send(if prior.is_none() {
                             SessionNotification::OperatorSessionAdded {
-                                session: Box::new(summary),
+                                session: Box::new(summary.clone()),
                             }
                         } else {
                             SessionNotification::OperatorSessionUpdated {
-                                session: Box::new(summary),
+                                session: Box::new(summary.clone()),
                             }
                         });
                     }
-                }
-                Ok(watcher::Event::Delete(cr)) => {
-                    if let Some(name) = cr.metadata.name {
-                        state.operator_sessions.write().await.remove(&name);
+                    let stale: Vec<String> = map
+                        .keys()
+                        .filter(|name| !observed.contains_key(*name))
+                        .cloned()
+                        .collect();
+                    for name in stale {
+                        map.remove(&name);
                         let _ = state
                             .notify_tx
                             .send(SessionNotification::OperatorSessionRemoved { name });
                     }
                 }
-                Ok(watcher::Event::Init)
-                | Ok(watcher::Event::InitApply(_))
-                | Ok(watcher::Event::InitDone) => {
-                    // watcher relist lifecycle; no action needed.
-                }
                 Err(err) => {
-                    let reason = format!("watcher error: {err}");
+                    let reason = format!("list error: {err}");
                     warn!("{reason}");
                     *state.operator_watch_status.write().await =
                         OperatorWatchStatus::Error { message: reason };
                 }
             }
         }
-
-        warn!("operator session watcher stream ended unexpectedly");
     });
 }
 
