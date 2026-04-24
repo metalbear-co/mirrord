@@ -617,8 +617,7 @@ impl From<HookError> for isize {
 ///
 /// On Windows, APIs with `usize`-shaped returns (for example WinSock `SOCKET`) do
 /// not share a single error sentinel/value convention. Windows hooks must use
-/// [`crate::detour::WindowsDetourReturn`] via
-/// [`crate::detour::Detour::unwrap_or_bypass_windows_as`] to encode the correct
+/// `WindowsDetourReturn` via `Detour::unwrap_or_bypass_windows_as` to encode the correct
 /// return value and error channel for each API.
 #[cfg(unix)]
 impl From<HookError> for usize {
@@ -633,7 +632,7 @@ impl From<HookError> for i32 {
     /// Generic numeric conversion for errno-style hooks.
     ///
     /// Windows WinSock hooks should prefer explicit conversion through
-    /// [`crate::detour::WindowsDetourReturn`], because many APIs need specific
+    /// `WindowsDetourReturn`, because many APIs need specific
     /// failure sentinels and error-channel behavior.
     fn from(fail: HookError) -> Self {
         i64::from(fail) as _
