@@ -176,7 +176,12 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
                     continue;
                 }
             },
-            ConnectionSource::FlatUrl { url, .. } => Envs::Url(url.clone()),
+            ConnectionSource::FlatUrl { url, .. } => {
+                let Some(first_url) = url.first() else {
+                    continue;
+                };
+                Envs::Url(first_url.clone())
+            }
             ConnectionSource::Params(config) => {
                 let ConnectionParamsVars {
                     host: Some(host),
@@ -189,21 +194,27 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
                     continue;
                 };
 
-                let (Some(host), Some(port)) = (host.as_variable(), port.as_variable()) else {
+                let (Some(host), Some(port)) = (
+                    host.first().and_then(ParamSource::as_variable),
+                    port.first().and_then(ParamSource::as_variable),
+                ) else {
                     continue;
                 };
                 let (host, port) = (host.to_owned(), port.to_owned());
 
                 let user = user
                     .as_ref()
+                    .and_then(|om| om.first())
                     .and_then(ParamSource::as_variable)
                     .map(str::to_owned);
                 let password = password
                     .as_ref()
+                    .and_then(|om| om.first())
                     .and_then(ParamSource::as_variable)
                     .map(str::to_owned);
                 let database = database
                     .as_ref()
+                    .and_then(|om| om.first())
                     .and_then(ParamSource::as_variable)
                     .map(str::to_owned);
 
@@ -542,11 +553,11 @@ mod tests {
         let conn = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: None,
             params: ConnectionParamsVars {
-                host: Some(ParamSource::Variable("H".to_owned())),
-                port: Some(ParamSource::Variable("P".to_owned())),
-                user: Some(ParamSource::Variable("U".to_owned())),
-                password: Some(ParamSource::Variable("PW".to_owned())),
-                database: Some(ParamSource::Variable("DB".to_owned())),
+                host: Some(ParamSource::Variable("H".to_owned()).into()),
+                port: Some(ParamSource::Variable("P".to_owned()).into()),
+                user: Some(ParamSource::Variable("U".to_owned()).into()),
+                password: Some(ParamSource::Variable("PW".to_owned()).into()),
+                database: Some(ParamSource::Variable("DB".to_owned()).into()),
             },
         }));
         let config = DatabaseBranchesConfig(vec![mysql(Some("db5"), conn)]);

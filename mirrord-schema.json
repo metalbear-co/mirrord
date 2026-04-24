@@ -806,7 +806,7 @@
         "database": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ParamSource"
+              "$ref": "#/$defs/SingleOrVec_ParamSource"
             },
             {
               "type": "null"
@@ -816,7 +816,7 @@
         "host": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ParamSource"
+              "$ref": "#/$defs/SingleOrVec_ParamSource"
             },
             {
               "type": "null"
@@ -826,7 +826,7 @@
         "password": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ParamSource"
+              "$ref": "#/$defs/SingleOrVec_ParamSource"
             },
             {
               "type": "null"
@@ -836,7 +836,7 @@
         "port": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ParamSource"
+              "$ref": "#/$defs/SingleOrVec_ParamSource"
             },
             {
               "type": "null"
@@ -846,7 +846,7 @@
         "user": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ParamSource"
+              "$ref": "#/$defs/SingleOrVec_ParamSource"
             },
             {
               "type": "null"
@@ -1400,7 +1400,7 @@
               ]
             },
             "url": {
-              "type": "string"
+              "$ref": "#/$defs/SingleOrVec_string"
             }
           },
           "additionalProperties": false,
@@ -3035,6 +3035,22 @@
             "env_var_name": {
               "type": "string"
             },
+            "value_pattern": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "env_var_name",
+            "value_pattern"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "env_var_name": {
+              "type": "string"
+            },
             "value": {
               "type": [
                 "string",
@@ -3619,6 +3635,32 @@
       "additionalProperties": false,
       "required": [
         "service"
+      ]
+    },
+    "SingleOrVec_ParamSource": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ParamSource"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ParamSource"
+          }
+        }
+      ]
+    },
+    "SingleOrVec_string": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       ]
     },
     "SplitQueuesConfig": {
