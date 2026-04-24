@@ -843,9 +843,6 @@ where
             (CLIENT_HOSTNAME_HEADER, hostname),
         ];
         for (name, raw_value) in headers {
-            let Some(raw_value) = raw_value else {
-                continue;
-            };
 
             // Replace non-ascii (not supported in headers) chars and trim.
             let cleaned = raw_value
