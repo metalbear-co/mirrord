@@ -15,7 +15,7 @@ use crate::crd::session::SessionOwner;
 #[serde(rename_all = "camelCase")]
 pub enum ConnectionSource {
     /// One or more complete connection URL sources.
-    Url(Vec<ConnectionSourceKind>),
+    Url(SingleOrVec<ConnectionSourceKind>),
     /// Individual connection parameters (host, port, user, password, database).
     Params(Box<ConnectionParamsSpec>),
 }
@@ -25,15 +25,15 @@ pub enum ConnectionSource {
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionParamsSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host: Option<Vec<ConnectionSourceKind>>,
+    pub host: Option<SingleOrVec<ConnectionSourceKind>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub port: Option<Vec<ConnectionSourceKind>>,
+    pub port: Option<SingleOrVec<ConnectionSourceKind>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub user: Option<Vec<ConnectionSourceKind>>,
+    pub user: Option<SingleOrVec<ConnectionSourceKind>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub password: Option<Vec<ConnectionSourceKind>>,
+    pub password: Option<SingleOrVec<ConnectionSourceKind>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub database: Option<Vec<ConnectionSourceKind>>,
+    pub database: Option<SingleOrVec<ConnectionSourceKind>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -135,9 +135,9 @@ impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
 impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
     fn from(config: &ConnectionParamsConfig) -> Self {
         let wrap =
-            |params: &Option<SingleOrVec<ParamSource>>| -> Option<Vec<ConnectionSourceKind>> {
+            |params: &Option<SingleOrVec<ParamSource>>| -> Option<SingleOrVec<ConnectionSourceKind>> {
                 params.as_ref().map(|one_or_many| {
-                    one_or_many
+                    let kinds: Vec<_> = one_or_many
                         .iter()
                         .map(|p| match p {
                             ParamSource::Variable(v) => match config.source_type.as_ref() {
@@ -184,7 +184,8 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
                                 env_var_name: env_var_name.clone(),
                             },
                         })
-                        .collect()
+                        .collect();
+                    SingleOrVec::from(kinds)
                 })
             };
         Self {

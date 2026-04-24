@@ -12,7 +12,7 @@ use mirrord_config::{
     feature::database_branches::{
         ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
         DatabaseBranchesConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource,
-        PgBranchConfig, TargetEnvironmentVariableSource,
+        PgBranchConfig, SingleOrVec, TargetEnvironmentVariableSource,
     },
     target::{Target, TargetDisplay},
 };
@@ -741,9 +741,11 @@ pub fn replace_values_with_secret_refs(
 
 fn convert_connection_source(source: &ConfigConnectionSource) -> CrdConnectionSource {
     match source {
-        ConfigConnectionSource::Url { url } => CrdConnectionSource::Url(vec![url.into()]),
+        ConfigConnectionSource::Url { url } => {
+            CrdConnectionSource::Url(SingleOrVec::from(vec![url.into()]))
+        }
         ConfigConnectionSource::FlatUrl { source_type, url } => {
-            let kinds = url
+            let kinds: Vec<_> = url
                 .iter()
                 .map(|u| {
                     let kind = match source_type {
@@ -762,7 +764,7 @@ fn convert_connection_source(source: &ConfigConnectionSource) -> CrdConnectionSo
                     (&kind).into()
                 })
                 .collect();
-            CrdConnectionSource::Url(kinds)
+            CrdConnectionSource::Url(SingleOrVec::from(kinds))
         }
         ConfigConnectionSource::Params(config) => {
             CrdConnectionSource::Params(Box::new(ConnectionParamsSpec::from(config.as_ref())))
