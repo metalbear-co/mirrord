@@ -20,7 +20,7 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, OutgoingConnMetadataRequest, PortSubscribe,
 };
 use mirrord_layer_lib::{
-    detour::Detour,
+    detour::{Detour, WinGetAddrInfoInt, WinSocket},
     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
     setup::{LayerSetup, NetworkHookConfig, setup},
@@ -227,7 +227,7 @@ unsafe extern "system" fn socket_detour(af: INT, type_: INT, protocol: INT) -> S
         }
     };
     socket(call_original, af, type_, protocol)
-        .unwrap_or_bypass_with(|_| unsafe { original(af, type_, protocol) })
+        .unwrap_or_bypass_windows_as::<WinSocket, _>(|_| unsafe { original(af, type_, protocol) })
 }
 
 /// Windows socket hook for WSASocket (advanced socket creation)
@@ -250,9 +250,9 @@ unsafe extern "system" fn wsa_socket_detour(
             Detour::Success(socket_result)
         }
     };
-    socket(call_original, af, socket_type, protocol).unwrap_or_bypass_with(|_| unsafe {
-        original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags)
-    })
+    socket(call_original, af, socket_type, protocol).unwrap_or_bypass_windows_as::<WinSocket, _>(
+        |_| unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) },
+    )
 }
 
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
@@ -274,9 +274,9 @@ unsafe extern "system" fn wsa_socket_w_detour(
             Detour::Success(socket_result)
         }
     };
-    socket(call_original, af, socket_type, protocol).unwrap_or_bypass_with(|_| unsafe {
-        original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags)
-    })
+    socket(call_original, af, socket_type, protocol).unwrap_or_bypass_windows_as::<WinSocket, _>(
+        |_| unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) },
+    )
 }
 
 /// Windows socket hook for bind
