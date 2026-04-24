@@ -10,7 +10,7 @@ use std::{
 
 use syn::Type;
 
-use crate::parse::{docs_from_attributes, get_ident_from_field_skipping_generics};
+use crate::parse::{docs_from_attributes, get_ident_from_field_skipping_generics, is_internal};
 
 /// We're extracting [`syn::Item`] structs and enums into this type.
 ///
@@ -73,11 +73,21 @@ pub struct PartialVariant<'a> {
 
 /// Converts a [`syn::Field`] into [`PartialField`], using
 /// [`get_ident_from_field_skipping_generics`] to get the field type.
+///
+/// Fields whose doc comments include the `<!--${internal}-->` marker are dropped: their own docs
+/// are suppressed AND [`crate::parse::dfs_fields`] will not recurse into their type. Use this on a
+/// field when its type is already documented elsewhere in the output (for example, a shared
+/// struct that is `#[serde(flatten)]`'d into several variants — to avoid repeating its fields
+/// under each variant).
 impl TryFrom<syn::Field> for PartialField<'_> {
     type Error = ();
 
     #[tracing::instrument(level = "trace", ret)]
     fn try_from(field: syn::Field) -> Result<Self, Self::Error> {
+        if is_internal(&field.attrs) {
+            return Err(());
+        }
+
         let type_ident = match field.ty {
             Type::Path(type_path) => {
                 // `get_ident` returns `Some` if the `path` doesn't contain generics.

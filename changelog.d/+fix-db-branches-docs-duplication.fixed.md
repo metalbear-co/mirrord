@@ -1,0 +1,1 @@
+Fixed duplicated `feature.db_branches[].connection` chunk (and other shared fields) on the generated config docs page. The shared SQL branch fields are now documented once instead of being repeated under each of the mysql/pg/mongodb/mssql variants.

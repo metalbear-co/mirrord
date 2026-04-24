@@ -9,6 +9,31 @@ use crate::{
     types::{PartialField, PartialType, PartialVariant},
 };
 
+/// Marker string that can be placed inside a doc comment to hide an item from the generated docs.
+const INTERNAL_MARKER: &str = "<!--${internal}-->";
+
+/// Returns `true` if any doc attribute contains the `<!--${internal}-->` marker.
+pub fn is_internal(attributes: &[Attribute]) -> bool {
+    attributes.iter().any(|attribute| {
+        let syn::Meta::NameValue(meta_doc) = &attribute.meta else {
+            return false;
+        };
+        let Some(ident) = meta_doc.path.segments.first().map(|s| &s.ident) else {
+            return false;
+        };
+        if ident != &Ident::new("doc", ident.span()) {
+            return false;
+        }
+        let Expr::Lit(doc_expr) = &meta_doc.value else {
+            return false;
+        };
+        let syn::Lit::Str(doc_lit) = &doc_expr.lit else {
+            return false;
+        };
+        doc_lit.value().contains(INTERNAL_MARKER)
+    })
+}
+
 /// Look into the [`syn::Attribute`]s of whatever item we're handling, and extract its doc strings.
 #[tracing::instrument(level = "trace", ret)]
 pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Option<Vec<String>> {
@@ -54,7 +79,7 @@ pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Option<Vec<String>> {
 
     for doc in docs.iter_mut() {
         // removes docs that we don't want in `configuration.md`
-        if doc.contains(r"<!--${internal}-->") {
+        if doc.contains(INTERNAL_MARKER) {
             return None;
         }
 

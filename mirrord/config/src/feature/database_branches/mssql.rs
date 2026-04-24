@@ -9,6 +9,8 @@ use super::DatabaseBranchBaseConfig;
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MssqlBranchConfig {
+    /// <!--${internal}-->
+    /// Shared fields documented once under the MongoDB branch config variant.
     #[serde(flatten)]
     pub base: DatabaseBranchBaseConfig,
 

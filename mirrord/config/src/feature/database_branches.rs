@@ -304,7 +304,7 @@ pub enum DatabaseBranchConfig {
     Redis(Box<RedisBranchConfig>),
 }
 
-/// MySQL and Postgres database branch config objects share the following fields.
+/// Fields shared by MySQL, PostgreSQL, MongoDB, and MSSQL branch config objects.
 #[derive(MirrordConfig, Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[config(map_to = "DatabaseBranchBaseFileConfig")]
 pub struct DatabaseBranchBaseConfig {
