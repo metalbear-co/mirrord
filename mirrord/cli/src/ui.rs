@@ -117,12 +117,9 @@ impl OperatorSessionSummary {
             .and_then(|secs| i64::try_from(secs).ok())
             .and_then(|secs| k8s_openapi::jiff::Timestamp::from_second(secs).ok())
             .map(|ts| ts.to_string())?;
-        let http_filter = session
-            .http_filter
-            .as_ref()
-            .map(|f| SessionHttpFilter {
-                header_filter: f.header_filter.clone(),
-            });
+        let http_filter = session.http_filter.as_ref().map(|f| SessionHttpFilter {
+            header_filter: f.header_filter.clone(),
+        });
         Some(Self {
             id,
             key,
@@ -448,8 +445,7 @@ async fn list_operator_sessions(
     let map = state.operator_sessions.read().await;
     let watch_status = state.operator_watch_status.read().await.clone();
 
-    let mut by_key: BTreeMap<String, Vec<OperatorSessionSummary>> =
-        BTreeMap::new();
+    let mut by_key: BTreeMap<String, Vec<OperatorSessionSummary>> = BTreeMap::new();
     let sessions: Vec<OperatorSessionSummary> = map.values().cloned().collect();
     for s in &sessions {
         by_key.entry(s.key.clone()).or_default().push(s.clone());
