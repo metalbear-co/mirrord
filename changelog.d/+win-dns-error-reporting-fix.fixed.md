@@ -1,0 +1,1 @@
+Fixed Windows DNS hook error reporting so getaddrinfo failures now return the correct WinSock error (for example WSAHOST_NOT_FOUND/11001) instead of surfacing unrelated errors like ERROR_INVALID_HANDLE (os error 6).
