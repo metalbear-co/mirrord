@@ -134,6 +134,10 @@ impl MirrordConfig for IncomingFileConfig {
                     .transpose()?
                     .unwrap_or_default(),
                 ports: advanced.ports.map(|ports| ports.into_iter().collect()),
+                raw_tcp_ports: advanced
+                    .raw_tcp_ports
+                    .map(|ports| ports.into_iter().collect())
+                    .unwrap_or_default(),
                 https_delivery: advanced.https_delivery,
                 tls_delivery: advanced.tls_delivery,
             },
@@ -308,6 +312,12 @@ pub struct IncomingAdvancedFileConfig {
     ///
     /// Mutually exclusive with [`ignore_ports`](###ignore_ports).
     pub ports: Option<Vec<u16>>,
+
+    /// ### raw_tcp_ports
+    ///
+    /// Ports to steal as raw TCP. Incoming connections on these ports bypass HTTP detection and
+    /// TLS handling, so they are forwarded immediately to the local application.
+    pub raw_tcp_ports: Option<Vec<u16>>,
 
     /// ### https_delivery
     ///
@@ -485,6 +495,12 @@ pub struct IncomingConfig {
     /// Mutually exclusive with
     /// [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
     pub ports: Option<HashSet<u16>>,
+
+    /// ##### feature.network.incoming.raw_tcp_ports {#feature-network-incoming-raw_tcp_ports}
+    ///
+    /// Ports to steal as raw TCP. Incoming connections on these ports bypass HTTP detection and
+    /// TLS handling, so they are forwarded immediately to the local application.
+    pub raw_tcp_ports: HashSet<u16>,
 
     /// ##### feature.network.incoming.https_delivery {#feature-network-incoming-https_delivery}
     ///
@@ -689,6 +705,7 @@ impl CollectAnalytics for &IncomingConfig {
         analytics.add("listen_ports_count", self.listen_ports.len());
         analytics.add("ignore_localhost", self.ignore_localhost);
         analytics.add("ignore_ports_count", self.ignore_ports.len());
+        analytics.add("raw_tcp_ports_count", self.raw_tcp_ports.len());
         analytics.add("http", &self.http_filter);
     }
 }

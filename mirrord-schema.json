@@ -2404,6 +2404,20 @@
             "minimum": 0
           }
         },
+        "raw_tcp_ports": {
+          "title": "raw_tcp_ports",
+          "description": "Ports to steal as raw TCP. Incoming connections on these ports bypass HTTP detection and\nTLS handling, so they are forwarded immediately to the local application.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0
+          }
+        },
         "tls_delivery": {
           "title": "tls_delivery",
           "description": "(Operator Only): configures how mirrord delivers stolen TLS traffic\nto the local application.",

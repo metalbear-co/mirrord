@@ -279,6 +279,7 @@ pub struct HttpSettings {
 pub struct IncomingMode {
     pub steal: bool,
     pub http_settings: Option<HttpSettings>,
+    pub raw_tcp_ports: HashSet<Port>,
 }
 
 impl IncomingMode {
@@ -306,23 +307,28 @@ impl IncomingMode {
         Self {
             steal: config.is_steal(),
             http_settings,
+            raw_tcp_ports: config.raw_tcp_ports.clone(),
         }
     }
 
     /// Returns [`PortSubscription`] request to be used for the given port.
     pub fn subscription(&self, port: Port) -> PortSubscription {
         if self.steal {
-            let steal_type = match &self.http_settings {
-                None => StealType::All(port),
-                Some(settings) => {
-                    if settings
-                        .ports
-                        .as_ref()
-                        .is_some_and(|p| p.contains(&port).not())
-                    {
-                        StealType::All(port)
-                    } else {
-                        StealType::FilteredHttpEx(port, settings.filter.clone())
+            let steal_type = if self.raw_tcp_ports.contains(&port) {
+                StealType::AllRawTcp(port)
+            } else {
+                match &self.http_settings {
+                    None => StealType::All(port),
+                    Some(settings) => {
+                        if settings
+                            .ports
+                            .as_ref()
+                            .is_some_and(|p| p.contains(&port).not())
+                        {
+                            StealType::All(port)
+                        } else {
+                            StealType::FilteredHttpEx(port, settings.filter.clone())
+                        }
                     }
                 }
             };

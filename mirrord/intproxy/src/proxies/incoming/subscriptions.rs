@@ -196,12 +196,8 @@ impl SubscriptionsManager {
         request: PortSubscribe,
         protocol_version: Option<&Version>,
     ) -> Option<Either<ProxyMessage, ClientMessage>> {
-        self.remote_ports.add(
-            layer_id,
-            (request.subscription.port(), request.listening_on),
-        );
-
         let port = request.subscription.port();
+        let requested_raw_tcp = request.subscription.requests_raw_tcp();
         let source = Source {
             layer: layer_id,
             message: message_id,
@@ -209,11 +205,42 @@ impl SubscriptionsManager {
         };
 
         match self.subscriptions.entry(port) {
-            Entry::Occupied(mut e) => e
-                .get_mut()
-                .push_source(source)
-                .map(|m| Either::Left(ProxyMessage::ToLayer(m))),
+            Entry::Occupied(mut e) => {
+                let current_raw_tcp = e
+                    .get()
+                    .active_source
+                    .request
+                    .subscription
+                    .requests_raw_tcp();
+
+                if current_raw_tcp != requested_raw_tcp {
+                    tracing::warn!(
+                        port,
+                        current_raw_tcp,
+                        requested_raw_tcp,
+                        "Port is already subscribed with a different incoming mode",
+                    );
+
+                    return Some(Either::Left(ProxyMessage::ToLayer(ToLayer {
+                        message_id: source.message,
+                        layer_id: source.layer,
+                        message: ProxyToLayerMessage::Incoming(IncomingResponse::PortSubscribe(
+                            Err(ResponseError::PortAlreadyStolen(port)),
+                        )),
+                    })));
+                }
+
+                self.remote_ports
+                    .add(layer_id, (port, source.request.listening_on));
+
+                e.get_mut()
+                    .push_source(source)
+                    .map(|m| Either::Left(ProxyMessage::ToLayer(m)))
+            }
             Entry::Vacant(e) => {
+                self.remote_ports
+                    .add(layer_id, (port, source.request.listening_on));
+
                 let (subscription, message) = Subscription::new(source, protocol_version);
                 e.insert(subscription);
                 Some(Either::Right(message))
@@ -346,7 +373,8 @@ impl SubscriptionsManager {
 #[cfg(test)]
 mod test {
     use mirrord_intproxy_protocol::PortSubscription;
-    use mirrord_protocol::tcp::{LayerTcp, MirrorType};
+    use mirrord_protocol::tcp::{Filter, LayerTcp, LayerTcpSteal, MirrorType, StealType};
+    use semver::Version;
 
     use super::*;
 
@@ -497,6 +525,62 @@ mod test {
             Some(ClientMessage::Tcp(LayerTcp::PortUnsubscribe(80)))
         ));
         assert!(manager.get(80).is_none());
+    }
+
+    #[test]
+    fn rejects_mode_change_for_existing_subscription() {
+        let listener_1 = "127.0.0.1:1111".parse().unwrap();
+        let listener_2 = "127.0.0.1:2222".parse().unwrap();
+        let protocol_version = Version::new(1, 27, 0);
+
+        let mut manager = SubscriptionsManager::default();
+
+        let response = manager.layer_subscribed(
+            LayerId(0),
+            0,
+            PortSubscribe {
+                listening_on: listener_1,
+                subscription: PortSubscription::Steal(StealType::FilteredHttp(
+                    80,
+                    Filter::new("host: api".to_owned()).unwrap(),
+                )),
+            },
+            Some(&protocol_version),
+        );
+        assert!(
+            matches!(
+                response,
+                Some(Either::Right(ClientMessage::TcpSteal(
+                    LayerTcpSteal::PortSubscribe(StealType::FilteredHttp(80, _))
+                )))
+            ),
+            "{response:?}"
+        );
+
+        let response = manager.layer_subscribed(
+            LayerId(0),
+            1,
+            PortSubscribe {
+                listening_on: listener_2,
+                subscription: PortSubscription::Steal(StealType::AllRawTcp(80)),
+            },
+            Some(&protocol_version),
+        );
+
+        assert!(
+            matches!(
+                response,
+                Some(Either::Left(ProxyMessage::ToLayer(ToLayer {
+                    layer_id: LayerId(0),
+                    message_id: 1,
+                    message: ProxyToLayerMessage::Incoming(IncomingResponse::PortSubscribe(Err(
+                        ResponseError::PortAlreadyStolen(80)
+                    ))),
+                })))
+            ),
+            "{response:?}"
+        );
+        assert_eq!(manager.get(80).unwrap().listening_on, listener_1);
     }
 
     #[test]

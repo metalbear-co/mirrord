@@ -23,6 +23,7 @@ use tokio::net::TcpStream;
 fn build_config(
     incoming_ports: Option<&[u16]>,
     filter_ports: Option<&[u16]>,
+    raw_tcp_ports: Option<&[u16]>,
     have_filter: bool,
 ) -> Value {
     // Start with the innermost fixed part: the "incoming" object
@@ -60,6 +61,13 @@ fn build_config(
             .insert("ports".to_string(), json!(ports));
     }
 
+    if let Some(ports) = raw_tcp_ports {
+        incoming
+            .as_object_mut()
+            .unwrap()
+            .insert("raw_tcp_ports".to_string(), json!(ports));
+    }
+
     // Now build the full config using the modified incoming object
     json!({
         "feature": {
@@ -73,6 +81,7 @@ fn build_config(
 enum BindMode {
     Local,
     Unfiltered,
+    UnfilteredRawTcp,
     Filtered,
 }
 
@@ -81,6 +90,10 @@ fn expected_behavior(port: u16, incoming: &IncomingConfig) -> BindMode {
         && remote_ports.contains(&port).not()
     {
         return BindMode::Local;
+    }
+
+    if incoming.raw_tcp_ports.contains(&port) {
+        return BindMode::UnfilteredRawTcp;
     }
 
     if incoming.http_filter.is_filter_set().not() {
@@ -124,7 +137,7 @@ async fn filter_ports(
 
     #[values(true, false)] have_filter: bool,
 ) {
-    let config = build_config(incoming_ports, http_filter_ports, have_filter);
+    let config = build_config(incoming_ports, http_filter_ports, None, have_filter);
     let mut config_file = tempfile::NamedTempFile::with_suffix(".json").unwrap();
     config_file
         .as_file_mut()
@@ -161,6 +174,14 @@ async fn filter_ports(
                 ) if stolen_port == port
             );
         }
+        BindMode::UnfilteredRawTcp => {
+            assert_matches!(
+                intproxy.recv().await,
+                ClientMessage::TcpSteal(
+                    LayerTcpSteal::PortSubscribe(StealType::AllRawTcp(stolen_port))
+                ) if stolen_port == port
+            );
+        }
         BindMode::Filtered => {
             assert_matches!(
                 intproxy.recv().await,
@@ -171,6 +192,37 @@ async fn filter_ports(
             );
         }
     }
+
+    drop(test_process)
+}
+
+#[rstest]
+#[tokio::test]
+#[timeout(std::time::Duration::from_secs(60))]
+async fn raw_tcp_ports_subscribe_raw_tcp(
+    #[values(Application::RustListenPorts)] application: Application,
+    #[values(rand::random_range(10000..60000))] port: u16,
+) {
+    let config = build_config(Some(&[port]), None, Some(&[port]), false);
+    let mut config_file = tempfile::NamedTempFile::with_suffix(".json").unwrap();
+    config_file
+        .as_file_mut()
+        .write_all(serde_json::to_string(&config).unwrap().as_bytes())
+        .unwrap();
+
+    let (test_process, mut intproxy) = application
+        .start_process(
+            vec![("APP_PORTS", &port.to_string())],
+            Some(config_file.path()),
+        )
+        .await;
+
+    assert_matches!(
+        intproxy.recv().await,
+        ClientMessage::TcpSteal(
+            LayerTcpSteal::PortSubscribe(StealType::AllRawTcp(stolen_port))
+        ) if stolen_port == port
+    );
 
     drop(test_process)
 }

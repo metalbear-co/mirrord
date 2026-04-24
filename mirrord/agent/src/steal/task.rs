@@ -171,7 +171,7 @@ impl TcpStealerTask {
             }
 
             (
-                PortSubscription::Unfiltered(client_id),
+                PortSubscription::Unfiltered(client_id, ..),
                 StolenTraffic::Tcp {
                     conn,
                     join_handle_tx,
@@ -213,7 +213,7 @@ impl TcpStealerTask {
                 return;
             }
 
-            (PortSubscription::Unfiltered(client_id), StolenTraffic::Http(http)) => {
+            (PortSubscription::Unfiltered(client_id, ..), StolenTraffic::Http(http)) => {
                 let Some(client) = clients.get(client_id) else {
                     tracing::error!(
                         client_id,
@@ -342,19 +342,24 @@ impl TcpStealerTask {
                 });
             }
 
-            Command::PortSubscribe(port, filter) => {
-                let Some(client) = self.clients.get(&command.client_id) else {
+            Command::PortSubscribe(port, filter, mode) => {
+                let Some(message_tx) = self
+                    .clients
+                    .get(&command.client_id)
+                    .map(|client| client.message_tx.clone())
+                else {
                     // The client disconnected after sending the message.
                     return Ok(());
                 };
 
-                self.subscriptions
-                    .add(command.client_id, port, filter)
-                    .await?;
+                let result = self
+                    .subscriptions
+                    .add(command.client_id, port, filter, mode)
+                    .await?
+                    .map(|()| port);
 
-                let _ = client
-                    .message_tx
-                    .send(StealerMessage::PortSubscribed(port))
+                let _ = message_tx
+                    .send(StealerMessage::PortSubscribeResult(result))
                     .await;
             }
 
