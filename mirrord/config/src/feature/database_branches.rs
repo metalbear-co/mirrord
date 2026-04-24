@@ -37,6 +37,30 @@ impl<T> Deref for SingleOrVec<T> {
     }
 }
 
+impl<T> std::ops::DerefMut for SingleOrVec<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<'a, T> IntoIterator for &'a SingleOrVec<T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut SingleOrVec<T> {
+    type Item = &'a mut T;
+    type IntoIter = std::slice::IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter_mut()
+    }
+}
+
 impl<'de, T: Deserialize<'de>> Deserialize<'de> for SingleOrVec<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
