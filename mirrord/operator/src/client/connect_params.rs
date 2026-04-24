@@ -102,6 +102,9 @@ pub struct ConnectParams<'a> {
     /// Key for this session
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<&'a str>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub header_filter: Option<&'a str>,
 }
 
 /// Same as TmpResourceEntry for serialization
@@ -169,6 +172,13 @@ impl<'a> ConnectParams<'a> {
             rmq_output_queues: HashMap::new(),
             output_tmp_resources: Vec::new(),
             key: Some(key),
+            header_filter: config
+                .feature
+                .network
+                .incoming
+                .http_filter
+                .header_filter
+                .as_deref(),
         }
     }
 }
