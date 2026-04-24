@@ -6,7 +6,7 @@
 //! localhost.
 
 use std::{
-    collections::{HashMap, hash_map::Entry},
+    collections::{BTreeMap, HashMap, hash_map::Entry},
     convert::Infallible,
     net::{Ipv6Addr, SocketAddr},
     path::PathBuf,
@@ -30,7 +30,7 @@ use eventsource_stream::Eventsource;
 use futures::stream::StreamExt as _;
 use kube::{Api, Client};
 use mirrord_operator::crd::{
-    MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, TARGETLESS_TARGET_NAME,
+    MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, SessionHttpFilter, TARGETLESS_TARGET_NAME,
 };
 use mirrord_session_monitor_client::{
     SessionError, connect_to_session, session_socket_entries, sessions_dir,
@@ -85,14 +85,7 @@ pub struct OperatorSessionSummary {
     pub target: Option<OperatorSessionTarget>,
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub http_filter: Option<OperatorSessionHttpFilter>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OperatorSessionHttpFilter {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub header_filter: Option<String>,
+    pub http_filter: Option<SessionHttpFilter>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -127,7 +120,7 @@ impl OperatorSessionSummary {
         let http_filter = session
             .http_filter
             .as_ref()
-            .map(|f| OperatorSessionHttpFilter {
+            .map(|f| SessionHttpFilter {
                 header_filter: f.header_filter.clone(),
             });
         Some(Self {
@@ -179,7 +172,7 @@ impl Serialize for TrackedSession {
 
 struct AppState {
     sessions: RwLock<HashMap<String, TrackedSession>>,
-    operator_sessions: RwLock<std::collections::BTreeMap<String, OperatorSessionSummary>>,
+    operator_sessions: RwLock<BTreeMap<String, OperatorSessionSummary>>,
     operator_watch_status: RwLock<OperatorWatchStatus>,
     notify_tx: broadcast::Sender<SessionNotification>,
     token: String,
@@ -444,7 +437,7 @@ async fn session_events_sse(
 
 #[derive(Serialize)]
 struct OperatorSessionsResponse {
-    by_key: std::collections::BTreeMap<String, Vec<OperatorSessionSummary>>,
+    by_key: BTreeMap<String, Vec<OperatorSessionSummary>>,
     sessions: Vec<OperatorSessionSummary>,
     watch_status: OperatorWatchStatus,
 }
@@ -455,8 +448,8 @@ async fn list_operator_sessions(
     let map = state.operator_sessions.read().await;
     let watch_status = state.operator_watch_status.read().await.clone();
 
-    let mut by_key: std::collections::BTreeMap<String, Vec<OperatorSessionSummary>> =
-        std::collections::BTreeMap::new();
+    let mut by_key: BTreeMap<String, Vec<OperatorSessionSummary>> =
+        BTreeMap::new();
     let sessions: Vec<OperatorSessionSummary> = map.values().cloned().collect();
     for s in &sessions {
         by_key.entry(s.key.clone()).or_default().push(s.clone());
@@ -723,7 +716,7 @@ async fn reconcile_operator_sessions(state: &AppState, operator: &MirrordOperato
 }
 
 fn apply_observed_sessions(
-    map: &mut std::collections::BTreeMap<String, OperatorSessionSummary>,
+    map: &mut BTreeMap<String, OperatorSessionSummary>,
     observed: &HashMap<String, OperatorSessionSummary>,
     notify_tx: &broadcast::Sender<SessionNotification>,
 ) {
@@ -743,7 +736,7 @@ fn apply_observed_sessions(
 }
 
 fn drop_stale_sessions(
-    map: &mut std::collections::BTreeMap<String, OperatorSessionSummary>,
+    map: &mut BTreeMap<String, OperatorSessionSummary>,
     observed: &HashMap<String, OperatorSessionSummary>,
     notify_tx: &broadcast::Sender<SessionNotification>,
 ) {
@@ -825,7 +818,7 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
 
     let state = Arc::new(AppState {
         sessions: RwLock::new(HashMap::new()),
-        operator_sessions: RwLock::new(std::collections::BTreeMap::new()),
+        operator_sessions: RwLock::new(BTreeMap::new()),
         operator_watch_status: RwLock::new(OperatorWatchStatus::NotStarted),
         notify_tx,
         token: token.clone(),
@@ -895,7 +888,7 @@ mod tests {
         let (notify_tx, _) = broadcast::channel(16);
         Arc::new(AppState {
             sessions: RwLock::new(HashMap::new()),
-            operator_sessions: RwLock::new(std::collections::BTreeMap::new()),
+            operator_sessions: RwLock::new(BTreeMap::new()),
             operator_watch_status: RwLock::new(OperatorWatchStatus::default()),
             notify_tx,
             token: TEST_TOKEN.to_owned(),
@@ -1142,7 +1135,7 @@ mod tests {
             let state = Arc::new(AppState {
                 sessions: RwLock::new(HashMap::new()),
                 operator_sessions: RwLock::new({
-                    let mut m = std::collections::BTreeMap::new();
+                    let mut m = BTreeMap::new();
                     let s1 =
                         OperatorSessionSummary::from_session(&sample_session("a", "k")).unwrap();
                     let s2 =

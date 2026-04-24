@@ -1,1 +1,1 @@
-Added `key` field to `MirrordOperator.status.sessions[]`, surfaced from the user's `key` value in the mirrord config. Lets clients group existing sessions by this key for discovery and reuse.
+`mirrord ui` now polls `MirrordOperator.status.sessions` and exposes the result through a `/api/operator-sessions` HTTP endpoint, letting the browser extension list existing sessions grouped by their `key`. Adds `key` and `http_filter` to `Session` so external clients can identify joinable sessions and derive the matching header to inject.
