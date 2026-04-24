@@ -8,6 +8,28 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.205.0](https://github.com/metalbear-co/mirrord/tree/3.205.0) - 2026-04-24
+
+
+### Added
+
+- Added `mirrord up`, a tool for spawning and managing multiple concurrent
+  mirrord sessions from a single `mirrord-up.yaml` file.
+- Support for composite environment variables (with `value_pattern` regex) and
+  multi source connection parameters in db branching.
+
+
+### Changed
+
+- Agent now automatically decides when to enable IPv6 based on IPs assigned to
+  available interfaces.
+
+
+### Fixed
+
+- DB branch credentials from a literal value or Secret reference now override
+  the local env vars correctly, even when the target pod does not set them.
+
 ## [3.204.1](https://github.com/metalbear-co/mirrord/tree/3.204.1) - 2026-04-20
 
 
