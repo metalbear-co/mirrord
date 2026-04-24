@@ -289,7 +289,7 @@ pub enum QueueFilter {
         message_filter: QueueMessageFilter,
     },
 
-    #[serde(rename = "GcpPubSub")]
+    #[serde(rename = "GCPPubSub")]
     GcpPubSub {
         /// A filter is a mapping between Pub/Sub message attribute names and regexes they
         /// should match. The local application will only receive messages whose attributes
@@ -300,7 +300,9 @@ pub enum QueueFilter {
         /// A jq filter.
         ///
         /// When this is specified, for each Pub/Sub message, the jq filter runs on a JSON
-        /// representation of the message body.
+        /// representation of the full
+        /// [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)
+        /// object.
         ///
         /// If the jq program outputs `true`, that message is considered as matching the filter.
         #[serde(skip_serializing_if = "Option::is_none")]

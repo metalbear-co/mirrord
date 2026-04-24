@@ -3284,7 +3284,7 @@
           "type": "object",
           "properties": {
             "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each Pub/Sub message, the jq filter runs on a JSON\nrepresentation of the message body.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
+              "description": "A jq filter.\n\nWhen this is specified, for each Pub/Sub message, the jq filter runs on a JSON\nrepresentation of the full\n[`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nobject.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
               "type": [
                 "string",
                 "null"
@@ -3302,7 +3302,7 @@
             },
             "queue_type": {
               "type": "string",
-              "const": "GcpPubSub"
+              "const": "GCPPubSub"
             }
           },
           "additionalProperties": false,
