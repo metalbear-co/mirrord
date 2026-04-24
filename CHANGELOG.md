@@ -8,6 +8,13 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.205.1](https://github.com/metalbear-co/mirrord/tree/3.205.1) - 2026-04-24
+
+
+### Fixed
+
+- Fix issue where username can't be determined breaking operator use
+
 ## [3.205.0](https://github.com/metalbear-co/mirrord/tree/3.205.0) - 2026-04-24
 
 
