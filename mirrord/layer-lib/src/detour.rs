@@ -588,4 +588,3 @@ impl<S> Detour<S> {
         }
     }
 }
-
