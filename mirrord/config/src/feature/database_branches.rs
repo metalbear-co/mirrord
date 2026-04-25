@@ -97,16 +97,12 @@ impl<T: JsonSchema> JsonSchema for SingleOrVec<T> {
         Cow::Owned(format!("SingleOrVec_{}", T::schema_name()))
     }
 
-    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        let inner = generator.subschema_for::<T>().to_value();
-        let array_schema = serde_json::json!({
-            "type": "array",
-            "items": inner,
-        });
-        let one_of = vec![inner, array_schema];
-
+    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
         let mut schema = schemars::json_schema!({});
-        schema.insert("oneOf".to_owned(), serde_json::Value::Array(one_of));
+        schema.insert(
+            "x-kubernetes-preserve-unknown-fields".to_owned(),
+            serde_json::Value::Bool(true),
+        );
         schema
     }
 }
