@@ -37,6 +37,30 @@ impl<T> Deref for SingleOrVec<T> {
     }
 }
 
+impl<T> std::ops::DerefMut for SingleOrVec<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<'a, T> IntoIterator for &'a SingleOrVec<T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut SingleOrVec<T> {
+    type Item = &'a mut T;
+    type IntoIter = std::slice::IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter_mut()
+    }
+}
+
 impl<'de, T: Deserialize<'de>> Deserialize<'de> for SingleOrVec<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -73,16 +97,12 @@ impl<T: JsonSchema> JsonSchema for SingleOrVec<T> {
         Cow::Owned(format!("SingleOrVec_{}", T::schema_name()))
     }
 
-    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        let inner = generator.subschema_for::<T>().to_value();
-        let array_schema = serde_json::json!({
-            "type": "array",
-            "items": inner,
-        });
-        let one_of = vec![inner, array_schema];
-
+    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
         let mut schema = schemars::json_schema!({});
-        schema.insert("oneOf".to_owned(), serde_json::Value::Array(one_of));
+        schema.insert(
+            "x-kubernetes-preserve-unknown-fields".to_owned(),
+            serde_json::Value::Bool(true),
+        );
         schema
     }
 }

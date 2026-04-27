@@ -38,7 +38,7 @@ pub struct TlsClientVerification {
     pub allow_anonymous: bool,
     /// Whether to accept any certificate, regardless of its validity and who signed it.
     ///
-    /// Note that this setting does not affect whether anononymous clients are accepted or not.
+    /// Note that this setting does not affect whether anonymous clients are accepted or not.
     /// If `allow_anonymous` is not set, a certificate will still be required.
     ///
     /// Optional. Defaults to `false`.
@@ -89,7 +89,7 @@ pub struct AgentServerConfig {
     ///
     /// If empty, ALPN is disabled.
     ///
-    /// Optional. Defaults to en ampty list.
+    /// Optional. Defaults to en empty list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub alpn_protocols: Vec<String>,
     /// Configures how mirrord-agent's server verifies the clients.

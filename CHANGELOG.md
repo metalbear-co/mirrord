@@ -8,6 +8,24 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.206.1](https://github.com/metalbear-co/mirrord/tree/3.206.1) - 2026-04-24
+
+## [3.206.0](https://github.com/metalbear-co/mirrord/tree/3.206.0) - 2026-04-24
+
+
+### Added
+
+- `mirrord ui` now polls `MirrordOperator.status.sessions` and exposes the
+  result through a `/api/operator-sessions` HTTP endpoint, letting the browser
+  extension list existing sessions grouped by their `key`. Adds `key` and
+  `http_filter` to `Session` so external clients can identify which sessions to
+  join and derive the matching header to inject.
+
+
+### Fixed
+
+- Fix issue where username can't be determined breaking operator use
+
 ## [3.205.0](https://github.com/metalbear-co/mirrord/tree/3.205.0) - 2026-04-24
 
 
