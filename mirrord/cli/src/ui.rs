@@ -828,9 +828,6 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
 
     let app = build_router(state);
 
-    // IPv4 loopback specifically: the browser extension's `externally_connectable`
-    // allowlist matches `http://localhost/*` and `http://127.0.0.1/*` but not `[::1]`,
-    // so binding on IPv6 loopback breaks the auto-configure handshake.
     let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), args.port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
