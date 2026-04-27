@@ -1,0 +1,1 @@
+Local `mirrord exec` sessions now take precedence over preview environments targeting the same workload and session key. When a conflicting local session starts, the operator temporarily pauses the preview session, preventing it from receiving traffic, then automatically resumes it after the local session ends.

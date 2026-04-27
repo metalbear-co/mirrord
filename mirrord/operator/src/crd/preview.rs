@@ -2,7 +2,7 @@
 //!
 //! The CLI creates a [`PreviewSession`] resource in the cluster, and the operator reconciles
 //! it by spawning a preview pod and routing traffic to it. The CR's status subresource
-//! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Failed`), which
+//! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Paused` / `Failed`), which
 //! the CLI watches to report progress back to the user.
 
 use std::{collections::BTreeMap, time::Duration};
@@ -135,8 +135,9 @@ pub struct PreviewSessionStatus {
 
 /// Phase of a preview session's lifecycle.
 ///
-/// Progresses through `Initializing` → `Waiting` → `Ready`. Any phase may transition to
-/// `Failed` on error.
+/// Progresses through `Initializing` → `Waiting` → `Ready`. A running preview may be moved to
+/// `Paused` while a local session with the same target and key is active. Any phase may
+/// transition to `Failed` on error.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
 pub enum PreviewSessionPhase {
     /// Operator is setting up — the preview pod has not been created yet.
@@ -145,6 +146,8 @@ pub enum PreviewSessionPhase {
     Waiting,
     /// Preview pod is running and traffic routing is active.
     Ready,
+    /// Preview resources were intentionally torn down while a local session takes precedence.
+    Paused,
     /// Session has encountered an unrecoverable error.
     Failed,
     /// For future compatibility.
