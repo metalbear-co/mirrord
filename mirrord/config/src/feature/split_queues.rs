@@ -168,21 +168,8 @@ impl SplitQueuesConfig {
                 QueueFilter::Sqs {
                     message_filter,
                     jq_filter,
-                } => {
-                    if let Some(filter) = message_filter {
-                        Self::verify_message_attribute_filter(queue_name, filter)?;
-                    }
-                    if let Some(jq_filter) = jq_filter {
-                        Self::verify_jq_program(queue_name, jq_filter)?;
-                    }
                 }
-                QueueFilter::Kafka { message_filter } => {
-                    Self::verify_message_attribute_filter(queue_name, message_filter)?;
-                }
-                QueueFilter::Rmq { message_filter } => {
-                    Self::verify_message_attribute_filter(queue_name, message_filter)?;
-                }
-                QueueFilter::GcpPubSub {
+                | QueueFilter::GcpPubSub {
                     message_filter,
                     jq_filter,
                 } => {
@@ -192,6 +179,9 @@ impl SplitQueuesConfig {
                     if let Some(jq_filter) = jq_filter {
                         Self::verify_jq_program(queue_name, jq_filter)?;
                     }
+                }
+                QueueFilter::Kafka { message_filter } | QueueFilter::Rmq { message_filter } => {
+                    Self::verify_message_attribute_filter(queue_name, message_filter)?;
                 }
                 QueueFilter::Unknown => {
                     return Err(QueueSplittingVerificationError::UnknownQueueType(
