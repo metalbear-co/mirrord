@@ -539,6 +539,25 @@ fn translate_dns_fail(dns_fail: DnsLookupError) -> i32 {
     } as _)
 }
 
+/// `getaddrinfo(3)` returns `EAI_*` codes directly instead of reporting failures via `errno`.
+///
+/// We still preserve the generic hook-error side effects for non-DNS failures, such as logging and
+/// graceful exits, before collapsing them into `EAI_FAIL` for callers like libuv that validate the
+/// return value.
+#[cfg(unix)]
+pub fn getaddrinfo_error_code(fail: HookError) -> i32 {
+    match fail {
+        HookError::ResponseError(ResponseError::DnsLookup(dns_fail)) => {
+            translate_dns_fail(dns_fail)
+        }
+        HookError::DNSNoName => libc::EAI_NONAME,
+        other => {
+            let _ = i64::from(other);
+            libc::EAI_FAIL
+        }
+    }
+}
+
 /// mapping based on - <https://man7.org/linux/man-pages/man3/errno.3.html>
 impl From<HookError> for i64 {
     fn from(fail: HookError) -> Self {
@@ -664,5 +683,39 @@ impl From<frida_gum::Error> for LayerError {
 impl From<HookError> for *mut hostent {
     fn from(_fail: HookError) -> Self {
         ptr::null_mut()
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use mirrord_protocol::{DnsLookupError, ResolveErrorKindInternal, ResponseError};
+
+    use super::{HookError, getaddrinfo_error_code};
+
+    #[test]
+    fn getaddrinfo_maps_dns_lookup_failures_to_eai_codes() {
+        let code = getaddrinfo_error_code(HookError::ResponseError(ResponseError::DnsLookup(
+            DnsLookupError {
+                kind: ResolveErrorKindInternal::NoRecordsFound(0),
+            },
+        )));
+
+        assert_eq!(code, libc::EAI_NONAME);
+    }
+
+    #[test]
+    fn getaddrinfo_maps_no_name_to_eai_noname() {
+        assert_eq!(
+            getaddrinfo_error_code(HookError::DNSNoName),
+            libc::EAI_NONAME
+        );
+    }
+
+    #[test]
+    fn getaddrinfo_maps_other_hook_errors_to_eai_fail() {
+        assert_eq!(
+            getaddrinfo_error_code(HookError::NullPointer),
+            libc::EAI_FAIL
+        );
     }
 }
