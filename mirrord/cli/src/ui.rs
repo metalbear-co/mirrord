@@ -8,7 +8,7 @@
 use std::{
     collections::{BTreeMap, HashMap, hash_map::Entry},
     convert::Infallible,
-    net::{Ipv6Addr, SocketAddr},
+    net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     sync::Arc,
     time::Duration,
@@ -828,7 +828,10 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
 
     let app = build_router(state);
 
-    let addr = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), args.port);
+    // IPv4 loopback specifically: the browser extension's `externally_connectable`
+    // allowlist matches `http://localhost/*` and `http://127.0.0.1/*` but not `[::1]`,
+    // so binding on IPv6 loopback breaks the auto-configure handshake.
+    let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), args.port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .map_err(|e| CliError::UiError(format!("failed to bind to {addr}: {e}")))?;

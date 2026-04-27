@@ -1,0 +1,1 @@
+`mirrord ui` now auto-configures the mirrord browser extension when its Web UI is opened in Chrome, so users no longer have to copy the `chrome-extension://...` configure URL by hand. The session monitor binds on IPv4 loopback (`127.0.0.1`) instead of IPv6 (`[::1]`) so the page origin matches the extension's `externally_connectable` allowlist.
