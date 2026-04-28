@@ -820,10 +820,10 @@ async fn exec(
     };
 
     #[cfg(unix)]
-    if let Some(ref redis) = _local_redis {
-        if let Err(e) = redis.spawn_cleanup_guardian() {
-            warn!(?e, "Failed to spawn cleanup guardian for local Redis");
-        }
+    if let Some(ref redis) = _local_redis
+        && let Err(e) = redis.spawn_cleanup_guardian()
+    {
+        warn!(?e, "Failed to spawn cleanup guardian for local Redis");
     }
 
     let mut analytics = AnalyticsReporter::only_error(
