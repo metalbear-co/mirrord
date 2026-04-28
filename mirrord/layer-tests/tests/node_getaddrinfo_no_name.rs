@@ -7,8 +7,8 @@ use mirrord_protocol::{
     ClientMessage, DaemonMessage, FileRequest, FileResponse,
     dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse},
     file::{
-        OpenFileRequest, OpenFileResponse, OpenOptionsInternal, SeekFileRequest, SeekFileResponse,
-        SeekFromInternal,
+        CloseFileRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileRequest,
+        SeekFileRequest, SeekFileResponse, SeekFromInternal,
     },
 };
 use rstest::rstest;
@@ -79,39 +79,50 @@ dns.lookup("missing.example.test", (err) => {
                     ))))
                     .await;
 
-                match intproxy.consume_xstats().await {
-                    ClientMessage::FileRequest(FileRequest::Seek(SeekFileRequest {
-                        fd,
-                        seek_from: SeekFromInternal::Start(0),
-                    })) => {
-                        assert_eq!(fd, RESOLV_CONF_FD);
+                let mut cursor = 0usize;
 
-                        intproxy
-                            .send(DaemonMessage::File(FileResponse::Seek(Ok(
-                                SeekFileResponse { result_offset: 0 },
-                            ))))
-                            .await;
-                        intproxy
-                            .consume_xstats_then_expect_file_read(
-                                RESOLV_CONF_CONTENTS,
-                                RESOLV_CONF_FD,
-                            )
-                            .await;
-                    }
-                    message => {
-                        let buffer_size =
-                            TestIntProxy::expect_message_file_read(message, RESOLV_CONF_FD).await;
-                        intproxy
-                            .answer_file_read_twice(
-                                RESOLV_CONF_CONTENTS,
-                                RESOLV_CONF_FD,
-                                buffer_size,
-                            )
-                            .await;
+                loop {
+                    match intproxy.consume_xstats().await {
+                        ClientMessage::FileRequest(FileRequest::Seek(SeekFileRequest {
+                            fd,
+                            seek_from: SeekFromInternal::Start(0),
+                        })) => {
+                            assert_eq!(fd, RESOLV_CONF_FD);
+                            cursor = 0;
+
+                            intproxy
+                                .send(DaemonMessage::File(FileResponse::Seek(Ok(
+                                    SeekFileResponse { result_offset: 0 },
+                                ))))
+                                .await;
+                        }
+                        ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
+                            remote_fd,
+                            buffer_size,
+                        })) => {
+                            assert_eq!(remote_fd, RESOLV_CONF_FD);
+
+                            let end = cursor
+                                .saturating_add(buffer_size as usize)
+                                .min(RESOLV_CONF_CONTENTS.len());
+                            let bytes = RESOLV_CONF_CONTENTS
+                                .as_bytes()
+                                .get(cursor..end)
+                                .unwrap_or_default()
+                                .to_vec();
+                            cursor = end;
+
+                            intproxy.answer_file_read(bytes).await;
+                        }
+                        ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd })) => {
+                            assert_eq!(fd, RESOLV_CONF_FD);
+                            break;
+                        }
+                        other => {
+                            panic!("Invalid message while serving /etc/resolv.conf: {other:?}")
+                        }
                     }
                 }
-
-                intproxy.expect_file_close(RESOLV_CONF_FD).await;
             }
             other => panic!("Invalid message received from layer: {other:?}"),
         }
