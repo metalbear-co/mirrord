@@ -125,15 +125,15 @@ dns.lookup("missing.example.test", (err) => {
                         create_new: false,
                     },
             })) => {
+                // Some Linux images probe additional host-related config files before DNS
+                // resolution. Unknown read-only files can safely behave like empty files here;
+                // the regression only needs `resolv.conf` and a few common hostname sources.
                 let contents = match path.as_path() {
                     path if path == Path::new("/etc/hostname") => HOSTNAME_CONTENTS,
                     path if path == Path::new("/etc/hosts") => HOSTS_CONTENTS,
                     path if path == Path::new("/etc/nsswitch.conf") => NSSWITCH_CONTENTS,
                     path if path == Path::new("/etc/resolv.conf") => RESOLV_CONF_CONTENTS,
-                    _ => panic!(
-                        "Unexpected file opened before getaddrinfo: {}",
-                        path.display()
-                    ),
+                    _ => "",
                 };
 
                 serve_remote_file(&mut intproxy, contents, REMOTE_FILE_FD).await;
