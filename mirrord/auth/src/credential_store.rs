@@ -35,6 +35,16 @@ static CREDENTIALS_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
 /// "~/.mirrord/credentials"
 static CREDENTIALS_PATH: LazyLock<PathBuf> = LazyLock::new(|| CREDENTIALS_DIR.join("credentials"));
 
+pub trait CredentialClient {
+    fn kube_client(&self) -> Client;
+}
+
+impl CredentialClient for Client {
+    fn kube_client(&self) -> Client {
+        self.clone()
+    }
+}
+
 /// Container that is responsible for creating/loading `Credentials`
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct CredentialStore {
@@ -140,14 +150,15 @@ impl CredentialStore {
     ///
     /// Also, subscription id is accepted as an [`Option`] to make the CLI backwards compatible.
     #[tracing::instrument(level = "trace", skip(self, client))]
-    pub async fn get_or_init<Old, New>(
+    pub async fn get_or_init<C, Old, New>(
         &mut self,
-        client: &Client,
+        client: &C,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
         support_new: bool,
     ) -> Result<&mut Credentials, CredentialStoreError>
     where
+        C: CredentialClient,
         Old: Resource + Clone + Debug,
         Old: for<'de> Deserialize<'de>,
         Old::DynamicType: Default,
@@ -163,14 +174,14 @@ impl CredentialStore {
                     .cloned();
                 let credentials = if support_new {
                     Credentials::init_regular::<New>(
-                        client.clone(),
+                        client.kube_client(),
                         &Self::certificate_common_name(),
                         key_pair,
                     )
                     .await?
                 } else {
                     Credentials::init::<Old>(
-                        client.clone(),
+                        client.kube_client(),
                         &Self::certificate_common_name(),
                         key_pair,
                     )
@@ -184,7 +195,7 @@ impl CredentialStore {
                 if !credentials.is_valid() {
                     credentials
                         .refresh::<Old, New>(
-                            client.clone(),
+                            client.kube_client(),
                             &Self::certificate_common_name(),
                             support_new,
                         )
@@ -231,22 +242,23 @@ impl CredentialStoreSync {
 
     /// Try and get/create a specific client certificate.
     /// The exclusive file lock is already acquired.
-    async fn access_credential<Old, New, C, V>(
+    async fn access_credential<C, Old, New, F, V>(
         &mut self,
-        client: &Client,
+        client: &C,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
         support_new: bool,
-        callback: C,
+        callback: F,
     ) -> Result<V, CredentialStoreError>
     where
+        C: CredentialClient,
         Old: Resource + Clone + Debug,
         Old: for<'de> Deserialize<'de>,
         Old::DynamicType: Default,
         New: Clone + Debug + SigningRequest + SigningResponse + Serialize,
         New: for<'de> Deserialize<'de>,
         New::DynamicType: Default,
-        C: FnOnce(&mut Credentials) -> V,
+        F: FnOnce(&mut Credentials) -> V,
     {
         let mut store = CredentialStore::load(&mut self.store_file)
             .await
@@ -255,7 +267,7 @@ impl CredentialStoreSync {
 
         let value = callback(
             store
-                .get_or_init::<Old, New>(
+                .get_or_init::<_, Old, New>(
                     client,
                     operator_fingerprint,
                     operator_subscription_id,
@@ -280,14 +292,15 @@ impl CredentialStoreSync {
     }
 
     /// Get or create specific client certificate with an exclusive lock on the file.
-    pub async fn get_client_certificate<Old, New>(
+    pub async fn get_client_certificate<C, Old, New>(
         &mut self,
-        client: &Client,
+        client: &C,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
         support_new: bool,
     ) -> Result<Certificate, CredentialStoreError>
     where
+        C: CredentialClient,
         Old: Resource + Clone + Debug,
         Old: for<'de> Deserialize<'de>,
         Old::DynamicType: Default,
@@ -300,7 +313,7 @@ impl CredentialStoreSync {
             .map_err(CredentialStoreError::Lockfile)?;
 
         let result = self
-            .access_credential::<Old, New, _, Certificate>(
+            .access_credential::<_, Old, New, _, Certificate>(
                 client,
                 operator_fingerprint,
                 operator_subscription_id,
