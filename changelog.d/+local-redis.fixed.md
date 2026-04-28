@@ -1,0 +1,1 @@
+Fixed local Redis containers/processes not being cleaned up.
