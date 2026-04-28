@@ -8,6 +8,17 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.207.0](https://github.com/metalbear-co/mirrord/tree/3.207.0) - 2026-04-28
+
+
+### Added
+
+- `mirrord ui` now auto-configures the mirrord browser extension once the user
+  opens its Web UI in Chrome, so users no longer have to copy a
+  `chrome-extension://...` configure URL by hand. The session UI binds on
+  `127.0.0.1` instead of `[::1]` so the page origin matches what the
+  extension's `externally_connectable` manifest entry accepts.
+
 ## [3.206.1](https://github.com/metalbear-co/mirrord/tree/3.206.1) - 2026-04-24
 
 ## [3.206.0](https://github.com/metalbear-co/mirrord/tree/3.206.0) - 2026-04-24
