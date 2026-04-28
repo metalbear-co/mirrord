@@ -1,0 +1,1 @@
+`mirrord ui` now auto-configures the mirrord browser extension once the user opens its Web UI in Chrome, so users no longer have to copy a `chrome-extension://...` configure URL by hand. The session UI binds on `127.0.0.1` instead of `[::1]` so the page origin matches what the extension's `externally_connectable` manifest entry accepts.
