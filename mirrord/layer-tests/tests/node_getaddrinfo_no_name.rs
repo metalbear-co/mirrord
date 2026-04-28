@@ -1,11 +1,12 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{io::Write, time::Duration};
+use std::{io::Write, path::PathBuf, time::Duration};
 
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage,
+    ClientMessage, DaemonMessage, FileRequest, FileResponse,
     dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse},
+    file::{OpenFileRequest, OpenFileResponse, OpenOptionsInternal},
 };
 use rstest::rstest;
 use tempfile::NamedTempFile;
@@ -20,6 +21,9 @@ pub use common::*;
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn test_node_getaddrinfo_no_name_returns_error() {
+    const RESOLV_CONF_CONTENTS: &str = "search home\nnameserver 10.0.0.138\n";
+    const RESOLV_CONF_FD: u64 = 2136;
+
     let mut app = NamedTempFile::with_suffix(".js").unwrap();
     app.as_file_mut()
         .write_all(
@@ -47,19 +51,37 @@ dns.lookup("missing.example.test", (err) => {
         .start_process(vec![("MIRRORD_REMOTE_DNS", "true")], None)
         .await;
 
-    if cfg!(target_os = "macos") {
-        intproxy
-            .expect_file_open_for_reading("/etc/resolv.conf", 2136)
-            .await;
-        intproxy
-            .consume_xstats_then_expect_file_read("search home\nnameserver 10.0.0.138\n", 2136)
-            .await;
-        intproxy.expect_file_close(2136).await;
-    }
+    let GetAddrInfoRequestV2 { node, .. } = loop {
+        let message = intproxy.consume_xstats().await;
 
-    let message = intproxy.recv().await;
-    let ClientMessage::GetAddrInfoRequestV2(GetAddrInfoRequestV2 { node, .. }) = message else {
-        panic!("Invalid message received from layer: {message:?}");
+        match message {
+            ClientMessage::GetAddrInfoRequestV2(request) => break request,
+            ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
+                path,
+                open_options:
+                    OpenOptionsInternal {
+                        read: true,
+                        write: false,
+                        append: false,
+                        truncate: false,
+                        create: false,
+                        create_new: false,
+                    },
+            })) => {
+                assert_eq!(path, PathBuf::from("/etc/resolv.conf"));
+
+                intproxy
+                    .send(DaemonMessage::File(FileResponse::Open(Ok(
+                        OpenFileResponse { fd: RESOLV_CONF_FD },
+                    ))))
+                    .await;
+                intproxy
+                    .consume_xstats_then_expect_file_read(RESOLV_CONF_CONTENTS, RESOLV_CONF_FD)
+                    .await;
+                intproxy.expect_file_close(RESOLV_CONF_FD).await;
+            }
+            other => panic!("Invalid message received from layer: {other:?}"),
+        }
     };
     assert_eq!(node, "missing.example.test");
 
