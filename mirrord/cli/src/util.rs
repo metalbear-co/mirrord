@@ -145,6 +145,56 @@ pub(crate) unsafe fn reparent_to_init() -> Result<(), nix::Error> {
     }
 }
 
+/// Check whether a process with the given PID is still running.
+#[cfg(unix)]
+pub(crate) fn is_pid_alive(pid: u32) -> bool {
+    use nix::{sys::signal::kill, unistd::Pid};
+
+    match kill(Pid::from_raw(pid as i32), None) {
+        Ok(()) => true,
+        Err(nix::errno::Errno::ESRCH) => false,
+        // EPERM means the process exists but we can't signal it.
+        Err(_) => true,
+    }
+}
+
+#[cfg(windows)]
+pub(crate) fn is_pid_alive(pid: u32) -> bool {
+    // Untested AI slop
+    std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+        .unwrap_or(false)
+}
+
+/// Poll `watch_pid` until it exits, then clean up the given container and/or process.
+/// Runs as the `cleanup-guardian` hidden subcommand, fully detached from the terminal.
+#[cfg(unix)]
+pub fn run_cleanup_guardian(
+    watch_pid: u32,
+    container_runtime: Option<String>,
+    container_name: Option<String>,
+    process_pid: Option<u32>,
+) {
+    while is_pid_alive(watch_pid) {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+
+    if let (Some(runtime), Some(name)) = (container_runtime, container_name) {
+        let _ = std::process::Command::new(&runtime)
+            .args(["rm", "-f", &name])
+            .output();
+    }
+
+    if let Some(pid) = process_pid {
+        let pid = nix::unistd::Pid::from_raw(pid as i32);
+        let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM);
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGKILL);
+    }
+}
+
 /// Creates a listening socket using socket2
 /// to control the backlog and manage scenarios where
 /// the proxy is under heavy load.
