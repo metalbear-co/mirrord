@@ -1,7 +1,7 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{io::Write, path::PathBuf, time::Duration};
+use std::{io::Write, path::Path, time::Duration};
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, FileRequest, FileResponse,
@@ -18,14 +18,68 @@ mod common;
 
 pub use common::*;
 
+async fn serve_remote_file(intproxy: &mut TestIntProxy, contents: &str, remote_fd: u64) {
+    intproxy
+        .send(DaemonMessage::File(FileResponse::Open(Ok(
+            OpenFileResponse { fd: remote_fd },
+        ))))
+        .await;
+
+    let mut cursor = 0usize;
+
+    loop {
+        match intproxy.consume_xstats().await {
+            ClientMessage::FileRequest(FileRequest::Seek(SeekFileRequest {
+                fd,
+                seek_from: SeekFromInternal::Start(0),
+            })) => {
+                assert_eq!(fd, remote_fd);
+                cursor = 0;
+
+                intproxy
+                    .send(DaemonMessage::File(FileResponse::Seek(Ok(
+                        SeekFileResponse { result_offset: 0 },
+                    ))))
+                    .await;
+            }
+            ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
+                remote_fd: requested_fd,
+                buffer_size,
+            })) => {
+                assert_eq!(requested_fd, remote_fd);
+
+                let end = cursor
+                    .saturating_add(buffer_size as usize)
+                    .min(contents.len());
+                let bytes = contents
+                    .as_bytes()
+                    .get(cursor..end)
+                    .unwrap_or_default()
+                    .to_vec();
+                cursor = end;
+
+                intproxy.answer_file_read(bytes).await;
+            }
+            ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd })) => {
+                assert_eq!(fd, remote_fd);
+                break;
+            }
+            other => panic!("Invalid message while serving remote file: {other:?}"),
+        }
+    }
+}
+
 /// Verify that Node gets a regular lookup error instead of aborting when remote DNS returns no
 /// records.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn test_node_getaddrinfo_no_name_returns_error() {
+    const HOSTNAME_CONTENTS: &str = "github-actions\n";
+    const HOSTS_CONTENTS: &str = "127.0.0.1 localhost\n::1 localhost\n";
+    const NSSWITCH_CONTENTS: &str = "hosts: files dns\n";
     const RESOLV_CONF_CONTENTS: &str = "search home\nnameserver 10.0.0.138\n";
-    const RESOLV_CONF_FD: u64 = 2136;
+    const REMOTE_FILE_FD: u64 = 2136;
 
     let mut app = NamedTempFile::with_suffix(".js").unwrap();
     app.as_file_mut()
@@ -71,58 +125,18 @@ dns.lookup("missing.example.test", (err) => {
                         create_new: false,
                     },
             })) => {
-                assert_eq!(path, PathBuf::from("/etc/resolv.conf"));
+                let contents = match path.as_path() {
+                    path if path == Path::new("/etc/hostname") => HOSTNAME_CONTENTS,
+                    path if path == Path::new("/etc/hosts") => HOSTS_CONTENTS,
+                    path if path == Path::new("/etc/nsswitch.conf") => NSSWITCH_CONTENTS,
+                    path if path == Path::new("/etc/resolv.conf") => RESOLV_CONF_CONTENTS,
+                    _ => panic!(
+                        "Unexpected file opened before getaddrinfo: {}",
+                        path.display()
+                    ),
+                };
 
-                intproxy
-                    .send(DaemonMessage::File(FileResponse::Open(Ok(
-                        OpenFileResponse { fd: RESOLV_CONF_FD },
-                    ))))
-                    .await;
-
-                let mut cursor = 0usize;
-
-                loop {
-                    match intproxy.consume_xstats().await {
-                        ClientMessage::FileRequest(FileRequest::Seek(SeekFileRequest {
-                            fd,
-                            seek_from: SeekFromInternal::Start(0),
-                        })) => {
-                            assert_eq!(fd, RESOLV_CONF_FD);
-                            cursor = 0;
-
-                            intproxy
-                                .send(DaemonMessage::File(FileResponse::Seek(Ok(
-                                    SeekFileResponse { result_offset: 0 },
-                                ))))
-                                .await;
-                        }
-                        ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
-                            remote_fd,
-                            buffer_size,
-                        })) => {
-                            assert_eq!(remote_fd, RESOLV_CONF_FD);
-
-                            let end = cursor
-                                .saturating_add(buffer_size as usize)
-                                .min(RESOLV_CONF_CONTENTS.len());
-                            let bytes = RESOLV_CONF_CONTENTS
-                                .as_bytes()
-                                .get(cursor..end)
-                                .unwrap_or_default()
-                                .to_vec();
-                            cursor = end;
-
-                            intproxy.answer_file_read(bytes).await;
-                        }
-                        ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd })) => {
-                            assert_eq!(fd, RESOLV_CONF_FD);
-                            break;
-                        }
-                        other => {
-                            panic!("Invalid message while serving /etc/resolv.conf: {other:?}")
-                        }
-                    }
-                }
+                serve_remote_file(&mut intproxy, contents, REMOTE_FILE_FD).await;
             }
             other => panic!("Invalid message received from layer: {other:?}"),
         }
