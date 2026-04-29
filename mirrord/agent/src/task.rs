@@ -39,7 +39,7 @@ pub(crate) struct BgTaskRuntime {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RuntimeNamespace {
     target_pid: u64,
-    namespace_type: NamespaceType,
+    namespace_types: &'static [NamespaceType],
 }
 
 impl BgTaskRuntime {
@@ -54,12 +54,15 @@ impl BgTaskRuntime {
         let thread_logic = move || {
             if let Some(RuntimeNamespace {
                 target_pid,
-                namespace_type,
+                namespace_types,
             }) = namespace
-                && let Err(error) = namespace::set_namespace(target_pid, namespace_type)
             {
-                let _ = result_tx.send(Err(error.into()));
-                return;
+                for namespace_type in namespace_types {
+                    if let Err(error) = namespace::set_namespace(target_pid, *namespace_type) {
+                        let _ = result_tx.send(Err(error.into()));
+                        return;
+                    }
+                }
             }
 
             let rt_result = tokio::runtime::Builder::new_current_thread()
@@ -124,11 +127,15 @@ impl core::fmt::Debug for BgTaskRuntime {
 }
 
 impl RuntimeNamespace {
+    pub(crate) const NET: &'static [NamespaceType] = &[NamespaceType::Net];
+    pub(crate) const NET_AND_MOUNT: &'static [NamespaceType] =
+        &[NamespaceType::Net, NamespaceType::Mount];
+
     #[tracing::instrument(level = Level::DEBUG, ret)]
-    pub(crate) fn new(target_pid: u64, namespace_type: NamespaceType) -> Self {
+    pub(crate) fn new(target_pid: u64, namespace_types: &'static [NamespaceType]) -> Self {
         Self {
             target_pid,
-            namespace_type,
+            namespace_types,
         }
     }
 }

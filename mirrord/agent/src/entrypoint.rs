@@ -159,6 +159,8 @@ struct State {
     tls_connector: Option<AgentTlsConnector>,
     /// [`tokio::runtime`] that should be used for network operations ([`BackgroundTasks`]).
     network_runtime: Arc<BgTaskRuntime>,
+    /// [`tokio::runtime`] that should be used for outgoing socket connections.
+    outgoing_runtime: Arc<BgTaskRuntime>,
 }
 
 impl State {
@@ -228,8 +230,18 @@ impl State {
 
         let network_runtime = match container.as_ref().map(ContainerHandle::pid) {
             Some(pid) if ephemeral.not() => {
-                BgTaskRuntime::spawn(Some(RuntimeNamespace::new(pid, NamespaceType::Net)))
+                BgTaskRuntime::spawn(Some(RuntimeNamespace::new(pid, RuntimeNamespace::NET)))
             }
+
+            None | Some(..) => BgTaskRuntime::spawn(None),
+        }
+        .await?;
+
+        let outgoing_runtime = match container.as_ref().map(ContainerHandle::pid) {
+            Some(pid) if ephemeral.not() => BgTaskRuntime::spawn(Some(RuntimeNamespace::new(
+                pid,
+                RuntimeNamespace::NET_AND_MOUNT,
+            ))),
 
             None | Some(..) => BgTaskRuntime::spawn(None),
         }
@@ -254,6 +266,7 @@ impl State {
             ephemeral,
             tls_connector,
             network_runtime: Arc::new(network_runtime),
+            outgoing_runtime: Arc::new(outgoing_runtime),
         })
     }
 
@@ -397,8 +410,8 @@ impl ClientConnectionHandler {
         .await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
         let reverse_dns_api = ReverseDnsApi::new(&state.network_runtime);
-        let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime);
-        let udp_outgoing_api = UdpOutgoingApi::new(&state.network_runtime);
+        let tcp_outgoing_api = TcpOutgoingApi::new(&state.outgoing_runtime);
+        let udp_outgoing_api = UdpOutgoingApi::new(&state.outgoing_runtime);
 
         let client_handler = Self {
             id,
