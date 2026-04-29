@@ -142,7 +142,7 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 ///     "namespace": "default",
 ///     "image": "ghcr.io/metalbear-co/mirrord:latest",
 ///     "image_pull_policy": "IfNotPresent",
-///     "image_pull_secrets": [ { "secret-key": "secret" } ],
+///     "image_pull_secrets": [ { "name": "secret" } ],
 ///     "ttl": 30,
 ///     "ephemeral": false,
 ///     "communication_timeout": 30,
