@@ -30,6 +30,49 @@ export type MonitorEvent =
   | { type: 'layer_connected'; pid: number; process_name: string }
   | { type: 'layer_disconnected'; pid: number }
 
+export interface OperatorSessionHttpFilter {
+  headerFilter?: string | null
+  pathFilter?: string | null
+  allOf?: OperatorSessionHttpFilter[] | null
+  anyOf?: OperatorSessionHttpFilter[] | null
+}
+
+export interface OperatorSessionOwner {
+  username: string
+  k8sUsername: string
+}
+
+export interface OperatorSessionTarget {
+  kind: string
+  name: string
+  container: string
+}
+
+export interface OperatorSessionSummary {
+  id: string
+  key: string
+  namespace: string
+  owner: OperatorSessionOwner
+  target: OperatorSessionTarget | null
+  createdAt: string
+  httpFilter?: OperatorSessionHttpFilter | null
+}
+
+export type OperatorWatchStatus =
+  | { status: 'not_started' }
+  | { status: 'watching' }
+  | { status: 'error'; message: string }
+  | { status: 'unavailable'; reason: string }
+
+export interface OperatorSessionsResponse {
+  by_key: Record<string, OperatorSessionSummary[]>
+  sessions: OperatorSessionSummary[]
+  watch_status: OperatorWatchStatus
+}
+
 export type WsMessage =
   | { type: 'session_added'; session: SessionInfo }
   | { type: 'session_removed'; session_id: string }
+  | { type: 'operator_session_added'; session: OperatorSessionSummary }
+  | { type: 'operator_session_removed'; id: string }
+  | { type: 'operator_session_updated'; session: OperatorSessionSummary }

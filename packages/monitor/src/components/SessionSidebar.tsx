@@ -13,9 +13,10 @@ import {
   cn,
 } from '@metalbear/ui'
 import { Activity, PanelLeftClose, PanelLeftOpen, Trash2 } from 'lucide-react'
-import type { SessionInfo } from '../types'
+import type { OperatorSessionSummary, OperatorWatchStatus, SessionInfo } from '../types'
 import { strings } from '../strings'
 import SessionCard from './SessionCard'
+import OperatorList from './OperatorList'
 
 const SIDEBAR_MIN = 240
 const SIDEBAR_MAX = 600
@@ -41,6 +42,8 @@ function getSavedSidebarHidden(): boolean {
   return false
 }
 
+type SidebarTab = 'mine' | 'team'
+
 interface SessionSidebarProps {
   sessions: SessionInfo[]
   selectedId: string | null
@@ -48,9 +51,30 @@ interface SessionSidebarProps {
   onSelect: (id: string) => void
   onKill: (id: string) => void
   onKillAll: () => void
+  operatorSessions: OperatorSessionSummary[]
+  watchStatus: OperatorWatchStatus | null
+  selectedOperatorId: string | null
+  onSelectOperator: (id: string) => void
+  onConnectOperator: () => void
+  activeTab: SidebarTab
+  onActiveTabChange: (t: SidebarTab) => void
 }
 
-export default function SessionSidebar({ sessions, selectedId, loading, onSelect, onKill, onKillAll }: SessionSidebarProps) {
+export default function SessionSidebar({
+  sessions,
+  selectedId,
+  loading,
+  onSelect,
+  onKill,
+  onKillAll,
+  operatorSessions,
+  watchStatus,
+  selectedOperatorId,
+  onSelectOperator,
+  onConnectOperator,
+  activeTab,
+  onActiveTabChange,
+}: SessionSidebarProps) {
   const [sidebarWidth, setSidebarWidth] = useState(getSavedSidebarWidth)
   const [sidebarHidden, setSidebarHidden] = useState(getSavedSidebarHidden)
   const isDraggingRef = useRef(false)
@@ -102,9 +126,69 @@ export default function SessionSidebar({ sessions, selectedId, loading, onSelect
   return (
     <>
       <div
-        className="border-r border-border overflow-y-auto p-3 space-y-2 shrink-0 relative bg-card/20"
+        className="border-r border-border overflow-y-auto p-3 shrink-0 relative bg-card/20 flex flex-col gap-2"
         style={{ width: sidebarWidth }}
       >
+        <div className="flex items-center gap-1 border-b border-border -mx-3 px-3 pb-2">
+          <button
+            type="button"
+            onClick={() => onActiveTabChange('mine')}
+            className={cn(
+              'flex-1 text-xs font-semibold py-1.5 px-2 rounded transition-colors',
+              activeTab === 'mine'
+                ? 'bg-card text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Mine{sessions.length > 0 ? ` (${sessions.length})` : ''}
+          </button>
+          <button
+            type="button"
+            onClick={() => onActiveTabChange('team')}
+            className={cn(
+              'flex-1 text-xs font-semibold py-1.5 px-2 rounded transition-colors',
+              activeTab === 'team'
+                ? 'bg-card text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Team{operatorSessions.length > 0 ? ` (${operatorSessions.length})` : ''}
+          </button>
+        </div>
+
+        {activeTab === 'team' ? (
+          watchStatus?.status === 'unavailable' ? (
+            <button
+              type="button"
+              onClick={onConnectOperator}
+              className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-border hover:border-primary hover:bg-muted/50 transition-colors"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60" />
+              <span className="flex-1 text-xs text-muted-foreground">
+                Showing only your sessions.{' '}
+                <span className="text-primary font-semibold">Connect operator →</span>
+              </span>
+            </button>
+          ) : watchStatus?.status === 'error' ? (
+            <div className="px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/40">
+              <div className="text-xs font-semibold text-destructive">Operator error</div>
+              <div className="text-[11px] text-destructive/80 mt-0.5 break-words">
+                {watchStatus.message || 'Could not reach the operator.'}
+              </div>
+            </div>
+          ) : watchStatus?.status === 'not_started' ? (
+            <div className="text-xs text-muted-foreground py-6 text-center">
+              Connecting to operator…
+            </div>
+          ) : (
+            <OperatorList
+              sessions={operatorSessions}
+              selectedId={selectedOperatorId}
+              onSelect={onSelectOperator}
+            />
+          )
+        ) : (
+        <>
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs text-muted-foreground">
             {sessions.length} {countLabel}
@@ -174,6 +258,8 @@ export default function SessionSidebar({ sessions, selectedId, loading, onSelect
               onKill={() => onKill(s.session_id)}
             />
           ))
+        )}
+        </>
         )}
       </div>
 
