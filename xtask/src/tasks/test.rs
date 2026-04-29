@@ -98,13 +98,16 @@ fn resolve_artifacts(
         }
         (None, Some(l)) => {
             let l = validate_path(&l, "MIRRORD_LAYER_FILE", "mirrord layer")?;
-            let b = build_binary_for_host(&l)?;
+            // Need this to be absolute because tests (e2e in
+            // particular) don't run from workspace root won't be able
+            // to resolve binary otherwise
+            let b = std::path::absolute(build_binary_for_host(&l)?)?;
             Ok((b, l))
         }
         (None, None) => {
             println!("No mirrord artifacts provided — building from source...");
             let l = build_layer_for_host()?;
-            let b = build_binary_for_host(&l)?;
+            let b = std::path::absolute(build_binary_for_host(&l)?)?;
             Ok((b, l))
         }
     }
