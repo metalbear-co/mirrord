@@ -843,10 +843,6 @@ where
             (CLIENT_HOSTNAME_HEADER, hostname),
         ];
         for (name, raw_value) in headers {
-            let Some(raw_value) = raw_value else {
-                continue;
-            };
-
             // Replace non-ascii (not supported in headers) chars and trim.
             let cleaned = raw_value
                 .replace(|c: char| !c.is_ascii(), "")
@@ -1620,6 +1616,7 @@ impl OperatorApi<PreparedClientCert> {
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
             key: Some(key),
+            header_filter: None,
         };
 
         if use_proxy {
@@ -2271,6 +2268,7 @@ mod test {
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
             key,
+            header_filter: None,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
@@ -2391,6 +2389,7 @@ mod test {
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
             key,
+            header_filter: None,
         };
         let produced =
             OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);

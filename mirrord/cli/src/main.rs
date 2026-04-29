@@ -819,6 +819,13 @@ async fn exec(
         None
     };
 
+    #[cfg(unix)]
+    if let Some(ref redis) = _local_redis
+        && let Err(e) = redis.spawn_cleanup_guardian()
+    {
+        warn!(?e, "Failed to spawn cleanup guardian for local Redis");
+    }
+
     let mut analytics = AnalyticsReporter::only_error(
         config.telemetry,
         Default::default(),
@@ -1189,6 +1196,20 @@ fn main() -> miette::Result<()> {
             Commands::Session(args) => session::session_command(*args).await?,
             #[cfg(unix)]
             Commands::Kill(args) => session::kill_command(*args).await?,
+            #[cfg(unix)]
+            Commands::CleanupGuardian {
+                watch_pid,
+                container_runtime,
+                container_name,
+                process_pid,
+            } => {
+                util::run_cleanup_guardian(
+                    watch_pid,
+                    container_runtime,
+                    container_name,
+                    process_pid,
+                );
+            }
         };
 
         Ok(())

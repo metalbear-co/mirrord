@@ -806,7 +806,7 @@
         "database": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ParamSource"
+              "$ref": "#/$defs/SingleOrVec_ParamSource"
             },
             {
               "type": "null"
@@ -816,7 +816,7 @@
         "host": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ParamSource"
+              "$ref": "#/$defs/SingleOrVec_ParamSource"
             },
             {
               "type": "null"
@@ -826,7 +826,7 @@
         "password": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ParamSource"
+              "$ref": "#/$defs/SingleOrVec_ParamSource"
             },
             {
               "type": "null"
@@ -836,7 +836,7 @@
         "port": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ParamSource"
+              "$ref": "#/$defs/SingleOrVec_ParamSource"
             },
             {
               "type": "null"
@@ -846,7 +846,7 @@
         "user": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ParamSource"
+              "$ref": "#/$defs/SingleOrVec_ParamSource"
             },
             {
               "type": "null"
@@ -1400,7 +1400,7 @@
               ]
             },
             "url": {
-              "type": "string"
+              "$ref": "#/$defs/SingleOrVec_string"
             }
           },
           "additionalProperties": false,
@@ -3000,55 +3000,6 @@
         }
       ]
     },
-    "ParamSource": {
-      "description": "<!--${internal}-->\nA connection parameter source: a plain env var name (string), an env var with a literal\nvalue override (object with `variable` and optional `value`), or a Kubernetes Secret\nreference.\n\nAs a string: `\"DB_HOST\"` - resolved using the parent `type` field (env or env_from).\n\nAs an object with a literal value: `{ \"variable\": \"DB_HOST\", \"value\": \"myhost.com\" }` -\nuses the provided `value` directly instead of reading the env var from the target pod.\nThe `variable` names the key in the credential Secret that the CLI creates.\n\nAs a value-only object: `{ \"value\": \"myhost.com\" }` - provides the value directly without\nreferencing any env var on the target pod.\n\nAs a Secret ref: `{ \"secret\": \"my-secret\", \"key\": \"password\" }` - read directly from a\nKubernetes Secret. Add `\"env_var_name\": \"DB_PASSWORD\"` to also expose the resolved\nvalue to the local process under that name. Without `env_var_name` the Secret is\nonly consumed by the operator for branch provisioning; the local app must get the\ncredential from the target pod's environment.",
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "object",
-          "properties": {
-            "env_var_name": {
-              "description": "Name of the env var to set on the local process from the resolved\nSecret value. When `None`, the operator only uses the Secret for\nbranch provisioning and does not inject anything locally.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "key": {
-              "type": "string"
-            },
-            "secret": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "secret",
-            "key"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "env_var_name": {
-              "type": "string"
-            },
-            "value": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "env_var_name"
-          ]
-        }
-      ]
-    },
     "PgBranchCopyConfig": {
       "description": "Users can choose from the following copy mode to bootstrap their PostgreSQL branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used\n  when the data volume of the source database is minimal.",
       "oneOf": [
@@ -3590,6 +3541,12 @@
       "required": [
         "service"
       ]
+    },
+    "SingleOrVec_ParamSource": {
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "SingleOrVec_string": {
+      "x-kubernetes-preserve-unknown-fields": true
     },
     "SplitQueuesConfig": {
       "description": "A mapping from queue ids to their filters. Each queue filter defines which messages from the\noriginal queue will be made available to the local application, based on message attributes\nor headers, and possibly on jq filters (for SQS).\n\nThe queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` for SQS and\nRabbitMQ or `MirrordKafkaTopicsConsumer` for Kafka.\n\n\n```json\n{\n  \"feature\": {\n    \"split_queues\": {\n      \"first-queue\": {\n        \"queue_type\": \"SQS\",\n        \"message_filter\": {\n          \"wows\": \"so wows\",\n          \"coolz\": \"^very\"\n        }\n      },\n      \"second-queue\": {\n        \"queue_type\": \"SQS\",\n        \"jq_filter\": \".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"\n      },\n      \"third-queue\": {\n        \"queue_type\": \"Kafka\",\n        \"message_filter\": {\n          \"who\": \"you$\"\n        }\n      },\n      \"fourth-queue\": {\n        \"queue_type\": \"Kafka\",\n        \"message_filter\": {\n          \"wows\": \"so wows\",\n          \"coolz\": \"^very\"\n        }\n      },\n    }\n  }\n}\n```",

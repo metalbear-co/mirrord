@@ -77,8 +77,20 @@
               rustToolchain.rust-analyzer
               rustPlatform.bindgenHook
 
-              # Wizard
-              nodejs_25
+              # Frontends
+              pnpm
+
+              # Integration tests
+              cargo-nextest
+              go
+              nodejs # Install required libraries with `npm install express portfinder --no-save` after entering the devshell.
+              (python3.withPackages (
+                pypkgs: with pypkgs; [
+                  fastapi
+                  flask
+                  uvicorn
+                ]
+              ))
 
               # Release
               python3Packages.towncrier

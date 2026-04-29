@@ -54,16 +54,16 @@ pub struct CredentialStore {
 #[derive(Default, Debug)]
 pub struct UserIdentity {
     /// User's name
-    pub name: Option<String>,
+    pub name: String,
     /// User's hostname
-    pub hostname: Option<String>,
+    pub hostname: String,
 }
 
 impl UserIdentity {
     pub fn load() -> Self {
         Self {
-            name: whoami::realname().ok(),
-            hostname: whoami::hostname().ok(),
+            name: whoami::realname().unwrap_or_else(|_| "unknown".to_string()),
+            hostname: whoami::hostname().unwrap_or_else(|_| "unknown".to_string()),
         }
     }
 }

@@ -38,7 +38,7 @@ pub enum RunType {
 /// Includes all information necessary to build the `mirrord` command
 /// for this session.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub struct RunConfig {
     #[serde(default)]
     pub r#type: RunType,
@@ -47,6 +47,7 @@ pub struct RunConfig {
 
 /// Default settings applied to all services.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
 pub struct CommonConfig {
     accept_invalid_certificates: Option<bool>,
     operator: Option<bool>,
@@ -57,6 +58,7 @@ pub struct CommonConfig {
 /// use custom serde attributes for this that we don't want on the
 /// other one.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct TargetConfig {
     #[serde(deserialize_with = "mirrord_config::util::string_or_struct_option")]
     path: Option<Target>,
@@ -74,6 +76,7 @@ impl From<TargetConfig> for mirrord_config::target::TargetConfig {
 
 /// Per-service configuration.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ServiceConfig {
     #[serde(default)]
     target: TargetConfig,
@@ -95,6 +98,7 @@ pub struct ServiceConfig {
 
 /// Resolved top-level `mirrord-up.yaml` configuration.
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct UpConfig {
     /// Settings applied to all services.
     #[serde(default)]

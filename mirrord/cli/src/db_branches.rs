@@ -18,6 +18,7 @@ use crate::{
     CliResult,
     config::{DbBranchesArgs, DbBranchesCommand},
     kube::{kube_client_from_layer_config, list_resource_if_defined},
+    util::is_pid_alive,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -258,28 +259,6 @@ async fn connections_command() -> CliResult<()> {
     }
 
     Ok(())
-}
-
-#[cfg(unix)]
-fn is_pid_alive(pid: u32) -> bool {
-    use nix::{sys::signal::kill, unistd::Pid};
-
-    match kill(Pid::from_raw(pid as i32), None) {
-        Ok(()) => true,
-        Err(nix::errno::Errno::ESRCH) => false,
-        // EPERM means the process exists but we can't signal it.
-        Err(_) => true,
-    }
-}
-
-#[cfg(windows)]
-fn is_pid_alive(pid: u32) -> bool {
-    // Untested AI slop
-    std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
-        .unwrap_or(false)
 }
 
 fn get_api<T: Resource<DynamicType = (), Scope = NamespaceResourceScope>>(

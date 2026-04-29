@@ -8,6 +8,57 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.207.0](https://github.com/metalbear-co/mirrord/tree/3.207.0) - 2026-04-28
+
+
+### Added
+
+- `mirrord ui` now auto-configures the mirrord browser extension once the user
+  opens its Web UI in Chrome, so users no longer have to copy a
+  `chrome-extension://...` configure URL by hand. The session UI binds on
+  `127.0.0.1` instead of `[::1]` so the page origin matches what the
+  extension's `externally_connectable` manifest entry accepts.
+
+## [3.206.1](https://github.com/metalbear-co/mirrord/tree/3.206.1) - 2026-04-24
+
+## [3.206.0](https://github.com/metalbear-co/mirrord/tree/3.206.0) - 2026-04-24
+
+
+### Added
+
+- `mirrord ui` now polls `MirrordOperator.status.sessions` and exposes the
+  result through a `/api/operator-sessions` HTTP endpoint, letting the browser
+  extension list existing sessions grouped by their `key`. Adds `key` and
+  `http_filter` to `Session` so external clients can identify which sessions to
+  join and derive the matching header to inject.
+
+
+### Fixed
+
+- Fix issue where username can't be determined breaking operator use
+
+## [3.205.0](https://github.com/metalbear-co/mirrord/tree/3.205.0) - 2026-04-24
+
+
+### Added
+
+- Added `mirrord up`, a tool for spawning and managing multiple concurrent
+  mirrord sessions from a single `mirrord-up.yaml` file.
+- Support for composite environment variables (with `value_pattern` regex) and
+  multi source connection parameters in db branching.
+
+
+### Changed
+
+- Agent now automatically decides when to enable IPv6 based on IPs assigned to
+  available interfaces.
+
+
+### Fixed
+
+- DB branch credentials from a literal value or Secret reference now override
+  the local env vars correctly, even when the target pod does not set them.
+
 ## [3.204.1](https://github.com/metalbear-co/mirrord/tree/3.204.1) - 2026-04-20
 
 
