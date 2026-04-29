@@ -1,4 +1,4 @@
-import type { SessionInfo } from './types'
+import type { OperatorSessionsResponse, SessionInfo } from './types'
 
 export const api = {
   listSessions: async (): Promise<SessionInfo[]> => {
@@ -17,6 +17,12 @@ export const api = {
 
   eventStreamUrl: (sessionId: string): string =>
     `/api/sessions/${encodeURIComponent(sessionId)}/events`,
+
+  listOperatorSessions: async (): Promise<OperatorSessionsResponse> => {
+    const r = await fetch('/api/operator-sessions')
+    if (!r.ok) throw new Error(`Failed to fetch operator sessions: ${r.status} ${r.statusText}`)
+    return r.json()
+  },
 
   wsUrl: (): string =>
     `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`,
