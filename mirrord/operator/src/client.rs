@@ -918,6 +918,18 @@ where
                 .require_feature(NewOperatorFeature::RmqQueueSplitting)?;
         }
 
+        if layer_config
+            .feature
+            .split_queues
+            .gcp_pubsub_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GcpPubSubQueueSplitting)?;
+        }
+
         Ok(())
     }
 
@@ -1604,8 +1616,10 @@ impl OperatorApi<PreparedClientCert> {
             profile,
             kafka_splits: Default::default(),
             rmq_splits: Default::default(),
+            gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
+            gcp_pubsub_jq_filters: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -1615,6 +1629,7 @@ impl OperatorApi<PreparedClientCert> {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
+            output_tmp_resources: Vec::new(),
             key: Some(key),
             header_filter: None,
         };
@@ -1992,6 +2007,7 @@ mod test {
         profile: Option<&'static str>,
         kafka_splits: HashMap<&'static str, BTreeMap<String, String>>,
         rmq_splits: HashMap<&'static str, BTreeMap<String, String>>,
+        gcp_pubsub_splits: HashMap<&'static str, BTreeMap<String, String>>,
         sqs_splits: HashMap<&'static str, BTreeMap<String, String>>,
         sqs_jq_filters: HashMap<&'static str, &'static str>,
         branch_db_names: BranchDbNames,
@@ -2021,6 +2037,7 @@ mod test {
                 profile: None,
                 kafka_splits: Default::default(),
                 rmq_splits: Default::default(),
+                gcp_pubsub_splits: Default::default(),
                 sqs_splits: Default::default(),
                 sqs_jq_filters: Default::default(),
                 branch_db_names: Default::default(),
@@ -2227,6 +2244,7 @@ mod test {
             profile,
             kafka_splits,
             rmq_splits,
+            gcp_pubsub_splits,
             sqs_splits,
             sqs_jq_filters,
             branch_db_names,
@@ -2245,6 +2263,11 @@ mod test {
             .map(|(topic_id, filters)| (*topic_id, filters))
             .collect();
 
+        let gcp_pubsub_splits = gcp_pubsub_splits
+            .iter()
+            .map(|(topic_id, filters)| (*topic_id, filters))
+            .collect();
+
         let sqs_splits = sqs_splits
             .iter()
             .map(|(topic_id, filters)| (*topic_id, filters))
@@ -2256,8 +2279,10 @@ mod test {
             profile,
             kafka_splits,
             rmq_splits,
+            gcp_pubsub_splits,
             sqs_splits,
             sqs_jq_filters,
+            gcp_pubsub_jq_filters: Default::default(),
             branch_name: None,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -2267,6 +2292,7 @@ mod test {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
+            output_tmp_resources: Default::default(),
             key,
             header_filter: None,
         };
@@ -2377,8 +2403,10 @@ mod test {
             profile: None,
             kafka_splits: Default::default(),
             rmq_splits: Default::default(),
+            gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
+            gcp_pubsub_jq_filters: Default::default(),
             branch_name: None,
             pg_branch_names: Default::default(),
             mysql_branch_names: Default::default(),
@@ -2388,6 +2416,7 @@ mod test {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
+            output_tmp_resources: Default::default(),
             key,
             header_filter: None,
         };
