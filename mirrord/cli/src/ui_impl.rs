@@ -5,11 +5,12 @@
 //! to each session's HTTP API, and serves a React frontend plus REST/SSE/WebSocket endpoints on
 //! localhost.
 
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
 use std::{
     collections::{BTreeMap, HashMap, hash_map::Entry},
     convert::Infallible,
     net::{Ipv6Addr, SocketAddr},
-    path::PathBuf,
     sync::Arc,
     time::Duration,
 };
@@ -26,14 +27,14 @@ use axum::{
     routing::{get, post},
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
-use eventsource_stream::Eventsource;
 use futures::stream::StreamExt as _;
 use kube::{Api, Client};
 use mirrord_operator::crd::{
     MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, SessionHttpFilter, TARGETLESS_TARGET_NAME,
 };
 use mirrord_session_monitor_client::{
-    SessionError, connect_to_session, session_socket_entries, sessions_dir,
+    SESSION_SENTINEL_EXTENSION, SessionClient, SessionEndpoint, connect_to_session,
+    session_endpoints, sessions_dir,
 };
 use mirrord_session_monitor_protocol::SessionInfo;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -155,10 +156,10 @@ fn parse_session_target(target: &str) -> Option<OperatorSessionTarget> {
 
 #[derive(Clone, Debug)]
 struct TrackedSession {
-    socket_path: PathBuf,
+    endpoint: SessionEndpoint,
     info: SessionInfo,
     events: Vec<serde_json::Value>,
-    client: reqwest::Client,
+    client: SessionClient,
 }
 
 impl Serialize for TrackedSession {
@@ -227,32 +228,6 @@ async fn token_auth(
     StatusCode::UNAUTHORIZED.into_response()
 }
 
-/// Opens an SSE connection to a session's Unix socket /events endpoint and returns
-/// a pinned `Eventsource` stream that yields parsed SSE events.
-async fn open_sse_stream(
-    client: &reqwest::Client,
-) -> Result<
-    std::pin::Pin<
-        Box<
-            dyn futures::Stream<
-                    Item = Result<
-                        eventsource_stream::Event,
-                        eventsource_stream::EventStreamError<reqwest::Error>,
-                    >,
-                > + Send,
-        >,
-    >,
-    SessionError,
-> {
-    let resp = client
-        .get("http://localhost/events")
-        .header("accept", "text/event-stream")
-        .send()
-        .await?;
-    let byte_stream = resp.bytes_stream();
-    Ok(Box::pin(byte_stream.eventsource()))
-}
-
 /// Appends parsed SSE values to the session's event buffer, capping at
 /// [`MAX_EVENTS_PER_SESSION`].
 async fn buffer_session_events(session_id: &str, values: Vec<serde_json::Value>, state: &AppState) {
@@ -269,8 +244,8 @@ async fn buffer_session_events(session_id: &str, values: Vec<serde_json::Value>,
 }
 
 /// Connects to a session's SSE /events endpoint and buffers events into the shared state.
-async fn stream_session_events(session_id: String, client: reqwest::Client, state: Arc<AppState>) {
-    let mut sse_stream = match open_sse_stream(&client).await {
+async fn stream_session_events(session_id: String, client: SessionClient, state: Arc<AppState>) {
+    let mut sse_stream = match client.open_event_stream().await {
         Ok(s) => s,
         Err(err) => {
             warn!(%session_id, ?err, "Failed to open SSE stream");
@@ -293,37 +268,37 @@ async fn stream_session_events(session_id: String, client: reqwest::Client, stat
 
     info!(%session_id, "Session stream disconnected, removing");
     if let Some(session) = state.sessions.read().await.get(&session_id)
-        && let Err(err) = std::fs::remove_file(&session.socket_path)
+        && let Err(err) = std::fs::remove_file(&session.endpoint.sentinel_path)
     {
-        warn!(%session_id, ?err, "Failed to remove session socket");
+        warn!(%session_id, ?err, "Failed to remove session sentinel");
     }
     remove_session(&session_id, &state).await;
 }
 
 async fn scan_existing_sessions(sessions_dir: &std::path::Path, state: &Arc<AppState>) {
-    for (session_id, socket_path) in session_socket_entries(sessions_dir) {
-        add_session(session_id, socket_path, state.clone()).await;
+    for (session_id, endpoint) in session_endpoints(sessions_dir) {
+        add_session(session_id, endpoint, state.clone()).await;
     }
 }
 
-async fn add_session(session_id: String, socket_path: PathBuf, state: Arc<AppState>) {
+async fn add_session(session_id: String, endpoint: SessionEndpoint, state: Arc<AppState>) {
     if state.sessions.read().await.contains_key(&session_id) {
         return;
     }
 
-    let connection = match connect_to_session(&socket_path).await {
+    let connection = match connect_to_session(&endpoint.sentinel_path).await {
         Ok(connection) => connection,
         Err(err) => {
-            debug!(%session_id, ?err, "Could not fetch session info, removing stale socket");
-            if let Err(err) = std::fs::remove_file(&socket_path) {
-                warn!(%session_id, ?err, "Failed to remove stale socket");
+            debug!(%session_id, ?err, "Could not fetch session info, removing stale sentinel");
+            if let Err(err) = std::fs::remove_file(&endpoint.sentinel_path) {
+                warn!(%session_id, ?err, "Failed to remove stale sentinel");
             }
             return;
         }
     };
 
     let tracked = TrackedSession {
-        socket_path: connection.socket_path.clone(),
+        endpoint: connection.endpoint.clone(),
         info: connection.info,
         events: Vec::new(),
         client: connection.client,
@@ -395,7 +370,7 @@ async fn session_events_sse(
             }
         }
 
-        let mut sse_stream = match open_sse_stream(&client).await {
+        let mut sse_stream = match client.open_event_stream().await {
             Ok(s) => s,
             Err(err) => {
                 warn!(?err, "Failed to open SSE stream for proxy");
@@ -459,28 +434,28 @@ async fn list_operator_sessions(
 }
 
 async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    let (client, socket_path) = {
+    let (client, sentinel_path) = {
         let sessions = state.sessions.read().await;
         match sessions.get(&id) {
-            Some(session) => (session.client.clone(), session.socket_path.clone()),
+            Some(session) => (
+                session.client.clone(),
+                session.endpoint.sentinel_path.clone(),
+            ),
             None => return StatusCode::NOT_FOUND.into_response(),
         }
     };
 
-    match client.post("http://localhost/kill").send().await {
-        Ok(resp) => {
-            let val: serde_json::Value = resp.json().await.unwrap_or_else(|err| {
-                warn!(?err, "Failed to parse kill response body");
-                serde_json::json!({"status": "ok"})
-            });
-
-            // Clean up socket file and remove session from tracking
-            if let Err(err) = std::fs::remove_file(&socket_path) {
-                warn!(%id, ?err, "Failed to remove session socket after kill");
+    match client.kill().await {
+        Ok(()) => {
+            // Clean up the sentinel file (the socket on unix; the marker on windows) and
+            // remove the session from local tracking. The producer also removes the sentinel
+            // on shutdown via its own Drop guard, so this is best-effort.
+            if let Err(err) = std::fs::remove_file(&sentinel_path) {
+                warn!(%id, ?err, "Failed to remove session sentinel after kill");
             }
             remove_session(&id, &state).await;
 
-            axum::Json(val).into_response()
+            axum::Json(serde_json::json!({"status": "ok"})).into_response()
         }
         Err(err) => {
             error!(?err, "Failed to proxy kill request");
@@ -627,19 +602,19 @@ fn start_filesystem_watcher(
         let _watcher = watcher;
         while let Some(event) = watcher_rx.recv().await {
             for path in &event.paths {
-                if path.extension().and_then(|e| e.to_str()) != Some("sock") {
+                if path.extension().and_then(|e| e.to_str()) != Some(SESSION_SENTINEL_EXTENSION) {
                     continue;
                 }
 
-                let session_id = match path.file_stem().and_then(|s| s.to_str()) {
-                    Some(s) => s.to_owned(),
-                    None => continue,
+                let Some(endpoint) = SessionEndpoint::from_sentinel(path) else {
+                    continue;
                 };
+                let session_id = endpoint.session_id.clone();
 
                 match event.kind {
                     EventKind::Create(_) => {
                         tokio::time::sleep(Duration::from_millis(100)).await;
-                        add_session(session_id, path.clone(), state.clone()).await;
+                        add_session(session_id, endpoint, state.clone()).await;
                     }
                     EventKind::Remove(_) => {
                         remove_session(&session_id, &state).await;

@@ -1,14 +1,24 @@
-#[cfg(unix)]
+//! Per-session HTTP API. Routes (`/health`, `/info`, `/events`, `/kill`) are platform-agnostic
+//! axum handlers; the only thing that varies between unix and windows is the transport the
+//! API binds to:
+//!
+//! - **unix**: `UnixListener` at `{sessions_dir}/{session_id}.sock`, mode `0o600`.
+//! - **windows**: `NamedPipeServer` at `\\.\pipe\mirrord-session-{session_id}` with a DACL
+//!   restricted to the current user. A zero-byte sentinel file at
+//!   `{sessions_dir}/{session_id}.pipe` lets file-watcher-based discovery work the same way the
+//!   unix socket does.
+//!
+//! Confidentiality and authentication come from the OS-level access control on the transport
+//! itself; the HTTP layer is unauthenticated.
+
 use std::{
     convert::Infallible,
     fs,
-    os::unix::fs::PermissionsExt,
     path::{Component, Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
 
-#[cfg(unix)]
 use axum::{
     Json, Router,
     extract::State,
@@ -19,54 +29,52 @@ use axum::{
     routing::{get, post},
 };
 use mirrord_session_monitor_protocol::{PortSubscription, ProcessInfo, SessionInfo};
-#[cfg(unix)]
-use tokio::{
-    net::UnixListener,
-    sync::{RwLock, broadcast::error::RecvError},
-};
-#[cfg(unix)]
+use tokio::sync::{RwLock, broadcast::error::RecvError};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
-#[cfg(unix)]
 use tokio_util::sync::CancellationToken;
 
-#[cfg(unix)]
 use super::{MonitorEvent, MonitorTx};
 
-/// Per-session API state. Access control is provided by Unix socket file
-/// permissions (`0o600`), so the HTTP layer itself is unauthenticated.
-#[cfg(unix)]
+#[cfg(windows)]
+#[path = "transport_windows.rs"]
+mod transport_windows;
+#[cfg(windows)]
+#[path = "win_security.rs"]
+mod win_security;
+
+/// Per-session API state. Access control is provided by the OS-level permissions on the
+/// transport (`0o600` on the unix socket; restrictive DACL on the named pipe), so the HTTP
+/// layer itself is unauthenticated.
 struct AppState {
     session_info: RwLock<SessionInfo>,
     monitor_tx: MonitorTx,
     shutdown: CancellationToken,
 }
 
-#[cfg(unix)]
-struct SocketCleanup {
+/// Drops the transport's filesystem footprint when `start_api_server` returns. On unix this
+/// is the socket itself; on windows it is the sentinel marker file (the named pipe has no
+/// persistent file).
+struct TransportCleanup {
     path: PathBuf,
 }
 
-#[cfg(unix)]
-impl Drop for SocketCleanup {
+impl Drop for TransportCleanup {
     fn drop(&mut self) {
         if let Err(err) = fs::remove_file(&self.path) {
-            tracing::warn!(?err, path = ?self.path, "Failed to remove session socket");
+            tracing::warn!(?err, path = ?self.path, "Failed to remove session sentinel");
         }
     }
 }
 
-#[cfg(unix)]
 async fn health() -> impl IntoResponse {
     Json(serde_json::json!({"status": "ok"}))
 }
 
-#[cfg(unix)]
 async fn info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let info = state.session_info.read().await;
     Json(info.clone())
 }
 
-#[cfg(unix)]
 async fn events(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
@@ -93,13 +101,11 @@ async fn events(
 
 /// Cancels the API server's cancellation token, triggering graceful shutdown of the API server
 /// only. The mirrord session lifecycle is managed separately by the intproxy.
-#[cfg(unix)]
 async fn kill(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     state.shutdown.cancel();
     Json(serde_json::json!({"status": "shutting_down"}))
 }
 
-#[cfg(unix)]
 async fn update_session_info_from_events(
     state: Arc<AppState>,
     mut rx: tokio::sync::broadcast::Receiver<MonitorEvent>,
@@ -150,7 +156,6 @@ async fn update_session_info_from_events(
 
 /// Returns `true` when `session_id` is a single normal path component, so that joining it with
 /// the sessions directory cannot escape that directory or produce an absolute path.
-#[cfg(unix)]
 fn verify_session_id(session_id: &str) -> bool {
     let as_path = Path::new(session_id);
     let mut components = as_path.components();
@@ -162,10 +167,10 @@ fn verify_session_id(session_id: &str) -> bool {
 
 /// Starts the per-session API server.
 ///
-/// `sessions_dir` is created (mode `0o700`) and the per-session socket is bound at
-/// `{sessions_dir}/{session_id}.sock`. Tests pass a tempdir; the production caller passes
-/// `~/.mirrord/sessions`.
-#[cfg(unix)]
+/// `sessions_dir` is created on demand (and on unix, set to mode `0o700`). The transport binds
+/// at `{sessions_dir}/{session_id}.sock` (unix) or `\\.\pipe\mirrord-session-{session_id}`
+/// with a sentinel file at `{sessions_dir}/{session_id}.pipe` (windows). Tests pass a tempdir;
+/// the production caller passes `~/.mirrord/sessions`.
 pub async fn start_api_server(
     sessions_dir: PathBuf,
     session_info: SessionInfo,
@@ -173,29 +178,19 @@ pub async fn start_api_server(
     monitor_rx: tokio::sync::broadcast::Receiver<MonitorEvent>,
     shutdown: CancellationToken,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let session_id = &session_info.session_id;
+    let session_id = session_info.session_id.clone();
 
-    if !verify_session_id(session_id) {
+    if !verify_session_id(&session_id) {
         return Err(format!("invalid session_id: {session_id}").into());
     }
 
     fs::create_dir_all(&sessions_dir)?;
-    fs::set_permissions(&sessions_dir, fs::Permissions::from_mode(0o700))?;
 
-    let socket_path = sessions_dir.join(format!("{session_id}.sock"));
-
-    if let Err(err) = fs::remove_file(&socket_path)
-        && err.kind() != std::io::ErrorKind::NotFound
+    #[cfg(unix)]
     {
-        tracing::warn!(?err, ?socket_path, "Failed to remove stale session socket");
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&sessions_dir, fs::Permissions::from_mode(0o700))?;
     }
-
-    let listener = UnixListener::bind(&socket_path)?;
-    fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;
-
-    let _cleanup = SocketCleanup {
-        path: socket_path.clone(),
-    };
 
     let state = Arc::new(AppState {
         session_info: RwLock::new(session_info),
@@ -212,7 +207,70 @@ pub async fn start_api_server(
         .route("/kill", post(kill))
         .with_state(state);
 
+    serve_session(&sessions_dir, &session_id, app, shutdown).await
+}
+
+#[cfg(unix)]
+async fn serve_session(
+    sessions_dir: &Path,
+    session_id: &str,
+    app: Router,
+    shutdown: CancellationToken,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    use tokio::net::UnixListener;
+
+    let socket_path = sessions_dir.join(format!("{session_id}.sock"));
+
+    if let Err(err) = fs::remove_file(&socket_path)
+        && err.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(?err, ?socket_path, "Failed to remove stale session socket");
+    }
+
+    let listener = UnixListener::bind(&socket_path)?;
+    fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;
+
+    let _cleanup = TransportCleanup {
+        path: socket_path.clone(),
+    };
+
     tracing::info!(?socket_path, "Session monitor API server starting");
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown.cancelled_owned())
+        .await?;
+
+    tracing::info!("Session monitor API server stopped");
+
+    Ok(())
+}
+
+#[cfg(windows)]
+async fn serve_session(
+    sessions_dir: &Path,
+    session_id: &str,
+    app: Router,
+    shutdown: CancellationToken,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use mirrord_session_monitor_protocol::pipe_name_for_session;
+    use transport_windows::NamedPipeListener;
+
+    let sentinel_path = sessions_dir.join(format!("{session_id}.pipe"));
+    let pipe_name = pipe_name_for_session(session_id);
+
+    // Sentinel file lets the consumer's file-watcher discover the session the same way it
+    // does on unix. Content is intentionally empty.
+    fs::write(&sentinel_path, b"")?;
+
+    let _cleanup = TransportCleanup {
+        path: sentinel_path.clone(),
+    };
+
+    let listener = NamedPipeListener::bind(pipe_name.clone())?;
+
+    tracing::info!(?sentinel_path, %pipe_name, "Session monitor API server starting");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown.cancelled_owned())

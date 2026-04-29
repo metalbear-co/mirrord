@@ -306,23 +306,13 @@ use nix::errno::Errno;
 use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
-#[cfg(any(windows, all(unix, debug_assertions)))]
+// Suppressor for the `unused-extern-crate` lint: `rust_embed` is only referenced from the
+// `#[derive(Embed)]` in `ui_impl.rs` that's gated to release builds.
+#[cfg(debug_assertions)]
 use rust_embed as _;
 use semver::Version;
 use tracing::{error, info, trace, warn};
 use which::which;
-// Suppressors for the `unused-extern-crate` lint. The deps below are only referenced from
-// platform- or feature-gated code (`ui_impl` on unix, `wizard` feature, `ci` on non-windows,
-// or only in release builds), so on a Windows build without the `wizard` feature the compiler
-// otherwise complains they are unused. Each suppressor is gated to the exact scenarios where
-// no real reference to the crate is compiled in.
-#[cfg(all(windows, not(feature = "wizard")))]
-use {axum as _, tower_http as _};
-#[cfg(windows)]
-use {
-    axum_extra as _, eventsource_stream as _, mime_guess as _,
-    mirrord_session_monitor_protocol as _, notify as _, rand as _,
-};
 
 mod browser;
 mod ci;
@@ -360,7 +350,6 @@ mod wsl;
 #[cfg(feature = "wizard")]
 mod wizard;
 
-#[cfg(unix)]
 mod session;
 
 mod ui;
@@ -1195,9 +1184,7 @@ fn main() -> miette::Result<()> {
             #[cfg(windows)]
             Commands::Pitm(args) => pitm::pitm_command(args)?,
             Commands::Ui(args) => ui::ui_command(args).await?,
-            #[cfg(unix)]
             Commands::Session(args) => session::session_command(*args).await?,
-            #[cfg(unix)]
             Commands::Kill(args) => session::kill_command(*args).await?,
         };
 

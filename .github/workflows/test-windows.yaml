@@ -44,3 +44,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           cargo test -p mirrord -p mirrord-layer-win
+      - name: mirrord intproxy UT (cross-platform session monitor contract)
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test -p mirrord-intproxy --test session_monitor_round_trip

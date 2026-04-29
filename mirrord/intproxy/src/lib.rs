@@ -38,10 +38,10 @@ use tokio::{
     time::{Interval, MissedTickBehavior},
 };
 // Suppressors for `unused_crate_dependencies` on the `lib test` build. These dev-deps are
-// referenced only from the integration test in `tests/session_monitor_round_trip.rs`, which is
-// a separate compilation unit, so the lib-test target sees them as unused without these.
-#[cfg(all(test, unix))]
-use {eventsource_stream as _, mirrord_session_monitor_client as _, reqwest as _, tempfile as _};
+// referenced only from the integration test in `tests/session_monitor_round_trip.rs`, which
+// is a separate compilation unit, so the lib-test target sees them as unused without these.
+#[cfg(test)]
+use {mirrord_session_monitor_client as _, tempfile as _};
 
 use crate::{
     agent_conn::{AgentConnection, AgentConnectionMessage},
