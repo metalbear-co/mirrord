@@ -3,16 +3,18 @@
 mod env_tests {
     use std::time::Duration;
 
+    use mirrord_test_utils::run_command::run_exec_with_target;
     use rstest::*;
 
     use crate::utils::{
-        application::env::EnvApp, kube_service::KubeService, run_command::run_exec_with_target,
+        application::{env::EnvApp, GoVersion},
+        kube_service::KubeService,
         services::basic_service,
     };
 
-    #[cfg_attr(not(feature = "job"), ignore)]
+    #[cfg_attr(any(not(feature = "job"), target_os = "windows"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn bash_remote_env_vars(
         #[future] basic_service: KubeService,
@@ -23,14 +25,14 @@ mod env_tests {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     pub async fn remote_env_vars_works(
         #[future] basic_service: KubeService,
         #[values(
-            EnvApp::Go21,
-            EnvApp::Go22,
-            EnvApp::Go23,
+            EnvApp::Go(GoVersion::GO_1_24),
+            EnvApp::Go(GoVersion::GO_1_25),
+            EnvApp::Go(GoVersion::GO_1_26),
             EnvApp::NodeInclude,
             EnvApp::NodeExclude
         )]

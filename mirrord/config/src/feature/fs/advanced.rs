@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{FsModeConfig, FsUserConfig};
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError},
+    config::{ConfigContext, ConfigError, from_env::FromEnv, source::MirrordConfigSource},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
@@ -40,40 +40,43 @@ pub const READONLY_FILE_BUFFER_HARD_LIMIT: u64 = 15 * 1024 * 1024;
 /// 1. `"read_write"` - List of patterns that should be read/write remotely.
 /// 2. `"read_only"` - List of patterns that should be read only remotely.
 /// 3. `"local"` - List of patterns that should be read locally.
-/// 4. `"not_found"` - List of patters that should never be read nor written. These files should be
+/// 4. `"not_found"` - List of patterns that should never be read nor written. These files should be
 ///    treated as non-existent.
 /// 4. `"mapping"` - Map of patterns and their corresponding replacers. The replacement happens before any specific behavior as defined above or mode (uses [`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace))
 ///
 /// The logic for choosing the behavior is as follows:
 ///
 ///
-/// 1. Check agains "mapping" if path needs to be replaced, if matched then continue to next step
+/// 1. Check against "mapping" if path needs to be replaced, if matched then continue to next step
 ///    with new path after replacements otherwise continue as usual.
 /// 2. Check if one of the patterns match the file path, do the corresponding action. There's no
 ///    specified order if two lists match the same path, we will use the first one (and we do not
 ///    guarantee what is first).
 ///
-///     **Warning**: Specifying the same path in two lists is unsupported and can lead to undefined
-///     behaviour.
+///    **Warning**: Specifying the same path in two lists is unsupported and can lead to undefined
+///    behaviour.
 ///
 /// 3. There are pre-defined exceptions to the set FS mode.
-///     1. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs)
-///        are read locally by default.
-///     2. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_remote_by_default.rs)
-///        are read remotely by default when the mode is `localwithoverrides`.
-///     3. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/not_found_by_default.rs)
-///        under the running user's home directory will not be found by the application when the
-///        mode is not `local`.
+///   1. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_local_by_default.rs)
+///      or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_local_by_default.rs)
+///      are read locally by default.
+///   2. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_remote_by_default.rs)
+///      or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_remote_by_default.rs)
+///      are read remotely by default when the mode is `localwithoverrides`.
+///   3. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/not_found_by_default.rs)
+///      or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/not_found_by_default.rs)
+///      under the running user's home directory will not be found by the application when the mode
+///      is not `local`.
 ///
-///     In order to override that default setting for a path, or a pattern, include it the
-///     appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even
-///     though it is covered by [the set of patterns that are read locally by default](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs),
-///     add `"^/etc/."` to the `read_only` set.
+///   In order to override that default setting for a path, or a pattern, include it the
+///   appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even
+///   though it is covered by the set of pre-defined patterns that are read locally by default,
+///   add `"^/etc/."` to the `read_only` set.
 ///
 /// 4. If none of the above match, use the default behavior (mode).
 ///
 /// For more information, check the file operations
-/// [technical reference](https://metalbear.co/mirrord/docs/reference/fileops/).
+/// [technical reference](https://metalbear.com/mirrord/docs/reference/fileops/).
 ///
 /// ```json
 /// {
@@ -95,34 +98,34 @@ pub const READONLY_FILE_BUFFER_HARD_LIMIT: u64 = 15 * 1024 * 1024;
     generator = "FsUserConfig"
 )]
 pub struct FsConfig {
-    /// ### feature.fs.mode {#feature-fs-mode}
+    /// #### feature.fs.mode {#feature-fs-mode}
     #[config(nested)]
     pub mode: FsModeConfig,
 
-    /// ### feature.fs.read_write {#feature-fs-read_write}
+    /// #### feature.fs.read_write {#feature-fs-read_write}
     ///
     /// Specify file path patterns that if matched will be read and written to the remote.
     #[config(env = "MIRRORD_FILE_READ_WRITE_PATTERN")]
     pub read_write: Option<VecOrSingle<String>>,
 
-    /// ### feature.fs.read_only {#feature-fs-read_only}
+    /// #### feature.fs.read_only {#feature-fs-read_only}
     ///
     /// Specify file path patterns that if matched will be read from the remote.
     /// if file matching the pattern is opened for writing or read/write it will be opened locally.
     pub read_only: Option<VecOrSingle<String>>,
 
-    /// ### feature.fs.local {#feature-fs-local}
+    /// #### feature.fs.local {#feature-fs-local}
     ///
     /// Specify file path patterns that if matched will be opened locally.
     #[config(env = "MIRRORD_FILE_LOCAL_PATTERN")]
     pub local: Option<VecOrSingle<String>>,
 
-    /// ### feature.fs.not_found {#feature-fs-not_found}
+    /// #### feature.fs.not_found {#feature-fs-not_found}
     ///
     /// Specify file path patterns that if matched will be treated as non-existent.
     pub not_found: Option<VecOrSingle<String>>,
 
-    /// ### feature.fs.mapping {#feature-fs-mapping}
+    /// #### feature.fs.mapping {#feature-fs-mapping}
     ///
     /// Specify map of patterns that if matched will replace the path according to specification.
     ///
@@ -135,7 +138,7 @@ pub struct FsConfig {
     ///   "^/home/(?<user>\\S+)/dev/config/(?<app>\\S+)": "/mnt/configs/${user}-$app"
     /// }
     /// ```
-    /// Will do the next replacements for any io operaton
+    /// Will do the next replacements for any io operation
     ///
     /// `/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml`
     /// `/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`
@@ -144,7 +147,7 @@ pub struct FsConfig {
     ///   `../dev`.
     pub mapping: Option<HashMap<String, String>>,
 
-    /// ### feature.fs.readonly_file_buffer {#feature-fs-readonly_file_buffer}
+    /// #### feature.fs.readonly_file_buffer {#feature-fs-readonly_file_buffer}
     ///
     /// Sets buffer size for read-only remote files in bytes. By default, the value is
     /// 128000 bytes, or 128 kB.

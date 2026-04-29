@@ -1,10 +1,13 @@
 use std::{fmt, num::ParseIntError};
 
 pub use http::Error as HttpError;
+use mirrord_auth::error::ApiKeyError;
 use mirrord_kube::error::KubeApiError;
+use mirrord_protocol_io::ProtocolError;
 use thiserror::Error;
+use tower::retry::backoff::InvalidBackoff;
 
-use crate::crd::{kube_target::UnknownTargetType, NewOperatorFeature};
+use crate::crd::{NewOperatorFeature, kube_target::UnknownTargetType};
 
 /// Operations performed on the operator via [`kube`] API.
 #[derive(Debug)]
@@ -16,6 +19,10 @@ pub enum OperatorOperation {
     GettingStatus,
     SessionManagement,
     ListingTargets,
+    DbBranching,
+    PgBranching,
+    MysqlBranching,
+    MongodbBranching,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -28,6 +35,10 @@ impl fmt::Display for OperatorOperation {
             Self::GettingStatus => "getting status",
             Self::SessionManagement => "session management",
             Self::ListingTargets => "listing targets",
+            Self::DbBranching => "database branching",
+            Self::PgBranching => "PostgreSQL branching",
+            Self::MysqlBranching => "MySQL branching",
+            Self::MongodbBranching => "MongoDB branching",
         };
 
         f.write_str(as_str)
@@ -77,6 +88,33 @@ pub enum OperatorApiError {
 
     #[error("copied target failed: {}", message.as_deref().unwrap_or("reason unknown"))]
     CopiedTargetFailed { message: Option<String> },
+
+    #[error("operation timed out: {}", operation)]
+    OperationTimeout { operation: OperatorOperation },
+
+    #[error("{operation} failed: {message}")]
+    BranchCreationFailed {
+        operation: OperatorOperation,
+        message: String,
+    },
+
+    #[error("failed to resolve target: {0}")]
+    TargetResolutionFailed(String),
+
+    #[error(transparent)]
+    InvalidBackoff(#[from] InvalidBackoff),
+
+    #[error("protocol error: {0}")]
+    ProtocolError(#[from] ProtocolError),
+
+    #[error(transparent)]
+    ApiKey(#[from] ApiKeyError),
+
+    #[error(transparent)]
+    SerdeJson(#[from] serde_json::Error),
+
+    #[error("failed to create credential secret: {0}")]
+    CredentialSecretCreation(String),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;

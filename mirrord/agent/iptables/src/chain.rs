@@ -1,11 +1,11 @@
 use std::sync::{
-    atomic::{AtomicI32, Ordering},
     Arc,
+    atomic::{AtomicI32, Ordering},
 };
 
 use crate::{
-    error::{IPTablesError, IPTablesResult},
     IPTables,
+    error::{IPTablesError, IPTablesResult},
 };
 
 #[derive(Debug)]

@@ -11,14 +11,25 @@ use std::{
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
+use derive_more::{Deref, Display};
 use http_body_util::BodyExt;
 use hyper::{
-    body::{Body, Frame},
     HeaderMap, Method, Request, Response, StatusCode, Uri, Version,
+    body::{Body, Frame},
+};
+use jaq_core::{
+    Compiler,
+    load::{Arena, File, Loader},
 };
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use serde_json_path::{
+    JsonPath,
+    functions::{NodesType, ValueType},
+};
+use strum_macros::{AsRefStr, EnumString};
 
 use crate::{ConnectionId, Payload, Port, RemoteResult, RequestId};
 
@@ -77,6 +88,10 @@ pub enum LayerTcp {
     /// Removes this `Port` from the sniffer's filter, the traffic won't be cloned to mirrord
     /// anymore.
     PortUnsubscribe(Port),
+
+    /// User is interested in mirroring traffic on this `Port`, so add it to the list of
+    /// ports that the sniffer is filtering.
+    PortSubscribeFilteredHttp(Port, HttpFilter),
 }
 
 /// Messages related to Tcp handler from server.
@@ -171,7 +186,7 @@ pub struct ChunkedRequestErrorV2 {
 
 /// Wraps the string that will become a [`fancy_regex::Regex`], providing a nice API in
 /// `Filter::new` that validates the regex in mirrord-layer.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Deref, Display)]
 pub struct Filter(String);
 
 impl Filter {
@@ -194,18 +209,162 @@ impl Filter {
     }
 }
 
-impl Display for Filter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
+/// Wraps the string that will become a [`serde_json_path::JsonPath`], providing a nice API in
+/// `JsonPathQuery::new` that validates the regex.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Deref)]
+pub struct JsonPathQuery(String);
+impl JsonPathQuery {
+    pub fn new(query_str: String) -> Result<Self, serde_json_path::ParseError> {
+        let _ = JsonPath::parse(&query_str)?;
+        Ok(Self(query_str))
+    }
+
+    /// Used in the layer, because the query has already been verified
+    /// by the CLI. We have to verify it in the CLI because
+    /// `serde_json_path` uses the `inventory` crate to register
+    /// extension functions, which in turn uses a constructor
+    /// functions that happen to run AFTER
+    /// `mirrord_layer_entry_point`, so when the CLI tries to verify
+    /// the query our extension functions haven't been registered yet,
+    /// giving us false errors.
+    pub fn new_unchecked(query_str: String) -> Self {
+        Self(query_str)
     }
 }
 
-impl std::ops::Deref for Filter {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+#[serde_json_path::function(name = "typeof")]
+fn type_of(nodes: NodesType) -> ValueType {
+    #[derive(PartialEq, strum_macros::Display)]
+    #[strum(serialize_all = "lowercase")]
+    enum Types {
+        Null,
+        Bool,
+        Number,
+        String,
+        Array,
+        Object,
     }
+
+    impl From<Types> for ValueType<'static> {
+        fn from(t: Types) -> Self {
+            ValueType::Value(Value::String(t.to_string()))
+        }
+    }
+
+    impl From<&Value> for Types {
+        fn from(v: &Value) -> Self {
+            match v {
+                Value::Null => Self::Null,
+                Value::Bool(_) => Self::Bool,
+                Value::Number(_) => Self::Number,
+                Value::String(_) => Self::String,
+                Value::Array(_) => Self::Array,
+                Value::Object(_) => Self::Object,
+            }
+        }
+    }
+
+    let mut iter = nodes.iter();
+
+    let first_type = match iter.next() {
+        Some(first) => Types::from(*first),
+        None => return ValueType::Nothing,
+    };
+
+    for v in iter {
+        if Types::from(*v) != first_type {
+            return ValueType::Nothing;
+        }
+    }
+
+    first_type.into()
+}
+#[derive(Debug, Clone, Deref, PartialEq, Eq, Encode, Decode, Display)]
+pub struct JqQuery(String);
+
+impl JqQuery {
+    pub fn new(expr: &str) -> Result<Self, String> {
+        let inner = || {
+            let program = File {
+                code: expr,
+                path: (),
+            };
+            let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
+            let arena = Arena::default();
+
+            let modules = loader.load(&arena, program).map_err(|errors| {
+                errors
+                    .into_iter()
+                    .map(|e| format!("{e:?}"))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            })?;
+
+            Compiler::default()
+                .with_funs(jaq_std::funs().chain(jaq_json::funs()))
+                .compile(modules)
+                .map_err(|errors| {
+                    errors
+                        .into_iter()
+                        .map(|e| format!("{e:?}"))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                })?;
+
+            Ok(JqQuery(expr.to_owned()))
+        };
+
+        inner().inspect_err(|fail| {
+            tracing::error!(
+                r"
+                Something went wrong while compiling jaq query {expr:?}
+
+                >> Please check that the string supplied is a valid jaq expression according to
+                   https://gedenkt.at/jaq/manual/.
+
+                > Error:
+                {fail:#?}
+                "
+            )
+        })
+    }
+}
+
+/// HTTP filter for HTTP methods.
+///
+/// Supports all the standard methods, plus a `Other` variant for custom methods (why would anyone
+/// do that).
+///
+/// Related to `HttpFilterConfig`. We convert the `HttpFilterConfig` `method_filter` or `method` in
+/// a `InnerFilter` from a `String` to this type.
+///
+/// The conversion is case-insensitive, but converting it back to `String` returns an uppercase
+/// string.
+#[derive(
+    Encode, Decode, Debug, PartialEq, Eq, Clone, EnumString, strum_macros::Display, AsRefStr,
+)]
+#[strum(ascii_case_insensitive, serialize_all = "UPPERCASE")]
+pub enum HttpMethodFilter {
+    Get,
+    Head,
+    Post,
+    Put,
+    Delete,
+    Connect,
+    Options,
+    Trace,
+    Patch,
+    #[strum(to_string = "{0}")]
+    Other(String),
+}
+
+/// Filter based on the contents of the body.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, strum_macros::Display)]
+pub enum HttpBodyFilter {
+    Json {
+        query: JsonPathQuery,
+        matches: Filter,
+    },
 }
 
 /// Describes different types of HTTP filtering available
@@ -222,6 +381,14 @@ pub enum HttpFilter {
         /// Filters to use
         filters: Vec<HttpFilter>,
     },
+    /// Filter by method ("POST")
+    Method(HttpMethodFilter),
+
+    /// Filter by body
+    Body(HttpBodyFilter),
+
+    /// Filter by header using JQ
+    HeaderJq(JqQuery),
 }
 
 impl Display for HttpFilter {
@@ -229,6 +396,7 @@ impl Display for HttpFilter {
         match self {
             HttpFilter::Header(filter) => write!(f, "header={filter}"),
             HttpFilter::Path(filter) => write!(f, "path={filter}"),
+            HttpFilter::Method(filter) => write!(f, "method={filter}"),
             HttpFilter::Composite { all, filters } => match all {
                 true => {
                     write!(f, "all of ")?;
@@ -257,6 +425,8 @@ impl Display for HttpFilter {
                     Ok(())
                 }
             },
+            HttpFilter::Body(filter) => write!(f, "body={filter}"),
+            HttpFilter::HeaderJq(filter) => write!(f, "header_jq={filter}"),
         }
     }
 }
@@ -279,6 +449,23 @@ impl StealType {
         let (StealType::All(port)
         | StealType::FilteredHttpEx(port, ..)
         | StealType::FilteredHttp(port, ..)) = self;
+        *port
+    }
+}
+
+/// Describes the mirroring subscription to a port
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[protocol_break(2)]
+pub enum MirrorType {
+    /// Mirror all traffic to this port.
+    All(Port),
+    /// Mirror HTTP traffic matching a given filter - supporting more than once kind of filter
+    FilteredHttp(Port, HttpFilter),
+}
+
+impl MirrorType {
+    pub fn get_port(&self) -> Port {
+        let (MirrorType::All(port) | MirrorType::FilteredHttp(port, ..)) = self;
         *port
     }
 }
@@ -430,12 +617,31 @@ pub static HTTP_FILTERED_UPGRADE_VERSION: LazyLock<VersionReq> =
 pub static HTTP_COMPOSITE_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.11.0".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that allows [`HttpFilter::Method`]
+pub static HTTP_METHOD_FILTER_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.20.0".parse().expect("Bad Identifier"));
+
 /// Minimal mirrord-protocol version that allows:
 /// 1. [`DaemonTcp::NewConnectionV2`]
 /// 2. Passing HTTP requests in [`DaemonMessage::Tcp`](crate::DaemonMessage::Tcp)
 /// 3. Passing HTTP requests in [`DaemonTcp`] when the client makes an unflitered port subscription
 pub static MODE_AGNOSTIC_HTTP_REQUESTS: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.19.4".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows HTTP filtering in mirror mode
+/// using [`LayerTcp::PortSubscribeFilteredHttp`]
+pub static MIRROR_HTTP_FILTER_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.21.1".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows HTTP body filtering
+/// ([`HttpFilter::Body`]) by JSON.
+pub static HTTP_BODY_JSON_FILTER_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.23.0".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows HTTP header filtering with JQ
+/// ([`HttpFilter::Body`]) by JSON.
+pub static HTTP_HEADER_JQ_FILTER_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.26.0".parse().expect("Bad Identifier"));
 
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
 /// so we can avoid losing this information.
@@ -542,7 +748,7 @@ impl<B: fmt::Debug> fmt::Debug for InternalHttpResponse<B> {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, Default, PartialEq, Eq, Clone)]
 pub struct InternalHttpBody(pub VecDeque<InternalHttpBodyFrame>);
 
 impl InternalHttpBody {
@@ -574,6 +780,14 @@ impl Body for InternalHttpBody {
 
     fn is_end_stream(&self) -> bool {
         self.0.is_empty()
+    }
+}
+
+impl fmt::Debug for InternalHttpBody {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("InternalHttpBody")
+            .field(&format_args!("{} frames", self.0.len()))
+            .finish()
     }
 }
 

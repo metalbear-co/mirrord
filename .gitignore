@@ -2,7 +2,6 @@ out
 dist
 node_modules
 package-lock.json
-package.json
 __pycache__
 .vscode-test/
 *.vsix
@@ -11,19 +10,26 @@ __pycache__
 /target
 build/
 .mirrord
+.helix/
+.porchlight/
+.claude/settings.local.json
 
 ### go tests ###
 *.go_test_app
+*.go_test_app.exe
 
 ### c test apps ###
 *.c_test_app
+*.c_test_app.exe
 
 ### other test apps ###
 *.test_app
+mirrord/layer-tests/tests/apps/*/target
 
 ### VSCode ###
 vscode-ext/bin
 .vscode/settings.json
+.vscode/launch.json
 
 ### Intellij ###
 intellij-ext/.gradle
@@ -33,3 +39,8 @@ intellij-ext/build
 intellij-ext/libmirrord_layer.*
 intellij-ext/bin
 .idea/
+
+### Wizard archive file ###
+wizard-frontend.tar.gz
+!packages/wizard/package-lock.json
+!packages/monitor/package-lock.json

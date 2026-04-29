@@ -1,5 +1,5 @@
 use proc_macro2_diagnostics::Diagnostic;
-use quote::{quote, ToTokens};
+use quote::{ToTokens, quote};
 use syn::{Field, GenericArgument, Ident, PathArguments, Type, Visibility};
 
 use crate::config::flag::{ConfigFlags, ConfigFlagsType, EnvFlag};
@@ -11,7 +11,7 @@ use crate::config::flag::{ConfigFlags, ConfigFlagsType, EnvFlag};
 ///  #[config(env = "TEST")]
 ///             |-----ty-----|
 /// |vis||ident|      |option|
-///  pub  flag:  Opton<Foobar>,
+///  pub  flag:  Option<Foobar>,
 /// ```
 #[derive(Debug)]
 pub struct ConfigField {
@@ -25,10 +25,9 @@ pub struct ConfigField {
 impl ConfigField {
     /// Check if field is `Option<T>` and if so return type of `T`
     fn is_option(field: &Field) -> Option<Type> {
-        let seg = if let Type::Path(ty) = &field.ty {
-            ty.path.segments.first()
-        } else {
-            None
+        let seg = match &field.ty {
+            Type::Path(ty) => ty.path.segments.first(),
+            _ => None,
         }?;
 
         (seg.ident == "Option").then(|| match &seg.arguments {
@@ -40,7 +39,7 @@ impl ConfigField {
         })?
     }
 
-    /// Will create the stuct definition part of the code
+    /// Will create the struct definition part of the code
     ///
     /// #### 1
     /// ```rust
@@ -72,7 +71,7 @@ impl ConfigField {
     /// #[serde(rename = "test2")]
     /// pub test: Option<String>
     /// ```
-    pub fn definition(&self) -> impl ToTokens {
+    pub fn definition(&self) -> impl ToTokens + use<> {
         let ConfigField {
             ident,
             vis,
@@ -103,8 +102,13 @@ impl ConfigField {
             .as_ref()
             .map(|rename| quote! { #[serde(rename = #rename)] });
 
+        let deprecated = flags.deprecated.as_ref().map(|note| {
+            quote! { #[deprecated(note = #note)] }
+        });
+
         quote! {
             #(#docs)*
+            #deprecated
             #rename
             #vis #ident: Option<#target>
         }
@@ -124,7 +128,7 @@ impl ConfigField {
     ///           .source_value().transpose()?
     ///           .ok_or(crate::config::ConfigError::ValueNotProvided("MyConfig", "test", Some("TEST")))?
     /// ```
-    pub fn implmentation(&self, parent: &Ident) -> impl ToTokens {
+    pub fn implementation(&self, parent: &Ident) -> impl ToTokens + use<> {
         let ConfigField {
             ident,
             option,
@@ -166,11 +170,11 @@ impl ConfigField {
             };
 
             // unwrap to default if exists
-            if let Some(default) = flags.default.as_ref() {
+            match flags.default.as_ref() { Some(default) => {
                 quote! {#default}
-            } else {
+            } _ => {
                 quote! { .ok_or(crate::config::ConfigError::ValueNotProvided(stringify!(#parent), stringify!(#ident), #env_override))? }
-            }
+            }}
         });
 
         let impls = impls

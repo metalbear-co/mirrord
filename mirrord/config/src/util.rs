@@ -1,11 +1,11 @@
 use std::{collections::HashSet, fmt, hash::Hash, marker::PhantomData, ops::Deref, str::FromStr};
 
 use schemars::JsonSchema;
-use serde::{de, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 
 use crate::{
-    config::{ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result},
     LayerConfig,
+    config::{ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result},
 };
 
 pub trait MirrordToggleableConfig: MirrordConfig + Default {
@@ -51,8 +51,8 @@ where
     type Generator = T::Generator;
 }
 
-// We manualy deserialize ToggleableConfig to properly propogate deserialzation errors and not via
-// untagged enum usless error
+// We manually deserialize ToggleableConfig to properly propagate deserialization errors and not via
+// untagged enum useless error
 impl<'de, T> Deserialize<'de> for ToggleableConfig<T>
 where
     T: Deserialize<'de>,
@@ -176,6 +176,44 @@ impl<T: Hash + Eq> From<VecOrSingle<T>> for HashSet<T> {
             }
             VecOrSingle::Multiple(vals) => vals.into_iter().collect(),
         }
+    }
+}
+
+impl<T> From<HashSet<T>> for VecOrSingle<T> {
+    fn from(value: HashSet<T>) -> Self {
+        Self::Multiple(Vec::from_iter(value))
+    }
+}
+
+impl<T> From<Vec<T>> for VecOrSingle<T> {
+    fn from(value: Vec<T>) -> Self {
+        Self::Multiple(value)
+    }
+}
+
+impl<T> From<VecOrSingle<T>> for Vec<T> {
+    fn from(value: VecOrSingle<T>) -> Self {
+        match value {
+            VecOrSingle::Single(item) => vec![item],
+            VecOrSingle::Multiple(items) => items,
+        }
+    }
+}
+
+impl<T: core::fmt::Display> core::fmt::Display for VecOrSingle<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        let mut first = true;
+        for item in self.iter() {
+            if first {
+                write!(f, "{item}")?;
+                first = false;
+            } else {
+                write!(f, ", {item}")?;
+            }
+        }
+        write!(f, "]")?;
+        Ok(())
     }
 }
 

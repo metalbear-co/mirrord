@@ -1,16 +1,13 @@
 use k8s_openapi::api::core::v1::ConfigMap;
 use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
-use mirrord_config::{config::ConfigContext, LayerConfig};
-use mirrord_kube::api::kubernetes::create_kube_config;
+use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_vpn::{agent::VpnAgent, config::VpnConfig, tunnel::VpnTunnel};
 use tokio::signal;
 
 use crate::{
-    config::VpnArgs,
-    connection::create_and_connect,
-    error::{CliError, CliResult},
-    util::get_user_git_branch,
+    config::VpnArgs, connection::create_and_connect, error::CliResult,
+    kube::kube_client_from_layer_config, util::get_user_git_branch,
 };
 
 pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
@@ -20,17 +17,11 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
     let mut cfg_context = ConfigContext::default()
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file)
         .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace);
-    let mut config = LayerConfig::resolve(&mut cfg_context)?;
-    config.agent.privileged = true;
 
-    let client = create_kube_config(
-        config.accept_invalid_certificates,
-        config.kubeconfig.clone(),
-        config.kube_context.clone(),
-    )
-    .await
-    .and_then(|config| kube::Client::try_from(config).map_err(From::from))
-    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
+    let mut layer_config = LayerConfig::resolve(&mut cfg_context)?;
+    layer_config.agent.privileged = true;
+
+    let client = kube_client_from_layer_config(&layer_config).await?;
 
     let mut sub_progress = progress.subtask("fetching vpn info");
 
@@ -49,14 +40,19 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
     let mut sub_progress = progress.subtask("create agent");
 
     let branch_name = get_user_git_branch().await;
-    let (_, connection) =
-        create_and_connect(&mut config, &mut sub_progress, &mut analytics, branch_name)
-            .await
-            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+    let (_, connection) = create_and_connect(
+        &mut layer_config,
+        &mut sub_progress,
+        &mut analytics,
+        branch_name,
+        None,
+    )
+    .await
+    .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
     sub_progress.success(None);
 
-    let mut vpn_agnet = VpnAgent::try_create(connection.sender, connection.receiver).await?;
+    let mut vpn_agnet = VpnAgent::try_create(connection).await?;
 
     let network = vpn_agnet.get_network_configuration().await?;
 

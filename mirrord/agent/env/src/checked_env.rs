@@ -1,14 +1,15 @@
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStrExt;
 use std::{
     any,
     convert::Infallible,
     fmt,
     marker::PhantomData,
     net::{AddrParseError, IpAddr, SocketAddr},
-    os::unix::ffi::OsStrExt,
     str::{FromStr, Utf8Error},
 };
 
-use base64::{engine::general_purpose, Engine};
+use base64::{Engine, engine::general_purpose};
 #[cfg(feature = "k8s-openapi")]
 use k8s_openapi::api::core::v1::EnvVar;
 use thiserror::Error;
@@ -89,7 +90,10 @@ impl<V: EnvValue> CheckedEnv<V> {
     pub fn try_from_env(self) -> Result<Option<V>, V::FromReprError> {
         match std::env::var_os(self.name) {
             Some(repr) => {
+                #[cfg(not(target_os = "windows"))]
                 let value = V::from_repr(repr.as_bytes())?;
+                #[cfg(target_os = "windows")]
+                let value = V::from_repr(repr.as_encoded_bytes())?;
                 Ok(Some(value))
             }
             None => Ok(None),
@@ -170,6 +174,8 @@ impl<V: EnvValue> Eq for CheckedEnv<V> {}
 impl StoredAsString for bool {}
 
 impl StoredAsString for u32 {}
+
+impl StoredAsString for u64 {}
 
 impl StoredAsString for usize {}
 

@@ -18,15 +18,20 @@ workspace = true
 
 [dependencies]
 mirrord-protocol = { path = "../protocol" }
+mirrord-protocol-io = { path = "../protocol-io" }
 
 futures.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
 ipnet.workspace = true
-pnet_packet = "0.35"
+pnet_packet.workspace = true
 semver.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "process"] }
 tracing.workspace = true
 tun2 = { workspace = true, features = ["async"] }
+
+[lib]
+test = false
+doctest = false

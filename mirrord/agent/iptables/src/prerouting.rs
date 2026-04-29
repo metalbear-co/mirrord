@@ -2,7 +2,7 @@ use std::{ops::Deref, sync::Arc};
 
 use async_trait::async_trait;
 
-use crate::{chain::IPTableChain, error::IPTablesResult, IPTables, Redirect, IPTABLE_PREROUTING};
+use crate::{IPTables, Redirect, chain::IPTableChain, error::IPTablesResult};
 
 pub struct PreroutingRedirect<IPT: IPTables> {
     managed: IPTableChain<IPT>,
@@ -14,14 +14,14 @@ where
 {
     const ENTRYPOINT: &'static str = "PREROUTING";
 
-    pub fn create(ipt: Arc<IPT>) -> IPTablesResult<Self> {
-        let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string())?;
+    pub fn create(ipt: Arc<IPT>, chain_name: String) -> IPTablesResult<Self> {
+        let managed = IPTableChain::create(ipt, chain_name)?;
 
         Ok(PreroutingRedirect { managed })
     }
 
-    pub fn load(ipt: Arc<IPT>) -> IPTablesResult<Self> {
-        let managed = IPTableChain::load(ipt, IPTABLE_PREROUTING.to_string())?;
+    pub fn load(ipt: Arc<IPT>, chain_name: String) -> IPTablesResult<Self> {
+        let managed = IPTableChain::load(ipt, chain_name)?;
 
         Ok(PreroutingRedirect { managed })
     }
@@ -45,9 +45,7 @@ where
         self.managed.inner().remove_rule(
             Self::ENTRYPOINT,
             &format!("-j {}", self.managed.chain_name()),
-        )?;
-
-        Ok(())
+        )
     }
 
     async fn add_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
@@ -86,22 +84,21 @@ mod tests {
 
     use mockall::predicate::eq;
 
-    use crate::{
-        prerouting::PreroutingRedirect, redirect::Redirect, MockIPTables, IPTABLE_PREROUTING,
-    };
+    use crate::{ChainNames, MockIPTables, prerouting::PreroutingRedirect, redirect::Redirect};
 
     #[tokio::test]
     async fn add_redirect() {
+        let chain_names = ChainNames::legacy();
         let mut mock = MockIPTables::new();
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_PREROUTING))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_PREROUTING),
+                eq(chain_names.prerouting.clone()),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
@@ -109,27 +106,29 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_PREROUTING))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
-        let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
+        let prerouting = PreroutingRedirect::create(Arc::new(mock), chain_names.prerouting.clone())
+            .expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).await.is_ok());
     }
 
     #[tokio::test]
     async fn add_redirect_twice() {
+        let chain_names = ChainNames::legacy();
         let mut mock = MockIPTables::new();
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_PREROUTING))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_PREROUTING),
+                eq(chain_names.prerouting.clone()),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
@@ -138,7 +137,7 @@ mod tests {
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_PREROUTING),
+                eq(chain_names.prerouting.clone()),
                 eq("-m tcp -p tcp --dport 169 -j REDIRECT --to-ports 1420"),
                 eq(2),
             )
@@ -146,11 +145,12 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_PREROUTING))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
-        let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
+        let prerouting = PreroutingRedirect::create(Arc::new(mock), chain_names.prerouting.clone())
+            .expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).await.is_ok());
         assert!(prerouting.add_redirect(169, 1420).await.is_ok());
@@ -158,27 +158,29 @@ mod tests {
 
     #[tokio::test]
     async fn remove_redirect() {
+        let chain_names = ChainNames::legacy();
         let mut mock = MockIPTables::new();
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_PREROUTING))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_remove_rule()
             .with(
-                eq(IPTABLE_PREROUTING),
+                eq(chain_names.prerouting.clone()),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_PREROUTING))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
-        let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
+        let prerouting = PreroutingRedirect::create(Arc::new(mock), chain_names.prerouting.clone())
+            .expect("Unable to create");
 
         assert!(prerouting.remove_redirect(69, 420).await.is_ok());
     }

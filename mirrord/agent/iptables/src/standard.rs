@@ -3,8 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    error::IPTablesResult, output::OutputRedirect, prerouting::PreroutingRedirect, IPTables,
-    Redirect, IPTABLE_STANDARD,
+    ChainNames, IPTables, Redirect, error::IPTablesResult, output::OutputRedirect,
+    prerouting::PreroutingRedirect,
 };
 
 pub struct StandardRedirect<IPT: IPTables> {
@@ -16,16 +16,20 @@ impl<IPT> StandardRedirect<IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(ipt: Arc<IPT>, pod_ips: Option<&str>) -> IPTablesResult<Self> {
-        let prerouting = PreroutingRedirect::create(ipt.clone())?;
-        let output = OutputRedirect::create(ipt, IPTABLE_STANDARD.to_string(), pod_ips)?;
+    pub fn create(
+        ipt: Arc<IPT>,
+        chain_names: &ChainNames,
+        pod_ips: Option<&str>,
+    ) -> IPTablesResult<Self> {
+        let prerouting = PreroutingRedirect::create(ipt.clone(), chain_names.prerouting.clone())?;
+        let output = OutputRedirect::create(ipt, chain_names.standard.clone(), pod_ips)?;
 
         Ok(StandardRedirect { prerouting, output })
     }
 
-    pub fn load(ipt: Arc<IPT>) -> IPTablesResult<Self> {
-        let prerouting = PreroutingRedirect::load(ipt.clone())?;
-        let output = OutputRedirect::load(ipt, IPTABLE_STANDARD.to_string())?;
+    pub fn load(ipt: Arc<IPT>, chain_names: &ChainNames) -> IPTablesResult<Self> {
+        let prerouting = PreroutingRedirect::load(ipt.clone(), chain_names.prerouting.clone())?;
+        let output = OutputRedirect::load(ipt, chain_names.standard.clone())?;
 
         Ok(StandardRedirect { prerouting, output })
     }
@@ -46,10 +50,11 @@ where
     }
 
     async fn unmount_entrypoint(&self) -> IPTablesResult<()> {
-        self.prerouting.unmount_entrypoint().await?;
-        self.output.unmount_entrypoint().await?;
-
-        Ok(())
+        // Don't fail early, so that we delete the second part even if the second part does not
+        // exist and its deletion therefore fails.
+        let prerouting_res = self.prerouting.unmount_entrypoint().await;
+        let output_res = self.output.unmount_entrypoint().await;
+        prerouting_res.and(output_res)
     }
 
     async fn add_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
@@ -64,13 +69,16 @@ where
     }
 
     async fn remove_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
-        self.prerouting
+        // Don't fail early, so that we delete the second part even if the second part does not
+        // exist and its deletion therefore fails.
+        let prerouting_res = self
+            .prerouting
             .remove_redirect(redirected_port, target_port)
-            .await?;
-        self.output
+            .await;
+        let output_res = self
+            .output
             .remove_redirect(redirected_port, target_port)
-            .await?;
-
-        Ok(())
+            .await;
+        prerouting_res.and(output_res)
     }
 }

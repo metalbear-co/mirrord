@@ -5,15 +5,15 @@
 //!    disable file operations;
 //!
 //! 2. [`FsUserConfig::Advanced`]: All of the above, plus allows setting up
-//!    `mirrord_layer::file::filter::FileFilter` to control which files should be opened locally or
-//!    remotely.
+//!    `mirrord_layer_lib::file::filter::FileFilter` to control which files should be opened locally
+//!    or remotely.
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 pub use self::{advanced::*, mode::*};
 use crate::{
     config::{
-        from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError, MirrordConfig,
+        ConfigContext, ConfigError, MirrordConfig, from_env::FromEnv, source::MirrordConfigSource,
     },
     util::MirrordToggleableConfig,
 };
@@ -25,7 +25,7 @@ pub mod mode;
 ///
 /// Changes file operations behavior based on user configuration.
 ///
-/// See the file operations [reference](https://metalbear.co/mirrord/docs/reference/fileops/)
+/// See the file operations [reference](https://metalbear.com/mirrord/docs/reference/fileops/)
 /// for more details, and [fs advanced](#fs-advanced) for more information on how to fully setup
 /// mirrord file operations.
 ///

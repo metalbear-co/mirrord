@@ -1,0 +1,42 @@
+[package]
+name = "mirrord-protocol-api"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+documentation.workspace = true
+authors.workspace = true
+description.workspace = true
+homepage.workspace = true
+publish.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+mirrord-protocol = { path = "../protocol" }
+
+bytes.workspace = true
+futures.workspace = true
+hyper.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+pin-project-lite = "0.2"
+semver.workspace = true
+smallvec = "1"
+strum.workspace = true
+strum_macros.workspace = true
+tokio-stream.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
+thiserror.workspace = true
+tracing.workspace = true
+tokio-retry.workspace = true
+
+[dev-dependencies]
+rstest.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false

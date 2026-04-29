@@ -9,7 +9,7 @@ use crate::error::{KubeApiError, Result};
 impl RuntimeDataFromLabels for CronJobTarget {
     type Resource = CronJob;
 
-    fn name(&self) -> Cow<str> {
+    fn name(&self) -> Cow<'_, str> {
         Cow::from(&self.cron_job)
     }
 

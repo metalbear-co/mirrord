@@ -2,22 +2,22 @@ use std::{
     collections::HashMap, future, io, path::PathBuf, sync::atomic::Ordering, time::Duration,
 };
 
-use futures::{stream::FuturesOrdered, StreamExt};
+use futures::{StreamExt, stream::FuturesOrdered};
 use hickory_resolver::{
+    Hosts, TokioAsyncResolver,
     config::{LookupIpStrategy, ServerOrderingStrategy},
     error::{ResolveError, ResolveErrorKind},
     lookup_ip::LookupIp,
     proto::error::ProtoErrorKind,
     system_conf::parse_resolv_conf,
-    Hosts, TokioAsyncResolver,
 };
 use mirrord_agent_env::envs;
 use mirrord_protocol::{
+    DnsLookupError, ResolveErrorKindInternal, ResponseError,
     dns::{
         AddressFamily, DnsLookup, GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse,
         LookupRecord,
     },
-    DnsLookupError, ResolveErrorKindInternal, ResponseError,
 };
 use thiserror::Error;
 use tokio::{
@@ -29,9 +29,9 @@ use tokio::{
     task::{Id, JoinSet},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{warn, Level};
+use tracing::{Level, warn};
 
-use crate::{error::AgentResult, metrics::DNS_REQUEST_COUNT, util::remote_runtime::BgTaskStatus};
+use crate::{error::AgentResult, metrics::DNS_REQUEST_COUNT, task::status::BgTaskStatus};
 
 #[derive(Debug)]
 pub(crate) enum ClientGetAddrInfoRequest {
@@ -73,8 +73,6 @@ pub(crate) struct DnsWorker {
     ///
     /// Configured via [`envs::DNS_TIMEOUT`].
     timeout: Option<Duration>,
-    /// Whether we want support querying for IPv6 addresses.
-    support_ipv6: bool,
     /// Background tasks that handle the DNS requests.
     ///
     /// Each of these builds a new [`TokioAsyncResolver`] and performs one lookup.
@@ -89,11 +87,8 @@ impl DnsWorker {
     /// # Note
     ///
     /// `pid` is used to find the correct path of `etc` directory.
-    pub(crate) fn new(
-        pid: Option<u64>,
-        request_rx: Receiver<DnsCommand>,
-        support_ipv6: bool,
-    ) -> Self {
+    #[tracing::instrument(level = Level::TRACE)]
+    pub(crate) fn new(pid: Option<u64>, request_rx: Receiver<DnsCommand>) -> Self {
         let etc_path = pid
             .map(|pid| {
                 PathBuf::from("/proc")
@@ -119,7 +114,6 @@ impl DnsWorker {
             request_rx,
             timeout,
             attempts,
-            support_ipv6,
             tasks: Default::default(),
             response_txs: Default::default(),
         }
@@ -139,7 +133,6 @@ impl DnsWorker {
         request: GetAddrInfoRequestV2,
         attempts: Option<usize>,
         timeout: Option<Duration>,
-        support_ipv6: bool,
     ) -> Result<DnsLookup, InternalLookupError> {
         // Prepares the `Resolver` after reading some `/etc` DNS files.
         //
@@ -148,10 +141,10 @@ impl DnsWorker {
             let resolv_conf_path = etc_path.join("resolv.conf");
             let hosts_path = etc_path.join("hosts");
 
-            let resolv_conf = fs::read(resolv_conf_path).await?;
-            let hosts_conf = fs::read(hosts_path).await?;
+            let resolv_conf = fs::read(resolv_conf_path).await.map_err(From::from)?;
+            let hosts_conf = fs::read(hosts_path).await.map_err(From::from)?;
 
-            let (config, mut options) = parse_resolv_conf(resolv_conf)?;
+            let (config, mut options) = parse_resolv_conf(resolv_conf).map_err(From::from)?;
             tracing::debug!(?config, ?options, "Parsed resolv configuration");
 
             options.server_ordering_strategy = ServerOrderingStrategy::UserProvidedOrder;
@@ -161,22 +154,18 @@ impl DnsWorker {
             if let Some(attempts) = attempts {
                 options.attempts = attempts;
             }
-            options.ip_strategy = if support_ipv6 {
-                tracing::debug!(
-                    "IPv6 support enabled. Respecting client IP family when resolving DNS."
-                );
-                request.family.convert()
-            } else {
-                tracing::debug!("IPv6 support disabled. Resolving IPv4 only.");
-                LookupIpStrategy::Ipv4Only
-            };
+
+            options.ip_strategy = request.family.convert();
 
             tracing::debug!(?config, ?options, "Updated resolv configuration");
 
             let mut resolver = TokioAsyncResolver::tokio(config, options);
             tracing::debug!(?resolver, "Build a DNS resolver");
 
-            let hosts = Hosts::default().read_hosts_conf(hosts_conf.as_slice())?;
+            let hosts = Hosts::default()
+                .read_hosts_conf(hosts_conf.as_slice())
+                .map_err(From::from)?;
+
             resolver.set_hosts(Some(hosts));
 
             resolver
@@ -199,20 +188,19 @@ impl DnsWorker {
         let etc_path = self.etc_path.clone();
         let timeout = self.timeout;
         let attempts = self.attempts;
-        let support_ipv6 = self.support_ipv6;
 
         let handle = self.tasks.spawn(Self::do_lookup(
             etc_path,
             message.request.into_v2(),
             attempts,
             timeout,
-            support_ipv6,
         ));
         self.response_txs.insert(handle.id(), message.response_tx);
 
         DNS_REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
     }
 
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) async fn run(mut self, cancellation_token: CancellationToken) {
         loop {
             tokio::select! {

@@ -1,9 +1,11 @@
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use k8s_openapi::api::{
     apps::v1::{Deployment, ReplicaSet, StatefulSet},
     batch::v1::{CronJob, Job},
-    core::v1::{Pod, Service},
+    core::v1::{
+        EnvFromSource, EnvVar, PersistentVolumeClaim, Pod, PodSpec, PodTemplateSpec, Service,
+    },
 };
 use kube::{Client, Resource, ResourceExt};
 use mirrord_config::target::Target;
@@ -66,7 +68,11 @@ pub struct ResolvedResource<R>
 where
     R: Resource,
 {
-    pub resource: R,
+    /// Resource fetched from the API.
+    ///
+    /// Boxed due to large size, e.g. >2kb for [`CronJob`].
+    /// Juggling very large structs in memory is not the best idea.
+    pub resource: Box<R>,
     pub container: Option<String>,
 }
 
@@ -196,19 +202,6 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::Targetless(..) => None,
         }
     }
-
-    /// Is this a [`ResolvedTarget::Deployment`], and is it empty?
-    pub fn empty_deployment(&self) -> bool {
-        if let Self::Deployment(ResolvedResource { resource, .. }) = self {
-            !resource
-                .status
-                .as_ref()
-                .map(|status| status.available_replicas > Some(0))
-                .unwrap_or_default()
-        } else {
-            false
-        }
-    }
 }
 
 impl ResolvedTarget<false> {
@@ -224,6 +217,7 @@ impl ResolvedTarget<false> {
             Target::Deployment(target) => get_k8s_resource_api::<Deployment>(client, namespace)
                 .get(&target.deployment)
                 .await
+                .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::Deployment(ResolvedResource {
                         resource,
@@ -233,6 +227,7 @@ impl ResolvedTarget<false> {
             Target::Rollout(target) => get_k8s_resource_api::<Rollout>(client, namespace)
                 .get(&target.rollout)
                 .await
+                .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::Rollout(ResolvedResource {
                         resource,
@@ -242,6 +237,7 @@ impl ResolvedTarget<false> {
             Target::Job(target) => get_k8s_resource_api::<Job>(client, namespace)
                 .get(&target.job)
                 .await
+                .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::Job(ResolvedResource {
                         resource,
@@ -251,6 +247,7 @@ impl ResolvedTarget<false> {
             Target::CronJob(target) => get_k8s_resource_api::<CronJob>(client, namespace)
                 .get(&target.cron_job)
                 .await
+                .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::CronJob(ResolvedResource {
                         resource,
@@ -260,6 +257,7 @@ impl ResolvedTarget<false> {
             Target::StatefulSet(target) => get_k8s_resource_api::<StatefulSet>(client, namespace)
                 .get(&target.stateful_set)
                 .await
+                .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::StatefulSet(ResolvedResource {
                         resource,
@@ -269,6 +267,7 @@ impl ResolvedTarget<false> {
             Target::Pod(target) => get_k8s_resource_api::<Pod>(client, namespace)
                 .get(&target.pod)
                 .await
+                .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::Pod(ResolvedResource {
                         resource,
@@ -278,6 +277,7 @@ impl ResolvedTarget<false> {
             Target::Service(target) => get_k8s_resource_api::<Service>(client, namespace)
                 .get(&target.service)
                 .await
+                .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::Service(ResolvedResource {
                         resource,
@@ -287,6 +287,7 @@ impl ResolvedTarget<false> {
             Target::ReplicaSet(target) => get_k8s_resource_api::<ReplicaSet>(client, namespace)
                 .get(&target.replica_set)
                 .await
+                .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::ReplicaSet(ResolvedResource {
                         resource,
@@ -307,14 +308,14 @@ impl ResolvedTarget<false> {
     ///
     /// Performs only basic checks:
     /// 1. [`ResolvedTarget::Deployment`], [`ResolvedTarget::Rollout`],
-    ///    [`ResolvedTarget::StatefulSet`] - has available replicas and the target container, if
-    ///    specified, is found in the spec
+    ///    [`ResolvedTarget::StatefulSet`] - the target container, if specified, is found in the
+    ///    spec
     /// 2. [`ResolvedTarget::Pod`] - passes target-readiness check, see [`RuntimeData::from_pod`].
     /// 3. [`ResolvedTarget::Job`] and [`ResolvedTarget::CronJob`] - error, as this is `copy_target`
     ///    exclusive
     /// 4. [`ResolvedTarget::Targetless`] - no check (not applicable)
-    /// 5. [`ResolvedTarget::Service`] - has available replicas and the target container, if
-    ///    specified, is found in at least one of them
+    /// 5. [`ResolvedTarget::Service`] - the target container, if specified, is found in at least
+    ///    one of the pods
     #[tracing::instrument(level = Level::DEBUG, skip(client), ret, err)]
     pub async fn assert_valid_mirrord_target(
         self,
@@ -325,34 +326,20 @@ impl ResolvedTarget<false> {
                 resource,
                 container,
             }) => {
-                let available = resource
-                    .status
-                    .as_ref()
-                    .ok_or_else(|| KubeApiError::missing_field(&resource, ".status"))?
-                    .available_replicas
-                    .unwrap_or_default(); // Field can be missing when there are no replicas
-
-                if available <= 0 {
-                    return Err(KubeApiError::invalid_state(
-                        &resource,
-                        "no available replicas",
-                    ));
-                }
-
                 if let Some(container) = &container {
                     // verify that the container exists
                     resource
                         .spec
                         .as_ref()
-                        .ok_or_else(|| KubeApiError::missing_field(&resource, ".spec"))?
+                        .ok_or_else(|| KubeApiError::missing_field(resource.as_ref(), ".spec"))?
                         .template
                         .spec
                         .as_ref()
-                        .ok_or_else(|| KubeApiError::missing_field(&resource, ".spec.template.spec"))?
+                        .ok_or_else(|| KubeApiError::missing_field(resource.as_ref(), ".spec.template.spec"))?
                         .containers
                         .iter()
                         .find(|c| c.name == *container)
-                        .ok_or_else(|| KubeApiError::invalid_state(&resource, format_args!("specified pod template does not contain target container `{container}`")))?;
+                        .ok_or_else(|| KubeApiError::invalid_state(resource.as_ref(), format_args!("specified pod template does not contain target container `{container}`")))?;
                 }
 
                 Ok(ResolvedTarget::Deployment(ResolvedResource {
@@ -376,29 +363,15 @@ impl ResolvedTarget<false> {
                 resource,
                 container,
             }) => {
-                let available = resource
-                    .status
-                    .as_ref()
-                    .ok_or_else(|| KubeApiError::missing_field(&resource, ".status"))?
-                    .available_replicas
-                    .unwrap_or_default(); // Field can be missing when there are no replicas
-
-                if available <= 0 {
-                    return Err(KubeApiError::invalid_state(
-                        &resource,
-                        "no available replicas",
-                    ));
-                }
-
                 let pod_template = resource.get_pod_template(client).await?;
 
                 if let Some(container) = &container {
                     // verify that the container exists
-                    pod_template.spec.as_ref().ok_or_else(|| KubeApiError::invalid_state(&resource, "specified pod template is missing field `.spec`"))?
+                    pod_template.spec.as_ref().ok_or_else(|| KubeApiError::invalid_state(resource.as_ref(), "specified pod template is missing field `.spec`"))?
                     .containers
                     .iter()
                     .find(|c| c.name == *container)
-                    .ok_or_else(|| KubeApiError::invalid_state(&resource, format_args!("specified pod template does not contain target container `{container}`")))?;
+                    .ok_or_else(|| KubeApiError::invalid_state(resource.as_ref(), format_args!("specified pod template does not contain target container `{container}`")))?;
                 }
 
                 Ok(ResolvedTarget::Rollout(ResolvedResource {
@@ -419,34 +392,20 @@ impl ResolvedTarget<false> {
                 resource,
                 container,
             }) => {
-                let available = resource
-                    .status
-                    .as_ref()
-                    .ok_or_else(|| KubeApiError::missing_field(&resource, ".status"))?
-                    .available_replicas
-                    .unwrap_or_default(); // Field can be missing when there are no replicas
-
-                if available <= 0 {
-                    return Err(KubeApiError::invalid_state(
-                        &resource,
-                        "no available replicas",
-                    ));
-                }
-
                 if let Some(container) = &container {
                     // verify that the container exists
                     resource
                         .spec
                         .as_ref()
-                        .ok_or_else(|| KubeApiError::missing_field(&resource, ".spec"))?
+                        .ok_or_else(|| KubeApiError::missing_field(resource.as_ref(), ".spec"))?
                         .template
                         .spec
                         .as_ref()
-                        .ok_or_else(|| KubeApiError::missing_field(&resource, ".spec.template.spec"))?
+                        .ok_or_else(|| KubeApiError::missing_field(resource.as_ref(), ".spec.template.spec"))?
                         .containers
                         .iter()
                         .find(|c| c.name == *container)
-                        .ok_or_else(|| KubeApiError::invalid_state(&resource, format_args!("specified pod template does not contain target container `{container}`")))?;
+                        .ok_or_else(|| KubeApiError::invalid_state(resource.as_ref(), format_args!("specified pod template does not contain target container `{container}`")))?;
                 }
 
                 Ok(ResolvedTarget::StatefulSet(ResolvedResource {
@@ -463,7 +422,7 @@ impl ResolvedTarget<false> {
 
                 if pods.is_empty() {
                     return Err(KubeApiError::invalid_state(
-                        &resource,
+                        resource.as_ref(),
                         "no pods matching the labels were found",
                     ));
                 }
@@ -476,9 +435,11 @@ impl ResolvedTarget<false> {
                         .any(|found_container| found_container.name == *container);
                     if !exists_in_a_pod {
                         return Err(KubeApiError::invalid_state(
-                            &resource,
-                            format_args!("none of the pods that match the labels contain the target container `{container}`"
-                        )));
+                            resource.as_ref(),
+                            format_args!(
+                                "none of the pods that match the labels contain the target container `{container}`"
+                            ),
+                        ));
                     }
                 }
 
@@ -492,31 +453,17 @@ impl ResolvedTarget<false> {
                 resource,
                 container,
             }) => {
-                let available = resource
-                    .status
-                    .as_ref()
-                    .ok_or_else(|| KubeApiError::missing_field(&resource, ".status"))?
-                    .available_replicas
-                    .unwrap_or_default(); // Field can be missing when there are no replicas
-
-                if available <= 0 {
-                    return Err(KubeApiError::invalid_state(
-                        &resource,
-                        "no available replicas",
-                    ));
-                }
-
                 if let Some(container) = &container {
                     // verify that the container exists
                     resource
                         .spec
                         .as_ref()
                         .and_then(|spec| spec.template.as_ref()?.spec.as_ref())
-                        .ok_or_else(|| KubeApiError::missing_field(&resource, ".spec.template.spec"))?
+                        .ok_or_else(|| KubeApiError::missing_field(resource.as_ref(), ".spec.template.spec"))?
                         .containers
                         .iter()
                         .find(|c| c.name == *container)
-                        .ok_or_else(|| KubeApiError::invalid_state(&resource, format_args!("specified pod template does not contain target container `{container}`")))?;
+                        .ok_or_else(|| KubeApiError::invalid_state(resource.as_ref(), format_args!("specified pod template does not contain target container `{container}`")))?;
                 }
 
                 Ok(ResolvedTarget::ReplicaSet(ResolvedResource {
@@ -530,5 +477,208 @@ impl ResolvedTarget<false> {
                 Ok(ResolvedTarget::Targetless(namespace))
             }
         }
+    }
+}
+
+impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
+    /// Get the pod spec of the target k8s resource.
+    pub fn get_pod_spec(&self) -> Option<&PodSpec> {
+        match self {
+            ResolvedTarget::Deployment(inner) => {
+                inner.resource.spec.as_ref()?.template.spec.as_ref()
+            }
+            ResolvedTarget::Rollout(inner) => inner
+                .resource
+                .spec
+                .as_ref()?
+                .template
+                .as_ref()?
+                .as_ref()
+                .spec
+                .as_ref(),
+            ResolvedTarget::Job(inner) => inner.resource.spec.as_ref()?.template.spec.as_ref(),
+            ResolvedTarget::CronJob(inner) => inner
+                .resource
+                .spec
+                .as_ref()?
+                .job_template
+                .spec
+                .as_ref()?
+                .template
+                .spec
+                .as_ref(),
+            ResolvedTarget::StatefulSet(inner) => {
+                inner.resource.spec.as_ref()?.template.spec.as_ref()
+            }
+            ResolvedTarget::Service(..) => None,
+            ResolvedTarget::ReplicaSet(inner) => inner
+                .resource
+                .spec
+                .as_ref()?
+                .template
+                .as_ref()?
+                .spec
+                .as_ref(),
+            ResolvedTarget::Pod(inner) => inner.resource.spec.as_ref(),
+            ResolvedTarget::Targetless(..) => None,
+        }
+    }
+
+    /// Get the pod template of the target k8s resource.
+    pub fn get_pod_template(&self) -> Option<Cow<'_, PodTemplateSpec>> {
+        match self {
+            ResolvedTarget::Deployment(inner) => {
+                Some(Cow::Borrowed(&inner.resource.spec.as_ref()?.template))
+            }
+            ResolvedTarget::Rollout(inner) => Some(Cow::Borrowed(
+                inner.resource.spec.as_ref()?.template.as_ref()?.as_ref(),
+            )),
+
+            ResolvedTarget::Job(inner) => {
+                Some(Cow::Borrowed(&inner.resource.spec.as_ref()?.template))
+            }
+            ResolvedTarget::CronJob(inner) => Some(Cow::Borrowed(
+                &inner
+                    .resource
+                    .spec
+                    .as_ref()?
+                    .job_template
+                    .spec
+                    .as_ref()?
+                    .template,
+            )),
+            ResolvedTarget::StatefulSet(inner) => {
+                Some(Cow::Borrowed(&inner.resource.spec.as_ref()?.template))
+            }
+            ResolvedTarget::Service(..) => None,
+            ResolvedTarget::ReplicaSet(inner) => Some(Cow::Borrowed(
+                inner.resource.spec.as_ref()?.template.as_ref()?,
+            )),
+            ResolvedTarget::Pod(inner) => Some(Cow::Owned(PodTemplateSpec {
+                metadata: Some(inner.resource.metadata.clone()),
+                spec: inner.resource.spec.clone(),
+            })),
+            ResolvedTarget::Targetless(..) => None,
+        }
+    }
+
+    /// Get the volumeClaimTemplate of the target k8s resource (only exists on StatefulSet).
+    /// Returns an empty vec if there are none.
+    pub fn get_volume_claim_templates(&self) -> Vec<PersistentVolumeClaim> {
+        match self {
+            ResolvedTarget::StatefulSet(inner) => inner
+                .resource
+                .spec
+                .as_ref()
+                .and_then(|spec| spec.volume_claim_templates.clone())
+                .unwrap_or_default(),
+            _ => vec![],
+        }
+    }
+
+    /// If pod spec is defined directly under the target resource's spec, return it.
+    /// Otherwise, resolve the target resource to its underlying pod spec.
+    pub async fn resolve_pod_spec<'a>(
+        &'a self,
+        client: &Client,
+    ) -> Result<Option<Cow<'a, PodSpec>>, KubeApiError> {
+        match self {
+            ResolvedTarget::Rollout(inner) => Ok(inner
+                .resource
+                .get_pod_template(client)
+                .await?
+                .into_owned()
+                .spec
+                .map(Cow::Owned)),
+            ResolvedTarget::Service(ResolvedResource {
+                resource,
+                container,
+            }) => {
+                let pods = ResolvedResource::<Service>::get_pods(resource, client).await?;
+                if pods.is_empty() {
+                    return Err(KubeApiError::invalid_state(
+                        resource.as_ref(),
+                        "no pods matching the labels were found",
+                    ));
+                }
+
+                if let Some(container) = &container {
+                    let pod = pods
+                        .into_iter()
+                        .flat_map(|pod| pod.spec)
+                        .find(|spec| spec.containers.iter().any(|c| c.name == *container));
+                    Ok(pod.map(Cow::Owned))
+                } else {
+                    // return the first pod spec found if container is not given.
+                    Ok(pods
+                        .into_iter()
+                        .next()
+                        .and_then(|pod| pod.spec)
+                        .map(Cow::Owned))
+                }
+            }
+            _ => Ok(self.get_pod_spec().map(Cow::Borrowed)),
+        }
+    }
+
+    /// Get the environment variable with `name` from the target's pod spec.
+    pub async fn get_env(
+        &self,
+        client: &Client,
+        name: &str,
+    ) -> Result<Option<EnvVar>, KubeApiError> {
+        let Some(pod_spec) = self.resolve_pod_spec(client).await? else {
+            return Ok(None);
+        };
+        let target_container = self.container();
+
+        if let Some(container_name) = target_container {
+            for container in &pod_spec.containers {
+                if container.name == container_name
+                    && let Some(env) = &container.env
+                {
+                    for env_var in env {
+                        if env_var.name == name {
+                            return Ok(Some(env_var.clone()));
+                        }
+                    }
+                }
+            }
+        } else {
+            for container in &pod_spec.containers {
+                if let Some(env) = &container.env {
+                    for env_var in env {
+                        if env_var.name == name {
+                            return Ok(Some(env_var.clone()));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Get the `envFrom` field from the target's pod spec.
+    pub async fn get_env_from(
+        &self,
+        client: &Client,
+    ) -> Result<Option<Vec<EnvFromSource>>, KubeApiError> {
+        let Some(pod_spec) = self.resolve_pod_spec(client).await? else {
+            return Ok(None);
+        };
+        let target_container = self.container();
+
+        if let Some(container_name) = target_container {
+            for container in &pod_spec.containers {
+                if container.name == container_name {
+                    return Ok(container.env_from.clone());
+                }
+            }
+        } else {
+            return Ok(pod_spec.containers.first().and_then(|c| c.env_from.clone()));
+        }
+
+        Ok(None)
     }
 }

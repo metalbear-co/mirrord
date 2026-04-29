@@ -1,22 +1,22 @@
 use std::{collections::HashSet, fmt, ops::Not, str::FromStr};
 
 use bimap::BiMap;
-use https_delivery::LocalHttpsDelivery;
 use mirrord_analytics::{AnalyticValue, Analytics, CollectAnalytics};
 use schemars::JsonSchema;
-use serde::{de, ser, ser::SerializeSeq as _, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de, ser, ser::SerializeSeq as _};
 use thiserror::Error;
+use tls_delivery::LocalTlsDelivery;
 
 use crate::{
     config::{
-        from_env::FromEnv, source::MirrordConfigSource, unstable::Unstable, ConfigContext,
-        ConfigError, FromMirrordConfig, MirrordConfig, Result,
+        ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result, from_env::FromEnv,
+        source::MirrordConfigSource, unstable::Unstable,
     },
     util::{MirrordToggleableConfig, ToggleableConfig},
 };
 
 pub mod http_filter;
-pub mod https_delivery;
+pub mod tls_delivery;
 
 use http_filter::*;
 
@@ -24,7 +24,7 @@ use http_filter::*;
 ///
 /// Controls the incoming TCP traffic feature.
 ///
-/// See the incoming [reference](https://metalbear.co/mirrord/docs/reference/traffic/#incoming) for more
+/// See the incoming [reference](https://metalbear.com/mirrord/docs/reference/traffic/#incoming) for more
 /// details.
 ///
 /// Incoming traffic supports 2 modes of operation:
@@ -56,7 +56,7 @@ use http_filter::*;
 ///       "incoming": {
 ///         "mode": "steal",
 ///         "http_filter": {
-///           "header_filter": "host: api\\..+"
+///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -135,6 +135,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .unwrap_or_default(),
                 ports: advanced.ports.map(|ports| ports.into_iter().collect()),
                 https_delivery: advanced.https_delivery,
+                tls_delivery: advanced.tls_delivery,
             },
         };
 
@@ -162,7 +163,7 @@ impl MirrordToggleableConfig for IncomingFileConfig {
     }
 }
 
-// Change to manual deserializtion to prevent usless untagged enum errors
+// Change to manual deserialization to prevent useless untagged enum errors
 impl<'de> Deserialize<'de> for IncomingFileConfig {
     fn deserialize<D>(deserializer: D) -> Result<IncomingFileConfig, D::Error>
     where
@@ -245,7 +246,7 @@ impl<'de> de::Visitor<'de> for IncomingFileConfigVisitor {
 pub struct IncomingAdvancedFileConfig {
     /// ### mode
     ///
-    /// Allows selecting between mirrorring or stealing traffic.
+    /// Allows selecting between mirroring or stealing traffic.
     ///
     /// See [`mode`](##mode (incoming)) for details.
     pub mode: Option<IncomingMode>,
@@ -310,10 +311,14 @@ pub struct IncomingAdvancedFileConfig {
 
     /// ### https_delivery
     ///
-    /// (Operator Only): configures how mirrord delivers stolen HTTPS requests
+    /// DEPRECATED: use `tls_delivery` instead.
+    pub https_delivery: Option<LocalTlsDelivery>,
+
+    /// #### tls_delivery
+    ///
+    /// (Operator Only): configures how mirrord delivers stolen TLS traffic
     /// to the local application.
-    #[serde(default)]
-    pub https_delivery: LocalHttpsDelivery,
+    pub tls_delivery: Option<LocalTlsDelivery>,
 }
 
 fn serialize_bi_map<S>(map: &BiMap<u16, u16>, serializer: S) -> Result<S::Ok, S::Error>
@@ -346,7 +351,7 @@ where
 
 /// Controls the incoming TCP traffic feature.
 ///
-/// See the incoming [reference](https://metalbear.co/mirrord/docs/reference/traffic/#incoming) for more
+/// See the incoming [reference](https://metalbear.com/mirrord/docs/reference/traffic/#incoming) for more
 /// details.
 ///
 /// Incoming traffic supports 3 [modes](#feature-network-incoming-mode) of operation:
@@ -401,7 +406,7 @@ where
 ///       "incoming": {
 ///         "mode": "steal",
 ///         "http_filter": {
-///           "header_filter": "host: api\\..+"
+///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -414,7 +419,7 @@ where
 /// ```
 #[derive(Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct IncomingConfig {
-    /// #### feature.network.incoming.port_mapping {#feature-network-incoming-port_mapping}
+    /// ##### feature.network.incoming.port_mapping {#feature-network-incoming-port_mapping}
     ///
     /// Mapping for local ports to remote ports.
     ///
@@ -427,10 +432,10 @@ pub struct IncomingConfig {
     )]
     pub port_mapping: BiMap<u16, u16>,
 
-    /// #### feature.network.incoming.ignore_localhost {#feature-network-incoming-ignore_localhost}
+    /// ##### feature.network.incoming.ignore_localhost {#feature-network-incoming-ignore_localhost}
     pub ignore_localhost: bool,
 
-    /// #### feature.network.incoming.ignore_ports {#feature-network-incoming-ignore_ports}
+    /// ##### feature.network.incoming.ignore_ports {#feature-network-incoming-ignore_ports}
     ///
     /// Ports to ignore when mirroring/stealing traffic, these ports will remain local.
     ///
@@ -442,13 +447,13 @@ pub struct IncomingConfig {
     /// Mutually exclusive with [`feature.network.incoming.ports`](#feature-network-ports).
     pub ignore_ports: HashSet<u16>,
 
-    /// #### feature.network.incoming.mode {#feature-network-incoming-mode}
+    /// ##### feature.network.incoming.mode {#feature-network-incoming-mode}
     pub mode: IncomingMode,
 
-    /// #### feature.network.incoming.http_filter {#feature-network-incoming-http-filter}
+    /// ##### feature.network.incoming.http_filter {#feature-network-incoming-http-filter}
     pub http_filter: HttpFilterConfig,
 
-    /// #### feature.network.incoming.listen_ports {#feature-network-incoming-listen_ports}
+    /// ##### feature.network.incoming.listen_ports {#feature-network-incoming-listen_ports}
     ///
     /// Mapping for local ports to actually used local ports.
     /// When application listens on a port while steal/mirror is active
@@ -468,23 +473,29 @@ pub struct IncomingConfig {
     )]
     pub listen_ports: BiMap<u16, u16>,
 
-    /// #### feature.network.incoming.on_concurrent_steal {#feature-network-incoming-on_concurrent_steal}
+    /// ##### feature.network.incoming.on_concurrent_steal {#feature-network-incoming-on_concurrent_steal}
     pub on_concurrent_steal: ConcurrentSteal,
 
-    /// #### feature.network.incoming.ports {#feature-network-incoming-ports}
+    /// ##### feature.network.incoming.ports {#feature-network-incoming-ports}
     ///
-    /// List of ports to mirror/steal traffic from. Other ports will remain local.
+    /// When set, traffic will only be mirrored/stolen on these ports,
+    /// and other ports will remain local. Otherwise, all ports are
+    /// mirrored/stolen.
     ///
     /// Mutually exclusive with
     /// [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
     pub ports: Option<HashSet<u16>>,
 
-    /// #### feature.network.incoming.https_delivery {#feature-network-incoming-https_delivery}
+    /// ##### feature.network.incoming.https_delivery {#feature-network-incoming-https_delivery}
     ///
-    /// (Operator Only): configures how mirrord delivers stolen HTTPS requests
+    /// DEPRECATED: use `tls_delivery` instead.
+    pub https_delivery: Option<LocalTlsDelivery>,
+
+    /// ##### feature.network.incoming.tls_delivery {#feature-network-incoming-tls_delivery}
+    ///
+    /// (Operator Only): configures how mirrord delivers stolen TLS traffic
     /// to the local application.
-    #[serde(default)]
-    pub https_delivery: LocalHttpsDelivery,
+    pub tls_delivery: Option<LocalTlsDelivery>,
 }
 
 impl IncomingConfig {
@@ -506,65 +517,22 @@ impl IncomingConfig {
         }
 
         if self.http_filter.is_filter_set() {
-            if let Some(filter_ports) = self.http_filter.ports.as_ref()
-                && filter_ports.contains(&port)
-            {
-                false
-            } else {
-                self.ports.as_ref().is_some_and(|set| set.contains(&port))
-            }
+            self.http_filter
+                .ports
+                .as_ref()
+                .is_some_and(|p| p.contains(&port).not())
         } else if self.ignore_ports.contains(&port) {
             false
-        } else if let Some(ports) = &self.ports {
-            ports.contains(&port)
         } else {
-            true
-        }
-    }
-
-    /// Update the [`HttpFilterConfig::ports`] with the health probes ports from the target and
-    /// ports `[80, 8080]`.
-    ///
-    /// Usually the user app will be listening on HTTP on the same ports as these probes, so
-    /// we can insert them in the user config.
-    ///
-    /// If the user has set anything in [`HttpFilterConfig::ports`], then we do nothing, to
-    /// avoid overriding their config. We also take care to not create conflicts with other
-    /// port configs that we have, such as [`IncomingConfig::ignore_ports`]`, and
-    /// [`IncomingConfig::ports`].
-    pub fn add_probe_ports_to_http_filter_ports(
-        &mut self,
-        probes_ports: &[u16],
-    ) -> Option<&PortList> {
-        if self.is_steal() && self.http_filter.is_filter_set() && self.http_filter.ports.is_none() {
-            let filtered_ports = probes_ports
-                .iter()
-                .chain(&[80, 8080])
-                // Avoid conflicts with `incoming.ignore_ports`.
-                .filter(|port| self.ignore_ports.contains(port).not())
-                .filter(|port| {
-                    // Avoid conflicts with `incoming.ports`.
-                    if let Some(ports) = &self.ports {
-                        ports.contains(port).not()
-                    } else {
-                        true
-                    }
-                })
-                .copied()
-                .collect::<HashSet<_>>();
-
-            // Only add something if we have a port to add, otherwise leave it as `None` so
-            // we can use the `PortList::default` when initializing things.
-            if filtered_ports.is_empty().not() {
-                self.http_filter.ports.replace(filtered_ports.into());
+            match &self.ports {
+                Some(ports) => ports.contains(&port),
+                _ => true,
             }
         }
-
-        self.http_filter.ports.as_ref()
     }
 }
 
-/// Allows selecting between mirrorring or stealing traffic.
+/// Allows selecting between mirroring or stealing traffic.
 ///
 /// Can be set to either `"mirror"` (default), `"steal"` or `"off"`.
 ///
@@ -608,6 +576,12 @@ pub enum IncomingMode {
     ///
     /// Disables the incoming network feature.
     Off,
+}
+
+impl IncomingMode {
+    pub fn is_off(&self) -> bool {
+        matches!(self, Self::Off)
+    }
 }
 
 #[derive(Error, Debug)]
@@ -716,222 +690,5 @@ impl CollectAnalytics for &IncomingConfig {
         analytics.add("ignore_localhost", self.ignore_localhost);
         analytics.add("ignore_ports_count", self.ignore_ports.len());
         analytics.add("http", &self.http_filter);
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use rstest::rstest;
-
-    use super::IncomingConfig;
-    use crate::feature::network::incoming::{http_filter::HttpFilterConfig, IncomingMode};
-
-    #[rstest]
-    #[case(
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            http_filter: HttpFilterConfig {
-                header_filter: Some("x-user: me".into()),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        80,
-        false,
-    )]
-    #[case(
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            http_filter: HttpFilterConfig {
-                header_filter: Some("x-user: me".into()),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        81,
-        false,
-    )]
-    #[case(
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            http_filter: HttpFilterConfig {
-                header_filter: Some("x-user: me".into()),
-                ..Default::default()
-            },
-            ports: Some([81].into()),
-            ..Default::default()
-        },
-        81,
-        true,
-    )]
-    #[case(
-        IncomingConfig {
-            mode: IncomingMode::Mirror,
-            ..Default::default()
-        },
-        80,
-        false,
-    )]
-    #[case(
-        IncomingConfig {
-            mode: IncomingMode::Off,
-            ..Default::default()
-        },
-        80,
-        false,
-    )]
-    #[case(
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            ..Default::default()
-        },
-        80,
-        true,
-    )]
-    #[case(
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            ignore_ports: [80].into(),
-            ..Default::default()
-        },
-        80,
-        false,
-    )]
-    #[case(
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            ports: Some([80].into()),
-            ..Default::default()
-        },
-        81,
-        false,
-    )]
-    #[test]
-    fn steals_port_without_filter(
-        #[case] config: IncomingConfig,
-        #[case] port: u16,
-        #[case] expected: bool,
-    ) {
-        let result = config.steals_port_without_filter(port);
-        assert_eq!(result, expected);
-    }
-
-    #[rstest]
-    // case_1: Base case, with default ports 80 and 8080 added. Port 80 is filtered out due to
-    // conflict with incoming.ports.
-    #[case(
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            ports: Some([80].into()),
-            http_filter: HttpFilterConfig {
-                header_filter: Some("siemowit".into()),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        81,
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            ports: Some([80].into()),
-            http_filter: HttpFilterConfig {
-                header_filter: Some("siemowit".into()),
-                ports: Some(vec![81, 8080].into()),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    )]
-    // case_2: User sets `HttpFilter::ports`, we don't change it.
-    #[case(
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            ports: Some([80].into()),
-            http_filter: HttpFilterConfig {
-                header_filter: Some("lestek".into()),
-                ports: Some(vec![82].into()),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        81,
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            ports: Some([80].into()),
-            http_filter: HttpFilterConfig {
-                header_filter: Some("lestek".into()),
-                ports: Some(vec![82].into()),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    )]
-    // case_3: Conflicts between `IncomingConfig::ports` and probe port, but default ports 80 and
-    // 8080 are still added.
-    #[case(
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            ports: Some([81].into()),
-            http_filter: HttpFilterConfig {
-                header_filter: Some("siemomysł".into()),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        81,
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            ports: Some([81].into()),
-            http_filter: HttpFilterConfig {
-                header_filter: Some("siemomysł".into()),
-                ports: Some(vec![80, 8080].into()),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    )]
-    // case_4: Conflicts between `IncomingConfig::ignore_ports` and probe port, but default ports 80
-    // and 8080 are still added.
-    #[case(
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            ports: Some([80].into()),
-            ignore_ports: [81].into(),
-            http_filter: HttpFilterConfig {
-                header_filter: Some("otto".into()),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        81,
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            ports: Some([80].into()),
-            ignore_ports: [81].into(),
-            http_filter: HttpFilterConfig {
-                header_filter: Some("otto".into()),
-                ports: Some(vec![8080].into()),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    )]
-    #[test]
-    /// Validates that we don't create conflicting configs between [`IncomingConfig`] _port_ related
-    /// configs and [`HttpFilterConfig::ports`].
-    fn automatically_add_probes_to_http_filter_ports(
-        #[case] mut config: IncomingConfig,
-        #[case] port: u16,
-        #[case] expected: IncomingConfig,
-    ) {
-        config.add_probe_ports_to_http_filter_ports(&[port]);
-
-        // Sort the ports since `HashSet` does not guarantee order.
-        if let Some(http_filter_ports) = config.http_filter.ports.as_mut() {
-            let mut ports_vec: Vec<u16> = http_filter_ports.clone().into();
-            ports_vec.sort();
-            *http_filter_ports = ports_vec.into();
-        }
-
-        assert_eq!(config, expected);
     }
 }

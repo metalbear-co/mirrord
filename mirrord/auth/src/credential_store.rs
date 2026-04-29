@@ -1,10 +1,12 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     fmt::Debug,
+    io::ErrorKind,
     path::PathBuf,
     sync::LazyLock,
 };
 
+use base64::{Engine, prelude::BASE64_STANDARD_NO_PAD};
 use fs4::tokio::AsyncFileExt;
 use kube::{Client, Resource};
 use serde::{Deserialize, Serialize};
@@ -12,10 +14,14 @@ use tokio::{
     fs,
     io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, SeekFrom},
 };
-use whoami::fallible;
 
 use crate::{
-    certificate::Certificate, credentials::Credentials, error::CredentialStoreError,
+    certificate::Certificate,
+    credentials::{
+        Credentials,
+        client::{SigningRequest, SigningResponse},
+    },
+    error::CredentialStoreError,
     key_pair::KeyPair,
 };
 
@@ -48,18 +54,16 @@ pub struct CredentialStore {
 #[derive(Default, Debug)]
 pub struct UserIdentity {
     /// User's name
-    pub name: Option<String>,
+    pub name: String,
     /// User's hostname
-    pub hostname: Option<String>,
+    pub hostname: String,
 }
 
 impl UserIdentity {
     pub fn load() -> Self {
         Self {
-            // next release of whoami (v2) will have fallible types
-            // so keep this Option for then :)
-            name: Some(whoami::realname()),
-            hostname: fallible::hostname().ok(),
+            name: whoami::realname().unwrap_or_else(|_| "unknown".to_string()),
+            hostname: whoami::hostname().unwrap_or_else(|_| "unknown".to_string()),
         }
     }
 }
@@ -89,9 +93,30 @@ impl CredentialStore {
         Ok(())
     }
 
+    /// Load the credential store from the default path (`~/.mirrord/credentials`), returning an
+    /// empty store if the file doesn't exist yet.
+    pub async fn load_from_default_path() -> Result<Self, CredentialStoreError> {
+        match fs::File::open(&*CREDENTIALS_PATH).await {
+            Ok(mut file) => Self::load(&mut file).await,
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(Self::default()),
+            Err(err) => Err(CredentialStoreError::FileAccess(err)),
+        }
+    }
+
+    /// Returns an iterator over `(operator_fingerprint, user_fingerprint)` pairs.
+    ///
+    /// The user fingerprint is `base64(STANDARD_NO_PAD)` of the certificate's raw public key
+    /// bytes. This is what the operator uses as `client_hash` to identify individual users.
+    pub fn user_fingerprints(&self) -> impl Iterator<Item = (&str, String)> {
+        self.credentials.iter().map(|(op_fp, creds)| {
+            let fingerprint = BASE64_STANDARD_NO_PAD.encode(creds.as_ref().public_key_data());
+            (op_fp.as_str(), fingerprint)
+        })
+    }
+
     /// Get hostname to be used as common name in a certification request.
     fn certificate_common_name() -> String {
-        let mut hostname = fallible::hostname().unwrap_or_else(|_| "localhost".to_string());
+        let mut hostname = whoami::hostname().unwrap_or_else(|_| "localhost".to_string());
 
         hostname.make_ascii_lowercase();
         hostname
@@ -115,16 +140,20 @@ impl CredentialStore {
     ///
     /// Also, subscription id is accepted as an [`Option`] to make the CLI backwards compatible.
     #[tracing::instrument(level = "trace", skip(self, client))]
-    pub async fn get_or_init<R>(
+    pub async fn get_or_init<Old, New>(
         &mut self,
         client: &Client,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
+        support_new: bool,
     ) -> Result<&mut Credentials, CredentialStoreError>
     where
-        R: Resource + Clone + Debug,
-        R: for<'de> Deserialize<'de>,
-        R::DynamicType: Default,
+        Old: Resource + Clone + Debug,
+        Old: for<'de> Deserialize<'de>,
+        Old::DynamicType: Default,
+        New: Clone + Debug + SigningRequest + SigningResponse + Serialize,
+        New: for<'de> Deserialize<'de>,
+        New::DynamicType: Default,
     {
         let credentials = match self.credentials.entry(operator_fingerprint) {
             Entry::Vacant(entry) => {
@@ -132,13 +161,21 @@ impl CredentialStore {
                     .as_ref()
                     .and_then(|id| self.signing_keys.get(id))
                     .cloned();
-
-                let credentials = Credentials::init::<R>(
-                    client.clone(),
-                    &Self::certificate_common_name(),
-                    key_pair,
-                )
-                .await?;
+                let credentials = if support_new {
+                    Credentials::init_regular::<New>(
+                        client.clone(),
+                        &Self::certificate_common_name(),
+                        key_pair,
+                    )
+                    .await?
+                } else {
+                    Credentials::init::<Old>(
+                        client.clone(),
+                        &Self::certificate_common_name(),
+                        key_pair,
+                    )
+                    .await?
+                };
                 entry.insert(credentials)
             }
             Entry::Occupied(entry) => {
@@ -146,7 +183,11 @@ impl CredentialStore {
 
                 if !credentials.is_valid() {
                     credentials
-                        .refresh::<R>(client.clone(), &Self::certificate_common_name())
+                        .refresh::<Old, New>(
+                            client.clone(),
+                            &Self::certificate_common_name(),
+                            support_new,
+                        )
                         .await?;
                 }
 
@@ -190,17 +231,21 @@ impl CredentialStoreSync {
 
     /// Try and get/create a specific client certificate.
     /// The exclusive file lock is already acquired.
-    async fn access_credential<R, C, V>(
+    async fn access_credential<Old, New, C, V>(
         &mut self,
         client: &Client,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
+        support_new: bool,
         callback: C,
     ) -> Result<V, CredentialStoreError>
     where
-        R: Resource + Clone + Debug,
-        R: for<'de> Deserialize<'de>,
-        R::DynamicType: Default,
+        Old: Resource + Clone + Debug,
+        Old: for<'de> Deserialize<'de>,
+        Old::DynamicType: Default,
+        New: Clone + Debug + SigningRequest + SigningResponse + Serialize,
+        New: for<'de> Deserialize<'de>,
+        New::DynamicType: Default,
         C: FnOnce(&mut Credentials) -> V,
     {
         let mut store = CredentialStore::load(&mut self.store_file)
@@ -210,7 +255,12 @@ impl CredentialStoreSync {
 
         let value = callback(
             store
-                .get_or_init::<R>(client, operator_fingerprint, operator_subscription_id)
+                .get_or_init::<Old, New>(
+                    client,
+                    operator_fingerprint,
+                    operator_subscription_id,
+                    support_new,
+                )
                 .await?,
         );
 
@@ -230,26 +280,31 @@ impl CredentialStoreSync {
     }
 
     /// Get or create specific client certificate with an exclusive lock on the file.
-    pub async fn get_client_certificate<R>(
+    pub async fn get_client_certificate<Old, New>(
         &mut self,
         client: &Client,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
+        support_new: bool,
     ) -> Result<Certificate, CredentialStoreError>
     where
-        R: Resource + Clone + Debug,
-        R: for<'de> Deserialize<'de>,
-        R::DynamicType: Default,
+        Old: Resource + Clone + Debug,
+        Old: for<'de> Deserialize<'de>,
+        Old::DynamicType: Default,
+        New: Clone + Debug + SigningRequest + SigningResponse + Serialize,
+        New: for<'de> Deserialize<'de>,
+        New::DynamicType: Default,
     {
         self.store_file
             .lock_exclusive()
             .map_err(CredentialStoreError::Lockfile)?;
 
         let result = self
-            .access_credential::<R, _, Certificate>(
+            .access_credential::<Old, New, _, Certificate>(
                 client,
                 operator_fingerprint,
                 operator_subscription_id,
+                support_new,
                 |credentials| credentials.as_ref().clone(),
             )
             .await;

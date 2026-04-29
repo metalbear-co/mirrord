@@ -17,6 +17,8 @@ pub enum VpnError {
     #[error("unable to send client message to agent, sender channel dropped")]
     ClientMessageDropped,
 
-    #[error("mirrord agent protocol-version {0} is not supported, expected >=1.10.0 (mirrord agent >3.115.0)")]
+    #[error(
+        "mirrord agent protocol-version {0} is not supported, expected >=1.10.0 (mirrord agent >3.115.0)"
+    )]
     AgentProtocolVersionMismatch(semver::Version),
 }

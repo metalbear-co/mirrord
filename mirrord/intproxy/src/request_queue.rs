@@ -54,7 +54,7 @@ impl<T: fmt::Debug> RequestQueue<T> {
     /// Retrieve and remove a request from the front of this queue.
     #[tracing::instrument(level = Level::TRACE, ret)]
     pub fn pop_front(&mut self) -> Option<(MessageId, LayerId)> {
-        let (message_id, layer_id, _) = self.inner.pop_front()?;
+        let (message_id, layer_id, _) = self.pop_front_with_data()?;
         Some((message_id, layer_id))
     }
 
@@ -67,7 +67,11 @@ impl<T: fmt::Debug> RequestQueue<T> {
     /// Retrieve and remove a request from the front of this queue.
     #[tracing::instrument(level = Level::TRACE, ret)]
     pub fn pop_front_with_data(&mut self) -> Option<(MessageId, LayerId, T)> {
-        self.inner.pop_front()
+        let (message_id, layer_id, data) = self.inner.pop_front()?;
+        if self.inner.len() < self.inner.capacity() / 3 {
+            self.inner.shrink_to_fit();
+        }
+        Some((message_id, layer_id, data))
     }
 
     pub fn len(&self) -> usize {

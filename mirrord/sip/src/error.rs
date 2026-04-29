@@ -1,3 +1,5 @@
+use std::{boxed::Box, process::ExitStatus};
+
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, SipError>;
@@ -6,6 +8,11 @@ pub type Result<T> = std::result::Result<T, SipError>;
 pub enum SipError {
     #[error("IO failed with `{0}`")]
     IO(#[from] std::io::Error),
+
+    #[error(
+        "Too many files open when trying to patch {0}. Try increasing the file limit using `ulimit`."
+    )]
+    TooManyFilesOpen(String),
 
     #[error("Adding Rpaths failed with statuscode: `{0}`, output: `{1}`")]
     AddingRpathsFailed(i32, String),
@@ -37,5 +44,25 @@ pub enum SipError {
     BinaryMoveFailed(std::io::Error),
 
     #[error("Code sign error: `{0}`")]
-    CodeSignError(#[from] apple_codesign::AppleCodesignError),
+    CodeSignError(#[from] Box<apple_codesign::AppleCodesignError>),
+
+    #[error("Code sign failed with {0}, stderr: `{1}`")]
+    Sign(ExitStatus, String),
+}
+
+/// NOTE(gabriela): this was introduced in https://github.com/metalbear-co/mirrord/pull/3687
+/// as CI suddenly started failing with unrelated changes.
+///
+/// [`apple_codesign::AppleCodesignError`] is 208 bytes, which is larger than most of the other
+/// [`SipError`] variants, causing https://rust-lang.github.io/rust-clippy/master/index.html#result_large_err
+/// to be triggered.
+///
+/// The [`SipError::CodeSignError`] enum variant has been changed to box the large type, as a result
+/// requiring less space to be allocated, and fixing the clippy lint.
+///
+/// To maintain ergonomics, we implement `From` for the problematic type, and automatically box it.
+impl From<apple_codesign::AppleCodesignError> for SipError {
+    fn from(value: apple_codesign::AppleCodesignError) -> Self {
+        Self::CodeSignError(Box::new(value))
+    }
 }

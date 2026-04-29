@@ -1,27 +1,51 @@
 use std::{
     self,
     borrow::Cow,
-    collections::{hash_map::Entry, HashMap, VecDeque},
-    fs::{read_link, File, OpenOptions, ReadDir},
-    io::{self, prelude::*, BufReader, SeekFrom},
+    collections::{HashMap, VecDeque, hash_map::Entry},
+    fs::{File, OpenOptions, ReadDir, read_link},
+    io::{self, SeekFrom, prelude::*},
     iter::{Enumerate, Peekable},
     ops::RangeInclusive,
     os::{
-        fd::RawFd,
-        unix::{fs::MetadataExt, prelude::FileExt},
+        fd::{AsRawFd, RawFd},
+        unix::{ffi::OsStrExt, fs::MetadataExt, prelude::FileExt},
     },
-    path::{Path, PathBuf},
+    path::{Path, PathBuf, StripPrefixError},
+    ptr,
 };
 
-use faccess::{AccessMode, PathExt};
+use faccess::{AccessMode, PathExt as _};
 use libc::DT_DIR;
-use mirrord_protocol::{file::*, FileRequest, FileResponse, RemoteResult, ResponseError};
+use mirrord_protocol::{FileRequest, FileResponse, RemoteResult, ResponseError, file::*};
 use nix::unistd::UnlinkatFlags;
-use tracing::{error, trace, Level};
+use tracing::{Level, error, trace};
 
 use crate::{
     error::AgentResult, metrics::OPEN_FD_COUNT, util::path_resolver::InTargetPathResolver,
 };
+
+trait PathExt {
+    /// Equivalent to `Path::strip_prefix("/")` but doesn't remove
+    /// trailing slash.
+    ///
+    /// [`Path::strip_prefix`] has a bug that also strips trailing
+    /// slashes (<https://github.com/rust-lang/rust/issues/148267>).
+    /// Apparently Rust's path API hates trailing slashes so we have
+    /// to do this overcomplicated trickery.
+    fn strip_prefix_root(&self) -> Result<PathBuf, StripPrefixError>;
+}
+
+impl PathExt for Path {
+    fn strip_prefix_root(&self) -> Result<PathBuf, StripPrefixError> {
+        let mut stripped = self.strip_prefix("/")?.to_owned();
+
+        if self.as_os_str().as_bytes().ends_with(b"/") {
+            stripped.push("");
+        }
+
+        Ok(stripped)
+    }
+}
 
 #[derive(Debug)]
 pub enum RemoteFile {
@@ -34,7 +58,7 @@ fn log_err(entry_res: io::Result<DirEntryInternal>) -> io::Result<DirEntryIntern
 }
 
 #[derive(Debug)]
-struct GetDEnts64Stream {
+pub(crate) struct GetDEnts64Stream {
     inner: std::fs::ReadDir,
     current_and_parent: VecDeque<io::Result<DirEntryInternal>>,
     current_index: usize,
@@ -98,11 +122,11 @@ impl FileManager {
         Ok(match request {
             FileRequest::Open(OpenFileRequest { path, open_options }) => {
                 // TODO: maybe not agent error on this?
-                let path = path
-                    .strip_prefix("/")
+                let path_stripped = path
+                    .strip_prefix_root()
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
-                let open_result = self.open(path.into(), open_options);
+                let open_result = self.open(path_stripped, open_options);
                 Some(FileResponse::Open(open_result))
             }
             FileRequest::OpenRelative(OpenRelativeFileRequest {
@@ -152,10 +176,10 @@ impl FileManager {
             FileRequest::Close(CloseFileRequest { fd }) => self.close(fd),
             FileRequest::Access(AccessFileRequest { pathname, mode }) => {
                 let pathname = pathname
-                    .strip_prefix("/")
+                    .strip_prefix_root()
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
-                let access_result = self.access(pathname.into(), mode);
+                let access_result = self.access(pathname, mode);
                 Some(FileResponse::Access(access_result))
             }
             FileRequest::Xstat(XstatRequest {
@@ -183,6 +207,10 @@ impl FileManager {
             FileRequest::StatFsV2(StatFsRequestV2 { path }) => {
                 let statfs_result = self.statfs(path);
                 Some(FileResponse::XstatFsV2(statfs_result))
+            }
+            FileRequest::Rename(RenameRequest { old_path, new_path }) => {
+                let rename_result = self.rename(old_path, new_path);
+                Some(FileResponse::Rename(rename_result))
             }
 
             // dir operations
@@ -224,6 +252,18 @@ impl FileManager {
                 pathname,
                 flags,
             }) => Some(FileResponse::Unlink(self.unlinkat(dirfd, &pathname, flags))),
+            FileRequest::Ftruncate(FtruncateRequest { fd, length }) => {
+                Some(FileResponse::Ftruncate(self.ftruncate(fd, length)))
+            }
+            FileRequest::Futimens(FutimensRequest { fd, times }) => {
+                Some(FileResponse::Futimens(self.futimens(fd, times)))
+            }
+            FileRequest::Fchown(FchownRequest { fd, owner, group }) => {
+                Some(FileResponse::Fchown(self.fchown(fd, owner, group)))
+            }
+            FileRequest::Fchmod(FchmodRequest { fd, mode }) => {
+                Some(FileResponse::Fchmod(self.fchmod(fd, mode)))
+            }
         })
     }
 
@@ -342,50 +382,6 @@ impl FileManager {
             })
     }
 
-    /// Remote implementation of `fgets`.
-    ///
-    /// Uses `BufReader::read_line` to read a line (including `"\n"`) from a file with `fd`. The
-    /// file cursor position has to be moved manually due to this.
-    ///
-    /// `fgets` is only supposed to read `buffer_size`, so we limit moving the file's position based
-    /// on it (even though we return the full `Vec` of bytes).
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn read_line(
-        &mut self,
-        fd: u64,
-        buffer_size: u64,
-    ) -> RemoteResult<ReadFileResponse> {
-        self.open_files
-            .get_mut(&fd)
-            .ok_or(ResponseError::NotFound(fd))
-            .and_then(|remote_file| {
-                if let RemoteFile::File(file) = remote_file {
-                    let original_position = file.stream_position()?;
-                    // limit bytes read using take
-                    let mut reader = BufReader::new(std::io::Read::by_ref(file)).take(buffer_size);
-                    let mut buffer = Vec::<u8>::with_capacity(buffer_size as usize);
-                    Ok(reader
-                        .read_until(b'\n', &mut buffer)
-                        .and_then(|read_amount| {
-                            // Revert file to original position + bytes read (in case the
-                            // bufreader advanced too much)
-                            file.seek(SeekFrom::Start(original_position + read_amount as u64))?;
-
-                            // We handle the extra bytes in the `fgets` hook, so here we can
-                            // just return the full buffer.
-                            let response = ReadFileResponse {
-                                bytes: buffer.into(),
-                                read_amount: read_amount as u64,
-                            };
-
-                            Ok(response)
-                        })?)
-                } else {
-                    Err(ResponseError::NotFile(fd))
-                }
-            })
-    }
-
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read_limited(
         &mut self,
@@ -424,7 +420,7 @@ impl FileManager {
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     pub(crate) fn read_link(&mut self, path: PathBuf) -> RemoteResult<ReadLinkFileResponse> {
         let relative_path = path
-            .strip_prefix("/")
+            .strip_prefix_root()
             .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
         let full_path = self
@@ -483,9 +479,7 @@ impl FileManager {
     pub(crate) fn mkdirat(&mut self, dirfd: u64, path: &Path, mode: u32) -> RemoteResult<()> {
         trace!(
             "FileManager::mkdirat -> dirfd {:#?} | path {:#?} | mode {:#?}",
-            dirfd,
-            path,
-            mode
+            dirfd, path, mode
         );
 
         let relative_dir = self
@@ -551,7 +545,7 @@ impl FileManager {
             _ => {
                 return Err(ResponseError::from(std::io::Error::from_raw_os_error(
                     libc::EINVAL,
-                )))
+                )));
             }
         };
 
@@ -561,11 +555,99 @@ impl FileManager {
             .map_err(|error| ResponseError::from(std::io::Error::from_raw_os_error(error as i32)))
     }
 
+    pub(crate) fn ftruncate(&mut self, fd: u64, length: i64) -> RemoteResult<()> {
+        let file = self
+            .open_files
+            .get(&fd)
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        match file {
+            RemoteFile::File(file) => {
+                let result = unsafe { libc::ftruncate(file.as_raw_fd(), length) };
+                match result {
+                    -1 => Err(ResponseError::from(io::Error::last_os_error())),
+                    _ => Ok(()),
+                }
+            }
+            _ => Err(ResponseError::NotFile(fd)),
+        }
+    }
+
+    pub(crate) fn futimens(&mut self, fd: u64, times: Option<[Timespec; 2]>) -> RemoteResult<()> {
+        let file = self
+            .open_files
+            .get(&fd)
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        match file {
+            RemoteFile::File(file) => {
+                let times = times.map(|times| {
+                    [
+                        libc::timespec {
+                            tv_sec: times[0].tv_sec,
+                            tv_nsec: times[0].tv_nsec,
+                        },
+                        libc::timespec {
+                            tv_sec: times[1].tv_sec,
+                            tv_nsec: times[1].tv_nsec,
+                        },
+                    ]
+                });
+                let result = unsafe {
+                    libc::futimens(
+                        file.as_raw_fd(),
+                        times.map(|times| times.as_ptr()).unwrap_or(ptr::null()),
+                    )
+                };
+                match result {
+                    -1 => Err(ResponseError::from(io::Error::last_os_error())),
+                    _ => Ok(()),
+                }
+            }
+            _ => Err(ResponseError::NotFile(fd)),
+        }
+    }
+
+    pub(crate) fn fchown(&mut self, fd: u64, owner: u32, group: u32) -> RemoteResult<()> {
+        let file = self
+            .open_files
+            .get(&fd)
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        match file {
+            RemoteFile::File(file) => {
+                let result = unsafe { libc::fchown(file.as_raw_fd(), owner, group) };
+                match result {
+                    -1 => Err(ResponseError::from(io::Error::last_os_error())),
+                    _ => Ok(()),
+                }
+            }
+            _ => Err(ResponseError::NotFile(fd)),
+        }
+    }
+
+    pub(crate) fn fchmod(&mut self, fd: u64, mode: u32) -> RemoteResult<()> {
+        let file = self
+            .open_files
+            .get(&fd)
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        match file {
+            RemoteFile::File(file) => {
+                let result = unsafe { libc::fchmod(file.as_raw_fd(), mode) };
+                match result {
+                    -1 => Err(ResponseError::from(io::Error::last_os_error())),
+                    _ => Ok(()),
+                }
+            }
+            _ => Err(ResponseError::NotFile(fd)),
+        }
+    }
+
     pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {
         trace!(
             "FileManager::seek -> fd {:#?} | seek_from {:#?}",
-            fd,
-            seek_from
+            fd, seek_from
         );
 
         self.open_files
@@ -653,8 +735,7 @@ impl FileManager {
         let pathname = self.resolve_path(&pathname)?;
         trace!(
             "FileManager::access -> pathname {:#?} | mode {:#?}",
-            pathname,
-            mode,
+            pathname, mode,
         );
 
         // Mirror bit representation of flags to support how the flags are represented in the
@@ -680,14 +761,15 @@ impl FileManager {
             (Some(path), None) => path,
             // fstatat
             (Some(path), Some(fd)) => {
-                if let RemoteFile::Directory(parent_path) = self
+                match self
                     .open_files
                     .get(&fd)
                     .ok_or(ResponseError::NotFound(fd))?
                 {
-                    parent_path.join(path)
-                } else {
-                    return Err(ResponseError::NotDirectory(fd));
+                    RemoteFile::Directory(parent_path) => parent_path.join(path),
+                    _ => {
+                        return Err(ResponseError::NotDirectory(fd));
+                    }
                 }
             }
             // fstat
@@ -700,23 +782,23 @@ impl FileManager {
                     RemoteFile::File(file) => {
                         return Ok(XstatResponse {
                             metadata: file.metadata()?.into(),
-                        })
+                        });
                     }
                     RemoteFile::Directory(path) => {
                         return Ok(XstatResponse {
                             metadata: path.metadata()?.into(),
-                        })
+                        });
                     }
                 }
             }
             // invalid
             _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into()),
         };
-        let path = path.strip_prefix("/").map_err(|_| {
+        let path = path.strip_prefix_root().map_err(|_| {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "couldn't strip prefix")
         })?;
         let res = if follow_symlink {
-            self.resolve_path(path)?.metadata()
+            self.resolve_path(&path)?.metadata()
         } else if let Some(resolver) = self.path_resolver.as_ref() {
             resolver.root_path().join(path).symlink_metadata()
         } else {
@@ -758,6 +840,14 @@ impl FileManager {
         Ok(XstatFsResponseV2 {
             metadata: statfs.into(),
         })
+    }
+
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::DEBUG))]
+    pub(super) fn rename(&mut self, old_path: PathBuf, new_path: PathBuf) -> RemoteResult<()> {
+        let old_path = self.resolve_path(&old_path)?;
+        let new_path = self.resolve_path(&new_path)?;
+
+        Ok(std::fs::rename(old_path, new_path)?)
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::DEBUG))]
@@ -853,12 +943,11 @@ impl FileManager {
     #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
     pub(crate) fn read_dir(&mut self, fd: u64) -> RemoteResult<ReadDirResponse> {
         let dir_stream = self.get_dir_stream(fd)?;
-        let result = if let Some(offset_entry_pair) = dir_stream.next() {
-            ReadDirResponse {
+        let result = match dir_stream.next() {
+            Some(offset_entry_pair) => ReadDirResponse {
                 direntry: Some(offset_entry_pair.try_into()?),
-            }
-        } else {
-            ReadDirResponse { direntry: None }
+            },
+            _ => ReadDirResponse { direntry: None },
         };
 
         Ok(result)

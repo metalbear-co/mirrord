@@ -1,5 +1,5 @@
 use k8s_openapi::api::core::v1::PodTemplateSpec;
-use serde::{de, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de};
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct RolloutSpecTemplate(#[serde(deserialize_with = "rollout_pod_spec")] PodTemplateSpec);

@@ -25,9 +25,10 @@ mod targetless_tests {
     ///
     /// Running this test on a cluster that does not have any pods, also proves that we don't use
     /// any existing pod and the agent pod is completely independent.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "targetless"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(30))]
     pub async fn connect_to_kubernetes_api_service_with_targetless_agent() {
         let app = Application::CurlToKubeApi;
@@ -39,9 +40,10 @@ mod targetless_tests {
     }
 
     /// Test spawning a targetless agent pod with a given priority class.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "targetless"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     pub async fn targetless_agent_with_priority_class(#[future] kube_client: Client) {
         let kube_client = kube_client.await;
         if operator_installed(&kube_client).await.unwrap() {
@@ -121,5 +123,16 @@ mod targetless_tests {
 
         tokio::time::sleep(Duration::from_secs(1)).await;
         drop(test_process);
+    }
+
+    #[cfg_attr(any(not(feature = "targetless"), target_os = "windows"), ignore)]
+    #[rstest]
+    #[tokio::test(flavor = "current_thread")]
+    #[timeout(Duration::from_secs(120))]
+    pub async fn intproxy_child() {
+        let app = Application::IntproxyChild;
+        let mut process = app.run_targetless(None, None, None).await;
+        let res = process.wait().await;
+        assert!(res.success());
     }
 }

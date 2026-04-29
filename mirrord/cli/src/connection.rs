@@ -1,29 +1,58 @@
 use std::{collections::HashSet, time::Duration};
 
 use mirrord_analytics::Reporter;
-use mirrord_config::{target::Target, LayerConfig};
+use mirrord_config::{
+    LayerConfig,
+    agent::AgentFileConfig,
+    config::MirrordConfig,
+    target::{Target, TargetDisplay},
+};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
-    api::{container::ContainerConfig, kubernetes::KubernetesAPI, wrap_raw_connection},
+    api::{container::ContainerConfig, kubernetes::KubernetesAPI},
     error::KubeApiError,
     resolved::ResolvedTarget,
 };
-use mirrord_operator::client::{OperatorApi, OperatorSessionConnection};
-use mirrord_progress::{
-    messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
-    IdeAction, IdeMessage, NotificationLevel, Progress,
+use mirrord_operator::{
+    client::{OperatorApi, OperatorSessionConnection},
+    crd::NewOperatorFeature,
 };
-use mirrord_protocol::{ClientMessage, DaemonMessage};
-use tokio::sync::mpsc;
+use mirrord_progress::{
+    IdeAction, IdeMessage, NotificationLevel, Progress,
+    messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
+    utm_medium,
+};
+use mirrord_protocol_io::{Client, Connection};
 use tracing::Level;
 
-use crate::{CliError, CliResult};
+use crate::{CliError, CliResult, MirrordCi, ci::error::CiError};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
 
-pub(crate) struct AgentConnection {
-    pub sender: mpsc::Sender<ClientMessage>,
-    pub receiver: mpsc::Receiver<DaemonMessage>,
+/// Sends a "Sign up for mirrord for Teams" upgrade CTA to the IDE via the [`IdeMessage`] protocol.
+///
+/// Only has an effect when running inside an IDE (`MIRRORD_PROGRESS_MODE=json`).
+/// In CLI mode, [`Progress::ide`] is a no-op.
+fn send_upgrade_ide_message<P: Progress>(
+    progress: &P,
+    text: &str,
+    utm_source: &str,
+) -> CliResult<()> {
+    let mut actions = HashSet::new();
+    actions.insert(IdeAction::Link {
+        label: "Sign up for mirrord for Teams".to_owned(),
+        link: format!(
+            "https://app.metalbear.com/?utm_source={utm_source}&utm_medium={}",
+            utm_medium()
+        ),
+    });
+    progress.ide(serde_json::to_value(IdeMessage {
+        id: "upgrade_cta".to_owned(),
+        level: NotificationLevel::Warning,
+        text: text.to_owned(),
+        actions,
+    })?);
+    Ok(())
 }
 
 /// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
@@ -32,37 +61,37 @@ pub(crate) struct AgentConnection {
 /// 3. Otherwise, attempts to use the mirrord-operator and returns [`None`] in case mirrord-operator
 ///    is not found or its license is invalid.
 async fn try_connect_using_operator<P, R>(
-    config: &mut LayerConfig,
+    layer_config: &mut LayerConfig,
     progress: &P,
     analytics: &mut R,
     branch_name: Option<String>,
+    mirrord_for_ci: Option<&MirrordCi>,
 ) -> CliResult<Option<OperatorSessionConnection>>
 where
     P: Progress,
     R: Reporter,
 {
     let mut operator_subtask = progress.subtask("checking operator");
-    if config.operator == Some(false) {
+    if layer_config.operator == Some(false) {
         operator_subtask.success(Some("operator disabled"));
         return Ok(None);
     }
 
-    let api = match OperatorApi::try_new(config, analytics).await? {
+    let api = match OperatorApi::try_new(layer_config, analytics, progress).await? {
         Some(api) => api,
-        None if config.operator == Some(true) => return Err(CliError::OperatorNotInstalled),
+        None if layer_config.operator == Some(true) => {
+            send_upgrade_ide_message(
+                progress,
+                "mirrord operator was not found in the cluster.",
+                "operatornotinstalled",
+            )?;
+            return Err(CliError::OperatorNotInstalled);
+        }
         None => {
             operator_subtask.success(Some("operator not found"));
             return Ok(None);
         }
     };
-
-    let mut version_cmp_subtask = operator_subtask.subtask("checking version compatibility");
-    let compatible = api.check_operator_version(&version_cmp_subtask);
-    if compatible {
-        version_cmp_subtask.success(Some("operator version compatible"));
-    } else {
-        version_cmp_subtask.failure(Some("operator version may not be compatible"));
-    }
 
     let mut license_subtask = operator_subtask.subtask("checking license");
     match api.check_license_validity(&license_subtask) {
@@ -70,7 +99,12 @@ where
         Err(error) => {
             license_subtask.failure(Some("operator license expired"));
 
-            if config.operator == Some(true) {
+            if layer_config.operator == Some(true) {
+                send_upgrade_ide_message(
+                    progress,
+                    "mirrord operator license expired.",
+                    "licenseexpired",
+                )?;
                 return Err(error.into());
             } else {
                 operator_subtask.failure(Some("proceeding without operator"));
@@ -80,21 +114,72 @@ where
     }
 
     let mut user_cert_subtask = operator_subtask.subtask("preparing user credentials");
-    let api = api.prepare_client_cert(analytics).await.into_certified()?;
+    let api = match mirrord_for_ci {
+        Some(mirrord_for_ci) => {
+            api.with_ci_api_key(
+                analytics,
+                progress,
+                layer_config,
+                mirrord_for_ci.api_key().ok_or(CiError::MissingCiApiKey)?,
+            )
+            .await
+        }
+        None => {
+            api.with_client_certificate(analytics, progress, layer_config)
+                .await
+        }
+    }
+    .into_certified()?;
+
     user_cert_subtask.success(Some("user credentials prepared"));
 
-    let target = ResolvedTarget::new(
-        api.client(),
-        &config.target.path.clone().unwrap_or(Target::Targetless),
-        config.target.namespace.as_deref(),
-    )
-    .await
-    .map_err(CliError::OperatorTargetResolution)?;
+    let is_multi_cluster = api
+        .operator()
+        .spec
+        .supported_features()
+        .contains(&NewOperatorFeature::MultiClusterPrimary);
 
     let mut session_subtask = operator_subtask.subtask("starting session");
-    let connection = api
-        .connect_in_new_session(target, config, &session_subtask, branch_name)
-        .await?;
+    let connection = if is_multi_cluster {
+        // Multi-cluster: CLI connects to Primary, which routes to the workload cluster
+        // where the target is resolved and the session is created
+        let target_config = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
+
+        api.connect_in_multi_cluster_session(
+            &target_config,
+            layer_config,
+            &session_subtask,
+            branch_name,
+            mirrord_for_ci.map(MirrordCi::info),
+        )
+        .await?
+    } else {
+        // Single-cluster: CLI resolves target of the connected cluster
+        let target = ResolvedTarget::new(
+            api.client(),
+            &layer_config
+                .target
+                .path
+                .clone()
+                .unwrap_or(Target::Targetless),
+            layer_config.target.namespace.as_deref(),
+        )
+        .await
+        .map_err(CliError::OperatorTargetResolution)?;
+
+        api.connect_in_new_session(
+            target,
+            layer_config,
+            &session_subtask,
+            branch_name,
+            mirrord_for_ci.map(MirrordCi::info),
+        )
+        .await?
+    };
     session_subtask.success(Some("session started"));
 
     operator_subtask.success(Some("using operator"));
@@ -111,28 +196,100 @@ where
 ///
 /// Here is where we start interactions with the kubernetes API.
 #[tracing::instrument(level = Level::TRACE, skip_all, err)]
-pub(crate) async fn create_and_connect<P, R: Reporter>(
+pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     config: &mut LayerConfig,
     progress: &mut P,
     analytics: &mut R,
     branch_name: Option<String>,
-) -> CliResult<(AgentConnectInfo, AgentConnection)>
-where
-    P: Progress + Send + Sync,
-{
+    mirrord_for_ci: Option<&MirrordCi>,
+) -> CliResult<(AgentConnectInfo, Connection<Client>)> {
     if let Some(connection) =
-        try_connect_using_operator(config, progress, analytics, branch_name).await?
+        try_connect_using_operator(config, progress, analytics, branch_name, mirrord_for_ci).await?
     {
+        if config.agent
+            != AgentFileConfig::default()
+                .generate_config(&mut Default::default())
+                .expect("BUG: Default agent config should always work!")
+        {
+            progress.warning(
+                "Agent configuration is ignored when using the mirrord operator. \
+                 Agent configuration is managed by the cluster admin.",
+            );
+        }
         return Ok((
             AgentConnectInfo::Operator(connection.session),
-            AgentConnection {
-                sender: connection.tx,
-                receiver: connection.rx,
-            },
+            connection.conn,
         ));
     }
 
+    process_config_oss(config, progress)?;
+
+    let k8s_api = KubernetesAPI::create(config, progress)
+        .await
+        .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
+
+    k8s_api
+        .detect_openshift(progress)
+        .await
+        .map_err(|fail| CliError::friendlier_error_or_else(fail, CliError::CreateAgentFailed))
+        .inspect_err(|fail| tracing::debug!(?fail, "Failed to detect OpenShift!"))
+        .ok();
+
+    let agent_container_config = ContainerConfig::default();
+
+    let agent_connect_info = tokio::time::timeout(
+        Duration::from_secs(config.agent.startup_timeout),
+        k8s_api.create_agent(
+            progress,
+            &config.target,
+            Some(&mut config.feature.network),
+            agent_container_config,
+        ),
+    )
+    .await
+    .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
+    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
+
+    let conn = Connection::<Client>::from_stream(
+        k8s_api
+            .create_connection_portforward(agent_connect_info.clone())
+            .await
+            .map_err(|error| {
+                CliError::friendlier_error_or_else(error, CliError::AgentConnectionFailed)
+            })?,
+    )
+    .await;
+
+    Ok((AgentConnectInfo::DirectKubernetes(agent_connect_info), conn))
+}
+
+/// Verifies and adjusts the [`LayerConfig`] after we've determined that this run does not use the
+/// operator.
+fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -> CliResult<()> {
+    // operator is disabled, but target requires it.
+    if let Some(target) = config.target.path.as_ref()
+        && Target::requires_operator(target)
+    {
+        send_upgrade_ide_message(
+            progress,
+            &format!(
+                "Target type {} requires the mirrord operator, which is part of mirrord for Teams.",
+                target.type_()
+            ),
+            "requiresoperator",
+        )?;
+        return Err(CliError::FeatureRequiresOperatorError(format!(
+            "target type {}",
+            target.type_()
+        )));
+    }
+
     if config.feature.copy_target.enabled {
+        send_upgrade_ide_message(
+            progress,
+            "copy_target requires the mirrord operator, which is part of mirrord for Teams.",
+            "requiresoperator",
+        )?;
         return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
     }
 
@@ -164,47 +321,12 @@ where
         _ => (),
     };
 
-    let k8s_api = KubernetesAPI::create(config)
-        .await
-        .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
+    config.experimental.non_blocking_tcp_connect =
+        config.experimental.non_blocking_tcp_connect.or(Some(true));
 
-    k8s_api
-        .detect_openshift(progress)
-        .await
-        .map_err(|fail| CliError::friendlier_error_or_else(fail, CliError::CreateAgentFailed))
-        .inspect_err(|fail| tracing::debug!(?fail, "Failed to detect OpenShift!"))
-        .ok();
+    config.experimental.sip_utils = config.experimental.sip_utils.or(Some(true));
 
-    let agent_container_config = ContainerConfig {
-        support_ipv6: config.feature.network.ipv6,
-        ..Default::default()
-    };
-    let agent_connect_info = tokio::time::timeout(
-        Duration::from_secs(config.agent.startup_timeout),
-        k8s_api.create_agent(
-            progress,
-            &config.target,
-            Some(&mut config.feature.network),
-            agent_container_config,
-        ),
-    )
-    .await
-    .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
-    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
-
-    let (sender, receiver) = wrap_raw_connection(
-        k8s_api
-            .create_connection_portforward(agent_connect_info.clone())
-            .await
-            .map_err(|error| {
-                CliError::friendlier_error_or_else(error, CliError::AgentConnectionFailed)
-            })?,
-    );
-
-    Ok((
-        AgentConnectInfo::DirectKubernetes(agent_connect_info),
-        AgentConnection { sender, receiver },
-    ))
+    Ok(())
 }
 
 fn user_persistent_random_message_select() -> bool {
@@ -223,37 +345,34 @@ fn user_persistent_random_message_select() -> bool {
 
 pub(crate) fn show_multipod_warning<P>(progress: &mut P) -> CliResult<(), CliError>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     // Send to IDEs that we're in multi-pod without operator.
     progress.ide(serde_json::to_value(IdeMessage {
-            id: MULTIPOD_WARNING.0.to_string(),
-            level: NotificationLevel::Warning,
-            text: MULTIPOD_WARNING.1.to_string(),
-            actions: {
-                let mut actions = HashSet::new();
-                actions.insert(IdeAction::Link {
-                    label: "Get started (read the docs)".to_string(),
-                    link: "https://metalbear.co/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=plugin".to_string(),
-                });
-                actions.insert(IdeAction::Link {
-                    label: "Try it now".to_string(),
-                    link: "https://app.metalbear.co/".to_string(),
-                });
+        id: MULTIPOD_WARNING.0.to_string(),
+        level: NotificationLevel::Warning,
+        text: MULTIPOD_WARNING.1.to_string(),
+        actions: {
+            let mut actions = HashSet::new();
+            actions.insert(IdeAction::Link {
+                label: "Try mirrord for Teams".to_string(),
+                link: "https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=plugin"
+                    .to_string(),
+            });
 
-                actions
-            },
-        })?);
+            actions
+        },
+    })?);
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
     progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
-    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.co/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=cli");
+    progress.print("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=cli");
     Ok(())
 }
 
 pub(crate) fn show_http_filter_warning<P>(progress: &mut P) -> CliResult<(), CliError>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     // Send to IDEs that at an HTTP filter is set without operator.
     progress.ide(serde_json::to_value(IdeMessage {
@@ -263,12 +382,9 @@ where
         actions: {
             let mut actions = HashSet::new();
             actions.insert(IdeAction::Link {
-                label: "Get started (read the docs)".to_string(),
-                link: "https://metalbear.co/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=plugin".to_string(),
-            });
-            actions.insert(IdeAction::Link {
-                label: "Try it now".to_string(),
-                link: "https://app.metalbear.co/".to_string(),
+                label: "Try mirrord for Teams".to_string(),
+                link: "https://app.metalbear.com/?utm_source=httpfilter&utm_medium=plugin"
+                    .to_string(),
             });
 
             actions
@@ -277,6 +393,44 @@ where
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("You're using an HTTP filter, which generally indicates the use of a shared environment. If so, we recommend");
     progress.print("considering mirrord for Teams, which is better suited to shared environments.");
-    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.co/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=cli");
+    progress.print("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=httpfilter&utm_medium=cli");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use mirrord_config::{
+        LayerFileConfig,
+        config::{ConfigContext, MirrordConfig},
+        target::{Target, TargetFileConfig, pod::PodTarget, service::ServiceTarget},
+    };
+    use mirrord_progress::NullProgress;
+    use rstest::rstest;
+
+    use crate::connection::process_config_oss;
+
+    /// Ensure that when `process_config_oss` is called, operator-only target types are disallowed.
+    /// This occurs when `create_and_connect` fails to establish a connection with the operator.
+    #[rstest]
+    #[case(Target::Pod(PodTarget{pod: "my-pet-pod".into(),container: None}))]
+    #[case(Target::Service(
+        ServiceTarget{service: "service-for-world-domination".into(),container: None}
+    ))]
+    fn deny_non_oss_targets_without_operator(#[case] target: Target) {
+        let allowed = !target.requires_operator();
+
+        let mut cfg_context = ConfigContext::default().strict_env(true);
+        let mut config = LayerFileConfig {
+            target: Some(TargetFileConfig::Simple(Some(target))),
+            ..Default::default()
+        }
+        .generate_config(&mut cfg_context)
+        .unwrap();
+        let mut progress = NullProgress {};
+
+        assert_eq!(
+            process_config_oss(&mut config, &mut progress).is_ok(),
+            allowed
+        )
+    }
 }

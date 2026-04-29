@@ -1,7 +1,7 @@
 use std::{ops::Deref, str::FromStr};
 
 use chrono::{DateTime, Utc};
-use serde::{de, ser, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de, ser};
 use x509_certificate::{X509Certificate, X509CertificateError};
 
 /// Serialize pem contents of `X509Certificate`

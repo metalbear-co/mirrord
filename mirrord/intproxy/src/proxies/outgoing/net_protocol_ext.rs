@@ -1,34 +1,42 @@
 //! Utilities for handling multiple network protocol stacks within one
 //! [`OutgoingProxy`](super::OutgoingProxy).
 
+#[cfg(not(target_os = "windows"))]
+use std::{env, path::PathBuf};
 use std::{
-    env, io,
+    io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    path::PathBuf,
 };
 
-use bytes::BytesMut;
-use mirrord_intproxy_protocol::NetProtocol;
-use mirrord_protocol::{
-    outgoing::{
-        tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing, LayerClose, LayerConnect, LayerWrite,
-        SocketAddress, UnixAddr,
-    },
-    ClientMessage, ConnectionId,
-};
-use rand::distr::{Alphanumeric, SampleString};
-use tokio::{
-    fs,
+#[cfg(not(target_os = "windows"))]
+use ::tokio::fs;
+use ::tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream, UdpSocket, UnixListener, UnixStream},
+    net::{TcpListener, TcpStream, UdpSocket},
 };
+use bytes::{Bytes, BytesMut};
+use mirrord_intproxy_protocol::NetProtocol;
+#[cfg(not(target_os = "windows"))]
+use mirrord_protocol::outgoing::UnixAddr;
+use mirrord_protocol::{
+    ClientMessage, ConnectionId,
+    outgoing::{
+        LayerClose, LayerConnect, LayerConnectV2, LayerWrite, SocketAddress, tcp::LayerTcpOutgoing,
+        udp::LayerUdpOutgoing,
+    },
+    uid::Uid,
+};
+#[cfg(not(target_os = "windows"))]
+use rand::distr::{Alphanumeric, SampleString};
+#[cfg(not(target_os = "windows"))]
+use tokio::net::{UnixListener, UnixStream};
 
 /// Trait for [`NetProtocol`] that handles differences in [`mirrord_protocol::outgoing`] between
 /// network protocols. Allows to unify logic.
 pub trait NetProtocolExt: Sized {
     /// Creates a [`LayerWrite`] message and wraps it into the common [`ClientMessage`] type.
     /// The enum path used here depends on this protocol.
-    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Vec<u8>) -> ClientMessage;
+    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Bytes) -> ClientMessage;
 
     /// Creates a [`LayerClose`] message and wraps it into the common [`ClientMessage`] type.
     /// The enum path used here depends on this protocol.
@@ -36,14 +44,14 @@ pub trait NetProtocolExt: Sized {
 
     /// Creates a [`LayerConnect`] message and wraps it into the common [`ClientMessage`] type.
     /// The enum path used here depends on this protocol.
-    fn wrap_agent_connect(self, remote_address: SocketAddress) -> ClientMessage;
+    fn wrap_agent_connect(self, remote_address: SocketAddress, uid: Option<Uid>) -> ClientMessage;
 
     /// Opens a new socket for intercepting a connection to the given remote address.
     async fn prepare_socket(self, for_remote_address: SocketAddress) -> io::Result<PreparedSocket>;
 }
 
 impl NetProtocolExt for NetProtocol {
-    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Vec<u8>) -> ClientMessage {
+    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Bytes) -> ClientMessage {
         match self {
             Self::Datagrams => ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
                 connection_id,
@@ -67,16 +75,30 @@ impl NetProtocolExt for NetProtocol {
         }
     }
 
-    fn wrap_agent_connect(self, remote_address: SocketAddress) -> ClientMessage {
-        match self {
-            Self::Datagrams => {
+    fn wrap_agent_connect(self, remote_address: SocketAddress, uid: Option<Uid>) -> ClientMessage {
+        match (self, uid) {
+            (Self::Datagrams, None) => {
                 ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
                     remote_address,
                 }))
             }
-            Self::Stream => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
-                remote_address,
-            })),
+            (Self::Datagrams, Some(uid)) => {
+                ClientMessage::UdpOutgoing(LayerUdpOutgoing::ConnectV2(LayerConnectV2 {
+                    uid,
+                    remote_address,
+                }))
+            }
+            (Self::Stream, None) => {
+                ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+                    remote_address,
+                }))
+            }
+            (Self::Stream, Some(uid)) => {
+                ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
+                    uid,
+                    remote_address,
+                }))
+            }
         }
     }
 
@@ -84,8 +106,8 @@ impl NetProtocolExt for NetProtocol {
         let socket = match for_remote_address {
             SocketAddress::Ip(addr) => {
                 let ip_addr = match addr.ip() {
-                    IpAddr::V4(..) => IpAddr::V4(Ipv4Addr::LOCALHOST),
-                    IpAddr::V6(..) => IpAddr::V6(Ipv6Addr::LOCALHOST),
+                    IpAddr::V4(..) => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                    IpAddr::V6(..) => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                 };
                 let bind_at = SocketAddr::new(ip_addr, 0);
 
@@ -94,16 +116,26 @@ impl NetProtocolExt for NetProtocol {
                     Self::Stream => PreparedSocket::TcpListener(TcpListener::bind(bind_at).await?),
                 }
             }
+            #[cfg(not(target_os = "windows"))]
             SocketAddress::Unix(..) => match self {
                 Self::Stream => {
                     let path = PreparedSocket::generate_uds_path().await?;
                     PreparedSocket::UnixListener(UnixListener::bind(path)?)
                 }
                 Self::Datagrams => {
-                    tracing::error!("layer requested intercepting outgoing datagrams over unix socket, this is not supported");
+                    tracing::error!(
+                        "layer requested intercepting outgoing datagrams over unix socket, this is not supported"
+                    );
                     panic!("layer requested outgoing datagrams over unix sockets");
                 }
             },
+            #[cfg(target_os = "windows")]
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "unsupported SocketAddress",
+                ));
+            }
         };
 
         Ok(socket)
@@ -111,17 +143,21 @@ impl NetProtocolExt for NetProtocol {
 }
 
 /// A socket prepared to accept an intercepted connection.
+#[derive(Debug)]
 pub enum PreparedSocket {
     /// There is no real listening/accepting here, see [`NetProtocol::Datagrams`] for more info.
     UdpSocket(UdpSocket),
     TcpListener(TcpListener),
+    #[cfg(not(target_os = "windows"))]
     UnixListener(UnixListener),
 }
 
 impl PreparedSocket {
     /// For unix listeners, relative to the temp dir.
+    #[cfg(not(target_os = "windows"))]
     const UNIX_STREAMS_DIRNAME: &'static str = "mirrord-unix-sockets";
 
+    #[cfg(not(target_os = "windows"))]
     async fn generate_uds_path() -> io::Result<PathBuf> {
         let tmp_dir = env::temp_dir().join(Self::UNIX_STREAMS_DIRNAME);
         if !tmp_dir.exists() {
@@ -137,6 +173,7 @@ impl PreparedSocket {
         let address = match self {
             Self::TcpListener(listener) => listener.local_addr()?.into(),
             Self::UdpSocket(socket) => socket.local_addr()?.into(),
+            #[cfg(not(target_os = "windows"))]
             Self::UnixListener(listener) => {
                 let addr = listener.local_addr()?;
                 let pathname = addr.as_pathname().unwrap().to_path_buf();
@@ -147,8 +184,8 @@ impl PreparedSocket {
         Ok(address)
     }
 
-    /// Accepts one connection on this socket and returns a new socket for sending and receiving
-    /// data.
+    /// Accepts one connection on this socket and returns a new socket
+    /// for sending and receiving data.
     pub async fn accept(self) -> io::Result<ConnectedSocket> {
         let (inner, is_really_connected) = match self {
             Self::TcpListener(listener) => {
@@ -156,6 +193,7 @@ impl PreparedSocket {
                 (InnerConnectedSocket::TcpStream(stream), true)
             }
             Self::UdpSocket(socket) => (InnerConnectedSocket::UdpSocket(socket), false),
+            #[cfg(not(target_os = "windows"))]
             Self::UnixListener(listener) => {
                 let (stream, _) = listener.accept().await?;
                 (InnerConnectedSocket::UnixStream(stream), true)
@@ -173,6 +211,7 @@ impl PreparedSocket {
 enum InnerConnectedSocket {
     UdpSocket(UdpSocket),
     TcpStream(TcpStream),
+    #[cfg(not(target_os = "windows"))]
     UnixStream(UnixStream),
 }
 
@@ -192,15 +231,13 @@ impl ConnectedSocket {
                 let bytes_sent = socket.send(bytes).await?;
 
                 if bytes_sent != bytes.len() {
-                    Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "failed to send all bytes",
-                    ))?;
+                    Err(io::Error::other("failed to send all bytes"))?;
                 }
 
                 Ok(())
             }
             InnerConnectedSocket::TcpStream(stream) => stream.write_all(bytes).await,
+            #[cfg(not(target_os = "windows"))]
             InnerConnectedSocket::UnixStream(stream) => stream.write_all(bytes).await,
         }
     }
@@ -226,6 +263,7 @@ impl ConnectedSocket {
                 self.buffer.clear();
                 Ok(bytes)
             }
+            #[cfg(not(target_os = "windows"))]
             InnerConnectedSocket::UnixStream(stream) => {
                 stream.read_buf(&mut self.buffer).await?;
                 let bytes = self.buffer.to_vec();
@@ -243,6 +281,7 @@ impl ConnectedSocket {
     pub async fn shutdown(&mut self) -> io::Result<()> {
         match &mut self.inner {
             InnerConnectedSocket::TcpStream(stream) => stream.shutdown().await,
+            #[cfg(not(target_os = "windows"))]
             InnerConnectedSocket::UnixStream(stream) => stream.shutdown().await,
             InnerConnectedSocket::UdpSocket(..) => Ok(()),
         }

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use kube::CustomResource;
 use mirrord_config::{feature::split_queues::SplitQueuesConfig, target::Target};
 use schemars::JsonSchema;
@@ -20,13 +22,20 @@ pub struct CopyTargetSpec {
     /// Original target.
     pub target: Target,
     /// How long should the operator keep this pod alive after its creation.
-    /// The pod is deleted when this timout has expired and there are no connected clients.
+    /// The pod is deleted when this timeout has expired and there are no connected clients.
     pub idle_ttl: Option<u32>,
     /// Should the operator scale down target deployment to 0 while this pod is alive.
     /// Ignored if [`Target`] is [`Target::Pod`].
     pub scale_down: bool,
     /// Split queues client side configuration.
+    #[schemars(schema_with = "split_queues_schema")]
     pub split_queues: Option<SplitQueuesConfig>,
+    /// Containers that are ignored by copy target.
+    #[serde(default)]
+    pub exclude_containers: Vec<String>,
+    /// Init containers that are ignored by copy target.
+    #[serde(default)]
+    pub exclude_init_containers: Vec<String>,
 }
 
 /// This is the `status` field for [`CopyTargetCrd`].
@@ -51,4 +60,11 @@ impl CopyTargetStatus {
     pub const PHASE_IN_PROGRESS: &'static str = "InProgress";
     pub const PHASE_READY: &'static str = "Ready";
     pub const PHASE_FAILED: &'static str = "Failed";
+}
+
+/// Generates a dummy schema for [`CopyTargetSpec::split_queues`].
+///
+/// The original schema is invalid per CRD standards.
+fn split_queues_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    Option::<BTreeMap<String, serde_json::Value>>::json_schema(generator)
 }

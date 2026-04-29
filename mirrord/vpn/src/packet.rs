@@ -1,7 +1,8 @@
 use pnet_packet::{
+    MutablePacket as _,
     ethernet::{self, EtherTypes},
     ip::IpNextHeaderProtocols,
-    ipv4, ipv6, tcp, udp, MutablePacket as _,
+    ipv4, ipv6, tcp, udp,
 };
 
 pub fn patch_packet_checksum(packet: &mut [u8]) {

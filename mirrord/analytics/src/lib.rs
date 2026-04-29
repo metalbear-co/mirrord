@@ -2,9 +2,12 @@
 
 use std::{collections::HashMap, str::FromStr, time::Instant};
 
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{Level, info};
+use uuid::Uuid;
+
+pub mod preview;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -16,7 +19,9 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub enum AnalyticValue {
     Bool(bool),
     Number(u32),
+    Uuid(Uuid),
     Nested(Analytics),
+    Hash(AnalyticsHash),
 }
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone, Copy)]
@@ -39,6 +44,8 @@ pub enum ExecutionKind {
     Exec = 2,
     PortForward = 3,
     Dump = 4,
+    Wizard = 5,
+    Preview = 6,
     Other = 0,
 }
 
@@ -49,6 +56,8 @@ impl From<u32> for ExecutionKind {
             2 => ExecutionKind::Exec,
             3 => ExecutionKind::PortForward,
             4 => ExecutionKind::Dump,
+            5 => ExecutionKind::Wizard,
+            6 => ExecutionKind::Preview,
             _ => ExecutionKind::Other,
         }
     }
@@ -80,7 +89,7 @@ impl FromStr for ExecutionKind {
 /// let mut analytics = Analytics::default();
 /// analytics.add("a", true);
 /// analytics.add("b", false);
-/// analytics.add("c", 3);
+/// analytics.add("c", 3usize);
 ///
 /// struct A {}
 /// impl CollectAnalytics for A {
@@ -143,6 +152,12 @@ impl From<bool> for AnalyticValue {
     }
 }
 
+impl From<u16> for AnalyticValue {
+    fn from(n: u16) -> Self {
+        AnalyticValue::Number(n.into())
+    }
+}
+
 impl From<u32> for AnalyticValue {
     fn from(n: u32) -> Self {
         AnalyticValue::Number(n)
@@ -161,9 +176,21 @@ impl From<usize> for AnalyticValue {
     }
 }
 
+impl From<Uuid> for AnalyticValue {
+    fn from(id: Uuid) -> Self {
+        AnalyticValue::Uuid(id)
+    }
+}
+
 impl From<Analytics> for AnalyticValue {
     fn from(analytics: Analytics) -> Self {
         AnalyticValue::Nested(analytics)
+    }
+}
+
+impl From<AnalyticsHash> for AnalyticValue {
+    fn from(hash: AnalyticsHash) -> Self {
+        AnalyticValue::Hash(hash)
     }
 }
 
@@ -198,9 +225,16 @@ pub struct AnalyticsReporter {
 }
 
 impl AnalyticsReporter {
-    pub fn new(enabled: bool, execution_kind: ExecutionKind, watch: drain::Watch) -> Self {
+    pub fn new(
+        enabled: bool,
+        execution_kind: ExecutionKind,
+        watch: drain::Watch,
+        machine_id: Uuid,
+    ) -> Self {
         let mut analytics = Analytics::default();
         analytics.add("execution_kind", execution_kind as u32);
+        analytics.add("machine_id", machine_id);
+        analytics.add("is_ci", ci_info::is_ci());
 
         AnalyticsReporter {
             analytics,
@@ -213,8 +247,13 @@ impl AnalyticsReporter {
         }
     }
 
-    pub fn only_error(enabled: bool, execution_kind: ExecutionKind, watch: drain::Watch) -> Self {
-        let mut reporter = AnalyticsReporter::new(enabled, execution_kind, watch);
+    pub fn only_error(
+        enabled: bool,
+        execution_kind: ExecutionKind,
+        watch: drain::Watch,
+        machine_id: Uuid,
+    ) -> Self {
+        let mut reporter = AnalyticsReporter::new(enabled, execution_kind, watch, machine_id);
         reporter.error_only_send = true;
         reporter
     }
@@ -316,15 +355,13 @@ struct AnalyticsReport {
     error: Option<AnalyticsError>,
 }
 
-/// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.co
-#[tracing::instrument(level = "trace")]
+const ANALYTICS_ENDPOINT: &str = "https://analytics.metalbear.com/api/v1/event";
+
+/// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.com
+#[tracing::instrument(level = Level::TRACE)]
 async fn send_analytics(report: AnalyticsReport) {
     let client = reqwest::Client::new();
-    let res = client
-        .post("https://analytics.metalbear.co/api/v1/event")
-        .json(&report)
-        .send()
-        .await;
+    let res = client.post(ANALYTICS_ENDPOINT).json(&report).send().await;
     if let Err(e) = res {
         info!("Failed to send analytics: {e}");
     }
@@ -373,6 +410,19 @@ mod tests {
                     "d": true,
                     "e": true
                 }
+            })
+        );
+    }
+
+    #[test]
+    fn hash_value_serialization() {
+        let mut analytics = Analytics::default();
+        analytics.add("preview_key_identifier", AnalyticsHash::from_bytes(b"key"));
+
+        assert_json_eq!(
+            analytics,
+            json!({
+                "preview_key_identifier": "a2V5"
             })
         );
     }

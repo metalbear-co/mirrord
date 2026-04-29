@@ -39,24 +39,30 @@ mod rpath;
 /// - A shebang is added to scripts without one in order to point it to the patched binary.
 /// - When checking a script, only the first line of the file is checked for a shebang, in case the
 ///   script is encoded unusually.
+/// - Some errors may prevent logs from printing out, making it harder to diagnose the issue. In
+///   this case, use the `experimental.sip_log_destination` config to print SIP logs to a file.
 mod main {
     use std::{
         env,
-        ffi::OsStr,
-        io::{self, BufRead},
+        ffi::{OsStr, OsString},
+        fs::{File, OpenOptions},
+        io::{self, BufRead, Cursor, ErrorKind, Write},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
         str::from_utf8,
+        time::{SystemTime, UNIX_EPOCH},
     };
 
     use apple_codesign::{CodeSignatureFlags, MachFile};
+    pub use codesign::MIRRORD_SANTA_MODE_ENV;
+    use fs4::fs_std::FileExt;
     use object::{
-        macho::{self, MachHeader64, LC_RPATH},
+        Architecture, Endianness, FileKind,
+        macho::{self, LC_RPATH, MachHeader64},
         read::{
             self,
             macho::{FatArch, LoadCommandVariant::Rpath, MachHeader},
         },
-        Architecture, Endianness, FileKind,
     };
     use once_cell::sync::Lazy;
     use tracing::{trace, warn};
@@ -65,9 +71,9 @@ mod main {
     use super::*;
     pub use crate::error::SipError;
     use crate::{
+        SipError::{FileNotFound, UnlikelyError},
         error::Result,
         main::SipStatus::{NoSip, SipBinary, SipScript},
-        SipError::{FileNotFound, UnlikelyError},
     };
 
     /// Where patched files are stored, relative to the temp dir (`/tmp/mirrord-bin/...`).
@@ -104,6 +110,17 @@ mod main {
     pub static MIRRORD_TEMP_BIN_DIR_STRING: Lazy<String> =
         Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_TEMP_BIN_DIR_PATH_BUF));
 
+    /// Path to `~/.mirrord/binaries` where pre-built SIP utility binaries are stored.
+    pub static MIRRORD_BINARIES_DIR_PATH_BUF: Lazy<PathBuf> = Lazy::new(|| {
+        PathBuf::from(env::var("HOME").unwrap_or_default())
+            .join(".mirrord")
+            .join("binaries")
+    });
+
+    /// String version of [`MIRRORD_BINARIES_DIR_PATH_BUF`], without a trailing `/`.
+    pub static MIRRORD_BINARIES_DIR_STRING: Lazy<String> =
+        Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_BINARIES_DIR_PATH_BUF));
+
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
     /// main cpu type is arm64. We only consider the lowest byte in the check.
     fn is_cpu_subtype_arm64e(subtype: u32) -> bool {
@@ -130,12 +147,24 @@ mod main {
     }
 
     /// Options for the [main::sip_patch] function.
-    #[derive(Default)]
+    #[derive(Clone, Copy, Default)]
     pub struct SipPatchOptions<'a> {
         /// A list of binaries to patch.
         pub patch: &'a [String],
         /// A list of binaries to skip patching.
         pub skip: &'a [String],
+        /// If `Some`, check this dir for a binary with the same filename before SIP-patching.
+        pub sip_binaries_dir: Option<&'a Path>,
+    }
+
+    /// Info for logging to `config.experimental.sip_log_destination`
+    pub struct SipLogInfo<'a> {
+        /// The file destination to write logs to
+        pub log_destination: &'a Path,
+        /// Args to the binary, if available
+        pub args: Option<&'a [OsString]>,
+        /// The load type, if available
+        pub load_type: Option<&'a str>,
     }
 
     struct BinaryInfo {
@@ -261,12 +290,12 @@ mod main {
         let mut load_commands = mach_header.load_commands(Endianness::default(), binary, 0)?;
         let mut rpath_entries = Vec::new();
         while let Some(load_command) = load_commands.next()? {
-            if load_command.cmd() == LC_RPATH {
-                if let Ok(Rpath(rpath_command)) = load_command.variant() {
-                    rpath_entries.push(from_utf8(
-                        load_command.string(Endianness::default(), rpath_command.path)?,
-                    )?)
-                }
+            if load_command.cmd() == LC_RPATH
+                && let Ok(Rpath(rpath_command)) = load_command.variant()
+            {
+                rpath_entries.push(from_utf8(
+                    load_command.string(Endianness::default(), rpath_command.path)?,
+                )?)
             }
         }
         Ok(rpath_entries)
@@ -315,8 +344,7 @@ mod main {
         if output.exists() {
             trace!(
                 "Using existing SIP-patched version of {:?}: {:?}",
-                path,
-                output
+                path, output
             );
             return Ok(output);
         }
@@ -327,8 +355,7 @@ mod main {
 
         trace!(
             "{:?} is a SIP protected binary, making non protected version at: {:?}",
-            path,
-            output
+            path, output
         );
         let data = std::fs::read(path)?;
 
@@ -351,7 +378,7 @@ mod main {
         }
 
         let signed_temp_file = tempfile::NamedTempFile::new()?;
-        codesign::sign(&temp_binary, &signed_temp_file)?;
+        codesign::sign(&temp_binary, &signed_temp_file, path)?;
 
         // Give the new file the same permissions as the old file.
         // This needs to happen after the sign because it might change the permissions.
@@ -359,11 +386,12 @@ mod main {
         std::fs::set_permissions(&signed_temp_file, std::fs::metadata(path)?.permissions())?;
 
         // Move the temp binary into its final location if no other process/thread already did.
-        if let Err(err) = signed_temp_file.persist_noclobber(&output) {
-            if err.error.kind() != std::io::ErrorKind::AlreadyExists {
-                return Err(SipError::BinaryMoveFailed(err.error));
-            }
+        if let Err(err) = signed_temp_file.persist_noclobber(&output)
+            && err.error.kind() != std::io::ErrorKind::AlreadyExists
+        {
+            return Err(SipError::BinaryMoveFailed(err.error));
         }
+
         Ok(output)
     }
 
@@ -378,9 +406,7 @@ mod main {
 
         trace!(
             "Shebang points to: {:?}. Patching the interpreter and making a version of {:?} with an altered shebang at: {:?}",
-            shebang.interpreter_path,
-            original_path,
-            patched_path,
+            shebang.interpreter_path, original_path, patched_path,
         );
 
         let data = std::fs::read(original_path)?;
@@ -480,21 +506,40 @@ mod main {
         NoSip,
     }
 
-    /// Checks if binary is signed with either `RUNTIME` or `RESTRICTED` flags.
+    /// Checks if binary is signed with `RESTRICTED` or `RUNTIME` flags.
     /// The code ignores error to allow smoother fallbacks.
     fn is_code_signed(data: &[u8]) -> bool {
         if let Ok(mach) = MachFile::parse(data) {
             for macho in mach.into_iter() {
-                if let Ok(Some(signature)) = macho.code_signature() {
-                    if let Ok(Some(blob)) = signature.code_directory() {
-                        if blob
-                            .flags
-                            .intersects(CodeSignatureFlags::RESTRICT | CodeSignatureFlags::RUNTIME)
-                        {
-                            return true;
-                        }
-                    }
+                if let Ok(Some(signature)) = macho.code_signature()
+                    && let Ok(Some(blob)) = signature.code_directory()
+                    && blob
+                        .flags
+                        .intersects(CodeSignatureFlags::RESTRICT | CodeSignatureFlags::RUNTIME)
+                {
+                    return true;
                 }
+            }
+        }
+        false
+    }
+
+    /// Checks if the binary has the `com.apple.security.cs.allow-dyld-environment-variables`
+    /// entitlement. Binaries with this entitlement allow `DYLD_INSERT_LIBRARIES` even when
+    /// restricted, so they don't need SIP patching (node for example, probably for loading 3rd
+    /// party dylibs).
+    fn has_dyld_entitlement(data: &[u8]) -> bool {
+        let Ok(mach) = MachFile::parse(data) else {
+            return false;
+        };
+        for macho in mach.into_iter() {
+            if let Ok(Some(signature)) = macho.code_signature()
+                && let Ok(Some(entitlements)) = signature.entitlements()
+                && entitlements
+                    .as_str()
+                    .contains("com.apple.security.cs.allow-dyld-environment-variables")
+            {
+                return true;
             }
         }
         false
@@ -508,10 +553,16 @@ mod main {
             return Ok(false);
         }
         // Patch binary if it is in the list of binaries to patch.
-        // See `ends_with` docs for understanding better when it returns true.
-        Ok(opts.patch.iter().any(|x| path.ends_with(x))
-            || is_code_signed(data)
-            || (std::fs::metadata(path)?.st_flags() & SF_RESTRICTED) > 0)
+        if opts.patch.iter().any(|x| path.ends_with(x)) {
+            return Ok(true);
+        }
+
+        let is_restricted =
+            is_code_signed(data) || (std::fs::metadata(path)?.st_flags() & SF_RESTRICTED) > 0;
+
+        // Binaries that are restricted but have the DYLD environment variables entitlement
+        // don't need patching — macOS will honor DYLD_INSERT_LIBRARIES for them.
+        Ok(is_restricted && !has_dyld_entitlement(data))
     }
 
     fn get_complete_path<P: AsRef<OsStr> + std::marker::Copy>(path: P) -> Result<PathBuf> {
@@ -528,13 +579,16 @@ mod main {
         Ok(MIRRORD_TEMP_BIN_DIR_PATH_BUF
             .canonicalize()
             .map(|x| canonical_path.starts_with(x))
-            // path might be non-existent yet.
-            .unwrap_or_default())
+            .unwrap_or_default()
+            || MIRRORD_BINARIES_DIR_PATH_BUF
+                .canonicalize()
+                .map(|x| canonical_path.starts_with(x))
+                .unwrap_or_default())
     }
 
     /// Checks the SF_RESTRICTED flags on a file (there might be a better check, feel free to
     /// suggest)
-    /// If file is a script with shebang, the SipStatus is derived from the the SipStatus of the
+    /// If file is a script with shebang, the SipStatus is derived from the SipStatus of the
     /// file the shebang points to.
     fn get_sip_status(path: &str, opts: SipPatchOptions) -> Result<SipStatus> {
         let complete_path = get_complete_path(path)?;
@@ -608,7 +662,7 @@ mod main {
                 } else {
                     frameworks_dir
                 };
-                env::set_var(FRAMEWORKS_ENV_VAR_NAME, new_value);
+                unsafe { env::set_var(FRAMEWORKS_ENV_VAR_NAME, new_value) };
                 break;
             }
         }
@@ -634,14 +688,95 @@ mod main {
         Ok(output)
     }
 
+    /// Write a log to the log file, if the file exists, in a thread-safe way
+    fn try_write_start_log_to_file(
+        file: &mut File,
+        binary_path: &str,
+        status: &Result<SipStatus>,
+        log_info: &SipLogInfo,
+    ) {
+        let _ = file
+            .lock_exclusive()
+            .map_err(|error| eprintln!("Failed to lock SIP logfile: {error}"));
+        let _ = writeln!(
+            file,
+            "[{}] (pid {}, binary: {binary_path}, args: {:?}) SIP Status: {status:?}, layer load type: {:?}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("")
+                .as_secs(),
+            std::process::id(),
+            log_info.args,
+            log_info.load_type
+        )
+            .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
+        let _ = FileExt::unlock(file)
+            .map_err(|error| eprintln!("Failed to unlock SIP logfile: {error}"));
+    }
+
+    fn try_write_result_to_file(file: &mut File, result: &Result<Option<String>>) {
+        let _ = file
+            .lock_exclusive()
+            .map_err(|error| eprintln!("Failed to lock SIP logfile: {error}"));
+        let _ = writeln!(
+            file,
+            "[{}] (pid {}) SIP patch result: {result:?}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("")
+                .as_secs(),
+            std::process::id()
+        )
+        .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
+        let _ = FileExt::unlock(file)
+            .map_err(|error| eprintln!("Failed to unlock SIP logfile: {error}"));
+    }
+
     /// Check if the file that the user wants to execute is a SIP protected binary
     ///
     /// (or a script starting with a shebang that leads to a SIP protected binary).
-    /// If it is, create a non-protected version of the file and return `Ok(Some(patched_path)`.
+    /// If it is, create a non-protected version of the file and return `Ok(Some(patched_path))`.
     /// If it is not, `Ok(None)`.
     /// Propagate errors.
-    pub fn sip_patch(binary_path: &str, opts: SipPatchOptions) -> Result<Option<String>> {
-        match get_sip_status(binary_path, opts) {
+    ///
+    /// Note about `SipError::TooManyFilesOpen`: We can't recover from this. The caller should act
+    /// accordingly by exiting fully.
+    pub fn sip_patch(
+        binary_path: &str,
+        opts: SipPatchOptions,
+        log_info: Option<SipLogInfo>,
+    ) -> Result<Option<String>> {
+        // set up logging to a file if present in config
+        let mut log_file = if let Some(log_info) = &log_info {
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_info.log_destination)
+                .inspect_err(|error| eprintln!("Fail to open SIP logfile: {error}"))
+                .ok()
+        } else {
+            None
+        };
+
+        let status = get_sip_status(binary_path, opts);
+        if let (Some(log_info), Some(log_file)) = (log_info, log_file.as_mut()) {
+            try_write_start_log_to_file(log_file, binary_path, &status, &log_info);
+        };
+
+        //    ______________________________
+        //  / \                             \
+        // |   |  ATTENTION! DANGER AHEAD!  |
+        //  \_ |                            |
+        //     |  ATTENTION! DANGER AHEAD!  |
+        //     |                            |
+        //     |  ATTENTION! DANGER AHEAD!  |
+        //     |   _________________________|___
+        //     |  /                            /
+        //     \_/____________________________/
+        //
+        // DO NOT INTRODUCE NEW TRACING LOGS OR CHANGE THE LEVEL OF EXISTING LOGS - tracing logs are
+        // NOT fork safe, and have been suspected to cause issues.
+        let patch_result = match status {
             Ok(SipScript { path, shebang }) => {
                 let patched_interpreter = patch_binary(&shebang.interpreter_path)?;
                 let patched_script = patch_script(
@@ -653,6 +788,12 @@ mod main {
                 Some(patched_script).transpose()
             }
             Ok(SipBinary(binary)) => {
+                if let Some(binaries_dir) = opts.sip_binaries_dir {
+                    let candidate = binaries_dir.join(binary.strip_prefix("/").unwrap_or(&binary));
+                    if candidate.exists() {
+                        return Ok(Some(candidate.to_string_lossy().to_string()));
+                    }
+                }
                 let patched_binary =
                     patch_binary(&binary).map(|path| path.to_string_lossy().to_string());
                 Some(patched_binary).transpose()
@@ -661,17 +802,57 @@ mod main {
                 trace!("No SIP detected on {:?}", binary_path);
                 Ok(None)
             }
+            Err(SipError::IO(err)) if err.raw_os_error() == Some(24) => {
+                // The full error is: `{ code: 24, kind: Uncategorized, message: "Too many open
+                // files" }`. This error was encountered in the past when using mirrord with Air
+                // (hot reloader). We can't recover from this, but we can't `graceful_exit!` within
+                // this crate so this error is handled by the caller.
+                Err(SipError::TooManyFilesOpen(binary_path.to_string()))
+            }
+            Err(SipError::IO(err)) if err.kind() == ErrorKind::NotFound => {
+                // In the future, if we know there are other kind of error we can ignore, add them
+                // to this match arm
+                trace!(
+                    "Checking the SIP status of {binary_path} (or of the binary in its shebang, if \
+                    applicable) failed with {err:?}. Continuing without SIP-sidestepping.\
+                    This type of `error` happens during normal execution flow."
+                );
+                // E.g. `env` tries to execute a bunch of non-existing files and fails, and
+                // that's just its valid flow.
+                Ok(None)
+            }
             Err(err) => {
                 trace!(
                     "Checking the SIP status of {binary_path} (or of the binary in its shebang, if \
                     applicable) failed with {err:?}. Continuing without SIP-sidestepping.\
                     This is not necessarily an error."
                 );
-                // E.g. `env` tries to execute a bunch of non-existing files and fails, and that's
-                // just its valid flow.
+                // We know that `NotFound` errors may occur here as part of normal execution, and
+                // that other errors may also occur normally, hence why we discard this error. In
+                // the case that tracing logs are not being printed, the configuration for
+                // `experimental.sip_log_destination` can be used to print this error to a file.
                 Ok(None)
             }
+        };
+
+        if let Some(mut log_file) = log_file {
+            try_write_result_to_file(&mut log_file, &patch_result);
         }
+
+        patch_result
+    }
+
+    /// Extracts the bundled apple utils archive into `binaries_dir`.
+    /// No-op if the directory already exists and is non-empty.
+    pub fn extract_sip_binaries(binaries_dir: &Path, archive_bytes: &[u8]) -> Result<()> {
+        if binaries_dir.exists() && std::fs::read_dir(binaries_dir)?.next().is_some() {
+            return Ok(());
+        }
+        std::fs::create_dir_all(binaries_dir)?;
+        let gz = flate2::read::GzDecoder::new(Cursor::new(archive_bytes));
+        let mut archive = tar::Archive::new(gz);
+        archive.unpack(binaries_dir)?;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -744,7 +925,7 @@ mod main {
         /// binary is no longer protected, and DYLD_PRINT_LIBRARIES is respected when running with
         /// it.
         fn patch_sip_and_verify_dyld_print(executable_path: &str) {
-            let patched_bin_path = sip_patch(executable_path, SipPatchOptions::default())
+            let patched_bin_path = sip_patch(executable_path, SipPatchOptions::default(), None)
                 .unwrap()
                 .unwrap();
             assert!(matches!(
@@ -760,9 +941,14 @@ mod main {
             patch_binary_and_verify_dyld_print("/bin/ls");
         }
 
+        /// `/usr/bin/aa` is restricted but has the `allow-dyld-environment-variables`
+        /// entitlement, so DYLD_INSERT_LIBRARIES works without patching.
         #[test]
-        fn patch_entitled_binary() {
-            patch_sip_and_verify_dyld_print("/usr/bin/aa");
+        fn entitled_binary_is_not_sip() {
+            let result = sip_patch("/usr/bin/aa", SipPatchOptions::default(), None).unwrap();
+            assert!(result.is_none(), "entitled binary should not need patching");
+            // Verify DYLD_* features work on the original binary:
+            run_and_verify_dyld_print(Path::new("/usr/bin/aa"));
         }
 
         /// Test that after patching we can Successfully use DYLD features on a binary that had
@@ -778,7 +964,9 @@ mod main {
 
             settings.set_code_signature_flags(
                 apple_codesign::SettingsScope::Main,
-                CodeSignatureFlags::ADHOC | CodeSignatureFlags::RUNTIME,
+                CodeSignatureFlags::ADHOC
+                    | CodeSignatureFlags::RUNTIME
+                    | CodeSignatureFlags::RESTRICT,
             );
             settings.set_binary_identifier(
                 apple_codesign::SettingsScope::Main,
@@ -840,6 +1028,7 @@ mod main {
             let patched_path = sip_patch(
                 original_file.path().to_str().unwrap(),
                 SipPatchOptions::default(),
+                None,
             )
             .unwrap()
             .unwrap();
@@ -915,10 +1104,13 @@ mod main {
             let script_contents = "#!/usr/bin/env bash\nexit\n";
             script.write_all(script_contents.as_ref()).unwrap();
             script.flush().unwrap();
-            let changed_script_path =
-                sip_patch(script.path().to_str().unwrap(), SipPatchOptions::default())
-                    .unwrap()
-                    .unwrap();
+            let changed_script_path = sip_patch(
+                script.path().to_str().unwrap(),
+                SipPatchOptions::default(),
+                None,
+            )
+            .unwrap()
+            .unwrap();
             let new_shebang = read_shebang_from_file(changed_script_path)
                 .unwrap()
                 .unwrap();
@@ -948,10 +1140,10 @@ mod main {
             std::fs::set_permissions(path, permissions).unwrap();
 
             let path_str = path.to_str().unwrap();
-            let _ = sip_patch(path_str, SipPatchOptions::default())
+            let _ = sip_patch(path_str, SipPatchOptions::default(), None)
                 .unwrap()
                 .unwrap();
-            let _ = sip_patch(path_str, SipPatchOptions::default())
+            let _ = sip_patch(path_str, SipPatchOptions::default(), None)
                 .unwrap()
                 .unwrap();
         }
@@ -964,7 +1156,11 @@ mod main {
             let contents = "#!".to_string() + script.path().to_str().unwrap();
             script.write_all(contents.as_bytes()).unwrap();
             script.flush().unwrap();
-            let res = sip_patch(script.path().to_str().unwrap(), SipPatchOptions::default());
+            let res = sip_patch(
+                script.path().to_str().unwrap(),
+                SipPatchOptions::default(),
+                None,
+            );
             assert!(matches!(res, Ok(None)));
         }
 
@@ -975,17 +1171,21 @@ mod main {
             let is_frameworks_path = |path: &str| path == frameworks_path;
 
             // Verify that the path was not there before.
-            assert!(!env::var(FRAMEWORKS_ENV_VAR_NAME)
-                .map(|value| value.split(':').any(is_frameworks_path))
-                .unwrap_or_default());
+            assert!(
+                !env::var(FRAMEWORKS_ENV_VAR_NAME)
+                    .map(|value| value.split(':').any(is_frameworks_path))
+                    .unwrap_or_default()
+            );
 
             set_fallback_frameworks_path_if_mac_app(Path::new(example_path));
 
             // Verify that the path is there after.
-            assert!(env::var(FRAMEWORKS_ENV_VAR_NAME)
-                .unwrap()
-                .split(':')
-                .any(is_frameworks_path));
+            assert!(
+                env::var(FRAMEWORKS_ENV_VAR_NAME)
+                    .unwrap()
+                    .split(':')
+                    .any(is_frameworks_path)
+            );
         }
 
         #[test]
@@ -1021,6 +1221,7 @@ mod main {
                     SipPatchOptions {
                         patch: &[],
                         skip: &[signed_temp_file_path.to_string()],
+                        sip_binaries_dir: None,
                     }
                 )
                 .unwrap(),

@@ -19,6 +19,105 @@
       ],
     },
     {
+      "name": "lldb: Attach to Child",
+      "type": "lldb",
+      "request": "attach",
+      "pid": "${command:pickProcess}", // or hardcode PID
+      "stopOnEntry": true
+    },   
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "[win] test mirrord (lldb)",
+      "cargo": {
+        "args": [
+          "test", "traffic_tests", "--manifest-path", "tests/Cargo.toml", "--no-run",
+          "--target", "x86_64-pc-windows-msvc"
+        ],
+        "env": {
+          // "MIRRORD_LAYER_WAIT_FOR_DEBUGGER": "1",
+          "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord_layer_win.dll",
+          "RUST_BACKTRACE": "full",
+          "RUST_MIN_STACK": "16777216",
+          "MIRRORD_TESTS_USE_BINARY": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord.exe",
+        },
+        "filter": {
+          "name": "tests"
+        },
+      },
+      "cwd": "${workspaceFolder}/tests",
+      "args": [
+        "traffic_tests",
+        "--", "--nocapture", "--test-threads=1", 
+      ],
+      "env": {
+        // "MIRRORD_LAYER_WAIT_FOR_DEBUGGER": "1",
+        "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord_layer_win.dll",
+        "RUST_BACKTRACE": "full",
+        "RUST_MIN_STACK": "16777216",
+      },
+      "console": "integratedTerminal",
+      "preLaunchTask": "cargo: build mirrord (msvc)",
+      "sourceMap": {},
+      "sourceLanguages": [
+        "rust"
+      ],
+      "initCommands": [
+        "settings set target.process.thread.step-avoid-regexp ^std::",
+        "breakpoint set --name rust_panic",
+        "breakpoint set --name rust_begin_unwind"
+      ],
+    },
+    {
+      "type": "cppvsdbg",
+      "request": "launch",
+      "name": "[win] debug cli exec",
+      "program": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord.exe",
+      "args": [
+        "exec", "-c", "--target", "pod/hostname-echo-vmfbvdd-cff7dd694-wgzx4/container/test", "--", "python3", "-u", "C:\\Users\\Daniel\\git\\mirrord\\tests\\debug_python.py"
+      ],
+      "cwd": "${workspaceFolder}/tests",
+      "environment": [
+        {
+          "name": "MIRRORD_DISABLE_VERSION_CHECK",
+          "value": "true"
+        },
+        {
+          "name": "MIRRORD_LAYER_FILE",
+          "value": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord_layer_win.dll"
+        },
+        {
+          "name": "MIRRORD_OPERATOR_ENABLE", 
+          "value": "false"
+        },
+        {
+          "name": "MIRRORD_TARGET",
+          "value": "targetless"
+        },
+        {
+          "name": "MIRRORD_SKIP_PROCESSES",
+          "value": "kube"
+        },
+        {
+          "name": "RUST_BACKTRACE",
+          "value": "full"
+        },
+        {
+          "name": "RUST_MIN_STACK",
+          "value": "16777216"
+        }
+      ],
+      "console": "integratedTerminal", 
+      "stopAtEntry": false,
+      "preLaunchTask": "cargo: build mirrord (msvc)"
+    },
+    {
+      "name": "3. attach to process (stack overflow debug)",
+      "type": "cppvsdbg",
+      "request": "attach",
+      "processId": "${command:pickProcess}"
+    },
+    {
       "name": "Launch golang file",
       "type": "go",
       "request": "launch",

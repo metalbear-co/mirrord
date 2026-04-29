@@ -2,9 +2,9 @@
 //!
 //! Just like original [`Client::connect`] function, [`connect_ws`] creates a
 //! WebSockets connection. However, original function swallows
-//! [`ErrorResponse`] sent by the operator and returns flat
+//! [`Status`] sent by the operator and returns flat
 //! [`UpgradeConnectionError`]. [`connect_ws`] attempts to
-//! recover the [`ErrorResponse`] - if operator response code is not
+//! recover the [`Status`] - if operator response code is not
 //! [`StatusCode::SWITCHING_PROTOCOLS`], it tries to read
 //! response body and deserialize it.
 
@@ -13,11 +13,11 @@ use http::{HeaderValue, Request, Response, StatusCode};
 use http_body_util::BodyExt;
 use hyper_util::rt::TokioIo;
 use kube::{
-    client::{Body, UpgradeConnectionError},
-    core::ErrorResponse,
     Client, Error, Result,
+    client::{Body, UpgradeConnectionError},
+    core::Status,
 };
-use tokio_tungstenite::{tungstenite::protocol::Role, WebSocketStream};
+use tokio_tungstenite::{WebSocketStream, tungstenite::protocol::Role};
 
 const WS_PROTOCOL: &str = "v4.channel.k8s.io";
 
@@ -34,10 +34,10 @@ async fn verify_response(res: Response<Body>, key: &HeaderValue) -> Result<Respo
                 .await
                 .ok()
                 .map(|body| body.to_bytes())
-                .and_then(|body_bytes| serde_json::from_slice::<ErrorResponse>(&body_bytes).ok());
+                .and_then(|body_bytes| serde_json::from_slice::<Status>(&body_bytes).ok());
 
             if let Some(error_response) = error_response {
-                return Err(Error::Api(error_response));
+                return Err(Error::Api(Box::new(error_response)));
             }
         }
 
@@ -134,11 +134,11 @@ pub async fn connect_ws(
         HeaderValue::from_static(WS_PROTOCOL),
     );
 
-    let res = client
-        .send(Request::from_parts(parts, Body::from(body)))
-        .await?;
-    let res = verify_response(res, &key).await?;
-    match hyper::upgrade::on(res).await {
+    let request = Request::from_parts(parts.clone(), Body::from(body.clone()));
+    let response = client.send(request).await?;
+
+    let verified_response = verify_response(response, &key).await?;
+    match hyper::upgrade::on(verified_response).await {
         Ok(upgraded) => {
             Ok(WebSocketStream::from_raw_socket(TokioIo::new(upgraded), Role::Client, None).await)
         }

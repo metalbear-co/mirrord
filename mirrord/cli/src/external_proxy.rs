@@ -2,31 +2,32 @@
 //! External proxy to pipe communication from intproxy to agent
 //!
 //! ```text
-//!                    ┌────────────────┐         
-//!                k8s │ mirrord agent  │         
-//!                    └─────┬────▲─────┘         
-//!                          │    │               
-//!                          │    │               
-//!                    ┌─────▼────┴─────┐         
-//!     container host │ external proxy │         
-//!                    └─────┬────▲─────┘         
-//!                          │    │               
-//!                          │    │               
+//!                    ┌────────────────┐
+//!                k8s │ mirrord agent  │
+//!                    └─────┬────▲─────┘
+//!                          │    │
+//!                          │    │
+//!                    ┌─────▼────┴─────┐
+//!     container host │ external proxy │
+//!                    └─────┬────▲─────┘
+//!                          │    │
+//!                          │    │
 //!                    ┌─────▼────┴─────┐◄──────┐
 //!  sidecar container │ internal proxy │       │
 //!                    └──┬─────────────┴──┐    │
 //!         run container │ mirrord-layer  ├────┘
-//!                       └────────────────┘      
+//!                       └────────────────┘
 //! ```
 
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStrExt;
 use std::{
     io,
     net::{Ipv4Addr, SocketAddr},
-    os::unix::ffi::OsStrExt,
     path::Path,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -34,7 +35,7 @@ use std::{
 use futures::{SinkExt, StreamExt};
 use local_ip_address::local_ip;
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
-use mirrord_config::{external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, LayerConfig};
+use mirrord_config::{LayerConfig, external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM};
 use mirrord_intproxy::agent_conn::{AgentConnectInfo, AgentConnection};
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, LogLevel, LogMessage};
 use tokio::net::{TcpListener, TcpStream};
@@ -42,12 +43,15 @@ use tokio_rustls::server::TlsStream;
 use tokio_util::{either::Either, sync::CancellationToken};
 use tracing::Level;
 
+#[cfg(not(target_os = "windows"))]
+use crate::util::detach_io;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, ExternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     internal_proxy::connect_and_ping,
-    util::{create_listen_socket, detach_io},
+    user_data::UserData,
+    util::create_listen_socket,
 };
 
 /// Print the address for the caller (mirrord cli execution flow) so it can pass it
@@ -59,7 +63,12 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 }
 
 #[tracing::instrument(level = Level::INFO, skip_all, err)]
-pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -> CliResult<()> {
+pub async fn proxy(
+    config: LayerConfig,
+    listen_port: u16,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
     tracing::info!(
         ?config,
         listen_port,
@@ -70,6 +79,8 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
     let agent_connect_info: AgentConnectInfo = std::env::var_os(AGENT_CONNECT_INFO_ENV_KEY)
         .ok_or(ExternalProxyError::MissingConnectInfo)
         .and_then(|var| {
+            #[cfg(target_os = "windows")]
+            let var = var.to_string_lossy();
             serde_json::from_slice(var.as_bytes()).map_err(|error| {
                 let as_string = String::from_utf8_lossy(var.as_bytes()).into_owned();
                 ExternalProxyError::DeseralizeConnectInfo(as_string, error)
@@ -81,7 +92,12 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
         .and_then(|execution_kind| execution_kind.parse().ok())
         .unwrap_or_default();
 
-    let mut analytics = AnalyticsReporter::new(config.telemetry, execution_kind, watch);
+    let mut analytics = AnalyticsReporter::new(
+        config.telemetry,
+        execution_kind,
+        watch,
+        user_data.machine_id(),
+    );
     (&config).collect_analytics(analytics.get_mut());
 
     // This connection is just to keep the agent alive as long as the client side is running.
@@ -106,6 +122,7 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
         .map_err(ExternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(ExternalProxyError::ListenerSetup)?;
 
+    #[cfg(not(target_os = "windows"))]
     if let Err(error) = unsafe { detach_io() }.map_err(ExternalProxyError::SetSid) {
         tracing::warn!(%error, "unable to detach io");
     }
@@ -123,7 +140,7 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
     loop {
         tokio::select! {
             conn = listener.accept() => {
-                if let Ok((stream, peer_addr)) = conn {
+                match conn { Ok((stream, peer_addr)) => {
                     tracing::debug!(?peer_addr, "new connection");
 
                     let tls_acceptor = tls_acceptor.clone();
@@ -161,16 +178,19 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
                             tracing::debug!(?peer_addr, "final connection, closing listener");
                         }
                     });
-                } else {
+                } _ => {
                     break;
-                }
+                }}
             }
 
-            message = own_agent_conn.agent_rx.recv() => {
+            message = own_agent_conn.connection.recv() => {
                 tracing::debug!(?message, "received message on own connection");
 
                 match message {
                     Some(DaemonMessage::Pong) => continue,
+                    Some(DaemonMessage::OperatorPing(id)) => {
+                        own_agent_conn.connection.send(ClientMessage::OperatorPong(id)).await;
+                    }
                     Some(DaemonMessage::LogMessage(LogMessage {
                         level: LogLevel::Error,
                         message,
@@ -190,7 +210,18 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
                             )).into()
                         );
                     }
-                    Some(message) => {
+                    message @ Some(DaemonMessage::UdpOutgoing(_))
+                    | message @ Some(DaemonMessage::Tcp(_))
+                    | message @ Some(DaemonMessage::TcpSteal(_))
+                    | message @ Some(DaemonMessage::TcpOutgoing(_))
+                    | message @ Some(DaemonMessage::File(_))
+                    | message @ Some(DaemonMessage::LogMessage(_))
+                    | message @ Some(DaemonMessage::GetEnvVarsResponse(_))
+                    | message @ Some(DaemonMessage::GetAddrInfoResponse(_))
+                    | message @ Some(DaemonMessage::PauseTarget(_))
+                    | message @ Some(DaemonMessage::SwitchProtocolVersionResponse(_))
+                    | message @ Some(DaemonMessage::Vpn(_))
+                    | message @ Some(DaemonMessage::ReverseDnsLookup(_)) => {
                         return Err(
                             ExternalProxyError::PingPongFailed(format!(
                                 "agent sent an unexpected message: {message:?}"
@@ -210,7 +241,7 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
             _ = ping_pong_ticker.tick() => {
                 tracing::debug!("sending ping");
 
-                let _ = own_agent_conn.agent_tx.send(ClientMessage::Ping).await;
+                own_agent_conn.connection.send(ClientMessage::Ping).await;
             }
 
             _ = initial_connection_timeout.as_mut(), if connections.load(Ordering::Relaxed) == 0 => {
@@ -244,11 +275,7 @@ async fn handle_connection(
             client_message = stream.next() => {
                 match client_message {
                     Some(Ok(client_message)) => {
-                        if let Err(error) = agent_conn.agent_tx.send(client_message).await {
-                            tracing::error!(?peer_addr, %error, "unable to send message to agent");
-
-                            break;
-                        }
+                        agent_conn.connection.send(client_message).await;
                     }
                     Some(Err(error)) => {
                         tracing::error!(?peer_addr, %error, "unable to recive message from intproxy");
@@ -260,16 +287,16 @@ async fn handle_connection(
                     }
                 }
             }
-            daemon_message = agent_conn.agent_rx.recv() => {
-                if let Some(daemon_message) = daemon_message {
+            daemon_message = agent_conn.connection.recv() => {
+                match daemon_message { Some(daemon_message) => {
                     if let Err(error) = stream.send(daemon_message).await {
                         tracing::error!(?peer_addr, %error, "unable to send message to intproxy");
 
                         break;
                     }
-                } else {
+                } _ => {
                     break;
-                }
+                }}
             }
             _ = cancellation_token.cancelled() => {
                 tracing::debug!(?peer_addr, "closing connection due to cancellation_token");

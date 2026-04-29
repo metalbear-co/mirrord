@@ -7,9 +7,8 @@ use std::{
 
 use mirrord_config::LayerConfig;
 use mirrord_intproxy_protocol::ProcessInfo;
+use mirrord_layer_lib::error::LayerError;
 use tracing::trace;
-
-use crate::error::LayerError;
 
 static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     HashSet::from([
@@ -35,6 +34,7 @@ static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "debugserver",
         "jspawnhelper",
         "bazel-real",
+        "clang",
     ])
 });
 
@@ -157,7 +157,8 @@ impl ExecuteArgs {
 
     pub(crate) fn to_process_info(&self, config: &LayerConfig) -> ProcessInfo {
         ProcessInfo {
-            pid: std::process::id(),
+            pid: nix::unistd::getpid().as_raw(),
+            parent_pid: nix::unistd::getppid().as_raw(),
             name: self.exec_name.clone(),
             cmdline: self
                 .args

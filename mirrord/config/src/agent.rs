@@ -7,41 +7,37 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{
-    self, from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError,
-    FromMirrordConfig, MirrordConfig,
+    self, ConfigContext, FromFileError, FromMirrordConfig, MirrordConfig, from_env::FromEnv,
+    source::MirrordConfigSource,
 };
 
+/// Linux capabilities used by the mirrord-agent container.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum LinuxCapability {
     SysAdmin,
     SysPtrace,
-    NetRaw,
     NetAdmin,
 }
 
 impl LinuxCapability {
     /// All capabilities that can be used by the agent.
     pub fn all() -> &'static [Self] {
-        &[
-            Self::SysAdmin,
-            Self::SysPtrace,
-            Self::NetRaw,
-            Self::NetAdmin,
-        ]
+        &[Self::SysAdmin, Self::SysPtrace, Self::NetAdmin]
+    }
+
+    pub fn as_spec_str(self) -> &'static str {
+        match self {
+            Self::SysAdmin => "SYS_ADMIN",
+            Self::SysPtrace => "SYS_PTRACE",
+            Self::NetAdmin => "NET_ADMIN",
+        }
     }
 }
 
 impl fmt::Display for LinuxCapability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let as_str = match self {
-            Self::SysAdmin => "SYS_ADMIN",
-            Self::SysPtrace => "SYS_PTRACE",
-            Self::NetRaw => "NET_RAW",
-            Self::NetAdmin => "NET_ADMIN",
-        };
-
-        f.write_str(as_str)
+        f.write_str(self.as_spec_str())
     }
 }
 
@@ -65,9 +61,11 @@ impl fmt::Display for LinuxCapability {
 ///     "ephemeral": false,
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
-///     "network_interface": "eth0",
 ///     "flush_connections": false,
 ///     "exclude_from_mesh": false
+///     "inject_headers": false,
+///     "max_body_buffer_size": 65535,
+///     "max_body_buffer_timeout": 1000
 ///   }
 /// }
 /// ```
@@ -128,7 +126,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "image": "internal.repo/images/mirrord:latest"
+    ///   "agent": {
+    ///     "image": "internal.repo/images/mirrord:latest"
+    ///   }
     /// }
     /// ```
     ///
@@ -136,12 +136,18 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "image": {
-    ///     "registry": "internal.repo/images/mirrord",
-    ///     "tag": "latest"
+    ///   "agent": {
+    ///     "image": {
+    ///       "registry": "internal.repo/images/mirrord",
+    ///       "tag": "latest"
+    ///     }
     ///   }
     /// }
     /// ```
+    ///
+    /// Can also be controlled via `MIRRORD_AGENT_IMAGE`, `MIRRORD_AGENT_IMAGE_REGISTRY`, and
+    /// `MIRRORD_AGENT_IMAGE_TAG`. `MIRRORD_AGENT_IMAGE` takes precedence, followed by config
+    /// values for registry/tag, then environment variables for registry/tag.
     #[config(nested)]
     pub image: AgentImageConfig,
 
@@ -216,15 +222,6 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_STARTUP_TIMEOUT", default = 60)]
     pub startup_timeout: u64,
 
-    /// ### agent.network_interface {#agent-network_interface}
-    ///
-    /// Which network interface to use for mirroring.
-    ///
-    /// The default behavior is try to access the internet and use that interface. If that fails
-    /// it uses `eth0`.
-    #[config(env = "MIRRORD_AGENT_NETWORK_INTERFACE")]
-    pub network_interface: Option<String>,
-
     /// ### agent.flush_connections {#agent-flush_connections}
     ///
     /// Flushes existing connections when starting to steal, might fix issues where connections
@@ -241,13 +238,14 @@ pub struct AgentConfig {
 
     /// ### agent.disabled_capabilities {#agent-disabled_capabilities}
     ///
-    /// Disables specified Linux capabilities for the agent container.
-    /// If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and
-    /// `SYS_ADMIN`.
+    /// If nothing is disabled here, agent uses:
+    /// 1. `NET_ADMIN`,
+    /// 2. `SYS_PTRACE`,
+    /// 3. `SYS_ADMIN`.
     ///
     /// Has no effect when using the targetless mode,
     /// as targetless agent containers have no capabilities.
-    pub disabled_capabilities: Option<Vec<LinuxCapability>>,
+    pub disabled_capabilities: Option<Vec<String>>,
 
     /// ### agent.tolerations {#agent-tolerations}
     ///
@@ -256,11 +254,15 @@ pub struct AgentConfig {
     /// Defaults to `operator: Exists`.
     ///
     /// ```json
-    /// [
-    ///   {
-    ///     "key": "meow", "operator": "Exists", "effect": "NoSchedule"
+    /// {
+    ///   "agent": {
+    ///     "tolerations": [
+    ///         {
+    ///           "key": "meow", "operator": "Exists", "effect": "NoSchedule"
+    ///         }
+    ///     ]
     ///   }
-    /// ]
+    /// }
     /// ```
     ///
     /// Set to an empty array to have no tolerations at all
@@ -268,19 +270,23 @@ pub struct AgentConfig {
 
     /// ### agent.resources {#agent-resources}
     ///
-    /// Set pod resource reqirements. (not with ephemeral agents)
+    /// Set pod resource requirements. (not with ephemeral agents)
     /// Default is
     /// ```json
     /// {
-    ///   "requests":
-    ///   {
-    ///     "cpu": "1m",
-    ///     "memory": "1Mi"
-    ///   },
-    ///   "limits":
-    ///   {
-    ///     "cpu": "100m",
-    ///       "memory": "100Mi"
+    ///   "agent": {
+    ///     "resources": {
+    ///       "requests":
+    ///       {
+    ///         "cpu": "1m",
+    ///         "memory": "1Mi"
+    ///       },
+    ///       "limits":
+    ///       {
+    ///         "cpu": "100m",
+    ///         "memory": "100Mi"
+    ///       }
+    ///     }
     ///   }
     /// }
     /// ```
@@ -310,12 +316,12 @@ pub struct AgentConfig {
 
     /// ### agent.nftables {#agent-nftables}
     ///
-    /// Use iptables-nft instead of iptables-legacy.
-    /// Defaults to `false`.
+    /// Determines which iptables backend will be used for traffic redirection.
     ///
-    /// Needed if your mesh uses nftables instead of iptables-legacy,
-    #[config(default = false)]
-    pub nftables: bool,
+    /// If set to `true`, the agent will use iptables-nft.
+    /// If set to `false`, the agent will use iptables-legacy.
+    /// If not set, the agent will try to detect the correct backend at runtime.
+    pub nftables: Option<bool>,
 
     /// ### agent.dns {#agent-dns}
     #[config(nested)]
@@ -327,7 +333,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "labels": { "user": "meow", "state": "asleep" }
+    ///   "agent": {
+    ///     "labels": { "user": "meow", "state": "asleep" }
+    ///   }
     /// }
     /// ```
     pub labels: Option<HashMap<String, String>>,
@@ -338,10 +346,12 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "annotations": {
-    ///     "cats.io/inject": "enabled"
-    ///     "prometheus.io/scrape": "true",
-    ///     "prometheus.io/port": "9000"
+    ///   "agent": {
+    ///     "annotations": {
+    ///       "cats.io/inject": "enabled"
+    ///       "prometheus.io/scrape": "true",
+    ///       "prometheus.io/port": "9000"
+    ///     }
     ///   }
     /// }
     /// ```
@@ -354,7 +364,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "node_selector": { "kubernetes.io/hostname": "node1" }
+    ///   "agent": {
+    ///     "node_selector": { "kubernetes.io/hostname": "node1" }
+    ///   }
     /// }
     /// ```
     pub node_selector: Option<HashMap<String, String>>,
@@ -365,7 +377,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "service_account": "my-service-account"
+    ///   "agent": {
+    ///     "service_account": "my-service-account"
+    ///   }
     /// }
     /// ```
     pub service_account: Option<String>,
@@ -379,7 +393,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "metrics": "0.0.0.0:9000"
+    ///   "agent": {
+    ///     "metrics": "0.0.0.0:9000"
+    ///   }
     /// }
     /// ```
     pub metrics: Option<SocketAddr>,
@@ -395,19 +411,77 @@ pub struct AgentConfig {
     ///
     /// Specifies the priority class to assign to the agent pod.
     ///
-    /// This option is only applicable when running in the targetless mode.
-    ///
     /// ```json
     /// {
-    ///   "priority_class": "my-priority-class-name"
+    ///   "agent": {
+    ///     "priority_class": "my-priority-class-name"
+    ///   }
     /// }
     /// ```
     ///
-    /// In some cases, the targetless agent pod may fail to schedule due to node resource
-    /// constraints. Setting a priority class allows you to explicitly assign an existing
-    /// priority class from your cluster to the agent pod, increasing its priority relative
-    /// to other workloads.
+    /// In some cases, the agent pod may fail to schedule due to node resource constraints.
+    /// Setting a priority class allows you to explicitly assign an existing priority class
+    /// from your cluster to the agent pod, increasing its priority relative to other workloads.
     pub priority_class: Option<String>,
+
+    /// ### agent.inject_headers {#agent-inject_headers}
+    ///
+    /// Sets whether `Mirrord-Agent` headers are injected into HTTP
+    /// responses that went through the agent.
+    ///
+    /// Possible values for the header:
+    ///
+    /// - `passed-through`: set when the request was not sent to the local app (perhaps because it
+    ///   didn't match the filters)
+    ///
+    /// - `forwarded-to-client`: set when the request was sent to the local app
+    #[config(default = false)]
+    pub inject_headers: bool,
+
+    /// ### agent.max_body_buffer_size {#agent-max_body_buffer_size}
+    ///
+    /// Maximum size, in bytes, of HTTP request body buffers. Used for
+    /// temporarily storing bodies of incoming HTTP requests to run
+    /// body filters. HTTP body filters will not match any requests
+    /// with bodies larger than this.
+    #[config(default = 65535)]
+    pub max_body_buffer_size: u32,
+
+    /// ### agent.max_body_buffer_timeout {#agent-max_body_buffer_timeout}
+    ///
+    /// Maximum timeout, in milliseconds, for receiving HTTP request
+    /// bodies. HTTP body filters will not match any requests whose
+    /// bodies do not arrive within this timeout.
+    #[config(default = 1000)]
+    pub max_body_buffer_timeout: u32,
+
+    /// ### agent.security_context {#agent-security_context}
+    ///
+    /// Agent pod security context (not with ephemeral agents).
+    /// Support seccomp profile and app armor profile.
+    pub security_context: Option<SecurityContext>,
+
+    /// ### agent.clean_iptables_on_start {#agent-clean_iptables_on_start}
+    ///
+    /// Clean leftover iptables rules and start the new agent instead of erroring out when there
+    /// are existing mirrord rules in the target's iptables.
+    #[config(env = "MIRRORD_AGENT_CLEAN_IPTABLES_ON_START")]
+    pub clean_iptables_on_start: Option<bool>,
+
+    /// ### agent.disable_mesh_sidecar_injection {#agent-disable_mesh_sidecar_injection}
+    ///
+    /// Add relevant labels and annotations to agent pods/jobs to
+    /// prevent service mesh sidecar injections. Defaults to true.
+    ///
+    /// Only affects istio, linkerd, kuma.
+    #[config(default = true)]
+    pub disable_mesh_sidecar_injection: bool,
+
+    /// ### agent.jaq_time_limit {#agent-jaq_time_limit}
+    ///
+    /// Time limit for running jaq queries, in milliseconds. Defaults to 500ms.
+    #[config(default = 1)]
+    pub jaq_time_limit: u64,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
@@ -472,6 +546,7 @@ impl AgentImageFileConfig {
 /// <!--${internal}-->
 /// Specifies a secret reference for the agent pod.
 #[derive(Clone, Debug, PartialEq, Eq, JsonSchema, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentPullSecret {
     /// Name of the secret.
     pub name: String,
@@ -483,20 +558,29 @@ impl MirrordConfig for AgentImageFileConfig {
     /// Generates the [`AgentImageConfig`] from the `agent.image` config, or the
     /// `MIRRORD_AGENT_IMAGE` env var.
     fn generate_config(self, context: &mut ConfigContext) -> config::Result<Self::Generated> {
+        let env_registry = FromEnv::new("MIRRORD_AGENT_IMAGE_REGISTRY")
+            .source_value(context)
+            .transpose()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| DEFAULT_AGENT_IMAGE_REGISTRY.to_string());
+
+        let env_tag = FromEnv::new("MIRRORD_AGENT_IMAGE_TAG")
+            .source_value(context)
+            .transpose()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+
         let agent_image = match self {
             AgentImageFileConfig::Simple(registry_and_tag) => {
-                registry_and_tag.unwrap_or_else(|| {
-                    format!(
-                        "{DEFAULT_AGENT_IMAGE_REGISTRY}:{}",
-                        env!("CARGO_PKG_VERSION")
-                    )
-                })
+                registry_and_tag.unwrap_or_else(|| format!("{env_registry}:{env_tag}"))
             }
             AgentImageFileConfig::Advanced { registry, tag } => {
                 format!(
                     "{}:{}",
-                    registry.unwrap_or_else(|| DEFAULT_AGENT_IMAGE_REGISTRY.to_string()),
-                    tag.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
+                    registry.unwrap_or(env_registry),
+                    tag.unwrap_or(env_tag)
                 )
             }
         };
@@ -521,7 +605,7 @@ impl AgentConfig {
 }
 
 impl AgentFileConfig {
-    pub fn from_path<P>(path: P) -> Result<Self, ConfigError>
+    pub fn from_path<P>(path: P) -> Result<Self, FromFileError>
     where
         P: AsRef<Path>,
     {
@@ -531,26 +615,74 @@ impl AgentFileConfig {
             Some("json") => Ok(serde_json::from_str::<Self>(&config)?),
             Some("toml") => Ok(toml::from_str::<Self>(&config)?),
             Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&config)?),
-            _ => Err(ConfigError::UnsupportedFormat),
+            ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
         }
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SecurityContext {
+    pub app_armor_profile: Option<AppArmorProfile>,
+    pub seccomp_profile: Option<SeccompProfile>,
+}
+
+impl From<SecurityContext> for k8s_openapi::api::core::v1::PodSecurityContext {
+    fn from(ctx: SecurityContext) -> Self {
+        Self {
+            app_armor_profile: ctx.app_armor_profile.map(Into::into),
+            seccomp_profile: ctx.seccomp_profile.map(Into::into),
+            ..Default::default()
+        }
+    }
+}
+
+pub type AppArmorProfile = SecurityProfile;
+pub type SeccompProfile = SecurityProfile;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SecurityProfile {
+    pub localhost_profile: Option<String>,
+
+    #[serde(rename = "type")]
+    pub type_: String,
+}
+
+impl From<AppArmorProfile> for k8s_openapi::api::core::v1::AppArmorProfile {
+    fn from(profile: SecurityProfile) -> Self {
+        Self {
+            localhost_profile: profile.localhost_profile,
+            type_: profile.type_,
+        }
+    }
+}
+
+impl From<SeccompProfile> for k8s_openapi::api::core::v1::SeccompProfile {
+    fn from(profile: SecurityProfile) -> Self {
+        Self {
+            localhost_profile: profile.localhost_profile,
+            type_: profile.type_,
+        }
+    }
+}
+
+/// Configuration options for how the agent performs DNS resolution.
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct AgentDnsConfig {
     /// ### agent.dns.timeout {#agent-dns-timeout}
     ///
-    /// When agent resolves DNS, how long to wait for a response before timeout
-    /// By default this is set to 1 (in the agent).
-    /// If the value is too high, it might cause internal proxy to timeout and exit.
+    /// Specifies how long (in seconds) the agent will wait for a DNS response before timing out.
+    /// If not specified the agent uses a default value of 1 second.
+    /// Setting this too high may cause the internal proxy to time out and exit.
     pub timeout: Option<u32>,
 
     /// ### agent.dns.attempts {#agent-dns-attempts}
     ///
-    /// When agent resolves DNS, how many attempts before failing.
-    /// If the value is too high, it might cause internal proxy to timeout and exit.
+    /// Specifies the number of DNS resolution attempts the agent will make before failing.
+    /// Setting this too high may cause the internal proxy to time out and exit.
     pub attempts: Option<u32>,
 }
 

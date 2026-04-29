@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use std::net::{Ipv4Addr, SocketAddr};
 
 use k8s_openapi::api::core::v1::Pod;

@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, Result},
+    config::{ConfigContext, Result, from_env::FromEnv, source::MirrordConfigSource},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
@@ -28,7 +28,7 @@ pub const MIRRORD_OVERRIDE_ENV_FILE_ENV: &str = "MIRRORD_OVERRIDE_ENV_VARS_FILE"
 /// Which environment variables to load from the remote pod are controlled by setting either
 /// [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).
 ///
-/// See the environment variables [reference](https://metalbear.co/mirrord/docs/reference/env/) for more details.
+/// See the environment variables [reference](https://metalbear.com/mirrord/docs/reference/env/) for more details.
 ///
 /// ```json
 /// {
@@ -47,11 +47,11 @@ pub const MIRRORD_OVERRIDE_ENV_FILE_ENV: &str = "MIRRORD_OVERRIDE_ENV_VARS_FILE"
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 #[config(map_to = "EnvFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct EnvConfig {
-    /// ### feature.env.include {#feature-env-include}
+    /// #### feature.env.include {#feature-env-include}
     ///
     /// Include only these remote environment variables in the local process.
     /// Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of
@@ -64,7 +64,7 @@ pub struct EnvConfig {
     #[config(env = MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV)]
     pub include: Option<VecOrSingle<String>>,
 
-    /// ### feature.env.exclude {#feature-env-exclude}
+    /// #### feature.env.exclude {#feature-env-exclude}
     ///
     /// Include the remote environment variables in the local process that are **NOT** specified by
     /// this option.
@@ -78,7 +78,7 @@ pub struct EnvConfig {
     #[config(env = MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV)]
     pub exclude: Option<VecOrSingle<String>>,
 
-    /// ### feature.env.override {#feature-env-override}
+    /// #### feature.env.override {#feature-env-override}
     ///
     /// Allows setting or overriding environment variables (locally) with a custom value.
     ///
@@ -88,16 +88,17 @@ pub struct EnvConfig {
     /// Environment specified here will also override variables passed via the env file.
     pub r#override: Option<HashMap<String, String>>, // `r#`: `override` is a Rust keyword.
 
-    /// ### feature.env.load_from_process {#feature-env-load_from_process}
+    /// #### feature.env.load_from_process {#feature-env-load_from_process}
     ///
     /// Allows for changing the way mirrord loads remote environment variables.
     /// If set, the variables are fetched after the user application is started.
     ///
     /// This setting is meant to resolve issues when using mirrord via the IntelliJ plugin on WSL
     /// and the remote environment contains a lot of variables.
+    #[config(env = "MIRRORD_ENV_LOAD_FROM_PROCESS")]
     pub load_from_process: Option<bool>,
 
-    /// ### feature.env.unset {#feature-env-unset}
+    /// #### feature.env.unset {#feature-env-unset}
     ///
     /// Allows unsetting environment variables in the executed process.
     ///
@@ -109,7 +110,7 @@ pub struct EnvConfig {
     /// and `Aws_Profile` and other variations.
     pub unset: Option<VecOrSingle<String>>,
 
-    /// ### feature.env_file {#feature-env-file}
+    /// #### feature.env.env_file {#feature-env-env-file}
     ///
     /// Allows for passing environment variables from an env file.
     ///
@@ -117,7 +118,7 @@ pub struct EnvConfig {
     #[config(env = MIRRORD_OVERRIDE_ENV_FILE_ENV)]
     pub env_file: Option<PathBuf>,
 
-    /// ### feature.env.mapping {#feature-env-mapping}
+    /// #### feature.env.mapping {#feature-env-mapping}
     ///
     /// Specify map of patterns that if matched will replace the value according to specification.
     ///

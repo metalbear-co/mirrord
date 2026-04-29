@@ -2,8 +2,8 @@ use std::{io::Write, path::Path, sync::Arc};
 
 use pem::{EncodeConfig, LineEnding, Pem};
 use rcgen::CertifiedKey;
-use rustls::{server::WebPkiClientVerifier, ClientConfig, RootCertStore};
-use tempfile::NamedTempFile;
+use rustls::{ClientConfig, RootCertStore, server::WebPkiClientVerifier};
+use tempfile::{Builder, NamedTempFile};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 use crate::error::SecureChannelError;
@@ -38,6 +38,9 @@ impl SecureChannelSetup {
     }
 
     /// Creates a PEM file containing a certificate chain and a private key.
+    ///
+    /// The file is created in `~/.mirrord/temp`, which is accessible to Docker when using
+    /// runtimes like Colima that cannot mount files from the system temp directory.
     fn prepare_single_pem(
         root: &CertifiedKey,
         server_name: &str,
@@ -53,8 +56,16 @@ impl SecureChannelSetup {
             EncodeConfig::new().set_line_ending(LineEnding::LF),
         );
 
-        let mut file =
-            NamedTempFile::with_suffix(".pem").map_err(SecureChannelError::TmpFileCreateError)?;
+        let pem_dir = home::home_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join(".mirrord")
+            .join("temp");
+        std::fs::create_dir_all(&pem_dir)?;
+
+        let mut file = Builder::new()
+            .suffix(".pem")
+            .tempfile_in(&pem_dir)
+            .map_err(SecureChannelError::TmpFileCreateError)?;
         file.as_file_mut().write_all(pem.as_bytes())?;
 
         Ok(file)

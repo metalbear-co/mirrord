@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
-use kube::{core::ErrorResponse, Api};
+use kube::Api;
 use mirrord_analytics::NullReporter;
-use mirrord_config::{config::ConfigContext, LayerConfig};
+use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
     client::{
-        error::{OperatorApiError, OperatorOperation},
         MaybeClientCert, OperatorApi,
+        error::{OperatorApiError, OperatorOperation},
     },
     crd::{NewOperatorFeature, SessionCrd},
 };
@@ -42,19 +42,29 @@ impl SessionCommandHandler {
 
         let mut cfg_context =
             ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config_file);
-        let config = LayerConfig::resolve(&mut cfg_context).inspect_err(|error| {
+        let layer_config = LayerConfig::resolve(&mut cfg_context).inspect_err(|error| {
             progress.failure(Some(&format!("failed to read config from env: {error}")));
         })?;
 
         let mut subtask = progress.subtask("checking operator");
-        let operator_api = match OperatorApi::try_new(&config, &mut NullReporter::default()).await?
-        {
-            Some(api) => api.prepare_client_cert(&mut NullReporter::default()).await,
-            None => {
-                subtask.failure(Some("operator not found"));
-                return Err(CliError::OperatorNotInstalled);
-            }
-        };
+        let operator_api =
+            match OperatorApi::try_new(&layer_config, &mut NullReporter::default(), &progress)
+                .await?
+            {
+                Some(api) => {
+                    api.with_client_certificate(
+                        &mut NullReporter::default(),
+                        &progress,
+                        &layer_config,
+                    )
+                    .await
+                }
+
+                None => {
+                    subtask.failure(Some("operator not found"));
+                    return Err(CliError::OperatorNotInstalled);
+                }
+            };
 
         operator_api.inspect_cert_error(|error| {
             progress.warning(&format!("Failed to prepare user certificate: {error}"));
@@ -102,8 +112,8 @@ impl SessionCommandHandler {
         }
         .map_err(|kube_fail| match kube_fail {
             // The random `reason` we get when the operator returns from a "missing route".
-            kube::Error::Api(ErrorResponse { code, reason, .. })
-                if code == 404 && reason.contains("parse") =>
+            kube::Error::Api(status)
+                if status.code == 404 && status.reason.contains("parse") =>
             {
                 OperatorApiError::UnsupportedFeature {
                     feature: NewOperatorFeature::SessionManagement,
@@ -116,7 +126,7 @@ impl SessionCommandHandler {
                 operation: OperatorOperation::SessionManagement,
             },
         })
-        // Finish the progress report here if we have an error response. 
+        // Finish the progress report here if we have an error response.
         .inspect_err(|fail| {
             sub_progress.failure(Some(&fail.to_string()));
             progress.failure(Some("Session management operation failed!"));

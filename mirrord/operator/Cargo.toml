@@ -32,33 +32,39 @@ client = [
   "dep:mirrord-kube",
   "dep:mirrord-progress",
   "dep:mirrord-protocol",
+  "dep:mirrord-protocol-io",
   "dep:rand",
   "dep:tokio",
   "dep:tokio-tungstenite",
   "dep:tracing",
   "dep:serde_urlencoded",
+  "dep:uuid",
+  "dep:tower",
 ]
 crd = [
+  "dep:dotenvy",
   "dep:k8s-openapi",
   "dep:kube",
-  "dep:mirrord-agent-env",
   "dep:mirrord-config",
+  "dep:mirrord-kube",
   "dep:semver",
   "dep:serde_json",
+  "dep:strum",
+  "dep:strum_macros",
   "dep:thiserror",
 ]
-setup = ["crd", "dep:serde_yaml"]
 
 [dependencies]
-mirrord-agent-env = { path = "../agent/env", features = ["schema"], optional = true }
 mirrord-analytics = { path = "../analytics", optional = true }
 mirrord-auth = { path = "../auth", features = ["client"], optional = true }
 mirrord-config = { path = "../config", optional = true }
 mirrord-kube = { path = "../kube", optional = true }
 mirrord-progress = { path = "../progress", optional = true }
 mirrord-protocol = { path = "../protocol", optional = true }
+mirrord-protocol-io = { path = "../protocol-io", optional = true}
 
 base64 = { workspace = true, optional = true }
+dotenvy = { workspace = true, optional = true }
 bincode = { workspace = true, features = ["serde"], optional = true }
 chrono = { workspace = true, features = ["clock", "serde"] }
 http = { workspace = true, optional = true }
@@ -69,16 +75,23 @@ k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, features = ["derive", "ws"], optional = true }
 futures = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
-schemars = { workspace = true, features = ["chrono"] }
+schemars = { workspace = true, features = ["chrono04", "url2"] }
 semver = { workspace = true, features = ["serde"], optional = true }
+strum = { workspace = true, optional = true }
+strum_macros = { workspace = true, optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
-serde_urlencoded = { version = "0.7", optional = true }
-serde_yaml = { workspace = true, optional = true }
+serde_urlencoded = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
+tower = { workspace = true, features = ["retry"], optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
 rstest.workspace = true
+serde_yaml.workspace = true
+
+[lib]
+doctest = false

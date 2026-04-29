@@ -1,0 +1,148 @@
+#![allow(dead_code)]
+use std::{collections::HashMap, process::Stdio};
+
+use tempfile::tempdir;
+use tokio::process::Command;
+
+use crate::TestProcess;
+
+/// See [`run_exec`].
+pub async fn run_exec_with_target(
+    process_cmd: Vec<String>,
+    target: &str,
+    namespace: Option<&str>,
+    args: Option<Vec<&str>>,
+    env: Option<Vec<(&str, &str)>>,
+) -> TestProcess {
+    run_exec(process_cmd, Some(target), namespace, args, env, None).await
+}
+
+/// Run `mirrord exec` without specifying a target, to run in targetless mode.
+pub async fn run_exec_targetless(
+    process_cmd: Vec<String>,
+    namespace: Option<&str>,
+    args: Option<Vec<&str>>,
+    env: Option<Vec<(&str, &str)>>,
+) -> TestProcess {
+    run_exec(process_cmd, None, namespace, args, env, None).await
+}
+
+/// Run `mirrord exec` with the given cmd, optional target (`None` for targetless), namespace,
+/// mirrord args, and env vars.
+pub async fn run_exec(
+    process_cmd: Vec<String>,
+    target: Option<&str>,
+    namespace: Option<&str>,
+    args: Option<Vec<&str>>,
+    env: Option<Vec<(&str, &str)>>,
+    env_remove: Option<&[&str]>,
+) -> TestProcess {
+    let mut mirrord_args = vec!["exec", "-c"];
+    if let Some(target) = target {
+        mirrord_args.extend(["--target", target].into_iter());
+    }
+    if let Some(namespace) = namespace {
+        mirrord_args.extend(["--target-namespace", namespace].into_iter());
+    }
+
+    if let Some(args) = args {
+        mirrord_args.extend(args.into_iter());
+    }
+    mirrord_args.push("--");
+    let args: Vec<&str> = mirrord_args
+        .into_iter()
+        .chain(process_cmd.iter().map(String::as_str))
+        .collect();
+    let agent_image_env = "MIRRORD_AGENT_IMAGE";
+    let agent_image_from_devs_env = std::env::var(agent_image_env);
+    // used by the CI, to load the image locally:
+    // docker build -t test . -f mirrord/agent/Dockerfile
+    // minikube load image test:latest
+    let mut base_env = HashMap::new();
+    base_env.insert(
+        agent_image_env,
+        // Let devs running the test specify an agent image per env var.
+        agent_image_from_devs_env.as_deref().unwrap_or("test"),
+    );
+    base_env.insert("MIRRORD_CHECK_VERSION", "false");
+    base_env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
+    base_env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
+    base_env.insert("RUST_LOG", "warn,mirrord=debug");
+    base_env.insert("MIRRORD_PROGRESS_MODE", "off");
+
+    if let Some(env) = env {
+        for (key, value) in env {
+            base_env.insert(key, value);
+        }
+    }
+
+    run_mirrord(args, base_env, env_remove).await
+}
+
+/// Runs `mirrord ls` command.
+pub async fn run_ls(namespace: &str, use_operator: bool) -> TestProcess {
+    let mut mirrord_args = vec!["ls"];
+    mirrord_args.extend(vec!["--namespace", namespace]);
+
+    let mut env = HashMap::new();
+    let use_operator = use_operator.to_string();
+    env.insert("MIRRORD_OPERATOR_ENABLE", use_operator.as_str());
+
+    run_mirrord(mirrord_args, env, None).await
+}
+
+/// Runs `mirrord verify-config [--ide] "/path/config.json"`.
+///
+/// ## Attention
+///
+/// The `verify-config` tests are here to guarantee that your changes do not break backwards
+/// compatability, so you should not modify them, only add new tests (unless breakage is
+/// wanted/required).
+pub async fn run_verify_config(args: Option<Vec<&str>>) -> TestProcess {
+    let mut mirrord_args = vec!["verify-config"];
+    if let Some(args) = args {
+        mirrord_args.extend(args);
+    }
+
+    run_mirrord(mirrord_args, Default::default(), None).await
+}
+
+pub async fn run_mirrord(
+    args: Vec<&str>,
+    env: HashMap<&str, &str>,
+    env_remove: Option<&[&str]>,
+) -> TestProcess {
+    let path = std::env::var("MIRRORD_TESTS_USE_BINARY")
+        .expect("MIRRORD_TESTS_USE_BINARY must point to an external mirrord binary");
+    let temp_dir = tempdir().unwrap();
+
+    // Print the mirrord path used to ease MIRRORD_TESTS_USE_BINARY possible misuse investigation
+    // efforts
+    println!("CWD: {:?}", std::env::current_dir().unwrap());
+    println!("Using mirrord path: {path:?}");
+
+    // Used for debugging with breakpoint on `let server` to debug mirrord execution
+    println!("executing mirrord with args {args:?}",);
+    let mut server = Command::new(&path);
+    server
+        .args(&args)
+        .envs(env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    if let Some(env_remove) = env_remove {
+        for key in env_remove {
+            server.env_remove(key);
+        }
+    }
+
+    let server = server.spawn().unwrap();
+    println!(
+        "executed mirrord with args {args:?} pid {}",
+        server.id().unwrap()
+    );
+    // We need to hold temp dir until the process is finished
+    TestProcess::from_child(server, Some(temp_dir))
+}

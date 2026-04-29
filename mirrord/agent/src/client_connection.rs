@@ -11,9 +11,9 @@ use mirrord_tls_util::{GetSanError, HasSubjectAlternateNames};
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio_rustls::{
-    client::TlsStream,
-    rustls::{pki_types::ServerName, ClientConfig, RootCertStore},
     TlsConnector,
+    client::TlsStream,
+    rustls::{ClientConfig, RootCertStore, pki_types::ServerName},
 };
 use tracing::Level;
 use x509_parser::{error::PEMError, nom, pem};
@@ -104,7 +104,7 @@ impl ClientConnection {
                     .connect(connector.server_name.clone(), stream)
                     .await?;
 
-                ConnectionFramed::Tls(Framed::new(tls_stream, DaemonCodec::default()))
+                ConnectionFramed::Tls(Box::new(Framed::new(tls_stream, DaemonCodec::default())))
             }
             None => ConnectionFramed::Tcp(Framed::new(stream, DaemonCodec::default())),
         };
@@ -149,7 +149,7 @@ impl fmt::Debug for ClientConnection {
 /// implement [`AsyncRead`](actix_codec::AsyncRead) and [`AsyncWrite`](actix_codec::AsyncWrite).
 enum ConnectionFramed {
     Tcp(Framed<TcpStream, DaemonCodec>),
-    Tls(Framed<TlsStream<TcpStream>, DaemonCodec>),
+    Tls(Box<Framed<TlsStream<TcpStream>, DaemonCodec>>),
 }
 
 #[cfg(test)]
@@ -160,8 +160,8 @@ mod test {
     use mirrord_protocol::ClientCodec;
     use tokio::net::{TcpListener, TcpStream};
     use tokio_rustls::{
-        rustls::{pki_types::PrivateKeyDer, ServerConfig},
         TlsAcceptor,
+        rustls::{ServerConfig, pki_types::PrivateKeyDer},
     };
 
     use super::*;

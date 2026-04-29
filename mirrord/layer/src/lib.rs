@@ -1,22 +1,22 @@
+// NOTE(gabriela): prevent compiling lib.rs so layer acts as empty
+// library to allow layer-lib as optional dependency for unix.
+#![cfg(unix)]
 #![feature(c_variadic)]
-#![feature(naked_functions)]
 #![feature(io_error_uncategorized)]
-#![feature(let_chains)]
 #![feature(try_trait_v2)]
 #![feature(try_trait_v2_residual)]
 #![feature(c_size_t)]
 #![feature(once_cell_try)]
-#![feature(vec_into_raw_parts)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
 //! Loaded dynamically with your local process.
 //!
-//! Paired with [`mirrord-agent`], it makes your local process behave as if it was running in a
+//! Paired with `mirrord-agent`, it makes your local process behave as if it was running in a
 //! remote context.
 //!
-//! Check out the [Introduction](https://metalbear.co/mirrord/docs/overview/introduction/) guide to learn
+//! Check out the [Introduction](https://metalbear.com/mirrord/docs/overview/introduction/) guide to learn
 //! more about mirrord.
 //!
 //! ## How it works
@@ -61,44 +61,62 @@
 //!
 //! The functions we intercept are controlled via the `mirrord-config` crate, check its
 //! documentation for more details, or
-//! [Configuration](https://metalbear.co/mirrord/docs/reference/configuration/) for usage information.
+//! [Configuration](https://metalbear.com/mirrord/docs/reference/configuration/) for usage information.
 
 extern crate alloc;
 extern crate core;
 
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+use std::ffi::c_void;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
+    fs::File,
+    io::Read,
     net::SocketAddr,
     os::unix::process::parent_id,
     panic,
-    sync::OnceLock,
+    sync::{Arc, OnceLock},
     time::Duration,
 };
 
 use ctor::ctor;
-use error::{LayerError, Result};
 use file::OPEN_FILES;
 use hooks::HookManager;
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+use libc::c_char;
 use libc::{c_int, pid_t};
 use load::ExecuteArgs;
-#[cfg(target_os = "macos")]
+#[cfg(doc)]
 use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
-    feature::{env::mapper::EnvVarsRemapper, fs::FsModeConfig, network::incoming::IncomingMode},
-    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, feature::env::mapper::EnvVarsRemapper,
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
+#[cfg(doc)]
+use mirrord_layer_lib::setup::SETUP;
+use mirrord_layer_lib::{
+    detour::DetourGuard,
+    error::{LayerError, Result},
+    logging::init_tracing,
+    proxy_connection::{PROXY_CONNECTION, ProxyConnection},
+    setup::{LayerSetup, init_layer_setup, setup},
+    socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING,
+    trace_only::is_trace_only_mode,
+};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
-use proxy_connection::ProxyConnection;
-use setup::LayerSetup;
+use nix::errno::Errno;
 use socket::SOCKETS;
-use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
-    common::make_proxy_request_with_response, debugger_ports::DebuggerPorts, detour::DetourGuard,
-    load::LoadType,
+    common::make_proxy_request_with_response, load::LoadType, socket::hooks::MANAGED_ADDRINFO,
 };
 
 /// Silences `deny(unused_crate_dependencies)`.
@@ -111,17 +129,16 @@ mod integration_tests_deps {
     use apple_codesign as _;
     use futures as _;
     use mirrord_intproxy as _;
+    use mirrord_layer_tests as _;
+    use mirrord_test_utils as _;
     use serde_json as _;
     use tempfile as _;
     use test_cdylib as _;
-    use tests as _;
     use tokio as _;
+    use tracing_subscriber as _;
 }
 
 mod common;
-mod debugger_ports;
-mod detour;
-mod error;
 mod exec_hooks;
 #[cfg(target_os = "macos")]
 mod exec_utils;
@@ -129,8 +146,6 @@ mod file;
 mod hooks;
 mod load;
 mod macros;
-mod proxy_connection;
-mod setup;
 mod socket;
 #[cfg(target_os = "macos")]
 mod tls;
@@ -147,27 +162,9 @@ mod go;
 ))]
 use crate::go::go_hooks;
 
-const TRACE_ONLY_ENV: &str = "MIRRORD_LAYER_TRACE_ONLY";
-
-// TODO: We don't really need a lock, we just need a type that:
-//  1. Can be initialized as static (with a const constructor or whatever)
-//  2. Is `Sync` (because shared static vars have to be).
-//  3. Can replace the held [`ProxyConnection`] with a different one (because we need to reset it on
-//     `fork`).
-//  We only ever set it in the ctor or in the `fork` hook (in the child process), and in both cases
-//  there are no other threads yet in that process, so we don't need write synchronization.
-//  Assuming it's safe to call `send` simultaneously from two threads, on two references to the
-//  same `Sender` (is it), we also don't need read synchronization.
-/// Global connection to the internal proxy.
-/// Should not be used directly. Use [`common::make_proxy_request_with_response`] or
-/// [`common::make_proxy_request_no_response`] functions instead.
-static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
-
-static SETUP: OnceLock<LayerSetup> = OnceLock::new();
-
-fn setup() -> &'static LayerSetup {
-    SETUP.get().expect("layer is not initialized")
-}
+/// if this env var exists, we exit.
+/// This to allow a way to protect from mirrord being used in destructive tests and such.
+const FAILSAFE_ENV: &str = "MIRRORD_DONT_LOAD";
 
 // The following statics are to avoid using CoreFoundation or high level macOS APIs
 // that aren't safe to use after fork.
@@ -184,6 +181,12 @@ static PROXY_CONNECTION_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
+    // we don't care about value, just that this env exists
+    let dont_start = std::env::var(FAILSAFE_ENV).is_ok();
+    if dont_start {
+        panic!("{FAILSAFE_ENV} environment variable found, stopping execution.")
+    }
+
     let given_process = EXECUTABLE_ARGS.get_or_try_init(ExecuteArgs::from_env)?;
 
     EXECUTABLE_PATH.get_or_try_init(|| {
@@ -209,21 +212,40 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         let path = EXECUTABLE_PATH
             .get()
             .expect("EXECUTABLE_PATH needs to be set!");
+        let args = EXECUTABLE_ARGS
+            .get()
+            .expect("EXECUTABLE_ARGS needs to be set!")
+            .args
+            .clone();
+        let load_type = match &given_process.load_type(&config) {
+            LoadType::Full => "full",
+            LoadType::SIPOnly => "SIP only",
+            LoadType::Skip => "skip",
+        };
+        let log_info = config
+            .experimental
+            .sip_log_destination
+            .as_ref()
+            .map(|log_destination| mirrord_sip::SipLogInfo {
+                log_destination,
+                args: Some(args.as_slice()),
+                load_type: Some(load_type),
+            });
+
         if let Ok(Some(binary)) = mirrord_sip::sip_patch(
             path,
             mirrord_sip::SipPatchOptions {
                 patch: &patch_binaries,
                 skip: &skip_patch_binaries,
+                sip_binaries_dir: config
+                    .experimental
+                    .sip_utils
+                    .unwrap_or_default()
+                    .then(|| mirrord_sip::MIRRORD_BINARIES_DIR_PATH_BUF.as_path()),
             },
+            log_info,
         ) {
-            let err = exec::execvp(
-                binary,
-                EXECUTABLE_ARGS
-                    .get()
-                    .expect("EXECUTABLE_ARGS needs to be set!")
-                    .args
-                    .clone(),
-            );
+            let err = exec::execvp(binary, args);
             tracing::error!("Couldn't execute {:?}", err);
             return Err(LayerError::ExecFailed(err));
         }
@@ -243,11 +265,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 /// if not in trace only mode.
 fn load_only_layer_start(config: &LayerConfig) {
     // Check if we're in trace only mode (no agent)
-    let trace_only = std::env::var(TRACE_ONLY_ENV)
-        .unwrap_or_default()
-        .parse()
-        .unwrap_or(false);
-    if trace_only {
+    if is_trace_only_mode() {
         return;
     }
 
@@ -258,12 +276,13 @@ fn load_only_layer_start(config: &LayerConfig) {
 
     let new_connection = ProxyConnection::new(
         address,
-        NewSessionRequest::New(
-            EXECUTABLE_ARGS
+        NewSessionRequest {
+            process_info: EXECUTABLE_ARGS
                 .get()
                 .expect("EXECUTABLE_ARGS MUST BE SET")
                 .to_process_info(config),
-        ),
+            parent_layer: None,
+        },
         *PROXY_CONNECTION_TIMEOUT
             .get_or_init(|| Duration::from_secs(config.internal_proxy.socket_timeout)),
     )
@@ -303,25 +322,6 @@ fn mirrord_layer_entry_point() {
     }
 }
 
-/// Initialize logger. Set the logs to go according to the layer's config either to a trace file, to
-/// mirrord-console or to stderr.
-fn init_tracing() {
-    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-        mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
-    } else {
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_thread_ids(true)
-                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-                    .compact()
-                    .with_writer(std::io::stderr),
-            )
-            .with(tracing_subscriber::EnvFilter::from_default_env())
-            .init();
-    };
-}
-
 /// Occurs after [`layer_pre_initialization`] has succeeded.
 ///
 /// Initialized the main parts of mirrord-layer.
@@ -330,7 +330,7 @@ fn init_tracing() {
 ///
 /// Sets up a few things based on the [`LayerConfig`] given by the user:
 ///
-/// 1. [`tracing_subscriber`] or [`mirrord_console`];
+/// 1. [`init_tracing`] for `tracing_subscriber` or `mirrord_console`
 ///
 /// 2. Global [`SETUP`];
 ///
@@ -339,42 +339,20 @@ fn init_tracing() {
 /// 4. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
 ///
 /// 5. Fetches remote environment from the agent (if enabled with
-///     [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
-fn layer_start(mut config: LayerConfig) {
-    if config.target.path.is_none() && config.feature.fs.mode.ne(&FsModeConfig::Local) {
-        // Use localwithoverrides on targetless regardless of user config, unless fs-mode is already
-        // set to local.
-        config.feature.fs.mode = FsModeConfig::LocalWithOverrides;
-    }
-
-    // Check if we're in trace only mode (no agent)
-    let trace_only = std::env::var(TRACE_ONLY_ENV)
-        .unwrap_or_default()
-        .parse()
-        .unwrap_or(false);
-
-    // Disable all features that require the agent
-    if trace_only {
-        config.feature.fs.mode = FsModeConfig::Local;
-        config.feature.network.dns.enabled = false;
-        config.feature.network.incoming.mode = IncomingMode::Off;
-        config.feature.network.outgoing.tcp = false;
-        config.feature.network.outgoing.udp = false;
-    }
-
+///    [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
+fn layer_start(config: LayerConfig) {
     init_tracing();
 
     let proxy_connection_timeout = *PROXY_CONNECTION_TIMEOUT
         .get_or_init(|| Duration::from_secs(config.internal_proxy.socket_timeout));
 
-    let debugger_ports = DebuggerPorts::from_env();
-    let local_hostname = trace_only || !config.feature.hostname;
     let process_info = EXECUTABLE_ARGS
         .get()
         .expect("EXECUTABLE_ARGS MUST BE SET")
         .to_process_info(&config);
-    let state = LayerSetup::new(config, debugger_ports, local_hostname);
-    SETUP.set(state).unwrap();
+
+    // initialize LayerSetup from config
+    init_layer_setup(config, false);
 
     let state = setup();
     enable_hooks(state);
@@ -395,7 +373,7 @@ fn layer_start(mut config: LayerConfig) {
         "Loaded into executable (base64 config omitted)",
     );
 
-    if trace_only {
+    if is_trace_only_mode() {
         tracing::debug!("Skipping new intproxy connection (trace only)");
         return;
     }
@@ -405,7 +383,10 @@ fn layer_start(mut config: LayerConfig) {
         let address = setup().proxy_address();
         let new_connection = ProxyConnection::new(
             address,
-            NewSessionRequest::New(process_info),
+            NewSessionRequest {
+                process_info,
+                parent_layer: None,
+            },
             proxy_connection_timeout,
         )
         .unwrap_or_else(|_| panic!("failed to initialize proxy connection at {address}"));
@@ -422,19 +403,37 @@ fn layer_start(mut config: LayerConfig) {
     if fetch_env {
         let env = fetch_env_vars();
         for (key, value) in env {
-            std::env::set_var(key, value);
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var(key, value) };
         }
 
-        std::env::set_var(REMOTE_ENV_FETCHED, "true");
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var(REMOTE_ENV_FETCHED, "true") };
     }
 
     if let Some(unset) = setup().env_config().unset.as_ref() {
         let unset = unset.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>();
         std::env::vars().for_each(|(key, _)| {
             if unset.contains(&key.to_lowercase()) {
-                std::env::remove_var(&key);
+                // TODO: Audit that the environment access only happens in single-threaded code.
+                unsafe { std::env::remove_var(&key) };
             }
         });
+    }
+
+    #[cfg(target_os = "macos")]
+    if setup().experimental().applev.as_ref().is_some() {
+        unsafe {
+            let mut applev = exec_utils::extract_applev();
+            let mut count: usize = 0;
+            while !(*applev).is_null() {
+                let c_str = std::ffi::CStr::from_ptr(*applev);
+                tracing::info!("applev[{}]: {}", count, c_str.to_string_lossy());
+                applev = applev.add(1);
+                count = count.saturating_add(1);
+            }
+            tracing::info!(count, "Finished reading Apple variables");
+        }
     }
 }
 
@@ -464,16 +463,18 @@ fn fetch_env_vars() -> HashMap<String, String> {
         (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
     };
 
-    let mut env_vars = (!env_vars_exclude.is_empty() || !env_vars_include.is_empty())
-        .then(|| {
+    let mut env_vars = if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
+        {
             make_proxy_request_with_response(GetEnvVarsRequest {
                 env_vars_filter: env_vars_exclude,
                 env_vars_select: env_vars_include,
             })
             .expect("failed to make request to proxy")
             .expect("failed to fetch remote env")
-        })
-        .unwrap_or_default();
+        }
+    } else {
+        Default::default()
+    };
 
     if let Some(file) = &setup().env_config().env_file {
         let envs_from_file = dotenvy::from_path_iter(file)
@@ -500,12 +501,10 @@ fn fetch_env_vars() -> HashMap<String, String> {
 /// mirrord-layer on a process where specified to skip with MIRRORD_SKIP_PROCESSES
 #[cfg(target_os = "macos")]
 fn sip_only_layer_start(
-    mut config: LayerConfig,
+    config: LayerConfig,
     patch_binaries: Vec<String>,
     skip_patch_binaries: Vec<String>,
 ) {
-    use mirrord_config::feature::fs::READONLY_FILE_BUFFER_DEFAULT;
-
     load_only_layer_start(&config);
 
     let mut hook_manager = HookManager::default();
@@ -514,22 +513,20 @@ fn sip_only_layer_start(
         exec_utils::enable_macos_hooks(&mut hook_manager, patch_binaries, skip_patch_binaries)
     };
     unsafe { exec_hooks::hooks::enable_exec_hooks(&mut hook_manager) };
-    // we need to hook file access to patch path to our temp bin.
-    config.feature.fs = FsConfig {
-        mode: FsModeConfig::Local,
-        read_write: None,
-        read_only: None,
-        local: None,
-        not_found: None,
-        mapping: None,
-        readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
-    };
-    let debugger_ports = DebuggerPorts::from_env();
-    let setup = LayerSetup::new(config, debugger_ports, true);
+    unsafe { replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK) };
 
-    SETUP.set(setup).expect("SETUP set failed");
+    init_layer_setup(config, true);
 
-    unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
+    unsafe { file::hooks::enable_file_hooks(&mut hook_manager, setup()) };
+
+    if let Some(unset) = setup().env_config().unset.as_ref() {
+        let unset = unset.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>();
+        std::env::vars().for_each(|(key, _)| {
+            if unset.contains(&key.to_lowercase()) {
+                unsafe { std::env::remove_var(&key) };
+            }
+        });
+    }
 }
 
 /// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what
@@ -589,6 +586,7 @@ fn enable_hooks(state: &LayerSetup) {
         };
 
         replace!(&mut hook_manager, "fork", fork_detour, FnFork, FN_FORK);
+        replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK);
     };
 
     unsafe {
@@ -617,7 +615,7 @@ fn enable_hooks(state: &LayerSetup) {
     }
 
     if enabled_file_ops {
-        unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
+        unsafe { file::hooks::enable_file_hooks(&mut hook_manager, state) };
     }
 
     #[cfg(all(
@@ -626,6 +624,24 @@ fn enable_hooks(state: &LayerSetup) {
     ))]
     {
         go_hooks::enable_hooks(&mut hook_manager);
+    }
+
+    #[cfg(all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ))]
+    {
+        if state.experimental().dlopen_cgo {
+            unsafe {
+                replace!(
+                    &mut hook_manager,
+                    "dlopen",
+                    dlopen_detour,
+                    FnDlopen,
+                    FN_DLOPEN
+                );
+            }
+        }
     }
 }
 
@@ -640,15 +656,36 @@ fn enable_hooks(state: &LayerSetup) {
 #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()))]
 pub(crate) fn close_layer_fd(fd: c_int) {
     // Remove from sockets.
-    if let Some(socket) = SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd) {
-        // Closed file is a socket, so if it's already bound to a port - notify agent to stop
-        // mirroring/stealing that port.
-        socket.close();
-    } else if setup().fs_config().is_active() {
-        OPEN_FILES
-            .lock()
-            .expect("OPEN_FILES lock failed")
-            .remove(&fd);
+    match SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd) {
+        Some(socket) => {
+            // Closed file is a socket, so if it's already bound to a port - notify agent to stop
+            // mirroring/stealing that port.
+            //
+            // Mind that there might be more instances of this socket,
+            // stored in the SOCKETS map due to `dup*` calls.
+            // We only make the request if this is the last instance.
+            let socket_cloned = socket.as_ref().clone();
+
+            // Obtain weak pointer, and drop the strong one.
+            let weak = Arc::downgrade(&socket);
+            std::mem::drop(socket);
+
+            // If there are no other strong ones, make the request.
+            // There is no chance of missed close here, because we dropped the strong pointer first.
+            // There is a chance of double close, but the second request should be a noop in the
+            // intproxy.
+            if weak.strong_count() == 0 {
+                socket_cloned.close();
+            }
+        }
+        _ => {
+            if setup().fs_config().is_active() {
+                OPEN_FILES
+                    .lock()
+                    .expect("OPEN_FILES lock failed")
+                    .remove(&fd);
+            }
+        }
     }
 }
 
@@ -664,9 +701,11 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 /// Replaces [`libc::close`].
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
-    let res = FN_CLOSE(fd);
-    close_layer_fd(fd);
-    res
+    unsafe {
+        let res = FN_CLOSE(fd);
+        close_layer_fd(fd);
+        res
+    }
 }
 
 /// Hook for `libc::fork`.
@@ -674,46 +713,173 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 /// on macOS, be wary what we do in this path as we might trigger <https://github.com/metalbear-co/mirrord/issues/1745>
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
-    tracing::debug!("Process {} forking!.", std::process::id());
+    // when running in multi-threaded app, we can have a scenario where another thread holds a mutex
+    // while the fork executes this leaves the mutex locked forever in the child process since
+    // there's no thread to unlock it so we need to grab all the mutexes we can here, and drop
+    // after the fork see https://github.com/metalbear-co/mirrord/issues/3659#issuecomment-3433990010
+    let sockets = SOCKETS.lock();
+    let open_files = OPEN_FILES.lock();
+    let addr_info = MANAGED_ADDRINFO.lock();
+    let dns_mapping = REMOTE_DNS_REVERSE_MAPPING.lock();
 
-    let res = FN_FORK();
+    unsafe {
+        tracing::debug!("Process {} forking!.", std::process::id());
 
-    match res.cmp(&0) {
-        Ordering::Equal => {
-            tracing::debug!("Child process initializing layer.");
-            #[allow(static_mut_refs)]
-            let parent_connection = match unsafe { PROXY_CONNECTION.take() } {
-                Some(conn) => conn,
-                None => {
-                    tracing::debug!("Skipping new inptroxy connection (trace only)");
-                    return res;
-                }
-            };
+        let res = FN_FORK();
 
-            let new_connection = ProxyConnection::new(
-                parent_connection.proxy_addr(),
-                NewSessionRequest::Forked(parent_connection.layer_id()),
-                PROXY_CONNECTION_TIMEOUT
-                    .get()
-                    .copied()
-                    .expect("PROXY_CONNECTION_TIMEOUT should be set by now!"),
-            )
-            .expect("failed to establish proxy connection for child");
-            #[allow(static_mut_refs)]
-            PROXY_CONNECTION
-                .set(new_connection)
-                .expect("Failed setting PROXY_CONNECTION in child fork");
-            // in macOS (and tbh sounds logical) we can't just drop the old connection in the child,
-            // as it needs to access a mutex with invalid state, so we need to forget it.
-            // better implementation would be to somehow close the underlying connections
-            // but side effect should be trivial
-            std::mem::forget(parent_connection);
+        match res.cmp(&0) {
+            Ordering::Equal => {
+                tracing::debug!("Child process initializing layer.");
+                #[allow(static_mut_refs)]
+                let parent_connection = match PROXY_CONNECTION.take() {
+                    Some(conn) => conn,
+                    None => {
+                        tracing::debug!("Skipping new inptroxy connection (trace only)");
+                        return res;
+                    }
+                };
+
+                let new_connection = ProxyConnection::new(
+                    parent_connection.proxy_addr(),
+                    NewSessionRequest {
+                        parent_layer: Some(parent_connection.layer_id()),
+                        process_info: EXECUTABLE_ARGS
+                            .get()
+                            .expect("should always be set in layer constructor")
+                            .to_process_info(setup().layer_config()),
+                    },
+                    PROXY_CONNECTION_TIMEOUT
+                        .get()
+                        .copied()
+                        .expect("PROXY_CONNECTION_TIMEOUT should be set by now!"),
+                )
+                .expect("failed to establish proxy connection for child");
+                #[allow(static_mut_refs)]
+                PROXY_CONNECTION
+                    .set(new_connection)
+                    .expect("Failed setting PROXY_CONNECTION in child fork");
+                // in macOS (and tbh sounds logical) we can't just drop the old connection in the
+                // child, as it needs to access a mutex with invalid state, so we
+                // need to forget it. better implementation would be to somehow
+                // close the underlying connections but side effect should be
+                // trivial
+                std::mem::forget(parent_connection);
+            }
+            Ordering::Greater => tracing::debug!("Child process id is {res}."),
+            Ordering::Less => tracing::debug!("fork failed"),
         }
-        Ordering::Greater => tracing::debug!("Child process id is {res}."),
-        Ordering::Less => tracing::debug!("fork failed"),
+
+        drop(sockets);
+        drop(open_files);
+        drop(addr_info);
+        drop(dns_mapping);
+        res
+    }
+}
+
+/// Transparently replaces `vfork` call with a safer `fork`.
+///
+/// `vfork` and `fork` calls are very similar (except performance),
+/// except that with `vfork` the parent process is blocked until the child exits or execs.
+/// This hook uses a dummy pipe to handle this difference:
+/// 1. Parent process creates a pipe with O_CLOEXEC flag.
+/// 2. Parent process forks.
+/// 3. Parent process closes the writing end and blocks on reading from the reading end.
+/// 4. The read call returns with EOF when the child process exits or execs.
+///
+/// # Rationale
+///
+/// To properly handle child processes, we need to hook functions from the `exec` family.
+/// These are often used in tandem with `vfork`. However, `vfork` requires the child process
+/// not to write to memory (it's shared with the parent). Doing it in the child process results with
+/// an undefined behavior. Since our hooks always write to memory, `vfork` is not our ally.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
+    #[cfg(target_os = "macos")]
+    let pipe_result = {
+        use std::os::fd::AsRawFd;
+
+        use nix::fcntl::{FcntlArg, FdFlag};
+
+        nix::unistd::pipe().and_then(|pipe| {
+            nix::fcntl::fcntl(pipe.1.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
+            Ok(pipe)
+        })
+    };
+    #[cfg(target_os = "linux")]
+    let pipe_result = nix::unistd::pipe2(nix::fcntl::OFlag::O_CLOEXEC);
+
+    let (pipe_read, pipe_write) = match pipe_result {
+        Ok(pipe) => pipe,
+        Err(error) => {
+            // If we cannot create the pipe, fallback to vfork.
+            tracing::error!(
+                %error,
+                "Failed to create a dummy pipe for vfork emulation. \
+                Letting the vfork happen. This might cause unforeseen issues. \
+                {}",
+                if error == Errno::EMFILE {
+                    "Try increasing the process open files limit using `ulimit`."
+                } else {
+                    "This is most probably a bug, please report it."
+                }
+            );
+            return unsafe { FN_VFORK() };
+        }
+    };
+
+    let fork_result = unsafe { fork_detour() };
+    match fork_result.cmp(&0) {
+        // We're the child.
+        // Write end of the pipe will be dropped when we exit or exec,
+        // notifying the parent.
+        Ordering::Equal => {
+            std::mem::drop(pipe_read);
+        }
+        // We're the parent.
+        // To emulate vfork properly, we need to wait until the child
+        // drops the write end of the pipe.
+        // Regardless of what happens now, we return with success.
+        // Worst case scenario, the parent will resume without waiting for the child to
+        // exit/exec.
+        Ordering::Greater => {
+            std::mem::drop(pipe_write);
+            let mut file = File::from(pipe_read);
+            let mut buf = Vec::new();
+            match file.read_to_end(&mut buf) {
+                Ok(0) => {
+                    // Write end dropped, success.
+                }
+                Ok(..) => {
+                    tracing::error!(
+                        read_from_dummy_pipe = %String::from_utf8_lossy(&buf),
+                        "Unexpected error in vfork emulation. \
+                        This is a bug, please report it."
+                    )
+                }
+                Err(error) => {
+                    tracing::error!(
+                        read_from_dummy_pipe_error = %error,
+                        "Unexpected error in vfork emulation. \
+                        This is a bug, please report it",
+                    );
+                }
+            }
+        }
+        // fork failed, fallback to vfork.
+        Ordering::Less => {
+            std::mem::drop(pipe_read);
+            std::mem::drop(pipe_write);
+            tracing::error!(
+                error = %Errno::from_raw(fork_result),
+                "Failed to fork the current process for vfork emulation. \
+                Letting the vfork happen. This might cause unforeseen issues.",
+            );
+            return unsafe { FN_VFORK() };
+        }
     }
 
-    res
+    fork_result
 }
 
 /// No need to guard because we call another detour which will do the guard for us.
@@ -723,17 +889,17 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
 /// One of the many [`libc::close`]-ish functions.
 #[hook_fn]
 pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
-    close_detour(fd)
+    unsafe { close_detour(fd) }
 }
 
 #[hook_fn]
 pub(crate) unsafe extern "C" fn __close_nocancel_detour(fd: c_int) -> c_int {
-    close_detour(fd)
+    unsafe { close_detour(fd) }
 }
 
 #[hook_fn]
 pub(crate) unsafe extern "C" fn __close_detour(fd: c_int) -> c_int {
-    close_detour(fd)
+    unsafe { close_detour(fd) }
 }
 
 /// ## Hook
@@ -748,8 +914,41 @@ pub(crate) unsafe extern "C" fn uv_fs_close_detour(
     fd: c_int,
     c: usize,
 ) -> c_int {
-    // In this case we call `close_layer_fd` before the original close function, because execution
-    // does not return to here after calling `FN_UV_FS_CLOSE`.
-    close_layer_fd(fd);
-    FN_UV_FS_CLOSE(a, b, fd, c)
+    unsafe {
+        // In this case we call `close_layer_fd` before the original close function, because
+        // execution does not return to here after calling `FN_UV_FS_CLOSE`.
+        close_layer_fd(fd);
+        FN_UV_FS_CLOSE(a, b, fd, c)
+    }
+}
+
+/// ## Hook
+///
+/// Detect if `dlopen()` loaded go dynamic library. If so, enable go specific hooks.
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+#[hook_fn]
+pub(crate) unsafe extern "C" fn dlopen_detour(
+    raw_path: *const c_char,
+    mode: c_int,
+) -> *const c_void {
+    let handle = unsafe { FN_DLOPEN(raw_path, mode) };
+    let _guard = DetourGuard::new();
+
+    let mut hook_manager = HookManager::default();
+    let path_str = unsafe {
+        std::ffi::CStr::from_ptr(raw_path)
+            .to_string_lossy()
+            .into_owned()
+    };
+    let filename = std::path::Path::new(&path_str)
+        .file_name()
+        .expect("cannot get the filename of the dynamic library")
+        .to_string_lossy()
+        .into_owned();
+    go_hooks::enable_hooks_in_loaded_module(&mut hook_manager, filename);
+
+    handle
 }

@@ -2,7 +2,7 @@ use std::arch::naked_asm;
 
 use tracing::trace;
 
-use crate::{go::c_abi_syscall6_handler, macros::hook_symbol, HookManager};
+use crate::{HookManager, go::c_abi_syscall6_handler, macros::hook_symbol};
 
 type VoidFn = unsafe extern "C" fn() -> ();
 static mut FN_ASMCGOCALL: Option<VoidFn> = None;
@@ -22,22 +22,24 @@ struct SyscallArgs {
 
 /// asmcgocall can pass a pointer, so this is a conversion call to `c_abi_syscall6_handler`
 unsafe extern "C" fn mirrord_syscall_handler(syscall_struct: *const SyscallArgs) -> i64 {
-    c_abi_syscall6_handler(
-        (*syscall_struct).syscall,
-        (*syscall_struct).arg1,
-        (*syscall_struct).arg2,
-        (*syscall_struct).arg3,
-        (*syscall_struct).arg4,
-        (*syscall_struct).arg5,
-        (*syscall_struct).arg6,
-    )
+    unsafe {
+        c_abi_syscall6_handler(
+            (*syscall_struct).syscall,
+            (*syscall_struct).arg1,
+            (*syscall_struct).arg2,
+            (*syscall_struct).arg3,
+            (*syscall_struct).arg4,
+            (*syscall_struct).arg5,
+            (*syscall_struct).arg6,
+        )
+    }
 }
 
 /// Detour for Go >= 1.19
 /// On Go 1.19 one hook catches all (?) syscalls and therefore we call the syscall6 handler always
 /// so syscall6 handler need to handle syscall3 detours as well.
 // We're using asmcogcall to avoid re-implementing it and doing it badly.
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn go_syscall_new_detour() {
     naked_asm!(
         // save fp and lr to stack and reserve that memory.
@@ -80,41 +82,81 @@ unsafe extern "C" fn go_syscall_new_detour() {
 }
 
 /// Hooks for when hooking a go binary between 1.19 and 1.23
-fn post_go1_19(hook_manager: &mut HookManager) {
-    unsafe {
-        FN_ASMCGOCALL = std::mem::transmute::<
-            frida_gum::NativePointer,
-            std::option::Option<unsafe extern "C" fn()>,
-        >(
-            hook_manager
-                .resolve_symbol_main_module("runtime.asmcgocall")
-                .expect("found go but couldn't find runtime.asmcgocall please file a bug"),
+fn post_go1_19(hook_manager: &mut HookManager, module_name: Option<&str>) {
+    if let Some(module_name) = module_name {
+        unsafe {
+            FN_ASMCGOCALL = std::mem::transmute::<
+                frida_gum::NativePointer,
+                std::option::Option<unsafe extern "C" fn()>,
+            >(
+                hook_manager
+                    .resolve_symbol_in_module(module_name, "runtime.asmcgocall")
+                    .expect("found go but couldn't find runtime.asmcgocall please file a bug"),
+            );
+        }
+        hook_symbol!(
+            hook_manager,
+            module_name,
+            "runtime/internal/syscall.Syscall6.abi0",
+            go_syscall_new_detour
+        );
+    } else {
+        unsafe {
+            FN_ASMCGOCALL = std::mem::transmute::<
+                frida_gum::NativePointer,
+                std::option::Option<unsafe extern "C" fn()>,
+            >(
+                hook_manager
+                    .resolve_symbol_main_module("runtime.asmcgocall")
+                    .expect("found go but couldn't find runtime.asmcgocall please file a bug"),
+            );
+        }
+        hook_symbol!(
+            hook_manager,
+            "runtime/internal/syscall.Syscall6.abi0",
+            go_syscall_new_detour
         );
     }
-    hook_symbol!(
-        hook_manager,
-        "runtime/internal/syscall.Syscall6.abi0",
-        go_syscall_new_detour
-    );
 }
 
 /// Hooks for when hooking a post go 1.23 binary
-fn post_go1_23(hook_manager: &mut HookManager) {
-    unsafe {
-        FN_ASMCGOCALL = std::mem::transmute::<
-            frida_gum::NativePointer,
-            std::option::Option<unsafe extern "C" fn()>,
-        >(
-            hook_manager
-                .resolve_symbol_main_module("runtime.asmcgocall")
-                .expect("found go but couldn't find runtime.asmcgocall please file a bug"),
+fn post_go1_23(hook_manager: &mut HookManager, go_version: f32, module_name: Option<&str>) {
+    let original_symbol = if go_version >= 1.26 {
+        "internal/runtime/syscall/linux.Syscall6.abi0"
+    } else {
+        "internal/runtime/syscall.Syscall6.abi0"
+    };
+
+    if let Some(module_name) = module_name {
+        unsafe {
+            FN_ASMCGOCALL = std::mem::transmute::<
+                frida_gum::NativePointer,
+                std::option::Option<unsafe extern "C" fn()>,
+            >(
+                hook_manager
+                    .resolve_symbol_in_module(module_name, "runtime.asmcgocall")
+                    .expect("found go but couldn't find runtime.asmcgocall please file a bug"),
+            );
+        }
+        hook_symbol!(
+            hook_manager,
+            module_name,
+            original_symbol,
+            go_syscall_new_detour
         );
+    } else {
+        unsafe {
+            FN_ASMCGOCALL = std::mem::transmute::<
+                frida_gum::NativePointer,
+                std::option::Option<unsafe extern "C" fn()>,
+            >(
+                hook_manager
+                    .resolve_symbol_main_module("runtime.asmcgocall")
+                    .expect("found go but couldn't find runtime.asmcgocall please file a bug"),
+            );
+        }
+        hook_symbol!(hook_manager, original_symbol, go_syscall_new_detour);
     }
-    hook_symbol!(
-        hook_manager,
-        "internal/runtime/syscall.Syscall6.abi0",
-        go_syscall_new_detour
-    );
 }
 
 /// Note: We only hook "RawSyscall", "Syscall6", and "Syscall" because for our usecase,
@@ -123,25 +165,34 @@ fn post_go1_23(hook_manager: &mut HookManager) {
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
 ///   - <https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go>
 pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
-    if let Some(version_symbol) =
-        hook_manager.resolve_symbol_main_module("runtime.buildVersion.str")
-    {
-        // Version str is `go1.xx` - take only last 4 characters.
-        let version = unsafe {
-            std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                version_symbol.0.add(2) as *const u8,
-                4,
-            ))
-        };
-        let version_parsed: f32 = version.parse().unwrap();
-        if version_parsed >= 1.23 {
-            trace!("found version >= 1.23");
-            post_go1_23(hook_manager);
-        } else if version_parsed >= 1.19 {
-            trace!("found version >= 1.19");
-            post_go1_19(hook_manager);
-        } else {
-            trace!("found version < 1.19, arm64 not supported - not hooking");
-        }
+    let Some(version) = super::get_go_runtime_version(hook_manager) else {
+        return;
+    };
+
+    if version >= 1.23 {
+        trace!("found version >= 1.23");
+        post_go1_23(hook_manager, version, None);
+    } else if version >= 1.19 {
+        trace!("found version >= 1.19");
+        post_go1_19(hook_manager, None);
+    } else {
+        trace!("found version < 1.19, arm64 not supported - not hooking");
+    }
+}
+
+/// Same as [`enable_hooks`], but hook symbols found in the given `module_name`.
+pub(crate) fn enable_hooks_in_loaded_module(hook_manager: &mut HookManager, module_name: String) {
+    let Some(version) = super::get_go_runtime_version_in_module(hook_manager, &module_name) else {
+        return;
+    };
+
+    if version >= 1.23 {
+        trace!("found version >= 1.23");
+        post_go1_23(hook_manager, version, Some(module_name.as_str()));
+    } else if version >= 1.19 {
+        trace!("found version >= 1.19");
+        post_go1_19(hook_manager, Some(module_name.as_str()));
+    } else {
+        trace!("found version < 1.19, arm64 not supported - not hooking");
     }
 }

@@ -1,15 +1,63 @@
-use std::{io, io::Write, net::SocketAddr};
+#[cfg(target_os = "macos")]
+use std::env;
+use std::{io, net::SocketAddr};
 
-use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
+#[cfg(not(target_os = "windows"))]
+use io::Write;
+use mirrord_config::{config::ConfigContext, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV};
+#[cfg(target_os = "macos")]
+use mirrord_sip::MIRRORD_SANTA_MODE_ENV;
+#[cfg(not(target_os = "windows"))]
 use nix::libc;
 use tokio::{net::TcpListener, process::Command};
 use tracing::Level;
+#[cfg(target_os = "macos")]
+use which::which;
 
 /// Address for mirrord-console is listening on.
 pub(crate) const MIRRORD_CONSOLE_ADDR_ENV: &str = "MIRRORD_CONSOLE_ADDR";
 
 /// User git branch (set by plugins).
 pub(crate) const MIRRORD_BRANCH_NAME_ENV: &str = "MIRRORD_BRANCH_NAME";
+
+/// When set, the CLI resolves config using only overrides and ignores the process environment.
+pub(crate) const MIRRORD_CLI_STRICT_ENV: &str = "MIRRORD_CLI_STRICT_ENV";
+
+/// Comma/whitespace separated allowlist of env vars to read even in strict env mode.
+pub(crate) const MIRRORD_CLI_STRICT_ENV_ALLOWLIST: &str = "MIRRORD_CLI_STRICT_ENV_ALLOWLIST";
+
+pub(crate) fn cli_strict_env_enabled() -> bool {
+    std::env::var(MIRRORD_CLI_STRICT_ENV)
+        .map(|value| matches!(value.to_lowercase().as_str(), "1" | "true"))
+        .unwrap_or(false)
+}
+
+/// Returns a list of env var names allowed to pass through in strict env mode.
+pub(crate) fn cli_strict_env_allowlist() -> Vec<String> {
+    std::env::var(MIRRORD_CLI_STRICT_ENV_ALLOWLIST)
+        .ok()
+        .map(|value| {
+            value
+                .split(|c: char| c == ',' || c.is_whitespace())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub(crate) fn apply_test_env_overrides(mut cfg_context: ConfigContext) -> ConfigContext {
+    if cli_strict_env_enabled() {
+        for key in cli_strict_env_allowlist() {
+            if let Ok(value) = std::env::var(&key) {
+                cfg_context = cfg_context.override_env(key, value);
+            }
+        }
+        cfg_context = cfg_context.strict_env(true);
+    }
+    cfg_context
+}
 
 /// Removes `HTTP_PROXY` and `https_proxy` from the environment
 pub(crate) fn remove_proxy_env() {
@@ -18,34 +66,133 @@ pub(crate) fn remove_proxy_env() {
         if lower_key == "http_proxy" || lower_key == "https_proxy" {
             // we set instead of unset since this way extension
             // will be able to propogate it as well.
-            std::env::set_var(key, "")
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var(key, "") }
         }
     }
 }
 
+/// Enable Santa-compatible signing mode when `santactl` is present.
+#[cfg(target_os = "macos")]
+pub(crate) fn maybe_enable_santa_mode() {
+    let already_set = env::var(MIRRORD_SANTA_MODE_ENV)
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .and_then(|value| value.parse::<bool>().ok())
+        .is_some();
+    if already_set {
+        return;
+    }
+
+    let present = which("santactl").is_ok();
+    unsafe {
+        env::set_var(MIRRORD_SANTA_MODE_ENV, present.to_string());
+    }
+    tracing::debug!("santa mode: {present}")
+}
+
 /// Used to pipe std[in/out/err] to "/dev/null" to prevent any printing to prevent any unwanted
 /// side effects
+#[cfg(not(target_os = "windows"))]
 unsafe fn redirect_fd_to_dev_null(fd: libc::c_int) {
-    let devnull_fd = libc::open(b"/dev/null\0" as *const [u8; 10] as _, libc::O_RDWR);
-    libc::dup2(devnull_fd, fd);
-    libc::close(devnull_fd);
+    unsafe {
+        let devnull_fd = libc::open(b"/dev/null\0" as *const [u8; 10] as _, libc::O_RDWR);
+        libc::dup2(devnull_fd, fd);
+        libc::close(devnull_fd);
+    }
 }
 
 /// Create a new session for the proxy process, detaching from the original terminal.
 /// This makes the process not to receive signals from the "mirrord" process or it's parent
 /// terminal fixes some side effects such as <https://github.com/metalbear-co/mirrord/issues/1232>
+#[cfg(not(target_os = "windows"))]
 pub(crate) unsafe fn detach_io() -> Result<(), nix::Error> {
-    nix::unistd::setsid()?;
+    unsafe {
+        nix::unistd::setsid()?;
 
-    // flush before redirection
-    {
-        // best effort
-        let _ = std::io::stdout().lock().flush();
+        // flush before redirection
+        {
+            // best effort
+            let _ = std::io::stdout().lock().flush();
+        }
+        for fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
+            redirect_fd_to_dev_null(fd);
+        }
+        Ok(())
     }
-    for fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
-        redirect_fd_to_dev_null(fd);
+}
+
+/// "Reparent" this process to init by forking and then exiting in the
+/// parent. The child process will get reparented to init,
+/// and return from this function.
+///
+/// # Safety
+///
+/// This function forks the current process.
+/// If the current process uses multiple threads,
+/// it will be bound by [`signal-safety`](https://man7.org/linux/man-pages/man7/signal-safety.7.html) rules after returning from this function.
+#[cfg(unix)]
+pub(crate) unsafe fn reparent_to_init() -> Result<(), nix::Error> {
+    use std::process::exit;
+
+    use nix::unistd::{ForkResult, fork};
+
+    unsafe {
+        match fork()? {
+            ForkResult::Parent { .. } => exit(0),
+            ForkResult::Child => Ok(()),
+        }
     }
-    Ok(())
+}
+
+/// Check whether a process with the given PID is still running.
+#[cfg(unix)]
+pub(crate) fn is_pid_alive(pid: u32) -> bool {
+    use nix::{sys::signal::kill, unistd::Pid};
+
+    match kill(Pid::from_raw(pid as i32), None) {
+        Ok(()) => true,
+        Err(nix::errno::Errno::ESRCH) => false,
+        // EPERM means the process exists but we can't signal it.
+        Err(_) => true,
+    }
+}
+
+#[cfg(windows)]
+pub(crate) fn is_pid_alive(pid: u32) -> bool {
+    // Untested AI slop
+    std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+        .unwrap_or(false)
+}
+
+/// Poll `watch_pid` until it exits, then clean up the given container and/or process.
+/// Runs as the `cleanup-guardian` hidden subcommand, fully detached from the terminal.
+#[cfg(unix)]
+pub fn run_cleanup_guardian(
+    watch_pid: u32,
+    container_runtime: Option<String>,
+    container_name: Option<String>,
+    process_pid: Option<u32>,
+) {
+    while is_pid_alive(watch_pid) {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+
+    if let (Some(runtime), Some(name)) = (container_runtime, container_name) {
+        let _ = std::process::Command::new(&runtime)
+            .args(["rm", "-f", &name])
+            .output();
+    }
+
+    if let Some(pid) = process_pid {
+        let pid = nix::unistd::Pid::from_raw(pid as i32);
+        let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM);
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGKILL);
+    }
 }
 
 /// Creates a listening socket using socket2

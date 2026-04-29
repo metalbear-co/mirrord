@@ -3,10 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::Level;
 
-use crate::{
-    chain::IPTableChain, error::IPTablesResult, redirect::Redirect, IPTables,
-    IPTABLE_EXCLUDE_FROM_MESH,
-};
+use crate::{IPTables, chain::IPTableChain, error::IPTablesResult, redirect::Redirect};
 
 /// Type used for excluding certain ports from the service mesh proxy.
 #[derive(Debug)]
@@ -48,9 +45,7 @@ where
         self.managed.inner().remove_rule(
             Self::ENTRYPOINT,
             &format!("-j {}", self.managed.chain_name()),
-        )?;
-
-        Ok(())
+        )
     }
 
     pub fn add_exclusion(&self, port: u16) -> IPTablesResult<()> {
@@ -59,8 +54,7 @@ where
     }
 
     pub fn remove_exclusion(&self, port: u16) -> IPTablesResult<()> {
-        self.managed.remove_rule(Self::accept_port_rule(port))?;
-        Ok(())
+        self.managed.remove_rule(Self::accept_port_rule(port))
     }
 
     fn accept_port_rule(port: u16) -> String {
@@ -80,15 +74,15 @@ where
     T: Redirect,
 {
     #[tracing::instrument(level = Level::TRACE, skip_all)]
-    pub fn create(ipt: Arc<IPT>, inner: Box<T>) -> IPTablesResult<Self> {
-        let exclusion = MeshExclusion::create(ipt, IPTABLE_EXCLUDE_FROM_MESH)?;
+    pub fn create(ipt: Arc<IPT>, chain_name: &str, inner: Box<T>) -> IPTablesResult<Self> {
+        let exclusion = MeshExclusion::create(ipt, chain_name)?;
 
         Ok(WithMeshExclusion { exclusion, inner })
     }
 
     #[tracing::instrument(level = Level::TRACE, skip_all)]
-    pub fn load(ipt: Arc<IPT>, inner: Box<T>) -> IPTablesResult<Self> {
-        let exclusion = MeshExclusion::load(ipt, IPTABLE_EXCLUDE_FROM_MESH)?;
+    pub fn load(ipt: Arc<IPT>, chain_name: &str, inner: Box<T>) -> IPTablesResult<Self> {
+        let exclusion = MeshExclusion::load(ipt, chain_name)?;
 
         Ok(WithMeshExclusion { exclusion, inner })
     }
@@ -115,9 +109,12 @@ where
 
     #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     async fn unmount_entrypoint(&self) -> IPTablesResult<()> {
-        self.inner.unmount_entrypoint().await?;
+        // Don't fail early, so that we delete the second part even if the second part does not
+        // exist and its deletion therefore fails.
+        let inner_res = self.inner.unmount_entrypoint().await;
 
-        self.exclusion.unmount_entrypoint()
+        let exclusion_res = self.exclusion.unmount_entrypoint();
+        inner_res.and(exclusion_res)
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
@@ -138,21 +135,22 @@ mod tests {
     use mockall::predicate::eq;
 
     use super::*;
-    use crate::MockIPTables;
+    use crate::{ChainNames, MockIPTables};
 
     #[test]
     fn default() {
+        let chain_names = ChainNames::legacy();
         let mut mock = MockIPTables::new();
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_EXCLUDE_FROM_MESH))
+            .with(eq(chain_names.exclude_from_mesh.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
                 eq("PREROUTING"),
-                eq(format!("-j {}", IPTABLE_EXCLUDE_FROM_MESH)),
+                eq(format!("-j {}", chain_names.exclude_from_mesh)),
                 eq(1),
             )
             .times(1)
@@ -160,7 +158,7 @@ mod tests {
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_EXCLUDE_FROM_MESH),
+                eq(chain_names.exclude_from_mesh.clone()),
                 eq("-p tcp --dport 1337 -j ACCEPT"),
                 eq(1),
             )
@@ -169,7 +167,7 @@ mod tests {
 
         mock.expect_remove_rule()
             .with(
-                eq(IPTABLE_EXCLUDE_FROM_MESH),
+                eq(chain_names.exclude_from_mesh.clone()),
                 eq("-p tcp --dport 1337 -j ACCEPT"),
             )
             .times(1)
@@ -178,18 +176,18 @@ mod tests {
         mock.expect_remove_rule()
             .with(
                 eq("PREROUTING"),
-                eq(format!("-j {}", IPTABLE_EXCLUDE_FROM_MESH)),
+                eq(format!("-j {}", chain_names.exclude_from_mesh)),
             )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_EXCLUDE_FROM_MESH))
+            .with(eq(chain_names.exclude_from_mesh.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
-        let exclusion =
-            MeshExclusion::create(mock.into(), IPTABLE_EXCLUDE_FROM_MESH).expect("Create Failed");
+        let exclusion = MeshExclusion::create(mock.into(), &chain_names.exclude_from_mesh)
+            .expect("Create Failed");
 
         assert!(exclusion.mount_entrypoint().is_ok());
 

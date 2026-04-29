@@ -1,10 +1,43 @@
-use std::net::IpAddr;
+use std::{fmt, net::IpAddr, path::PathBuf};
 
+use clap::ValueEnum;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::config::source::MirrordConfigSource;
+
+/// Container runtimes supported by mirrord.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default, ValueEnum, Hash,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ContainerRuntime {
+    /// Docker container runtime. (default)
+    #[default]
+    Docker,
+    /// Podman container runtime.
+    Podman,
+    /// nerdctl container runtime (containerd).
+    Nerdctl,
+}
+
+impl ContainerRuntime {
+    /// Returns the command name for this runtime.
+    pub fn command(&self) -> &'static str {
+        match self {
+            Self::Docker => "docker",
+            Self::Podman => "podman",
+            Self::Nerdctl => "nerdctl",
+        }
+    }
+}
+
+impl fmt::Display for ContainerRuntime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.command())
+    }
+}
 
 static DEFAULT_CLI_IMAGE: &str = concat!(
     "ghcr.io/metalbear-co/mirrord-cli:",
@@ -49,10 +82,7 @@ pub struct ContainerConfig {
     /// ### container.cli_image_lib_path {#container-cli_image}
     ///
     /// Path of the mirrord-layer lib inside the specified mirrord-cli image.
-    ///
-    /// Defaults to `"/opt/mirrord/lib/libmirrord_layer.so"`.
-    #[config(default = "/opt/mirrord/lib/libmirrord_layer.so")]
-    pub cli_image_lib_path: String,
+    pub cli_image_lib_path: Option<String>,
 
     /// ### container.override_host_ip {#container-override_host_ip}
     ///
@@ -71,9 +101,36 @@ pub struct ContainerConfig {
     /// one bound as host.
     ///
     /// - If you're running inside WSL, and encountering problems, try setting
-    ///   `external_proxy.host_ip` T `0.0.0.0`, and this to the internal container runtime address
+    ///   `external_proxy.host_ip` to `0.0.0.0`, and this to the internal container runtime address
     ///   (for docker, this  would be what `host.docker.internal` resolved to, which by default is
     ///   `192.168.65.254`). You can find this ip by resolving it from inside a running container,
     ///   e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`
     pub override_host_ip: Option<IpAddr>,
+
+    /// ### container.cli_tls_path {#container-cli_tls_path}
+    ///
+    /// When using`mirrord container` with external_proxy TLS enabled (is enabled by default), you
+    /// can specify the path where the certificate `.pem` file will be created, in the cli
+    /// container.
+    ///
+    /// Defaults to `"/opt/mirrord/tls/mirrord-tls.pem"`.
+    #[config(default = PathBuf::from(r"/opt/mirrord/tls/mirrord-tls.pem"))]
+    pub cli_tls_path: PathBuf,
+
+    /// ### container.platform {#container-platform}
+    ///
+    /// Platform specification for the target container (e.g., "linux/amd64", "linux/arm64").
+    ///
+    /// When specified, the target container will run with this platform, while the internal proxy
+    /// container will still run on the native platform and contain both architectures (x64/arm64).
+    /// The LD_PRELOAD will automatically use the correct architecture.
+    ///
+    /// ```json
+    /// {
+    ///   "container": {
+    ///     "platform": "linux/amd64"
+    ///   }
+    /// }
+    /// ```
+    pub platform: Option<String>,
 }

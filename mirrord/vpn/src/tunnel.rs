@@ -1,7 +1,7 @@
 use std::{io, time::Duration};
 
 use futures::{Sink, SinkExt, Stream, StreamExt};
-use mirrord_protocol::{vpn::ServerVpn, DaemonMessage};
+use mirrord_protocol::{DaemonMessage, vpn::ServerVpn};
 
 use crate::{agent::VpnAgent, error::VpnError};
 
@@ -27,15 +27,13 @@ where
 
         tokio::pin!(stream);
 
-        agent.open_socket().await?;
+        agent.open_socket().await;
 
         'main: loop {
             tokio::select! {
                 packet = stream.next() => {
                     let packet = packet.unwrap().unwrap();
-                    agent
-                        .send_packet(packet)
-                        .await?
+                    agent.send_packet(packet).await
                 }
                 message = agent.next() => {
                     match message {

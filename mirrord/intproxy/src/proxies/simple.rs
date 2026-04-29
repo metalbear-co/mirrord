@@ -5,19 +5,20 @@ use std::collections::HashMap;
 
 use mirrord_intproxy_protocol::{LayerId, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{
-    dns::{AddressFamily, GetAddrInfoRequestV2, GetAddrInfoResponse, ADDRINFO_V2_VERSION},
-    ClientMessage, DaemonMessage, GetEnvVarsRequest, RemoteResult,
+    ClientMessage, DaemonMessage, DnsLookupError, GetEnvVarsRequest, RemoteResult,
+    ResolveErrorKindInternal, ResponseError,
+    dns::{ADDRINFO_V2_VERSION, AddressFamily, GetAddrInfoRequestV2, GetAddrInfoResponse},
 };
 use semver::Version;
 use thiserror::Error;
 use tracing::Level;
 
 use crate::{
-    background_tasks::{BackgroundTask, MessageBus},
-    error::{agent_lost_io_error, UnexpectedAgentMessage},
-    main_tasks::ToLayer,
-    request_queue::RequestQueue,
     ProxyMessage,
+    background_tasks::{BackgroundTask, MessageBus},
+    error::{UnexpectedAgentMessage, agent_lost_io_error},
+    main_tasks::{ConnectionRefresh, ToLayer},
+    request_queue::RequestQueue,
 };
 
 #[derive(Debug)]
@@ -28,12 +29,22 @@ pub enum SimpleProxyMessage {
     GetEnvRes(RemoteResult<HashMap<String, String>>),
     /// Protocol version was negotiated with the agent.
     ProtocolVersion(Version),
-    ConnectionRefresh,
+    ConnectionRefresh(ConnectionRefresh),
 }
 
 #[derive(Error, Debug)]
-#[error(transparent)]
-pub struct SimpleProxyError(#[from] UnexpectedAgentMessage);
+pub enum SimpleProxyError {
+    #[error(transparent)]
+    UnexpectedAgentMessage(#[from] UnexpectedAgentMessage),
+
+    #[error(
+        "mirrord-agent failed to perform DNS lookup, permission denied. \
+        This indicates that your Kubernetes cluster is hardened, \
+        and the agent might not be fully functional. \
+        You might need to enable the `agent.privileged` configuration option"
+    )]
+    DnsPermissionDenied,
+}
 
 pub enum AgentLostSimpleResponseKind {
     AddrInfo,
@@ -76,7 +87,6 @@ impl From<AgentLostSimpleResponse> for ToLayer {
 
 /// For passing messages between the layer and the agent without custom internal logic.
 /// Run as a [`BackgroundTask`].
-#[derive(Default)]
 pub struct SimpleProxy {
     /// For [`GetAddrInfoRequestV2`]s.
     addr_info_reqs: RequestQueue,
@@ -85,9 +95,20 @@ pub struct SimpleProxy {
     /// [`mirrord_protocol`] version negotiated with the agent.
     /// Determines whether we can use `GetAddrInfoRequestV2`.
     protocol_version: Option<Version>,
+    /// Whether to consider permission errors in DNS lookup to be fatal.
+    dns_permission_error_fatal: bool,
 }
 
 impl SimpleProxy {
+    pub fn new(dns_permission_error_fatal: bool) -> Self {
+        Self {
+            addr_info_reqs: Default::default(),
+            get_env_reqs: Default::default(),
+            protocol_version: Default::default(),
+            dns_permission_error_fatal,
+        }
+    }
+
     fn set_protocol_version(&mut self, version: Version) {
         self.protocol_version.replace(version);
     }
@@ -99,36 +120,45 @@ impl SimpleProxy {
             .is_some_and(|version| ADDRINFO_V2_VERSION.matches(version))
     }
 
-    #[tracing::instrument(level = Level::INFO, skip_all, ret, err)]
+    #[tracing::instrument(level = Level::INFO, skip_all)]
     async fn handle_connection_refresh(
         &mut self,
         message_bus: &mut MessageBus<Self>,
-    ) -> Result<(), SimpleProxyError> {
-        tracing::debug!(
-            num_responses = self.addr_info_reqs.len(),
-            "Flushing error responses to GetAddrInfoRequests"
-        );
-        while let Some((message_id, layer_id)) = self.addr_info_reqs.pop_front() {
-            message_bus
-                .send(ToLayer::from(AgentLostSimpleResponse::addr_info(
-                    layer_id, message_id,
-                )))
-                .await;
-        }
+        refresh: ConnectionRefresh,
+    ) {
+        match refresh {
+            ConnectionRefresh::Start => {
+                tracing::debug!(
+                    num_responses = self.addr_info_reqs.len(),
+                    "Flushing error responses to GetAddrInfoRequests"
+                );
+                while let Some((message_id, layer_id)) = self.addr_info_reqs.pop_front() {
+                    message_bus
+                        .send(ToLayer::from(AgentLostSimpleResponse::addr_info(
+                            layer_id, message_id,
+                        )))
+                        .await;
+                }
 
-        tracing::debug!(
-            num_responses = self.get_env_reqs.len(),
-            "Flushing error responses to GetEnvVarsRequests"
-        );
-        while let Some((message_id, layer_id)) = self.get_env_reqs.pop_front() {
-            message_bus
-                .send(ToLayer::from(AgentLostSimpleResponse::get_env(
-                    layer_id, message_id,
-                )))
-                .await;
-        }
+                tracing::debug!(
+                    num_responses = self.get_env_reqs.len(),
+                    "Flushing error responses to GetEnvVarsRequests"
+                );
+                while let Some((message_id, layer_id)) = self.get_env_reqs.pop_front() {
+                    message_bus
+                        .send(ToLayer::from(AgentLostSimpleResponse::get_env(
+                            layer_id, message_id,
+                        )))
+                        .await;
+                }
 
-        Ok(())
+                // Reset protocol version since we'll need another negotiation
+                // round for the new connection.
+                self.protocol_version = None;
+            }
+            ConnectionRefresh::End(tx_handle) => message_bus.set_agent_tx(tx_handle),
+            ConnectionRefresh::Request => {}
+        }
     }
 }
 
@@ -145,7 +175,7 @@ impl BackgroundTask for SimpleProxy {
                     self.addr_info_reqs.push_back(message_id, session_id);
                     if self.addr_info_v2() {
                         message_bus
-                            .send(ClientMessage::GetAddrInfoRequestV2(req))
+                            .send_agent(ClientMessage::GetAddrInfoRequestV2(req))
                             .await;
                     } else {
                         if matches!(req.family, AddressFamily::Ipv6Only) {
@@ -157,14 +187,23 @@ impl BackgroundTask for SimpleProxy {
                             )
                         }
                         message_bus
-                            .send(ClientMessage::GetAddrInfoRequest(req.into()))
+                            .send_agent(ClientMessage::GetAddrInfoRequest(req.into()))
                             .await;
                     }
+                }
+                SimpleProxyMessage::AddrInfoRes(GetAddrInfoResponse(Err(
+                    ResponseError::DnsLookup(DnsLookupError {
+                        kind: ResolveErrorKindInternal::PermissionDenied,
+                    }),
+                ))) if self.dns_permission_error_fatal => {
+                    return Err(SimpleProxyError::DnsPermissionDenied);
                 }
                 SimpleProxyMessage::AddrInfoRes(res) => {
                     let (message_id, layer_id) =
                         self.addr_info_reqs.pop_front().ok_or_else(|| {
-                            UnexpectedAgentMessage(DaemonMessage::GetAddrInfoResponse(res.clone()))
+                            UnexpectedAgentMessage(
+                                DaemonMessage::GetAddrInfoResponse(res.clone()).into(),
+                            )
                         })?;
                     message_bus
                         .send(ToLayer {
@@ -177,13 +216,16 @@ impl BackgroundTask for SimpleProxy {
                 SimpleProxyMessage::GetEnvReq(message_id, layer_id, req) => {
                     self.get_env_reqs.push_back(message_id, layer_id);
                     message_bus
-                        .send(ClientMessage::GetEnvVarsRequest(req))
+                        .send_agent(ClientMessage::GetEnvVarsRequest(req))
                         .await;
                 }
                 SimpleProxyMessage::GetEnvRes(res) => {
                     let (message_id, layer_id) =
                         self.get_env_reqs.pop_front().ok_or_else(|| {
-                            UnexpectedAgentMessage(DaemonMessage::GetEnvVarsResponse(res.clone()))
+                            UnexpectedAgentMessage(
+                                DaemonMessage::GetEnvVarsResponse(res.clone().map(Into::into))
+                                    .into(),
+                            )
                         })?;
                     message_bus
                         .send(ToLayer {
@@ -194,8 +236,9 @@ impl BackgroundTask for SimpleProxy {
                         .await
                 }
                 SimpleProxyMessage::ProtocolVersion(version) => self.set_protocol_version(version),
-                SimpleProxyMessage::ConnectionRefresh => {
-                    self.handle_connection_refresh(message_bus).await?
+                SimpleProxyMessage::ConnectionRefresh(new_agent_tx) => {
+                    self.handle_connection_refresh(message_bus, new_agent_tx)
+                        .await
                 }
             }
         }

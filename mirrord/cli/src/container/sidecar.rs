@@ -1,9 +1,9 @@
-use std::{fmt, io, net::SocketAddr, ops::Not, path::PathBuf, process::Stdio, time::Duration};
+use std::{fmt, io, net::SocketAddr, ops::Not, process::Stdio, time::Duration};
 
 use futures::{FutureExt, Stream};
 use mirrord_analytics::ExecutionKind;
 use mirrord_config::{
-    config::ConfigError, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV, LayerConfig,
+    LayerConfig, config::ConfigError, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
@@ -13,18 +13,18 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader, Lines},
     process::{ChildStderr, ChildStdout, Command},
 };
-use tokio_stream::{wrappers::LinesStream, StreamExt};
+use tokio_stream::{StreamExt, wrappers::LinesStream};
 use tracing::Level;
 
 use super::command_display::CommandDisplay;
 use crate::{
+    CliError, ContainerRuntime,
     config::ContainerRuntimeCommand,
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     container::{command_builder::RuntimeCommandBuilder, command_display::CommandExt},
     error::ContainerError,
     execution::MIRRORD_EXECUTION_KIND_ENV,
     util::MIRRORD_CONSOLE_ADDR_ENV,
-    CliError, ContainerRuntime,
 };
 
 /// Errors that can occure when creating or starting the internal proxy sidecar container.
@@ -134,11 +134,15 @@ impl IntproxySidecar {
             let client_pem_path = tls.client_pem().to_str().ok_or_else(|| {
                 IntproxySidecarError::NonUtf8Path(tls.client_pem().to_string_lossy().into_owned())
             })?;
-            let container_path = "/tmp/mirrord-tls.pem";
-            sidecar_command.add_volume(client_pem_path, container_path, true);
+
+            sidecar_command.add_volume(
+                client_pem_path,
+                &config.container.cli_tls_path.to_string_lossy(),
+                true,
+            );
             AgentConnectInfo::ExternalProxy {
                 proxy_addr: extproxy_addr,
-                tls_pem: Some(PathBuf::from(container_path)),
+                tls_pem: Some(config.container.cli_tls_path.clone()),
             }
         } else {
             AgentConnectInfo::ExternalProxy {
@@ -154,6 +158,11 @@ impl IntproxySidecar {
 
         let cleanup = config.container.cli_prevent_cleanup.not().then_some("--rm");
 
+        let mut intproxy_args = vec![&config.container.cli_image, "mirrord", "intproxy"];
+        if let Some(log_destination) = config.internal_proxy.log_destination.as_os_str().to_str() {
+            intproxy_args.extend_from_slice(&["--logfile", log_destination]);
+        }
+
         let sidecar_container_command = ContainerRuntimeCommand::create(
             config
                 .container
@@ -161,7 +170,7 @@ impl IntproxySidecar {
                 .iter()
                 .map(String::as_str)
                 .chain(cleanup)
-                .chain([&config.container.cli_image, "mirrord", "intproxy"]),
+                .chain(intproxy_args),
         );
 
         let (runtime_binary, sidecar_args) = sidecar_command
@@ -206,6 +215,7 @@ impl IntproxySidecar {
                 error,
             })?;
 
+        let pid = child.id();
         let mut stdout = BufReader::new(child.stdout.take().expect("was piped")).lines();
         let mut stderr = BufReader::new(child.stderr.take().expect("was piped")).lines();
 
@@ -236,7 +246,14 @@ impl IntproxySidecar {
             })?,
         };
 
-        Ok((intproxy_addr, SidecarLogs { stdout, stderr }))
+        Ok((
+            intproxy_addr,
+            SidecarLogs {
+                pid,
+                stdout,
+                stderr,
+            },
+        ))
     }
 
     /// Reads all ready lines from the given reader.
@@ -259,11 +276,17 @@ impl IntproxySidecar {
 
 /// Live logs from a started [`IntproxySidecar`].
 pub struct SidecarLogs {
+    pid: Option<u32>,
     stdout: Lines<BufReader<ChildStdout>>,
     stderr: Lines<BufReader<ChildStderr>>,
 }
 
 impl SidecarLogs {
+    /// Returns the pid of the runtime attach client process that started the sidecar logs stream.
+    pub fn pid(&self) -> Option<u32> {
+        self.pid
+    }
+
     /// Returns the logs as a [`Stream`] of lines,
     /// from both stdout and stderr.
     pub fn into_merged_lines(self) -> impl 'static + Stream<Item = io::Result<String>> {
@@ -301,7 +324,7 @@ async fn exec_and_get_first_line(mut command: Command) -> Result<String, Intprox
             return Err(IntproxySidecarError::CommandExecuteError {
                 command: command.display(),
                 error,
-            })
+            });
         }
         Ok(Ok(output)) => output,
     };

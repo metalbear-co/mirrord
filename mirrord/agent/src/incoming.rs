@@ -4,21 +4,29 @@ mod composed;
 mod connection;
 mod error;
 mod iptables;
+mod mirror_handle;
 mod steal_handle;
 mod task;
+pub mod tls;
 
 use std::{
+    fmt,
     future::Future,
     io,
     net::{IpAddr, SocketAddr},
 };
 
 use composed::ComposedRedirector;
-pub use connection::RedirectedConnection;
-pub use error::RedirectorTaskError;
+pub use connection::{
+    IncomingStream, IncomingStreamItem,
+    http::{MirroredHttp, RedirectedHttp, ResponseBodyProvider, ResponseProvider, StolenHttp},
+    tcp::{RedirectedTcp, StolenTcp},
+};
+pub use error::{ConnError, RedirectorTaskError};
 use iptables::IpTablesRedirector;
-pub use steal_handle::StealHandle;
-pub use task::RedirectorTask;
+pub use mirror_handle::{MirrorHandle, MirroredTraffic};
+pub use steal_handle::{StealHandle, StolenTraffic};
+pub use task::{RedirectorTask, RedirectorTaskConfig};
 use tokio::net::TcpStream;
 
 /// A component that implements redirecting incoming TCP connections.
@@ -71,6 +79,15 @@ pub struct Redirected {
     destination: SocketAddr,
 }
 
+impl fmt::Debug for Redirected {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Redirected")
+            .field("source", &self.source)
+            .field("destination", &self.destination)
+            .finish()
+    }
+}
+
 /// Creates a [`ComposedRedirector`] based on [`IpTablesRedirector`]s.
 ///
 /// Fails when no inner redirector can be created.
@@ -79,59 +96,79 @@ pub struct Redirected {
 ///
 /// * `flush_connections` - passed to inner redirectors.
 /// * `pod_ips` - passed to inner redirectors.
-/// * `support_ipv6` - if set, this function will attempt to create both an IPv4 and an IPv6
-///   redirector. Otherwise, it will only attempt to create an IPv4 redirector.
+/// * `support_ipv4` / `support_ipv6` - control whether we should try to create IPv4 and IPv6
+///   redirectors.
 pub async fn create_iptables_redirector(
     flush_connections: bool,
     pod_ips: &[IpAddr],
-    support_ipv6: bool,
     with_mesh_exclusion: Option<u16>,
+    support_ipv4: bool,
+    support_ipv6: bool,
 ) -> io::Result<ComposedRedirector<IpTablesRedirector>> {
-    let ipv4 = IpTablesRedirector::create(flush_connections, pod_ips, false, with_mesh_exclusion)
-        .await
-        .inspect_err(|error| {
-            tracing::error!(
-                %error,
-                "Failed to create an IPv4 traffic redirector",
-            )
-        });
-
-    let ipv6 = if support_ipv6 {
-        IpTablesRedirector::create(flush_connections, pod_ips, true, with_mesh_exclusion)
-            .await
-            .inspect_err(|error| {
-                tracing::error!(
-                    %error,
-                    "Failed to create an IPv6 traffic redirector",
-                )
-            })
-            .into()
+    let ipv4 = if support_ipv4 {
+        Some(
+            IpTablesRedirector::create(flush_connections, pod_ips, false, with_mesh_exclusion)
+                .await
+                .inspect_err(
+                    |error| tracing::error!(%error, "Failed to create an IPv4 traffic redirector"),
+                ),
+        )
     } else {
         None
     };
 
-    let redirectors = match (ipv4, ipv6) {
-        (Ok(ipv4), ipv6) => {
-            let mut redirectors = vec![ipv4];
-            redirectors.extend(ipv6.transpose().ok().flatten());
-            redirectors
-        }
-        (Err(error), None | Some(Err(..))) => return Err(error),
-        (Err(..), Some(Ok(ipv6))) => vec![ipv6],
+    let ipv6 = if support_ipv6 {
+        Some(
+            IpTablesRedirector::create(flush_connections, pod_ips, true, with_mesh_exclusion)
+                .await
+                .inspect_err(
+                    |error| tracing::error!(%error, "Failed to create an IPv6 traffic redirector"),
+                ),
+        )
+    } else {
+        None
     };
+
+    let mut redirectors = Vec::new();
+    let mut last_error = None;
+
+    for result in [ipv4, ipv6].into_iter().flatten() {
+        match result {
+            Ok(redirector) => redirectors.push(redirector),
+            Err(error) => last_error = Some(error),
+        }
+    }
+
+    if redirectors.is_empty() {
+        return Err(last_error.unwrap_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "at least one of IPv4 or IPv6 must be supported",
+            )
+        }));
+    }
 
     Ok(ComposedRedirector::new(redirectors))
 }
 
 #[cfg(test)]
 pub mod test {
-    use std::{collections::HashSet, error::Error, ops::Not};
+    use std::{
+        collections::HashSet,
+        error::Error,
+        net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+        ops::Not,
+    };
 
-    use tokio::sync::{mpsc, watch};
+    use tokio::{
+        net::{TcpListener, TcpStream},
+        sync::{mpsc, watch},
+    };
 
     use super::{PortRedirector, Redirected};
 
     /// Implementation of [`PortRedirector`] that can be used in unit tests.
+    /// Receives connections sent from [`DummyConnectionTx`].
     pub struct DummyRedirector {
         state: watch::Sender<DummyRedirectorState>,
         conn_rx: mpsc::Receiver<Redirected>,
@@ -166,7 +203,7 @@ pub mod test {
         pub fn new() -> (
             Self,
             watch::Receiver<DummyRedirectorState>,
-            mpsc::Sender<Redirected>,
+            DummyConnectionTx,
         ) {
             let (conn_tx, conn_rx) = mpsc::channel(8);
             let (state_tx, state_rx) = watch::channel(DummyRedirectorState::default());
@@ -177,7 +214,11 @@ pub mod test {
                     conn_rx,
                 },
                 state_rx,
-                conn_tx,
+                DummyConnectionTx {
+                    tx: conn_tx,
+                    v4_listener: None,
+                    v6_listener: None,
+                },
             )
         }
     }
@@ -230,6 +271,52 @@ pub mod test {
                 .recv()
                 .await
                 .ok_or_else(|| "channel closed".into())
+        }
+    }
+
+    /// Used for simulating incoming connections from the outside world.
+    pub struct DummyConnectionTx {
+        tx: mpsc::Sender<Redirected>,
+        v4_listener: Option<TcpListener>,
+        v6_listener: Option<TcpListener>,
+    }
+
+    impl DummyConnectionTx {
+        pub async fn make_connection(&mut self, original_destination: SocketAddr) -> TcpStream {
+            let (listener, addr) = if original_destination.is_ipv4() {
+                (
+                    &mut self.v4_listener,
+                    SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
+                )
+            } else {
+                (
+                    &mut self.v6_listener,
+                    SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
+                )
+            };
+
+            let listener = match listener {
+                Some(listener) => listener,
+                None => {
+                    let new_listener = TcpListener::bind(addr).await.unwrap();
+                    listener.insert(new_listener)
+                }
+            };
+
+            let ((server_stream, peer_addr), client_stream) = tokio::try_join!(
+                listener.accept(),
+                TcpStream::connect(listener.local_addr().unwrap()),
+            )
+            .unwrap();
+
+            let redirected = Redirected {
+                stream: server_stream,
+                source: peer_addr,
+                destination: original_destination,
+            };
+            self.tx.send(redirected).await.unwrap();
+
+            client_stream
         }
     }
 }

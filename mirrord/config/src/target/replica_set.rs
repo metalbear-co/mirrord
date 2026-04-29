@@ -3,7 +3,7 @@ use std::str::Split;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{FromSplit, FAIL_PARSE_DEPLOYMENT_OR_POD};
+use super::{FAIL_PARSE_DEPLOYMENT_OR_POD, FromSplit};
 use crate::config::{ConfigError, Result};
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]

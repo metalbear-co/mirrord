@@ -3,27 +3,26 @@
 
 use std::{collections::BTreeMap, path::PathBuf, sync::Once};
 
-use chrono::{Timelike, Utc};
 use k8s_openapi::api::core::v1::Service;
 use kube::{api::GroupVersionKind, discovery, Client, Config, Resource};
 use mirrord_operator::crd::MirrordOperatorCrd;
-pub use process::TestProcess;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest::{RequestBuilder, StatusCode};
 use rstest::*;
 use serde_json::{json, Value};
 
-pub(crate) mod application;
-pub(crate) mod cluster_resource;
-pub(crate) mod ipv6;
-pub(crate) mod kube_service;
-pub(crate) mod port_forwarder;
-pub mod process;
-pub(crate) mod resource_guard;
-pub(crate) mod run_command;
-pub(crate) mod services;
-pub mod sqs_resources;
-pub(crate) mod watch;
+pub mod application;
+pub mod cluster_resource;
+pub mod ipv6;
+pub mod kube_service;
+pub mod port_forwarder;
+pub mod resource_guard;
+pub mod services;
+
+#[cfg(target_os = "windows")]
+pub mod windows;
+
+pub mod watch;
 
 const TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 pub const CONTAINER_NAME: &str = "test";
@@ -44,16 +43,10 @@ pub fn get_test_resource_label_map() -> BTreeMap<String, String> {
 }
 
 /// Creates a random string of 7 alphanumeric lowercase characters.
-pub(crate) fn random_string() -> String {
+pub fn random_string() -> String {
     Alphanumeric
         .sample_string(&mut rand::rng(), 7)
         .to_ascii_lowercase()
-}
-
-/// Returns string with time format of hh:mm:ss
-fn format_time() -> String {
-    let now = Utc::now();
-    format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
 }
 
 static CRYPTO_PROVIDER_INSTALLED: Once = Once::new();

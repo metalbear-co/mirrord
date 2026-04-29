@@ -7,12 +7,12 @@ use mirrord_protocol::FileRequest;
 use tokio::time;
 
 use crate::{
+    IntProxy,
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     error::{ProxyRuntimeError, ProxyStartupError},
     layer_conn::LayerConnection,
     layer_initializer::LayerInitializer,
     main_tasks::{FromLayer, MainTaskId, ProxyMessage},
-    IntProxy,
 };
 
 /// This struct is a strategy that handle failover logic for [`IntProxy`].
@@ -33,10 +33,6 @@ pub(super) struct FailoverStrategy {
 }
 
 impl FailoverStrategy {
-    pub fn fail_cause(&self) -> &ProxyRuntimeError {
-        &self.fail_cause
-    }
-
     fn has_layer_connections(&self) -> bool {
         !self.layers.is_empty()
     }
@@ -106,8 +102,15 @@ impl FailoverStrategy {
         update: TaskUpdate<ProxyMessage, ProxyRuntimeError>,
     ) {
         match (task_id, update) {
-            (MainTaskId::LayerConnection(LayerId(id)), TaskUpdate::Finished(Ok(()))) => {
-                tracing::trace!(layer_id = id, "Layer connection closed");
+            (MainTaskId::LayerConnection(LayerId(id)), TaskUpdate::Finished(result)) => {
+                match result {
+                    Ok(()) => {
+                        tracing::info!(layer_id = id, "Layer connection closed");
+                    }
+                    Err(error) => {
+                        tracing::error!(layer_id = id, %error, "Layer connection failed");
+                    }
+                }
                 self.layers.remove(&LayerId(id));
             }
             (task_id, TaskUpdate::Finished(res)) => match res {
@@ -164,18 +167,21 @@ impl FailoverStrategy {
     }
 
     async fn send_error_to_layer(&self, layer_id: LayerId, message_id: MessageId) {
-        if let Some(layer) = self.layers.get(&layer_id) {
-            layer
-                .send(LocalMessage {
-                    message_id,
-                    inner: ProxyToLayerMessage::ProxyFailed(self.fail_cause.to_string()),
-                })
-                .await;
-        } else {
-            tracing::warn!(
-                "Layer {:?} not found, but it was waiting for proxy to respond!",
-                layer_id
-            );
+        match self.layers.get(&layer_id) {
+            Some(layer) => {
+                layer
+                    .send(LocalMessage {
+                        message_id,
+                        inner: ProxyToLayerMessage::ProxyFailed(self.fail_cause.to_string()),
+                    })
+                    .await;
+            }
+            _ => {
+                tracing::warn!(
+                    "Layer {:?} not found, but it was waiting for proxy to respond!",
+                    layer_id
+                );
+            }
         }
     }
 }

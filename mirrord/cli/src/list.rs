@@ -2,19 +2,17 @@ use std::{sync::LazyLock, time::Instant};
 
 use futures::TryStreamExt;
 use k8s_openapi::api::core::v1::Namespace;
-use kube::Client;
 use mirrord_analytics::NullReporter;
-use mirrord_config::{config::ConfigContext, target::TargetType, LayerConfig};
-use mirrord_kube::{
-    api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
-    error::KubeApiError,
-};
+use mirrord_config::{LayerConfig, config::ConfigContext, target::TargetType};
+use mirrord_kube::{api::kubernetes::seeker::KubeResourceSeeker, error::KubeApiError};
 use mirrord_operator::client::OperatorApi;
 use semver::VersionReq;
-use serde::{ser::SerializeSeq, Serialize, Serializer};
+use serde::{Serialize, Serializer, ser::SerializeSeq};
 use tracing::Level;
 
-use crate::{util, CliError, CliResult, Format, ListTargetArgs};
+use crate::{
+    CliError, CliResult, Format, ListTargetArgs, kube::kube_client_from_layer_config, util,
+};
 
 /// Name of the environment variable used to specify which resource types to list with `mirrord ls`.
 /// Primarily used by the plugins when the user picks a target to fetch fewer targets at once.
@@ -52,7 +50,7 @@ struct FoundTargets {
 
     /// Current lookup namespace.
     ///
-    /// Taken from [`LayerConfig::target`], defaults to [`Client`]'s default namespace.
+    /// Taken from [`LayerConfig::target`], defaults to [`kube::Client`]'s default namespace.
     current_namespace: String,
 
     /// Available lookup namespaces.
@@ -69,31 +67,25 @@ impl FoundTargets {
     /// If `rich_output` is set:
     /// 1. returned [`FoundTargets`] will contain info about namespaces available in the cluster;
     /// 2. only deployment, rollout, and pod targets will be fetched.
-    #[tracing::instrument(level = Level::DEBUG, skip(config), name = "resolve_targets", err)]
+    #[tracing::instrument(level = Level::DEBUG, skip(layer_config), name = "resolve_targets", err)]
     async fn resolve(
-        config: LayerConfig,
+        layer_config: LayerConfig,
         rich_output: bool,
         target_types: Option<Vec<TargetType>>,
     ) -> CliResult<Self> {
-        let client = create_kube_config(
-            config.accept_invalid_certificates,
-            config.kubeconfig.clone(),
-            config.kube_context.clone(),
-        )
-        .await
-        .and_then(|config| Client::try_from(config).map_err(From::from))
-        .map_err(|error| {
-            CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed)
-        })?;
+        let client = kube_client_from_layer_config(&layer_config).await?;
 
         let start = Instant::now();
         let mut reporter = NullReporter::default();
-        let operator_api = if config.operator != Some(false)
-            && let Some(api) = OperatorApi::try_new(&config, &mut reporter).await?
+        let progress = mirrord_progress::NullProgress {};
+        let operator_api = if layer_config.operator != Some(false)
+            && let Some(api) = OperatorApi::try_new(&layer_config, &mut reporter, &progress).await?
         {
             tracing::debug!(elapsed_s = start.elapsed().as_secs_f32(), "Operator found");
 
-            let api = api.prepare_client_cert(&mut reporter).await;
+            let api = api
+                .with_client_certificate(&mut reporter, &progress, &layer_config)
+                .await;
 
             api.inspect_cert_error(
                 |error| tracing::error!(%error, "failed to prepare client certificate"),
@@ -106,18 +98,18 @@ impl FoundTargets {
 
         let seeker = KubeResourceSeeker {
             client: &client,
-            namespace: config
+            namespace: layer_config
                 .target
                 .namespace
                 .as_deref()
                 .unwrap_or(client.default_namespace()),
-            copy_target: config.feature.copy_target.enabled,
+            copy_target: layer_config.feature.copy_target.enabled,
         };
 
         let (targets, namespaces) = tokio::try_join!(
             async {
                 let paths = match (operator_api, target_types) {
-                    (None, _) if config.operator == Some(true) => {
+                    (None, _) if layer_config.operator == Some(true) => {
                         Err(CliError::OperatorNotInstalled)
                     }
 
@@ -181,7 +173,7 @@ impl FoundTargets {
             }
         )?;
 
-        let current_namespace = config
+        let current_namespace = layer_config
             .target
             .namespace
             .as_deref()

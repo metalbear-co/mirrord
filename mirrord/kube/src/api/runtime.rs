@@ -5,16 +5,16 @@ use std::{
     fmt::{self, Display, Formatter},
     future::Future,
     net::IpAddr,
-    ops::FromResidual,
+    ops::{FromResidual, Not},
     str::FromStr,
 };
 
 use k8s_openapi::{
+    NamespaceResourceScope,
     api::core::v1::{Container, ContainerPort, Node, Pod, Probe},
     apimachinery::pkg::util::intstr::IntOrString,
-    NamespaceResourceScope,
 };
-use kube::{api::ListParams, Api, Client, Resource};
+use kube::{Api, Client, Resource, api::ListParams};
 use mirrord_agent_env::mesh::MeshVendor;
 use mirrord_config::target::Target;
 use serde::de::DeserializeOwned;
@@ -27,6 +27,10 @@ use crate::{
         kubernetes::get_k8s_resource_api,
     },
     error::{KubeApiError, Result},
+    extract::{
+        FromResource,
+        metadata::{Name, Namespace},
+    },
     resolved::ResolvedTarget,
 };
 
@@ -79,6 +83,7 @@ pub struct RuntimeData {
     pub pod_ips: Vec<IpAddr>,
     pub pod_namespace: String,
     pub node_name: String,
+    pub node_hostname: Option<String>,
     pub container_id: String,
     pub container_runtime: ContainerRuntime,
     pub container_name: String,
@@ -97,24 +102,18 @@ pub struct RuntimeData {
 }
 
 impl RuntimeData {
+    /// Standard annotation containing the name of the [`Pod`]'s default container.
+    ///
+    /// See [Kubernetes docs](https://kubernetes.io/docs/reference/labels-annotations-taints/#kubectl-kubernetes-io-default-container).
+    pub const DEFAULT_CONTAINER_ANNOTATION: &str = "kubectl.kubernetes.io/default-container";
+
     /// Extracts data needed to create the mirrord-agent targeting the given [`Pod`].
     /// Verifies that the [`Pod`] is ready to be a target:
     /// 1. pod is in "Running" phase,
     /// 2. pod is not in deletion,
     /// 3. target container is ready.
     pub fn from_pod(pod: &Pod, container_name: Option<&str>) -> Result<Self> {
-        let pod_name = pod
-            .metadata
-            .name
-            .as_ref()
-            .ok_or_else(|| KubeApiError::missing_field(pod, ".metadata.name"))?
-            .to_owned();
-        let pod_namespace = pod
-            .metadata
-            .namespace
-            .as_ref()
-            .ok_or_else(|| KubeApiError::missing_field(pod, ".metadata.namespace"))?
-            .to_owned();
+        let (Name(pod_name), Namespace(pod_namespace)) = FromResource::from_resource(pod, &())?;
 
         let phase = pod
             .status
@@ -167,16 +166,18 @@ impl RuntimeData {
             .as_ref()
             .and_then(|status| status.container_statuses.as_ref())
             .ok_or_else(|| KubeApiError::missing_field(pod, ".status.containerStatuses"))?;
+        let default_container_name = pod
+            .metadata
+            .annotations
+            .as_ref()
+            .and_then(|annotations| annotations.get(Self::DEFAULT_CONTAINER_ANNOTATION))
+            .map(String::as_str);
 
-        if container_name.is_none() && container_statuses.len() > 1 {
-            tracing::trace!(
-                "Target has multiple containers and no container name was specified.\
-                Now filtering out mesh containers etc."
-            );
-        }
-
-        let (chosen_container, guessed_container) =
-            choose_container(container_name, container_statuses.as_ref());
+        let (chosen_container, guessed_container) = choose_container(
+            container_name,
+            default_container_name,
+            container_statuses.as_ref(),
+        );
 
         if guessed_container {
             tracing::warn!("mirrord picked first eligible container out of many");
@@ -213,7 +214,9 @@ impl RuntimeData {
                 return Err(KubeApiError::invalid_value(
                     pod,
                     ".status.containerStatuses.[].containerID",
-                    format_args!("failed to extract container runtime for `{container_name}`: `{container_id_full}`"),
+                    format_args!(
+                        "failed to extract container runtime for `{container_name}`: `{container_id_full}`"
+                    ),
                 ));
             }
         };
@@ -222,9 +225,10 @@ impl RuntimeData {
 
         Ok(RuntimeData {
             pod_ips,
-            pod_name,
-            pod_namespace,
+            pod_name: pod_name.to_owned(),
+            pod_namespace: pod_namespace.to_owned(),
             node_name,
+            node_hostname: None,
             container_id,
             container_runtime,
             container_name,
@@ -237,6 +241,28 @@ impl RuntimeData {
                 .unwrap_or_default(),
             containers_probe_ports,
         })
+    }
+
+    /// Resolves and stores `kubernetes.io/hostname` label from the target node when available.
+    /// This is best-effort and intentionally non-fatal.
+    #[tracing::instrument(level = Level::TRACE, skip(client))]
+    pub async fn try_resolve_node_hostname(&mut self, client: &Client) {
+        const NODE_HOSTNAME_LABEL: &str = "kubernetes.io/hostname";
+
+        if self.node_hostname.is_some() {
+            return;
+        }
+
+        let node_api: Api<Node> = Api::all(client.clone());
+
+        let resolved = node_api
+            .get_metadata(&self.node_name)
+            .await
+            .ok()
+            .and_then(|node| node.metadata.labels)
+            .and_then(|mut labels| labels.remove(NODE_HOSTNAME_LABEL));
+
+        self.node_hostname = resolved;
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(client), ret)]
@@ -266,20 +292,23 @@ impl RuntimeData {
         };
 
         loop {
-            let pods_on_node = pod_api.list(&list_params).await?;
+            let pods_on_node = pod_api.list_metadata(&list_params).await?;
 
             pod_count += pods_on_node.items.len();
 
             match pods_on_node.metadata.continue_ {
-                Some(next) => {
+                Some(next) if next.is_empty().not() => {
                     list_params = list_params.continue_token(&next);
                 }
-                None => break,
+                None | Some(..) => break,
             }
         }
 
         if allowed <= pod_count {
-            NodeCheck::Failed(node, pod_count)
+            NodeCheck::Failed {
+                node: Box::new(node),
+                pod_count,
+            }
         } else {
             NodeCheck::Success
         }
@@ -345,7 +374,14 @@ impl RuntimeData {
 #[derive(Debug)]
 pub enum NodeCheck {
     Success,
-    Failed(Node, usize),
+    Failed {
+        /// [`Node`] fetched from the API.
+        ///
+        /// Boxed due to large size (>1kb).
+        node: Box<Node>,
+        /// Count of pods found on the node.
+        pod_count: usize,
+    },
     Error(KubeApiError),
 }
 
@@ -415,7 +451,7 @@ pub trait RuntimeDataFromLabels {
         }
     }
 
-    fn name(&self) -> Cow<str>;
+    fn name(&self) -> Cow<'_, str>;
 
     fn container(&self) -> Option<&str>;
 }

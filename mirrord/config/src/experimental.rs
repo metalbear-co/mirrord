@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -16,12 +18,6 @@ pub struct ExperimentalConfig {
     /// <https://github.com/metalbear-co/mirrord/issues/2421#issuecomment-2093200904>
     #[config(default = true)]
     pub tcp_ping4_mock: bool,
-
-    /// ### _experimental_ readlink {#experimental-readlink}
-    ///
-    /// DEPRECATED, WILL BE REMOVED
-    #[config(default = false)]
-    pub readlink: bool,
 
     /// ### _experimental_ trust_any_certificate {#experimental-trust_any_certificate}
     ///
@@ -59,12 +55,6 @@ pub struct ExperimentalConfig {
     #[config(default = true)]
     pub use_dev_null: bool,
 
-    /// ### _experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}
-    ///
-    /// DEPRECATED, WILL BE REMOVED: moved to `feature.fs.readonly_file_buffer` as part of
-    /// stabilisation. See <https://github.com/metalbear-co/mirrord/issues/2069>.
-    pub readonly_file_buffer: Option<u64>,
-
     /// ### _experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}
     ///
     /// Sets a timeout for idle local HTTP connections (in milliseconds).
@@ -91,17 +81,109 @@ pub struct ExperimentalConfig {
 
     /// ### _experimental_ browser_extension_config {#experimental-browser_extension_config}
     ///
-    /// mirrord will either open a URL for initiating mirrord browser extension to
+    /// mirrord will open a URL for initiating mirrord browser extension to
     /// automatically inject HTTP header that matches the HTTP filter configured in
     /// `feature.network.incoming.http_filter.header_filter`.
     #[config(default = false)]
     pub browser_extension_config: bool,
+
+    /// ### _experimental_ sip_log_destination {#experimental-sip_log_destination}
+    ///
+    /// Writes basic fork-safe SIP patching logs to a destination file.
+    /// Useful for seeing the state of SIP when `stdout` may be affected by another process.
+    #[config(default = None)]
+    pub sip_log_destination: Option<PathBuf>,
+
+    /// ### _experimental_ hook_rename {#experimental-hook_rename}
+    ///
+    /// Enables hooking the `rename` function.
+    ///
+    /// Useful if you need file remapping and your application uses `rename`, i.e. `php-fpm`,
+    /// `twig`, to create and rename temporary files.
+    ///
+    /// DEPRECATED, WILL BE REMOVED
+    #[config(
+        default = true,
+        deprecated = "`hook_rename` is deprecated and is default to true."
+    )]
+    pub hook_rename: bool,
+
+    /// ### _experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}
+    ///
+    /// Whether to terminate the session when a permission denied error
+    /// occurs during DNS resolution. This error often means that the Kubernetes cluster is
+    /// hardened, and the mirrord-agent is not fully functional without `agent.privileged`
+    /// enabled.
+    ///
+    /// Defaults to `true`
+    ///
+    /// DEPRECATED, WILL BE REMOVED
+    #[config(
+        default = true,
+        deprecated = "`dns_permission_error_fatal` is deprecated and is default to true."
+    )]
+    pub dns_permission_error_fatal: bool,
+
+    /// ### _experimental_ force_hook_connect {#experimental-force_hook_connect}
+    ///
+    /// Forces hooking all instances of the connect function.
+    /// In very niche cases the connect function has multiple exports and this flag
+    /// makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>
+    ///
+    /// Defaults to `true`
+    ///
+    /// DEPRECATED, WILL BE REMOVED
+    #[config(
+        default = true,
+        deprecated = "`force_hook_connect` is deprecated and is default to true."
+    )]
+    pub force_hook_connect: bool,
+
+    /// ### _experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
+    ///
+    /// Enables better support for outgoing connections using
+    /// non-blocking TCP sockets. For technical reasons, enabling this
+    /// will cause `getsockname` to always return a localhost address.
+    ///
+    /// Defaults to `true` in OSS.
+    /// Defaults to `false` in mfT.
+    #[config(default = None)]
+    pub non_blocking_tcp_connect: Option<bool>,
+
+    /// ### _experimental_ dlopen_cgo {#experimental-dlopen_cgo}
+    ///
+    /// Useful when the user's application loads a c-shared golang library dynamically.
+    ///
+    /// Defaults to `false`.
+    #[config(default = false)]
+    pub dlopen_cgo: bool,
+
+    /// ### _experimental_ latency {#experimental-latency}
+    ///
+    /// Configuration for adding artificial latency to outgoing network operations.
+    #[config(nested)]
+    pub latency: LatencyConfig,
+
+    /// ### _experimental_ applev {#experimental-applev}
+    ///
+    /// Configuration for inspecting and modifying apple variables. macOS only.
+    pub applev: Option<AppleVariablesConfig>,
+
+    /// ### _experimental_ sip_utils {#experimental-sip_utils}
+    ///
+    /// Extract pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses
+    /// them in place of SIP-patching the originals.
+    /// This shouldn't be used unless someone from MetalBear/mirrord tells you to.
+    ///
+    /// Defaults to `true` in OSS.
+    /// Defaults to `false` in mfT.
+    #[config(default = None)]
+    pub sip_utils: Option<bool>,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("tcp_ping4_mock", self.tcp_ping4_mock);
-        analytics.add("readlink", self.readlink);
         analytics.add("trust_any_certificate", self.trust_any_certificate);
         analytics.add("enable_exec_hooks_linux", self.enable_exec_hooks_linux);
         analytics.add("hide_ipv6_interfaces", self.hide_ipv6_interfaces);
@@ -111,5 +193,47 @@ impl CollectAnalytics for &ExperimentalConfig {
             self.idle_local_http_connection_timeout,
         );
         analytics.add("browser_extension_config", self.browser_extension_config);
+        analytics.add(
+            "dns_permission_error_fatal",
+            self.dns_permission_error_fatal,
+        );
+        analytics.add("force_hook_connect", self.force_hook_connect);
+        if let Some(non_blocking_tcp_connect) = self.non_blocking_tcp_connect {
+            analytics.add("non_blocking_tcp_connect", non_blocking_tcp_connect);
+        }
+        analytics.add("dlopen_cgo", self.dlopen_cgo);
+        analytics.add("latency_transmit_delay", self.latency.transmit_delay);
+        analytics.add("latency_receive_delay", self.latency.receive_delay);
+        analytics.add("applev", self.applev.is_some());
+        if let Some(sip_utils) = self.sip_utils {
+            analytics.add("sip_utils", sip_utils);
+        }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
+pub struct AppleVariablesConfig {}
+
+/// Configuration for adding artificial latency to outgoing network operations.
+/// Useful for testing application behavior under network delay conditions.
+#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[config(map_to = "LatencyFileConfig", derive = "JsonSchema")]
+#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
+pub struct LatencyConfig {
+    /// ### _experimental_ latency.transmit_delay {#experimental-latency-transmit_delay}
+    ///
+    /// Delay in milliseconds for outgoing send operations (Layer → Agent).
+    ///
+    /// Defaults to `0` (no delay).
+    #[config(default = 0)]
+    pub transmit_delay: u64,
+
+    /// ### _experimental_ latency.receive_delay {#experimental-latency-receive_delay}
+    ///
+    /// Delay in milliseconds for outgoing receive operations (Agent → Layer).
+    ///
+    /// Defaults to `0` (no delay).
+    #[config(default = 0)]
+    pub receive_delay: u64,
 }

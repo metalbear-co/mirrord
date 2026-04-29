@@ -59,7 +59,7 @@ impl RuntimeCommandBuilder {
                 self.push_arg("-v");
                 self.push_arg(format!(
                     "{host_path}:{container_path}{}",
-                    readonly.then_some(":ro").unwrap_or_default()
+                    if readonly { ":ro" } else { Default::default() }
                 ));
             }
         }
@@ -85,6 +85,18 @@ impl RuntimeCommandBuilder {
             ContainerRuntime::Podman | ContainerRuntime::Docker | ContainerRuntime::Nerdctl => {
                 self.push_arg("--network");
                 self.push_arg(network);
+            }
+        }
+    }
+
+    pub fn add_platform<P>(&mut self, platform: P)
+    where
+        P: Into<String>,
+    {
+        match self.runtime {
+            ContainerRuntime::Podman | ContainerRuntime::Docker | ContainerRuntime::Nerdctl => {
+                self.push_arg("--platform");
+                self.push_arg(platform);
             }
         }
     }

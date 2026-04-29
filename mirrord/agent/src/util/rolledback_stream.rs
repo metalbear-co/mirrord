@@ -33,13 +33,6 @@ where
     }
 }
 
-impl<IO, B> RolledBackStream<IO, B> {
-    /// Returns a reference to the inner IO stream.
-    pub fn inner(&self) -> &IO {
-        &self.stream
-    }
-}
-
 impl<IO, B> AsyncRead for RolledBackStream<IO, B>
 where
     IO: AsyncRead + Unpin,

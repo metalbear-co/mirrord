@@ -3,7 +3,7 @@ import https from "node:https";
 console.log(">> test_outgoing_traffic_single_request");
 
 const options = {
-  hostname: "www.rust-lang.org",
+  hostname: "rust-lang.org",
   port: 443,
   path: "/",
   method: "GET",

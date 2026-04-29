@@ -5,8 +5,8 @@ use fancy_regex::Regex;
 use mirrord_agent_env::{envs, mesh::MeshVendor};
 
 use crate::{
-    error::IPTablesResult, output::OutputRedirect, prerouting::PreroutingRedirect,
-    redirect::Redirect, IPTables, IPTABLE_MESH,
+    ChainNames, IPTables, error::IPTablesResult, output::OutputRedirect,
+    prerouting::PreroutingRedirect, redirect::Redirect,
 };
 
 pub mod exclusion;
@@ -30,16 +30,17 @@ where
 {
     pub fn create(
         ipt: Arc<IPT>,
+        chain_names: &ChainNames,
         vendor: MeshVendor,
         pod_ips: Option<&str>,
     ) -> IPTablesResult<Self> {
-        let prerouting = PreroutingRedirect::create(ipt.clone())?;
+        let prerouting = PreroutingRedirect::create(ipt.clone(), chain_names.prerouting.clone())?;
 
         for port in Self::get_skip_ports(&ipt, &vendor)? {
             prerouting.add_rule(format!("-m multiport -p tcp ! --dports {port} -j RETURN"))?;
         }
 
-        let output = OutputRedirect::create(ipt, IPTABLE_MESH.to_string(), pod_ips)?;
+        let output = OutputRedirect::create(ipt, chain_names.mesh.clone(), pod_ips)?;
 
         Ok(MeshRedirect {
             prerouting,
@@ -48,9 +49,13 @@ where
         })
     }
 
-    pub fn load(ipt: Arc<IPT>, vendor: MeshVendor) -> IPTablesResult<Self> {
-        let prerouting = PreroutingRedirect::load(ipt.clone())?;
-        let output = OutputRedirect::load(ipt, IPTABLE_MESH.to_string())?;
+    pub fn load(
+        ipt: Arc<IPT>,
+        chain_names: &ChainNames,
+        vendor: MeshVendor,
+    ) -> IPTablesResult<Self> {
+        let prerouting = PreroutingRedirect::load(ipt.clone(), chain_names.prerouting.clone())?;
+        let output = OutputRedirect::load(ipt, chain_names.mesh.clone())?;
 
         Ok(MeshRedirect {
             prerouting,
@@ -97,10 +102,11 @@ where
     }
 
     async fn unmount_entrypoint(&self) -> IPTablesResult<()> {
-        self.prerouting.unmount_entrypoint().await?;
-        self.output.unmount_entrypoint().await?;
-
-        Ok(())
+        // Don't fail early, so that we delete the second part even if the second part does not
+        // exist and its deletion therefore fails.
+        let prerouting_res = self.prerouting.unmount_entrypoint().await;
+        let output_res = self.output.unmount_entrypoint().await;
+        prerouting_res.and(output_res)
     }
 
     async fn add_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
@@ -201,9 +207,7 @@ mod tests {
     use mockall::predicate::eq;
     use nix::unistd::getgid;
 
-    use crate::{
-        mesh::MeshRedirect, redirect::Redirect, MockIPTables, IPTABLE_MESH, IPTABLE_PREROUTING,
-    };
+    use crate::{ChainNames, MockIPTables, mesh::MeshRedirect, redirect::Redirect};
 
     fn create_mesh_list_values(mock: &mut MockIPTables) {
         mock.expect_list_rules()
@@ -234,19 +238,20 @@ mod tests {
 
     #[tokio::test]
     async fn add_redirect() {
+        let chain_names = ChainNames::legacy();
         let gid = getgid();
         let mut mock = MockIPTables::new();
 
         create_mesh_list_values(&mut mock);
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_PREROUTING))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_PREROUTING),
+                eq(chain_names.prerouting.clone()),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
@@ -254,13 +259,13 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_MESH))
+            .with(eq(chain_names.mesh.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_MESH),
+                eq(chain_names.mesh.clone()),
                 eq(format!("-m owner --gid-owner {gid} -p tcp  -j RETURN")),
                 eq(1),
             )
@@ -269,7 +274,7 @@ mod tests {
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_MESH),
+                eq(chain_names.mesh.clone()),
                 eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(2),
             )
@@ -277,17 +282,18 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_PREROUTING))
+            .with(eq(chain_names.prerouting.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_MESH))
+            .with(eq(chain_names.mesh.clone()))
             .times(1)
             .returning(|_| Ok(()));
 
-        let prerouting = MeshRedirect::create(Arc::new(mock), MeshVendor::Linkerd, None)
-            .expect("Unable to create");
+        let prerouting =
+            MeshRedirect::create(Arc::new(mock), &chain_names, MeshVendor::Linkerd, None)
+                .expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).await.is_ok());
     }

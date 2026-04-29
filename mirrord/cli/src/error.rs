@@ -1,7 +1,13 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
-use kube::core::ErrorResponse;
+#[cfg(feature = "wizard")]
+use axum::response::{IntoResponse, Response};
+use kube::{
+    self,
+    core::{Status, response::StatusSummary},
+};
 use miette::Diagnostic;
+use mirrord_auth::error::{ApiKeyError, CredentialStoreError};
 use mirrord_config::config::ConfigError;
 use mirrord_console::error::ConsoleError;
 use mirrord_intproxy::{
@@ -10,15 +16,20 @@ use mirrord_intproxy::{
 };
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
+use mirrord_protocol_io::ProtocolError;
 use mirrord_tls_util::SecureChannelError;
 use mirrord_vpn::error::VpnError;
 use reqwest::StatusCode;
 use thiserror::Error;
 
 use crate::{
+    ci::error::CiError,
     container::{CommandDisplay, IntproxySidecarError},
+    dump::DumpSessionError,
+    fix::FixKubeconfigError,
     port_forward::PortForwardError,
     profile::ProfileError,
+    up::UpCliError,
 };
 
 pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
@@ -29,9 +40,9 @@ const GENERAL_HELP: &str = r#"
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
->> Or join our Slack https://metalbear.co/slack and request help in #mirrord-help
+>> Or join our Slack https://metalbear.com/slack and request help in #mirrord-help
 
->> Or email us at hi@metalbear.co
+>> Or email us at hi@metalbear.com
 
 "#;
 
@@ -39,9 +50,9 @@ const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or Git
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
->> Or join our Slack https://metalbear.co/slack and request help in #mirrord-help
+>> Or join our Slack https://metalbear.com/slack and request help in #mirrord-help
 
->> Or email us at hi@metalbear.co
+>> Or email us at hi@metalbear.com
 
 "#;
 
@@ -62,6 +73,9 @@ pub(crate) enum ContainerError {
         error: io::Error,
         command: CommandDisplay,
     },
+
+    #[error("Unsupported platform used: {0}")]
+    UnsupportedPlatform(String),
 }
 
 /// Errors that can occur when executing the `mirrord extproxy` command.
@@ -91,6 +105,7 @@ pub(crate) enum ExternalProxyError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     OpenLogFile(String, std::io::Error),
 
+    #[cfg(not(target_os = "windows"))]
     #[error("Failed to set sid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     SetSid(nix::Error),
@@ -111,6 +126,7 @@ pub(crate) enum InternalProxyError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     ListenerSetup(std::io::Error),
 
+    #[cfg(not(target_os = "windows"))]
     #[error("Failed to set sid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     SetSid(nix::Error),
@@ -146,17 +162,11 @@ pub(crate) enum InternalProxyError {
 /// Errors that can occur when executing the `mirrord operator setup` command.
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum OperatorSetupError {
-    #[error("Failed to get latest mirrord operator version: {0}")]
-    #[diagnostic(help("Please check internet connection.{GENERAL_HELP}"))]
-    OperatorVersionCheck(#[from] reqwest::Error),
-
-    #[error("Failed to open output file at `{0}`: {1}")]
-    #[diagnostic(help("{GENERAL_HELP}"))]
-    OutputFileOpen(PathBuf, std::io::Error),
-
-    #[error("Failed to write mirrord operator setup: {0}")]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    SetupWrite(#[from] mirrord_operator::setup::SetupWriteError),
+    #[error("mirrord operator setup was deleted")]
+    #[diagnostic(help(
+        "Please use the helm chart instead https://github.com/metalbear-co/charts/"
+    ))]
+    Deleted,
 }
 
 #[derive(Debug, Error, Diagnostic)]
@@ -164,11 +174,15 @@ pub(crate) enum CliError {
     /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
     /// for more granular error detection.
     #[error("Failed to create Kubernetes API client: {0}")]
-    #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
+    #[diagnostic(help(
+        "Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"
+    ))]
     CreateKubeApiFailed(KubeApiError),
 
     #[error("Failed to list mirrord targets: {0}")]
-    #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
+    #[diagnostic(help(
+        "Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"
+    ))]
     ListTargetsFailed(KubeApiError),
 
     /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
@@ -236,8 +250,13 @@ pub(crate) enum CliError {
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
     ConfigError(#[from] mirrord_config::config::ConfigError),
 
+    #[error("Failed to run command `{command}` due to missing argument `{arg}`")]
+    MissingArg { command: String, arg: String },
+
     #[error("Failed to access env file at `{0}`: {1}")]
-    #[diagnostic(help("Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"))]
+    #[diagnostic(help(
+        "Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"
+    ))]
     EnvFileAccessError(PathBuf, dotenvy::Error),
 
     #[cfg(target_os = "macos")]
@@ -307,7 +326,7 @@ pub(crate) enum CliError {
     #[error("Feature `{0}` requires using mirrord operator")]
     #[diagnostic(help(
         "The mirrord operator is part of mirrord for Teams. \
-        You can get started with mirrord for Teams at this link: https://metalbear.co/mirrord/docs/overview/teams/?utm_source=errreqop&utm_medium=cli"
+        You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=requiresoperator&utm_medium=cli"
     ))]
     FeatureRequiresOperatorError(String),
 
@@ -318,23 +337,29 @@ pub(crate) enum CliError {
         operator_version: String,
     },
 
+    #[error("mirrord operator {0} failed: {1}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    OperatorBranchCreationFailed(OperatorOperation, String),
+
     #[error("mirrord operator API failed: {0} failed with {1}")]
     #[diagnostic(help(
     "Please check the following:
     1. The operator is running and the logs are not showing any errors.
-    2. You have sufficient permissions to port forward to the operator.
+    2. You have sufficient permissions to use the operator (mirrord-operator-user role bound to you)
 
     If you want to run without the operator, please set `\"operator\": false` in the mirrord configuration file.
 
-    Please remember that some features are supported only when using mirrord operator (https://metalbear.co/mirrord/docs/overview/teams?utm_source=erropfailed&utm_medium=cli#supported-features).{GENERAL_HELP}"))]
+    Please remember that some features are supported only when using mirrord operator (https://metalbear.com/mirrord/docs/overview/teams?utm_source=erropfailed&utm_medium=cli#supported-features).{GENERAL_HELP}"))]
     OperatorApiFailed(OperatorOperation, kube::Error),
 
     #[error("mirrord operator rejected {0}: {1}")]
-    #[diagnostic(help("If the problem refers to mirrord operator license, visit https://app.metalbear.co to manage or renew your license.{GENERAL_HELP}"))]
+    #[diagnostic(help(
+        "If the problem refers to mirrord operator license, visit https://app.metalbear.com to manage or renew your license.{GENERAL_HELP}"
+    ))]
     OperatorApiForbidden(OperatorOperation, String),
 
     #[error(
-        "mirrord operator license expired. Visit https://app.metalbear.co to renew your license"
+        "mirrord operator license expired. Visit https://app.metalbear.com to renew your license"
     )]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorLicenseExpired,
@@ -356,7 +381,7 @@ pub(crate) enum CliError {
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
         "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
-        Read more here: https://metalbear.co/mirrord/docs/overview/quick-start/#operator.{GENERAL_HELP}"
+        Read more here: https://metalbear.com/mirrord/docs/overview/quick-start/#operator.{GENERAL_HELP}"
     ))]
     OperatorNotInstalled,
 
@@ -365,7 +390,9 @@ pub(crate) enum CliError {
     OperatorReturnedUnknownTargetType(String),
 
     #[error("Failed to make secondary agent connection: {0}")]
-    #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
+    #[diagnostic(help(
+        "Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"
+    ))]
     PortForwardingSetupError(KubeApiError),
 
     #[error("Failed to make secondary agent connection (TLS): {0}")]
@@ -374,17 +401,25 @@ pub(crate) enum CliError {
     #[error("An error occurred in the port-forwarding process: {0}")]
     PortForwardingError(#[from] PortForwardError),
 
+    #[cfg(feature = "wizard")]
+    #[error("An IO error occurred while serving the wizard app: {0}")]
+    WizardIoError(io::Error),
+
+    #[error("An error occurred in the wizard while fetching target data: {0}")]
+    WizardTargetError(#[from] KubeApiError),
+
     #[error("Failed to execute authentication command specified in kubeconfig: {0}")]
     #[diagnostic(help("
         mirrord failed to execute Kube authentication command.
         This can happen when the command is not specified using absolute path and cannot be found in $PATH in the context where mirrord is invoked.
         Possible fixes:
-        1. Change global $PATH to include the authentication command and relaunch the IDE/terminal.
-        2. In the kubeconfig, specify the command with an absolute path.{GENERAL_HELP}
+        1. Run `mirrord fix kubeconfig` from a terminal.
+        2. Change global $PATH to include the authentication command and relaunch the IDE/terminal.
+        3. In the kubeconfig, specify the command with an absolute path.{GENERAL_HELP}
     "))]
-    KubeAuthExecFailed(String),
+    KubeAuthExecFailed(io::Error),
 
-    #[error("Failed while resolving target while using the mirrord-operator: {0}")]
+    #[error("Failed resolving target while using the mirrord-operator: {0}")]
     #[diagnostic(help(
         "
         mirrord failed to resolve or validate a target.
@@ -407,6 +442,7 @@ pub(crate) enum CliError {
     #[error(transparent)]
     ProfileError(#[from] ProfileError),
 
+    #[cfg(not(target_os = "windows"))]
     #[error(
         "Failed to execute the binary: execve failed with {}",
         nix::errno::Errno::E2BIG
@@ -417,11 +453,196 @@ pub(crate) enum CliError {
     ))]
     ExecveE2Big,
 
-    #[error("Failed starting a mirrord dump session: {0}")]
-    DumpError(String),
+    #[error("mirrord dump session failed: {0}")]
+    DumpError(#[from] DumpSessionError),
 
     #[error("Failed to copy the session target: {}", message.as_deref().unwrap_or("unknown reason"))]
     OperatorCopyTargetFailed { message: Option<String> },
+
+    #[error("operator operation timed out: {}", operation)]
+    OperatorOperationTimeout { operation: String },
+
+    #[error("Failed to setup mirrord startup retry config with `{0}`")]
+    #[diagnostic(help(
+        "This may happen when `startup_retry.min_ms > startup_retry.max_ms` or when `startup_retry.max_ms == 0`. If this is not teh case in your config, then this might be a bug!"
+    ))]
+    InvalidBackoff(String),
+
+    #[error("Job Agent's Pod got deleted during initialization")]
+    #[diagnostic(help(
+        "This likely means that you don't have the required permissions to spawn it.
+        Look into your namespace's Pod Security admission controllers and try mirrord for Teams if the issue persists.
+        You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=noperm&utm_medium=cli"
+    ))]
+    AgentPodDeleted,
+
+    #[error(
+        "The target node `{node_name}` has no capacity for a new agent pod (currently running {pod_count} pods)"
+    )]
+    #[diagnostic(help(
+        "The Kubernetes node where the target pod runs has reached its pod limit. You can either:
+        1. Free up pod capacity on the node by deleting unused pods.
+        2. Use ephemeral containers instead, which do not count toward the node's pod limit.
+           Set `\"agent\": {{ \"ephemeral\": true }}` in your mirrord config file,
+           or set the environment variable MIRRORD_EPHEMERAL_CONTAINER=true.{GENERAL_HELP}"
+    ))]
+    NodeOutOfPods { node_name: String, pod_count: usize },
+
+    #[error("Detected mirrord being run within mirrord")]
+    #[diagnostic(help(
+        "Running mirrord within mirrord is likely to fail or introduce severe slowness. \
+        If you are using a mirrord IDE plugin, please check that your build/run script \
+        does not invoke mirrord."
+    ))]
+    NestedExec,
+
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    MirrordForCi(#[from] CiError),
+
+    #[error("The '{0}' command is not currently supported on Windows")]
+    UnsupportedOnWindows(String),
+
+    #[cfg(windows)]
+    #[error("Failed to open process {0} for attachment: {1}")]
+    AttachProcessOpenFailed(u32, std::io::Error),
+
+    #[cfg(windows)]
+    #[error("Failed to inject layer into process {0}: {1}")]
+    AttachInjectionFailed(u32, String),
+
+    #[cfg(windows)]
+    #[error(
+        "Timed out waiting for layer to signal injection complete in process {0} (30s timeout)"
+    )]
+    AttachLayerTimeout(u32),
+
+    #[cfg(windows)]
+    #[error("`mirrord pitm` requires the `MIRRORD_CHILD_ENV` environment variable to be set")]
+    #[diagnostic(help(
+        "`pitm` is intended to be invoked by the IntelliJ plugin, which base64-encodes the JSON \
+         payload of env vars from `mirrord ext` into `MIRRORD_CHILD_ENV`."
+    ))]
+    PitmMissingChildEnv,
+
+    #[cfg(windows)]
+    #[error("Failed to decode `MIRRORD_CHILD_ENV`: {0}")]
+    PitmInvalidChildEnv(String),
+
+    #[cfg(windows)]
+    #[error("`mirrord pitm` was invoked without a target executable")]
+    PitmMissingExe,
+
+    #[cfg(windows)]
+    #[error("`mirrord pitm` failed to launch target process `{0}`: {1}")]
+    PitmExecuteFailed(String, String),
+
+    #[error(transparent)]
+    ApiKey(#[from] ApiKeyError),
+
+    #[error("Local Redis error: {0}")]
+    #[diagnostic(help("Install redis-server with"))]
+    LocalRedisError(String),
+
+    #[error("error while fixing kubeconfig")]
+    FixKubeconfig(#[from] FixKubeconfigError),
+
+    #[error("No image specified for preview environment")]
+    #[diagnostic(help(
+        "Specify the image using `-i <image>` or set `feature.preview.image` in your mirrord config file."
+    ))]
+    PreviewImageRequired,
+
+    #[error("No target specified for preview environment")]
+    #[diagnostic(help(
+        "Specify the target using `-t <target>` or set `target.path` in your mirrord config file."
+    ))]
+    PreviewTargetRequired,
+
+    #[error("Failed to resolve target for preview environment: {0}")]
+    #[diagnostic(help(
+        "Targetless mode is not supported for preview environments. \
+         Please check that the target exists and has running pods.{GENERAL_HELP}"
+    ))]
+    PreviewTargetResolutionFailed(String),
+
+    #[error("Failed to create preview session resource: {0}")]
+    #[diagnostic(help(
+        "Please check that the operator is running and that you have sufficient permissions \
+        to create PreviewSession resources in the target namespace.{GENERAL_HELP}"
+    ))]
+    PreviewSessionRejected(String),
+
+    #[error("Preview session failed: {0}")]
+    #[diagnostic(help(
+        "The operator reported a failure while setting up the preview environment. \
+        Check the operator logs for more details.{GENERAL_HELP}"
+    ))]
+    PreviewSessionFailed(String),
+
+    #[error("Preview session was unexpectedly deleted while waiting for it to become ready")]
+    #[diagnostic(help(
+        "Something in your cluster deleted the PreviewSession resource before it became ready. \
+        Check for external controllers, admission webhooks, or resource quotas that may \
+        be removing custom resources.{GENERAL_HELP}"
+    ))]
+    PreviewSessionDeleted,
+
+    #[error("Failed to watch preview session status: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    PreviewWatchFailed(String),
+
+    #[error("Preview environment creation timed out")]
+    #[diagnostic(help(
+        "The preview pod did not become ready within the configured timeout. \
+        You can increase the timeout with `feature.preview.creation_timeout_secs` in your config file. \
+        Check the operator logs for more details.{GENERAL_HELP}"
+    ))]
+    PreviewTimeout,
+
+    #[error("Failed to list preview sessions: {0}")]
+    #[diagnostic(help(
+        "Please check that you have permissions to list PreviewSession resources \
+        and that the operator CRD is installed.{GENERAL_HELP}"
+    ))]
+    PreviewListFailed(String),
+
+    #[error("Failed to delete preview session `{name}`: {reason}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    PreviewDeleteFailed { name: String, reason: String },
+
+    #[error("A preview environment with key \"{key}\" already exists for target \"{target}\"")]
+    #[diagnostic(help(
+        "Use `--force` to replace the existing session, \
+         `mirrord preview stop` to stop it first, \
+         or choose a different key with `--key`."
+    ))]
+    PreviewDuplicateSession { key: String, target: String },
+
+    #[error("No preview sessions found matching key `{0}`")]
+    #[diagnostic(help("Use `mirrord preview status` to see available preview environments."))]
+    PreviewNotFound(String),
+
+    #[error("Environment key is required for this command")]
+    #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
+    PreviewKeyRequired,
+
+    /// Errors produced by the `mirrord up` command.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Up(#[from] UpCliError),
+
+    /// Errors produced by the `mirrord ui` command.
+    #[cfg(unix)]
+    #[error("Session monitor UI error: {0}")]
+    #[diagnostic(help("Check that no other process is using the port and try again."))]
+    UiError(String),
+
+    #[error("Failed to read credentials file: {0}")]
+    #[diagnostic(help(
+        "Check that `~/.mirrord/credentials` exists and is readable.{GENERAL_HELP}"
+    ))]
+    CredentialStore(#[from] CredentialStoreError),
 }
 
 impl CliError {
@@ -434,11 +655,11 @@ impl CliError {
         error: KubeApiError,
         fallback: F,
     ) -> Self {
-        use kube::{client::AuthError, Error};
+        use kube::{Error, client::AuthError};
 
         match error {
-            KubeApiError::KubeError(Error::Auth(AuthError::AuthExec(error))) => {
-                Self::KubeAuthExecFailed(error.to_owned())
+            KubeApiError::KubeError(Error::Auth(AuthError::AuthExecStart(error))) => {
+                Self::KubeAuthExecFailed(error)
             }
             // UGH(alex): Type-erased errors are messy, and this one is especially bad.
             // See `kube_service_error_dependency_is_in_sync` for a "what's going on here".
@@ -447,6 +668,14 @@ impl CliError {
             {
                 Self::InvalidCertificate(error)
             }
+            KubeApiError::AgentPodDeleted => Self::AgentPodDeleted,
+            KubeApiError::NodeOutOfPods {
+                node_name,
+                pod_count,
+            } => Self::NodeOutOfPods {
+                node_name,
+                pod_count,
+            },
             error => fallback(error),
         }
     }
@@ -454,9 +683,12 @@ impl CliError {
 
 impl From<OperatorApiError> for CliError {
     fn from(value: OperatorApiError) -> Self {
-        use kube::{client::AuthError, Error};
+        use kube::{Error, client::AuthError};
 
         match value {
+            OperatorApiError::BranchCreationFailed { operation, message } => {
+                Self::OperatorBranchCreationFailed(operation, message)
+            }
             OperatorApiError::UnsupportedFeature {
                 feature,
                 operator_version,
@@ -469,13 +701,18 @@ impl From<OperatorApiError> for CliError {
             }
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::KubeError {
-                error: Error::Api(ErrorResponse { message, code, .. }),
+                error: Error::Api(status),
                 operation,
-            } if code == StatusCode::FORBIDDEN => Self::OperatorApiForbidden(operation, message),
+            } if status.code == StatusCode::FORBIDDEN => {
+                Self::OperatorApiForbidden(operation, status.message)
+            }
             OperatorApiError::KubeError {
-                error: Error::Auth(AuthError::AuthExec(error)),
+                error: Error::Auth(AuthError::AuthExecStart(error)),
                 ..
-            } => Self::KubeAuthExecFailed(error),
+            }
+            | OperatorApiError::KubeApi(KubeApiError::KubeError(Error::Auth(
+                AuthError::AuthExecStart(error),
+            ))) => Self::KubeAuthExecFailed(error),
             OperatorApiError::KubeError { error, operation } => {
                 Self::OperatorApiFailed(operation, error)
             }
@@ -485,12 +722,13 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorApiForbidden(operation, status.message)
             }
             OperatorApiError::StatusFailure { operation, status } => {
-                let error = kube::Error::Api(ErrorResponse {
-                    status: "Failure".to_string(),
+                let error = kube::Error::Api(Box::new(Status {
+                    status: Some(StatusSummary::Failure),
                     message: status.message,
                     reason: status.reason,
                     code: status.code,
-                });
+                    ..Default::default()
+                }));
 
                 Self::OperatorApiFailed(operation, error)
             }
@@ -504,13 +742,35 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::CopiedTargetFailed { message } => {
                 Self::OperatorCopyTargetFailed { message }
             }
+            OperatorApiError::OperationTimeout { operation } => Self::OperatorOperationTimeout {
+                operation: operation.to_string(),
+            },
+            OperatorApiError::InvalidBackoff(fail) => Self::InvalidBackoff(fail.to_string()),
+            OperatorApiError::ProtocolError(error) => Self::from(error),
+            OperatorApiError::ApiKey(fail) => Self::ApiKey(fail),
+            OperatorApiError::SerdeJson(fail) => Self::JsonSerializeError(fail),
+            OperatorApiError::TargetResolutionFailed(msg) => {
+                Self::OperatorTargetResolution(KubeApiError::MalformedResource(msg))
+            }
+            OperatorApiError::CredentialSecretCreation(msg) => {
+                Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
+            }
         }
     }
 }
 
-#[derive(Debug, Error)]
-#[error("unsupported runtime version")]
-pub struct UnsupportedRuntimeVariant;
+impl From<ProtocolError> for CliError {
+    fn from(e: ProtocolError) -> Self {
+        Self::InitialAgentCommFailed(e.to_string())
+    }
+}
+
+#[cfg(feature = "wizard")]
+impl IntoResponse for CliError {
+    fn into_response(self) -> Response {
+        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -521,20 +781,20 @@ mod tests {
 
     use http_body_util::Full;
     use hyper::{
+        Request, Response,
         body::{Bytes, Incoming},
         service::service_fn,
-        Request, Response,
     };
     use hyper_util::{
         rt::{TokioExecutor, TokioIo},
         server::conn::auto::Builder,
     };
     use k8s_openapi::api::core::v1::Pod;
-    use kube::{api::ListParams, Api};
+    use kube::{Api, api::ListParams};
     use rustls::{
-        crypto::aws_lc_rs::default_provider,
-        pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
         ServerConfig,
+        crypto::aws_lc_rs::default_provider,
+        pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
     };
     use tokio::{net::TcpListener, sync::Notify};
     use tokio_rustls::TlsAcceptor;

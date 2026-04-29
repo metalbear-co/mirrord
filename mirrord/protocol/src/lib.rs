@@ -57,6 +57,9 @@
 #![feature(io_error_more)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
+// windows features for protocol/file.rs in From<Metadata> for MetadataInternal
+#![cfg_attr(target_os = "windows", feature(windows_change_time))]
+#![cfg_attr(target_os = "windows", feature(windows_by_handle))]
 
 pub mod batched_body;
 pub mod codec;
@@ -68,6 +71,7 @@ pub mod outgoing;
 pub mod pause;
 pub mod payload;
 pub mod tcp;
+pub mod uid;
 pub mod vpn;
 
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};
@@ -75,6 +79,7 @@ use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 pub use codec::*;
 pub use error::*;
 pub use payload::{Payload, ToPayload};
+use semver::VersionReq;
 
 pub type Port = u16;
 pub type ConnectionId = u64;
@@ -88,6 +93,10 @@ pub static VERSION: LazyLock<semver::Version> = LazyLock::new(|| {
         .parse()
         .expect("Bad version parsing")
 });
+
+/// Minimal protocol version that allows for sending [`DaemonMessage::OperatorPing`].
+pub static MIRRORD_OPERATOR_LATENCY_PING_PONG: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.19.8".parse().expect("Bad Identifier"));
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EnvVars(pub String);

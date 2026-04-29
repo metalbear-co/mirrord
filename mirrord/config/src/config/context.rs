@@ -1,9 +1,10 @@
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStrExt;
 use std::{
     collections::HashMap,
     env::VarError,
     ffi::{OsStr, OsString},
     ops::Not,
-    os::unix::ffi::OsStrExt,
 };
 
 /// Context for generating and verifying a [`MirrordConfig`](super::MirrordConfig).
@@ -11,6 +12,7 @@ use std::{
 /// See:
 /// 1. [`LayerConfig::verify`](crate::LayerConfig::verify)
 /// 2. [`MirrordConfig::generate_config`](crate::config::MirrordConfig::generate_config)
+#[derive(Default)]
 pub struct ConfigContext {
     /// Whether an empty [TargetConfig::path](crate::target::TargetConfig::path) should be
     /// considered final.
@@ -36,9 +38,20 @@ impl ConfigContext {
     /// This override will only affect [`Self::get_env`] behavior,
     /// it will **not** change the process environment.
     pub fn override_env<K: AsRef<OsStr>, V: AsRef<OsStr>>(mut self, key: K, value: V) -> Self {
+        self.override_env_mut(key, value);
+        self
+    }
+
+    /// Adds an override for an environment variable via mutable reference.
+    ///
+    /// Like [`override_env`](Self::override_env), but takes `&mut self` instead of consuming
+    /// `self`. Useful when you only have a mutable reference to the context.
+    ///
+    /// This override will only affect [`Self::get_env`] behavior,
+    /// it will **not** change the process environment.
+    pub fn override_env_mut<K: AsRef<OsStr>, V: AsRef<OsStr>>(&mut self, key: K, value: V) {
         self.env_override
             .insert(key.as_ref().into(), value.as_ref().into());
-        self
     }
 
     /// Adds overrides for multiple environment variables.
@@ -94,7 +107,11 @@ impl ConfigContext {
     ///
     /// This is the only way we should read environment when generating or verifying configuration.
     pub fn get_env(&self, name: &str) -> Result<String, VarError> {
+        #[cfg(not(target_os = "windows"))]
         let name = OsStr::from_bytes(name.as_bytes());
+
+        #[cfg(target_os = "windows")]
+        let name = OsStr::new(name);
 
         let os_value = match self.env_override.get(name) {
             Some(value) => Ok(value.clone()),
@@ -102,9 +119,12 @@ impl ConfigContext {
             None => std::env::var_os(name).ok_or(VarError::NotPresent),
         }?;
 
-        std::str::from_utf8(os_value.as_bytes())
-            .map(ToString::to_string)
-            .map_err(|_| VarError::NotUnicode(os_value))
+        #[cfg(not(target_os = "windows"))]
+        let s = std::str::from_utf8(os_value.as_bytes()).map(ToString::to_string);
+        #[cfg(target_os = "windows")]
+        let s = os_value.clone().into_string();
+
+        s.map_err(|_| VarError::NotUnicode(os_value))
     }
 
     /// Returns the mark previously set with [`ConfigContext::empty_target_final`].
@@ -125,16 +145,5 @@ impl ConfigContext {
     /// Returns whether this context stores any warnings.
     pub fn has_warnings(&self) -> bool {
         self.warnings.is_empty().not()
-    }
-}
-
-impl Default for ConfigContext {
-    fn default() -> Self {
-        Self {
-            empty_target_final: true,
-            env_override: Default::default(),
-            strict_env: false,
-            warnings: Default::default(),
-        }
     }
 }

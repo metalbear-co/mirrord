@@ -10,15 +10,17 @@
 mod cli {
     use std::{path::Path, time::Duration};
 
+    use mirrord_test_utils::run_command::run_verify_config;
     use rstest::rstest;
 
-    use crate::utils::{config_dir, run_command::run_verify_config};
+    use crate::utils::config_dir;
 
     /// Tests `verify-config` with `path` and `--ide` args, which should be:
     ///
     /// ```sh
     /// mirrord verify-config --ide /path/to/config.json
     /// ```
+    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
@@ -40,6 +42,7 @@ mod cli {
     /// ```sh
     /// mirrord verify-config /path/to/config.json
     /// ```
+    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
@@ -62,6 +65,7 @@ mod cli {
     /// ```sh
     /// mirrord verify-config --ide
     /// ```
+    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
@@ -81,6 +85,7 @@ mod cli {
     /// ```sh
     /// mirrord verify-config
     /// ```
+    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]

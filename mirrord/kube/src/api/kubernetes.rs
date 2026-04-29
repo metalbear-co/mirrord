@@ -1,34 +1,40 @@
-use std::ops::{Deref, Not};
+use std::{
+    ffi::OsStr,
+    ops::{Deref, Not},
+};
 
 use k8s_openapi::NamespaceResourceScope;
 use kube::{
-    config::{KubeConfigOptions, Kubeconfig},
     Api, Client, Config, Discovery,
+    client::ClientBuilder,
+    config::{KubeConfigOptions, Kubeconfig},
 };
 use mirrord_agent_env::mesh::MeshVendor;
 use mirrord_config::{
+    LayerConfig,
     agent::AgentConfig,
     feature::network::NetworkConfig,
     target::{Target, TargetConfig},
-    LayerConfig,
 };
 use mirrord_progress::Progress;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, Level};
+use tower::{buffer::BufferLayer, retry::RetryLayer};
+use tracing::{Level, debug, info};
 
 use super::container::ContainerConfig;
 use crate::{
     api::{
         container::{
+            ContainerApi, ContainerParams,
             ephemeral::EphemeralTargetedVariant,
             job::{JobTargetedVariant, JobVariant},
             targeted::Targeted,
             targetless::Targetless,
-            ContainerApi, ContainerParams,
         },
         runtime::{RuntimeData, RuntimeDataProvider},
     },
     error::{KubeApiError, Result},
+    retry::retry_policy_from_config,
 };
 
 #[cfg(feature = "portforward")]
@@ -46,14 +52,21 @@ impl KubernetesAPI {
     ///
     /// If [`LayerConfig::target`] specifies a targetless run,
     /// replaces [`AgentConfig::namespace`] with the target namespace.
-    pub async fn create(config: &LayerConfig) -> Result<Self> {
-        let client = create_kube_config(
+    pub async fn create<P: Progress>(config: &LayerConfig, progress: &P) -> Result<Self> {
+        let client_config = create_kube_config(
             config.accept_invalid_certificates,
             config.kubeconfig.clone(),
             config.kube_context.clone(),
         )
-        .await?
-        .try_into()?;
+        .await?;
+
+        let client = progress
+            .suspend(|| ClientBuilder::try_from(client_config.clone()))?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(retry_policy_from_config(
+                &config.startup_retry,
+            )?))
+            .build();
 
         let mut agent = config.agent.clone();
         if config
@@ -84,7 +97,7 @@ impl KubernetesAPI {
 
     pub async fn detect_openshift<P>(&self, progress: &P) -> Result<()>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         // filter openshift to make it a lot faster
         if Discovery::new(self.client.clone())
@@ -93,7 +106,7 @@ impl KubernetesAPI {
             .await?
             .has_group("route.openshift.io")
         {
-            progress.warning("mirrord has detected it's running on OpenShift. Due to the default PSP of OpenShift, mirrord may not be able to create the agent. Please refer to the documentation at https://metalbear.co/mirrord/docs/faq/limitations/#does-mirrord-support-openshift");
+            progress.warning("mirrord has detected it's running on OpenShift. Due to the default PSP of OpenShift, mirrord may not be able to create the agent. Please refer to the documentation at https://metalbear.com/mirrord/docs/faq/limitations/#does-mirrord-support-openshift");
         } else {
             debug!("OpenShift was not detected.");
         }
@@ -153,7 +166,7 @@ impl KubernetesAPI {
         Ok(conn)
     }
 
-    /// Connects to the agent using kube's [`Api::portforward`].
+    /// Connects to the agent using kube's [`kube::Api::portforward`].
     #[cfg(feature = "portforward")]
     pub async fn create_connection_portforward(
         &self,
@@ -177,12 +190,16 @@ impl KubernetesAPI {
         target: &TargetConfig,
         mut config: ContainerConfig,
     ) -> Result<(ContainerParams, Option<RuntimeData>), KubeApiError> {
-        let runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
+        let mut runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
             Target::Targetless => None,
             path => path
                 .runtime_data(&self.client, target.namespace.as_deref())
                 .await?
                 .into(),
+        };
+
+        if let Some(runtime_data) = runtime_data.as_mut() {
+            runtime_data.try_resolve_node_hostname(&self.client).await;
         };
 
         let pod_ips = runtime_data
@@ -208,7 +225,7 @@ impl KubernetesAPI {
         container_config: ContainerConfig,
     ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         let (params, runtime_data) = self
             .create_agent_params(target_config, container_config)
@@ -226,13 +243,6 @@ impl KubernetesAPI {
             }
 
             if let Some(network_config) = network_config {
-                if let Some(modified_ports) = network_config
-                    .incoming
-                    .add_probe_ports_to_http_filter_ports(containers_probe_ports)
-                {
-                    progress.info(&format!("`network.incoming.http_filter.ports` has been set to use ports {modified_ports}."));
-                }
-
                 let stolen_probes = containers_probe_ports
                     .iter()
                     .copied()
@@ -257,7 +267,7 @@ impl KubernetesAPI {
 
             if matches!(mesh, MeshVendor::IstioAmbient) && self.agent.privileged.not() {
                 progress.warning(
-                    "mirrord detected an ambient Istio service mesh but\
+                    "mirrord detected an ambient Istio service mesh but \
                      the agent is not configured to run in a privileged SecurityContext.\
                      Please set `agent.privileged = true`, otherwise the agent will not be able to start.",
                 );
@@ -324,30 +334,50 @@ pub struct AgentKubernetesConnectInfo {
     pub agent_port: u16,
 }
 
+#[tracing::instrument(level = Level::TRACE, skip(kubeconfig), ret, err)]
 pub async fn create_kube_config<P>(
     accept_invalid_certificates: Option<bool>,
     kubeconfig: Option<P>,
     kube_context: Option<String>,
 ) -> Result<Config>
 where
-    P: AsRef<str>,
+    P: AsRef<OsStr>,
 {
     let kube_config_opts = KubeConfigOptions {
         context: kube_context,
         ..Default::default()
     };
 
-    let mut config = if let Some(kubeconfig) = kubeconfig {
-        let kubeconfig = shellexpand::full(&kubeconfig)
-            .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
-        let parsed_kube_config = Kubeconfig::read_from(kubeconfig.deref())?;
+    // parse kubeconfig the same way as KUBECONFIG is parsed by `kube-client`, supporting
+    // colon-separated lists of paths. Borrowed affectionately & with love from
+    // https://docs.rs/kube/latest/kube/config/struct.Kubeconfig.html#method.from_env
+    let mut config = if let Some(kubeconfig) = kubeconfig
+        && let paths = std::env::split_paths(&kubeconfig)
+            .filter_map(|p| {
+                let path_str = p.as_os_str().to_string_lossy().into_owned();
+                path_str.is_empty().not().then_some(path_str)
+            })
+            .collect::<Vec<_>>()
+        && paths.is_empty().not()
+    {
+        let parsed_kube_config =
+            paths
+                .iter()
+                .try_fold(Kubeconfig::default(), |merged_kubeconfig, path_str| {
+                    let expanded = shellexpand::full(&path_str)
+                        .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
+
+                    Kubeconfig::read_from(expanded.deref())
+                        .and_then(|config| merged_kubeconfig.merge(config))
+                        .map_err(KubeApiError::from)
+                })?;
         Config::from_custom_kubeconfig(parsed_kube_config, &kube_config_opts).await?
     } else if kube_config_opts.context.is_some() {
         // if context is set, it's not in cluster so it has to be a kubeconfig.
         Config::from_kubeconfig(&kube_config_opts).await?
     } else {
-        // if context isn't set and user doesn't specify a kubeconfig, we infer which tries local
-        // kube or incluster configuration.
+        // if context isn't set and user doesn't specify a kubeconfig, we infer which tries
+        // local kube or in-cluster configuration.
         Config::infer().await?
     };
 

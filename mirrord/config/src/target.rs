@@ -1,9 +1,9 @@
-use std::{fmt, str::FromStr};
+use std::{borrow::Cow, fmt, str::FromStr};
 
 use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
 use replica_set::ReplicaSetTarget;
-use schemars::{gen::SchemaGenerator, schema::SchemaObject, JsonSchema};
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumDiscriminants, EnumString};
 
@@ -13,9 +13,9 @@ use self::{
 };
 use crate::{
     config::{
+        ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result,
         from_env::{FromEnv, FromEnvWithError},
         source::MirrordConfigSource,
-        ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result,
     },
     feature::FeatureConfig,
     util::string_or_struct_option,
@@ -46,29 +46,24 @@ pub enum TargetFileConfig {
         /// but it is not optional in a resulting [`TargetConfig`] object - either there is a path,
         /// or the target configuration is `None`.
         #[serde(default, deserialize_with = "string_or_struct_option")]
+        #[schemars(schema_with = "make_simple_target_custom_schema")]
         path: Option<Target>,
         namespace: Option<String>,
     },
 }
 
-fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::schema::Schema {
+fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Schema {
     // generate the schema for the Option<Target> like usual, then just push a string type to the
     // any_of.
-    let mut schema: SchemaObject = <Option<Target>>::json_schema(gen).into();
-    let subschema = schema.subschemas();
+    let mut schema = <Option<Target>>::json_schema(generator);
+    let schema_obj = schema.ensure_object();
 
-    let mut any_ofs = subschema.any_of.clone().unwrap();
-    any_ofs.push(
+    if let Some(serde_json::Value::Array(any_ofs)) = schema_obj.get_mut("anyOf") {
         // There's a small gap here for the string to be _anything_, not just k8s objects.
-        schemars::schema::SchemaObject {
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            ..Default::default()
-        }
-        .into(),
-    );
-    subschema.any_of = Some(any_ofs);
+        any_ofs.push(serde_json::json!({ "type": "string" }));
+    }
 
-    schema.into()
+    schema
 }
 
 /// Specifies the target and namespace to target.
@@ -141,7 +136,7 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 ///
 /// The setup above will result in a session without any target.
 /// Remote outgoing traffic and DNS will be done from the `bear-namespace` namespace.
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, Default)]
 #[serde(deny_unknown_fields)]
 pub struct TargetConfig {
     /// ### target.path {#target-path}
@@ -273,9 +268,7 @@ mirrord-layer failed to parse the provided target!
 ///
 /// Used to derive `TargetType` via the strum crate
 #[warn(clippy::wildcard_enum_match_arm)]
-#[derive(
-    Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema, EnumDiscriminants,
-)]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, EnumDiscriminants)]
 #[serde(untagged, deny_unknown_fields)]
 #[strum_discriminants(derive(EnumString, Serialize, Deserialize))]
 #[strum_discriminants(name(TargetType))]
@@ -320,8 +313,43 @@ pub enum Target {
 
     /// <!--${internal}-->
     /// Spawn a new pod.
-    #[schemars(skip)]
     Targetless,
+}
+
+impl JsonSchema for Target {
+    fn schema_name() -> Cow<'static, str> {
+        "Target".into()
+    }
+
+    fn json_schema(schema_gen: &mut SchemaGenerator) -> Schema {
+        let one_of = vec![
+            schema_gen
+                .subschema_for::<deployment::DeploymentTarget>()
+                .to_value(),
+            schema_gen.subschema_for::<pod::PodTarget>().to_value(),
+            schema_gen
+                .subschema_for::<rollout::RolloutTarget>()
+                .to_value(),
+            schema_gen.subschema_for::<job::JobTarget>().to_value(),
+            schema_gen
+                .subschema_for::<cron_job::CronJobTarget>()
+                .to_value(),
+            schema_gen
+                .subschema_for::<stateful_set::StatefulSetTarget>()
+                .to_value(),
+            schema_gen
+                .subschema_for::<service::ServiceTarget>()
+                .to_value(),
+            schema_gen
+                .subschema_for::<replica_set::ReplicaSetTarget>()
+                .to_value(),
+            serde_json::json!({ "enum": ["targetless"] }),
+        ];
+
+        let mut schema = schemars::json_schema!({});
+        schema.insert("oneOf".to_owned(), serde_json::Value::Array(one_of));
+        schema
+    }
 }
 
 impl FromStr for Target {
@@ -340,9 +368,13 @@ impl FromStr for Target {
             Some("pod") => pod::PodTarget::from_split(&mut split).map(Target::Pod),
             Some("job") => job::JobTarget::from_split(&mut split).map(Target::Job),
             Some("cronjob") => cron_job::CronJobTarget::from_split(&mut split).map(Target::CronJob),
-            Some("statefulset") => stateful_set::StatefulSetTarget::from_split(&mut split).map(Target::StatefulSet),
+            Some("statefulset") => {
+                stateful_set::StatefulSetTarget::from_split(&mut split).map(Target::StatefulSet)
+            }
             Some("service") => service::ServiceTarget::from_split(&mut split).map(Target::Service),
-            Some("replicaset") => replica_set::ReplicaSetTarget::from_split(&mut split).map(Target::ReplicaSet),
+            Some("replicaset") => {
+                replica_set::ReplicaSetTarget::from_split(&mut split).map(Target::ReplicaSet)
+            }
             _ => Err(ConfigError::InvalidTarget(format!(
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
@@ -356,8 +388,23 @@ impl Target {
         matches!(self, Target::Job(_) | Target::CronJob(_))
     }
 
+    /// Set the container on this target. No-op for [`Target::Targetless`].
+    pub fn set_container(&mut self, container: String) {
+        match self {
+            Target::Deployment(t) => t.container = Some(container),
+            Target::Pod(t) => t.container = Some(container),
+            Target::Rollout(t) => t.container = Some(container),
+            Target::StatefulSet(t) => t.container = Some(container),
+            Target::Service(t) => t.container = Some(container),
+            Target::ReplicaSet(t) => t.container = Some(container),
+            Target::Job(t) => t.container = Some(container),
+            Target::CronJob(t) => t.container = Some(container),
+            Target::Targetless => {}
+        }
+    }
+
     /// `true` if this [`Target`] is only supported when the operator is enabled.
-    pub(super) fn requires_operator(&self) -> bool {
+    pub fn requires_operator(&self) -> bool {
         matches!(
             self,
             Target::Job(_)

@@ -3,8 +3,9 @@ use std::{process::ExitStatus, sync::Arc};
 use thiserror::Error;
 
 use crate::{
-    client_connection::TlsSetupError, incoming::RedirectorTaskError, namespace::NamespaceError,
-    runtime, util::error::RemoteRuntimeError,
+    client_connection::TlsSetupError, http::filter::FilterCreationError,
+    incoming::RedirectorTaskError, namespace::NamespaceError, runtime,
+    util::error::AgentRuntimeError,
 };
 
 #[derive(Debug, Error)]
@@ -18,10 +19,6 @@ pub(crate) enum AgentError {
     #[error("Path failed with `{0}`")]
     StripPrefixError(#[from] std::path::StripPrefixError),
 
-    #[error(r#"Failed to set socket flag PACKET_IGNORE_OUTGOING, this might be due to kernel version before 4.20.
-    Original error `{0}`"#)]
-    PacketIgnoreOutgoing(#[source] std::io::Error),
-
     #[error("Background task `{task}` failed: `{error}`")]
     BackgroundTaskFailed {
         task: &'static str,
@@ -29,7 +26,9 @@ pub(crate) enum AgentError {
         error: Arc<dyn std::error::Error + Send + Sync>,
     },
 
-    #[error("Returning an error to test the agent's error cleanup. Should only ever be used when testing mirrord.")]
+    #[error(
+        "Returning an error to test the agent's error cleanup. Should only ever be used when testing mirrord."
+    )]
     TestError,
 
     #[error(transparent)]
@@ -45,6 +44,13 @@ pub(crate) enum AgentError {
     #[error("Exhausted possible identifiers for incoming connections.")]
     ExhaustedConnectionId,
 
+    #[error("Failed to parse the given HTTP filter: {0}")]
+    InvalidHttpFilter(
+        /// Boxed due to large size difference.
+        #[from]
+        Box<FilterCreationError>,
+    ),
+
     #[error("Timeout on accepting first client connection")]
     FirstConnectionTimeout,
 
@@ -58,7 +64,10 @@ pub(crate) enum AgentError {
     IPTablesDirty,
 
     #[error("Failed to start a tokio runtime in the target's namespace: {0}")]
-    RemoteRuntimeError(#[from] RemoteRuntimeError),
+    RemoteRuntimeError(#[from] AgentRuntimeError),
+
+    #[error(transparent)]
+    Timeout(#[from] tokio::time::error::Elapsed),
 }
 
 pub(crate) type AgentResult<T, E = AgentError> = std::result::Result<T, E>;

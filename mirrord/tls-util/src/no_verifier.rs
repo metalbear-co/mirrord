@@ -1,10 +1,10 @@
 use std::ops::Not;
 
 use rustls::{
+    DigitallySignedStruct, DistinguishedName, SignatureScheme,
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
     pki_types::{CertificateDer, ServerName, UnixTime},
     server::danger::{ClientCertVerified, ClientCertVerifier},
-    DigitallySignedStruct, DistinguishedName, SignatureScheme,
 };
 
 /// Custom implementation of [`ServerCertVerifier`]` that **always** accepts **all** certificates.

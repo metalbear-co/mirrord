@@ -9,7 +9,7 @@ use crate::error::{KubeApiError, Result};
 impl RuntimeDataFromLabels for ReplicaSetTarget {
     type Resource = ReplicaSet;
 
-    fn name(&self) -> Cow<str> {
+    fn name(&self) -> Cow<'_, str> {
         Cow::from(&self.replica_set)
     }
 

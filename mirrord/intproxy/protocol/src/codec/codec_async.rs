@@ -6,7 +6,7 @@ use tokio::{
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
 };
 
-use super::{Result, BUFFER_SIZE, PREFIX_BYTES};
+use super::{BUFFER_SIZE, PREFIX_BYTES, Result};
 
 /// Handles sending messages of type `T` through the underlying [AsyncWrite] of type `W`.
 #[derive(Debug)]

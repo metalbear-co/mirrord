@@ -1,27 +1,53 @@
 #![deny(missing_docs)]
 
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStringExt;
 use std::{
     borrow::Cow,
     collections::HashMap,
     ffi::{OsStr, OsString},
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    os::unix::ffi::OsStringExt,
     path::PathBuf,
     str::FromStr,
 };
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
+pub use mirrord_config::container::ContainerRuntime;
 use mirrord_config::{
-    feature::env::{
-        MIRRORD_OVERRIDE_ENV_FILE_ENV, MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV,
-        MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV,
+    LayerConfig, env_key,
+    feature::{
+        env::{
+            MIRRORD_OVERRIDE_ENV_FILE_ENV, MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV,
+            MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV,
+        },
+        preview::PreviewTtlMins,
     },
     target::TargetType,
-    LayerConfig,
 };
-use mirrord_operator::setup::OperatorNamespace;
 use thiserror::Error;
+
+use crate::config::ci::CiArgs;
+
+pub(crate) mod ci;
+
+/// Macro to automatically handle Windows unsupported commands.
+/// Usage: `windows_unsupported!(args, "command_name", { command_execution })`
+#[macro_export]
+macro_rules! windows_unsupported {
+    ($args:expr, $command_name:literal, $block:block) => {{
+        // we use cfg! to prevent rust from optimizing out $block which forces us to
+        // cfg(not(windows))  existing pieces of compilable code, used but unix but
+        // currently not windows,  which'll be used by windows in the future (currently
+        // assumed as untested but compilable)
+        if cfg!(target_os = "windows") {
+            return Err($crate::error::CliError::UnsupportedOnWindows(
+                $command_name.to_string(),
+            ));
+        }
+        $block
+    }};
+}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -30,7 +56,7 @@ use thiserror::Error;
     about,
     long_about = r#"
 Encountered an issue? Have a feature request?
-Join our Slack at https://metalbear.co/slack , create a GitHub issue at https://github.com/metalbear-co/mirrord/issues/new/choose, or email as at hi@metalbear.co"#
+Join our Slack at https://metalbear.com/slack , create a GitHub issue at https://github.com/metalbear-co/mirrord/issues/new/choose, or email as at hi@metalbear.com"#
 )]
 pub(super) struct Cli {
     #[command(subcommand)]
@@ -47,6 +73,7 @@ pub(super) enum Commands {
     Exec(Box<ExecArgs>),
 
     /// Print incoming tcp traffic of specific ports from remote target.
+    #[cfg_attr(target_os = "windows", command(hide = true))]
     Dump(Box<DumpArgs>),
 
     /// Generate shell completions for the provided shell.
@@ -62,6 +89,7 @@ pub(super) enum Commands {
     Extract { path: String },
 
     /// Execute a command related to the mirrord Operator.
+    #[cfg_attr(target_os = "windows", command(hide = true))]
     Operator(Box<OperatorArgs>),
 
     /// List available mirrord targets in the cluster.
@@ -99,6 +127,14 @@ pub(super) enum Commands {
         /// Port on which the extproxy will accept connections.
         #[arg(long, default_value_t = 0)]
         port: u16,
+        /// Debug arguments.
+        ///
+        /// These are passed only for visibility in `ps` output,
+        /// to improve debugging experience.
+        ///
+        /// Should not be used from within the extproxy itself.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+        _debug_args: Vec<OsString>,
     },
 
     /// Spawned:
@@ -112,12 +148,32 @@ pub(super) enum Commands {
         /// Port on which the intproxy will accept connections.
         #[arg(long, default_value_t = 0)]
         port: u16,
+
+        /// Set this when starting the internal proxy from `mirrord ci start`.
+        ///
+        /// Enables mirrord-for-ci intproxy pid saving, and checking for the `MIRRORD_CI_API_KEY`
+        /// env var.
+        #[arg(long, default_value_t = false)]
+        mirrord_for_ci: bool,
+
+        /// Debug arguments.
+        ///
+        /// These are passed only for visibility in `ps` output,
+        /// to improve debugging experience.
+        ///
+        /// Should not be used from within the intproxy itself.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+        _debug_args: Vec<OsString>,
     },
 
     /// Forward local ports to hosts available from the cluster
     /// or intercept traffic and direct it to local ports (unstable).
     #[command(name = "port-forward")]
     PortForward(Box<PortForwardArgs>),
+
+    /// Manage database branching.
+    #[command(name = "db-branches")]
+    DbBranches(Box<DbBranchesArgs>),
 
     /// Verify config file without starting mirrord.
     ///
@@ -126,6 +182,7 @@ pub(super) enum Commands {
     VerifyConfig(VerifyConfigArgs),
 
     /// Try out mirrord for Teams.
+    #[cfg_attr(target_os = "windows", command(hide = true))]
     Teams,
 
     /// Diagnose mirrord setup.
@@ -134,6 +191,99 @@ pub(super) enum Commands {
     /// Run mirrord vpn (alpha).
     #[command(hide = true)]
     Vpn(Box<VpnArgs>),
+
+    /// Subscribe to the mirrord newsletter.
+    Newsletter,
+
+    /// Execute a command related to mirrord CI.
+    #[cfg_attr(target_os = "windows", command(hide = true))]
+    Ci(Box<CiArgs>),
+
+    /// Manage preview environments (requires operator).
+    #[cfg_attr(target_os = "windows", command(hide = true))]
+    Preview(Box<PreviewArgs>),
+
+    /// Run mirrord sessions for all services defined in `mirrord-up.yaml`.
+    #[cfg_attr(target_os = "windows", command(hide = true))]
+    Up(Box<UpArgs>),
+
+    /// Launch the config wizard.
+    ///
+    /// The config wizard is a web app that allows the user to create a mirrord config file by
+    /// interacting with the GUI instead of by hand. This includes starting with a boilerplate
+    /// config, finding targets in the cluster and using exposed target ports to create network
+    /// configuration. Like `mirrord exec` it requires a connection to the cluster.
+    #[cfg(feature = "wizard")]
+    Wizard(Box<WizardArgs>),
+
+    /// Fix issues related to mirrord.
+    Fix(FixArgs),
+
+    /// Attach mirrord layer to an already-running process by PID.
+    ///
+    /// Used by IDE extensions that spawn a process with mirrord env vars
+    /// already configured, then request the CLI to inject the layer DLL.
+    #[cfg(windows)]
+    #[command(hide = true)]
+    Attach(AttachArgs),
+
+    /// Process In The Middle: create a target process suspended, inject the
+    /// mirrord layer DLL, and resume execution.
+    ///
+    /// Used by IDE extensions that cannot start the target process in a
+    /// suspended state themselves (e.g. IntelliJ run configurations). Like
+    /// `attach`, this assumes intproxy and the rest of the session have
+    /// already been set up by the plugin via `mirrord ext`; `pitm` itself
+    /// does no k8s or agent work. The plugin prepends `mirrord pitm --` to
+    /// the user command line and delivers the child's mirrord environment
+    /// through a single side-channel env var (`MIRRORD_CHILD_ENV`,
+    /// base64-encoded JSON with `set` and `unset` keys), which `pitm`
+    /// extracts and applies to the child process's environment. `pitm`
+    /// owns the child lifecycle end-to-end, so there is no race between
+    /// process start and layer injection.
+    #[cfg(windows)]
+    #[command(hide = true)]
+    Pitm(PitmArgs),
+
+    /// Launch the mirrord local UI.
+    ///
+    /// Watches active mirrord sessions and displays a web dashboard showing
+    /// real-time events (file operations, DNS queries, HTTP requests, etc.)
+    /// from all running mirrord sessions.
+    #[cfg(unix)]
+    Ui(UiArgs),
+
+    /// Manage local mirrord sessions.
+    #[cfg(unix)]
+    #[command(visible_alias = "sessions")]
+    Session(Box<SessionArgs>),
+
+    /// Kill a local mirrord session.
+    #[cfg(unix)]
+    Kill(Box<KillArgs>),
+
+    /// Detached guardian that monitors a PID and cleans up resources when it exits.
+    /// Spawned by `exec` for resources (e.g. local Redis) that must be cleaned up
+    /// even after `execve` replaces the process or the CLI is interrupted.
+    #[cfg(unix)]
+    #[command(hide = true, name = "cleanup-guardian")]
+    CleanupGuardian {
+        /// PID to monitor. Cleanup runs when this PID exits.
+        #[arg(long)]
+        watch_pid: u32,
+
+        /// Container runtime command (e.g. "docker", "podman") for container cleanup.
+        #[arg(long)]
+        container_runtime: Option<String>,
+
+        /// Container name to remove.
+        #[arg(long)]
+        container_name: Option<String>,
+
+        /// PID of a process to kill during cleanup.
+        #[arg(long)]
+        process_pid: Option<u32>,
+    },
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -215,8 +365,8 @@ pub(super) struct ExecParams {
     #[arg(long)]
     pub no_telemetry: bool,
 
-    #[arg(long)]
     /// Disable version check on startup.
+    #[arg(long)]
     pub disable_version_check: bool,
 
     /// Load config from config file
@@ -235,6 +385,13 @@ pub(super) struct ExecParams {
     /// These variables will override environment fetched from the remote target.
     #[arg(long, value_hint = ValueHint::FilePath)]
     pub env_file: Option<PathBuf>,
+
+    /// An identifier for this mirrord session.
+    ///
+    /// Available as the `{{ key }}` template variable in config files.
+    /// If not provided here or in the config file, a unique key is generated automatically.
+    #[arg(long)]
+    pub key: Option<String>,
 }
 
 impl ExecParams {
@@ -264,10 +421,11 @@ impl ExecParams {
             );
         }
         if let Some(fs_mode) = self.fs_mode {
-            envs.insert(
-                "MIRRORD_FILE_MODE".as_ref(),
-                Cow::Owned(OsString::from_vec(fs_mode.to_string().into_bytes())),
-            );
+            #[cfg(not(target_os = "windows"))]
+            let file_mode = OsString::from_vec(fs_mode.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let file_mode = OsString::from(fs_mode.to_string());
+            envs.insert("MIRRORD_FILE_MODE".as_ref(), Cow::Owned(file_mode));
         }
         if let Some(override_env_vars_exclude) = &self.override_env_vars_exclude {
             envs.insert(
@@ -334,6 +492,12 @@ impl ExecParams {
             envs.insert(
                 MIRRORD_OVERRIDE_ENV_FILE_ENV.as_ref(),
                 Cow::Borrowed(env_file.as_ref()),
+            );
+        }
+        if let Some(key) = &self.key {
+            envs.insert(
+                env_key::MIRRORD_ENV_KEY.as_ref(),
+                Cow::Borrowed(key.as_ref()),
             );
         }
 
@@ -465,17 +629,21 @@ impl AgentParams {
             );
         }
         if let Some(agent_ttl) = &self.agent_ttl {
-            envs.insert(
-                "MIRRORD_AGENT_TTL".as_ref(),
-                Cow::Owned(OsString::from_vec(agent_ttl.to_string().into_bytes())),
-            );
+            #[cfg(not(target_os = "windows"))]
+            let agent_ttl = OsString::from_vec(agent_ttl.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let agent_ttl = OsString::from(agent_ttl.to_string());
+            envs.insert("MIRRORD_AGENT_TTL".as_ref(), Cow::Owned(agent_ttl));
         }
         if let Some(agent_startup_timeout) = &self.agent_startup_timeout {
+            #[cfg(not(target_os = "windows"))]
+            let agent_startup_timeout =
+                OsString::from_vec(agent_startup_timeout.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let agent_startup_timeout = OsString::from(agent_startup_timeout.to_string());
             envs.insert(
                 "MIRRORD_AGENT_STARTUP_TIMEOUT".as_ref(),
-                Cow::Owned(OsString::from_vec(
-                    agent_startup_timeout.to_string().into_bytes(),
-                )),
+                Cow::Owned(agent_startup_timeout),
             );
         }
         if self.ephemeral_container {
@@ -610,7 +778,9 @@ impl FromStr for AddrPortMapping {
 
 #[derive(Error, Debug, PartialEq)]
 pub enum PortMappingParseErr {
-    #[error("Invalid format of argument `{0}`, expected `[local-port:]remote-ipv4-or-hostname:remote-port`")]
+    #[error(
+        "Invalid format of argument `{0}`, expected `[local-port:]remote-ipv4-or-hostname:remote-port`"
+    )]
     InvalidFormat(String),
 
     #[error("Failed to parse port `{0}` in argument `{1}`")]
@@ -675,8 +845,9 @@ pub(super) enum OperatorCommand {
     /// This will install the operator, which requires a seat based license to be used.
     ///
     /// NOTE: You don't need to install the operator to use open source mirrord features.
-    #[command(override_usage = "mirrord operator setup [OPTIONS] | kubectl apply -f -")]
-    Setup(#[clap(flatten)] OperatorSetupParams),
+    // DEPRECATED: use the helm chart instead: https://github.com/metalbear-co/charts/
+    #[clap(hide(true))]
+    Setup,
     /// Print operator status
     Status {
         /// Specify config file to use
@@ -694,71 +865,6 @@ pub(super) enum OperatorCommand {
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
         config_file: Option<PathBuf>,
     },
-}
-
-#[derive(Args, Debug)]
-pub(super) struct OperatorSetupParams {
-    /// ToS can be read here <https://metalbear.co/legal/terms>
-    #[arg(long)]
-    pub(super) accept_tos: bool,
-
-    /// A mirrord for Teams license key (online)
-    #[arg(long, allow_hyphen_values(true))]
-    pub(super) license_key: Option<String>,
-
-    /// Path to a file containing a mirrord for Teams license certificate
-    #[arg(long)]
-    pub(super) license_path: Option<PathBuf>,
-
-    /// Output Kubernetes specs to file instead of stdout
-    #[arg(short, long)]
-    pub(super) file: Option<PathBuf>,
-
-    /// Namespace to create the operator in (this doesn't limit the namespaces the operator
-    /// will be able to access)
-    #[arg(short, long, default_value = "mirrord")]
-    pub(super) namespace: OperatorNamespace,
-
-    /// AWS role ARN for the operator's service account.
-    /// Necessary for enabling SQS queue splitting.
-    /// For successfully running an SQS queue splitting operator the given IAM role must be
-    /// able to create, read from, write to, and delete SQS queues.
-    /// If the queue messages are encrypted using KMS, the operator also needs the
-    /// `kms:Encrypt`, `kms:Decrypt` and `kms:GenerateDataKey` permissions.
-    #[arg(long, visible_alias = "arn")]
-    pub(super) aws_role_arn: Option<String>,
-
-    /// Enable SQS queue splitting.
-    /// When set, some extra CRDs will be installed on the cluster, and the operator will run
-    /// an SQS splitting component.
-    #[arg(
-        long,
-        visible_alias = "sqs",
-        default_value_t = false,
-        requires = "aws_role_arn"
-    )]
-    pub(super) sqs_splitting: bool,
-
-    /// Enable Kafka queue splitting.
-    /// When set, some extra CRDs will be installed on the cluster, and the operator will run
-    /// a Kafka splitting component.
-    #[arg(long, visible_alias = "kafka", default_value_t = false)]
-    pub(super) kafka_splitting: bool,
-
-    /// Enable argocd Application auto-pause
-    /// When set the operator will temporary pause automated sync for applications whom resources
-    /// are targeted with `scale_down` feature enabled.
-    #[arg(long, default_value_t = false)]
-    pub(super) application_auto_pause: bool,
-
-    /// Enable MirrordClusterSession CRD's (curretly experimental and requires operator compiled
-    /// with experimental flag).
-    #[arg(
-        long = "experimental-statefull-sessions",
-        default_value_t = false,
-        hide = true
-    )]
-    pub(super) stateful_sessions: bool,
 }
 
 /// `mirrord operator session` family of commands.
@@ -882,24 +988,11 @@ pub(super) enum DiagnoseCommand {
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
         config_file: Option<PathBuf>,
     },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, serde::Serialize)]
-/// Runtimes supported by the `mirrord container` command.
-pub(super) enum ContainerRuntime {
-    Docker,
-    Podman,
-    Nerdctl,
-}
-
-impl std::fmt::Display for ContainerRuntime {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ContainerRuntime::Docker => write!(f, "docker"),
-            ContainerRuntime::Podman => write!(f, "podman"),
-            ContainerRuntime::Nerdctl => write!(f, "nerdctl"),
-        }
-    }
+    /// Print the user fingerprints from the local credentials file.
+    ///
+    /// The fingerprint is what the operator uses to identify individual users (e.g. for seat
+    /// counting). One fingerprint is shown per operator license the machine has connected to.
+    License,
 }
 
 // `mirrord container` command
@@ -1016,6 +1109,460 @@ pub(super) struct VpnArgs {
     /// Path to resolver (macOS)
     #[arg(long, default_value = "/etc/resolver")]
     pub resolver_path: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct DbBranchesArgs {
+    /// Specify the namespace to operate on
+    #[arg(short = 'n', long = "namespace")]
+    pub namespace: Option<String>,
+
+    /// Operate on all namespaces
+    #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
+    pub all_namespaces: bool,
+
+    /// Load config from config file
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    pub config_file: Option<PathBuf>,
+
+    #[command(subcommand)]
+    pub command: DbBranchesCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(super) enum DbBranchesCommand {
+    /// Show the status of database branches
+    Status {
+        /// Names of specific branches to show status for (all branches if none specified)
+        #[arg()]
+        names: Vec<String>,
+    },
+    /// Show active portforward connections for database branches
+    Connections,
+    /// Destroy database branches
+    Destroy {
+        /// Destroy all branches
+        #[arg(long, conflicts_with = "names")]
+        all: bool,
+        /// Names of specific branches to destroy
+        #[arg(required_unless_present = "all")]
+        names: Vec<String>,
+    },
+}
+
+#[derive(Args, Debug)]
+pub struct WizardArgs {
+    /// Accept/reject invalid certificates.
+    #[arg(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", short = 'c', long, default_missing_value="true", num_args=0..=1, require_equals=true
+    )]
+    pub accept_invalid_certificates: Option<bool>,
+
+    /// Kube context to use from Kubeconfig.
+    #[arg(env = "MIRRORD_KUBE_CONTEXT", long)]
+    pub context: Option<String>,
+
+    /// Kubeconfig.
+    #[arg(env = "MIRRORD_KUBECONFIG", long)]
+    pub kubeconfig: Option<String>,
+
+    /// Controls whether mirrord sends telemetry data to MetalBear cloud. Telemetry sent doesn't
+    /// contain personal identifiers or any data that should be considered sensitive. It is used to
+    /// improve the product.
+    /// [More information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md).
+    #[arg(env = "MIRRORD_TELEMETRY", long, default_value = "true")]
+    pub telemetry: bool,
+}
+
+/// `mirrord fix` args.
+#[derive(Args, Debug)]
+pub struct FixArgs {
+    /// Command to use with `mirrord fix`.
+    #[command(subcommand)]
+    pub command: FixCommand,
+}
+
+/// `mirrord fix` commands.
+#[derive(Subcommand, Debug)]
+pub enum FixCommand {
+    /// Look for non-absolute paths in kubeconfig and interactively make them absolute.
+    Kubeconfig(FixKubeconfig),
+}
+
+/// `mirrord fix kubeconfig` args
+#[derive(Args, Debug)]
+pub struct FixKubeconfig {
+    /// Explicitly set path of the kubeconfig file
+    #[arg(env = "MIRRORD_KUBECONFIG", long = "kubeconfig")]
+    pub file_path: Option<PathBuf>,
+
+    /// Do not make any actual changes, just print what would be changed
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
+}
+
+/// Arguments for `mirrord preview` command.
+#[derive(Args, Debug)]
+pub(super) struct PreviewArgs {
+    /// Subcommand to use with `mirrord preview`.
+    #[command(subcommand)]
+    pub command: PreviewCommand,
+}
+
+/// `mirrord preview` subcommands.
+#[derive(Subcommand, Debug)]
+pub(super) enum PreviewCommand {
+    /// Start a new preview environment or update an existing one.
+    Start(PreviewStartArgs),
+    /// Show the status of preview environments.
+    Status(PreviewStatusArgs),
+    /// Delete preview environments.
+    Stop(PreviewStopArgs),
+}
+
+/// Arguments shared across all `mirrord preview` subcommands.
+#[derive(Args, Debug)]
+pub(super) struct PreviewCommonArgs {
+    /// Environment key for the preview environment.
+    ///
+    /// Can also be set via the `key` field in the mirrord config file.
+    #[arg(short = 'k', long)]
+    pub key: Option<String>,
+
+    /// Load config from config file.
+    ///
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    pub config_file: Option<PathBuf>,
+
+    /// Kube context to use from Kubeconfig.
+    #[arg(long)]
+    pub context: Option<String>,
+}
+
+impl PreviewCommonArgs {
+    /// Convert the common CLI arguments to environment variable overrides.
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
+        let mut envs = HashMap::default();
+
+        if let Some(key) = &self.key {
+            envs.insert(
+                env_key::MIRRORD_ENV_KEY.as_ref(),
+                Cow::Borrowed(key.as_ref()),
+            );
+        }
+        if let Some(config_file) = &self.config_file {
+            envs.insert(
+                LayerConfig::FILE_PATH_ENV.as_ref(),
+                Cow::Borrowed(config_file.as_ref()),
+            );
+        }
+        if let Some(context) = &self.context {
+            envs.insert(
+                "MIRRORD_KUBE_CONTEXT".as_ref(),
+                Cow::Borrowed(context.as_ref()),
+            );
+        }
+
+        envs
+    }
+}
+
+/// Arguments for `mirrord preview start` command.
+#[derive(Args, Debug)]
+pub(super) struct PreviewStartArgs {
+    #[clap(flatten)]
+    pub common: PreviewCommonArgs,
+
+    /// Container image to run in the preview pod.
+    ///
+    /// The image must be pre-built and pushed to a registry accessible by the cluster.
+    #[arg(short = 'i', long)]
+    pub image: Option<String>,
+
+    /// Target to copy configuration from.
+    ///
+    /// Valid formats:
+    /// - `pod/{pod-name}[/container/{container-name}]`
+    /// - `deployment/{deployment-name}[/container/{container-name}]`
+    /// - `rollout/{rollout-name}[/container/{container-name}]`
+    /// - `statefulset/{statefulset-name}[/container/{container-name}]`
+    ///
+    /// The preview pod will be a copy of the target's pod spec with your image.
+    #[arg(short = 't', long)]
+    pub target: Option<String>,
+
+    /// Namespace of the target.
+    #[arg(short = 'n', long)]
+    pub target_namespace: Option<String>,
+
+    /// TTL in minutes for the preview session.
+    ///
+    /// The operator will terminate the session after this time elapses.
+    ///
+    /// Set to `"infinite"` to disable TTL.
+    #[arg(long)]
+    pub ttl: Option<PreviewTtlMins>,
+
+    /// How long (in seconds) to wait for the preview to become ready.
+    ///
+    /// If the session hasn't reached `Ready` within this time, the CLI deletes it.
+    #[arg(long)]
+    pub timeout: Option<u64>,
+
+    /// Replace an existing preview session with the same key and target.
+    ///
+    /// Without this flag, the CLI will refuse to create a session if one already exists
+    /// for the same key+target combination.
+    #[arg(long)]
+    pub force: bool,
+}
+
+impl PreviewStartArgs {
+    /// Convert CLI arguments to environment variable overrides for config resolution.
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
+        let mut envs = self.common.as_env_vars();
+
+        if let Some(image) = &self.image {
+            envs.insert(
+                "MIRRORD_PREVIEW_IMAGE".as_ref(),
+                Cow::Borrowed(image.as_ref()),
+            );
+        }
+        if let Some(target) = &self.target {
+            envs.insert(
+                "MIRRORD_IMPERSONATED_TARGET".as_ref(),
+                Cow::Borrowed(target.as_ref()),
+            );
+        }
+        if let Some(namespace) = &self.target_namespace {
+            envs.insert(
+                "MIRRORD_TARGET_NAMESPACE".as_ref(),
+                Cow::Borrowed(namespace.as_ref()),
+            );
+        }
+        if let Some(ttl) = &self.ttl {
+            #[cfg(not(target_os = "windows"))]
+            let ttl = OsString::from_vec(ttl.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let ttl = OsString::from(ttl.to_string());
+            envs.insert("MIRRORD_PREVIEW_TTL_MINS".as_ref(), Cow::Owned(ttl));
+        }
+        if let Some(timeout) = &self.timeout {
+            #[cfg(not(target_os = "windows"))]
+            let timeout = OsString::from_vec(timeout.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let timeout = OsString::from(timeout.to_string());
+            envs.insert(
+                "MIRRORD_PREVIEW_CREATION_TIMEOUT_SECS".as_ref(),
+                Cow::Owned(timeout),
+            );
+        }
+
+        envs
+    }
+}
+
+/// Arguments for `mirrord preview status` command.
+#[derive(Args, Debug)]
+pub(super) struct PreviewStatusArgs {
+    #[clap(flatten)]
+    pub common: PreviewCommonArgs,
+
+    /// Namespace to query. Can also be set via `target.namespace` in the mirrord config.
+    ///
+    /// When neither this flag nor the config set a namespace, the command implicitly searches
+    /// all namespaces (equivalent to `-A`).
+    #[arg(short = 'n', long = "namespace")]
+    pub namespace: Option<String>,
+
+    /// Query all namespaces.
+    #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
+    pub all_namespaces: bool,
+}
+
+impl PreviewStatusArgs {
+    /// Convert CLI arguments to environment variable overrides for config resolution.
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
+        let mut envs = self.common.as_env_vars();
+
+        if let Some(namespace) = &self.namespace {
+            envs.insert(
+                "MIRRORD_TARGET_NAMESPACE".as_ref(),
+                Cow::Borrowed(namespace.as_ref()),
+            );
+        }
+
+        envs
+    }
+}
+
+/// Arguments for `mirrord preview stop` command.
+#[derive(Args, Debug)]
+pub(super) struct PreviewStopArgs {
+    #[clap(flatten)]
+    pub common: PreviewCommonArgs,
+
+    /// Specific target to delete (optional).
+    ///
+    /// If provided, only the preview session matching both the key and this target will be
+    /// deleted. If not provided, all preview sessions with the given key will be deleted.
+    #[arg(short = 't', long)]
+    pub target: Option<String>,
+
+    /// Namespace to search. Can also be set via `target.namespace` in the mirrord config.
+    ///
+    /// When neither this flag nor the config set a namespace, the command implicitly searches
+    /// all namespaces (equivalent to `-A`).
+    #[arg(short = 'n')]
+    pub namespace: Option<String>,
+
+    /// Operate on all namespaces.
+    #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
+    pub all_namespaces: bool,
+}
+
+impl PreviewStopArgs {
+    /// Convert CLI arguments to environment variable overrides for config resolution.
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
+        let mut envs = self.common.as_env_vars();
+
+        if let Some(target) = &self.target {
+            envs.insert(
+                "MIRRORD_IMPERSONATED_TARGET".as_ref(),
+                Cow::Borrowed(target.as_ref()),
+            );
+        }
+        if let Some(namespace) = &self.namespace {
+            envs.insert(
+                "MIRRORD_TARGET_NAMESPACE".as_ref(),
+                Cow::Borrowed(namespace.as_ref()),
+            );
+        }
+
+        envs
+    }
+}
+
+/// Arguments for the `mirrord up` command.
+#[derive(Args, Debug)]
+pub(super) struct UpArgs {
+    /// Path to the mirrord-up config file.
+    ///
+    /// When using this argument without a value, defaults to `mirrord-up.yaml`
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml")]
+    pub config_file: PathBuf,
+
+    /// Session key, used as the `{{ key }}` template variable.
+    ///
+    /// If not provided, a key is generated automatically from the system username.
+    #[arg(long)]
+    pub key: Option<String>,
+}
+/// `mirrord attach` args.
+#[cfg(windows)]
+#[derive(Args, Debug)]
+pub(super) struct AttachArgs {
+    /// PID of the target process to attach to.
+    pub pid: u32,
+}
+
+/// `mirrord pitm` args.
+#[cfg(windows)]
+#[derive(Args, Debug)]
+pub(super) struct PitmArgs {
+    /// Target executable followed by its arguments. Everything after `--`
+    /// is forwarded verbatim to the child process.
+    #[arg(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        required = true,
+        num_args = 1..,
+    )]
+    pub command: Vec<String>,
+}
+
+/// Arguments for the `mirrord ui` command.
+#[cfg(unix)]
+#[derive(Args, Debug)]
+pub struct UiArgs {
+    /// Port to serve the UI on.
+    #[arg(short = 'p', long, default_value_t = 59281)]
+    pub port: u16,
+}
+
+/// Arguments for the `mirrord session` command.
+#[cfg(unix)]
+#[derive(Args, Debug)]
+pub struct SessionArgs {
+    /// Arguments shared across `mirrord session` commands.
+    #[command(flatten)]
+    pub common: SessionCommonArgs,
+
+    /// Subcommand to use with `mirrord session`.
+    #[command(subcommand)]
+    pub command: Option<LocalSessionCommand>,
+}
+
+/// Arguments shared across `mirrord session` commands.
+#[cfg(unix)]
+#[derive(Args, Clone, Debug)]
+pub struct SessionCommonArgs {
+    /// Namespace to operate on. Can also be set via `target.namespace` in the mirrord config.
+    #[arg(short = 'n', long = "namespace", global = true)]
+    pub namespace: Option<String>,
+
+    /// Load config from config file.
+    ///
+    /// When using `-f` without a value, defaults to `"./.mirrord/mirrord.json"`.
+    #[arg(
+        short = 'f',
+        long,
+        value_hint = ValueHint::FilePath,
+        default_missing_value = "./.mirrord/mirrord.json",
+        num_args = 0..=1,
+        global = true
+    )]
+    pub config_file: Option<PathBuf>,
+}
+
+/// `mirrord session` subcommands.
+#[cfg(unix)]
+#[derive(Subcommand, Debug)]
+pub enum LocalSessionCommand {
+    /// List mirrord sessions currently running locally and in cluster (in same namespace).
+    #[command(visible_alias = "ls")]
+    List,
+
+    /// Kill a local mirrord session.
+    #[command(visible_alias = "kill")]
+    Delete(SessionDeleteArgs),
+}
+
+/// Arguments for deleting local mirrord sessions.
+#[cfg(unix)]
+#[derive(Args, Debug)]
+pub struct SessionDeleteArgs {
+    /// Session ID to kill.
+    #[arg(required_unless_present = "key")]
+    pub id: Option<String>,
+
+    /// Kill all local sessions with this key.
+    #[arg(long, conflicts_with = "id")]
+    pub key: Option<String>,
+}
+
+/// Arguments for the `mirrord kill` command.
+#[cfg(unix)]
+#[derive(Args, Debug)]
+pub struct KillArgs {
+    /// Arguments shared across `mirrord session` commands.
+    #[command(flatten)]
+    pub common: SessionCommonArgs,
+
+    /// Session selection for the kill operation.
+    #[command(flatten)]
+    pub delete: SessionDeleteArgs,
 }
 
 #[cfg(test)]

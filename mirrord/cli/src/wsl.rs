@@ -3,7 +3,7 @@ use std::{env, fs};
 
 use mirrord_config::LayerConfig;
 
-use crate::ContainerRuntime;
+use crate::config::ContainerRuntime;
 
 /// Modifies the [`LayerConfig`] for WSL environments when running the `mirrord container`.
 ///

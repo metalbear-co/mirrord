@@ -12,9 +12,6 @@ use crate::{checked_env::CheckedEnv, steal_tls::StealPortTlsConfig};
 /// operator that spawned it.
 pub const OPERATOR_CERT: CheckedEnv<String> = CheckedEnv::new("AGENT_OPERATOR_CERT_ENV");
 
-/// Determines a network interface for mirroring.
-pub const NETWORK_INTERFACE: CheckedEnv<String> = CheckedEnv::new("AGENT_NETWORK_INTERFACE_ENV");
-
 /// Enables Prometheus metrics export point and sets its address.
 pub const METRICS: CheckedEnv<SocketAddr> = CheckedEnv::new("MIRRORD_AGENT_METRICS");
 
@@ -34,9 +31,6 @@ pub const NFTABLES: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_NFTABLES")
 
 /// Instructs the agent to produce logs in JSON format.
 pub const JSON_LOG: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_JSON_LOG");
-
-/// Enables IPv6 support in the agent.
-pub const IPV6_SUPPORT: CheckedEnv<bool> = CheckedEnv::new("AGENT_IPV6_ENV");
 
 /// Sets a hard timeout on DNS queries.
 pub const DNS_TIMEOUT: CheckedEnv<u32> = CheckedEnv::new("MIRRORD_AGENT_DNS_TIMEOUT");
@@ -70,3 +64,33 @@ pub const EPHEMERAL_TARGET_CONTAINER_ID: CheckedEnv<String> =
 
 /// Exclude agent's port from service mesh sidecar proxy.
 pub const EXCLUDE_FROM_MESH: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_EXCLUDE_FROM_MESH");
+
+/// TODO remove
+///
+/// Deprecated, used to control mirroring mode.
+/// Should always be set to `true` for compatibility with older agents.
+pub const PASSTHROUGH_MIRRORING: CheckedEnv<bool> =
+    CheckedEnv::new("MIRRORD_AGENT_PASSTHROUGH_MIRRORING");
+
+/// Controls how long the agent should keep running after all client connections have been closed.
+///
+/// Specified in seconds.
+pub const IDDLE_TTL: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_AGENT_IDLE_TTL");
+
+/// Sets whether `Mirrord-Agent` headers are injected into HTTP
+/// responses that went through the agent.
+pub const INJECT_HEADERS: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_INJECT_HEADERS");
+
+/// Sets the max size (in bytes) for bodies buffered for body filters.
+pub const MAX_BODY_BUFFER_SIZE: CheckedEnv<u32> = CheckedEnv::new("MIRRORD_MAX_BODY_BUFFER_SIZE");
+
+/// Sets how long to wait (in milliseconds) to receive the entire body for body filters.
+pub const MAX_BODY_BUFFER_TIMEOUT: CheckedEnv<u32> =
+    CheckedEnv::new("MIRRORD_MAX_BODY_BUFFER_TIMEOUT");
+
+/// When set, the agent will clean any existing iptables rules.
+pub const CLEAN_IPTABLES_ON_START: CheckedEnv<bool> =
+    CheckedEnv::new("MIRRORD_AGENT_CLEAN_IPTABLES_ON_START");
+
+/// Jaq process time limit (ms)
+pub const JAQ_TIME_LIMIT: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_JAQ_TIME_LIMIT");

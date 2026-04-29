@@ -31,7 +31,7 @@ mod steal_tests {
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn steal_http_traffic(
         #[future] basic_service: KubeService,
@@ -68,9 +68,14 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&process).await;
+
+        #[cfg(not(target_os = "windows"))]
         process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
+
         send_requests(&url, true, Default::default()).await;
 
         application.assert(&process).await;
@@ -78,7 +83,7 @@ mod steal_tests {
 
     #[ignore] // Needs special cluster setup, so ignore by default.
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn steal_http_ipv6_traffic(
         #[future] ipv6_service: KubeService,
@@ -103,6 +108,10 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&process).await;
+
+        #[cfg(not(target_os = "windows"))]
         process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
@@ -120,7 +129,7 @@ mod steal_tests {
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[cfg(target_os = "linux")]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn steal_http_traffic_with_flush_connections(
         #[future] basic_service: KubeService,
@@ -157,6 +166,10 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&process).await;
+
+        #[cfg(not(target_os = "windows"))]
         process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
@@ -169,7 +182,7 @@ mod steal_tests {
     /// closes a socket.
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn close_socket(#[future] basic_service: KubeService, #[future] kube_client: Client) {
         let application = Application::PythonCloseSocket;
@@ -192,6 +205,10 @@ mod steal_tests {
             .await;
 
         // Verify that we hooked the socket operations and the agent started stealing.
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&process).await;
+
+        #[cfg(not(target_os = "windows"))]
         process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
@@ -275,7 +292,7 @@ mod steal_tests {
     /// application closes a socket, we stop stealing existing connections.
     #[ignore]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn close_socket_keep_connection(
         #[future] basic_service: KubeService,
@@ -314,6 +331,10 @@ mod steal_tests {
         let url = format!("http://{}", portforwarder.address());
 
         // Wait for the app to start listening for stolen data before connecting.
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&process).await;
+
+        #[cfg(not(target_os = "windows"))]
         process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
@@ -360,7 +381,7 @@ mod steal_tests {
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_only_matching_requests(
         #[future] basic_service: KubeService,
@@ -393,6 +414,10 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&client).await;
+
+        #[cfg(not(target_os = "windows"))]
         client
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
@@ -406,7 +431,7 @@ mod steal_tests {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_only_matching_requests_new(
         config_dir: &Path,
@@ -437,6 +462,10 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&client).await;
+
+        #[cfg(not(target_os = "windows"))]
         client
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
@@ -450,7 +479,7 @@ mod steal_tests {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_requests_by_path(
         config_dir: &Path,
@@ -481,6 +510,10 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&client).await;
+
+        #[cfg(not(target_os = "windows"))]
         client
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
@@ -533,7 +566,7 @@ mod steal_tests {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn test_filter_with_single_client_and_only_matching_requests_http2(
         #[future] http2_service: KubeService,
@@ -561,6 +594,10 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&mirrored_process).await;
+
+        #[cfg(not(target_os = "windows"))]
         mirrored_process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
@@ -605,7 +642,7 @@ mod steal_tests {
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_some_matching_requests(
         #[future] basic_service: KubeService,
@@ -639,6 +676,10 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&mirrorded_process).await;
+
+        #[cfg(not(target_os = "windows"))]
         mirrorded_process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
@@ -673,7 +714,7 @@ mod steal_tests {
     /// app does not see the traffic.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn complete_passthrough(
         #[future] tcp_echo_service: KubeService,
@@ -703,6 +744,10 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&mirrorded_process).await;
+
+        #[cfg(not(target_os = "windows"))]
         mirrorded_process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
@@ -740,7 +785,7 @@ mod steal_tests {
     /// app does not see the traffic.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(60))]
     async fn websocket_upgrade_no_filter_match(
         #[future] websocket_service: KubeService,
@@ -774,6 +819,10 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&mirrorded_process).await;
+
+        #[cfg(not(target_os = "windows"))]
         mirrorded_process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
@@ -827,7 +876,7 @@ mod steal_tests {
     ///
     /// We verify that the traffic is handled by the local app.
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(60))]
     async fn websocket_upgrade_filter_match(
         #[future] websocket_service: KubeService,
@@ -853,6 +902,10 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&mirrorded_process).await;
+
+        #[cfg(not(target_os = "windows"))]
         mirrorded_process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;

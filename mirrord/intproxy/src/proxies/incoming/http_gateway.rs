@@ -9,22 +9,22 @@ use std::{
 };
 
 use http_body_util::BodyExt;
-use hyper::{body::Incoming, http::response::Parts, StatusCode};
+use hyper::{StatusCode, body::Incoming, http::response::Parts};
 use mirrord_protocol::{
+    ClientMessage, Payload,
     batched_body::BatchedBody,
     tcp::{
         ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedResponse, HttpRequest, HttpResponse,
         IncomingTrafficTransportType, InternalHttpBody, InternalHttpBodyFrame,
-        InternalHttpResponse,
+        InternalHttpResponse, LayerTcpSteal,
     },
-    Payload,
 };
 use tokio::time;
 use tokio_retry::strategy::ExponentialBackoff;
 use tracing::Level;
 
 use super::{
-    http::{mirrord_error_response, ClientStore, LocalHttpError, ResponseMode, StreamingBody},
+    http::{ClientStore, LocalHttpError, ResponseMode, StreamingBody, mirrord_error_response},
     tasks::{HttpOut, InProxyTaskMessage},
 };
 use crate::background_tasks::{BackgroundTask, MessageBus};
@@ -97,6 +97,9 @@ impl HttpGatewayTask {
             .ready_frames()
             .map_err(LocalHttpError::ReadBodyFailed)?;
 
+        // If all frames are instantly ready, **always** send the full response in one message.
+        // This is important for proper handling of gRPC error responses,
+        // as it affects structure of HTTP/2 frames returned to the gRPC client.
         if frames.is_last {
             let ready_frames = frames
                 .frames
@@ -119,7 +122,11 @@ impl HttpGatewayTask {
                     body: InternalHttpBody(ready_frames),
                 },
             };
-            message_bus.send(HttpOut::ResponseFramed(response)).await;
+            message_bus
+                .send_agent(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(
+                    response,
+                )))
+                .await;
 
             return Ok(ControlFlow::Continue(()));
         }
@@ -146,8 +153,11 @@ impl HttpGatewayTask {
                 body: ready_frames,
             },
         };
+
         message_bus
-            .send(HttpOut::ResponseChunked(ChunkedResponse::Start(response)))
+            .send_agent(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
+                ChunkedResponse::Start(response),
+            )))
             .await;
 
         loop {
@@ -168,13 +178,13 @@ impl HttpGatewayTask {
                     );
 
                     message_bus
-                        .send(HttpOut::ResponseChunked(ChunkedResponse::Body(
-                            ChunkedRequestBodyV1 {
+                        .send_agent(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
+                            ChunkedResponse::Body(ChunkedRequestBodyV1 {
                                 frames,
                                 is_last,
                                 connection_id: self.request.connection_id,
                                 request_id: self.request.request_id,
-                            },
+                            }),
                         )))
                         .await;
 
@@ -194,11 +204,11 @@ impl HttpGatewayTask {
                     );
 
                     message_bus
-                        .send(HttpOut::ResponseChunked(ChunkedResponse::Error(
-                            ChunkedRequestErrorV1 {
+                        .send_agent(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
+                            ChunkedResponse::Error(ChunkedRequestErrorV1 {
                                 connection_id: self.request.connection_id,
                                 request_id: self.request.request_id,
-                            },
+                            }),
                         )))
                         .await;
 
@@ -260,7 +270,11 @@ impl HttpGatewayTask {
                         body,
                     },
                 };
-                message_bus.send(HttpOut::ResponseBasic(response)).await;
+                message_bus
+                    .send_agent(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(
+                        response,
+                    )))
+                    .await;
 
                 ControlFlow::Continue(())
             }
@@ -286,7 +300,11 @@ impl HttpGatewayTask {
                         body,
                     },
                 };
-                message_bus.send(HttpOut::ResponseFramed(response)).await;
+                message_bus
+                    .send_agent(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(
+                        response,
+                    )))
+                    .await;
 
                 ControlFlow::Continue(())
             }
@@ -312,11 +330,14 @@ impl HttpGatewayTask {
             return Ok(());
         }
 
-        if let Some(on_upgrade) = on_upgrade {
-            message_bus.send(HttpOut::Upgraded(on_upgrade)).await;
-        } else {
-            // If there was no upgrade and no error, the client can be reused.
-            self.client_store.push_idle(client);
+        match on_upgrade {
+            Some(on_upgrade) => {
+                message_bus.send(HttpOut::Upgraded(on_upgrade)).await;
+            }
+            _ => {
+                // If there was no upgrade and no error, the client can be reused.
+                self.client_store.push_idle(client);
+            }
         }
 
         Ok(())
@@ -340,13 +361,24 @@ impl BackgroundTask for HttpGatewayTask {
             .max_delay(Duration::from_millis(500))
             .take(9);
 
-        let guard = message_bus.closed();
+        let closed_token = message_bus.closed_token().clone();
 
         let mut attempt = 0;
         let error = loop {
             attempt += 1;
             tracing::debug!(attempt, "Starting send attempt");
-            match guard.cancel_on_close(self.send_attempt(message_bus)).await {
+
+            let send_result = if self.response_mode.is_some() {
+                closed_token
+                    .run_until_cancelled(self.send_attempt(message_bus))
+                    .await
+            } else {
+                // If we're in mirror mode, we cannot cancel the request when the remote connection
+                // ends. The local application processes the request independently.
+                self.send_attempt(message_bus).await.into()
+            };
+
+            match send_result {
                 None | Some(Ok(())) => return Ok(()),
                 Some(Err(error)) => {
                     let backoff = error.can_retry().then(|| backoffs.next()).flatten();
@@ -369,21 +401,42 @@ impl BackgroundTask for HttpGatewayTask {
                         "Trying again after backoff",
                     );
 
-                    if guard.cancel_on_close(time::sleep(backoff)).await.is_none() {
-                        return Ok(());
+                    if self.response_mode.is_some() {
+                        if closed_token
+                            .run_until_cancelled(time::sleep(backoff))
+                            .await
+                            .is_none()
+                        {
+                            return Ok(());
+                        }
+                    } else {
+                        // If we're in mirror mode, we cannot cancel the request when the remote
+                        // connection ends. The local application processes
+                        // the request independently.
+                        time::sleep(backoff).await;
                     }
                 }
             }
         };
 
-        let response = mirrord_error_response(
-            Report::new(error).pretty(true),
-            self.request.version(),
-            self.request.connection_id,
-            self.request.request_id,
-            self.request.port,
-        );
-        message_bus.send(HttpOut::ResponseBasic(response)).await;
+        // If we send an error response here IncomingProxy may hit an
+        // unreachable!() and panic as it doesn't expect responses in
+        // mirror mode
+        if self.response_mode.is_some() {
+            let response = mirrord_error_response(
+                Report::new(error).pretty(true),
+                self.request.version(),
+                self.request.connection_id,
+                self.request.request_id,
+                self.request.port,
+            );
+
+            message_bus
+                .send_agent(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(
+                    response,
+                )))
+                .await;
+        }
 
         Ok(())
     }
@@ -396,24 +449,26 @@ mod test {
     use bytes::Bytes;
     use http_body_util::{Empty, StreamBody};
     use hyper::{
+        Method, Request, Response, StatusCode, Version,
         body::{Frame, Incoming},
-        header::{self, HeaderValue, CONNECTION, UPGRADE},
+        header::{self, CONNECTION, HeaderValue, UPGRADE},
         server::conn::http1,
         service::service_fn,
         upgrade::Upgraded,
-        Method, Request, Response, StatusCode, Version,
     };
     use hyper_util::rt::TokioIo;
     use mirrord_protocol::{
-        tcp::{HttpRequest, InternalHttpRequest},
         ConnectionId, ToPayload,
+        tcp::{HttpRequest, InternalHttpRequest, TcpData},
     };
+    use mirrord_protocol_io::Connection;
     use rstest::rstest;
     use rustls::ServerConfig;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
-        sync::{mpsc, watch, Semaphore},
+        select,
+        sync::{Semaphore, mpsc, watch},
         task,
     };
     use tokio_rustls::TlsAcceptor;
@@ -423,9 +478,9 @@ mod test {
     use crate::{
         background_tasks::{BackgroundTasks, TaskUpdate},
         proxies::incoming::{
+            InProxyTaskError,
             tcp_proxy::{LocalTcpConnection, TcpProxyTask},
             tls::LocalTlsSetup,
-            InProxyTaskError,
         },
     };
 
@@ -489,7 +544,8 @@ mod test {
         Ok(res)
     }
 
-    /// Runs a [`hyper`] server that accepts only requests upgrading to the [`TEST_PROTO`] protocol.
+    /// Runs a [`hyper`] server that accepts only requests upgrading
+    /// to the [`TEST_PROTO`] protocol.
     async fn dummy_echo_server(
         listener: TcpListener,
         acceptor: Option<TlsAcceptor>,
@@ -497,8 +553,8 @@ mod test {
     ) {
         loop {
             let (stream, _) = tokio::select! {
-                res = listener.accept() => res.expect("dummy echo server failed to accept a TCP connection"),
-                _ = shutdown.changed() => break,
+                res = listener.accept() => res.expect("dummy echo server failed to accept a TCP
+            connection"),                 _ = shutdown.changed() => break,
             };
 
             let mut shutdown = shutdown.clone();
@@ -586,8 +642,11 @@ mod test {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server_task = task::spawn(dummy_echo_server(listener, acceptor, shutdown_rx));
 
+        let (connection, _, proxy_rx) = Connection::dummy();
+
         let mut tasks: BackgroundTasks<ConnectionId, InProxyTaskMessage, InProxyTaskError> =
-            Default::default();
+            BackgroundTasks::new(connection.tx_handle());
+
         let _gateway = {
             let request = HttpRequest {
                 connection_id: 0,
@@ -595,7 +654,7 @@ mod test {
                 port: 80,
                 internal_request: InternalHttpRequest {
                     method: Method::GET,
-                    uri: "dummyecho://www.mirrord.dev/".parse().unwrap(),
+                    uri: "dummyecho://metalbear.com/mirrord/".parse().unwrap(),
                     headers: [
                         (CONNECTION, HeaderValue::from_static("upgrade")),
                         (UPGRADE, HeaderValue::from_static(TEST_PROTO)),
@@ -627,31 +686,28 @@ mod test {
         };
 
         if is_steal {
-            let message = tasks
-                .next()
-                .await
-                .expect("no task result")
-                .1
-                .unwrap_message();
+            let message = proxy_rx.next().await.expect("no task result");
             match message {
-                InProxyTaskMessage::Http(HttpOut::ResponseBasic(res)) => {
+                ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(res)) => {
                     assert_eq!(
                         res.internal_response.status,
                         StatusCode::SWITCHING_PROTOCOLS
                     );
                     println!("Received response from the gateway: {res:?}");
-                    assert!(res
-                        .internal_response
-                        .headers
-                        .get(CONNECTION)
-                        .filter(|v| *v == "upgrade")
-                        .is_some());
-                    assert!(res
-                        .internal_response
-                        .headers
-                        .get(UPGRADE)
-                        .filter(|v| *v == TEST_PROTO)
-                        .is_some());
+                    assert!(
+                        res.internal_response
+                            .headers
+                            .get(CONNECTION)
+                            .filter(|v| *v == "upgrade")
+                            .is_some()
+                    );
+                    assert!(
+                        res.internal_response
+                            .headers
+                            .get(UPGRADE)
+                            .filter(|v| *v == TEST_PROTO)
+                            .is_some()
+                    );
                 }
                 other => panic!("unexpected task update: {other:?}"),
             }
@@ -665,7 +721,6 @@ mod test {
             .unwrap_message();
         let on_upgrade = match message {
             InProxyTaskMessage::Http(HttpOut::Upgraded(on_upgrade)) => on_upgrade,
-            other => panic!("unexpected task update: {other:?}"),
         };
         let update = tasks.next().await.expect("no task result");
         match update.1 {
@@ -686,28 +741,18 @@ mod test {
         proxy.send(b"test test test".to_vec()).await;
 
         if is_steal {
-            let message = tasks
-                .next()
-                .await
-                .expect("no task result")
-                .1
-                .unwrap_message();
+            let message = proxy_rx.next().await.expect("no task result");
             match message {
-                InProxyTaskMessage::Tcp(bytes) => {
-                    assert_eq!(bytes, INITIAL_MESSAGE);
+                ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData { bytes, .. })) => {
+                    assert_eq!(&*bytes, INITIAL_MESSAGE);
                 }
                 _ => panic!("unexpected task update: {update:?}"),
             }
 
-            let message = tasks
-                .next()
-                .await
-                .expect("no task result")
-                .1
-                .unwrap_message();
+            let message = proxy_rx.next().await.expect("no task result");
             match message {
-                InProxyTaskMessage::Tcp(bytes) => {
-                    assert_eq!(bytes, b"test test test");
+                ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData { bytes, .. })) => {
+                    assert_eq!(&*bytes, b"test test test".as_slice());
                 }
                 _ => panic!("unexpected task update: {update:?}"),
             }
@@ -786,7 +831,11 @@ mod test {
             },
         };
 
-        let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> = Default::default();
+        let (connection, _, proxy_rx) = Connection::dummy();
+
+        let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> =
+            BackgroundTasks::new(connection.tx_handle());
+
         let _gateway = tasks.register(
             HttpGatewayTask::new(
                 request,
@@ -802,8 +851,8 @@ mod test {
         match response_mode {
             Some(ResponseMode::Basic) => {
                 semaphore.add_permits(2);
-                match tasks.next().await.unwrap().1.unwrap_message() {
-                    InProxyTaskMessage::Http(HttpOut::ResponseBasic(response)) => {
+                match proxy_rx.next().await.unwrap() {
+                    ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response)) => {
                         assert_eq!(response.internal_response.body.as_ref(), b"hello\nhello\n");
                     }
                     other => panic!("unexpected task message: {other:?}"),
@@ -812,8 +861,8 @@ mod test {
 
             Some(ResponseMode::Framed) => {
                 semaphore.add_permits(2);
-                match tasks.next().await.unwrap().1.unwrap_message() {
-                    InProxyTaskMessage::Http(HttpOut::ResponseFramed(response)) => {
+                match proxy_rx.next().await.unwrap() {
+                    ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(response)) => {
                         let mut collected = vec![];
                         for frame in response.internal_response.body.0 {
                             match frame {
@@ -833,20 +882,20 @@ mod test {
             }
 
             Some(ResponseMode::Chunked) => {
-                match tasks.next().await.unwrap().1.unwrap_message() {
-                    InProxyTaskMessage::Http(HttpOut::ResponseChunked(ChunkedResponse::Start(
-                        response,
-                    ))) => {
+                match proxy_rx.next().await.unwrap() {
+                    ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
+                        ChunkedResponse::Start(response),
+                    )) => {
                         assert!(response.internal_response.body.is_empty());
                     }
                     other => panic!("unexpected task message: {other:?}"),
                 }
 
                 semaphore.add_permits(1);
-                match tasks.next().await.unwrap().1.unwrap_message() {
-                    InProxyTaskMessage::Http(HttpOut::ResponseChunked(ChunkedResponse::Body(
-                        body,
-                    ))) => {
+                match proxy_rx.next().await.unwrap() {
+                    ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
+                        ChunkedResponse::Body(body),
+                    )) => {
                         assert_eq!(
                             body.frames,
                             vec![InternalHttpBodyFrame::Data(b"hello\n".to_payload())],
@@ -857,10 +906,10 @@ mod test {
                 }
 
                 semaphore.add_permits(1);
-                match tasks.next().await.unwrap().1.unwrap_message() {
-                    InProxyTaskMessage::Http(HttpOut::ResponseChunked(ChunkedResponse::Body(
-                        body,
-                    ))) => {
+                match proxy_rx.next().await.unwrap() {
+                    ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
+                        ChunkedResponse::Body(body),
+                    )) => {
                         assert_eq!(
                             body.frames,
                             vec![InternalHttpBodyFrame::Data(b"hello\n".to_payload())],
@@ -941,7 +990,11 @@ mod test {
             .headers
             .insert(header::CONTENT_LENGTH, HeaderValue::from_static("12"));
 
-        let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> = Default::default();
+        let (connection, _, proxy_rx) = Connection::dummy();
+
+        let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> =
+            BackgroundTasks::new(connection.tx_handle());
+
         let client_store =
             ClientStore::new_with_timeout(Duration::from_secs(1), Default::default());
         let _gateway = tasks.register(
@@ -965,8 +1018,8 @@ mod test {
         }
         std::mem::drop(frame_tx);
 
-        match tasks.next().await.unwrap().1.unwrap_message() {
-            InProxyTaskMessage::Http(HttpOut::ResponseBasic(response)) => {
+        match proxy_rx.next().await.unwrap() {
+            ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response)) => {
                 assert_eq!(response.internal_response.status, StatusCode::OK);
             }
             other => panic!("unexpected message: {other:?}"),
@@ -1016,9 +1069,14 @@ mod test {
             .headers
             .insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
 
-        let mut tasks: BackgroundTasks<u32, InProxyTaskMessage, Infallible> = Default::default();
+        let (connection, _, proxy_rx) = Connection::dummy();
+
+        let mut tasks: BackgroundTasks<u32, InProxyTaskMessage, Infallible> =
+            BackgroundTasks::new(connection.tx_handle());
+
         let client_store =
             ClientStore::new_with_timeout(Duration::from_secs(1337 * 21 * 37), Default::default());
+
         let _gateway_1 = tasks.register(
             HttpGatewayTask::new(
                 request.clone(),
@@ -1046,20 +1104,21 @@ mod test {
         let mut responses = 0;
 
         while finished < 2 && responses < 2 {
-            match tasks.next().await.unwrap() {
-                (id, TaskUpdate::Finished(Ok(()))) => {
-                    println!("gateway {id} finished");
-                    finished += 1;
+            select! {
+                update = tasks.next() => match update.unwrap() {
+                    (id, TaskUpdate::Finished(Ok(()))) => {
+                        println!("gateway {id} finished");
+                        finished += 1;
+                    }
+                    other => panic!("unexpected task update: {other:?}"),
+                },
+                message = proxy_rx.next() => match message.unwrap() {
+                    ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response)) => {
+                        assert_eq!(response.internal_response.status, StatusCode::OK);
+                        responses += 1;
+                    }
+                    other => panic!("unexpected message: {other:?}"),
                 }
-                (
-                    id,
-                    TaskUpdate::Message(InProxyTaskMessage::Http(HttpOut::ResponseBasic(response))),
-                ) => {
-                    println!("gateway {id} returned a response");
-                    assert_eq!(response.internal_response.status, StatusCode::OK);
-                    responses += 1;
-                }
-                other => panic!("unexpected task update: {other:?}"),
             }
         }
     }

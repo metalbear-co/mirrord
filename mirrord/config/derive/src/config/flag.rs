@@ -1,9 +1,9 @@
 use proc_macro2::{Span, TokenStream};
 use proc_macro2_diagnostics::{Diagnostic, SpanDiagnosticExt};
-use quote::{quote, ToTokens};
+use quote::{ToTokens, quote};
 use syn::{
-    punctuated::Punctuated, spanned::Spanned, Attribute, Expr, ExprLit, Ident, Lit, Meta,
-    MetaNameValue, Token,
+    Attribute, Expr, ExprLit, Ident, Lit, Meta, MetaNameValue, Token, punctuated::Punctuated,
+    spanned::Spanned,
 };
 
 #[derive(Debug, Eq, PartialEq)]
@@ -185,7 +185,7 @@ impl ConfigFlags {
                         return Err(meta.path().span().error(
                             "unsupported config
                          attribute flag",
-                        ))
+                        ));
                     }
                 }
             }

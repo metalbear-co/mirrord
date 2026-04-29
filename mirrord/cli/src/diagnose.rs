@@ -1,34 +1,30 @@
 use std::{path::Path, time::Duration};
 
 use mirrord_analytics::NullReporter;
-use mirrord_config::{
-    config::{ConfigContext, MirrordConfig},
-    LayerFileConfig,
-};
+use mirrord_auth::credential_store::CredentialStore;
+use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use tokio::{sync::mpsc, time::Instant};
+use mirrord_protocol_io::{Client, Connection};
+use tokio::time::Instant;
 use tracing::Level;
 
 use crate::{
-    connection::create_and_connect, util::remove_proxy_env, CliError, CliResult, DiagnoseArgs,
-    DiagnoseCommand,
+    CliError, CliResult, DiagnoseArgs, DiagnoseCommand, connection::create_and_connect,
+    util::remove_proxy_env,
 };
 
 /// Sends a ping the connection and expects a pong.
-async fn ping(
-    sender: &mpsc::Sender<ClientMessage>,
-    receiver: &mut mpsc::Receiver<DaemonMessage>,
-) -> CliResult<()> {
-    sender.send(ClientMessage::Ping).await.map_err(|_| {
-        CliError::PingPongFailed(
-            "failed to send ping message - agent unexpectedly closed connection".to_string(),
-        )
-    })?;
+async fn ping(connection: &mut Connection<Client>) -> CliResult<()> {
+    connection.send(ClientMessage::Ping).await;
 
     loop {
-        let result = match receiver.recv().await {
+        let result = match connection.recv().await {
             Some(DaemonMessage::Pong) => Ok(()),
+            Some(DaemonMessage::OperatorPing(id)) => {
+                connection.send(ClientMessage::OperatorPong(id)).await;
+                Ok(())
+            }
             Some(DaemonMessage::LogMessage(..)) => continue,
             Some(DaemonMessage::Close(message)) => Err(CliError::PingPongFailed(format!(
                 "agent closed connection with message: {message}"
@@ -50,12 +46,8 @@ async fn ping(
 async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord network diagnosis");
 
-    let mut cfg_context = ConfigContext::default();
-    let mut config = if let Some(path) = config {
-        LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
-    } else {
-        LayerFileConfig::default().generate_config(&mut cfg_context)
-    }?;
+    let mut context = ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config);
+    let mut config = LayerConfig::resolve(&mut context)?;
 
     if !config.use_proxy {
         remove_proxy_env();
@@ -63,16 +55,16 @@ async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
 
     let mut analytics = NullReporter::default();
     let (_, mut connection) =
-        create_and_connect(&mut config, &mut progress, &mut analytics, None).await?;
+        create_and_connect(&mut config, &mut progress, &mut analytics, None, None).await?;
 
     let mut statistics: Vec<Duration> = Vec::new();
 
     // ignore first ping as it's part of the initialization.
-    ping(&connection.sender, &mut connection.receiver).await?;
+    ping(&mut connection).await?;
     // run 100 iterations
     for i in 0..100 {
         let start = Instant::now();
-        ping(&connection.sender, &mut connection.receiver).await?;
+        ping(&mut connection).await?;
         let elapsed = start.elapsed();
         progress.info(
             format!(
@@ -98,9 +90,28 @@ async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
     Ok(())
 }
 
+/// Print the user fingerprints stored in the local credentials file.
+///
+/// Each entry corresponds to an operator license the machine has authenticated against. The
+/// fingerprint is what the operator uses as `client_hash` to identify users (e.g. seat counting).
+async fn diagnose_license() -> CliResult<()> {
+    let store = CredentialStore::load_from_default_path().await?;
+    let mut count = 0usize;
+    for (operator_fp, user_fp) in store.user_fingerprints() {
+        println!("operator: {operator_fp}");
+        println!("  user fingerprint: {user_fp}");
+        count += 1;
+    }
+    if count == 0 {
+        println!("No credentials found in ~/.mirrord/credentials.");
+    }
+    Ok(())
+}
+
 /// Handle commands related to the operator `mirrord diagnose ...`
 pub(crate) async fn diagnose_command(args: DiagnoseArgs) -> CliResult<()> {
     match args.command {
         DiagnoseCommand::Latency { config_file } => diagnose_latency(config_file.as_deref()).await,
+        DiagnoseCommand::License => diagnose_license().await,
     }
 }

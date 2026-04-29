@@ -24,10 +24,6 @@ pub struct Args {
     #[arg(short = 't', long, default_value_t = 30)]
     pub communication_timeout: u16,
 
-    /// Interface to use
-    #[arg(short = 'i', long, env = envs::NETWORK_INTERFACE.name)]
-    pub network_interface: Option<String>,
-
     /// Controls whether metrics are enabled, and the address to set up the metrics server.
     #[arg(long, env = envs::METRICS.name)]
     pub metrics: Option<SocketAddr>,
@@ -57,22 +53,19 @@ pub struct Args {
     )]
     pub is_mesh: bool,
 
-    /// Enable support for IPv6-only clusters
+    /// DEPRECATED AND UNUSED
     ///
-    /// Only when this option is set will take the needed steps to run on an IPv6 single stack
-    /// cluster.
-    #[arg(long, default_value_t = false, env = envs::IPV6_SUPPORT.name)]
+    /// IPv6 support will be enabled automatically when a usable IPv6
+    /// address is found on an interface.
+    ///
+    /// Kept here for backwards compatibility.
+    #[arg(long, default_value_t = false)]
     pub ipv6: bool,
-}
 
-impl Args {
-    pub fn is_mesh(&self) -> bool {
-        self.is_mesh
-            || matches!(
-                self.mode,
-                Mode::Targeted { mesh: Some(_), .. } | Mode::Ephemeral { mesh: Some(_) }
-            )
-    }
+    /// Clean leftover iptables rules and start the new agent instead of erroring out when there
+    /// are existing mirrord rules in the target's iptables.
+    #[arg(long, default_value_t = false, env = envs::CLEAN_IPTABLES_ON_START.name)]
+    pub clean_iptables_on_start: bool,
 }
 
 #[derive(Clone, Debug, Default, Subcommand)]

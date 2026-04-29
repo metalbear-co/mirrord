@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
 use k8s_openapi::{
+    DeepMerge,
     api::core::v1::{
         Capabilities, Container, HostPathVolumeSource, LocalObjectReference, Pod, PodSpec,
         SecurityContext, Volume, VolumeMount,
     },
-    DeepMerge,
 };
 use kube::api::ObjectMeta;
 use mirrord_agent_env::{envs, mesh::MeshVendor};
@@ -14,8 +14,8 @@ use mirrord_config::agent::AgentConfig;
 use super::util::agent_env;
 use crate::api::{
     container::{
-        util::{base_command_line, get_capabilities, DEFAULT_TOLERATIONS},
         ContainerParams, ContainerVariant,
+        util::{AGENT_COMMAND, DEFAULT_TOLERATIONS, agent_base_args, get_capabilities},
     },
     runtime::RuntimeData,
 };
@@ -23,27 +23,23 @@ use crate::api::{
 /// The `targetless` agent variant is created by this, see its [`PodVariant::as_update`].
 pub struct PodVariant<'c> {
     agent: &'c AgentConfig,
-    command_line: Vec<String>,
+    args: Vec<String>,
     params: &'c ContainerParams,
 }
 
 impl<'c> PodVariant<'c> {
     pub fn new(agent: &'c AgentConfig, params: &'c ContainerParams) -> Self {
-        let mut command_line = base_command_line(agent, params);
+        let mut args = agent_base_args(agent, params);
 
-        command_line.push("targetless".to_owned());
+        args.push("targetless".to_owned());
 
-        PodVariant::with_command_line(agent, params, command_line)
+        PodVariant::with_args(agent, params, args)
     }
 
-    fn with_command_line(
-        agent: &'c AgentConfig,
-        params: &'c ContainerParams,
-        command_line: Vec<String>,
-    ) -> Self {
+    fn with_args(agent: &'c AgentConfig, params: &'c ContainerParams, args: Vec<String>) -> Self {
         PodVariant {
             agent,
-            command_line,
+            args,
             params,
         }
     }
@@ -63,7 +59,7 @@ impl ContainerVariant for PodVariant<'_> {
     fn as_update(&self) -> Pod {
         let PodVariant {
             agent,
-            command_line,
+            args,
             params,
             ..
         } = self;
@@ -99,25 +95,22 @@ impl ContainerVariant for PodVariant<'_> {
             .map(BTreeMap::from_iter)
             .unwrap_or_default();
 
+        let mut labels = BTreeMap::from([("app".to_string(), "mirrord".to_string())]);
+
+        if agent.disable_mesh_sidecar_injection {
+            labels.insert("kuma.io/sidecar-injection".into(), "disabled".into());
+        }
+
         Pod {
             metadata: ObjectMeta {
-                annotations: Some(
+                annotations: agent.disable_mesh_sidecar_injection.then(|| {
                     [
                         ("sidecar.istio.io/inject".to_string(), "false".to_string()),
                         ("linkerd.io/inject".to_string(), "disabled".to_string()),
                     ]
-                    .into(),
-                ),
-                labels: Some(
-                    [
-                        (
-                            "kuma.io/sidecar-injection".to_string(),
-                            "disabled".to_string(),
-                        ),
-                        ("app".to_string(), "mirrord".to_string()),
-                    ]
-                    .into(),
-                ),
+                    .into()
+                }),
+                labels: Some(labels),
                 ..Default::default()
             },
             spec: Some(PodSpec {
@@ -130,12 +123,14 @@ impl ContainerVariant for PodVariant<'_> {
                     name: "mirrord-agent".to_string(),
                     image: Some(agent.image().to_string()),
                     image_pull_policy: Some(agent.image_pull_policy.clone()),
-                    command: Some(command_line.clone()),
+                    command: Some(vec![AGENT_COMMAND.into()]),
+                    args: Some(args.clone()),
                     env: Some(env),
                     // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                     resources: Some(resources),
                     ..Default::default()
                 }],
+                security_context: agent.security_context.clone().map(Into::into),
                 priority_class_name: agent.priority_class.clone(),
                 ..Default::default()
             }),
@@ -159,9 +154,9 @@ impl<'c> PodTargetedVariant<'c> {
         params: &'c ContainerParams,
         runtime_data: &'c RuntimeData,
     ) -> Self {
-        let mut command_line = base_command_line(agent, params);
+        let mut args = agent_base_args(agent, params);
 
-        command_line.extend([
+        args.extend([
             "targeted".to_owned(),
             "--container-id".to_owned(),
             runtime_data.container_id.to_string(),
@@ -169,7 +164,7 @@ impl<'c> PodTargetedVariant<'c> {
             runtime_data.container_runtime.to_string(),
         ]);
 
-        let inner = PodVariant::with_command_line(agent, params, command_line);
+        let inner = PodVariant::with_args(agent, params, args);
 
         PodTargetedVariant {
             inner,
@@ -210,7 +205,6 @@ impl ContainerVariant for PodTargetedVariant<'_> {
                 restart_policy: Some("Never".to_string()),
                 tolerations: Some(tolerations.clone()),
                 host_pid: Some(true),
-                node_name: Some(runtime_data.node_name.clone()),
                 volumes: Some(vec![
                     Volume {
                         name: "hostrun".to_string(),
@@ -268,10 +262,16 @@ impl ContainerVariant for PodTargetedVariant<'_> {
         let mut pod = self.inner.as_update();
         pod.merge_from(update);
 
-        // Remove priority class from spec if it's targeted.
-        pod.spec
-            .as_mut()
-            .map(|pod_spec| pod_spec.priority_class_name.take());
+        if let Some(spec) = pod.spec.as_mut() {
+            if let Some(node_hostname) = runtime_data.node_hostname.as_ref() {
+                spec.node_name = None;
+                spec.node_selector
+                    .get_or_insert_with(BTreeMap::new)
+                    .insert("kubernetes.io/hostname".to_string(), node_hostname.clone());
+            } else {
+                spec.node_name = Some(runtime_data.node_name.clone());
+            }
+        }
 
         pod
     }
@@ -286,8 +286,8 @@ mod test {
 
     use crate::api::{
         container::{
-            pod::{PodTargetedVariant, PodVariant},
             ContainerParams, ContainerVariant,
+            pod::{PodTargetedVariant, PodVariant},
         },
         runtime::{ContainerRuntime, RuntimeData},
     };
@@ -303,18 +303,16 @@ mod test {
             gid: 13,
             tls_cert: None,
             pod_ips: None,
-            support_ipv6: false,
             steal_tls_config: Default::default(),
+            idle_ttl: Default::default(),
         };
 
-        // targetless agent pod can be configured with priority class name.
         let update = PodVariant::new(&agent, &params).as_update();
         assert_eq!(
             update.spec.unwrap().priority_class_name.unwrap(),
             "test-priority-profile"
         );
 
-        // cannot configure priority class for targeted.
         let update = PodTargetedVariant::new(
             &agent,
             &params,
@@ -324,6 +322,7 @@ mod test {
                 pod_ips: vec![],
                 pod_namespace: "default".to_string(),
                 node_name: "some-node".to_string(),
+                node_hostname: None,
                 container_id: "container".to_string(),
                 container_runtime: ContainerRuntime::Docker,
                 container_name: "some-container".to_string(),
@@ -333,7 +332,58 @@ mod test {
             },
         )
         .as_update();
-        assert!(update.spec.unwrap().priority_class_name.is_none());
+        assert_eq!(
+            update.spec.unwrap().priority_class_name.unwrap(),
+            "test-priority-profile"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn targeted_uses_node_hostname_selector_when_resolved() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut config_context = ConfigContext::default();
+        let agent = AgentFileConfig::default().generate_config(&mut config_context)?;
+        let params = ContainerParams {
+            name: "foobar".to_string(),
+            port: 3000,
+            gid: 13,
+            tls_cert: None,
+            pod_ips: None,
+            steal_tls_config: Default::default(),
+            idle_ttl: Default::default(),
+        };
+
+        let update = PodTargetedVariant::new(
+            &agent,
+            &params,
+            &RuntimeData {
+                mesh: None,
+                pod_name: "some-pod".to_string(),
+                pod_ips: vec![],
+                pod_namespace: "default".to_string(),
+                node_name: "some-node-name".to_string(),
+                node_hostname: Some("some-node-hostname".to_string()),
+                container_id: "container".to_string(),
+                container_runtime: ContainerRuntime::Docker,
+                container_name: "some-container".to_string(),
+                guessed_container: false,
+                share_process_namespace: false,
+                containers_probe_ports: vec![],
+            },
+        )
+        .as_update();
+
+        let spec = update.spec.expect("targeted pod should include spec");
+        assert_eq!(spec.node_name, None);
+        assert_eq!(
+            spec.node_selector
+                .as_ref()
+                .and_then(|labels| labels.get("kubernetes.io/hostname"))
+                .map(String::as_str),
+            Some("some-node-hostname")
+        );
+
         Ok(())
     }
 }

@@ -1,54 +1,20 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{ffi::CStr, fmt::Debug, ops::Not, path::PathBuf};
+use std::{ffi::CStr, ops::Not, path::PathBuf};
 
 use libc::c_char;
-use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
+pub use mirrord_layer_lib::{
+    detour::{Bypass, Detour},
+    proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
+};
 use mirrord_protocol::file::OpenOptionsInternal;
 use null_terminated::Nul;
 use tracing::warn;
 
-use crate::{
-    detour::{Bypass, Detour},
-    error::{HookError, HookResult},
-    exec_hooks::Argv,
-    file::OpenOptionsInternalExt,
-    socket::SHARED_SOCKETS_ENV_VAR,
-    PROXY_CONNECTION,
-};
+/// Make it const so can be shared and re-used with by reference without fear.
+#[cfg(target_os = "macos")]
+const ROOT_DIR: &str = "/\0";
 
-/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
-/// Blocks until the proxy responds.
-pub fn make_proxy_request_with_response<T>(request: T) -> HookResult<T::Response>
-where
-    T: IsLayerRequestWithResponse + Debug,
-    T::Response: Debug,
-{
-    // SAFETY: mutation happens only on initialization.
-    #[allow(static_mut_refs)]
-    unsafe {
-        PROXY_CONNECTION
-            .get()
-            .ok_or(HookError::CannotGetProxyConnection)?
-            .make_request_with_response(request)
-            .map_err(Into::into)
-    }
-}
-
-/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
-/// Blocks until the request is sent.
-pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
-    request: T,
-) -> HookResult<MessageId> {
-    // SAFETY: mutation happens only on initialization.
-    #[allow(static_mut_refs)]
-    unsafe {
-        PROXY_CONNECTION
-            .get()
-            .ok_or(HookError::CannotGetProxyConnection)?
-            .make_request_no_response(request)
-            .map_err(Into::into)
-    }
-}
+use crate::{exec_hooks::Argv, file::OpenOptionsInternalExt, socket::SHARED_SOCKETS_ENV_VAR};
 
 /// Converts raw pointer values `P` to some other type.
 ///
@@ -87,14 +53,27 @@ impl CheckedInto<String> for *const c_char {
 
 #[cfg(target_os = "macos")]
 pub fn strip_mirrord_path(path_str: &str) -> Option<&str> {
-    use mirrord_sip::MIRRORD_PATCH_DIR;
+    use mirrord_sip::{MIRRORD_BINARIES_DIR_STRING, MIRRORD_PATCH_DIR};
 
     // SAFETY: We only slice after we find the string in the path
     // so it must be valid
     #[allow(clippy::indexing_slicing)]
     path_str
         .find(MIRRORD_PATCH_DIR)
-        .map(|index| &path_str[(MIRRORD_PATCH_DIR.len() + index)..])
+        .map(|index| {
+            let remain = &path_str[(MIRRORD_PATCH_DIR.len() + index)..];
+            // if the case is lstat(MIRRORD_PATCH_DIR) the result would be lstat("") which ofc is
+            // very sad. which is in that case we automatically insert "/"
+            if remain.is_empty() { ROOT_DIR } else { remain }
+        })
+        .or_else(|| {
+            path_str
+                .find(MIRRORD_BINARIES_DIR_STRING.as_str())
+                .map(|index| {
+                    let remain = &path_str[(MIRRORD_BINARIES_DIR_STRING.len() + index)..];
+                    if remain.is_empty() { ROOT_DIR } else { remain }
+                })
+        })
 }
 
 impl CheckedInto<PathBuf> for *const c_char {

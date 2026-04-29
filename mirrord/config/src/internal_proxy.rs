@@ -1,10 +1,11 @@
-use std::path::PathBuf;
-
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::config::source::MirrordConfigSource;
+use crate::{
+    config::source::MirrordConfigSource,
+    logfile_path::{Intproxy, LogDestinationConfig},
+};
 
 /// Environment variable we use to notify the internal proxy that it runs in a sidecar container.
 ///
@@ -95,11 +96,18 @@ pub struct InternalProxyConfig {
 
     /// ### internal_proxy.log_destination {#internal_proxy-log_destination}
     ///
-    /// Set the log file destination for the internal proxy.
+    /// Set the log destination for the internal proxy.
+    ///
+    /// 1. If the provided path ends with a separator (`/` on UNIX, `\` on Windows), it will be
+    ///    treated as a path to directory where the log file should be created.
+    /// 2. Otherwise, if the path exists, mirrord will check if it's a directory or not.
+    /// 3. Otherwise, it will be treated as a path to the log file.
+    ///
+    /// mirrord will auto create all parent directories.
     ///
     /// Defaults to a randomized path inside the temporary directory.
-    #[config(default = crate::default_proxy_logfile_path("mirrord-intproxy"))]
-    pub log_destination: PathBuf,
+    #[config(default, nested)]
+    pub log_destination: LogDestinationConfig<Intproxy>,
 
     /// ### internal_proxy.json_log {#internal_proxy-json_log}
     ///
@@ -109,4 +117,21 @@ pub struct InternalProxyConfig {
     /// Defaults to true.
     #[config(default = true)]
     pub json_log: bool,
+
+    /// ### internal_proxy.process_logging_interval {#internal_proxy-process_logging_interval}
+    ///
+    /// How often to log information about connected processes in seconds.
+    ///
+    /// This feature logs details about processes that are currently connected to the internal
+    /// proxy, including their PID, process name, command line, and connection status.
+    ///
+    /// ```json
+    /// {
+    ///   "internal_proxy": {
+    ///     "process_logging_interval": 60
+    ///   }
+    /// }
+    /// ```
+    #[config(default = 60)]
+    pub process_logging_interval: u64,
 }

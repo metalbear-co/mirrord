@@ -3,6 +3,7 @@
 
 use std::io;
 
+use bytes::Bytes;
 use tracing::Level;
 
 use super::InterceptorId;
@@ -32,8 +33,8 @@ impl Interceptor {
 
 impl BackgroundTask for Interceptor {
     type Error = io::Error;
-    type MessageIn = Vec<u8>;
-    type MessageOut = Vec<u8>;
+    type MessageIn = Bytes;
+    type MessageOut = Bytes;
 
     /// Accepts one connection the owned [`PreparedSocket`] and transparently proxies bytes between
     /// the [`MessageBus`] and the new
@@ -60,7 +61,14 @@ impl BackgroundTask for Interceptor {
             return Ok(());
         };
 
-        let mut connected_socket = socket.accept().await?;
+        let mut connected_socket = tokio::select! {
+            socket = socket.accept() => socket?,
+            _ = message_bus.closed_token().cancelled() => {
+                tracing::trace!("Connection closed from the outgoing_proxy side, exiting");
+                return Ok(());
+            },
+        };
+
         let mut reading_closed = false;
 
         loop {
@@ -94,7 +102,7 @@ impl BackgroundTask for Interceptor {
                     }
 
                     None => {
-                        tracing::trace!("Connection closed from the ourgoing_proxy side, exiting");
+                        tracing::trace!("Connection closed from the outgoing_proxy side, exiting");
                         break Ok(())
                     }
                 },

@@ -1,6 +1,9 @@
 from flask import Flask
 import logging
 import sys
+from threading import Lock
+
+print_lock = Lock()
 
 log = logging.getLogger("werkzeug")
 log.disabled = True
@@ -15,25 +18,29 @@ TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod 
 
 @app.route("/", methods=["GET"])
 def get():
-    print("GET: Request completed")
+    with print_lock:
+        print("GET: Request completed")
     return "GET"
 
 
 @app.route("/", methods=["POST"])
 def post():
-    print("POST: Request completed")
+    with print_lock:
+        print("POST: Request completed")
     return "POST"
 
 
 @app.route("/", methods=["PUT"])
 def put():
-    print("PUT: Request completed")
+    with print_lock:
+        print("PUT: Request completed")
     return "PUT"
 
 
 @app.route("/", methods=["DELETE"])
 def delete():
-    print("DELETE: Request completed")
+    with print_lock:
+        print("DELETE: Request completed")
     return "DELETE"
 
 

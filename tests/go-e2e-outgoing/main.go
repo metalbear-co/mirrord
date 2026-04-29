@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
-)
-import (
 	"net"
+	"net/http"
 	"os"
 )
 

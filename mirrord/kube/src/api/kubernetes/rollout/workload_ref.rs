@@ -1,10 +1,10 @@
 use k8s_openapi::{
+    Resource,
     api::{
         apps::v1::{Deployment, ReplicaSet, StatefulSet},
         core::v1::{PodTemplate, PodTemplateSpec},
     },
     apimachinery::pkg::apis::meta::v1::LabelSelector,
-    Resource,
 };
 use kube::Client;
 use serde::{Deserialize, Serialize};

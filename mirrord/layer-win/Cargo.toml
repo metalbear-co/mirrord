@@ -1,0 +1,43 @@
+[package]
+name = "mirrord-layer-win"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+documentation.workspace = true
+authors.workspace = true
+description.workspace = true
+homepage.workspace = true
+publish.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+mirrord-layer-macro = { path = "../layer/macro" }
+mirrord-layer-lib = { path = "../layer-lib", features = ["layer-hook-execution"] }
+mirrord-protocol = { path = "../protocol" }
+mirrord-progress = { path = "../progress" }
+mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
+mirrord-config = { path = "../config" }
+socket2.workspace = true
+
+# Used for logging and tracing
+tracing.workspace = true
+
+libc.workspace = true
+[target.'cfg(windows)'.dependencies]
+phnt.workspace = true
+once_cell.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi.workspace = true
+str-win = { path = "../str-win" }
+minhook-detours-rs.workspace = true
+windows-strings.workspace = true
+
+[lints]
+workspace = true

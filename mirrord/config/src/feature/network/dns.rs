@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::filter::AddressFilter;
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError},
+    config::{ConfigContext, ConfigError, from_env::FromEnv, source::MirrordConfigSource},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
@@ -28,8 +28,8 @@ use crate::{
 /// }
 /// ```
 ///
-/// - Only queries for addresses in subnet `1.1.1.0/24` with service port `1337`` will go through
-///   the remote pod.
+/// - Only queries for addresses in subnet `1.1.1.0/24` with service port `1337` will go through the
+///   remote pod.
 ///
 /// ```json
 /// {
@@ -66,12 +66,12 @@ use crate::{
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum DnsFilterConfig {
-    /// DNS queries matching what is specified here will go through the remote pod, everything else
-    /// will go through local.
+    /// When filters are specified under `remote`, matching DNS queries will go through the remote
+    /// pod, everything else will go through local.
     Remote(VecOrSingle<String>),
 
-    /// DNS queries matching what is specified here will go through the local app, everything else
-    /// will go through the remote pod.
+    /// When filters are specified under `local`, matching DNS queries will go through the local
+    /// app , everything else will go through the remote pod.
     Local(VecOrSingle<String>),
 }
 
@@ -94,7 +94,7 @@ pub struct DnsConfig {
     #[config(env = "MIRRORD_REMOTE_DNS", default = true)]
     pub enabled: bool,
 
-    /// #### feature.network.dns.filter {#feature-network-dns-filter}
+    /// ##### feature.network.dns.filter {#feature-network-dns-filter}
     ///
     /// Unstable: the precise syntax of this config is subject to change.
     #[config(default, unstable)]

@@ -1,0 +1,22 @@
+name: Build CLI Image
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build-cli-image:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: build and export
+        env:
+          PLATFORMS: ${{ matrix.platform }}
+          CLI_TAGS: "cli_image"
+        run: docker buildx bake -f ci/docker-bake.hcl cli --set "cli.output=type=docker,dest=${{ github.workspace }}/cli_image.tar"

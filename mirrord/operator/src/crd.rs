@@ -1,9 +1,10 @@
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap},
     fmt::{Display, Formatter},
 };
 
-use chrono::{DateTime, Utc};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
@@ -14,21 +15,50 @@ use mirrord_config::{
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use strum_macros::EnumDiscriminants;
 
 #[cfg(feature = "client")]
 use crate::client::error::OperatorApiError;
-use crate::{crd::copy_target::CopyTargetCrd, types::LicenseInfoOwned};
+use crate::{
+    crd::{copy_target::CopyTargetCrd, kafka::MirrordKafkaEphemeralTopicSpec},
+    types::LicenseInfoOwned,
+};
 
 pub mod copy_target;
+pub mod db_branching;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
-pub mod policy;
+pub mod preview;
 pub mod profile;
-pub mod session;
-pub mod steal_tls;
+pub mod rabbitmq;
 
+pub mod session;
+
+pub use kafka::MirrordKafkaEphemeralTopic;
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
+
+/// Request body for `POST /branchcredentials` - asks the operator to create a K8s
+/// Secret with the given values in the target namespace. The Secret name is derived
+/// from `branch_id` so the same branch always reuses the same Secret.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateCredentialSecretRequest {
+    pub namespace: String,
+    pub branch_id: String,
+    pub values: HashMap<String, String>,
+}
+
+/// Response from `POST /branchcredentials` with the name of the created Secret.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateCredentialSecretResponse {
+    pub secret_name: String,
+}
+
+/// For Multi-Cluster Management-Only mode: Annotation used to specify the target namespace on
+/// remote clusters. When a CRD is created in the operator namespace on Primary, this annotation
+/// tells the sync controller which namespace to use on the Default cluster. If not present, the
+/// CRD's own namespace is used.
+pub const TARGET_NAMESPACE_ANNOTATION: &str = "mirrord.metalbear.co/target-namespace";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
@@ -56,9 +86,10 @@ impl TargetCrd {
     /// # Warning
     ///
     /// Do **not** change url paths here, even if the operator recognizes the other format.
-    /// It can break exisiting [`policy::MirrordPolicy`]s and [`policy::MirrordClusterPolicy`]
-    /// (see [`policy::MirrordPolicySpec::target_path`] and
-    /// [`policy::MirrordClusterPolicySpec::target_path`]).
+    /// It can break existing `operator-crd::crd::policy::MirrordPolicy`s and
+    /// `operator-crd::crd::policy::MirrordClusterPolicy` (see
+    /// `operator-crd::crd::policy::MirrordPolicySpec::target_path` and
+    /// `operator-crd::crd::policy::MirrordClusterPolicySpec::target_path`).
     pub fn urlfied_name(target: &Target) -> String {
         let (type_name, target, container) = match target {
             Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
@@ -141,6 +172,10 @@ pub struct MirrordOperatorSpec {
     /// this field).
     #[deprecated(note = "use supported_features instead")]
     copy_target_enabled: Option<bool>,
+    /// The namespace where the operator is deployed.
+    /// Used by CLI in multi-cluster management-only mode to create CRDs
+    /// in the operator's namespace with a target-namespace annotation.
+    pub operator_namespace: Option<String>,
 }
 
 impl MirrordOperatorSpec {
@@ -150,6 +185,7 @@ impl MirrordOperatorSpec {
         supported_features: Vec<NewOperatorFeature>,
         license: LicenseInfoOwned,
         protocol_version: Option<String>,
+        operator_namespace: Option<String>,
     ) -> Self {
         let features = supported_features
             .contains(&NewOperatorFeature::ProxyApi)
@@ -165,6 +201,7 @@ impl MirrordOperatorSpec {
             protocol_version,
             features,
             copy_target_enabled,
+            operator_namespace,
         }
     }
 
@@ -210,20 +247,186 @@ impl MirrordOperatorSpec {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CopyTargetEntry {
+    pub pod_name: String,
+    pub copy_target: CopyTargetCrd,
+}
+
+/// Compatibility enum for CopyTargetEntry that can handle both old tuple format and new struct
+/// format.
+///
+/// This enum provides backward/forward compatibility by accepting both:
+/// - Modern: The new CopyTargetEntry struct format (for OpenAPI v2 compatibility)
+/// - Legacy: The old tuple format (String, CopyTargetCrd)
+///
+/// The JsonSchema implementation only exposes the modern format to ensure clean OpenAPI schemas,
+/// while serde can still deserialize both formats from existing data.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum CopyTargetEntryCompat {
+    Modern(CopyTargetEntry),
+    Legacy(String, CopyTargetCrd), // tuple format
+}
+
+impl JsonSchema for CopyTargetEntryCompat {
+    fn schema_name() -> Cow<'static, str> {
+        "CopyTargetEntry".into()
+    }
+
+    fn json_schema(schema_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        // Only expose the modern schema in OpenAPI
+        CopyTargetEntry::json_schema(schema_gen)
+    }
+}
+
+impl CopyTargetEntryCompat {
+    pub fn to_copy_target_entry(&self) -> CopyTargetEntry {
+        match self {
+            CopyTargetEntryCompat::Modern(entry) => entry.clone(),
+            CopyTargetEntryCompat::Legacy(pod_name, copy_target) => CopyTargetEntry {
+                pod_name: pod_name.clone(),
+                copy_target: copy_target.clone(),
+            },
+        }
+    }
+
+    pub fn from_copy_target_entry(entry: CopyTargetEntry) -> Self {
+        CopyTargetEntryCompat::Modern(entry)
+    }
+}
+
+/// _CRD-ish_ that we get from `mirrord operator status`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
     pub sessions: Vec<Session>,
     pub statistics: Option<MirrordOperatorStatusStatistics>,
 
     /// Option because added later.
-    /// (copy-target pod name, copy-target resource)
-    pub copy_targets: Option<Vec<(String, CopyTargetCrd)>>,
+    pub copy_targets: Option<Vec<CopyTargetEntryCompat>>,
+
+    /// Status of connected remote clusters (only on primary with multi-cluster enabled).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connected_clusters: Option<Vec<ConnectedClusterStatus>>,
+
+    /// Active multi-cluster sessions (only on primary with multi-cluster enabled).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multi_cluster_sessions: Option<Vec<MultiClusterSessionInfo>>,
+}
+
+/// Display representation of a multi-cluster session for `mirrord operator status`.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MultiClusterSessionInfo {
+    /// Session ID (CRD name).
+    pub id: String,
+    /// Duration of the session in seconds.
+    pub duration_secs: u64,
+    /// User who created the session.
+    pub user: String,
+    /// Target identifier (e.g., "deployment/my-app").
+    pub target: String,
+    /// Namespace for the target.
+    pub namespace: String,
+    /// List of clusters this session spans.
+    pub clusters: Vec<String>,
+    /// Current phase of the session.
+    pub phase: String,
+}
+
+/// Status of a connected remote cluster.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectedClusterStatus {
+    /// Logical name of the cluster.
+    pub name: String,
+    /// Timestamp of last health check.
+    pub last_check: MicroTime,
+    /// Result of the health check.
+    #[serde(flatten)]
+    pub result: ClusterCheckResult,
+}
+
+/// Result of a cluster health check.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum ClusterCheckResult {
+    /// Cluster is connected and responding.
+    Connected {
+        /// Operator version running on the remote cluster.
+        operator_version: String,
+        /// License fingerprint from the remote cluster (for license validation).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        license_fingerprint: Option<String>,
+    },
+    /// Cluster check failed.
+    Error {
+        /// Error message describing the failure.
+        message: String,
+    },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatusStatistics {
     pub dau: usize,
     pub mau: usize,
+
+    /// Count of active mirrord for ci sessions.
+    ///
+    /// - These sessions have a slight delay before they're reported as dead (they have a ttl), so
+    ///   you may see a number in here that's higher than how many are actually being used (the
+    ///   count is correct though, they're still alive).
+    pub active_ci_sessions_count: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LockedPort {
+    pub port: u16,
+    pub kind: String,
+    pub filter: Option<String>,
+}
+
+/// Compatibility enum for LockedPort that can handle both old tuple format and new struct format.
+///
+/// This enum provides backward/forward compatibility by accepting both:
+/// - Modern: The new LockedPort struct format (for OpenAPI v2 compatibility)
+/// - Legacy: The old tuple format (u16, String, `Option<String>`)
+///
+/// The JsonSchema implementation only exposes the modern format to ensure clean OpenAPI schemas,
+/// while serde can still deserialize both formats from existing data.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum LockedPortCompat {
+    Modern(LockedPort),
+    Legacy(u16, String, Option<String>), // tuple format
+}
+
+impl JsonSchema for LockedPortCompat {
+    fn schema_name() -> Cow<'static, str> {
+        "LockedPort".into()
+    }
+
+    fn json_schema(schema_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        // Only expose the modern schema in OpenAPI
+        LockedPort::json_schema(schema_gen)
+    }
+}
+
+impl LockedPortCompat {
+    pub fn to_locked_port(&self) -> LockedPort {
+        match self {
+            LockedPortCompat::Modern(locked_port) => locked_port.clone(),
+            LockedPortCompat::Legacy(port, kind, filter) => LockedPort {
+                port: *port,
+                kind: kind.clone(),
+                filter: filter.clone(),
+            },
+        }
+    }
+
+    pub fn from_locked_port(locked_port: LockedPort) -> Self {
+        LockedPortCompat::Modern(locked_port)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -233,9 +436,22 @@ pub struct Session {
     pub user: String,
     pub target: String,
     pub namespace: Option<String>,
-    pub locked_ports: Option<Vec<(u16, String, Option<String>)>>,
+    pub locked_ports: Option<Vec<LockedPortCompat>>,
     pub user_id: Option<String>,
     pub sqs: Option<Vec<MirrordSqsSession>>,
+    pub rmq: Option<Vec<rabbitmq::MirrordRmqSession>>,
+    pub kafka: Option<Vec<MirrordKafkaEphemeralTopicSpec>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_filter: Option<SessionHttpFilter>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionHttpFilter {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header_filter: Option<String>,
 }
 
 /// Resource used to access the operator's session management routes.
@@ -274,12 +490,45 @@ pub enum OperatorFeatures {
 pub enum NewOperatorFeature {
     ProxyApi,
     CopyTarget,
+    CopyTargetExcludeContainers,
     SessionManagement,
     SqsQueueSplitting,
     KafkaQueueSplitting,
     LayerReconnect,
     KafkaQueueSplittingDirect,
     SqsQueueSplittingDirect,
+    MySqlBranching,
+    ExtendableUserCredentials,
+    PgBranching,
+
+    /// The operator supports bypassing user license validation (skips the `user_license.verify()`).
+    ///
+    /// Useful when the `CiApiKey::V1` is being used for `mirrord ci start`, since this user's
+    /// credentials are tied to a specific operator license, and thus it breaks whenever the
+    /// operator's license gets updated (on validity extension, for example).
+    BypassCiCertificateVerification,
+
+    MongodbBranching,
+    /// This operator can act as a primary and use envoy to connect to remote clusters.
+    MultiClusterPrimary,
+    /// This operator can be connected to by a primary.
+    MultiClusterRemote,
+    /// This operator can accept jq filters for SQS queue splitting.
+    SqsQueueSplittingWithJqFilter,
+
+    PreviewEnv,
+
+    /// The operator supports the unified `BranchDatabase` CRD with per-dialect options
+    /// (`postgresOptions`, `mysqlOptions`, `mongodbOptions`) instead of the old separate
+    /// `PgBranchDatabase`, `MysqlBranchDatabase`, `MongodbBranchDatabase` CRDs.
+    UnifiedBranchDbCrd,
+
+    /// This operator can perform queue splitting on RabbitMQ
+    RmqQueueSplitting,
+
+    /// This operator can perform queue splitting on Google Cloud Pub/Sub
+    GcpPubSubQueueSplitting,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -292,6 +541,7 @@ impl Display for NewOperatorFeature {
         let name = match self {
             NewOperatorFeature::ProxyApi => "proxy API",
             NewOperatorFeature::CopyTarget => "copy target",
+            NewOperatorFeature::CopyTargetExcludeContainers => "copy target excluded containers",
             NewOperatorFeature::SessionManagement => "session management",
             NewOperatorFeature::SqsQueueSplitting => "SQS queue splitting",
             NewOperatorFeature::KafkaQueueSplitting => "Kafka queue splitting",
@@ -302,6 +552,22 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SqsQueueSplittingDirect => {
                 "SQS queue splitting without copy target"
             }
+            NewOperatorFeature::MySqlBranching => "MySQL branching",
+            NewOperatorFeature::PgBranching => "PostgreSQL branching",
+            NewOperatorFeature::MongodbBranching => "MongoDB branching",
+            NewOperatorFeature::PreviewEnv => "preview environments",
+            NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
+            NewOperatorFeature::BypassCiCertificateVerification => {
+                "BypassCiCertificateVerification"
+            }
+            NewOperatorFeature::MultiClusterPrimary => "multi-cluster primary",
+            NewOperatorFeature::MultiClusterRemote => "multi-cluster remote",
+            NewOperatorFeature::SqsQueueSplittingWithJqFilter => {
+                "Splitting SQS queues with a jq filter"
+            }
+            NewOperatorFeature::UnifiedBranchDbCrd => "unified branch database CRD",
+            NewOperatorFeature::RmqQueueSplitting => "RabbitMQ queue splitting",
+            NewOperatorFeature::GcpPubSubQueueSplitting => "GCP Pub/Sub queue splitting",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -335,7 +601,7 @@ pub enum QueueNameSource {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // name_source -> nameSource in yaml.
-pub struct SqsQueueDetails {
+pub struct SplitQueueNameDetails {
     /// Where the application gets the queue name from. Will be used to read messages from that
     /// queue and distribute them to the output queues. When running with mirrord and splitting
     /// this queue, applications will get a modified name from that source.
@@ -355,6 +621,13 @@ pub struct SqsQueueDetails {
     /// If set, the value read from `name_source` or `fallback_name`
     /// will be parsed as a JSON map. The values in this map will be used as queue names.
     pub names_from_json_map: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")] // name_source -> nameSource in yaml.
+pub struct SqsQueueDetails {
+    #[serde(flatten)]
+    pub name_details: SplitQueueNameDetails,
 
     /// These tags will be set for all temporary SQS queues created by mirrord for queues defined
     /// in this MirrordWorkloadQueueRegistry, alongside with the original tags of the respective
@@ -369,13 +642,52 @@ pub struct SqsQueueDetails {
     pub sns: Option<bool>,
 }
 
+// This is a proxy to generate a schemars schema that contains the common fields between
+// [`SqsQueueDetails`] and [`RmqQueueDetails`](rabbitmq::RmqQueueDetails)
 /// The details of a queue that should be split.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(tag = "queueType")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, EnumDiscriminants)]
+#[strum_discriminants(derive(Deserialize, Serialize, JsonSchema))]
+#[strum_discriminants(serde(rename_all = "SCREAMING_SNAKE_CASE"))]
+#[serde(tag = "queueType", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SplitQueue {
     /// Amazon SQS
-    #[serde(rename = "SQS")]
     Sqs(SqsQueueDetails),
+
+    /// RabbitMQ
+    Rmq(rabbitmq::RmqQueueDetails),
+
+    /// Unknown, left for future compatibility.
+    ///
+    /// Solves issues when deserializing unknown variants returned in responses to list or watch
+    /// requests.
+    #[strum_discriminants(schemars(skip))]
+    #[serde(other)]
+    Unknown,
+}
+
+impl JsonSchema for SplitQueue {
+    fn schema_name() -> Cow<'static, str> {
+        "SplitQueue".into()
+    }
+
+    /// [`SplitQueue`] is adjacently tagged. Because of this, its JSON schema is not valid according
+    /// to CRD standards.
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        struct Proxy {
+            // We verify the tag.
+            #[serde(rename = "queueType")]
+            tag: SplitQueueDiscriminants,
+            // Other fields can be whatever.
+            //
+            // Generated CRD has `x-kubernetes-preserve-unknown-fields`,
+            // so everything is all right.
+            #[serde(flatten)]
+            rest: HashMap<String, serde_json::Value>,
+        }
+
+        Proxy::json_schema(generator)
+    }
 }
 
 /// A workload that is a consumer of a queue that is being split.
@@ -498,6 +810,7 @@ pub struct WorkloadQueueRegistryStatus {
     status = "WorkloadQueueRegistryStatus",
     namespaced
 )]
+#[serde(rename_all = "camelCase")]
 pub struct MirrordWorkloadQueueRegistrySpec {
     /// A map of the queues that should be split.
     /// The key is used by users to associate filters to the right queues.
@@ -505,6 +818,13 @@ pub struct MirrordWorkloadQueueRegistrySpec {
 
     /// The resource (deployment or Argo rollout) that reads from the queues.
     pub consumer: QueueConsumer,
+
+    /// Timeout for waiting until workload patch takes effect, that is - at least one pod reads
+    /// from the main temporary queue.
+    ///
+    /// Specified in seconds. Defaults to 120s.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workload_restart_timeout: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -533,10 +853,6 @@ pub struct SqsSessionError {
 
 impl Display for SqsSessionError {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        // Write strictly the first element into the supplied output
-        // stream: `f`. Returns `fmt::Result` which indicates whether the
-        // operation succeeded or failed. Note that `write!` uses syntax which
-        // is very similar to `println!`.
         write!(f, "{}", self.reason)
     }
 }
@@ -609,6 +925,14 @@ pub struct MirrordSqsSessionSpec {
     /// The name of the queue on AWS.
     pub queue_filters: HashMap<QueueId, QueueMessageFilter>,
 
+    /// Specify jq programs that will be used to filter messages from queues.
+    /// For queues with a specified jq program, for every message the jq filter runs on a JSON
+    /// representation of the SQS `Message` object.
+    ///
+    /// If the jq program outputs `true`, that message is considered as matching the filter.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub queue_jq_filters: HashMap<QueueId, String>,
+
     /// The target of this session.
     pub queue_consumer: QueueConsumer,
 
@@ -616,32 +940,138 @@ pub struct MirrordSqsSessionSpec {
     // The Kubernetes API can't deal with 64 bit numbers (with most significant bit set)
     // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
+
+    /// Multi-cluster coordination: explicit output queue names.
+    ///
+    /// Maps original queue names to their corresponding output queue names.
+    /// For multi-cluster: the default cluster creates temp queues and passes the exact names here.
+    /// Other clusters use these names directly instead of generating their own.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub output_queue_names: HashMap<String, String>,
 }
 
-/// Describes an operator user.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
     version = "v1",
-    kind = "MirrordOperatorUser",
-    root = "MirrordOperatorUser"
+    kind = "MirrordClusterOperatorUserCredential",
+    status = "MirrordClusterOperatorUserCredentialStatus"
 )]
 #[serde(rename_all = "camelCase")]
-pub struct MirrordOperatorUserSpec {
-    /// Unique ID.
-    pub user_id: String,
-    /// Last seen local username.
-    pub last_username: String,
-    /// Last seen hostname.
-    pub last_hostname: String,
-    /// Last seen Kubernetes username.
-    pub last_k8s_username: String,
-    /// Most recent session activity.
-    pub last_seen: DateTime<Utc>,
-    /// Total session count.
-    pub total_sessions_count: u64,
-    /// Total session duration.
-    pub total_sessions_duration_seconds: u64,
-    /// Last session's target.
-    pub last_target: String,
+pub struct MirrordClusterOperatorUserCredentialSpec {
+    /// Certificate signing request created using the client's key pair.
+    pub csr: String,
+
+    /// The intended usage of this credential.
+    pub kind: UserCredentialKind,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrordClusterOperatorUserCredentialStatus {
+    pub certificate: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum UserCredentialKind {
+    #[default]
+    Regular,
+    Ci,
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::Path};
+
+    use kube::CustomResourceExt;
+
+    use crate::crd::{
+        MirrordClusterOperatorUserCredential, MirrordSqsSession, MirrordWorkloadQueueRegistry,
+        QueueNameSource, SplitQueue, SplitQueueNameDetails, SqsQueueDetails,
+        db_branching::{
+            branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
+            mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
+        },
+        kafka::MirrordKafkaEphemeralTopic,
+        preview::PreviewSession,
+        profile::{MirrordClusterProfile, MirrordProfile},
+        rabbitmq::MirrordRmqSession,
+    };
+
+    fn write_crd_yaml<T: CustomResourceExt>() {
+        let crd = T::crd();
+        let yaml = serde_yaml::to_string(&crd).unwrap();
+        println!("{yaml}");
+
+        if let Some(out_path) = std::env::var_os("MIRRORD_TEST_DUMP_CRD_DIR") {
+            let path = Path::new(&out_path);
+            fs::create_dir_all(path).unwrap();
+            let filename = crd.metadata.name.as_ref().unwrap();
+            let filepath = path.join(format!("{filename}.yaml"));
+            fs::write(filepath, yaml).unwrap();
+        }
+    }
+
+    #[test]
+    fn write_all_crd_yamls() {
+        write_crd_yaml::<MirrordWorkloadQueueRegistry>();
+        write_crd_yaml::<MirrordSqsSession>();
+        write_crd_yaml::<MirrordRmqSession>();
+        write_crd_yaml::<MirrordClusterOperatorUserCredential>();
+        write_crd_yaml::<PreviewSession>();
+        write_crd_yaml::<PgBranchDatabase>();
+        write_crd_yaml::<MysqlBranchDatabase>();
+        write_crd_yaml::<MongodbBranchDatabase>();
+        write_crd_yaml::<BranchDatabase>();
+        write_crd_yaml::<MirrordKafkaEphemeralTopic>();
+        write_crd_yaml::<MirrordClusterProfile>();
+        write_crd_yaml::<MirrordProfile>();
+        write_crd_yaml::<PreviewSession>();
+    }
+
+    #[test]
+    fn deserialize_split_queue() {
+        let valid_sqs = serde_json::json!({
+            "queueType": "SQS",
+            "nameSource": {
+                "envVar": "TEST_ENV",
+            },
+        });
+        let deserialized = serde_json::from_value::<SplitQueue>(valid_sqs).unwrap();
+        assert_eq!(
+            deserialized,
+            SplitQueue::Sqs(SqsQueueDetails {
+                name_details: SplitQueueNameDetails {
+                    name_source: QueueNameSource::EnvVar("TEST_ENV".into()),
+                    fallback_name: None,
+                    names_from_json_map: None,
+                },
+                tags: None,
+                sns: None,
+            }),
+        );
+
+        let invalid_sqs = serde_json::json!({
+            "queueType": "SQS",
+            "nameSource": {
+                "ENV_VAR": "TEST_ENV",
+            },
+        });
+        serde_json::from_value::<SplitQueue>(invalid_sqs).unwrap_err();
+
+        let unknown_queue_type = serde_json::json!({
+            "queueType": "I_DO_NOT_EXIST",
+            "nameSource": {
+                "envVar": {
+                    "variable": "TEST_ENV",
+                },
+            },
+        });
+        let deserialized = serde_json::from_value::<SplitQueue>(unknown_queue_type).unwrap();
+        assert_eq!(deserialized, SplitQueue::Unknown,);
+    }
 }

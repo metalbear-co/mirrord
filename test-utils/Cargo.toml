@@ -1,0 +1,18 @@
+[package]
+name = "mirrord-test-utils"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+chrono.workspace = true
+fancy-regex.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "process", "time", "io-util", "sync"] }
+
+[lib]
+test = false
+doctest = false

@@ -1,1 +1,0 @@
-Improved SQS E2E tests, removing unnecessary sleeps.

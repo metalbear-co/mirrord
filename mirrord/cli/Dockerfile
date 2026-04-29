@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:602d397f8e2088ca6ef229e7da0f86490153d8b7 AS chef
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21 AS builder
 ARG TARGETARCH
 WORKDIR /build
 
@@ -8,29 +8,50 @@ RUN ./platform.sh
 # this takes around 1 minute since libgit2 is slow https://github.com/rust-lang/cargo/issues/9167
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
-# cargo-chef 0.1.69 breaks the build
-RUN cargo install cargo-chef@0.1.68
-
-FROM chef AS planner
 
 COPY . /build/
-RUN cargo +nightly-2025-01-22 chef prepare --recipe-path recipe.json
 
-FROM chef AS builder
+RUN apt-get update && apt-get install -y python3-pip
+RUN python3 -m pip install --break-system-packages uv==0.11.3
+RUN cargo install cargo-zigbuild --version 0.22.1 --locked
 
-COPY --from=planner /build/recipe.json recipe.json
-RUN cargo +nightly-2025-01-22 chef cook --release --zigbuild --target $(cat /.platform) --recipe-path recipe.json
+RUN case "$(cat /.platform)" in \
+    x86_64-unknown-linux-gnu) platform=linux-x86_64 ;; \
+    aarch64-unknown-linux-gnu) platform=linux-aarch64 ;; \
+    *) echo "unsupported xtask platform for $(cat /.platform)" >&2; exit 1 ;; \
+    esac; \
+    cargo xtask build-cli --no-wizard --no-monitor --platform "$platform" --release
 
-COPY . /build/
-RUN cargo +nightly-2025-01-22 zigbuild -p mirrord -p mirrord-layer -Z bindeps --target $(cat /.platform) --release --locked
 RUN cp /build/target/$(cat /.platform)/release/mirrord /mirrord
 RUN cp /build/target/$(cat /.platform)/release/libmirrord_layer.so /libmirrord_layer.so
 
+# For ARM64 builds, also build x86_64 version to support cross-platform containers
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+    cargo xtask build-layer --target x86_64-unknown-linux-gnu --release --locked && \
+    cp /build/target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so /libmirrord_layer_x86_64.so; \
+    fi
+
 FROM debian AS runtime
+ARG TARGETARCH
 
 RUN mkdir -p /opt/mirrord/bin && mkdir -p /opt/mirrord/lib && mkdir -p /opt/mirrord/tls
 COPY --from=builder /mirrord /opt/mirrord/bin/mirrord
 COPY --from=builder /libmirrord_layer.so /opt/mirrord/lib/libmirrord_layer.so
+
+# Create architecture-specific directories and copy libraries
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+    mkdir -p /opt/mirrord/lib/aarch64 /opt/mirrord/lib/x86_64 && \
+    cp /opt/mirrord/lib/libmirrord_layer.so /opt/mirrord/lib/aarch64/libmirrord_layer.so; \
+    elif [ "$TARGETARCH" = "amd64" ]; then \
+    mkdir -p /opt/mirrord/lib/x86_64 && \
+    cp /opt/mirrord/lib/libmirrord_layer.so /opt/mirrord/lib/x86_64/libmirrord_layer.so; \
+    fi
+
+# Copy cross-architecture library for ARM64 builds
+COPY --from=builder /libmirrord_layer_x86_64.so* /tmp/
+RUN if [ "$TARGETARCH" = "arm64" ] && [ -f /tmp/libmirrord_layer_x86_64.so ]; then \
+    cp /tmp/libmirrord_layer_x86_64.so /opt/mirrord/lib/x86_64/libmirrord_layer.so; \
+    fi
 
 VOLUME /opt/mirrord
 

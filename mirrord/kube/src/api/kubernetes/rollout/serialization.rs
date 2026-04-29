@@ -9,9 +9,9 @@ use std::fmt;
 
 use k8s_openapi::Resource;
 use serde::{
+    Deserialize, Serialize,
     de::{self, MapAccess, Visitor},
     ser::SerializeStruct,
-    Deserialize, Serialize,
 };
 
 use crate::api::kubernetes::rollout::Rollout;

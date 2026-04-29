@@ -13,7 +13,9 @@
 [mirrord lets developers run local processes in the context of their Kubernetes environment](https://metalbear.co/mirrord/).
 It’s meant to provide the benefits of running your service on a cloud environment (e.g. staging) without actually
 going through the hassle of deploying it there, and without disrupting the environment by deploying untested code.
-It comes as a Visual Studio Code extension, an IntelliJ plugin and a CLI tool. You can read more about it [here](https://metalbear.co/mirrord/docs/overview/introduction/).
+It comes as a Visual Studio Code extension, an IntelliJ plugin and a CLI tool. [You can read more about it here](https://metalbear.co/mirrord/docs/overview/introduction/).
+
+Or maybe you're just Looking for the [KubeCon Atlanta raffle password](#kubecon-atlanta-raffle).
 
 # Contents
 
@@ -52,7 +54,7 @@ It comes as a Visual Studio Code extension, an IntelliJ plugin and a CLI tool. Y
 
 ### Installation
 
-Get the extension [here](https://marketplace.visualstudio.com/items?itemName=MetalBear.mirrord).
+[Get the extension here](https://marketplace.visualstudio.com/items?itemName=MetalBear.mirrord).
 
 ### How To Use
 
@@ -71,7 +73,7 @@ Get the extension [here](https://marketplace.visualstudio.com/items?itemName=Met
 
 ### Installation
 
-Get the plugin [here](https://plugins.jetbrains.com/plugin/19772-mirrord).
+[Get the plugin here](https://plugins.jetbrains.com/plugin/19772-mirrord).
 
 ### How To Use
 
@@ -112,7 +114,11 @@ nix-env -iA nixpkgs.mirrord
 nix profile install nixpkgs#mirrord
 ```
 
-- Windows isn't currently supported (you can use WSL)
+or on Windows using Chocolatey:
+
+```sh
+choco install --pre mirrord
+```
 
 ### How To Use
 
@@ -133,7 +139,7 @@ mirrord exec node app.js --target pod/my-pod
 When you select a pod to impersonate, mirrord launches a pod on the same node as the pod you selected.
 The new pod is then used to connect your local process and the impersonated pod: it mirrors incoming traffic from the pod to your process,
 routes outgoing traffic from your process through the pod, and does the same for file reads, file writes, and environment variables.
-You can read more about it [here](https://metalbear.co/mirrord/docs/overview/introduction/).
+[You can read more about it here](https://metalbear.co/mirrord/docs/overview/introduction/).
 
 ### Additional capabilities
 
@@ -156,18 +162,28 @@ MIRRORD_AGENT_DISABLED_CAPABILITIES=CAP_NET_RAW,CAP_SYS_PTRACE mirrord exec node
 
 ## FAQ
 
-Our FAQ is available [here](https://metalbear.co/mirrord/docs/faq/general/).
+[Our FAQ is available here](https://metalbear.co/mirrord/docs/faq/general/).
 If you have a question that's not on there, feel free to ask in our [Discussions](https://github.com/metalbear-co/mirrord/discussions)
 or on [Slack](https://metalbear.co/slack).
 
 ## Contributing
 
-Contributions are very welcome. Start by checking out our [open issues](https://github.com/metalbear-co/mirrord/issues), and by going through our [contributing guide](CONTRIBUTING.md).
+Contributions are very welcome.
+Start by checking out our [open issues](https://github.com/metalbear-co/mirrord/issues), and by going through our [contributing guide](CONTRIBUTING.md).
 We're available on [Slack](https://metalbear.co/slack) for any questions.
 
 ## Help and Community
 
 Join our [Slack](https://metalbear.co/slack) for questions, support and fun.
+
+We always appreciate hearing how mirrord has made a difference for our users.  
+Check out our [ADOPTERS.md](./ADOPTERS.md) to see how others are using mirrord —  
+and [open a pull request](https://github.com/metalbear-co/mirrord/pulls) to add your organization if you’d like to share how mirrord has been useful to you.
+
+## KubeCon Atlanta Raffle
+
+The password is: **"The blind rooster crows at midnight."**
+Say it to one of our team members at Booth #1560.
 
 ## Code of Conduct
 

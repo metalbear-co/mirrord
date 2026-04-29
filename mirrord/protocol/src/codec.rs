@@ -6,13 +6,25 @@ use std::{
 };
 
 use actix_codec::{Decoder, Encoder};
-use bincode::{error::DecodeError, Decode, Encode};
-use bytes::{Buf, BufMut, BytesMut};
+use bincode::{
+    Decode, Encode,
+    enc::{
+        EncoderImpl,
+        write::{SizeWriter, Writer},
+    },
+    error::{DecodeError, EncodeError},
+};
+use bytes::{Buf, BytesMut};
+use derive_more::{Deref, From, Into};
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 
 use crate::{
-    dns::{GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse},
+    ResponseError,
+    dns::{
+        GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse, ReverseDnsLookupRequest,
+        ReverseDnsLookupResponse,
+    },
     file::*,
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -20,7 +32,6 @@ use crate::{
     },
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     vpn::{ClientVpn, ServerVpn},
-    ResponseError,
 };
 
 /// Minimal mirrord-protocol version that that allows [`LogLevel::Info`].
@@ -63,23 +74,34 @@ pub struct GetEnvVarsRequest {
     pub env_vars_select: HashSet<String>,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, strum_macros::IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
 pub enum FileRequest {
     Open(OpenFileRequest),
+    #[strum(serialize = "open")]
     OpenRelative(OpenRelativeFileRequest),
     Read(ReadFileRequest),
+    #[strum(serialize = "read")]
     ReadLimited(ReadLimitedFileRequest),
     Seek(SeekFileRequest),
     Write(WriteFileRequest),
+    #[strum(serialize = "write")]
     WriteLimited(WriteLimitedFileRequest),
     Close(CloseFileRequest),
     Access(AccessFileRequest),
+    #[strum(serialize = "stat")]
     Xstat(XstatRequest),
+    #[strum(serialize = "stat")]
     XstatFs(XstatFsRequest),
+    #[strum(serialize = "opendir")]
     FdOpenDir(FdOpenDirRequest),
+    #[strum(serialize = "readdir")]
     ReadDir(ReadDirRequest),
+    #[strum(serialize = "closedir")]
     CloseDir(CloseDirRequest),
+    #[strum(serialize = "getdents64")]
     GetDEnts64(GetDEnts64Request),
+    #[strum(serialize = "readlink")]
     ReadLink(ReadLinkFileRequest),
 
     /// `readdir` request.
@@ -87,19 +109,33 @@ pub enum FileRequest {
     /// Unlike other requests that come from the layer -> intproxy, this one is intproxy
     /// only. [`ReadDirRequest`]s that come from the layer are transformed into this
     /// batched form when the protocol version supports it. See [`READDIR_BATCH_VERSION`].
+    #[strum(serialize = "readdir")]
     ReadDirBatch(ReadDirBatchRequest),
+    #[strum(serialize = "mkdir")]
     MakeDir(MakeDirRequest),
+    #[strum(serialize = "mkdir")]
     MakeDirAt(MakeDirAtRequest),
+    #[strum(serialize = "rmdir")]
     RemoveDir(RemoveDirRequest),
+    #[strum(serialize = "unlink")]
     Unlink(UnlinkRequest),
+    #[strum(serialize = "unlink")]
     UnlinkAt(UnlinkAtRequest),
+    #[strum(serialize = "statfs")]
     StatFs(StatFsRequest),
 
     /// Same as XstatFs, but results in the V2 response.
+    #[strum(serialize = "stat")]
     XstatFsV2(XstatFsRequestV2),
 
     /// Same as StatFs, but results in the V2 response.
+    #[strum(serialize = "statfs")]
     StatFsV2(StatFsRequestV2),
+    Rename(RenameRequest),
+    Ftruncate(FtruncateRequest),
+    Futimens(FutimensRequest),
+    Fchown(FchownRequest),
+    Fchmod(FchmodRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -142,6 +178,14 @@ pub enum ClientMessage {
     ReadyForLogs,
     Vpn(ClientVpn),
     GetAddrInfoRequestV2(GetAddrInfoRequestV2),
+    /// Pong message that replies to [`DaemonMessage::OperatorPing`].
+    ///
+    /// Has the same ID that we got from the [`DaemonMessage::OperatorPing`].
+    OperatorPong(u128),
+    /// Reverse DNS lookup request (IP to hostname).
+    ///
+    /// Sent by the operator when enforcing hostname-based outgoing network policies.
+    ReverseDnsLookup(ReverseDnsLookupRequest),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -167,10 +211,15 @@ pub enum FileResponse {
     RemoveDir(RemoteResult<()>),
     Unlink(RemoteResult<()>),
     XstatFsV2(RemoteResult<XstatFsResponseV2>),
+    Rename(RemoteResult<()>),
+    Ftruncate(RemoteResult<()>),
+    Futimens(RemoteResult<()>),
+    Fchown(RemoteResult<()>),
+    Fchmod(RemoteResult<()>),
 }
 
 /// `-agent` --> `-layer` messages.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, PartialEq, Eq, Clone, Debug)]
 #[protocol_break(2)]
 #[allow(deprecated)] // We can't remove deprecated variants without breaking the protocol
 pub enum DaemonMessage {
@@ -185,12 +234,33 @@ pub enum DaemonMessage {
     File(FileResponse),
     Pong,
     /// NOTE: can remove `RemoteResult` when we break protocol compatibility.
-    GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
+    GetEnvVarsResponse(RemoteResult<RemoteEnvVars>),
     GetAddrInfoResponse(GetAddrInfoResponse),
     /// Pause is deprecated but we don't want to break protocol
     PauseTarget(crate::pause::DaemonPauseTarget),
     SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
     Vpn(ServerVpn),
+    /// Ping message that comes from the operator to mirrord.
+    ///
+    /// - Unlike other `DaemonMessage`s, this should never come from the agent!
+    ///
+    /// Holds the unique id of this ping.
+    OperatorPing(u128),
+    /// Reverse DNS lookup response.
+    ///
+    /// Sent by the agent in response to [`ClientMessage::ReverseDnsLookup`].
+    ReverseDnsLookup(RemoteResult<ReverseDnsLookupResponse>),
+}
+
+#[derive(Encode, Decode, PartialEq, Eq, Clone, From, Into, Deref)]
+pub struct RemoteEnvVars(pub HashMap<String, String>);
+
+impl core::fmt::Debug for RemoteEnvVars {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("GetEnvVarsResponse")
+            .field(&"<REDACTED>")
+            .finish()
+    }
 }
 
 pub struct ProtocolCodec<I, O> {
@@ -198,6 +268,13 @@ pub struct ProtocolCodec<I, O> {
     /// Phantom fields to make this struct generic over message types.
     _phantom_incoming_message: PhantomData<I>,
     _phantom_outgoing_message: PhantomData<O>,
+}
+
+impl<I, O> Copy for ProtocolCodec<I, O> {}
+impl<I, O> Clone for ProtocolCodec<I, O> {
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
 // Codec to be used by the client side to receive `DaemonMessage`s from the agent and send
@@ -228,7 +305,7 @@ impl<I: bincode::Decode<()>, O> Decoder for ProtocolCodec<I, O> {
                 Ok(Some(message))
             }
             Err(DecodeError::UnexpectedEnd { .. }) => Ok(None),
-            Err(err) => Err(io::Error::new(io::ErrorKind::Other, err.to_string())),
+            Err(err) => Err(io::Error::other(err.to_string())),
         }
     }
 }
@@ -237,25 +314,35 @@ impl<I, O: bincode::Encode> Encoder<O> for ProtocolCodec<I, O> {
     type Error = io::Error;
 
     fn encode(&mut self, msg: O, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let encoded = match bincode::encode_to_vec(msg, self.config) {
-            Ok(encoded) => encoded,
-            Err(err) => {
-                return Err(io::Error::new(io::ErrorKind::Other, err.to_string()));
-            }
+        // First, calculate the size of encoded message, and eagerly reserve enough space in the
+        // buffer. This guarantees at most one allocation.
+        let size = {
+            let mut size_writer = EncoderImpl::new(SizeWriter::default(), self.config);
+            msg.encode(&mut size_writer).map_err(io::Error::other)?;
+            size_writer.into_writer().bytes_written
         };
-        dst.reserve(encoded.len());
-        dst.put(&encoded[..]);
+        dst.reserve(size);
 
-        Ok(())
+        /// Allows using [`BytesMut`] as bincode's [`Writer`].
+        struct WriterAdapter<'a>(&'a mut BytesMut);
+
+        impl Writer for WriterAdapter<'_> {
+            fn write(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
+                self.0.extend_from_slice(bytes);
+                Ok(())
+            }
+        }
+
+        bincode::encode_into_writer(msg, WriterAdapter(dst), self.config).map_err(io::Error::other)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use bytes::BytesMut;
+    use bytes::{BufMut, BytesMut};
 
     use super::*;
-    use crate::{tcp::TcpData, Payload};
+    use crate::{Payload, tcp::TcpData};
 
     #[test]
     fn sanity_client_encode_decode() {

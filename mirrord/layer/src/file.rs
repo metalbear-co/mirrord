@@ -1,10 +1,11 @@
 use std::{
     collections::HashMap,
     os::unix::io::RawFd,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{Arc, LazyLock},
 };
 
-use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
+use libc::{O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY, c_int};
+use mirrord_layer_lib::mutex::Mutex;
 use mirrord_protocol::file::{
     AccessFileRequest, CloseFileRequest, FdOpenDirRequest, OpenDirResponse, OpenOptionsInternal,
     OpenRelativeFileRequest, ReadFileRequest, ReadLimitedFileRequest, SeekFileRequest,
@@ -22,9 +23,7 @@ use mirrord_protocol::file::{
 #[cfg(target_os = "linux")]
 use mirrord_protocol::file::{GetDEnts64Request, GetDEnts64Response};
 
-pub(crate) mod filter;
 pub(crate) mod hooks;
-pub(crate) mod mapper;
 pub(crate) mod open_dirs;
 pub(crate) mod ops;
 
