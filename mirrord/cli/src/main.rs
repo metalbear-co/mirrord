@@ -306,11 +306,23 @@ use nix::errno::Errno;
 use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
-#[cfg(all(unix, debug_assertions))]
+#[cfg(any(windows, all(unix, debug_assertions)))]
 use rust_embed as _;
 use semver::Version;
 use tracing::{error, info, trace, warn};
 use which::which;
+// Suppressors for the `unused-extern-crate` lint. The deps below are only referenced from
+// platform- or feature-gated code (`ui_impl` on unix, `wizard` feature, `ci` on non-windows,
+// or only in release builds), so on a Windows build without the `wizard` feature the compiler
+// otherwise complains they are unused. Each suppressor is gated to the exact scenarios where
+// no real reference to the crate is compiled in.
+#[cfg(all(windows, not(feature = "wizard")))]
+use {axum as _, tower_http as _};
+#[cfg(windows)]
+use {
+    axum_extra as _, eventsource_stream as _, mime_guess as _,
+    mirrord_session_monitor_protocol as _, notify as _, rand as _,
+};
 
 mod browser;
 mod ci;
@@ -351,7 +363,6 @@ mod wizard;
 #[cfg(unix)]
 mod session;
 
-#[cfg(unix)]
 mod ui;
 
 mod fix;
@@ -1183,7 +1194,6 @@ fn main() -> miette::Result<()> {
             }
             #[cfg(windows)]
             Commands::Pitm(args) => pitm::pitm_command(args)?,
-            #[cfg(unix)]
             Commands::Ui(args) => ui::ui_command(args).await?,
             #[cfg(unix)]
             Commands::Session(args) => session::session_command(*args).await?,

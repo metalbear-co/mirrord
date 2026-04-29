@@ -176,8 +176,18 @@ async fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> Monit
 
         let shutdown = CancellationToken::new();
 
+        let sessions_dir =
+            home::home_dir().map(|home_dir| home_dir.join(".mirrord").join("sessions"));
+
         tokio::spawn(async move {
+            let Some(sessions_dir) = sessions_dir else {
+                tracing::warn!(
+                    "Could not determine home directory; skipping session monitor API server"
+                );
+                return;
+            };
             if let Err(error) = mirrord_intproxy::session_monitor::api::start_api_server(
+                sessions_dir,
                 session_info,
                 api_monitor_tx,
                 api_monitor_rx,

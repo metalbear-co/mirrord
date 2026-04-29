@@ -51,12 +51,20 @@ tokio-util.workspace = true
 [target.'cfg(unix)'.dependencies]
 axum.workspace = true
 serde_json.workspace = true
-home.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 
 [dev-dependencies]
 rcgen.workspace = true
 rstest.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+mirrord-session-monitor-client.workspace = true
+reqwest = { workspace = true, features = ["stream"] }
+eventsource-stream.workspace = true
+futures.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio-util = { workspace = true }
 
 [lib]
 doctest = false

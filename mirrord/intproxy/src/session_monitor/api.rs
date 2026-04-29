@@ -160,8 +160,14 @@ fn verify_session_id(session_id: &str) -> bool {
     )
 }
 
+/// Starts the per-session API server.
+///
+/// `sessions_dir` is created (mode `0o700`) and the per-session socket is bound at
+/// `{sessions_dir}/{session_id}.sock`. Tests pass a tempdir; the production caller passes
+/// `~/.mirrord/sessions`.
 #[cfg(unix)]
 pub async fn start_api_server(
+    sessions_dir: PathBuf,
     session_info: SessionInfo,
     monitor_tx: MonitorTx,
     monitor_rx: tokio::sync::broadcast::Receiver<MonitorEvent>,
@@ -172,11 +178,6 @@ pub async fn start_api_server(
     if !verify_session_id(session_id) {
         return Err(format!("invalid session_id: {session_id}").into());
     }
-
-    let sessions_dir = home::home_dir()
-        .ok_or("could not determine home directory")?
-        .join(".mirrord")
-        .join("sessions");
 
     fs::create_dir_all(&sessions_dir)?;
     fs::set_permissions(&sessions_dir, fs::Permissions::from_mode(0o700))?;

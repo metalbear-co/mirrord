@@ -61,11 +61,16 @@ jobs:
     if: github.event.pull_request.draft == false
     outputs:
       rust_toolchain: ${{ steps.toolchain.outputs.rust_toolchain }}
-      rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
+      # TEMP(mirrord-ui): OR `workflow_dispatch` into the gates that fan out to the test/build
+      # jobs so that manual fork dispatches run the full matrix. `changed-files` compares
+      # against the parent commit, which is empty for an "empty" trigger commit, and skips
+      # everything. Revert these two lines once PR #4228 has its CI approved upstream and runs
+      # via `pull_request` events directly.
+      rs_changed: ${{ steps.changed-rs.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch' }}
       vale_changed: ${{ steps.changed-vale.outputs.any_changed }}
       windows_changed: ${{ steps.changed-windows.outputs.any_changed }}
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
-      ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
+      ci_changed: ${{ steps.changed-ci.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch' }}
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}

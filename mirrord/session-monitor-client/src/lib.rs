@@ -1,5 +1,3 @@
-#![cfg(unix)]
-
 use std::path::{Path, PathBuf};
 
 pub use mirrord_session_monitor_protocol::{ProcessInfo, SessionInfo};

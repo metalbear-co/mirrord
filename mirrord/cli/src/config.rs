@@ -250,7 +250,6 @@ pub(super) enum Commands {
     /// Watches active mirrord sessions and displays a web dashboard showing
     /// real-time events (file operations, DNS queries, HTTP requests, etc.)
     /// from all running mirrord sessions.
-    #[cfg(unix)]
     Ui(UiArgs),
 
     /// Manage local mirrord sessions.
@@ -1460,7 +1459,6 @@ pub(super) struct PitmArgs {
 }
 
 /// Arguments for the `mirrord ui` command.
-#[cfg(unix)]
 #[derive(Args, Debug)]
 pub struct UiArgs {
     /// Port to serve the UI on.
