@@ -3,16 +3,15 @@
 use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
     ClientMessage, Port,
-    tcp::{LayerTcp, LayerTcpSteal, MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType},
+    tcp::{
+        LayerTcp, LayerTcpSteal, MIRROR_HTTP_FILTER_VERSION, MirrorType, STEAL_RAW_TCP_VERSION,
+        StealType,
+    },
 };
 
 /// Retrieves subscribed port from the given [`StealType`].
 fn get_port(steal_type: &StealType) -> Port {
-    match steal_type {
-        StealType::All(port) => *port,
-        StealType::FilteredHttp(port, _) => *port,
-        StealType::FilteredHttpEx(port, _) => *port,
-    }
+    steal_type.get_port()
 }
 
 /// Trait for [`PortSubscription`] that handles differences in [`mirrord_protocol::tcp`] between the
@@ -20,6 +19,9 @@ fn get_port(steal_type: &StealType) -> Port {
 pub trait PortSubscriptionExt {
     /// Returns the subscribed port.
     fn port(&self) -> Port;
+
+    /// Returns whether this subscription requests raw TCP mode.
+    fn requests_raw_tcp(&self) -> bool;
 
     /// Returns a subscribe request to be sent to the agent.
     fn agent_subscribe(&self, protocol_version: Option<&semver::Version>) -> ClientMessage;
@@ -34,6 +36,10 @@ impl PortSubscriptionExt for PortSubscription {
             Self::Mirror(mirror_type) => mirror_type.get_port(),
             Self::Steal(steal_type) => get_port(steal_type),
         }
+    }
+
+    fn requests_raw_tcp(&self) -> bool {
+        matches!(self, Self::Steal(StealType::AllRawTcp(..)))
     }
 
     /// [`LayerTcp::PortSubscribe`], [`LayerTcp::PortSubscribeFilteredHttp`], or
@@ -66,7 +72,33 @@ impl PortSubscriptionExt for PortSubscription {
                 }
             },
             Self::Steal(steal_type) => {
-                ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(steal_type.clone()))
+                // AllRawTcp requires a minimum agent protocol version. Fall back to All for
+                // older or not-yet-negotiated agents to preserve backward compatibility.
+                let effective = match steal_type {
+                    StealType::AllRawTcp(port) => {
+                        if protocol_version.is_some_and(|v| STEAL_RAW_TCP_VERSION.matches(v)) {
+                            steal_type.clone()
+                        } else {
+                            if protocol_version.is_some() {
+                                tracing::warn!(
+                                    ?protocol_version,
+                                    port,
+                                    "Agent protocol version does not support StealType::AllRawTcp. \
+                                     Falling back to StealType::All; HTTP detection will still run \
+                                     on this port.",
+                                );
+                            } else {
+                                tracing::debug!(
+                                    port,
+                                    "Agent protocol version unknown, downgrading AllRawTcp to All",
+                                );
+                            }
+                            StealType::All(*port)
+                        }
+                    }
+                    other => other.clone(),
+                };
+                ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(effective))
             }
         }
     }

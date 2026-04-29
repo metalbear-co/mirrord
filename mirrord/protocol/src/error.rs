@@ -109,7 +109,7 @@ pub enum BlockedAction {
 impl fmt::Display for BlockedAction {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            BlockedAction::Steal(StealType::All(port)) => {
+            BlockedAction::Steal(StealType::All(port) | StealType::AllRawTcp(port)) => {
                 write!(f, "Stealing traffic from port {port}")
             }
             BlockedAction::Steal(StealType::FilteredHttp(port, filter)) => {

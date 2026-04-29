@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
 use super::{
-    PortRedirector, Redirected,
+    IncomingPortMode, PortRedirector, Redirected,
     connection::{ConnectionInfo, MaybeHttp, http::RedirectedHttp, tcp::RedirectedTcp},
     error::RedirectorTaskError,
     steal_handle::{StealHandle, StolenTraffic},
@@ -173,17 +173,21 @@ where
             let tx = self.internal_tx.clone();
             let tls_store = self.tls_store.clone();
             let shutdown = state.shutdown.child_token();
+            let port_mode = state.mode;
             Self::spawn_tracked_connection(
                 self.internal_tx.clone(),
                 destination.port(),
                 state,
                 async move {
-                    let detection_result = tokio::select! {
-                        r = MaybeHttp::detect(conn, &tls_store) => r,
-                        _ = shutdown.cancelled() => {
-                            tracing::debug!("Shutting down redirected connection during HTTP detection");
-                            return;
-                        }
+                    let detection_result = match port_mode {
+                        IncomingPortMode::Detect => tokio::select! {
+                            r = MaybeHttp::detect(conn, &tls_store) => r,
+                            _ = shutdown.cancelled() => {
+                                tracing::debug!("Shutting down redirected connection during HTTP detection");
+                                return;
+                            }
+                        },
+                        IncomingPortMode::RawTcp => MaybeHttp::accept_raw_tcp(conn),
                     };
 
                     match detection_result {
@@ -397,10 +401,13 @@ where
                             mirror_txs: vec![conn_tx.clone()],
                             shutdown: Default::default(),
                             connections: Default::default(),
+                            mode: IncomingPortMode::Detect,
                         });
                     }
                     Entry::Occupied(mut e) => {
-                        e.get_mut().mirror_txs.push(conn_tx.clone());
+                        let state = e.get_mut();
+                        state.warn_on_mode_conflict(port, IncomingPortMode::Detect, "mirroring");
+                        state.mirror_txs.push(conn_tx.clone());
                     }
                 };
 
@@ -413,13 +420,18 @@ where
                 let _ = receiver_tx.send(conn_rx);
             }
 
-            RedirectRequest::Steal { port, receiver_tx } => {
+            RedirectRequest::Steal {
+                port,
+                mode,
+                receiver_tx,
+            } => {
                 let (conn_tx, conn_rx) = mpsc::channel(32);
 
                 match self.ports.entry(port) {
                     Entry::Vacant(e) => {
                         tracing::debug!(
                             from_port = port,
+                            ?mode,
                             "Creating a new port redirection for a stealing client"
                         );
                         self.redirector.add_redirection(port).await?;
@@ -428,10 +440,13 @@ where
                             mirror_txs: Default::default(),
                             shutdown: Default::default(),
                             connections: Default::default(),
+                            mode,
                         });
                     }
                     Entry::Occupied(mut e) => {
-                        e.get_mut().steal_tx.replace(conn_tx.clone());
+                        let state = e.get_mut();
+                        state.steal_tx.replace(conn_tx.clone());
+                        state.warn_on_mode_conflict(port, mode, "stealing");
                     }
                 }
 
@@ -584,6 +599,7 @@ pub type MirroredConnectionsRx = mpsc::Receiver<MirroredTraffic>;
 pub enum RedirectRequest {
     Steal {
         port: u16,
+        mode: IncomingPortMode,
         receiver_tx: oneshot::Sender<StolenConnectionsRx>,
     },
     Mirror {
@@ -599,9 +615,10 @@ impl fmt::Debug for RedirectRequest {
                 .debug_struct("Mirror")
                 .field("port", port)
                 .finish_non_exhaustive(),
-            Self::Steal { port, .. } => f
+            Self::Steal { port, mode, .. } => f
                 .debug_struct("Steal")
                 .field("port", port)
+                .field("mode", mode)
                 .finish_non_exhaustive(),
         }
     }
@@ -663,6 +680,11 @@ struct PortState {
     shutdown: CancellationToken,
     /// Used to track connection IO tasks and wait for their graceful shutdown.
     connections: JoinSet<()>,
+    /// How incoming connections for this port should be handled before delivery.
+    ///
+    /// This is shared port-wide. The mode chosen by the subscriber that creates the redirection
+    /// wins for the lifetime of that redirection.
+    mode: IncomingPortMode,
 }
 
 impl fmt::Debug for PortState {
@@ -676,11 +698,24 @@ impl fmt::Debug for PortState {
                     .is_some_and(|tx| tx.is_closed().not()),
             )
             .field("mirrorers", &self.mirror_txs.len())
+            .field("mode", &self.mode)
             .finish()
     }
 }
 
 impl PortState {
+    fn warn_on_mode_conflict(&self, port: u16, requested_mode: IncomingPortMode, subscriber: &str) {
+        if self.mode != requested_mode {
+            tracing::warn!(
+                from_port = port,
+                existing_mode = ?self.mode,
+                ?requested_mode,
+                subscriber,
+                "Port is already redirected with a different incoming mode; keeping existing mode",
+            );
+        }
+    }
+
     /// Tell and wait for all connections to gracefully shut down.
     /// This function is essentially `AsyncDrop`, and it should always
     /// be called before removing the redirection.
@@ -708,7 +743,8 @@ mod test {
     };
 
     use crate::incoming::{
-        RedirectorTask, RedirectorTaskConfig, StolenTraffic, test::DummyRedirector,
+        IncomingPortMode, MirroredTraffic, RedirectorTask, RedirectorTaskConfig, StolenTraffic,
+        test::DummyRedirector,
     };
 
     #[rstest]
@@ -729,7 +765,7 @@ mod test {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
 
-        handle.steal(port).await.unwrap();
+        handle.steal(port, IncomingPortMode::Detect).await.unwrap();
         assert!(state.borrow().has_redirections([port]));
 
         let mut tcp = tx.make_connection(listener.local_addr().unwrap()).await;
@@ -818,7 +854,7 @@ mod test {
         );
         tokio::spawn(task.run());
 
-        handle.steal(80).await.unwrap();
+        handle.steal(80, IncomingPortMode::Detect).await.unwrap();
         assert!(state.borrow().has_redirections([80]));
 
         handle.stop_steal(80);
@@ -827,7 +863,7 @@ mod test {
             .await
             .unwrap();
 
-        handle.steal(81).await.unwrap();
+        handle.steal(81, IncomingPortMode::Detect).await.unwrap();
         assert!(state.borrow().has_redirections([81]));
 
         std::mem::drop(handle);
@@ -835,6 +871,76 @@ mod test {
             .wait_for(|state| state.has_redirections([]))
             .await
             .unwrap();
+    }
+
+    #[rstest]
+    #[timeout(Duration::from_secs(5))]
+    #[tokio::test]
+    async fn mirror_detection_survives_later_raw_tcp_steal() {
+        let (redirector, _state, mut conn_tx) = DummyRedirector::new();
+        let (task, mut steal_handle, mut mirror_handle) = RedirectorTask::new(
+            redirector,
+            Default::default(),
+            RedirectorTaskConfig::from_env(),
+        );
+        tokio::spawn(task.run());
+
+        mirror_handle.mirror(80).await.unwrap();
+        steal_handle
+            .steal(80, IncomingPortMode::RawTcp)
+            .await
+            .unwrap();
+
+        let mut client_conn = conn_tx
+            .make_connection("127.0.0.1:80".parse().unwrap())
+            .await;
+        client_conn
+            .write_all(b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+            .await
+            .unwrap();
+
+        let MirroredTraffic::Http(_) = mirror_handle.next().await.unwrap().unwrap() else {
+            panic!("mirror subscriber lost HTTP detection mode");
+        };
+        let StolenTraffic::Http(_) = steal_handle.next().await.unwrap().unwrap() else {
+            panic!("steal subscriber lost HTTP detection mode");
+        };
+    }
+
+    #[rstest]
+    #[timeout(Duration::from_secs(5))]
+    #[tokio::test]
+    async fn raw_tcp_steal_mode_survives_later_mirror() {
+        let (redirector, _state, mut conn_tx) = DummyRedirector::new();
+        let (task, mut steal_handle, mut mirror_handle) = RedirectorTask::new(
+            redirector,
+            Default::default(),
+            RedirectorTaskConfig::from_env(),
+        );
+        tokio::spawn(task.run());
+
+        steal_handle
+            .steal(80, IncomingPortMode::RawTcp)
+            .await
+            .unwrap();
+        mirror_handle.mirror(80).await.unwrap();
+
+        let mut client_conn = conn_tx
+            .make_connection("127.0.0.1:80".parse().unwrap())
+            .await;
+        client_conn
+            .write_all(b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+            .await
+            .unwrap();
+
+        let MirroredTraffic::Tcp(_) = mirror_handle.next().await.unwrap().unwrap() else {
+            panic!("mirror subscriber changed raw TCP steal mode");
+        };
+        let StolenTraffic::Tcp { join_handle_tx, .. } = steal_handle.next().await.unwrap().unwrap()
+        else {
+            panic!("steal subscriber changed raw TCP steal mode");
+        };
+        join_handle_tx.send(tokio::spawn(async {})).unwrap();
     }
 
     /// Regression test for a bug with HTTP graceful shutdown.
@@ -856,7 +962,7 @@ mod test {
         );
         let redirector_task = tokio::spawn(task.run());
 
-        handle.steal(80).await.unwrap();
+        handle.steal(80, IncomingPortMode::Detect).await.unwrap();
         let client_conn = conn_tx
             .make_connection("127.0.0.1:80".parse().unwrap())
             .await;

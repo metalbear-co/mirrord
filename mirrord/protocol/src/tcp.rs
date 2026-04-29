@@ -442,11 +442,17 @@ pub enum StealType {
     FilteredHttp(Port, Filter),
     /// Steal HTTP traffic matching a given filter - supporting more than once kind of filter
     FilteredHttpEx(Port, HttpFilter),
+    /// Steal all traffic to this port as raw TCP.
+    ///
+    /// Used for ports configured as `raw_tcp_ports`, bypassing HTTP detection and TLS handling
+    /// so server-first protocols can be forwarded immediately.
+    AllRawTcp(Port),
 }
 
 impl StealType {
     pub fn get_port(&self) -> Port {
         let (StealType::All(port)
+        | StealType::AllRawTcp(port)
         | StealType::FilteredHttpEx(port, ..)
         | StealType::FilteredHttp(port, ..)) = self;
         *port
@@ -642,6 +648,10 @@ pub static HTTP_BODY_JSON_FILTER_VERSION: LazyLock<VersionReq> =
 /// ([`HttpFilter::Body`]) by JSON.
 pub static HTTP_HEADER_JQ_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.26.0".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows [`StealType::AllRawTcp`].
+pub static STEAL_RAW_TCP_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.27.0".parse().expect("Bad Identifier"));
 
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
 /// so we can avoid losing this information.

@@ -657,6 +657,36 @@ impl LayerConfig {
             ))?
         }
 
+        if self.feature.network.incoming.is_steal()
+            && self.feature.network.incoming.http_filter.is_filter_set()
+            && !self.feature.network.incoming.raw_tcp_ports.is_empty()
+        {
+            match &self.feature.network.incoming.http_filter.ports {
+                Some(http_filter_ports) => {
+                    if let Some(port) = self
+                        .feature
+                        .network
+                        .incoming
+                        .raw_tcp_ports
+                        .iter()
+                        .find(|&&port| http_filter_ports.contains(&port))
+                    {
+                        Err(ConfigError::Conflict(format!(
+                            "Cannot include port `{port}` in both \
+                            `feature.network.incoming.raw_tcp_ports` and \
+                            `feature.network.incoming.http_filter.ports`"
+                        )))?
+                    }
+                }
+                None => Err(ConfigError::Conflict(
+                    "Cannot use `feature.network.incoming.raw_tcp_ports` when \
+                        `feature.network.incoming.http_filter` applies to all ports. \
+                        Set `feature.network.incoming.http_filter.ports` to the HTTP ports."
+                        .to_owned(),
+                ))?,
+            }
+        }
+
         match (
             &self.feature.network.incoming.https_delivery,
             &self.feature.network.incoming.tls_delivery,
@@ -908,6 +938,12 @@ impl LayerConfig {
             != default.feature.network.incoming.http_filter.ports
         {
             context.add_warning(ignored("feature.network.incoming.http_filter.ports"));
+        }
+
+        if self.feature.network.incoming.raw_tcp_ports
+            != default.feature.network.incoming.raw_tcp_ports
+        {
+            context.add_warning(ignored("feature.network.incoming.raw_tcp_ports"));
         }
 
         if matches!(self.feature.network.incoming.mode, IncomingMode::Steal)
@@ -1363,6 +1399,7 @@ mod tests {
                             listen_ports: None,
                             on_concurrent_steal: None,
                             ports: None,
+                            raw_tcp_ports: None,
                             https_delivery: Default::default(),
                             tls_delivery: Default::default(),
                         }),

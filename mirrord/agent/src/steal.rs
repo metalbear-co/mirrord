@@ -1,9 +1,9 @@
-use mirrord_protocol::{LogMessage, Port};
+use mirrord_protocol::{LogMessage, Port, RemoteResult};
 use tokio::sync::mpsc::Sender;
 
 use crate::{
     http::filter::HttpFilter,
-    incoming::{StolenHttp, StolenTcp},
+    incoming::{IncomingPortMode, StolenHttp, StolenTcp},
     util::{ClientId, protocol_version::ClientProtocolVersion},
 };
 
@@ -28,8 +28,8 @@ enum Command {
 
     /// The layer wants to subscribe to this [`Port`].
     ///
-    /// The agent starts stealing traffic from this [`Port`].
-    PortSubscribe(Port, Option<HttpFilter>),
+    /// The agent starts stealing traffic from this [`Port`] with the requested incoming mode.
+    PortSubscribe(Port, Option<HttpFilter>, IncomingPortMode),
 
     /// The layer wants to unsubscribe from this [`Port`].
     ///
@@ -51,5 +51,5 @@ enum StealerMessage {
     StolenTcp(StolenTcp),
     StolenHttp(StolenHttp),
     Log(LogMessage),
-    PortSubscribed(Port),
+    PortSubscribeResult(RemoteResult<Port>),
 }

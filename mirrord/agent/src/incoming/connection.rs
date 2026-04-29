@@ -159,6 +159,32 @@ impl MaybeHttp {
     /// Timeout for detemining if the redirected connection is HTTP.
     pub const HTTP_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
+    /// Wraps the given redirected connection as raw TCP.
+    ///
+    /// Used when the port is known to carry raw TCP traffic, avoiding the detection timeout
+    /// that would stall server-first protocols (e.g. SMTP, FTP).
+    pub fn accept_raw_tcp(redirected: Redirected) -> Result<Self, HttpDetectError> {
+        let metric_guard = MetricGuard::new(&REDIRECTED_CONNECTIONS);
+        let local_addr = redirected
+            .stream
+            .local_addr()
+            .map_err(HttpDetectError::LocalAddr)?;
+
+        Ok(Self {
+            info: ConnectionInfo {
+                original_destination: redirected.destination,
+                local_addr,
+                peer_addr: redirected.source,
+                tls_connector: None,
+            },
+            http_version: None,
+            stream: Box::new(IncomingIoWrapper {
+                io: redirected.stream,
+                _metric_guard: metric_guard,
+            }),
+        })
+    }
+
     /// Accepts the (possibly TLS) connection and detects if the redirected connection is
     /// HTTP.
     pub async fn detect(

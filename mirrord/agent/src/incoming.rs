@@ -29,6 +29,15 @@ pub use steal_handle::{StealHandle, StolenTraffic};
 pub use task::{RedirectorTask, RedirectorTaskConfig};
 use tokio::net::TcpStream;
 
+/// Port-wide handling mode for redirected incoming connections.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IncomingPortMode {
+    /// Use the normal incoming path: apply configured TLS handling and detect HTTP traffic.
+    Detect,
+    /// Forward bytes immediately as raw TCP, bypassing HTTP detection and TLS handling.
+    RawTcp,
+}
+
 /// A component that implements redirecting incoming TCP connections.
 pub trait PortRedirector {
     type Error: Sized;

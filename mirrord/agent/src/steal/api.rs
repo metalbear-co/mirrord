@@ -31,8 +31,8 @@ use crate::{
     error::AgentResult,
     http::{MIRRORD_AGENT_HTTP_HEADER_NAME, filter::HttpFilter},
     incoming::{
-        ConnError, IncomingStream, IncomingStreamItem, RedirectorTaskConfig, ResponseBodyProvider,
-        ResponseProvider, StolenHttp, StolenTcp,
+        ConnError, IncomingPortMode, IncomingStream, IncomingStreamItem, RedirectorTaskConfig,
+        ResponseBodyProvider, ResponseProvider, StolenHttp, StolenTcp,
     },
     steal::api::wait_body::WaitForFullBody,
     task::status::BgTaskStatus,
@@ -163,8 +163,8 @@ impl TcpStealerApi {
                         StealerMessage::Log(log) => {
                             break Ok(DaemonMessage::LogMessage(log));
                         },
-                        StealerMessage::PortSubscribed(port) => {
-                            break Ok(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(port))));
+                        StealerMessage::PortSubscribeResult(result) => {
+                            break Ok(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(result)));
                         },
                         StealerMessage::StolenHttp(http) => self.handle_request(http)?,
                         StealerMessage::StolenTcp(tcp) => self.handle_connection(tcp)?,
@@ -490,8 +490,9 @@ impl TcpStealerApi {
     ) -> AgentResult<()> {
         match message {
             LayerTcpSteal::PortSubscribe(steal_type) => {
-                let (port, filter) = match steal_type {
-                    StealType::All(port) => (port, None),
+                let (port, filter, mode) = match steal_type {
+                    StealType::All(port) => (port, None, IncomingPortMode::Detect),
+                    StealType::AllRawTcp(port) => (port, None, IncomingPortMode::RawTcp),
                     StealType::FilteredHttp(port, filter) => (
                         port,
                         Some(
@@ -501,6 +502,7 @@ impl TcpStealerApi {
                             .map_err(Box::new)
                             .map_err(AgentError::InvalidHttpFilter)?,
                         ),
+                        IncomingPortMode::Detect,
                     ),
                     StealType::FilteredHttpEx(port, filter) => (
                         port,
@@ -509,10 +511,11 @@ impl TcpStealerApi {
                                 .map_err(Box::new)
                                 .map_err(AgentError::InvalidHttpFilter)?,
                         ),
+                        IncomingPortMode::Detect,
                     ),
                 };
 
-                self.send_command(Command::PortSubscribe(port, filter))
+                self.send_command(Command::PortSubscribe(port, filter, mode))
                     .await?;
             }
 
