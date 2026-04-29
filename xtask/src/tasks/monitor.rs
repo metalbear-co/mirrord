@@ -37,7 +37,7 @@ pub fn build_monitor() -> Result<PathBuf> {
     // 'matches')"). Monitor only depends on its own package.json, so a scoped install is
     // what we want.
     println!("  → Running pnpm install --ignore-workspace...");
-    let status = Command::new("pnpm")
+    let status = Command::new(pnpm_command())
         .args(["install", "--ignore-workspace"])
         .current_dir(monitor_dir)
         .status()
@@ -47,7 +47,7 @@ pub fn build_monitor() -> Result<PathBuf> {
     }
 
     println!("  → Running pnpm run build...");
-    let status = Command::new("pnpm")
+    let status = Command::new(pnpm_command())
         .args(["run", "build"])
         .current_dir(monitor_dir)
         .status()
@@ -87,8 +87,15 @@ pub fn build_monitor() -> Result<PathBuf> {
 }
 
 fn pnpm_available() -> bool {
-    Command::new("pnpm")
+    Command::new(pnpm_command())
         .arg("--version")
         .output()
         .is_ok_and(|out| out.status.success())
+}
+
+/// Pnpm is installed via `corepack` as a batch script on windows, so `Command::new("pnpm")`
+/// fails — Rust's `std::process::Command` on windows doesn't apply `PATHEXT` and only looks
+/// for `pnpm.exe`. Use the `.cmd` shim explicitly there.
+fn pnpm_command() -> &'static str {
+    if cfg!(windows) { "pnpm.cmd" } else { "pnpm" }
 }
