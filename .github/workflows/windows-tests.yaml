@@ -103,7 +103,7 @@ jobs:
           
           if (-not (Test-Path $exe)) { throw "mirrord.exe not found" }
           
-          "MIRRORD_EXE=$exe" | Out-File -Append -FilePath $env:GITHUB_ENV
+          "MIRRORD_TESTS_USE_BINARY=$exe" | Out-File -Append -FilePath $env:GITHUB_ENV
           "MIRRORD_LAYER_FILE=$dll" | Out-File -Append -FilePath $env:GITHUB_ENV
 
       - name: Run Windows E2E Tests
