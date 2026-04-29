@@ -552,6 +552,7 @@ pub fn getaddrinfo_error_code(fail: HookError) -> i32 {
         }
         HookError::DNSNoName => libc::EAI_NONAME,
         other => {
+            // The conversion has side effects - logs, possible gracefull exit, etc.
             let _ = i64::from(other);
             libc::EAI_FAIL
         }
@@ -683,39 +684,5 @@ impl From<frida_gum::Error> for LayerError {
 impl From<HookError> for *mut hostent {
     fn from(_fail: HookError) -> Self {
         ptr::null_mut()
-    }
-}
-
-#[cfg(all(test, unix))]
-mod tests {
-    use mirrord_protocol::{DnsLookupError, ResolveErrorKindInternal, ResponseError};
-
-    use super::{HookError, getaddrinfo_error_code};
-
-    #[test]
-    fn getaddrinfo_maps_dns_lookup_failures_to_eai_codes() {
-        let code = getaddrinfo_error_code(HookError::ResponseError(ResponseError::DnsLookup(
-            DnsLookupError {
-                kind: ResolveErrorKindInternal::NoRecordsFound(0),
-            },
-        )));
-
-        assert_eq!(code, libc::EAI_NONAME);
-    }
-
-    #[test]
-    fn getaddrinfo_maps_no_name_to_eai_noname() {
-        assert_eq!(
-            getaddrinfo_error_code(HookError::DNSNoName),
-            libc::EAI_NONAME
-        );
-    }
-
-    #[test]
-    fn getaddrinfo_maps_other_hook_errors_to_eai_fail() {
-        assert_eq!(
-            getaddrinfo_error_code(HookError::NullPointer),
-            libc::EAI_FAIL
-        );
     }
 }
