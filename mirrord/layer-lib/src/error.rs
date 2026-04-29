@@ -539,6 +539,26 @@ fn translate_dns_fail(dns_fail: DnsLookupError) -> i32 {
     } as _)
 }
 
+/// `getaddrinfo(3)` returns `EAI_*` codes directly instead of reporting failures via `errno`.
+///
+/// We still preserve the generic hook-error side effects for non-DNS failures, such as logging and
+/// graceful exits, before collapsing them into `EAI_FAIL` for callers like libuv that validate the
+/// return value.
+#[cfg(unix)]
+pub fn getaddrinfo_error_code(fail: HookError) -> i32 {
+    match fail {
+        HookError::ResponseError(ResponseError::DnsLookup(dns_fail)) => {
+            translate_dns_fail(dns_fail)
+        }
+        HookError::DNSNoName => libc::EAI_NONAME,
+        other => {
+            // The conversion has side effects - logs, possible gracefull exit, etc.
+            let _ = i64::from(other);
+            libc::EAI_FAIL
+        }
+    }
+}
+
 /// mapping based on - <https://man7.org/linux/man-pages/man3/errno.3.html>
 impl From<HookError> for i64 {
     fn from(fail: HookError) -> Self {
