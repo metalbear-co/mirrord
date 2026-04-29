@@ -45,7 +45,6 @@ use crate::{
     incoming::MirrorHandle,
     metrics,
     mirror::TcpMirrorApi,
-    namespace::NamespaceType,
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     reverse_dns::ReverseDnsApi,
     runtime::{self, get_container},
@@ -228,7 +227,8 @@ impl State {
 
         tracing::debug!("THE ID IS: {IPTABLES_IDENTIFIER:?}");
 
-        let network_runtime = match container.as_ref().map(ContainerHandle::pid) {
+        let target_pid = container.as_ref().map(ContainerHandle::pid);
+        let network_runtime = match target_pid {
             Some(pid) if ephemeral.not() => {
                 BgTaskRuntime::spawn(Some(RuntimeNamespace::new(pid, RuntimeNamespace::NET)))
             }
@@ -236,16 +236,19 @@ impl State {
             None | Some(..) => BgTaskRuntime::spawn(None),
         }
         .await?;
+        let network_runtime = Arc::new(network_runtime);
 
-        let outgoing_runtime = match container.as_ref().map(ContainerHandle::pid) {
-            Some(pid) if ephemeral.not() => BgTaskRuntime::spawn(Some(RuntimeNamespace::new(
-                pid,
-                RuntimeNamespace::NET_AND_MOUNT,
-            ))),
+        let outgoing_runtime = match target_pid {
+            Some(pid) if ephemeral.not() => Arc::new(
+                BgTaskRuntime::spawn(Some(RuntimeNamespace::new(
+                    pid,
+                    RuntimeNamespace::NET_AND_MOUNT,
+                )))
+                .await?,
+            ),
 
-            None | Some(..) => BgTaskRuntime::spawn(None),
-        }
-        .await?;
+            None | Some(..) => network_runtime.clone(),
+        };
 
         let env_pid = match container.as_ref().map(ContainerHandle::pid) {
             Some(pid) => pid.to_string(),
@@ -265,8 +268,8 @@ impl State {
             env: Arc::new(env),
             ephemeral,
             tls_connector,
-            network_runtime: Arc::new(network_runtime),
-            outgoing_runtime: Arc::new(outgoing_runtime),
+            network_runtime,
+            outgoing_runtime,
         })
     }
 
