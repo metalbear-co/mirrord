@@ -5,6 +5,13 @@
 //! group, so any logged-in user could subscribe to the session's `/events` stream. The session
 //! monitor surfaces process names, file paths, env-var names and other potentially sensitive
 //! material — confidentiality is the same contract as `0o600` on the unix socket.
+//!
+//! TODO: this helper isn't really session-monitor-specific — it builds a generic
+//! current-user-only [`SECURITY_ATTRIBUTES`] usable for any kernel object (files, mutexes,
+//! more pipes, …). When a second consumer shows up, lift it out into its own
+//! `mirrord-win-utils`-style crate. We don't want to put it in `mirrord-layer-lib`: that
+//! crate exists to support the injected layer (frida-gum, dll-syringe, mirrord-sip), and
+//! pulling those into the intproxy compile graph for one DACL helper would be heavy.
 
 #![cfg(windows)]
 
