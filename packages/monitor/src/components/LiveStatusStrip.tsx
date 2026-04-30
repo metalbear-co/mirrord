@@ -1,17 +1,16 @@
 import { useState, useEffect } from 'react'
-import { Button, Card, CardContent, Separator } from '@metalbear/ui'
-import { Clock, Cpu, Radio, Activity, ChevronRight } from 'lucide-react'
+import { Card, CardContent, Separator } from '@metalbear/ui'
+import { Clock, Cpu, Radio, Activity } from 'lucide-react'
 import type { SessionInfo, PortSubscription, ProcessInfo } from '../types'
 import { strings } from '../strings'
 import { formatUptime } from '../utils'
-import type { DetailTab, EventCounts } from './sessionDetailTypes'
+import type { EventCounts } from './sessionDetailTypes'
 
 interface Props {
   session: SessionInfo
   portSubs: PortSubscription[]
   processes: ProcessInfo[]
   eventCounts: EventCounts
-  onSwitchTab: (tab: DetailTab) => void
 }
 
 export default function LiveStatusStrip({
@@ -19,7 +18,6 @@ export default function LiveStatusStrip({
   portSubs,
   processes,
   eventCounts,
-  onSwitchTab,
 }: Props) {
   const [uptimeStr, setUptimeStr] = useState(formatUptime(session.started_at))
 
@@ -55,17 +53,11 @@ export default function LiveStatusStrip({
           </span>
         </div>
         <Separator orientation="vertical" className="h-4" />
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => onSwitchTab('events')}
-          className="h-auto px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground gap-1.5"
-        >
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <Activity className="h-3 w-3" />
           <span className="font-mono tabular-nums">{eventCounts.total}</span>
           <span>{strings.session.eventsLabel}</span>
-          <ChevronRight className="h-3 w-3 opacity-50" />
-        </Button>
+        </div>
       </CardContent>
     </Card>
   )

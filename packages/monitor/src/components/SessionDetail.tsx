@@ -1,23 +1,20 @@
 import { useState, useEffect } from 'react'
-import { Server, Settings, Activity } from 'lucide-react'
+import { Settings } from 'lucide-react'
 import type { SessionInfo, MonitorEvent, PortSubscription, ProcessInfo } from '../types'
 import { api } from '../api'
-import { strings } from '../strings'
 import { EventType } from '../eventTypes'
 import { expectArray } from '../utils'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
-import SessionTabs from './SessionTabs'
-import OverviewTab from './OverviewTab'
+import LiveStatusStrip from './LiveStatusStrip'
+import SessionIdentity from './SessionIdentity'
+import PortSubscriptionsCard from './PortSubscriptionsCard'
+import ProcessesCard from './ProcessesCard'
 import ConfigTab from './ConfigTab'
 import JoinBar from './JoinBar'
+import Widget from './Widget'
 import type { ExtensionState } from '../extensionBridge'
-import {
-  type DetailTab,
-  type EventCounts,
-  type TabDef,
-  initialEventCounts,
-} from './sessionDetailTypes'
+import { type EventCounts, initialEventCounts } from './sessionDetailTypes'
 
 interface Props {
   session: SessionInfo
@@ -34,7 +31,6 @@ export default function SessionDetail({
   onJoin,
   onLeave,
 }: Props) {
-  const [activeTab, setActiveTab] = useState<DetailTab>('overview')
   const [portSubs, setPortSubs] = useState<PortSubscription[]>([])
   const [processes, setProcesses] = useState<ProcessInfo[]>([])
   const [eventCounts, setEventCounts] = useState<EventCounts>(initialEventCounts)
@@ -118,42 +114,57 @@ export default function SessionDetail({
     }
   }, [session.session_id])
 
-  const tabs: TabDef[] = [
-    { id: 'overview', label: strings.session.overview, icon: Server },
-    { id: 'events', label: strings.session.eventsTab, icon: Activity, count: eventCounts.total },
-    { id: 'config', label: strings.session.configTab, icon: Settings },
-  ]
-
   return (
     <div className="h-full flex flex-col">
       <SessionHeader session={session} processes={processes} onKill={onKill} />
-      <SessionTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-      <div className="flex-1 overflow-hidden">
-        {activeTab === 'overview' && (
-          <div className="overflow-auto h-full">
-            <div className="p-4 max-w-3xl">
-              {session.is_operator && session.key && (
-                <div className="mb-4">
-                  <JoinBar
-                    joinKey={session.key}
-                    extensionState={extensionState}
-                    onJoin={onJoin}
-                    onLeave={onLeave}
-                  />
-                </div>
-              )}
-            </div>
-            <OverviewTab
+      <div className="flex-1 overflow-auto">
+        <div className="grid grid-cols-2 gap-4 p-4 max-w-5xl mx-auto auto-rows-min">
+          <div className="col-span-2">
+            <LiveStatusStrip
               session={session}
               portSubs={portSubs}
               processes={processes}
               eventCounts={eventCounts}
-              onSwitchTab={setActiveTab}
             />
           </div>
-        )}
-        {activeTab === 'events' && <EventStream session={session} />}
-        {activeTab === 'config' && <ConfigTab config={session.config} />}
+
+          {session.is_operator && session.key && (
+            <div className="col-span-2">
+              <JoinBar
+                joinKey={session.key}
+                extensionState={extensionState}
+                onJoin={onJoin}
+                onLeave={onLeave}
+              />
+            </div>
+          )}
+
+          <SessionIdentity session={session} />
+          <PortSubscriptionsCard portSubs={portSubs} />
+
+          {processes.length > 0 && (
+            <div className="col-span-2">
+              <ProcessesCard processes={processes} />
+            </div>
+          )}
+
+          <div className="col-span-2 h-[420px]">
+            <div className="rounded-md border border-border bg-card overflow-hidden h-full flex flex-col">
+              <EventStream session={session} />
+            </div>
+          </div>
+
+          <div className="col-span-2">
+            <Widget
+              title="Config"
+              icon={<Settings className="h-3 w-3" />}
+              collapsible
+              defaultOpen={false}
+            >
+              <ConfigTab config={session.config} />
+            </Widget>
+          </div>
+        </div>
       </div>
     </div>
   )

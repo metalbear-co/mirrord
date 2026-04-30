@@ -12,7 +12,6 @@ import {
   Filter,
   Network,
   Radio,
-  Server,
   Settings,
   User,
 } from 'lucide-react'
@@ -22,9 +21,8 @@ import type {
   OperatorSessionSummary,
 } from '../types'
 import type { ExtensionState } from '../extensionBridge'
-import SessionTabs from './SessionTabs'
 import JoinBar from './JoinBar'
-import type { DetailTab, TabDef } from './sessionDetailTypes'
+import Widget from './Widget'
 
 interface OperatorSessionDetailProps {
   session: OperatorSessionSummary
@@ -99,11 +97,7 @@ export default function OperatorSessionDetail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, baseSecs])
 
-  const [activeTab, setActiveTab] = useState<DetailTab>('overview')
-  const tabs: TabDef[] = [
-    { id: 'overview', label: 'Overview', icon: Server },
-    { id: 'config', label: 'Config', icon: Settings },
-  ]
+  const splitsTotal = totalSplits(splits)
 
   return (
     <div className="h-full flex flex-col">
@@ -127,50 +121,51 @@ export default function OperatorSessionDetail({
         </div>
       </div>
 
-      <SessionTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
+      <div className="flex-1 overflow-auto">
+        <div className="grid grid-cols-2 gap-4 p-4 max-w-5xl mx-auto auto-rows-min">
+          <div className="col-span-2">
+            <Card className="bg-card/40">
+              <CardContent className="flex items-center gap-6 px-4 py-3">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Clock className="h-3 w-3" />
+                  <span className="font-mono tabular-nums">
+                    {formatUptime(uptime)}
+                  </span>
+                </div>
+                <Separator orientation="vertical" className="h-4" />
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Network className="h-3 w-3" />
+                  <span>
+                    {lockedPorts.length}{' '}
+                    {lockedPorts.length === 1 ? 'port' : 'ports'}
+                  </span>
+                </div>
+                <Separator orientation="vertical" className="h-4" />
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Radio className="h-3 w-3" />
+                  <span>
+                    {splitsTotal} {splitsTotal === 1 ? 'split' : 'splits'}
+                  </span>
+                </div>
+                <Separator orientation="vertical" className="h-4" />
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <User className="h-3 w-3" />
+                  <span className="truncate" title={session.owner.k8sUsername}>
+                    {session.owner.username}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
-      <div className="overflow-auto h-full" hidden={activeTab !== 'overview'}>
-        <div className="p-4 space-y-4 max-w-3xl">
-          <Card className="bg-card/40">
-            <CardContent className="flex items-center gap-6 px-4 py-3">
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Clock className="h-3 w-3" />
-                <span className="font-mono tabular-nums">
-                  {formatUptime(uptime)}
-                </span>
-              </div>
-              <Separator orientation="vertical" className="h-4" />
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Network className="h-3 w-3" />
-                <span>
-                  {lockedPorts.length}{' '}
-                  {lockedPorts.length === 1 ? 'port' : 'ports'}
-                </span>
-              </div>
-              <Separator orientation="vertical" className="h-4" />
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Radio className="h-3 w-3" />
-                <span>
-                  {totalSplits(splits)}{' '}
-                  {totalSplits(splits) === 1 ? 'split' : 'splits'}
-                </span>
-              </div>
-              <Separator orientation="vertical" className="h-4" />
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <User className="h-3 w-3" />
-                <span className="truncate" title={session.owner.k8sUsername}>
-                  {session.owner.username}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <JoinBar
-            joinKey={session.key}
-            extensionState={extensionState}
-            onJoin={onJoin}
-            onLeave={onLeave}
-          />
+          <div className="col-span-2">
+            <JoinBar
+              joinKey={session.key}
+              extensionState={extensionState}
+              onJoin={onJoin}
+              onLeave={onLeave}
+            />
+          </div>
 
           <Card className="overflow-hidden p-0">
             <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
@@ -231,7 +226,7 @@ export default function OperatorSessionDetail({
             </CardContent>
           </Card>
 
-          {totalSplits(splits) > 0 && (
+          {splitsTotal > 0 && (
             <Card className="overflow-hidden p-0">
               <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
                 <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
@@ -245,37 +240,44 @@ export default function OperatorSessionDetail({
               </CardContent>
             </Card>
           )}
-        </div>
-      </div>
 
-      <div className="overflow-auto h-full" hidden={activeTab !== 'config'}>
-        <div className="p-4 max-w-3xl">
-          <Code
-            variant="block"
-            language="json"
-            className="text-[11px] whitespace-pre-wrap bg-card/30 border border-border"
-          >
-            {JSON.stringify(
-              {
-                id: session.id,
-                key: session.key,
-                namespace: session.namespace,
-                target: session.target,
-                owner: session.owner,
-                createdAt: session.createdAt,
-                durationSecs: session.durationSecs,
-                lockedPorts: session.lockedPorts ?? [],
-                queueSplits: session.queueSplits ?? {
-                  sqs: 0,
-                  rabbitmq: 0,
-                  kafka: 0,
-                },
-                httpFilter: session.httpFilter ?? null,
-              },
-              null,
-              2
-            )}
-          </Code>
+          <div className="col-span-2">
+            <Widget
+              title="Config"
+              icon={<Settings className="h-3 w-3" />}
+              collapsible
+              defaultOpen={false}
+            >
+              <div className="p-4">
+                <Code
+                  variant="block"
+                  language="json"
+                  className="text-[11px] whitespace-pre-wrap bg-card/30 border border-border"
+                >
+                  {JSON.stringify(
+                    {
+                      id: session.id,
+                      key: session.key,
+                      namespace: session.namespace,
+                      target: session.target,
+                      owner: session.owner,
+                      createdAt: session.createdAt,
+                      durationSecs: session.durationSecs,
+                      lockedPorts: session.lockedPorts ?? [],
+                      queueSplits: session.queueSplits ?? {
+                        sqs: 0,
+                        rabbitmq: 0,
+                        kafka: 0,
+                      },
+                      httpFilter: session.httpFilter ?? null,
+                    },
+                    null,
+                    2
+                  )}
+                </Code>
+              </div>
+            </Widget>
+          </div>
         </div>
       </div>
     </div>
@@ -318,4 +320,3 @@ function PortRow({ port }: { port: OperatorLockedPort }) {
     </div>
   )
 }
-
