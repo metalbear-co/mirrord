@@ -8,6 +8,35 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.208.0](https://github.com/metalbear-co/mirrord/tree/3.208.0) - 2026-04-30
+
+
+### Added
+
+- Added support for GCP Pub Sub.
+
+
+### Changed
+
+- `mirrord up` now rejects unknown fields in `mirrord-up.yaml` to catch typos
+  in configuration.
+- `mirrord up` now reports a clear error when `mirrord-up.yaml` is missing,
+  with help text on how to specify a custom path.
+
+
+### Fixed
+
+- Fixed Windows DNS hook error reporting so DNS lookup failures now return the
+  correct WinSock error, for example `WSAHOST_NOT_FOUND` code `11001`, instead
+  of surfacing unrelated errors like `ERROR_INVALID_HANDLE` with `os error 6`.
+- Fixed a Node/libuv crash when mirrord's Unix `getaddrinfo` hook returned a
+  non-`EAI_*` error after remote DNS found no records.
+- Fixed example in `agent.image_pull_secrets` configuration docs to use `name`
+  instead of `secret-key`.
+- Fixed local `Redis` containers/processes not being cleaned up.
+- mirrord now expands templates inside the root `key` field, so you can derive
+  session keys from expressions like `{{ get_env(...) }}` in the config file.
+
 ## [3.207.0](https://github.com/metalbear-co/mirrord/tree/3.207.0) - 2026-04-28
 
 
