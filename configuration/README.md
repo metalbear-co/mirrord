@@ -1,7 +1,7 @@
 ---
 title: Configuration Examples
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-04-24T00:00:00.000Z
+lastmod: 2026-04-30T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -84,7 +84,7 @@ configuration file containing all fields.
     "namespace": "default",
     "image": "ghcr.io/metalbear-co/mirrord:latest",
     "image_pull_policy": "IfNotPresent",
-    "image_pull_secrets": [ { "secret-key": "secret" } ],
+    "image_pull_secrets": [ { "name": "secret" } ],
     "ttl": 30,
     "ephemeral": false,
     "communication_timeout": 30,
