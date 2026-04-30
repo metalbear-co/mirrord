@@ -1195,3 +1195,18 @@ jobs:
             repos/metalbear-co/infra/actions/workflows/update-cli-version.yml/dispatches \
             -f ref=main \
             -f inputs[cli_version]=${{ needs.validate_release_request.outputs.version }}
+
+  linear_release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    needs: [validate_release_request, release_homebrew, check_for_new_docs, update_latest]
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
+        with:
+          fetch-depth: 0 # Required for commit history
+
+      - uses: metalbear-co/linear-release-action@76a250988b9470b152ec13d24d661140084042c1
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+          version: ${{ needs.validate_release_request.outputs.version }}
