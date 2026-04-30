@@ -16,7 +16,6 @@
 use std::{
     path::{Path, PathBuf},
     pin::Pin,
-    time::Duration,
 };
 
 use bytes::Bytes;
@@ -120,6 +119,8 @@ pub fn session_endpoints(sessions_dir: &Path) -> Vec<(String, SessionEndpoint)> 
 /// callers don't observe spurious failures.
 #[cfg(windows)]
 async fn connect_named_pipe(pipe_name: &str) -> std::io::Result<TransportStream> {
+    use std::time::Duration;
+
     use tokio::net::windows::named_pipe::ClientOptions;
     use winapi::shared::winerror::ERROR_PIPE_BUSY;
 
