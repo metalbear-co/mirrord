@@ -44,7 +44,7 @@ pub fn sessions_dir() -> Option<PathBuf> {
 /// Address of a single session's HTTP API.
 ///
 /// On unix the [`Self::sentinel_path`] is the actual socket. On windows it is a marker file
-/// next to which the named pipe runs; the transport uses [`Self::pipe_name`].
+/// next to which the named pipe runs; the transport uses `pipe_name` (a windows-only field).
 #[derive(Clone, Debug)]
 pub struct SessionEndpoint {
     pub session_id: String,
