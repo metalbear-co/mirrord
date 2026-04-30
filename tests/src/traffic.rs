@@ -759,7 +759,13 @@ mod traffic_tests {
         .await;
 
         let res = process.child.wait().await.unwrap();
-        assert!(res.success());
+        if res.success().not() {
+            panic!(
+                "process didnt exit successfully {res:?} stdout={} stderr={}",
+                process.get_stderr().await,
+                process.get_stderr().await
+            )
+        }
         process.assert_no_error_in_stderr().await;
     }
 
