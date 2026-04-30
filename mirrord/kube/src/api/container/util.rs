@@ -1,7 +1,7 @@
 use std::{ops::Not, sync::LazyLock};
 
 use futures::{AsyncBufReadExt, TryStreamExt};
-use k8s_openapi::api::core::v1::{EnvVar, Pod, Toleration};
+use k8s_openapi::api::core::v1::{ContainerStateWaiting, EnvVar, Pod, Toleration};
 use kube::{Api, api::LogParams};
 use mirrord_agent_env::envs;
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
@@ -44,7 +44,6 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
         envs::LOG_LEVEL.as_k8s_spec(&agent.log_level),
         envs::STEALER_FLUSH_CONNECTIONS.as_k8s_spec(&agent.flush_connections),
         envs::JSON_LOG.as_k8s_spec(&agent.json_log),
-        envs::IPV6_SUPPORT.as_k8s_spec(&params.support_ipv6),
         // TODO remove after some time.
         // Left for compatibility with older agents.
         envs::PASSTHROUGH_MIRRORING.as_k8s_spec(&true),
@@ -96,23 +95,28 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
     env
 }
 
-pub(super) fn base_command_line(agent: &AgentConfig, params: &ContainerParams) -> Vec<String> {
-    let mut command_line = vec![
-        "./mirrord-agent".to_owned(),
-        "-l".to_owned(),
-        params.port.to_string(),
-    ];
+/// Static [`Container::command`](k8s_openapi::api::core::v1::Container::command) to use with agent
+/// containers.
+///
+/// Keeping the command static enables matching the agent pods with GKE Autopilot [WorkloadAllowlist](https://docs.cloud.google.com/kubernetes-engine/docs/reference/crds/workloadallowlist).
+/// Any dynamic configuration should be passed in
+/// [`Container::args`](k8s_openapi::api::core::v1::Container::args) or
+/// [`Container::env`](k8s_openapi::api::core::v1::Container::env).
+pub(super) const AGENT_COMMAND: &str = "./mirrord-agent";
+
+pub(super) fn agent_base_args(agent: &AgentConfig, params: &ContainerParams) -> Vec<String> {
+    let mut args = vec!["-l".to_owned(), params.port.to_string()];
     if let Some(timeout) = agent.communication_timeout {
-        command_line.push("-t".to_owned());
-        command_line.push(timeout.to_string());
+        args.push("-t".to_owned());
+        args.push(timeout.to_string());
     }
 
     #[cfg(debug_assertions)]
     if agent.test_error {
-        command_line.push("--test-error".to_owned());
+        args.push("--test-error".to_owned());
     }
 
-    command_line
+    args
 }
 
 /**
@@ -145,6 +149,44 @@ pub(super) async fn wait_for_agent_startup(
 
     warn!("Agent did not print 'agent ready' message");
     Ok(None)
+}
+
+/// Returns an error message if the container is in an image pull failure state
+/// (e.g. ImagePullBackOff, ErrImagePull).
+pub(super) fn is_image_pull_error(container_state: &ContainerStateWaiting) -> Option<String> {
+    let reason = container_state.reason.as_deref();
+    if matches!(reason, Some("ImagePullBackOff" | "ErrImagePull")) {
+        return Some(format!(
+            "agent container failed to pull image ({}): {}",
+            reason.unwrap_or("<unknown reason>"),
+            container_state.message.as_deref().unwrap_or("<no message>"),
+        ));
+    }
+    None
+}
+
+/// Inspects the ephemeral container status and returns an error message if the
+/// container is stuck in an image pull failure state.
+///
+/// These states do not transition the pod to `Failed`, so they must be handled
+/// explicitly to avoid waiting indefinitely.
+pub(super) fn get_ephemeral_container_image_pull_error(
+    pod: &Pod,
+    container_name: &str,
+) -> Option<String> {
+    let waiting = pod
+        .status
+        .as_ref()
+        .and_then(|status| status.ephemeral_container_statuses.as_deref())
+        .and_then(|container_statuses| {
+            container_statuses
+                .iter()
+                .find(|status| status.name == container_name)
+                .and_then(|status| status.state.as_ref())
+                .and_then(|state| state.waiting.as_ref())
+        })?;
+
+    is_image_pull_error(waiting)
 }
 
 #[cfg(test)]

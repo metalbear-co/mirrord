@@ -38,6 +38,22 @@ pub mod session;
 pub use kafka::MirrordKafkaEphemeralTopic;
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
+/// Request body for `POST /branchcredentials` - asks the operator to create a K8s
+/// Secret with the given values in the target namespace. The Secret name is derived
+/// from `branch_id` so the same branch always reuses the same Secret.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateCredentialSecretRequest {
+    pub namespace: String,
+    pub branch_id: String,
+    pub values: HashMap<String, String>,
+}
+
+/// Response from `POST /branchcredentials` with the name of the created Secret.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateCredentialSecretResponse {
+    pub secret_name: String,
+}
+
 /// For Multi-Cluster Management-Only mode: Annotation used to specify the target namespace on
 /// remote clusters. When a CRD is created in the operator namespace on Primary, this annotation
 /// tells the sync controller which namespace to use on the Default cluster. If not present, the
@@ -425,6 +441,17 @@ pub struct Session {
     pub sqs: Option<Vec<MirrordSqsSession>>,
     pub rmq: Option<Vec<rabbitmq::MirrordRmqSession>>,
     pub kafka: Option<Vec<MirrordKafkaEphemeralTopicSpec>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_filter: Option<SessionHttpFilter>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionHttpFilter {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header_filter: Option<String>,
 }
 
 /// Resource used to access the operator's session management routes.
@@ -498,6 +525,10 @@ pub enum NewOperatorFeature {
 
     /// This operator can perform queue splitting on RabbitMQ
     RmqQueueSplitting,
+
+    /// This operator can perform queue splitting on Google Cloud Pub/Sub
+    GcpPubSubQueueSplitting,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -536,6 +567,7 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::UnifiedBranchDbCrd => "unified branch database CRD",
             NewOperatorFeature::RmqQueueSplitting => "RabbitMQ queue splitting",
+            NewOperatorFeature::GcpPubSubQueueSplitting => "GCP Pub/Sub queue splitting",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

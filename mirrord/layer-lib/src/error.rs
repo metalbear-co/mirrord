@@ -428,7 +428,7 @@ fn get_platform_errno(fail: HookError) -> i32 {
 }
 
 #[cfg(windows)]
-fn get_platform_errno(fail: HookError) -> u32 {
+pub(crate) fn get_platform_errno(fail: HookError) -> u32 {
     use winapi::shared::winerror::*;
     match fail {
         HookError::Null(_) => WSAEINVAL,
@@ -539,6 +539,26 @@ fn translate_dns_fail(dns_fail: DnsLookupError) -> i32 {
     } as _)
 }
 
+/// `getaddrinfo(3)` returns `EAI_*` codes directly instead of reporting failures via `errno`.
+///
+/// We still preserve the generic hook-error side effects for non-DNS failures, such as logging and
+/// graceful exits, before collapsing them into `EAI_FAIL` for callers like libuv that validate the
+/// return value.
+#[cfg(unix)]
+pub fn getaddrinfo_error_code(fail: HookError) -> i32 {
+    match fail {
+        HookError::ResponseError(ResponseError::DnsLookup(dns_fail)) => {
+            translate_dns_fail(dns_fail)
+        }
+        HookError::DNSNoName => libc::EAI_NONAME,
+        other => {
+            // The conversion has side effects - logs, possible gracefull exit, etc.
+            let _ = i64::from(other);
+            libc::EAI_FAIL
+        }
+    }
+}
+
 /// mapping based on - <https://man7.org/linux/man-pages/man3/errno.3.html>
 impl From<HookError> for i64 {
     fn from(fail: HookError) -> Self {
@@ -612,6 +632,14 @@ impl From<HookError> for isize {
     }
 }
 
+/// Unix-only conversion used by hooks whose ABI reports errors through `-1` and
+/// `errno` semantics.
+///
+/// On Windows, APIs with `usize`-shaped returns (for example WinSock `SOCKET`) do
+/// not share a single error sentinel/value convention. Windows hooks must use
+/// `WindowsDetourReturn` via `Detour::unwrap_or_bypass_windows_as` to encode the correct
+/// return value and error channel for each API.
+#[cfg(unix)]
 impl From<HookError> for usize {
     fn from(fail: HookError) -> Self {
         let _ = i64::from(fail);
@@ -621,6 +649,11 @@ impl From<HookError> for usize {
 }
 
 impl From<HookError> for i32 {
+    /// Generic numeric conversion for errno-style hooks.
+    ///
+    /// Windows WinSock hooks should prefer explicit conversion through
+    /// `WindowsDetourReturn`, because many APIs need specific
+    /// failure sentinels and error-channel behavior.
     fn from(fail: HookError) -> Self {
         i64::from(fail) as _
     }

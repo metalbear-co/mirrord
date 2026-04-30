@@ -43,7 +43,9 @@ pub enum MonitorEvent {
     },
     LayerConnected {
         pid: u32,
+        parent_pid: Option<u32>,
         process_name: String,
+        cmdline: Vec<String>,
     },
     LayerDisconnected {
         pid: u32,

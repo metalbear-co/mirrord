@@ -7,7 +7,7 @@ use kube::{
     core::{Status, response::StatusSummary},
 };
 use miette::Diagnostic;
-use mirrord_auth::error::ApiKeyError;
+use mirrord_auth::error::{ApiKeyError, CredentialStoreError};
 use mirrord_config::config::ConfigError;
 use mirrord_console::error::ConsoleError;
 use mirrord_intproxy::{
@@ -29,6 +29,7 @@ use crate::{
     fix::FixKubeconfigError,
     port_forward::PortForwardError,
     profile::ProfileError,
+    up::UpCliError,
 };
 
 pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
@@ -502,6 +503,40 @@ pub(crate) enum CliError {
     #[error("The '{0}' command is not currently supported on Windows")]
     UnsupportedOnWindows(String),
 
+    #[cfg(windows)]
+    #[error("Failed to open process {0} for attachment: {1}")]
+    AttachProcessOpenFailed(u32, std::io::Error),
+
+    #[cfg(windows)]
+    #[error("Failed to inject layer into process {0}: {1}")]
+    AttachInjectionFailed(u32, String),
+
+    #[cfg(windows)]
+    #[error(
+        "Timed out waiting for layer to signal injection complete in process {0} (30s timeout)"
+    )]
+    AttachLayerTimeout(u32),
+
+    #[cfg(windows)]
+    #[error("`mirrord pitm` requires the `MIRRORD_CHILD_ENV` environment variable to be set")]
+    #[diagnostic(help(
+        "`pitm` is intended to be invoked by the IntelliJ plugin, which base64-encodes the JSON \
+         payload of env vars from `mirrord ext` into `MIRRORD_CHILD_ENV`."
+    ))]
+    PitmMissingChildEnv,
+
+    #[cfg(windows)]
+    #[error("Failed to decode `MIRRORD_CHILD_ENV`: {0}")]
+    PitmInvalidChildEnv(String),
+
+    #[cfg(windows)]
+    #[error("`mirrord pitm` was invoked without a target executable")]
+    PitmMissingExe,
+
+    #[cfg(windows)]
+    #[error("`mirrord pitm` failed to launch target process `{0}`: {1}")]
+    PitmExecuteFailed(String, String),
+
     #[error(transparent)]
     ApiKey(#[from] ApiKeyError),
 
@@ -524,7 +559,7 @@ pub(crate) enum CliError {
     ))]
     PreviewTargetRequired,
 
-    #[error("Failed to resolve target `{0}` for preview environment")]
+    #[error("Failed to resolve target for preview environment: {0}")]
     #[diagnostic(help(
         "Targetless mode is not supported for preview environments. \
          Please check that the target exists and has running pods.{GENERAL_HELP}"
@@ -592,11 +627,22 @@ pub(crate) enum CliError {
     #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
     PreviewKeyRequired,
 
+    /// Errors produced by the `mirrord up` command.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Up(#[from] UpCliError),
+
     /// Errors produced by the `mirrord ui` command.
     #[cfg(unix)]
     #[error("Session monitor UI error: {0}")]
     #[diagnostic(help("Check that no other process is using the port and try again."))]
     UiError(String),
+
+    #[error("Failed to read credentials file: {0}")]
+    #[diagnostic(help(
+        "Check that `~/.mirrord/credentials` exists and is readable.{GENERAL_HELP}"
+    ))]
+    CredentialStore(#[from] CredentialStoreError),
 }
 
 impl CliError {
@@ -705,6 +751,9 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::SerdeJson(fail) => Self::JsonSerializeError(fail),
             OperatorApiError::TargetResolutionFailed(msg) => {
                 Self::OperatorTargetResolution(KubeApiError::MalformedResource(msg))
+            }
+            OperatorApiError::CredentialSecretCreation(msg) => {
+                Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }
         }
     }

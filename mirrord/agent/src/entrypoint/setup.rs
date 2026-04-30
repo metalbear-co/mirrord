@@ -2,7 +2,7 @@ use mirrord_agent_env::envs;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::BackgroundTask;
+use super::{BackgroundTask, IP_VERSION_AVAILABILITY, IpVersionAvailability};
 use crate::{
     dns::{DnsCommand, DnsWorker},
     error::{AgentError, AgentResult},
@@ -29,18 +29,21 @@ pub(super) async fn start_traffic_redirector(
 
     let flush_connections = envs::STEALER_FLUSH_CONNECTIONS.from_env_or_default();
     let pod_ips = envs::POD_IPS.from_env_or_default();
-    let support_ipv6 = envs::IPV6_SUPPORT.from_env_or_default();
     let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
     let tls_handler_store =
         StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(target_pid));
 
     let redirector_task_config = RedirectorTaskConfig::from_env();
+
+    let IpVersionAvailability { v4, v6 } = &*IP_VERSION_AVAILABILITY;
+
     let (task, steal_handle, mirror_handle) = tokio::spawn(async move {
         incoming::create_iptables_redirector(
             flush_connections,
             &pod_ips,
-            support_ipv6,
             with_mesh_exclusion,
+            *v4,
+            *v6,
         )
         .await
         .map(|redirector| {
@@ -75,7 +78,6 @@ pub(super) fn start_stealer(
 }
 
 pub(super) fn start_dns(
-    args: &super::Args,
     runtime: &BgTaskRuntime,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<DnsCommand> {
@@ -86,7 +88,7 @@ pub(super) fn start_dns(
     let (command_tx, command_rx) = mpsc::channel::<DnsCommand>(1000);
 
     let task_status = tokio::spawn(
-        DnsWorker::new(runtime.target_pid(), command_rx, args.ipv6).run(cancellation_token.clone()),
+        DnsWorker::new(runtime.target_pid(), command_rx).run(cancellation_token.clone()),
     )
     .into_status("DnsTask");
 

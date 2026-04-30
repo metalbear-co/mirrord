@@ -41,8 +41,6 @@ pub struct ContainerConfig {
     /// the agent container.
     pub tls_cert: Option<String>,
     pub pod_ips: Option<Vec<IpAddr>>,
-    /// Whether to support IPv6-only clusters.
-    pub support_ipv6: bool,
     /// Configuration for stealing TLS traffic.
     pub steal_tls_config: Vec<StealPortTlsConfig>,
     /// How long the agent should keep running after all client connections have been closed.
@@ -62,8 +60,6 @@ pub struct ContainerParams {
     pub tls_cert: Option<String>,
     /// IP addresses of the target pod.
     pub pod_ips: Option<Vec<IpAddr>>,
-    /// Whether to support IPv6-only clusters.
-    pub support_ipv6: bool,
     /// Configuration for stealing TLS traffic.
     pub steal_tls_config: Vec<StealPortTlsConfig>,
     /// How long the agent should keep running after all client connections have been closed.
@@ -90,7 +86,6 @@ impl From<ContainerConfig> for ContainerParams {
             port,
             tls_cert: value.tls_cert,
             pod_ips: value.pod_ips,
-            support_ipv6: value.support_ipv6,
             steal_tls_config: value.steal_tls_config,
             idle_ttl: value.idle_ttl,
         }

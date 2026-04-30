@@ -1,11 +1,111 @@
-use std::ops::Deref;
+use std::{borrow::Cow, ops::Deref};
 
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use mirrord_config_derive::MirrordConfig;
-use schemars::JsonSchema;
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize, ser::SerializeMap};
 
 use crate::config::{self, source::MirrordConfigSource};
+
+/// Deserializes from either a single value or a JSON array.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SingleOrVec<T>(pub Vec<T>);
+
+impl<T> SingleOrVec<T> {
+    pub fn first(&self) -> Option<&T> {
+        self.0.first()
+    }
+}
+
+impl<T> From<T> for SingleOrVec<T> {
+    fn from(value: T) -> Self {
+        Self(vec![value])
+    }
+}
+
+impl<T> From<Vec<T>> for SingleOrVec<T> {
+    fn from(value: Vec<T>) -> Self {
+        Self(value)
+    }
+}
+
+impl<T> Deref for SingleOrVec<T> {
+    type Target = Vec<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> std::ops::DerefMut for SingleOrVec<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<'a, T> IntoIterator for &'a SingleOrVec<T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut SingleOrVec<T> {
+    type Item = &'a mut T;
+    type IntoIter = std::slice::IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter_mut()
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for SingleOrVec<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Helper<T> {
+            Single(T),
+            Multiple(Vec<T>),
+        }
+
+        match Helper::deserialize(deserializer)? {
+            Helper::Single(v) => Ok(SingleOrVec::from(v)),
+            Helper::Multiple(v) => Ok(SingleOrVec::from(v)),
+        }
+    }
+}
+
+impl<T: Serialize> Serialize for SingleOrVec<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self.0.as_slice() {
+            [single] => single.serialize(serializer),
+            many => many.serialize(serializer),
+        }
+    }
+}
+
+impl<T: JsonSchema> JsonSchema for SingleOrVec<T> {
+    fn schema_name() -> Cow<'static, str> {
+        Cow::Owned(format!("SingleOrVec_{}", T::schema_name()))
+    }
+
+    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
+        let mut schema = schemars::json_schema!({});
+        schema.insert(
+            "x-kubernetes-preserve-unknown-fields".to_owned(),
+            serde_json::Value::Bool(true),
+        );
+        schema
+    }
+}
 
 pub mod mongodb;
 pub mod mssql;
@@ -29,6 +129,7 @@ pub type PgIamAuthConfig = IamAuthConfig;
 /// Shared copy config for individual items (tables, collections, etc.).
 /// All database engines use this same struct for per-item copy configuration.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BranchItemCopyConfig {
     pub filter: Option<String>,
 }
@@ -41,7 +142,7 @@ pub struct BranchItemCopyConfig {
 /// - `{ "type": "env", "variable": "VAR_NAME" }` - direct env var from pod spec
 /// - `{ "type": "env_from", "variable": "VAR_NAME" }` - from configMapRef/secretRef
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum IamAuthConfig {
     /// For AWS RDS/Aurora IAM authentication, set `type` to `"aws_rds"`.
     ///
@@ -214,7 +315,7 @@ impl DatabaseBranchesConfig {
 /// }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum DatabaseBranchConfig {
     Mongodb(Box<MongodbBranchConfig>),
     Mssql(Box<MssqlBranchConfig>),
@@ -296,7 +397,7 @@ pub struct DatabaseBranchBaseConfig {
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSource")]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum ConnectionSource {
     Url {
         url: TargetEnvironmentVariableSource,
@@ -304,9 +405,9 @@ pub enum ConnectionSource {
     FlatUrl {
         #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
         source_type: Option<ConnectionSourceType>,
-        url: String,
+        url: SingleOrVec<String>,
     },
-    Params(ConnectionParamsConfig),
+    Params(Box<ConnectionParamsConfig>),
 }
 
 impl Serialize for ConnectionSource {
@@ -354,6 +455,7 @@ pub enum ConnectionSourceType {
 /// The `type` field is optional - when omitted, the operator auto-detects
 /// whether the variable comes from `env` or `envFrom` on the target pod.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectionParamsConfig {
     #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     pub source_type: Option<ConnectionSourceType>,
@@ -361,21 +463,47 @@ pub struct ConnectionParamsConfig {
 }
 
 /// <!--${internal}-->
-/// A connection parameter source: either a plain env var name (string) or a Kubernetes Secret
-/// reference (object).
+/// A connection parameter source: a plain env var name (string), an env var with a literal
+/// value override (object with `variable` and optional `value`), or a Kubernetes Secret
+/// reference.
 ///
-/// As a string: `"DB_HOST"` — resolved using the parent `type` field (env or env_from).
+/// As a string: `"DB_HOST"` - resolved using the parent `type` field (env or env_from).
 ///
-/// As an object: `{ "secret": "my-secret", "key": "password" }` — read directly from a
-/// Kubernetes Secret.
+/// As an object with a literal value: `{ "variable": "DB_HOST", "value": "myhost.com" }` -
+/// uses the provided `value` directly instead of reading the env var from the target pod.
+/// The `variable` names the key in the credential Secret that the CLI creates.
+///
+/// As a value-only object: `{ "value": "myhost.com" }` - provides the value directly without
+/// referencing any env var on the target pod.
+///
+/// As a Secret ref: `{ "secret": "my-secret", "key": "password" }` - read directly from a
+/// Kubernetes Secret. Add `"env_var_name": "DB_PASSWORD"` to also expose the resolved
+/// value to the local process under that name. Without `env_var_name` the Secret is
+/// only consumed by the operator for branch provisioning; the local app must get the
+/// credential from the target pod's environment.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum ParamSource {
     Variable(String),
     Secret {
         #[serde(rename = "secret")]
         name: String,
         key: String,
+        /// Name of the env var to set on the local process from the resolved
+        /// Secret value. When `None`, the operator only uses the Secret for
+        /// branch provisioning and does not inject anything locally.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
+    Pattern {
+        env_var_name: String,
+        value_pattern: String,
+    },
+    Env {
+        #[serde(alias = "variable")]
+        env_var_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
     },
 }
 
@@ -383,6 +511,9 @@ impl ParamSource {
     pub fn as_variable(&self) -> Option<&str> {
         match self {
             Self::Variable(v) => Some(v),
+            Self::Env { env_var_name, .. } | Self::Pattern { env_var_name, .. } => {
+                Some(env_var_name)
+            }
             Self::Secret { .. } => None,
         }
     }
@@ -392,17 +523,18 @@ impl ParamSource {
 /// At least one parameter must be specified.
 /// Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectionParamsVars {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host: Option<ParamSource>,
+    pub host: Option<SingleOrVec<ParamSource>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub port: Option<ParamSource>,
+    pub port: Option<SingleOrVec<ParamSource>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub user: Option<ParamSource>,
+    pub user: Option<SingleOrVec<ParamSource>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub password: Option<ParamSource>,
+    pub password: Option<SingleOrVec<ParamSource>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub database: Option<ParamSource>,
+    pub database: Option<SingleOrVec<ParamSource>>,
 }
 
 /// <!--${internal}-->
@@ -414,11 +546,15 @@ pub struct ConnectionParamsVars {
 /// - `secret` read directly from a Kubernetes Secret.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSourceKind")]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TargetEnvironmentVariableSource {
     Env {
         container: Option<String>,
         variable: String,
+        /// Literal value for this connection parameter. The CLI sends it to the
+        /// operator, which stores it in a Kubernetes Secret for the branch pod.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
     },
     EnvFrom {
         container: Option<String>,
@@ -427,6 +563,10 @@ pub enum TargetEnvironmentVariableSource {
     Secret {
         name: String,
         key: String,
+        /// Name of the env var to set on the local process from the resolved
+        /// Secret value. Same semantics as on `ParamSource::Secret`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
     },
 }
 
@@ -476,7 +616,8 @@ mod tests {
             ConnectionSource::Url {
                 url: TargetEnvironmentVariableSource::Env {
                     container: None,
-                    variable: "DB_URL".to_string(),
+                    variable: "DB_URL".to_owned(),
+                    value: None,
                 }
             }
         );
@@ -491,7 +632,7 @@ mod tests {
             ConnectionSource::Url {
                 url: TargetEnvironmentVariableSource::EnvFrom {
                     container: None,
-                    variable: "DB_URL".to_string(),
+                    variable: "DB_URL".to_owned(),
                 }
             }
         );
@@ -505,8 +646,9 @@ mod tests {
             source,
             ConnectionSource::Url {
                 url: TargetEnvironmentVariableSource::Env {
-                    container: Some("my-app".to_string()),
-                    variable: "DB_URL".to_string(),
+                    container: Some("my-app".to_owned()),
+                    variable: "DB_URL".to_owned(),
+                    value: None,
                 }
             }
         );
@@ -520,7 +662,7 @@ mod tests {
             source,
             ConnectionSource::FlatUrl {
                 source_type: Some(ConnectionSourceType::Env),
-                url: "DB_URL".to_string(),
+                url: "DB_URL".to_owned().into(),
             }
         );
     }
@@ -533,7 +675,7 @@ mod tests {
             source,
             ConnectionSource::FlatUrl {
                 source_type: Some(ConnectionSourceType::EnvFrom),
-                url: "DB_URL".to_string(),
+                url: "DB_URL".to_owned().into(),
             }
         );
     }
@@ -546,7 +688,7 @@ mod tests {
             source,
             ConnectionSource::FlatUrl {
                 source_type: None,
-                url: "DB_URL".to_string(),
+                url: "DB_URL".to_owned().into(),
             }
         );
     }
@@ -554,7 +696,6 @@ mod tests {
     #[test]
     fn deserialize_params_all() {
         let json = r#"{
-            "type": "env",
             "params": {
                 "host": "DB_HOST",
                 "port": "DB_PORT",
@@ -566,26 +707,25 @@ mod tests {
         let source: ConnectionSource = serde_json::from_str(json).unwrap();
         match source {
             ConnectionSource::Params(config) => {
-                assert_eq!(config.source_type, Some(ConnectionSourceType::Env));
                 assert_eq!(
                     config.params.host,
-                    Some(ParamSource::Variable("DB_HOST".to_string()))
+                    Some(ParamSource::Variable("DB_HOST".to_owned()).into())
                 );
                 assert_eq!(
                     config.params.port,
-                    Some(ParamSource::Variable("DB_PORT".to_string()))
+                    Some(ParamSource::Variable("DB_PORT".to_owned()).into())
                 );
                 assert_eq!(
                     config.params.user,
-                    Some(ParamSource::Variable("DB_USER".to_string()))
+                    Some(ParamSource::Variable("DB_USER".to_owned()).into())
                 );
                 assert_eq!(
                     config.params.password,
-                    Some(ParamSource::Variable("DB_PASSWORD".to_string()))
+                    Some(ParamSource::Variable("DB_PASSWORD".to_owned()).into())
                 );
                 assert_eq!(
                     config.params.database,
-                    Some(ParamSource::Variable("DB_NAME".to_string()))
+                    Some(ParamSource::Variable("DB_NAME".to_owned()).into())
                 );
             }
             other => panic!("expected Params, got {:?}", other),
@@ -594,20 +734,20 @@ mod tests {
 
     #[test]
     fn deserialize_params_partial() {
-        let json = r#"{ "type": "env", "params": { "host": "DB_HOST", "database": "DB_NAME" } }"#;
+        let json = r#"{ "params": { "host": "DB_HOST", "database": "DB_NAME" } }"#;
         let source: ConnectionSource = serde_json::from_str(json).unwrap();
         match source {
             ConnectionSource::Params(config) => {
                 assert_eq!(
                     config.params.host,
-                    Some(ParamSource::Variable("DB_HOST".to_string()))
+                    Some(ParamSource::Variable("DB_HOST".to_owned()).into())
                 );
                 assert!(config.params.port.is_none());
                 assert!(config.params.user.is_none());
                 assert!(config.params.password.is_none());
                 assert_eq!(
                     config.params.database,
-                    Some(ParamSource::Variable("DB_NAME".to_string()))
+                    Some(ParamSource::Variable("DB_NAME".to_owned()).into())
                 );
             }
             other => panic!("expected Params, got {:?}", other),
@@ -620,7 +760,7 @@ mod tests {
         let result = serde_json::from_str::<ConnectionSource>(json).unwrap();
         assert_eq!(
             result,
-            ConnectionSource::Params(ConnectionParamsConfig {
+            ConnectionSource::Params(Box::new(ConnectionParamsConfig {
                 source_type: Some(ConnectionSourceType::Env),
                 params: ConnectionParamsVars {
                     host: None,
@@ -629,7 +769,7 @@ mod tests {
                     password: None,
                     database: None,
                 },
-            })
+            }))
         );
     }
 
@@ -642,11 +782,11 @@ mod tests {
                 assert_eq!(config.source_type, None);
                 assert_eq!(
                     config.params.host,
-                    Some(ParamSource::Variable("DB_HOST".to_string()))
+                    Some(ParamSource::Variable("DB_HOST".to_owned()).into())
                 );
                 assert_eq!(
                     config.params.database,
-                    Some(ParamSource::Variable("DB_NAME".to_string()))
+                    Some(ParamSource::Variable("DB_NAME".to_owned()).into())
                 );
             }
             other => panic!("expected Params, got {:?}", other),
@@ -665,7 +805,8 @@ mod tests {
         let source = ConnectionSource::Url {
             url: TargetEnvironmentVariableSource::Env {
                 container: None,
-                variable: "DB_URL".to_string(),
+                variable: "DB_URL".to_owned(),
+                value: None,
             },
         };
         let json = serde_json::to_string(&source).unwrap();
@@ -675,16 +816,16 @@ mod tests {
 
     #[test]
     fn serialize_roundtrip_params() {
-        let source = ConnectionSource::Params(ConnectionParamsConfig {
-            source_type: Some(ConnectionSourceType::Env),
+        let source = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
+            source_type: None,
             params: ConnectionParamsVars {
-                host: Some(ParamSource::Variable("DB_HOST".to_string())),
+                host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
                 port: None,
-                user: Some(ParamSource::Variable("DB_USER".to_string())),
+                user: Some(ParamSource::Variable("DB_USER".to_owned()).into()),
                 password: None,
-                database: Some(ParamSource::Variable("DB_NAME".to_string())),
+                database: Some(ParamSource::Variable("DB_NAME".to_owned()).into()),
             },
-        });
+        }));
         let json = serde_json::to_string(&source).unwrap();
         let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
         assert_eq!(source, deserialized);
@@ -693,7 +834,6 @@ mod tests {
     #[test]
     fn deserialize_params_with_secret_password() {
         let json = r#"{
-            "type": "env",
             "params": {
                 "host": "DB_HOST",
                 "port": "DB_PORT",
@@ -705,21 +845,24 @@ mod tests {
         let source: ConnectionSource = serde_json::from_str(json).unwrap();
         match source {
             ConnectionSource::Params(config) => {
-                assert_eq!(config.source_type, Some(ConnectionSourceType::Env));
                 assert_eq!(
                     config.params.host,
-                    Some(ParamSource::Variable("DB_HOST".to_string()))
+                    Some(ParamSource::Variable("DB_HOST".to_owned()).into())
                 );
                 assert_eq!(
                     config.params.password,
-                    Some(ParamSource::Secret {
-                        name: "rds-credentials".to_string(),
-                        key: "password".to_string(),
-                    })
+                    Some(
+                        ParamSource::Secret {
+                            name: "rds-credentials".to_owned(),
+                            key: "password".to_owned(),
+                            env_var_name: None,
+                        }
+                        .into()
+                    )
                 );
                 assert_eq!(
                     config.params.database,
-                    Some(ParamSource::Variable("DB_NAME".to_string()))
+                    Some(ParamSource::Variable("DB_NAME".to_owned()).into())
                 );
             }
             other => panic!("expected Params, got {:?}", other),
@@ -728,19 +871,23 @@ mod tests {
 
     #[test]
     fn serialize_roundtrip_params_with_secret() {
-        let source = ConnectionSource::Params(ConnectionParamsConfig {
-            source_type: Some(ConnectionSourceType::Env),
+        let source = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
+            source_type: None,
             params: ConnectionParamsVars {
-                host: Some(ParamSource::Variable("DB_HOST".to_string())),
+                host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
                 port: None,
                 user: None,
-                password: Some(ParamSource::Secret {
-                    name: "my-secret".to_string(),
-                    key: "pass".to_string(),
-                }),
-                database: Some(ParamSource::Variable("DB_NAME".to_string())),
+                password: Some(
+                    ParamSource::Secret {
+                        name: "my-secret".to_owned(),
+                        key: "pass".to_owned(),
+                        env_var_name: None,
+                    }
+                    .into(),
+                ),
+                database: Some(ParamSource::Variable("DB_NAME".to_owned()).into()),
             },
-        });
+        }));
         let json = serde_json::to_string(&source).unwrap();
         let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
         assert_eq!(source, deserialized);
@@ -749,12 +896,77 @@ mod tests {
     #[test]
     fn deserialize_param_source_invalid_object_fails() {
         let json = r#"{
-            "type": "env",
             "params": {
                 "host": { "invalid": "object" }
             }
         }"#;
         let result = serde_json::from_str::<ConnectionSource>(json);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn deserialize_pattern_and_multi_source() {
+        let json = r#"{
+            "params": {
+                "host": { "env_var_name": "MYSQL_SERVER", "value_pattern": "^([^:]+):" },
+                "port": { "env_var_name": "MYSQL_SERVER", "value_pattern": ":([0-9]+)$" },
+                "user": "DB_USER",
+                "password": { "secret": "rds-creds", "key": "password" }
+            }
+        }"#;
+        let source: ConnectionSource = serde_json::from_str(json).unwrap();
+        match &source {
+            ConnectionSource::Params(config) => {
+                assert!(matches!(
+                    config.params.host.as_ref().unwrap().first(),
+                    Some(ParamSource::Pattern { .. })
+                ));
+                assert!(matches!(
+                    config.params.port.as_ref().unwrap().first(),
+                    Some(ParamSource::Pattern { .. })
+                ));
+                assert!(matches!(
+                    config.params.user.as_ref().unwrap().first(),
+                    Some(ParamSource::Variable(_))
+                ));
+                assert!(matches!(
+                    config.params.password.as_ref().unwrap().first(),
+                    Some(ParamSource::Secret { .. })
+                ));
+            }
+            other => panic!("expected Params, got {:?}", other),
+        }
+        assert_eq!(
+            source,
+            serde_json::from_str(&serde_json::to_string(&source).unwrap()).unwrap()
+        );
+
+        let multi_host: ConnectionSource = serde_json::from_str(
+            r#"{
+            "params": {
+                "host": [
+                    "WRITE_HOST",
+                    { "env_var_name": "READ_SERVER", "value_pattern": "^([^:]+):" }
+                ]
+            }
+        }"#,
+        )
+        .unwrap();
+        match multi_host {
+            ConnectionSource::Params(config) => {
+                let hosts = config.params.host.as_ref().unwrap();
+                assert_eq!(hosts.len(), 2);
+                assert!(matches!(hosts.first(), Some(ParamSource::Variable(_))));
+                assert!(matches!(hosts.get(1), Some(ParamSource::Pattern { .. })));
+            }
+            other => panic!("expected Params, got {:?}", other),
+        }
+
+        let multi_url: ConnectionSource =
+            serde_json::from_str(r#"{ "url": ["DB_WRITE_URL", "DB_READ_URL"] }"#).unwrap();
+        match multi_url {
+            ConnectionSource::FlatUrl { url, .. } => assert_eq!(url.len(), 2),
+            other => panic!("expected FlatUrl, got {:?}", other),
+        }
     }
 }

@@ -18,7 +18,10 @@ use crate::{
     api::{
         container::{
             ContainerParams, ContainerVariant,
-            util::{base_command_line, get_capabilities, wait_for_agent_startup},
+            util::{
+                agent_base_args, get_capabilities, get_ephemeral_container_image_pull_error,
+                wait_for_agent_startup,
+            },
         },
         kubernetes::AgentKubernetesConnectInfo,
         runtime::RuntimeData,
@@ -133,6 +136,14 @@ where
     pin!(stream);
 
     while let Some(Ok(pod)) = stream.next().await {
+        // Fail fast on image pull errors on ephemeral containers (ImagePullBackOff, ErrImagePull)
+        // instead of waiting indefinitely while the pod remains in Pending.
+        // See: https://github.com/metalbear-co/mirrord/issues/366
+        if let Some(msg) = get_ephemeral_container_image_pull_error(&pod, &params.name) {
+            container_progress.failure(Some(&msg));
+            return Err(KubeApiError::AgentPodStartError(msg));
+        }
+
         if is_ephemeral_container_running(pod, &params.name) {
             debug!("container ready");
             break;
@@ -166,7 +177,7 @@ where
 
 pub struct EphemeralTargetedVariant<'c> {
     agent: &'c AgentConfig,
-    command_line: Vec<String>,
+    args: Vec<String>,
     params: &'c ContainerParams,
     runtime_data: &'c RuntimeData,
 }
@@ -177,14 +188,14 @@ impl<'c> EphemeralTargetedVariant<'c> {
         params: &'c ContainerParams,
         runtime_data: &'c RuntimeData,
     ) -> Self {
-        let mut command_line = base_command_line(agent, params);
+        let mut args = agent_base_args(agent, params);
 
-        command_line.extend(["ephemeral".to_string()]);
+        args.extend(["ephemeral".to_string()]);
 
         EphemeralTargetedVariant {
             agent,
             params,
-            command_line,
+            args,
             runtime_data,
         }
     }
@@ -206,7 +217,7 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
             agent,
             params,
             runtime_data,
-            command_line,
+            args,
         } = self;
         let mut env = agent_env(agent, params);
 
@@ -250,7 +261,8 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
             image_pull_policy: Some(agent.image_pull_policy.clone()),
             target_container_name: Some(runtime_data.container_name.clone()),
             env: Some(env),
-            command: Some(command_line.clone()),
+            command: Some(vec!["./mirrord-agent".into()]),
+            args: Some(args.clone()),
             ..Default::default()
         }
     }

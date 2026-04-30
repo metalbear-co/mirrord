@@ -250,6 +250,14 @@
 //! - [`fix::fix_command`]
 //!
 //! > Contains fixes for commonly occuring issues that prevent mirrord from working optimally.
+//!
+//! ### `mirrord up`
+//!
+//! Spawns and manage multiple child mirrord sessions, based on a single `mirrord-up.yaml`
+//! configuration file.
+//! - [`up::up_command`]
+//!
+//! > Think docker compose but for mirrord.
 
 #![feature(try_blocks)]
 #![feature(iterator_try_collect)]
@@ -291,6 +299,7 @@ use mirrord_config::{
     },
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
+use mirrord_operator::client::database_branches::resolve_branch_id;
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
@@ -329,6 +338,7 @@ mod port_forward;
 mod preview;
 mod profile;
 mod teams;
+mod up;
 mod user_data;
 mod util;
 mod verify_config;
@@ -339,9 +349,18 @@ mod wsl;
 mod wizard;
 
 #[cfg(unix)]
+mod session;
+
+#[cfg(unix)]
 mod ui;
 
 mod fix;
+
+#[cfg(windows)]
+mod attach;
+
+#[cfg(windows)]
+mod pitm;
 
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
@@ -753,8 +772,17 @@ async fn exec(
 
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     cfg_context = apply_test_env_overrides(cfg_context);
-    let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
-    let mut config = LayerConfig::resolve(&mut cfg_context)?;
+
+    let (config_file_path, mut config) =
+        if let Ok(encoded) = std::env::var(mirrord_up::RESOLVED_CONFIG_ENV) {
+            // Running as a child of `mirrord up`, resolve config from env
+            let config = LayerConfig::decode(&encoded)?;
+            (None, config)
+        } else {
+            let path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
+            let config = LayerConfig::resolve(&mut cfg_context)?;
+            (path, config)
+        };
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
@@ -768,6 +796,8 @@ async fn exec(
             None
         }) {
         let port = redis_config.local.port;
+        let redis_instance_id = resolve_branch_id(&redis_config.id, config.key.as_str(), progress);
+        let redis_container_name = format!("mirrord-redis-{redis_instance_id}");
 
         // Get the override variable and build the appropriate connection string
         if let Some(variable) = redis_config.connection.override_variable() {
@@ -784,10 +814,17 @@ async fn exec(
         // Auto-configure: ignore localhost so traffic goes directly to local Redis
         config.feature.network.outgoing.ignore_localhost = true;
 
-        Some(local_redis::start(progress, &redis_config.local).await?)
+        Some(local_redis::start(progress, &redis_config.local, redis_container_name).await?)
     } else {
         None
     };
+
+    #[cfg(unix)]
+    if let Some(ref redis) = _local_redis
+        && let Err(e) = redis.spawn_cleanup_guardian()
+    {
+        warn!(?e, "Failed to spawn cleanup guardian for local Redis");
+    }
 
     let mut analytics = AnalyticsReporter::only_error(
         config.telemetry,
@@ -980,6 +1017,14 @@ fn main() -> miette::Result<()> {
     #[cfg(target_os = "windows")]
     console::ensure_vt_or_dumb_progress();
 
+    // IDEA plugin dispatches Java runs through a fake JDK whose `bin/java.exe`
+    // is a copy of this binary. When invoked under that name, skip clap entirely
+    // and run the `pitm` flow on the real java.exe (path passed via env var).
+    #[cfg(target_os = "windows")]
+    if let Some(result) = pitm::run_as_java_launcher() {
+        return result;
+    }
+
     let cli = Cli::parse();
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -1051,9 +1096,9 @@ fn main() -> miette::Result<()> {
             Commands::Operator(args) => {
                 operator_command(*args).await?;
             }
-            Commands::ExtensionExec(args) => windows_unsupported!(args, "ext", {
+            Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch, &user_data).await?;
-            }),
+            }
             Commands::InternalProxy {
                 port,
                 mirrord_for_ci,
@@ -1125,6 +1170,7 @@ fn main() -> miette::Result<()> {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
             Commands::Preview(args) => preview::preview_command(*args, watch, &user_data).await?,
+            Commands::Up(args) => up::up_command(*args).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             #[cfg(feature = "wizard")]
             Commands::Wizard(args) => {
@@ -1137,8 +1183,33 @@ fn main() -> miette::Result<()> {
                 .await?
             }
             Commands::Fix(args) => fix::fix_command(args).await?,
+            #[cfg(windows)]
+            Commands::Attach(args) => {
+                let progress = ProgressTracker::from_env("mirrord attach");
+                attach::attach_command(args, &progress)?;
+            }
+            #[cfg(windows)]
+            Commands::Pitm(args) => pitm::pitm_command(args)?,
             #[cfg(unix)]
             Commands::Ui(args) => ui::ui_command(args).await?,
+            #[cfg(unix)]
+            Commands::Session(args) => session::session_command(*args).await?,
+            #[cfg(unix)]
+            Commands::Kill(args) => session::kill_command(*args).await?,
+            #[cfg(unix)]
+            Commands::CleanupGuardian {
+                watch_pid,
+                container_runtime,
+                container_name,
+                process_pid,
+            } => {
+                util::run_cleanup_guardian(
+                    watch_pid,
+                    container_runtime,
+                    container_name,
+                    process_pid,
+                );
+            }
         };
 
         Ok(())

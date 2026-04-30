@@ -8,6 +8,230 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.208.0](https://github.com/metalbear-co/mirrord/tree/3.208.0) - 2026-04-30
+
+
+### Added
+
+- Added support for GCP Pub Sub.
+
+
+### Changed
+
+- `mirrord up` now rejects unknown fields in `mirrord-up.yaml` to catch typos
+  in configuration.
+- `mirrord up` now reports a clear error when `mirrord-up.yaml` is missing,
+  with help text on how to specify a custom path.
+
+
+### Fixed
+
+- Fixed Windows DNS hook error reporting so DNS lookup failures now return the
+  correct WinSock error, for example `WSAHOST_NOT_FOUND` code `11001`, instead
+  of surfacing unrelated errors like `ERROR_INVALID_HANDLE` with `os error 6`.
+- Fixed a Node/libuv crash when mirrord's Unix `getaddrinfo` hook returned a
+  non-`EAI_*` error after remote DNS found no records.
+- Fixed example in `agent.image_pull_secrets` configuration docs to use `name`
+  instead of `secret-key`.
+- Fixed local `Redis` containers/processes not being cleaned up.
+- mirrord now expands templates inside the root `key` field, so you can derive
+  session keys from expressions like `{{ get_env(...) }}` in the config file.
+
+## [3.207.0](https://github.com/metalbear-co/mirrord/tree/3.207.0) - 2026-04-28
+
+
+### Added
+
+- `mirrord ui` now auto-configures the mirrord browser extension once the user
+  opens its Web UI in Chrome, so users no longer have to copy a
+  `chrome-extension://...` configure URL by hand. The session UI binds on
+  `127.0.0.1` instead of `[::1]` so the page origin matches what the
+  extension's `externally_connectable` manifest entry accepts.
+
+## [3.206.1](https://github.com/metalbear-co/mirrord/tree/3.206.1) - 2026-04-24
+
+## [3.206.0](https://github.com/metalbear-co/mirrord/tree/3.206.0) - 2026-04-24
+
+
+### Added
+
+- `mirrord ui` now polls `MirrordOperator.status.sessions` and exposes the
+  result through a `/api/operator-sessions` HTTP endpoint, letting the browser
+  extension list existing sessions grouped by their `key`. Adds `key` and
+  `http_filter` to `Session` so external clients can identify which sessions to
+  join and derive the matching header to inject.
+
+
+### Fixed
+
+- Fix issue where username can't be determined breaking operator use
+
+## [3.205.0](https://github.com/metalbear-co/mirrord/tree/3.205.0) - 2026-04-24
+
+
+### Added
+
+- Added `mirrord up`, a tool for spawning and managing multiple concurrent
+  mirrord sessions from a single `mirrord-up.yaml` file.
+- Support for composite environment variables (with `value_pattern` regex) and
+  multi source connection parameters in db branching.
+
+
+### Changed
+
+- Agent now automatically decides when to enable IPv6 based on IPs assigned to
+  available interfaces.
+
+
+### Fixed
+
+- DB branch credentials from a literal value or Secret reference now override
+  the local env vars correctly, even when the target pod does not set them.
+
+## [3.204.1](https://github.com/metalbear-co/mirrord/tree/3.204.1) - 2026-04-20
+
+
+### Fixed
+
+- mirrord go run on macOS regression fixed
+
+## [3.204.0](https://github.com/metalbear-co/mirrord/tree/3.204.0) - 2026-04-20
+
+
+### Added
+
+- Added `pitm` subcommand for Windows as a necessity to support JetBrains IDE
+  extensions.
+- Support for plain value credentials in db branching.
+
+
+### Fixed
+
+- tailwind wrong config didn't bundle `metalbear-ui`.
+
+## [3.203.1](https://github.com/metalbear-co/mirrord/tree/3.203.1) - 2026-04-17
+
+
+### Fixed
+
+- Changed the release workflow to build Linux and Windows CLI artifacts through
+  `cargo xtask build-cli` instead of handwritten cargo build steps.
+  Fixes regression with wrong artifact on Linux causing mirrord to not work
+
+## [3.203.0](https://github.com/metalbear-co/mirrord/tree/3.203.0) - 2026-04-16
+
+
+### Added
+
+- Add a Settings dialog to the session monitor UI (accessed via the gear icon
+  in the header) with a toggle for anonymous usage analytics. The preference
+  persists in the browser's local storage. When turned off, the client calls
+  `posthog.opt_out_capturing` and stops any active session recording
+  immediately; the session's own `config.telemetry = false` still vetoes
+  telemetry regardless of the UI toggle.
+
+
+### Fixed
+
+- Fix `mirrord ui` serving 404 in release builds: enable `corepack` on the
+  macOS CLI release jobs so the xtask actually builds the monitor frontend.
+  Also permit the PostHog telemetry host in the UI `Content-Security-Policy`,
+  and mask all text and inputs in session replays so they do not capture
+  customer-sensitive content surfaced by the UI.
+
+## [3.202.0](https://github.com/metalbear-co/mirrord/tree/3.202.0) - 2026-04-16
+
+
+### Added
+
+- Add -n and -f flags to session commands
+- Add token-based authentication, CORS, Host header validation, and security
+  response headers to the session monitor API to protect against cross-origin
+  attacks on localhost.
+- Added a web frontend for the local session monitor API under
+  `monitor-frontend/`.
+
+
+### Changed
+
+- Fix the squashed mirrord logo in the session monitor header and align the
+  monitor's typography, color tokens, and header layout with the
+  operator-dashboard's design system so both apps share the same look.
+
+
+### Fixed
+
+- Fix an issue where mirrord would wait indefinitely if the agent image could
+  not be pulled (e.g. ImagePullBackOff, ErrImagePull). The CLI now surfaces a
+  clear error instead of hanging.
+  [#366](https://github.com/metalbear-co/mirrord/issues/366)
+- Adds agent support for multiple mirrord sessions that have the same target
+  pod, but they're targeting different containers of this pod. Previously the
+  second agent iptables' would take over the first agent's, now iptables' chain
+  names are dynamic, and thus avoid this problem.
+- Fix a bug where unknown fields in some nested mirrord config sections were
+  accepted during deserialization instead of being rejected.
+- Fix the root layer process being absent from the local UI processes list.
+  Also update the `mirrord ui` help text from "Launch the session monitor UI"
+  to "Launch the mirrord local UI".
+
+## [3.201.0](https://github.com/metalbear-co/mirrord/tree/3.201.0) - 2026-04-10
+
+
+### Added
+
+- Added `mirrord diagnose license` for troubleshooting mirrord for Teams
+  license usage.
+- Added local and remote session management commands under `mirrord session`.
+- Implemented `mirrord attach` on Windows to support IDE extensions.
+
+
+### Changed
+
+- Preview environments now have a default HTTP header filter, `baggage:
+  *.mirrord-session={{key}}.*`, which will be used if no filter is configured.
+- Preview environments now ignore the config option
+  `feature.network.incoming.http_filter.ports` to prevent accidentally stealing
+  traffic without a filter. This means that all HTTP filters now
+  unconditionally apply to all intercepted ports.
+
+## [3.200.0](https://github.com/metalbear-co/mirrord/tree/3.200.0) - 2026-04-09
+
+
+### Changed
+
+- Add Ruby and sh files to default local filter
+- Moved agent container command line arguments from `command` to `args` in
+  order to enable matching with GKE Autopilot WorkloadAllowlist.
+- Identify local redis database branch instances by db branch id instead of by
+  port.
+
+### Fixed
+
+- Fix preview environments failure when using it in CI contexts where a mirrord
+  user isn't configured.
+- Preview env resolve target backwards compatible fix.
+
+## [3.199.0](https://github.com/metalbear-co/mirrord/tree/3.199.0) - 2026-04-06
+
+
+### Added
+
+- Emit a warning when agent settings are configured but ignored because the
+  mirrord operator is managing the session.
+
+
+### Changed
+
+- Adjusted error message for client failure to connect to operator
+
+
+### Fixed
+
+- fixed regression of mirrord container introduced in 3.196.0
+  [#4126](https://github.com/metalbear-co/mirrord/issues/4126)
+- mirrord container on colima now works without disabling TLS
+
 ## [3.198.0](https://github.com/metalbear-co/mirrord/tree/3.198.0) - 2026-04-02
 
 

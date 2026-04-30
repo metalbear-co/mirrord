@@ -56,7 +56,7 @@ impl fmt::Display for LinuxCapability {
 ///     "namespace": "default",
 ///     "image": "ghcr.io/metalbear-co/mirrord:latest",
 ///     "image_pull_policy": "IfNotPresent",
-///     "image_pull_secrets": [ { "secret-key": "secret" } ],
+///     "image_pull_secrets": [ { "name": "secret" } ],
 ///     "ttl": 30,
 ///     "ephemeral": false,
 ///     "communication_timeout": 30,
@@ -546,6 +546,7 @@ impl AgentImageFileConfig {
 /// <!--${internal}-->
 /// Specifies a secret reference for the agent pod.
 #[derive(Clone, Debug, PartialEq, Eq, JsonSchema, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentPullSecret {
     /// Name of the secret.
     pub name: String,
@@ -620,6 +621,7 @@ impl AgentFileConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SecurityContext {
     pub app_armor_profile: Option<AppArmorProfile>,
     pub seccomp_profile: Option<SeccompProfile>,
@@ -639,6 +641,7 @@ pub type AppArmorProfile = SecurityProfile;
 pub type SeccompProfile = SecurityProfile;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SecurityProfile {
     pub localhost_profile: Option<String>,
 

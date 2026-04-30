@@ -11,16 +11,9 @@ workspace = true
 doctest = false
 
 [dependencies]
-aws-config = { workspace = true, optional = true }
-aws-credential-types.workspace = true
-aws-sdk-sqs = { workspace = true, optional = true }
-aws-types.workspace = true
-json-patch.workspace = true
-jsonptr.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
 reqwest.workspace = true
-regex.workspace = true
 tokio = { workspace = true, features = [
     "rt",
     "rt-multi-thread",
@@ -30,44 +23,28 @@ tokio = { workspace = true, features = [
 ] }
 serde_json.workspace = true
 mirrord-operator = { path = "../mirrord/operator", features = ["crd"] }
-mirrord-tls-util = { path = "../mirrord/tls-util", optional = true }
 serde.workspace = true
 futures.workspace = true
 rand.workspace = true
-bytes.workspace = true
 fancy-regex.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 http-body-util.workspace = true
-pem = { workspace = true, optional = true }
-rcgen = { workspace = true, optional = true }
 rustls.workspace = true
 rstest.workspace = true
 mirrord-kube = { path = "../mirrord/kube" }
 
 futures-util.workspace = true
-wsl.workspace = true
 chrono.workspace = true
 tempfile.workspace = true
 tokio-tungstenite.workspace = true
 
-# Note: always compiles mirrord as build dependancy
 mirrord-test-utils = { path = "../test-utils" }
-
-[target.'cfg(unix)'.dependencies]
-mirrord-agent-env = { path = "../mirrord/agent/env", optional = true }
 
 [features]
 default = ["ephemeral", "job", "cli", "targetless"]
 ephemeral = []
 job = []
-operator = [
-    "dep:aws-config",
-    "dep:aws-sdk-sqs",
-    "dep:rcgen",
-    "dep:mirrord-agent-env",
-    "dep:pem",
-    "dep:mirrord-tls-util",
-]
+operator = []
 cli = []
 targetless = []

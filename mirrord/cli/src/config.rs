@@ -203,6 +203,10 @@ pub(super) enum Commands {
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Preview(Box<PreviewArgs>),
 
+    /// Run mirrord sessions for all services defined in `mirrord-up.yaml`.
+    #[cfg_attr(target_os = "windows", command(hide = true))]
+    Up(Box<UpArgs>),
+
     /// Launch the config wizard.
     ///
     /// The config wizard is a web app that allows the user to create a mirrord config file by
@@ -215,13 +219,71 @@ pub(super) enum Commands {
     /// Fix issues related to mirrord.
     Fix(FixArgs),
 
-    /// Launch the session monitor UI.
+    /// Attach mirrord layer to an already-running process by PID.
+    ///
+    /// Used by IDE extensions that spawn a process with mirrord env vars
+    /// already configured, then request the CLI to inject the layer DLL.
+    #[cfg(windows)]
+    #[command(hide = true)]
+    Attach(AttachArgs),
+
+    /// Process In The Middle: create a target process suspended, inject the
+    /// mirrord layer DLL, and resume execution.
+    ///
+    /// Used by IDE extensions that cannot start the target process in a
+    /// suspended state themselves (e.g. IntelliJ run configurations). Like
+    /// `attach`, this assumes intproxy and the rest of the session have
+    /// already been set up by the plugin via `mirrord ext`; `pitm` itself
+    /// does no k8s or agent work. The plugin prepends `mirrord pitm --` to
+    /// the user command line and delivers the child's mirrord environment
+    /// through a single side-channel env var (`MIRRORD_CHILD_ENV`,
+    /// base64-encoded JSON with `set` and `unset` keys), which `pitm`
+    /// extracts and applies to the child process's environment. `pitm`
+    /// owns the child lifecycle end-to-end, so there is no race between
+    /// process start and layer injection.
+    #[cfg(windows)]
+    #[command(hide = true)]
+    Pitm(PitmArgs),
+
+    /// Launch the mirrord local UI.
     ///
     /// Watches active mirrord sessions and displays a web dashboard showing
     /// real-time events (file operations, DNS queries, HTTP requests, etc.)
     /// from all running mirrord sessions.
     #[cfg(unix)]
     Ui(UiArgs),
+
+    /// Manage local mirrord sessions.
+    #[cfg(unix)]
+    #[command(visible_alias = "sessions")]
+    Session(Box<SessionArgs>),
+
+    /// Kill a local mirrord session.
+    #[cfg(unix)]
+    Kill(Box<KillArgs>),
+
+    /// Detached guardian that monitors a PID and cleans up resources when it exits.
+    /// Spawned by `exec` for resources (e.g. local Redis) that must be cleaned up
+    /// even after `execve` replaces the process or the CLI is interrupted.
+    #[cfg(unix)]
+    #[command(hide = true, name = "cleanup-guardian")]
+    CleanupGuardian {
+        /// PID to monitor. Cleanup runs when this PID exits.
+        #[arg(long)]
+        watch_pid: u32,
+
+        /// Container runtime command (e.g. "docker", "podman") for container cleanup.
+        #[arg(long)]
+        container_runtime: Option<String>,
+
+        /// Container name to remove.
+        #[arg(long)]
+        container_name: Option<String>,
+
+        /// PID of a process to kill during cleanup.
+        #[arg(long)]
+        process_pid: Option<u32>,
+    },
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -926,6 +988,11 @@ pub(super) enum DiagnoseCommand {
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
         config_file: Option<PathBuf>,
     },
+    /// Print the user fingerprints from the local credentials file.
+    ///
+    /// The fingerprint is what the operator uses to identify individual users (e.g. for seat
+    /// counting). One fingerprint is shown per operator license the machine has connected to.
+    License,
 }
 
 // `mirrord container` command
@@ -1377,6 +1444,44 @@ impl PreviewStopArgs {
     }
 }
 
+/// Arguments for the `mirrord up` command.
+#[derive(Args, Debug)]
+pub(super) struct UpArgs {
+    /// Path to the mirrord-up config file.
+    ///
+    /// When using this argument without a value, defaults to `mirrord-up.yaml`
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml")]
+    pub config_file: PathBuf,
+
+    /// Session key, used as the `{{ key }}` template variable.
+    ///
+    /// If not provided, a key is generated automatically from the system username.
+    #[arg(long)]
+    pub key: Option<String>,
+}
+/// `mirrord attach` args.
+#[cfg(windows)]
+#[derive(Args, Debug)]
+pub(super) struct AttachArgs {
+    /// PID of the target process to attach to.
+    pub pid: u32,
+}
+
+/// `mirrord pitm` args.
+#[cfg(windows)]
+#[derive(Args, Debug)]
+pub(super) struct PitmArgs {
+    /// Target executable followed by its arguments. Everything after `--`
+    /// is forwarded verbatim to the child process.
+    #[arg(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        required = true,
+        num_args = 1..,
+    )]
+    pub command: Vec<String>,
+}
+
 /// Arguments for the `mirrord ui` command.
 #[cfg(unix)]
 #[derive(Args, Debug)]
@@ -1384,6 +1489,80 @@ pub struct UiArgs {
     /// Port to serve the UI on.
     #[arg(short = 'p', long, default_value_t = 59281)]
     pub port: u16,
+}
+
+/// Arguments for the `mirrord session` command.
+#[cfg(unix)]
+#[derive(Args, Debug)]
+pub struct SessionArgs {
+    /// Arguments shared across `mirrord session` commands.
+    #[command(flatten)]
+    pub common: SessionCommonArgs,
+
+    /// Subcommand to use with `mirrord session`.
+    #[command(subcommand)]
+    pub command: Option<LocalSessionCommand>,
+}
+
+/// Arguments shared across `mirrord session` commands.
+#[cfg(unix)]
+#[derive(Args, Clone, Debug)]
+pub struct SessionCommonArgs {
+    /// Namespace to operate on. Can also be set via `target.namespace` in the mirrord config.
+    #[arg(short = 'n', long = "namespace", global = true)]
+    pub namespace: Option<String>,
+
+    /// Load config from config file.
+    ///
+    /// When using `-f` without a value, defaults to `"./.mirrord/mirrord.json"`.
+    #[arg(
+        short = 'f',
+        long,
+        value_hint = ValueHint::FilePath,
+        default_missing_value = "./.mirrord/mirrord.json",
+        num_args = 0..=1,
+        global = true
+    )]
+    pub config_file: Option<PathBuf>,
+}
+
+/// `mirrord session` subcommands.
+#[cfg(unix)]
+#[derive(Subcommand, Debug)]
+pub enum LocalSessionCommand {
+    /// List mirrord sessions currently running locally and in cluster (in same namespace).
+    #[command(visible_alias = "ls")]
+    List,
+
+    /// Kill a local mirrord session.
+    #[command(visible_alias = "kill")]
+    Delete(SessionDeleteArgs),
+}
+
+/// Arguments for deleting local mirrord sessions.
+#[cfg(unix)]
+#[derive(Args, Debug)]
+pub struct SessionDeleteArgs {
+    /// Session ID to kill.
+    #[arg(required_unless_present = "key")]
+    pub id: Option<String>,
+
+    /// Kill all local sessions with this key.
+    #[arg(long, conflicts_with = "id")]
+    pub key: Option<String>,
+}
+
+/// Arguments for the `mirrord kill` command.
+#[cfg(unix)]
+#[derive(Args, Debug)]
+pub struct KillArgs {
+    /// Arguments shared across `mirrord session` commands.
+    #[command(flatten)]
+    pub common: SessionCommonArgs,
+
+    /// Session selection for the kill operation.
+    #[command(flatten)]
+    pub delete: SessionDeleteArgs,
 }
 
 #[cfg(test)]

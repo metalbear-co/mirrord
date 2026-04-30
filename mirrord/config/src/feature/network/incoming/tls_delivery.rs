@@ -66,6 +66,7 @@ use crate::config::{ConfigContext, ConfigError};
 ///    used;
 /// 4. Otherwise, `localhost` will be used.
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema, PartialEq, Eq, Default)]
+#[serde(deny_unknown_fields)]
 pub struct LocalTlsDelivery {
     /// ##### feature.network.incoming.tls_delivery.protocol {#feature-network-incoming-tls_delivery-protocol}
     ///

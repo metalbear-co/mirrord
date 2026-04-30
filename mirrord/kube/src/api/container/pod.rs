@@ -15,7 +15,7 @@ use super::util::agent_env;
 use crate::api::{
     container::{
         ContainerParams, ContainerVariant,
-        util::{DEFAULT_TOLERATIONS, base_command_line, get_capabilities},
+        util::{AGENT_COMMAND, DEFAULT_TOLERATIONS, agent_base_args, get_capabilities},
     },
     runtime::RuntimeData,
 };
@@ -23,27 +23,23 @@ use crate::api::{
 /// The `targetless` agent variant is created by this, see its [`PodVariant::as_update`].
 pub struct PodVariant<'c> {
     agent: &'c AgentConfig,
-    command_line: Vec<String>,
+    args: Vec<String>,
     params: &'c ContainerParams,
 }
 
 impl<'c> PodVariant<'c> {
     pub fn new(agent: &'c AgentConfig, params: &'c ContainerParams) -> Self {
-        let mut command_line = base_command_line(agent, params);
+        let mut args = agent_base_args(agent, params);
 
-        command_line.push("targetless".to_owned());
+        args.push("targetless".to_owned());
 
-        PodVariant::with_command_line(agent, params, command_line)
+        PodVariant::with_args(agent, params, args)
     }
 
-    fn with_command_line(
-        agent: &'c AgentConfig,
-        params: &'c ContainerParams,
-        command_line: Vec<String>,
-    ) -> Self {
+    fn with_args(agent: &'c AgentConfig, params: &'c ContainerParams, args: Vec<String>) -> Self {
         PodVariant {
             agent,
-            command_line,
+            args,
             params,
         }
     }
@@ -63,7 +59,7 @@ impl ContainerVariant for PodVariant<'_> {
     fn as_update(&self) -> Pod {
         let PodVariant {
             agent,
-            command_line,
+            args,
             params,
             ..
         } = self;
@@ -127,7 +123,8 @@ impl ContainerVariant for PodVariant<'_> {
                     name: "mirrord-agent".to_string(),
                     image: Some(agent.image().to_string()),
                     image_pull_policy: Some(agent.image_pull_policy.clone()),
-                    command: Some(command_line.clone()),
+                    command: Some(vec![AGENT_COMMAND.into()]),
+                    args: Some(args.clone()),
                     env: Some(env),
                     // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                     resources: Some(resources),
@@ -157,9 +154,9 @@ impl<'c> PodTargetedVariant<'c> {
         params: &'c ContainerParams,
         runtime_data: &'c RuntimeData,
     ) -> Self {
-        let mut command_line = base_command_line(agent, params);
+        let mut args = agent_base_args(agent, params);
 
-        command_line.extend([
+        args.extend([
             "targeted".to_owned(),
             "--container-id".to_owned(),
             runtime_data.container_id.to_string(),
@@ -167,7 +164,7 @@ impl<'c> PodTargetedVariant<'c> {
             runtime_data.container_runtime.to_string(),
         ]);
 
-        let inner = PodVariant::with_command_line(agent, params, command_line);
+        let inner = PodVariant::with_args(agent, params, args);
 
         PodTargetedVariant {
             inner,
@@ -306,7 +303,6 @@ mod test {
             gid: 13,
             tls_cert: None,
             pod_ips: None,
-            support_ipv6: false,
             steal_tls_config: Default::default(),
             idle_ttl: Default::default(),
         };
@@ -354,7 +350,6 @@ mod test {
             gid: 13,
             tls_cert: None,
             pod_ips: None,
-            support_ipv6: false,
             steal_tls_config: Default::default(),
             idle_ttl: Default::default(),
         };

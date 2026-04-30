@@ -1,0 +1,49 @@
+name: Test Windows
+
+on:
+  workflow_call:
+    inputs:
+      rust_toolchain:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  MIRRORD_TELEMETRY: false
+
+jobs:
+  windows-tests:
+    runs-on: windows-latest
+    env:
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord.exe
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/mirrord_layer_win.dll
+    steps:
+      - uses: actions/checkout@v4
+      - run: Remove-Item rust-toolchain.toml
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+        with:
+          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+          components: rustfmt, clippy
+          target: x86_64-pc-windows-msvc
+          toolchain: ${{ inputs.rust_toolchain }}
+      - run: |
+          cd mirrord/layer-tests/tests/apps/outgoing
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/dns_resolve
+          cargo build
+      - name: build layer
+        run: cargo build -p mirrord-layer-win
+      - name: build mirrord
+        run: cargo build -p mirrord
+      - name: mirrord layer integration tests
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test -p mirrord-layer-tests --no-default-features
+      - name: run UT
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test -p mirrord -p mirrord-layer-win

@@ -32,6 +32,10 @@ gcloud
 Tokio
 tokio
 serde
+serialize
+serialization
+deserialize
+deserialization
 reqwest
 rustls
 bincode
@@ -65,6 +69,7 @@ consts
 fd
 fds
 syscalls
+subcommand
 
 # Linux syscalls and C API
 openat
@@ -114,6 +119,7 @@ gRPC
 HTTP
 HTTPS
 IP
+IPs
 TTL
 RTT
 VPN
@@ -146,6 +152,7 @@ sccache
 LTO
 jq
 jaq
+towncrier
 
 # Cloud services
 SNS

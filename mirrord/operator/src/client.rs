@@ -31,7 +31,7 @@ use mirrord_kube::{
     },
     error::KubeApiError,
     resolved::{ResolvedResource, ResolvedTarget},
-    retry::RetryKube,
+    retry::retry_policy_from_config,
 };
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
@@ -252,7 +252,7 @@ impl OperatorApi<NoClientCert> {
             .suspend(|| ClientBuilder::try_from(base_config.clone()))
             .map_err(KubeApiError::from)?
             .with_layer(&BufferLayer::new(1024))
-            .with_layer(&RetryLayer::new(RetryKube::try_from(
+            .with_layer(&RetryLayer::new(retry_policy_from_config(
                 &config.startup_retry,
             )?))
             .build();
@@ -358,7 +358,7 @@ impl OperatorApi<NoClientCert> {
                 .map_err(OperatorApiError::CreateKubeClient)?
                 .with_layer(&BufferLayer::new(1024))
                 .with_layer(&RetryLayer::new(
-                    RetryKube::try_from(&layer_config.startup_retry).map_err(From::from)?,
+                    retry_policy_from_config(&layer_config.startup_retry).map_err(From::from)?,
                 ))
                 .build();
 
@@ -540,6 +540,283 @@ where
         Ok(encoded)
     }
 
+    /// Ask the operator to create a K8s Secret with the given credential values
+    /// in the target namespace. The Secret name is derived from `branch_id` so
+    /// branches sharing the same ID reuse the same Secret.
+    async fn create_credential_secret(
+        &self,
+        namespace: &str,
+        branch_id: &str,
+        values: std::collections::HashMap<String, String>,
+    ) -> OperatorApiResult<String> {
+        use crate::crd::{CreateCredentialSecretRequest, CreateCredentialSecretResponse};
+
+        let request_body = CreateCredentialSecretRequest {
+            namespace: namespace.to_string(),
+            branch_id: branch_id.to_string(),
+            values,
+        };
+
+        let body = serde_json::to_vec(&request_body)
+            .map_err(|e| OperatorApiError::CredentialSecretCreation(format!("serialize: {e}")))?;
+
+        let request = http::Request::builder()
+            .method("POST")
+            .uri("/apis/operator.metalbear.co/v1/branchcredentials")
+            .header("content-type", "application/json")
+            .body(body)
+            .map_err(|e| {
+                OperatorApiError::CredentialSecretCreation(format!("build request: {e}"))
+            })?;
+
+        let response: CreateCredentialSecretResponse = self
+            .client
+            .request(request)
+            .await
+            .map_err(|e| OperatorApiError::CredentialSecretCreation(e.to_string()))?;
+
+        Ok(response.secret_name)
+    }
+
+    /// Prepare branch databases, and return database resource names.
+    ///
+    /// 1. List reusable branch databases.
+    /// 2. Create new ones if any missing.
+    /// 3. Wait for all new databases to be ready.
+    #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
+    pub async fn prepare_branch_dbs<P: Progress>(
+        &self,
+        layer_config: &LayerConfig,
+        progress: &P,
+    ) -> OperatorApiResult<BranchDbNames> {
+        use database_branches::TARGET_NAMESPACE_ANNOTATION;
+
+        let mut subtask = progress.subtask("preparing branch databases");
+        let target = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
+        let target_namespace = layer_config
+            .target
+            .namespace
+            .as_deref()
+            .unwrap_or(self.client.default_namespace());
+
+        // In multi-cluster management-only mode, create CRDs in operator's namespace
+        // with an annotation specifying the target namespace for the sync controller.
+        let (api_namespace, target_ns_annotation) =
+            if let Some(op_ns) = &self.operator.spec.operator_namespace {
+                (op_ns.as_str(), Some(target_namespace.to_string()))
+            } else {
+                (target_namespace, None)
+            };
+
+        let timeout_secs = layer_config
+            .feature
+            .db_branches
+            .iter()
+            .filter_map(|branch_config| match branch_config {
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mongodb(
+                    mongodb_config,
+                ) => Some(mongodb_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mssql(
+                    mssql_config,
+                ) => Some(mssql_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
+                    mysql_config,
+                ) => Some(mysql_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
+                    Some(pg_config.base.creation_timeout_secs)
+                }
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Redis(_) => None,
+            })
+            .max()
+            .unwrap_or(default_creation_timeout_secs());
+        let timeout = std::time::Duration::from_secs(timeout_secs);
+
+        let use_unified_crd = self
+            .operator
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::UnifiedBranchDbCrd);
+
+        if use_unified_crd {
+            let mut db_branches = layer_config.feature.db_branches.clone();
+            let UnifiedDatabaseBranchParams {
+                branches: mut create_params,
+            } = UnifiedDatabaseBranchParams::new(
+                &mut db_branches,
+                &target,
+                layer_config.key.as_str(),
+                &subtask,
+            )?;
+
+            // For each branch that had literal `value` fields in its config,
+            // create a K8s Secret and replace the CRD connection entries with
+            // Secret references. Values were already extracted from the config
+            // inside `new()` before CRD conversion.
+            for (branch_id, params) in create_params.iter_mut() {
+                if params.literal_values.is_empty() {
+                    continue;
+                }
+                let secret_name = self
+                    .create_credential_secret(
+                        target_namespace,
+                        branch_id.as_ref(),
+                        params.literal_values.clone(),
+                    )
+                    .await?;
+                database_branches::replace_values_with_secret_refs(
+                    &mut params.spec.connection_source,
+                    &secret_name,
+                    &params.literal_values,
+                );
+            }
+
+            if let Some(ref ns) = target_ns_annotation {
+                for params in create_params.values_mut() {
+                    params
+                        .annotations
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                }
+            }
+
+            let branch_api: Api<BranchDatabase> =
+                Api::namespaced(self.client.clone(), api_namespace);
+
+            let existing = list_existing_branches(&branch_api, &create_params, &subtask).await?;
+
+            create_params.retain(|id, _| {
+                !existing.ready.contains_key(id) && !existing.pending.contains_key(id)
+            });
+
+            let waited_branches =
+                wait_for_pending_branches(&branch_api, &existing.pending, timeout, &subtask)
+                    .await?;
+
+            let created_branches =
+                create_branches(&branch_api, create_params, timeout, &subtask).await?;
+
+            subtask.success(None);
+
+            let mut names = BranchDbNames::default();
+            for branch in existing
+                .ready
+                .values()
+                .chain(waited_branches.values())
+                .chain(created_branches.values())
+            {
+                let name = branch
+                    .meta()
+                    .name
+                    .clone()
+                    .ok_or(KubeApiError::missing_field(branch, ".metadata.name"))?;
+
+                if branch.spec.postgres_options.is_some() {
+                    names.pg.push(name);
+                } else if branch.spec.mysql_options.is_some() {
+                    names.mysql.push(name);
+                } else if branch.spec.mongodb_options.is_some() {
+                    names.mongodb.push(name);
+                } else if branch.spec.mssql_options.is_some() {
+                    names.mssql.push(name);
+                }
+            }
+            Ok(names)
+        } else {
+            let DatabaseBranchParams {
+                mongodb: mut create_mongodb_params,
+                mysql: mut create_mysql_params,
+                pg: mut create_pg_params,
+            } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+
+            if let Some(ref ns) = target_ns_annotation {
+                for params in create_pg_params.values_mut() {
+                    params
+                        .annotations
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                }
+                for params in create_mysql_params.values_mut() {
+                    params
+                        .annotations
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                }
+                for params in create_mongodb_params.values_mut() {
+                    params
+                        .annotations
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                }
+            }
+
+            let pg_api: Api<PgBranchDatabase> = Api::namespaced(self.client.clone(), api_namespace);
+            let mysql_api: Api<MysqlBranchDatabase> =
+                Api::namespaced(self.client.clone(), api_namespace);
+            let mongodb_api: Api<MongodbBranchDatabase> =
+                Api::namespaced(self.client.clone(), api_namespace);
+
+            let reusable_pg =
+                list_reusable_pg_branches(&pg_api, &create_pg_params, &subtask).await?;
+            create_pg_params.retain(|id, _| !reusable_pg.contains_key(id));
+            let created_pg =
+                create_pg_branches(&pg_api, create_pg_params, timeout, &subtask).await?;
+
+            let reusable_mysql =
+                list_reusable_mysql_branches(&mysql_api, &create_mysql_params, &subtask).await?;
+            create_mysql_params.retain(|id, _| !reusable_mysql.contains_key(id));
+            let created_mysql =
+                create_mysql_branches(&mysql_api, create_mysql_params, timeout, &subtask).await?;
+
+            let reusable_mongodb =
+                list_reusable_mongodb_branches(&mongodb_api, &create_mongodb_params, &subtask)
+                    .await?;
+            create_mongodb_params.retain(|id, _| !reusable_mongodb.contains_key(id));
+            let created_mongodb =
+                create_mongodb_branches(&mongodb_api, create_mongodb_params, timeout, &subtask)
+                    .await?;
+
+            subtask.success(None);
+
+            let pg_names = reusable_pg
+                .values()
+                .chain(created_pg.values())
+                .map(|b| {
+                    b.meta()
+                        .name
+                        .clone()
+                        .ok_or(KubeApiError::missing_field(b, ".metadata.name"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mysql_names = reusable_mysql
+                .values()
+                .chain(created_mysql.values())
+                .map(|b| {
+                    b.meta()
+                        .name
+                        .clone()
+                        .ok_or(KubeApiError::missing_field(b, ".metadata.name"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mongodb_names = reusable_mongodb
+                .values()
+                .chain(created_mongodb.values())
+                .map(|b| {
+                    b.meta()
+                        .name
+                        .clone()
+                        .ok_or(KubeApiError::missing_field(b, ".metadata.name"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok(BranchDbNames {
+                pg: pg_names,
+                mysql: mysql_names,
+                mongodb: mongodb_names,
+                mssql: Vec::new(),
+            })
+        }
+    }
+
     /// Creates a base [`Config`] for creating kube [`Client`]s.
     /// Adds extra headers that we send to the operator with each request:
     /// 1. [`MIRRORD_CLI_VERSION_HEADER`]
@@ -566,10 +843,6 @@ where
             (CLIENT_HOSTNAME_HEADER, hostname),
         ];
         for (name, raw_value) in headers {
-            let Some(raw_value) = raw_value else {
-                continue;
-            };
-
             // Replace non-ascii (not supported in headers) chars and trim.
             let cleaned = raw_value
                 .replace(|c: char| !c.is_ascii(), "")
@@ -643,6 +916,18 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::RmqQueueSplitting)?;
+        }
+
+        if layer_config
+            .feature
+            .split_queues
+            .gcp_pubsub_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GcpPubSubQueueSplitting)?;
         }
 
         Ok(())
@@ -1331,8 +1616,10 @@ impl OperatorApi<PreparedClientCert> {
             profile,
             kafka_splits: Default::default(),
             rmq_splits: Default::default(),
+            gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
+            gcp_pubsub_jq_filters: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -1344,6 +1631,7 @@ impl OperatorApi<PreparedClientCert> {
             rmq_output_queues: Default::default(),
             multi_cluster: None,
             key: Some(key),
+            header_filter: None,
         };
 
         if use_proxy {
@@ -1602,7 +1890,7 @@ impl OperatorApi<PreparedClientCert> {
             .map_err(KubeApiError::from)
             .map_err(OperatorApiError::CreateKubeClient)?
             .with_layer(&BufferLayer::new(1024))
-            .with_layer(&RetryLayer::new(RetryKube::try_from(
+            .with_layer(&RetryLayer::new(retry_policy_from_config(
                 &layer_config.startup_retry,
             )?))
             .build();
@@ -1959,6 +2247,7 @@ mod test {
         profile: Option<&'static str>,
         kafka_splits: HashMap<&'static str, BTreeMap<String, String>>,
         rmq_splits: HashMap<&'static str, BTreeMap<String, String>>,
+        gcp_pubsub_splits: HashMap<&'static str, BTreeMap<String, String>>,
         sqs_splits: HashMap<&'static str, BTreeMap<String, String>>,
         sqs_jq_filters: HashMap<&'static str, &'static str>,
         branch_db_names: BranchDbNames,
@@ -1988,6 +2277,7 @@ mod test {
                 profile: None,
                 kafka_splits: Default::default(),
                 rmq_splits: Default::default(),
+                gcp_pubsub_splits: Default::default(),
                 sqs_splits: Default::default(),
                 sqs_jq_filters: Default::default(),
                 branch_db_names: Default::default(),
@@ -2194,6 +2484,7 @@ mod test {
             profile,
             kafka_splits,
             rmq_splits,
+            gcp_pubsub_splits,
             sqs_splits,
             sqs_jq_filters,
             branch_db_names,
@@ -2212,6 +2503,11 @@ mod test {
             .map(|(topic_id, filters)| (*topic_id, filters))
             .collect();
 
+        let gcp_pubsub_splits = gcp_pubsub_splits
+            .iter()
+            .map(|(topic_id, filters)| (*topic_id, filters))
+            .collect();
+
         let sqs_splits = sqs_splits
             .iter()
             .map(|(topic_id, filters)| (*topic_id, filters))
@@ -2223,8 +2519,10 @@ mod test {
             profile,
             kafka_splits,
             rmq_splits,
+            gcp_pubsub_splits,
             sqs_splits,
             sqs_jq_filters,
+            gcp_pubsub_jq_filters: Default::default(),
             branch_name: None,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -2235,7 +2533,9 @@ mod test {
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
             multi_cluster: None,
+            output_tmp_resources: Default::default(),
             key,
+            header_filter: None,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
@@ -2344,8 +2644,10 @@ mod test {
             profile: None,
             kafka_splits: Default::default(),
             rmq_splits: Default::default(),
+            gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
+            gcp_pubsub_jq_filters: Default::default(),
             branch_name: None,
             pg_branch_names: Default::default(),
             mysql_branch_names: Default::default(),
@@ -2356,7 +2658,9 @@ mod test {
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
             multi_cluster: None,
+            output_tmp_resources: Default::default(),
             key,
+            header_filter: None,
         };
         let produced =
             OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);

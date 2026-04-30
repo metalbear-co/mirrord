@@ -1,30 +1,46 @@
+## Project Overview
+
+mirrord is a tool that lets developers run local processes in the context of their cloud environment.
+
 ## Quick Reference
 
+### Compiling
+
 ```bash
+# CLI
+cargo xtask build-cli
+
 # layer
-cargo check -p mirrord-layer --keep-going
+cargo xtask build-layer
+
 # intproxy
 cargo check -p mirrord-intproxy --keep-going
-# agent (Linux-only)
+
+# agent (Linux only)
 cargo check -p mirrord-agent --target x86_64-unknown-linux-gnu --keep-going
-# CLI
-cargo check -p mirrord --keep-going
+```
 
+### Testing
+
+```bash
 # Integration tests
-cargo test -p mirrord-layer-tests
+cargo xtask test-integration
 
-# Always format after edits
+# Unit tests
+cargo xtask test-ut
+```
+
+### Styling
+
+```bash
+# Formatting
 cargo fmt
 
-# Always lint after edits
+# Linting
 cargo clippy -- --deny warnings
 ```
 
 Use `cargo check -p <crate> --keep-going` to surface all errors at once rather than stopping at the first.
-
-## Project Overview
-
-mirrord is a tool that lets developers run local processes in the context of their cloud environment.
 
 ### How the Pieces Connect
 
@@ -96,3 +112,10 @@ When changing how something works, don't leave comments like "this replaces how 
 - Always use `foo.rs` instead of `foo/mod.rs` for module roots.
 - When extending existing declarations (consts, methods, enum variants, match arms), append new entries below the existing ones. If the new entry is related to a specific existing one, place it directly below that one instead of at the end.
 - Run `cargo fmt` and `cargo clippy -- --deny warnings` after every edit.
+
+## Contribution Notes
+
+- Add a towncrier fragment for code changes in `changelog.d/`, named `<identifier>.<category>.md`.
+- Use a public GitHub issue number when one exists, otherwise use `+some-name`.
+- Valid categories are `added`, `fixed`, `internal`, and `changed`.
+- Use `internal` for test-only, CI-only, and other changes users do not care about.

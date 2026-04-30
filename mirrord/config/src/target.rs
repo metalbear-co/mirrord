@@ -136,7 +136,7 @@ fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Schema {
 ///
 /// The setup above will result in a session without any target.
 /// Remote outgoing traffic and DNS will be done from the `bear-namespace` namespace.
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, Default)]
 #[serde(deny_unknown_fields)]
 pub struct TargetConfig {
     /// ### target.path {#target-path}

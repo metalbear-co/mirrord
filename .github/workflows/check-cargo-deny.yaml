@@ -1,0 +1,20 @@
+name: Check Cargo Deny
+
+on:
+  workflow_call:
+    inputs:
+      rust_toolchain:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-deny:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: metalbear-co/cargo-deny-action@76cd80eb775d7bbbd2d80292136d74d39e1b4918
+        with:
+          rust-version: ${{ inputs.rust_toolchain }}

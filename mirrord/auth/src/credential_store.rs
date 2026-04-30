@@ -1,10 +1,12 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
     fmt::Debug,
+    io::ErrorKind,
     path::PathBuf,
     sync::LazyLock,
 };
 
+use base64::{Engine, prelude::BASE64_STANDARD_NO_PAD};
 use fs4::tokio::AsyncFileExt;
 use kube::{Client, Resource};
 use serde::{Deserialize, Serialize};
@@ -12,7 +14,6 @@ use tokio::{
     fs,
     io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, SeekFrom},
 };
-use whoami::fallible;
 
 use crate::{
     certificate::Certificate,
@@ -53,18 +54,16 @@ pub struct CredentialStore {
 #[derive(Default, Debug)]
 pub struct UserIdentity {
     /// User's name
-    pub name: Option<String>,
+    pub name: String,
     /// User's hostname
-    pub hostname: Option<String>,
+    pub hostname: String,
 }
 
 impl UserIdentity {
     pub fn load() -> Self {
         Self {
-            // next release of whoami (v2) will have fallible types
-            // so keep this Option for then :)
-            name: Some(whoami::realname()),
-            hostname: fallible::hostname().ok(),
+            name: whoami::realname().unwrap_or_else(|_| "unknown".to_string()),
+            hostname: whoami::hostname().unwrap_or_else(|_| "unknown".to_string()),
         }
     }
 }
@@ -94,9 +93,30 @@ impl CredentialStore {
         Ok(())
     }
 
+    /// Load the credential store from the default path (`~/.mirrord/credentials`), returning an
+    /// empty store if the file doesn't exist yet.
+    pub async fn load_from_default_path() -> Result<Self, CredentialStoreError> {
+        match fs::File::open(&*CREDENTIALS_PATH).await {
+            Ok(mut file) => Self::load(&mut file).await,
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(Self::default()),
+            Err(err) => Err(CredentialStoreError::FileAccess(err)),
+        }
+    }
+
+    /// Returns an iterator over `(operator_fingerprint, user_fingerprint)` pairs.
+    ///
+    /// The user fingerprint is `base64(STANDARD_NO_PAD)` of the certificate's raw public key
+    /// bytes. This is what the operator uses as `client_hash` to identify individual users.
+    pub fn user_fingerprints(&self) -> impl Iterator<Item = (&str, String)> {
+        self.credentials.iter().map(|(op_fp, creds)| {
+            let fingerprint = BASE64_STANDARD_NO_PAD.encode(creds.as_ref().public_key_data());
+            (op_fp.as_str(), fingerprint)
+        })
+    }
+
     /// Get hostname to be used as common name in a certification request.
     fn certificate_common_name() -> String {
-        let mut hostname = fallible::hostname().unwrap_or_else(|_| "localhost".to_string());
+        let mut hostname = whoami::hostname().unwrap_or_else(|_| "localhost".to_string());
 
         hostname.make_ascii_lowercase();
         hostname

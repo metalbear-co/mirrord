@@ -53,77 +53,16 @@ env:
   PINNED_NIGHTLY: nightly-2026-02-24
 
 jobs:
-  towncrier_check:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Install uv
-        uses: astral-sh/setup-uv@v2
-      - run: uv python install
-      - run: uv venv
-      - name: install towncrier
-        run: uv pip install towncrier==25.08.0
-      - name: verify newsfragment exist
-        run: uv run towncrier check
+  # ── plan ────────────────────────────────────────────────────────────
 
-  typos_check:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: install typos
-        uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
-        with:
-          tool: typos-cli
-
-      - name: print typos version
-        run: echo $(typos --version)
-
-      - name: list markdown files
-        run: echo $(git ls-files '*.md')
-
-      - name: spell check markdown files
-        run: typos --format brief $(git ls-files '*.md')
-
-      - name: spell check mirrord/config crate
-        run: typos --format brief $(git ls-files 'mirrord/config/*.rs')
-        
-  vale_check:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      ## POC setup.
-      ## The vale-action currently downloads the latest version of Vale without checksum verification, which we want to avoid.
-      ## For this proof of concept we install a pinned version and verify the checksum.
-      ## Adopting Vale is still in question, due to additional maintenance overhead.
-      - name: install vale
-        run: |
-          wget "https://github.com/errata-ai/vale/releases/download/v3.13.1/vale_3.13.1_Linux_64-bit.tar.gz" -O /tmp/vale.tgz
-          echo '99bd899f0ac52054444ffe3df571c749cc811f3b606cf5ef740c9a5a2db33df6 /tmp/vale.tgz' | sha256sum -c
-          mkdir -p /tmp/vale
-          tar -xzf /tmp/vale.tgz -C /tmp/vale
-          chmod +x /tmp/vale/vale
-          mv /tmp/vale/vale /usr/local/bin
-
-      - name: check root markdown files
-        run: vale $(find . -name '*.md' -maxdepth 1 -not -name CLAUDE.md -not -name CHANGELOG.md) --output=report.tmpl
-
-      - name: check changelog.d files
-        run: vale $(git ls-files 'changelog.d/*.md') --output=report.tmpl
-
-  changed_files:
+  plan:
     runs-on: ubuntu-24.04
     # don't run CI on drafts
     if: github.event.pull_request.draft == false
     outputs:
+      rust_toolchain: ${{ steps.toolchain.outputs.rust_toolchain }}
       rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
+      vale_changed: ${{ steps.changed-vale.outputs.any_changed }}
       windows_changed: ${{ steps.changed-windows.outputs.any_changed }}
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
@@ -131,19 +70,22 @@ jobs:
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
       wizard_frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
+      release_branch: ${{ steps.release-branch.outputs.branch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
         with:
           fetch-depth: 0
+      - id: toolchain
+        run: echo "rust_toolchain=${{ env.PINNED_NIGHTLY }}" >> "$GITHUB_OUTPUT"
       - name: get CI changes
         id: changed-ci
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
-            .github/workflows/ci.yaml
+            .github/workflows/**
       - name: get changed rs files
         id: changed-rs
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             **/*.rs
@@ -156,9 +98,16 @@ jobs:
             rustfmt.toml
             deny.toml
             .cargo/**
+      - name: get vale changes
+        id: changed-vale
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        with:
+          files: |
+            *.md
+            changelog.d/*.md
       - name: get changed windows files
         id: changed-windows
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             mirrord/layer-win/**
@@ -171,36 +120,35 @@ jobs:
             .github/workflows/windows-build.yaml
       - name: get markdown changes
         id: changed-markdown
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             README.md
       - name: get protocol changes
         id: changed-protocol
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             mirrord/protocol/**
       - name: get protocol toml changes
         id: changed-protocol-toml
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             mirrord/protocol/Cargo.toml
       - name: get dockerfile changes
         id: changed-dockerfile
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             mirrord/agent/Dockerfile
             mirrord/cli/Dockerfile
-
       - name: get wizard frontend changes
         id: changed-wizard-frontend
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
-            wizard-frontend/**
+            packages/wizard/**
       - name: verify protocol bump
         run: |
           if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
@@ -209,14 +157,19 @@ jobs:
           fi
       - name: get config changes
         id: changed-config-schema
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
         with:
           files: |
             mirrord-schema.json
+      - id: release-branch
+        run: |
+          echo "branch=$([[ "${{ github.head_ref || github.ref_name }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
       - name: output test
         run: |
           echo ${{ steps.changed-rs.outputs.any_changed }};
           echo ${{ steps.changed-rs.outputs.all_changed_files }};
+          echo ${{ steps.changed-vale.outputs.any_changed }};
+          echo ${{ steps.changed-vale.outputs.all_changed_files }};
           echo ${{ steps.changed-markdown.outputs.any_changed }};
           echo ${{ steps.changed-markdown.outputs.all_changed_files }};
           echo ${{ steps.changed-ci.outputs.any_changed }};
@@ -226,123 +179,74 @@ jobs:
           echo ${{ steps.changed-windows.outputs.any_changed }};
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-config-schema.outputs.any_changed }};
-
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
+          echo ${{ steps.release-branch.outputs.branch }};
+
+  # ── checks (no build deps) ─────────────────────────────────────────
+
+  towncrier_check:
+    uses: ./.github/workflows/check-towncrier.yaml
 
   lint:
-    strategy:
-      matrix:
-        include:
-          - os: macos-latest
-            target: x86_64-apple-darwin
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-    runs-on: ${{matrix.os}}
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    steps:
-      - uses: actions/checkout@v4
-      # Otherwise the arguments to the setup-rust-toolchain action are ignored.
-      - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
-        with:
-          toolchain: ${{ env.PINNED_NIGHTLY }}
-          components: rustfmt, clippy
-          target: ${{matrix.target}}
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: cargo fmt (run only on one platform)
-        if: ${{matrix.target == 'x86_64-unknown-linux-gnu'}}
-        run: cargo fmt --all -- --check
-
-        # Check whether `mirrord-operator` crate compiles the way it's used in the operator
-      - if: ${{matrix.target == 'x86_64-unknown-linux-gnu'}}
-        run: cargo check -p mirrord-operator --features crd --target ${{matrix.target}}
-
-        # Wclippy is quoted for Windows T_T. They don't like ::
-      - if: ${{matrix.os == 'macos-latest'}}
-        run: touch /tmp/not-really-layer.dylib
-      - run: cargo clippy --workspace --lib --bins --all-features --target ${{matrix.target}} --tests -- "-Wclippy::indexing_slicing" -D warnings
-        env:
-          MIRRORD_LAYER_FILE_MACOS_ARM64: /tmp/not-really-layer.dylib
-
-  wizard-frontend-lint:
-    runs-on: ubuntu-24.04
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.wizard_frontend_changed == 'true'}}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 24
-      - run: npm install
-        working-directory: ./wizard-frontend
-      - run: npm run lint
-        working-directory: ./wizard-frontend
-
-  # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
-  # the output of this test is a boolean indicating if it's a release branch
-  # which is then used by `build_mirrord_on_release_branch`
-  check_if_release_branch:
-    runs-on: ubuntu-24.04
-    outputs:
-      release_branch: ${{ steps.release-branch.outputs.branch }}
-    steps:
-      - id: release-branch
-        run: |
-          echo "branch=$([[ "${{ github.head_ref || github.ref_name }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
-      - name: output test
-        run: |
-          echo ${{ steps.release-branch.outputs.branch }}
+    needs: plan
+    uses: ./.github/workflows/check-lint.yaml
+    with:
+      run_markdown: ${{ needs.plan.outputs.markdown_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+      run_rust: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+      run_vale: ${{ needs.plan.outputs.vale_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+      run_wizard_frontend: ${{ needs.plan.outputs.wizard_frontend_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+      rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
+    secrets: inherit
 
   cargo-deny:
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: metalbear-co/cargo-deny-action@76cd80eb775d7bbbd2d80292136d74d39e1b4918
-        with:
-          rust-version: ${{ env.PINNED_NIGHTLY }}
+    needs: plan
+    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.windows_changed == 'true' }}
+    uses: ./.github/workflows/check-cargo-deny.yaml
+    with:
+      rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
 
   check-rust-docs:
-    runs-on: ubuntu-24.04
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    env:
-      # enables the creation of a workspace index.html page.
-      RUSTDOCFLAGS: "--enable-index-page -Zunstable-options -Dwarnings"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
-        with:
-          toolchain: ${{ env.PINNED_NIGHTLY }}
-          cache: false
-      # TODO(alex): `no-deps` here due to an issue in `futures-util`.
-      - run: cargo doc --document-private-items --no-deps
+    needs: plan
+    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    uses: ./.github/workflows/check-rust-docs.yaml
+    with:
+      rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
+    secrets: inherit
+
+  # ── builds ──────────────────────────────────────────────────────────
+
+  # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
+  # building concurrently can run faster the release ide tests
+  build_mirrord_on_release_branch:
+    name: build mirrord CLI
+    needs: plan
+    if: ${{ needs.plan.outputs.release_branch == 'true' }}
+    uses: ./.github/workflows/build-mirrord-cli.yaml
+    secrets: inherit
+
+  test_agent_image:
+    needs: plan
+    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
+    uses: ./.github/workflows/build-agent-image.yaml
+
+  test_cli_image:
+    needs: plan
+    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
+    uses: ./.github/workflows/build-cli-image.yaml
+
+  # ── tests ───────────────────────────────────────────────────────────
 
   test_agent:
     runs-on: ubuntu-24.04
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    needs: plan
+    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
     container:
       image: ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      # the setup rust toolchain action ignores the input if file exists.. so remove it
       - run: rm rust-toolchain.toml
       - run: rustup default ${{ env.PINNED_NIGHTLY }}
       - name: mirrord-agent UT
@@ -352,468 +256,50 @@ jobs:
       - name: mirrord-agent-iptables UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent-iptables
 
-  test_agent_image:
-    runs-on: ubuntu-24.04
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - name: build and export
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: test
-          file: mirrord/agent/Dockerfile
-          outputs: type=docker,dest=/tmp/test.tar
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - name: upload image
-        uses: actions/upload-artifact@v4
-        with:
-          name: test
-          path: /tmp/test.tar
-
-  test_cli_image:
-    runs-on: ubuntu-24.04
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - name: build and export
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: cli_image
-          file: mirrord/cli/Dockerfile
-          outputs: type=docker,dest=/tmp/cli_image.tar
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
   integration_tests:
-    runs-on: ubuntu-24.04
-    needs: [changed_files]
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    env:
-      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/debug/mirrord
-      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so
-    steps:
-      - uses: actions/checkout@v4 # Checkout the mirrord repo.
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
-        with:
-          target: x86_64-unknown-linux-gnu
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1123
-          rustc issue1123.rs --out-dir target
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1054
-          rustc issue1054.rs --out-dir target
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1458
-          rustc issue1458.rs --out-dir target
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1458portnot53
-          rustc issue1458portnot53.rs --out-dir target
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue2058
-          rustc issue2058.rs --out-dir target
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue2204
-          rustc issue2204.rs --out-dir target
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 24
-      - run: npm install express
-      - uses: actions/setup-python@v5
-      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
-      # don't use "cache" for other Gos since it will try to overwrite and have bad results.
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-          cache-dependency-path: tests/go-e2e/go.sum
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          cd mirrord/layer-tests/tests
-          ../../../scripts/build_go_apps.sh 24
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
-          cache: false
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          cd mirrord/layer-tests/tests
-          ../../../scripts/build_go_apps.sh 25
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.26"
-          cache: false
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          cd mirrord/layer-tests/tests
-          ../../../scripts/build_go_apps.sh 26
-      - run: |
-          cd mirrord/layer-tests/tests/apps/fileops
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/outgoing
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/recv_from
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/dns_resolve
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/listen_ports
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1776
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1776portnot53
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1899
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue2001
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue2438
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue3248
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/rebind0
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/dup_listen
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/double_listen
-          cargo build
-      - run: ./mirrord/layer-tests/tests/apps/dlopen_cgo/build_test_app.sh
-      - run: ./scripts/build_c_apps.sh
-      - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord-layer
-      - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-lib
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
-      - name: create dummy file to compile wizard feature
-        run: touch wizard-frontend.tar.gz
-      - name: mirrord protocol UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
-      - name: mirrord config UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-config
-      - name: mirrord kube UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
-      - name: mirrord intproxy UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-intproxy
-      - name: mirrord auth UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-auth
-      - name: mirrord operator UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
-      - name: mirrord cli UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord --features "wizard"
-      - name: mirrord protocol-io UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
-      - name: mirrord jaq UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-jaq
-      - name: save intproxy logs
-        continue-on-error: true
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          # Name of the artifact to upload.
-          name: intproxy_logs_linux
-          path: /tmp/intproxy_logs/linux
+    needs: plan
+    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    uses: ./.github/workflows/test-integration.yaml
 
   macos_tests:
-    runs-on: macos-latest
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    env:
-      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/universal-apple-darwin/debug/libmirrord_layer.dylib
-      MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/aarch64-apple-darwin/debug/libmirrord_layer.dylib
-      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord
-    steps:
-      - uses: actions/checkout@v4 # Checkout the mirrord repo.
-      # the setup rust toolchain action ignores the input if file exists.. so remove it
-      - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
-        with:
-          components: rustfmt, clippy
-          target: x86_64-apple-darwin, aarch64-apple-darwin
-          toolchain: ${{ env.PINNED_NIGHTLY }}
-      - name: Install Protoc
-        uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: verify SIP status
-        run: csrutil status
-      - name: build universal layer files
-        run: cargo xtask build-layer --platform macos-universal
-      - name: build cli
-        run: cargo build -p mirrord
-      - name: mirrord-sip UT
-        run: cargo test -p mirrord-sip
-      - name: mirrord-intproxy UT
-        run: cargo test -p mirrord-intproxy
-      # prepare stuff needed for integration tests
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1123
-          rustc issue1123.rs --out-dir target
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1054
-          rustc issue1054.rs --out-dir target
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1458
-          rustc issue1458.rs --out-dir target
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1458portnot53
-          rustc issue1458portnot53.rs --out-dir target
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue2058
-          rustc issue2058.rs --out-dir target
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-          cache-dependency-path: tests/go-e2e/go.sum
-      - run: |
-          go version
-      # don't use "cache" for other Gos since it will try to overwrite and have bad results.
-      - run: | # Build Go test apps.
-          cd mirrord/layer-tests/tests
-          ../../../scripts/build_go_apps.sh 24
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
-          cache: false
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          cd mirrord/layer-tests/tests
-          ../../../scripts/build_go_apps.sh 25
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.26"
-          cache: false
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          cd mirrord/layer-tests/tests
-          ../../../scripts/build_go_apps.sh 26
-      - run: |
-          cd mirrord/layer-tests/tests/apps/fileops
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/outgoing
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/recv_from
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/dns_resolve
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1776
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1776portnot53
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1899
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue2001
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue2438
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue3248
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/rebind0
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/dup_listen
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/double_listen
-          cargo build
-      - run: ./scripts/build_c_apps.sh
-      - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
-        with:
-          python-version: "3.14"
-      - name: Display Pip version
-        run: pip --version
-      - run: python3 -m pip install flask fastapi uvicorn[standard] # For http mirroring test with Flask.
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 24
-      - run: npm install express # For http mirroring test with node.
-      - run: npm install portfinder # For a node specific test
-      - name: mirrord layer integration tests
-        run: cargo test -p mirrord-layer-tests --no-default-features
-      - name: mirrord layer unit tests
-        run: cargo test -p mirrord-layer
-      - name: save intproxy logs
-        continue-on-error: true
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          # Name of the artifact to upload.
-          name: intproxy_logs_macos
-          path: /tmp/intproxy_logs/macos
+    needs: plan
+    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    uses: ./.github/workflows/test-macos.yaml
+    with:
+      rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
+    secrets: inherit
 
   e2e:
-    runs-on: ubuntu-24.04
-    strategy:
-      matrix:
-        container-runtime: ["docker", "containerd"]
-    name: e2e
-    needs: [test_agent_image, changed_files]
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    env:
-      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 22
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
-      - uses: metalbear-co/ci/e2e-setup-action@main
-        with:
-          container-runtime: ${{matrix.container-runtime}}
-      - name: download image
-        uses: actions/download-artifact@v4
-        with:
-          name: test
-          path: /tmp
-      - run: minikube image load /tmp/test.tar
-      # run the cli tests only once, i.e. docker runtime only
-      - name: Run cli E2E tests
-        if: ${{ matrix.container-runtime == 'docker' }}
-        run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features cli -- --test-threads=6
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - run: cargo build --manifest-path=./Cargo.toml -p mirrord --features wizard
-      # This needs improving to prevent flakiness! e.g. examining output for progress messages
-      # `sleep` is used here to give the wizard enough time to start before curl
-      - run: |
-          ./target/debug/mirrord wizard &
-          sleep 2 && curl localhost:3000
-      # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
-      - name: Run targetless E2E test
-        run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features targetless -- --test-threads=6 targetless
-      # prepare argo rollouts
-      - run: kubectl create namespace argo-rollouts
-      - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
-      - name: Run all E2E tests
-        run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features job -- --test-threads=6
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features ephemeral -- --test-threads=6
-      - name: Collect logs
-        if: ${{ failure() }}
-        run: |
-          find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \;
-          kubectl get all
-          kubectl describe pods
-          docker exec minikube find /var/log/pods -print -exec cat {} \;
-
-  lint_markdown:
-    runs-on: ubuntu-24.04
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.markdown_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: metalbear-co/markdownlint-cli2-action@0fb2cca662f67f99dfdb04fce7d81bb2904ee404
-        with:
-          config: ".markdownlint.json"
-          globs: "README.md"
+    needs: [plan, test_agent_image]
+    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    uses: ./.github/workflows/test-e2e.yaml
+    secrets: inherit
 
   windows_tests:
-    needs: changed_files
-    if: ${{ needs.changed_files.outputs.rs_changed == 'true' ||needs.changed_files.outputs.windows_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
-    runs-on: windows-latest
-    env:
-      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord.exe
-      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/mirrord_layer_win.dll
-    steps:
-      - uses: actions/checkout@v4 # Checkout the mirrord repo.
-      # the setup rust toolchain action ignores the input if file exists.. so remove it
-      - run: Remove-Item rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
-        with:
-          components: rustfmt, clippy
-          target: x86_64-pc-windows-msvc
-          toolchain: ${{ env.PINNED_NIGHTLY }}
+    needs: plan
+    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.windows_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    uses: ./.github/workflows/test-windows.yaml
+    with:
+      rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
 
-      - run: |
-          cd mirrord/layer-tests/tests/apps/outgoing
-          cargo build
-      - name: build layer
-        run: cargo build -p mirrord-layer-win
-      - name: build mirrord
-        run: cargo build -p mirrord
-      - name: mirrord layer integration tests
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo test -p mirrord-layer-tests --no-default-features
-      - name: run UT
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo test -p mirrord -p mirrord-layer-win
-
-  # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
-  # building concurrently can run faster the release ide tests
-  build_mirrord_on_release_branch:
-    runs-on: ubuntu-24.04
-    name: build mirrord CLI
-    needs: check_if_release_branch
-    if: ${{ needs.check_if_release_branch.outputs.release_branch == 'true' }}
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
-      - run: cargo build --manifest-path=./Cargo.toml -p mirrord
-      - name: upload mirrord CLI
-        uses: actions/upload-artifact@v4
-        with:
-          name: mirrord-artifacts
-          path: |
-            target/debug/mirrord
-          if-no-files-found: error
+  # ── external calls ──────────────────────────────────────────────────
 
   # depends on `build_mirrord_on_release_branch` which provides the binary on the current tag
-  # `build_mirrord_on_release_branch` depends on `check_if_release_branch`
+  # `build_mirrord_on_release_branch` depends on `plan`
   # which checks if the branch is a release branch
   intellij_e2e_on_release_branch:
-    # requires test_agent to have image to download
     needs: [build_mirrord_on_release_branch, test_agent_image]
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
 
   vscode_e2e_on_release_branch:
-    # requires test_agent to have image to download
     needs: [build_mirrord_on_release_branch, test_agent_image]
     uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
+
+  # ── gate ────────────────────────────────────────────────────────────
 
   # We need some "accumulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
@@ -825,9 +311,7 @@ jobs:
     needs:
       [
         towncrier_check,
-        typos_check,
-        vale_check,
-        changed_files,
+        plan,
         intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
         test_agent_image,
@@ -837,32 +321,20 @@ jobs:
         e2e,
         test_agent,
         lint,
-        lint_markdown,
         check-rust-docs,
         cargo-deny,
         windows_tests,
       ]
     runs-on: ubuntu-24.04
     steps:
-      - name: CI succeeded
+      - name: Check required jobs passed
         # We have to do it in the shell since if it's in the if condition
         # then skipping is considered success by branch protection rules
         env:
-          CI_SUCCESS: ${{ (needs.changed_files.result == 'success') &&
-            (needs.towncrier_check.result == 'success') &&
-            (needs.typos_check.result == 'success' ) &&
-            (needs.vale_check.result == 'success') &&
-            (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
-            (needs.test_cli_image.result == 'success' || needs.test_cli_image.result == 'skipped') &&
-            (needs.macos_tests.result == 'success' || needs.macos_tests.result == 'skipped') &&
-            (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
-            (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
-            (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
-            (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
-            (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped') &&
-            (needs.intellij_e2e_on_release_branch.result == 'success' || needs.intellij_e2e_on_release_branch.result == 'skipped') &&
-            (needs.vscode_e2e_on_release_branch.result == 'success' || needs.vscode_e2e_on_release_branch.result == 'skipped') &&
-            (needs.check-rust-docs.result == 'success' || needs.check-rust-docs.result == 'skipped') &&
-            (needs.cargo-deny.result == 'success' || needs.cargo-deny.result == 'skipped') &&
-            (needs.windows_tests.result == 'success' || needs.windows_tests.result == 'skipped') }}
-        run: echo $CI_SUCCESS && if [ "$CI_SUCCESS" == "true" ]; then echo "SUCCESS" && exit 0; else echo "Failure" && exit 1; fi
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          failing=$(echo "$NEEDS_JSON" | jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key): \(.value.result)"')
+          if [ -n "$failing" ]; then
+            echo "$failing"
+            exit 1
+          fi

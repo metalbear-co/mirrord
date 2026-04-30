@@ -31,12 +31,22 @@ pub struct ConnectParams<'a> {
     #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
     pub rmq_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
 
+    #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
+    pub gcp_pubsub_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
+
     #[serde(
         default,
         with = "force_json_ser",
         skip_serializing_if = "HashMap::is_empty"
     )]
     pub sqs_jq_filters: HashMap<&'a str, &'a str>,
+
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub gcp_pubsub_jq_filters: HashMap<&'a str, &'a str>,
 
     /// User's current git branch name - may be an empty string if user is in detached head mode or
     /// another error occurred: this case handled by the operator
@@ -86,10 +96,31 @@ pub struct ConnectParams<'a> {
     /// When set to `false`, forces a single-cluster session on a multi-cluster Primary.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub multi_cluster: Option<bool>,
+    /// Multi-cluster: prefilled temporary resource names from the default cluster.
+    /// The envoy reads these from the default cluster's Ready status and passes
+    /// them to remote clusters so they reuse the same broker resources.
+    #[serde(with = "force_json_ser", skip_serializing_if = "Vec::is_empty")]
+    pub output_tmp_resources: Vec<OutputTmpResource>,
 
     /// Key for this session
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<&'a str>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub header_filter: Option<&'a str>,
+}
+
+/// Same as TmpResourceEntry for serialization
+/// in connect params. The envoy converts from the CRD type into this when
+/// building the connect URL for remote clusters.
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputTmpResource {
+    pub queue_id: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub topic: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub subscription: BTreeMap<String, String>,
 }
 
 /// Per-dialect branch database names, used to keep the connect params
@@ -125,8 +156,14 @@ impl<'a> ConnectParams<'a> {
             profile: config.profile.as_deref(),
             kafka_splits: config.feature.split_queues.kafka().collect(),
             rmq_splits: config.feature.split_queues.rmq().collect(),
+            gcp_pubsub_splits: config.feature.split_queues.gcp_pubsub().collect(),
             sqs_splits: config.feature.split_queues.sqs().collect(),
             sqs_jq_filters: config.feature.split_queues.sqs_jq_filters().collect(),
+            gcp_pubsub_jq_filters: config
+                .feature
+                .split_queues
+                .gcp_pubsub_jq_filters()
+                .collect(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -137,7 +174,15 @@ impl<'a> ConnectParams<'a> {
             sqs_output_queues: HashMap::new(),
             rmq_output_queues: HashMap::new(),
             multi_cluster: config.multi_cluster,
+            output_tmp_resources: Vec::new(),
             key: Some(key),
+            header_filter: config
+                .feature
+                .network
+                .incoming
+                .http_filter
+                .header_filter
+                .as_deref(),
         }
     }
 }

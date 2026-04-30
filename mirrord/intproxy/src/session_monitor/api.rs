@@ -1,7 +1,14 @@
+#[cfg(unix)]
 use std::{
-    convert::Infallible, fs, os::unix::fs::PermissionsExt, path::PathBuf, sync::Arc, time::Duration,
+    convert::Infallible,
+    fs,
+    os::unix::fs::PermissionsExt,
+    path::{Component, Path, PathBuf},
+    sync::Arc,
+    time::Duration,
 };
 
+#[cfg(unix)]
 use axum::{
     Json, Router,
     extract::State,
@@ -11,43 +18,35 @@ use axum::{
     },
     routing::{get, post},
 };
-use serde::{Deserialize, Serialize};
+use mirrord_session_monitor_protocol::{PortSubscription, ProcessInfo, SessionInfo};
+#[cfg(unix)]
 use tokio::{
     net::UnixListener,
     sync::{RwLock, broadcast::error::RecvError},
 };
+#[cfg(unix)]
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
+#[cfg(unix)]
 use tokio_util::sync::CancellationToken;
 
+#[cfg(unix)]
 use super::{MonitorEvent, MonitorTx};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ProcessInfo {
-    pub pid: u32,
-    pub process_name: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SessionInfo {
-    pub session_id: String,
-    pub target: String,
-    pub started_at: String,
-    pub mirrord_version: String,
-    pub is_operator: bool,
-    pub processes: Vec<ProcessInfo>,
-    pub config: serde_json::Value,
-}
-
+/// Per-session API state. Access control is provided by Unix socket file
+/// permissions (`0o600`), so the HTTP layer itself is unauthenticated.
+#[cfg(unix)]
 struct AppState {
     session_info: RwLock<SessionInfo>,
     monitor_tx: MonitorTx,
     shutdown: CancellationToken,
 }
 
+#[cfg(unix)]
 struct SocketCleanup {
     path: PathBuf,
 }
 
+#[cfg(unix)]
 impl Drop for SocketCleanup {
     fn drop(&mut self) {
         if let Err(err) = fs::remove_file(&self.path) {
@@ -56,15 +55,18 @@ impl Drop for SocketCleanup {
     }
 }
 
+#[cfg(unix)]
 async fn health() -> impl IntoResponse {
     Json(serde_json::json!({"status": "ok"}))
 }
 
+#[cfg(unix)]
 async fn info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let info = state.session_info.read().await;
     Json(info.clone())
 }
 
+#[cfg(unix)]
 async fn events(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
@@ -91,46 +93,86 @@ async fn events(
 
 /// Cancels the API server's cancellation token, triggering graceful shutdown of the API server
 /// only. The mirrord session lifecycle is managed separately by the intproxy.
+#[cfg(unix)]
 async fn kill(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     state.shutdown.cancel();
     Json(serde_json::json!({"status": "shutting_down"}))
 }
 
-/// Subscribes to monitor events and updates session_info.processes on
-/// LayerConnected/LayerDisconnected events.
-async fn update_processes_from_events(state: Arc<AppState>) {
-    let mut rx = match state.monitor_tx.subscribe() {
-        Some(rx) => rx,
-        None => return,
-    };
-
+#[cfg(unix)]
+async fn update_session_info_from_events(
+    state: Arc<AppState>,
+    mut rx: tokio::sync::broadcast::Receiver<MonitorEvent>,
+) {
     loop {
         match rx.recv().await {
-            Ok(MonitorEvent::LayerConnected { pid, process_name }) => {
+            Ok(MonitorEvent::LayerConnected {
+                pid,
+                parent_pid,
+                process_name,
+                cmdline,
+            }) => {
                 let mut info = state.session_info.write().await;
                 if !info.processes.iter().any(|p| p.pid == pid) {
-                    info.processes.push(ProcessInfo { pid, process_name });
+                    info.processes.push(ProcessInfo {
+                        pid,
+                        parent_pid,
+                        process_name,
+                        cmdline,
+                    });
                 }
             }
             Ok(MonitorEvent::LayerDisconnected { pid }) => {
                 let mut info = state.session_info.write().await;
                 info.processes.retain(|p| p.pid != pid);
             }
+            Ok(MonitorEvent::PortSubscription { port, mode }) => {
+                let mut info = state.session_info.write().await;
+                match info
+                    .port_subscriptions
+                    .iter_mut()
+                    .find(|ps| ps.port == port)
+                {
+                    Some(existing) => existing.mode = mode,
+                    None => info
+                        .port_subscriptions
+                        .push(PortSubscription { port, mode }),
+                }
+            }
             Ok(_) => {}
             Err(RecvError::Lagged(n)) => {
-                tracing::warn!(n, "Process tracker lagged, dropped events");
+                tracing::warn!(n, "Session info updater lagged, dropped events");
             }
             Err(RecvError::Closed) => break,
         }
     }
 }
 
+/// Returns `true` when `session_id` is a single normal path component, so that joining it with
+/// the sessions directory cannot escape that directory or produce an absolute path.
+#[cfg(unix)]
+fn verify_session_id(session_id: &str) -> bool {
+    let as_path = Path::new(session_id);
+    let mut components = as_path.components();
+    matches!(
+        std::array::from_fn::<_, 2, _>(|_| components.next()),
+        [Some(Component::Normal(..)), None]
+    )
+}
+
+#[cfg(unix)]
 pub async fn start_api_server(
     session_info: SessionInfo,
     monitor_tx: MonitorTx,
+    monitor_rx: tokio::sync::broadcast::Receiver<MonitorEvent>,
     shutdown: CancellationToken,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let session_id = &session_info.session_id;
+
+    if !verify_session_id(session_id) {
+        return Err(format!("invalid session_id: {session_id}").into());
+    }
+
     let sessions_dir = home::home_dir()
         .ok_or("could not determine home directory")?
         .join(".mirrord")
@@ -141,7 +183,6 @@ pub async fn start_api_server(
 
     let socket_path = sessions_dir.join(format!("{session_id}.sock"));
 
-    // Remove stale socket if it exists
     if let Err(err) = fs::remove_file(&socket_path)
         && err.kind() != std::io::ErrorKind::NotFound
     {
@@ -161,8 +202,7 @@ pub async fn start_api_server(
         shutdown: shutdown.clone(),
     });
 
-    // Spawn background task to update processes from monitor events
-    tokio::spawn(update_processes_from_events(state.clone()));
+    tokio::spawn(update_session_info_from_events(state.clone(), monitor_rx));
 
     let app = Router::new()
         .route("/health", get(health))
