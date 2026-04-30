@@ -603,14 +603,21 @@ where
             .as_deref()
             .unwrap_or(self.client.default_namespace());
 
-        // In multi-cluster management-only mode, create CRDs in operator's namespace
-        // with an annotation specifying the target namespace for the sync controller.
-        let (api_namespace, target_ns_annotation) =
-            if let Some(op_ns) = &self.operator.spec.operator_namespace {
-                (op_ns.as_str(), Some(target_namespace.to_string()))
-            } else {
-                (target_namespace, None)
-            };
+        // Management-only operators set operator_namespace so the sync controller can
+        // pick up CRDs and forward them to the default cluster. When the user forces
+        // single-cluster mode we skip that redirect and put CRDs straight into the
+        // target namespace where the local branching controller will handle them.
+        let use_operator_namespace = layer_config.multi_cluster != Some(false);
+        let (api_namespace, target_ns_annotation) = match self
+            .operator
+            .spec
+            .operator_namespace
+            .as_deref()
+            .filter(|_| use_operator_namespace)
+        {
+            Some(op_ns) => (op_ns, Some(target_namespace.to_string())),
+            None => (target_namespace, None),
+        };
 
         let timeout_secs = layer_config
             .feature
@@ -679,6 +686,17 @@ where
                     params
                         .annotations
                         .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                }
+            }
+
+            // Single-cluster session on a multi-cluster Primary: mark the CRD so the
+            // sync controller ignores it and the local branching controller picks it up.
+            if layer_config.multi_cluster == Some(false) {
+                for params in create_params.values_mut() {
+                    params.labels.insert(
+                        crate::types::MULTI_CLUSTER_SKIP_SYNC_LABEL.to_string(),
+                        "true".to_string(),
+                    );
                 }
             }
 
@@ -1630,6 +1648,7 @@ impl OperatorApi<PreparedClientCert> {
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
             multi_cluster: None,
+            output_tmp_resources: Default::default(),
             key: Some(key),
             header_filter: None,
         };
@@ -1976,246 +1995,6 @@ impl OperatorApi<PreparedClientCert> {
         .await?;
 
         Ok(conn)
-    }
-
-    /// Prepare branch databases, and return database resource names.
-    ///
-    /// 1. List reusable branch databases.
-    /// 2. Create new ones if any missing.
-    /// 3. Wait for all new databases to be ready.
-    #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
-    pub async fn prepare_branch_dbs<P: Progress>(
-        &self,
-        layer_config: &LayerConfig,
-        progress: &P,
-    ) -> OperatorApiResult<BranchDbNames> {
-        use database_branches::TARGET_NAMESPACE_ANNOTATION;
-
-        let mut subtask = progress.subtask("preparing branch databases");
-        let target = layer_config
-            .target
-            .path
-            .clone()
-            .unwrap_or(Target::Targetless);
-        let target_namespace = layer_config
-            .target
-            .namespace
-            .as_deref()
-            .unwrap_or(self.client.default_namespace());
-
-        // Management-only operators set operator_namespace so the sync controller can
-        // pick up CRDs and forward them to the default cluster. When the user forces
-        // single-cluster mode we skip that redirect and put CRDs straight into the
-        // target namespace where the local branching controller will handle them.
-        let use_operator_namespace = layer_config.multi_cluster != Some(false);
-        let (api_namespace, target_ns_annotation) = match self
-            .operator
-            .spec
-            .operator_namespace
-            .as_deref()
-            .filter(|_| use_operator_namespace)
-        {
-            // Multi-cluster: CRD goes into the operator namespace, and the sync
-            // controller reads the annotation to know which namespace on the
-            // default cluster it should replicate the CRD into.
-            Some(op_ns) => (op_ns, Some(target_namespace.to_string())),
-            // Single-cluster (or no operator_namespace configured): CRD goes
-            // directly into the target namespace where the branching controller
-            // and the target pod both live.
-            None => (target_namespace, None),
-        };
-
-        let timeout_secs = layer_config
-            .feature
-            .db_branches
-            .iter()
-            .filter_map(|branch_config| match branch_config {
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mongodb(
-                    mongodb_config,
-                ) => Some(mongodb_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mssql(
-                    mssql_config,
-                ) => Some(mssql_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
-                    mysql_config,
-                ) => Some(mysql_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
-                    Some(pg_config.base.creation_timeout_secs)
-                }
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Redis(_) => None,
-            })
-            .max()
-            .unwrap_or(default_creation_timeout_secs());
-        let timeout = std::time::Duration::from_secs(timeout_secs);
-
-        let use_unified_crd = self
-            .operator
-            .spec
-            .supported_features()
-            .contains(&NewOperatorFeature::UnifiedBranchDbCrd);
-
-        if use_unified_crd {
-            let UnifiedDatabaseBranchParams {
-                branches: mut create_params,
-            } = UnifiedDatabaseBranchParams::new(
-                &layer_config.feature.db_branches,
-                &target,
-                layer_config.key.as_str(),
-                &subtask,
-            )?;
-
-            if let Some(ref ns) = target_ns_annotation {
-                for params in create_params.values_mut() {
-                    params
-                        .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
-                }
-            }
-
-            // Single-cluster session on a multi-cluster Primary: mark the CRD so the
-            // sync controller ignores it and the local branching controller picks it up.
-            if layer_config.multi_cluster == Some(false) {
-                for params in create_params.values_mut() {
-                    params.labels.insert(
-                        crate::types::MULTI_CLUSTER_SKIP_SYNC_LABEL.to_string(),
-                        "true".to_string(),
-                    );
-                }
-            }
-
-            let branch_api: Api<BranchDatabase> =
-                Api::namespaced(self.client.clone(), api_namespace);
-
-            let existing = list_existing_branches(&branch_api, &create_params, &subtask).await?;
-
-            create_params.retain(|id, _| {
-                !existing.ready.contains_key(id) && !existing.pending.contains_key(id)
-            });
-
-            let waited_branches =
-                wait_for_pending_branches(&branch_api, &existing.pending, timeout, &subtask)
-                    .await?;
-
-            let created_branches =
-                create_branches(&branch_api, create_params, timeout, &subtask).await?;
-
-            subtask.success(None);
-
-            let mut names = BranchDbNames::default();
-            for branch in existing
-                .ready
-                .values()
-                .chain(waited_branches.values())
-                .chain(created_branches.values())
-            {
-                let name = branch
-                    .meta()
-                    .name
-                    .clone()
-                    .ok_or(KubeApiError::missing_field(branch, ".metadata.name"))?;
-
-                if branch.spec.postgres_options.is_some() {
-                    names.pg.push(name);
-                } else if branch.spec.mysql_options.is_some() {
-                    names.mysql.push(name);
-                } else if branch.spec.mongodb_options.is_some() {
-                    names.mongodb.push(name);
-                } else if branch.spec.mssql_options.is_some() {
-                    names.mssql.push(name);
-                }
-            }
-            Ok(names)
-        } else {
-            let DatabaseBranchParams {
-                mongodb: mut create_mongodb_params,
-                mysql: mut create_mysql_params,
-                pg: mut create_pg_params,
-            } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
-
-            if let Some(ref ns) = target_ns_annotation {
-                for params in create_pg_params.values_mut() {
-                    params
-                        .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
-                }
-                for params in create_mysql_params.values_mut() {
-                    params
-                        .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
-                }
-                for params in create_mongodb_params.values_mut() {
-                    params
-                        .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
-                }
-            }
-
-            let pg_api: Api<PgBranchDatabase> = Api::namespaced(self.client.clone(), api_namespace);
-            let mysql_api: Api<MysqlBranchDatabase> =
-                Api::namespaced(self.client.clone(), api_namespace);
-            let mongodb_api: Api<MongodbBranchDatabase> =
-                Api::namespaced(self.client.clone(), api_namespace);
-
-            let reusable_pg =
-                list_reusable_pg_branches(&pg_api, &create_pg_params, &subtask).await?;
-            create_pg_params.retain(|id, _| !reusable_pg.contains_key(id));
-            let created_pg =
-                create_pg_branches(&pg_api, create_pg_params, timeout, &subtask).await?;
-
-            let reusable_mysql =
-                list_reusable_mysql_branches(&mysql_api, &create_mysql_params, &subtask).await?;
-            create_mysql_params.retain(|id, _| !reusable_mysql.contains_key(id));
-            let created_mysql =
-                create_mysql_branches(&mysql_api, create_mysql_params, timeout, &subtask).await?;
-
-            let reusable_mongodb =
-                list_reusable_mongodb_branches(&mongodb_api, &create_mongodb_params, &subtask)
-                    .await?;
-            create_mongodb_params.retain(|id, _| !reusable_mongodb.contains_key(id));
-            let created_mongodb =
-                create_mongodb_branches(&mongodb_api, create_mongodb_params, timeout, &subtask)
-                    .await?;
-
-            subtask.success(None);
-
-            let pg_names = reusable_pg
-                .values()
-                .chain(created_pg.values())
-                .map(|b| {
-                    b.meta()
-                        .name
-                        .clone()
-                        .ok_or(KubeApiError::missing_field(b, ".metadata.name"))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let mysql_names = reusable_mysql
-                .values()
-                .chain(created_mysql.values())
-                .map(|b| {
-                    b.meta()
-                        .name
-                        .clone()
-                        .ok_or(KubeApiError::missing_field(b, ".metadata.name"))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let mongodb_names = reusable_mongodb
-                .values()
-                .chain(created_mongodb.values())
-                .map(|b| {
-                    b.meta()
-                        .name
-                        .clone()
-                        .ok_or(KubeApiError::missing_field(b, ".metadata.name"))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            Ok(BranchDbNames {
-                pg: pg_names,
-                mysql: mysql_names,
-                mongodb: mongodb_names,
-                mssql: Vec::new(),
-            })
-        }
     }
 }
 
