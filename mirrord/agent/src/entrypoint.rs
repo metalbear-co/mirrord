@@ -45,7 +45,6 @@ use crate::{
     incoming::MirrorHandle,
     metrics,
     mirror::TcpMirrorApi,
-    namespace::NamespaceType,
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     reverse_dns::ReverseDnsApi,
     runtime::{self, get_container},
@@ -159,6 +158,8 @@ struct State {
     tls_connector: Option<AgentTlsConnector>,
     /// [`tokio::runtime`] that should be used for network operations ([`BackgroundTasks`]).
     network_runtime: Arc<BgTaskRuntime>,
+    /// [`tokio::runtime`] that should be used for outgoing socket connections.
+    outgoing_runtime: Arc<BgTaskRuntime>,
 }
 
 impl State {
@@ -226,14 +227,28 @@ impl State {
 
         tracing::debug!("THE ID IS: {IPTABLES_IDENTIFIER:?}");
 
-        let network_runtime = match container.as_ref().map(ContainerHandle::pid) {
+        let target_pid = container.as_ref().map(ContainerHandle::pid);
+        let network_runtime = match target_pid {
             Some(pid) if ephemeral.not() => {
-                BgTaskRuntime::spawn(Some(RuntimeNamespace::new(pid, NamespaceType::Net)))
+                BgTaskRuntime::spawn(Some(RuntimeNamespace::new(pid, RuntimeNamespace::NET)))
             }
 
             None | Some(..) => BgTaskRuntime::spawn(None),
         }
         .await?;
+        let network_runtime = Arc::new(network_runtime);
+
+        let outgoing_runtime = match target_pid {
+            Some(pid) if ephemeral.not() => Arc::new(
+                BgTaskRuntime::spawn(Some(RuntimeNamespace::new(
+                    pid,
+                    RuntimeNamespace::NET_AND_MOUNT,
+                )))
+                .await?,
+            ),
+
+            None | Some(..) => network_runtime.clone(),
+        };
 
         let env_pid = match container.as_ref().map(ContainerHandle::pid) {
             Some(pid) => pid.to_string(),
@@ -253,7 +268,8 @@ impl State {
             env: Arc::new(env),
             ephemeral,
             tls_connector,
-            network_runtime: Arc::new(network_runtime),
+            network_runtime,
+            outgoing_runtime,
         })
     }
 
@@ -397,8 +413,8 @@ impl ClientConnectionHandler {
         .await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
         let reverse_dns_api = ReverseDnsApi::new(&state.network_runtime);
-        let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime);
-        let udp_outgoing_api = UdpOutgoingApi::new(&state.network_runtime);
+        let tcp_outgoing_api = TcpOutgoingApi::new(&state.outgoing_runtime);
+        let udp_outgoing_api = UdpOutgoingApi::new(&state.outgoing_runtime);
 
         let client_handler = Self {
             id,
