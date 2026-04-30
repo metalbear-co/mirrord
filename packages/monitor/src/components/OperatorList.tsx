@@ -1,30 +1,22 @@
-import { useMemo, useState } from 'react'
-import { Button, Input, cn } from '@metalbear/ui'
-import { Box, ChevronRight, Search, Users } from 'lucide-react'
+import { useMemo } from 'react'
+import { Users } from 'lucide-react'
 import type { OperatorSessionSummary } from '../types'
+import SessionRow from './SessionRow'
+import Avatar from './Avatar'
 
 interface OperatorListProps {
   sessions: OperatorSessionSummary[]
   selectedId: string | null
   onSelect: (id: string) => void
+  joinedKey?: string | null
+  query?: string
+  emptyLabel?: string
+  showCount?: boolean
 }
 
-interface TargetGroup {
-  targetLabel: string
-  namespace: string
+interface KeyGroup {
+  key: string
   sessions: OperatorSessionSummary[]
-}
-
-function groupByTarget(sessions: OperatorSessionSummary[]): TargetGroup[] {
-  const map = new Map<string, TargetGroup>()
-  for (const s of sessions) {
-    const targetLabel = s.target ? `${s.target.kind}/${s.target.name}` : 'targetless'
-    const k = `${s.namespace}\n${targetLabel}`
-    const existing = map.get(k)
-    if (existing) existing.sessions.push(s)
-    else map.set(k, { targetLabel, namespace: s.namespace, sessions: [s] })
-  }
-  return Array.from(map.values()).sort((a, b) => b.sessions.length - a.sessions.length)
 }
 
 function matchesQuery(s: OperatorSessionSummary, q: string): boolean {
@@ -54,49 +46,72 @@ function relativeTime(iso: string): string {
   return `${Math.floor(diff / 86400)}d`
 }
 
-export default function OperatorList({ sessions, selectedId, onSelect }: OperatorListProps) {
-  const [query, setQuery] = useState('')
+function shortKey(k: string): string {
+  return k.length > 6 ? k.slice(0, 6) : k
+}
+
+function firstName(full: string): string {
+  return full.trim().split(/\s+/)[0] || full
+}
+
+export default function OperatorList({
+  sessions,
+  selectedId,
+  onSelect,
+  joinedKey,
+  query = '',
+  emptyLabel = 'No teammate sessions yet.',
+  showCount = false,
+}: OperatorListProps) {
   const normalized = query.trim().toLowerCase()
+
   const filtered = useMemo(
     () => sessions.filter((s) => matchesQuery(s, normalized)),
     [sessions, normalized]
   )
-  const groups = useMemo(() => groupByTarget(filtered), [filtered])
+
+  const grouped = useMemo<KeyGroup[]>(() => {
+    const map = new Map<string, OperatorSessionSummary[]>()
+    for (const s of filtered) {
+      const arr = map.get(s.key)
+      if (arr) arr.push(s)
+      else map.set(s.key, [s])
+    }
+    const keys = Array.from(map.keys())
+    keys.sort((a, b) => {
+      if (a === joinedKey) return -1
+      if (b === joinedKey) return 1
+      return a.localeCompare(b)
+    })
+    return keys.map((k) => ({
+      key: k,
+      sessions: map.get(k)!.slice().sort((a, b) => a.id.localeCompare(b.id)),
+    }))
+  }, [filtered, joinedKey])
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="relative">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="search by team, user, target, namespace"
-          spellCheck={false}
-          autoComplete="off"
-          className="h-8 pl-8 text-xs"
-        />
-      </div>
-
-      {sessions.length > 0 && (
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-1">
-          {filtered.length} live operator session{filtered.length === 1 ? '' : 's'}
+    <div className="flex flex-col gap-2.5">
+      {showCount && sessions.length > 0 && (
+        <div className="text-[11px] text-muted-foreground px-1">
+          {filtered.length} session{filtered.length === 1 ? '' : 's'}
         </div>
       )}
 
-      {groups.length === 0 ? (
-        <div className="text-center text-muted-foreground py-10">
-          <Users className="h-9 w-9 mx-auto mb-3 opacity-30" />
-          <p className="text-sm">
+      {grouped.length === 0 ? (
+        <div className="text-center text-muted-foreground py-6">
+          <Users className="h-8 w-8 mx-auto mb-2 opacity-30" />
+          <p className="text-xs">
             {sessions.length === 0
-              ? "No operator sessions yet."
-              : "No sessions match your search."}
+              ? emptyLabel
+              : 'No sessions match your search.'}
           </p>
         </div>
       ) : (
-        groups.map((g) => (
-          <TargetGroupCard
-            key={`${g.namespace}/${g.targetLabel}`}
+        grouped.map((g) => (
+          <KeyGroupSection
+            key={g.key}
             group={g}
+            joined={g.key === joinedKey}
             selectedId={selectedId}
             onSelect={onSelect}
           />
@@ -106,86 +121,47 @@ export default function OperatorList({ sessions, selectedId, onSelect }: Operato
   )
 }
 
-function TargetGroupCard({
+function KeyGroupSection({
   group,
+  joined,
   selectedId,
   onSelect,
 }: {
-  group: TargetGroup
+  group: KeyGroup
+  joined: boolean
   selectedId: string | null
   onSelect: (id: string) => void
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-card/60">
-        <Box className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        <div className="min-w-0 flex-1">
-          <div className="font-mono text-sm font-semibold truncate">{group.targetLabel}</div>
-          <div className="text-[11px] text-muted-foreground truncate">
-            {group.namespace} · {group.sessions.length} session
-            {group.sessions.length === 1 ? '' : 's'}
-          </div>
-        </div>
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2 px-1 text-[10.5px] uppercase tracking-wider text-muted-foreground font-semibold">
+        <span className="font-mono normal-case tracking-normal">
+          key {shortKey(group.key)}
+        </span>
+        {joined && (
+          <span className="px-1.5 rounded-full bg-primary/15 text-primary text-[9.5px] font-bold tracking-wider">
+            JOINED
+          </span>
+        )}
+        <span className="ml-auto normal-case tracking-normal font-medium">
+          {group.sessions.length}
+        </span>
       </div>
-      <div className="divide-y divide-border">
-        {group.sessions.map((s) => (
-          <OperatorSessionRow
-            key={s.id}
-            session={s}
-            selected={s.id === selectedId}
-            onSelect={() => onSelect(s.id)}
-          />
-        ))}
-      </div>
+      {group.sessions.map((s) => (
+        <SessionRow
+          key={s.id}
+          selected={selectedId === s.id}
+          onClick={() => onSelect(s.id)}
+          lead={<Avatar name={s.owner.username} seed={s.owner.k8sUsername} />}
+          target={s.target ? `${s.target.kind}/${s.target.name}` : 'targetless'}
+          meta={[
+            firstName(s.owner.username),
+            s.namespace,
+            relativeTime(s.createdAt),
+          ]}
+          leftStrip={joined ? 'hsl(var(--primary))' : undefined}
+        />
+      ))}
     </div>
   )
-}
-
-function OperatorSessionRow({
-  session,
-  selected,
-  onSelect,
-}: {
-  session: OperatorSessionSummary
-  selected: boolean
-  onSelect: () => void
-}) {
-  const filterDescription = describeFilter(session.httpFilter)
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={cn(
-        'w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors flex items-start gap-2',
-        selected && 'bg-primary/10'
-      )}
-    >
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 text-sm">
-          <span className="font-medium truncate">{session.owner.username}</span>
-          <span className="text-[11px] text-muted-foreground shrink-0">
-            {relativeTime(session.createdAt)}
-          </span>
-        </div>
-        {filterDescription && (
-          <div className="text-[11px] text-muted-foreground font-mono truncate mt-0.5">
-            {filterDescription}
-          </div>
-        )}
-        <div className="text-[10px] text-muted-foreground/80 font-mono mt-0.5">
-          key {session.key}
-        </div>
-      </div>
-      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-1" />
-    </button>
-  )
-}
-
-function describeFilter(f: OperatorSessionSummary['httpFilter']): string {
-  if (!f) return ''
-  if (f.headerFilter) return `on ${f.headerFilter}`
-  if (f.pathFilter) return `path ${f.pathFilter}`
-  if (f.allOf?.length) return `${f.allOf.length} filters (all)`
-  if (f.anyOf?.length) return `${f.anyOf.length} filters (any)`
-  return ''
 }
