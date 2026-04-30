@@ -135,7 +135,10 @@ impl OperatorSessionSummary {
         let id = session.id.clone()?;
         let key = session.key.clone()?;
         let namespace = session.namespace.clone().unwrap_or_default();
-        let owner = parse_session_owner(&session.user)?;
+        let owner = parse_session_owner(&session.user).unwrap_or_else(|| OperatorSessionOwner {
+            username: session.user.clone(),
+            k8s_username: session.user.clone(),
+        });
         let target = parse_session_target(&session.target);
         let created_at = std::time::SystemTime::now()
             .checked_sub(std::time::Duration::from_secs(session.duration_secs))
