@@ -15,7 +15,7 @@ use kube::{
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
     certificate::Certificate,
-    credential_store::{CredentialStoreSync, UserIdentity},
+    credential_store::{CredentialClient, CredentialStoreSync, UserIdentity},
     credentials::{CiApiKey, Credentials, LicenseValidity},
 };
 use mirrord_config::{
@@ -970,7 +970,7 @@ where
         })?;
 
         credential_store
-            .get_client_certificate::<MirrordOperatorCrd, MirrordClusterOperatorUserCredential>(
+            .get_client_certificate::<_, MirrordOperatorCrd, MirrordClusterOperatorUserCredential>(
                 &self.client,
                 fingerprint,
                 subscription_id,
