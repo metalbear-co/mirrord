@@ -38,6 +38,9 @@ jobs:
       - run: |
           cd mirrord/layer-tests/tests/apps/rebind0
           cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue2058
+          rustc issue2058.rs --out-dir target
       - name: build layer
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
