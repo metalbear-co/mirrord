@@ -242,6 +242,7 @@ export default function OperatorSessionDetail({
                 icon={<Settings className="h-3 w-3" />}
                 collapsible
                 defaultOpen
+                className="w-fit max-w-full"
               >
                 <div className="p-4">
                   <JsonHighlight
