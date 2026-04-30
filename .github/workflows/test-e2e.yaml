@@ -19,6 +19,16 @@ jobs:
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
+      - name: Free disk space
+        uses: metalbear-co/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: true
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v3
         with:
@@ -36,7 +46,7 @@ jobs:
         with:
           name: test
           path: /tmp
-      - run: minikube image load /tmp/test.tar
+      - run: minikube image load /tmp/test.tar && rm /tmp/test.tar
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
