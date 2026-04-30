@@ -16,7 +16,7 @@ jobs:
       MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/debug/mirrord
       MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
