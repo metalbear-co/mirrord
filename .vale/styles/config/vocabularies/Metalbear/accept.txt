@@ -107,6 +107,7 @@ syscall
 pid
 aarch
 darwin
+unix
 preload
 dylib
 intproxy
