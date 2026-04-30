@@ -29,6 +29,15 @@ jobs:
           components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
           toolchain: ${{ inputs.rust_toolchain }}
+      - name: free port 80 on GH Windows Runner (stop HTTP.sys)
+        run: |
+          $ErrorActionPreference = "Continue"
+          Write-Host "Port 80 listeners before stopping HTTP service:"
+          netstat -ano | findstr :80
+          Write-Host "Stopping HTTP service (http.sys) and dependencies if needed..."
+          net stop http /y
+          Write-Host "Port 80 listeners after stopping HTTP service:"
+          netstat -ano | findstr :80
       - run: |
           cd mirrord/layer-tests/tests/apps/outgoing
           cargo build
