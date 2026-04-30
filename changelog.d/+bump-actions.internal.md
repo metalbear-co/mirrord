@@ -1,1 +1,1 @@
-Bump github actions
+Bump GitHub actions
