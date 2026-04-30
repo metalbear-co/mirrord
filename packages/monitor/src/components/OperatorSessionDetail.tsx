@@ -9,10 +9,10 @@ import {
 import {
   Clock,
   Filter,
+  FlaskConical,
   Network,
   Radio,
   Settings,
-  Sparkles,
   User,
 } from 'lucide-react'
 import type {
@@ -120,7 +120,7 @@ export default function OperatorSessionDetail({
                 variant="outline"
                 className="text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal text-emerald-500 border-emerald-500/40 inline-flex items-center gap-1"
               >
-                <Sparkles className="h-2.5 w-2.5" />
+                <FlaskConical className="h-2.5 w-2.5" />
                 preview
               </Badge>
             )}
@@ -216,21 +216,23 @@ export default function OperatorSessionDetail({
             </Card>
           )}
 
-          <Card className="overflow-hidden p-0">
-            <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
-              <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
-                HTTP filter
-              </span>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="px-4 py-2.5 flex items-center gap-2">
-                <Filter className="h-3 w-3 text-muted-foreground shrink-0" />
-                <span className="text-xs font-mono break-all">
-                  {describeFilter(session.httpFilter)}
+          {!isPreview && (
+            <Card className="overflow-hidden p-0">
+              <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
+                <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
+                  HTTP filter
                 </span>
-              </div>
-            </CardContent>
-          </Card>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="px-4 py-2.5 flex items-center gap-2">
+                  <Filter className="h-3 w-3 text-muted-foreground shrink-0" />
+                  <span className="text-xs font-mono break-all">
+                    {describeFilter(session.httpFilter)}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {splitsTotal > 0 && (
             <Card className="overflow-hidden p-0">

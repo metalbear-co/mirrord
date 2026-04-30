@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Users, Sparkles } from 'lucide-react'
+import { Users, FlaskConical, Key as KeyIcon } from 'lucide-react'
 import type { OperatorSessionSummary } from '../types'
 import SessionRow from './SessionRow'
 import Avatar from './Avatar'
@@ -138,8 +138,9 @@ function KeyGroupSection({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2 px-1 text-[10.5px] uppercase tracking-wider text-muted-foreground font-semibold">
+        <KeyIcon className="h-3 w-3 shrink-0" />
         <span className="font-mono normal-case tracking-normal break-all">
-          key {group.key}
+          {group.key}
         </span>
         {joined && (
           <span className="shrink-0 px-1.5 rounded-full bg-primary/15 text-primary text-[9.5px] font-bold tracking-wider">
@@ -187,7 +188,7 @@ function PreviewBadge() {
       style={{ width: 26, height: 26 }}
       title="preview environment"
     >
-      <Sparkles className="h-3.5 w-3.5" />
+      <FlaskConical className="h-3.5 w-3.5" />
     </span>
   )
 }
