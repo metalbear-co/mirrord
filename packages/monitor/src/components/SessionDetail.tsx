@@ -142,11 +142,7 @@ export default function SessionDetail({
           <SessionIdentity session={session} />
           {portSubs.length > 0 && <PortSubscriptionsCard portSubs={portSubs} />}
 
-          {processes.length > 0 && (
-            <div className="md:col-span-2 xl:col-span-3">
-              <ProcessesCard processes={processes} />
-            </div>
-          )}
+          {processes.length > 0 && <ProcessesCard processes={processes} />}
 
           <div className="md:col-span-2 xl:col-span-3">
             <Widget

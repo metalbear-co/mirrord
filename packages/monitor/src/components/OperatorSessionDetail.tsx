@@ -277,7 +277,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="grid grid-cols-[110px_1fr] items-baseline gap-3 px-4 py-1.5">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-xs font-mono font-medium text-foreground break-all">
+      <span className="text-xs font-mono font-medium text-foreground break-words">
         {value}
       </span>
     </div>

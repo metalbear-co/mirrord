@@ -1,14 +1,4 @@
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@metalbear/ui'
+import { Card, CardContent, CardHeader } from '@metalbear/ui'
 import type { ProcessInfo } from '../types'
 import { strings } from '../strings'
 
@@ -21,25 +11,20 @@ export default function ProcessesCard({ processes }: { processes: ProcessInfo[] 
           {strings.session.sectionProcesses}
         </span>
       </CardHeader>
-      <CardContent className="p-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="text-xs">{strings.session.columnName}</TableHead>
-              <TableHead className="text-xs text-right">{strings.session.columnPid}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {processes.map((p) => (
-              <TableRow key={p.pid}>
-                <TableCell className="text-xs font-mono font-medium text-foreground">
-                  {p.process_name || strings.session.unknownProcess}
-                </TableCell>
-                <TableCell className="text-xs font-mono text-muted-foreground text-right">{p.pid}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+      <CardContent className="p-0 divide-y divide-border">
+        {processes.map((p) => (
+          <div
+            key={p.pid}
+            className="grid grid-cols-[1fr_max-content] items-baseline gap-3 px-4 py-1.5"
+          >
+            <span className="text-xs font-mono font-medium text-foreground truncate">
+              {p.process_name || strings.session.unknownProcess}
+            </span>
+            <span className="text-xs font-mono text-muted-foreground tabular-nums">
+              {p.pid}
+            </span>
+          </div>
+        ))}
       </CardContent>
     </Card>
   )
