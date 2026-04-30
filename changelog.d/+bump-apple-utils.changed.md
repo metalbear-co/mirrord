@@ -1,1 +1,1 @@
-Bump bundled apple utils
+Bump bundled `appleutils`
