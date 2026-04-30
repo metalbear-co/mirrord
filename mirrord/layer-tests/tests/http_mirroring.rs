@@ -1,4 +1,3 @@
-#![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 #![allow(non_snake_case)]
 

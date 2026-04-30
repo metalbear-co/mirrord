@@ -41,6 +41,33 @@ jobs:
       - run: |
           cd mirrord/layer-tests/tests/apps/issue2058
           rustc issue2058.rs --out-dir target
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: tests/go-e2e/go.sum
+      - run: |
+          go version
+      - run: |
+          . ./scripts/win_build_test_apps_utils.ps1
+          Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "24"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - run: |
+          go version
+      - run: |
+          . ./scripts/win_build_test_apps_utils.ps1
+          Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "25"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: false
+      - run: |
+          go version
+      - run: |
+          . ./scripts/win_build_test_apps_utils.ps1
+          Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "26"
       - name: build layer
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
