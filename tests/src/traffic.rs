@@ -5,22 +5,22 @@ mod steal;
 mod traffic_tests {
     use std::{ops::Not, path::PathBuf, time::Duration};
 
-    use futures::{stream, StreamExt};
-    use futures_util::{stream::TryStreamExt, AsyncBufReadExt};
+    use futures::{StreamExt, stream};
+    use futures_util::{AsyncBufReadExt, stream::TryStreamExt};
     use k8s_openapi::api::core::v1::Pod;
-    use kube::{api::LogParams, Api, Client};
+    use kube::{Api, Client, api::LogParams};
     use mirrord_test_utils::run_command::run_exec_with_target;
     use rstest::*;
 
     #[cfg(target_os = "windows")]
     use crate::utils::windows::LegacyConsoleGuard;
     use crate::utils::{
+        CONTAINER_NAME,
         application::{Application, GoVersion},
         ipv6::ipv6_service,
         kube_client,
         kube_service::KubeService,
         services::{basic_service, hostname_service, udp_logger_service},
-        CONTAINER_NAME,
     };
 
     #[cfg_attr(not(feature = "job"), ignore)]
@@ -759,7 +759,13 @@ mod traffic_tests {
         .await;
 
         let res = process.child.wait().await.unwrap();
-        assert!(res.success());
+        if res.success().not() {
+            panic!(
+                "process didnt exit successfully {res:?} stdout={} stderr={}",
+                process.get_stderr().await,
+                process.get_stderr().await
+            )
+        }
         process.assert_no_error_in_stderr().await;
     }
 
