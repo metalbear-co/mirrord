@@ -603,14 +603,21 @@ where
             .as_deref()
             .unwrap_or(self.client.default_namespace());
 
-        // In multi-cluster management-only mode, create CRDs in operator's namespace
-        // with an annotation specifying the target namespace for the sync controller.
-        let (api_namespace, target_ns_annotation) =
-            if let Some(op_ns) = &self.operator.spec.operator_namespace {
-                (op_ns.as_str(), Some(target_namespace.to_string()))
-            } else {
-                (target_namespace, None)
-            };
+        // Management-only operators set operator_namespace so the sync controller can
+        // pick up CRDs and forward them to the default cluster. When the user forces
+        // single-cluster mode we skip that redirect and put CRDs straight into the
+        // target namespace where the local branching controller will handle them.
+        let use_operator_namespace = layer_config.multi_cluster != Some(false);
+        let (api_namespace, target_ns_annotation) = match self
+            .operator
+            .spec
+            .operator_namespace
+            .as_deref()
+            .filter(|_| use_operator_namespace)
+        {
+            Some(op_ns) => (op_ns, Some(target_namespace.to_string())),
+            None => (target_namespace, None),
+        };
 
         let timeout_secs = layer_config
             .feature
@@ -679,6 +686,17 @@ where
                     params
                         .annotations
                         .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                }
+            }
+
+            // Single-cluster session on a multi-cluster Primary: mark the CRD so the
+            // sync controller ignores it and the local branching controller picks it up.
+            if layer_config.multi_cluster == Some(false) {
+                for params in create_params.values_mut() {
+                    params.labels.insert(
+                        crate::types::MULTI_CLUSTER_SKIP_SYNC_LABEL.to_string(),
+                        "true".to_string(),
+                    );
                 }
             }
 
@@ -916,6 +934,18 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::RmqQueueSplitting)?;
+        }
+
+        if layer_config
+            .feature
+            .split_queues
+            .gcp_pubsub_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GcpPubSubQueueSplitting)?;
         }
 
         Ok(())
@@ -1604,8 +1634,10 @@ impl OperatorApi<PreparedClientCert> {
             profile,
             kafka_splits: Default::default(),
             rmq_splits: Default::default(),
+            gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
+            gcp_pubsub_jq_filters: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -1615,6 +1647,8 @@ impl OperatorApi<PreparedClientCert> {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
+            multi_cluster: None,
+            output_tmp_resources: Default::default(),
             key: Some(key),
             header_filter: None,
         };
@@ -1992,6 +2026,7 @@ mod test {
         profile: Option<&'static str>,
         kafka_splits: HashMap<&'static str, BTreeMap<String, String>>,
         rmq_splits: HashMap<&'static str, BTreeMap<String, String>>,
+        gcp_pubsub_splits: HashMap<&'static str, BTreeMap<String, String>>,
         sqs_splits: HashMap<&'static str, BTreeMap<String, String>>,
         sqs_jq_filters: HashMap<&'static str, &'static str>,
         branch_db_names: BranchDbNames,
@@ -2021,6 +2056,7 @@ mod test {
                 profile: None,
                 kafka_splits: Default::default(),
                 rmq_splits: Default::default(),
+                gcp_pubsub_splits: Default::default(),
                 sqs_splits: Default::default(),
                 sqs_jq_filters: Default::default(),
                 branch_db_names: Default::default(),
@@ -2227,6 +2263,7 @@ mod test {
             profile,
             kafka_splits,
             rmq_splits,
+            gcp_pubsub_splits,
             sqs_splits,
             sqs_jq_filters,
             branch_db_names,
@@ -2245,6 +2282,11 @@ mod test {
             .map(|(topic_id, filters)| (*topic_id, filters))
             .collect();
 
+        let gcp_pubsub_splits = gcp_pubsub_splits
+            .iter()
+            .map(|(topic_id, filters)| (*topic_id, filters))
+            .collect();
+
         let sqs_splits = sqs_splits
             .iter()
             .map(|(topic_id, filters)| (*topic_id, filters))
@@ -2256,8 +2298,10 @@ mod test {
             profile,
             kafka_splits,
             rmq_splits,
+            gcp_pubsub_splits,
             sqs_splits,
             sqs_jq_filters,
+            gcp_pubsub_jq_filters: Default::default(),
             branch_name: None,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -2267,6 +2311,8 @@ mod test {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
+            multi_cluster: None,
+            output_tmp_resources: Default::default(),
             key,
             header_filter: None,
         };
@@ -2377,8 +2423,10 @@ mod test {
             profile: None,
             kafka_splits: Default::default(),
             rmq_splits: Default::default(),
+            gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
+            gcp_pubsub_jq_filters: Default::default(),
             branch_name: None,
             pg_branch_names: Default::default(),
             mysql_branch_names: Default::default(),
@@ -2388,6 +2436,8 @@ mod test {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
+            multi_cluster: None,
+            output_tmp_resources: Default::default(),
             key,
             header_filter: None,
         };

@@ -258,6 +258,29 @@ pub(super) enum Commands {
 
     /// Kill a local mirrord session.
     Kill(Box<KillArgs>),
+
+    /// Detached guardian that monitors a PID and cleans up resources when it exits.
+    /// Spawned by `exec` for resources (e.g. local Redis) that must be cleaned up
+    /// even after `execve` replaces the process or the CLI is interrupted.
+    #[cfg(unix)]
+    #[command(hide = true, name = "cleanup-guardian")]
+    CleanupGuardian {
+        /// PID to monitor. Cleanup runs when this PID exits.
+        #[arg(long)]
+        watch_pid: u32,
+
+        /// Container runtime command (e.g. "docker", "podman") for container cleanup.
+        #[arg(long)]
+        container_runtime: Option<String>,
+
+        /// Container name to remove.
+        #[arg(long)]
+        container_name: Option<String>,
+
+        /// PID of a process to kill during cleanup.
+        #[arg(long)]
+        process_pid: Option<u32>,
+    },
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]

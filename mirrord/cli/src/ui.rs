@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::{
     collections::{BTreeMap, HashMap, hash_map::Entry},
     convert::Infallible,
-    net::{Ipv6Addr, SocketAddr},
+    net::{Ipv4Addr, SocketAddr},
     sync::Arc,
     time::Duration,
 };
@@ -804,7 +804,7 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
 
     let app = build_router(state);
 
-    let addr = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), args.port);
+    let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), args.port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .map_err(|e| CliError::UiError(format!("failed to bind to {addr}: {e}")))?;
@@ -813,12 +813,10 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
         .local_addr()
         .map_err(|e| CliError::UiError(format!("failed to get listener address: {e}")))?;
     let url = format!("http://{addr}?token={token}");
-    let extension_url = build_extension_configure_url(&addr, &token);
 
     eprintln!();
     eprintln!("  mirrord session monitor");
     eprintln!("    Web UI:             {url}");
-    eprintln!("    Browser extension:  {extension_url}");
     eprintln!();
 
     if let Err(err) = opener::open(&url) {
@@ -830,18 +828,6 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
         .map_err(|e| CliError::UiError(format!("server error: {e}")))?;
 
     Ok(())
-}
-
-const MIRRORD_EXTENSION_ID: &str = "bijejadnnfgjkfdocgocklekjhnhkhkf";
-
-fn build_extension_configure_url(addr: &SocketAddr, token: &str) -> String {
-    let backend = format!("http://{addr}");
-    let backend_encoded: String =
-        url::form_urlencoded::byte_serialize(backend.as_bytes()).collect();
-    format!(
-        "chrome-extension://{id}/pages/configure.html?backend={backend_encoded}&token={token}",
-        id = MIRRORD_EXTENSION_ID
-    )
 }
 
 #[cfg(test)]

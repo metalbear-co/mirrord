@@ -10,6 +10,7 @@ use mirrord_config::experimental::ExperimentalConfig;
 use mirrord_layer_lib::socket::apple_dnsinfo::*;
 use mirrord_layer_lib::{
     detour::{Detour, DetourGuard},
+    error::getaddrinfo_error_code,
     mutex::Mutex,
     socket::ops::socket,
 };
@@ -341,18 +342,18 @@ unsafe extern "C" fn getaddrinfo_detour(
         let rawish_service = (!raw_service.is_null()).then(|| CStr::from_ptr(raw_service));
         let rawish_hints = raw_hints.as_ref();
 
-        getaddrinfo(rawish_node, rawish_service, rawish_hints)
-            .map(|c_addr_info_ptr| {
+        match getaddrinfo(rawish_node, rawish_service, rawish_hints) {
+            Detour::Success(c_addr_info_ptr) => {
                 out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
                 MANAGED_ADDRINFO
                     .lock()
                     .expect("MANAGED_ADDRINFO lock failed")
                     .insert(c_addr_info_ptr as usize);
                 0
-            })
-            .unwrap_or_bypass_with(|_| {
-                FN_GETADDRINFO(raw_node, raw_service, raw_hints, out_addr_info)
-            })
+            }
+            Detour::Bypass(_) => FN_GETADDRINFO(raw_node, raw_service, raw_hints, out_addr_info),
+            Detour::Error(error) => getaddrinfo_error_code(error),
+        }
     }
 }
 

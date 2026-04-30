@@ -257,6 +257,59 @@ async fn start_server<P: Progress>(
     }
 }
 
+impl LocalRedis {
+    /// Spawn a background process that polls our PID and cleans up when we exit.
+    /// Detached from both the parent process and the terminal session so it survives
+    /// `execve` and Ctrl+C.
+    #[cfg(unix)]
+    pub fn spawn_cleanup_guardian(&self) -> CliResult<()> {
+        let watched_pid = std::process::id();
+        let exe = std::env::current_exe().map_err(CliError::CliPathError)?;
+
+        let mut cmd = tokio::process::Command::new(exe);
+        cmd.arg("cleanup-guardian")
+            .arg("--watch-pid")
+            .arg(watched_pid.to_string());
+
+        match self {
+            LocalRedis::Container {
+                runtime,
+                container_name,
+            } => {
+                cmd.arg("--container-runtime")
+                    .arg(runtime.command())
+                    .arg("--container-name")
+                    .arg(container_name);
+            }
+            LocalRedis::Process(child) => {
+                cmd.arg("--process-pid").arg(child.id().to_string());
+            }
+        }
+
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        unsafe {
+            cmd.pre_exec(|| {
+                crate::util::reparent_to_init()?;
+                crate::util::detach_io()?;
+                Ok(())
+            });
+        }
+
+        let mut child = cmd.spawn().map_err(|e| {
+            CliError::LocalRedisError(format!("failed to spawn cleanup guardian: {e}"))
+        })?;
+
+        // reparent_to_init forks -- our immediate child exits right away,
+        // reparenting the real guardian to init. Wait for the immediate child.
+        tokio::spawn(async move { child.wait().await });
+
+        Ok(())
+    }
+}
+
 /// Check if Redis is ready by sending a PING command.
 fn is_ready(port: u16) -> bool {
     Command::new("redis-cli")
