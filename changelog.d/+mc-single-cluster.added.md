@@ -1,1 +1,0 @@
-Support for single cluster sessions in Multi Cluster.
