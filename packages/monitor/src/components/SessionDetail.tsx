@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Settings } from 'lucide-react'
+import { Activity, Settings } from 'lucide-react'
 import type { SessionInfo, MonitorEvent, PortSubscription, ProcessInfo } from '../types'
 import { api } from '../api'
 import { EventType } from '../eventTypes'
@@ -118,8 +118,8 @@ export default function SessionDetail({
     <div className="h-full flex flex-col">
       <SessionHeader session={session} processes={processes} onKill={onKill} />
       <div className="flex-1 overflow-auto">
-        <div className="grid grid-cols-2 gap-4 p-4 max-w-5xl mx-auto auto-rows-min">
-          <div className="col-span-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4 max-w-7xl mx-auto auto-rows-min">
+          <div className="md:col-span-2 xl:col-span-3">
             <LiveStatusStrip
               session={session}
               portSubs={portSubs}
@@ -129,7 +129,7 @@ export default function SessionDetail({
           </div>
 
           {session.is_operator && session.key && (
-            <div className="col-span-2">
+            <div className="md:col-span-2 xl:col-span-3">
               <JoinBar
                 joinKey={session.key}
                 extensionState={extensionState}
@@ -143,23 +143,30 @@ export default function SessionDetail({
           <PortSubscriptionsCard portSubs={portSubs} />
 
           {processes.length > 0 && (
-            <div className="col-span-2">
+            <div className="md:col-span-2 xl:col-span-3">
               <ProcessesCard processes={processes} />
             </div>
           )}
 
-          <div className="col-span-2 h-[420px]">
-            <div className="rounded-md border border-border bg-card overflow-hidden h-full flex flex-col">
-              <EventStream session={session} />
-            </div>
+          <div className="md:col-span-2 xl:col-span-3">
+            <Widget
+              title="Events"
+              icon={<Activity className="h-3 w-3" />}
+              collapsible
+              defaultOpen
+            >
+              <div className="h-[420px] flex flex-col">
+                <EventStream session={session} />
+              </div>
+            </Widget>
           </div>
 
-          <div className="col-span-2">
+          <div className="md:col-span-2 xl:col-span-3">
             <Widget
               title="Config"
               icon={<Settings className="h-3 w-3" />}
               collapsible
-              defaultOpen={false}
+              defaultOpen
             >
               <ConfigTab config={session.config} />
             </Widget>

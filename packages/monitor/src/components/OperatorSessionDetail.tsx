@@ -8,7 +8,6 @@ import {
 } from '@metalbear/ui'
 import {
   Clock,
-  Filter,
   FlaskConical,
   Network,
   Radio,
@@ -22,6 +21,7 @@ import type {
 } from '../types'
 import type { ExtensionState } from '../extensionBridge'
 import JoinBar from './JoinBar'
+import JsonHighlight from './JsonHighlight'
 import Widget from './Widget'
 
 interface OperatorSessionDetailProps {
@@ -51,12 +51,12 @@ function relativeTime(iso: string): string {
 }
 
 function describeFilter(f: OperatorSessionSummary['httpFilter']): string {
-  if (!f) return 'No filter'
+  if (!f) return 'no filter'
   if (f.headerFilter) return `header: ${f.headerFilter}`
   if (f.pathFilter) return `path: ${f.pathFilter}`
   if (f.allOf?.length) return `${f.allOf.length} filters (all)`
   if (f.anyOf?.length) return `${f.anyOf.length} filters (any)`
-  return 'Custom filter'
+  return 'no filter'
 }
 
 function totalSplits(s: OperatorQueueSplits | undefined): number {
@@ -132,8 +132,8 @@ export default function OperatorSessionDetail({
       </div>
 
       <div className="flex-1 overflow-auto">
-        <div className="grid grid-cols-2 gap-4 p-4 max-w-5xl mx-auto auto-rows-min">
-          <div className="col-span-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4 max-w-7xl mx-auto auto-rows-min">
+          <div className="md:col-span-2 xl:col-span-3">
             <Card className="bg-card/40">
               <CardContent className="flex items-center gap-6 px-4 py-3">
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -168,7 +168,7 @@ export default function OperatorSessionDetail({
             </Card>
           </div>
 
-          <div className="col-span-2">
+          <div className="md:col-span-2 xl:col-span-3">
             <JoinBar
               joinKey={session.key}
               extensionState={extensionState}
@@ -195,6 +195,12 @@ export default function OperatorSessionDetail({
                 label="Owner"
                 value={`${session.owner.username} · ${session.owner.k8sUsername}`}
               />
+              {!isPreview && (
+                <Row
+                  label="HTTP filter"
+                  value={describeFilter(session.httpFilter)}
+                />
+              )}
               <Row label="Started" value={relativeTime(session.createdAt)} />
             </CardContent>
           </Card>
@@ -216,23 +222,6 @@ export default function OperatorSessionDetail({
             </Card>
           )}
 
-          {!isPreview && (
-            <Card className="overflow-hidden p-0">
-              <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
-                <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
-                  HTTP filter
-                </span>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="px-4 py-2.5 flex items-center gap-2">
-                  <Filter className="h-3 w-3 text-muted-foreground shrink-0" />
-                  <span className="text-xs font-mono break-all">
-                    {describeFilter(session.httpFilter)}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-          )}
 
           {splitsTotal > 0 && (
             <Card className="overflow-hidden p-0">
@@ -249,7 +238,7 @@ export default function OperatorSessionDetail({
             </Card>
           )}
 
-          <div className="col-span-2">
+          <div className="md:col-span-2 xl:col-span-3">
             <Widget
               title="Config"
               icon={<Settings className="h-3 w-3" />}
@@ -257,26 +246,24 @@ export default function OperatorSessionDetail({
               defaultOpen
             >
               <div className="p-4">
-                <pre className="text-[11px] whitespace-pre-wrap bg-card/30 border border-border rounded-md p-3 font-mono leading-relaxed overflow-x-auto">
-                  <JsonHighlight
-                    value={{
-                      id: session.id,
-                      key: session.key,
-                      namespace: session.namespace,
-                      target: session.target,
-                      owner: session.owner,
-                      createdAt: session.createdAt,
-                      durationSecs: session.durationSecs,
-                      lockedPorts: session.lockedPorts ?? [],
-                      queueSplits: session.queueSplits ?? {
-                        sqs: 0,
-                        rabbitmq: 0,
-                        kafka: 0,
-                      },
-                      httpFilter: session.httpFilter ?? null,
-                    }}
-                  />
-                </pre>
+                <JsonHighlight
+                  value={{
+                    id: session.id,
+                    key: session.key,
+                    namespace: session.namespace,
+                    target: session.target,
+                    owner: session.owner,
+                    createdAt: session.createdAt,
+                    durationSecs: session.durationSecs,
+                    lockedPorts: session.lockedPorts ?? [],
+                    queueSplits: session.queueSplits ?? {
+                      sqs: 0,
+                      rabbitmq: 0,
+                      kafka: 0,
+                    },
+                    httpFilter: session.httpFilter ?? null,
+                  }}
+                />
               </div>
             </Widget>
           </div>
@@ -294,60 +281,6 @@ function Row({ label, value }: { label: string; value: string }) {
         {value}
       </span>
     </div>
-  )
-}
-
-const JSON_TOKEN_RE =
-  /("(?:\\.|[^"\\])*"\s*:)|("(?:\\.|[^"\\])*")|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g
-
-function JsonHighlight({ value }: { value: unknown }) {
-  const text = JSON.stringify(value, null, 2)
-  const parts: Array<{ kind: string; text: string }> = []
-  let last = 0
-  for (const match of text.matchAll(JSON_TOKEN_RE)) {
-    const idx = match.index ?? 0
-    if (idx > last) parts.push({ kind: 'plain', text: text.slice(last, idx) })
-    if (match[1]) parts.push({ kind: 'key', text: match[1] })
-    else if (match[2]) parts.push({ kind: 'string', text: match[2] })
-    else if (match[3]) parts.push({ kind: 'literal', text: match[3] })
-    else if (match[4]) parts.push({ kind: 'number', text: match[4] })
-    last = idx + match[0].length
-  }
-  if (last < text.length) parts.push({ kind: 'plain', text: text.slice(last) })
-
-  return (
-    <code data-language="json">
-      {parts.map((p, i) => {
-        if (p.kind === 'key')
-          return (
-            <span key={i} className="text-sky-500 dark:text-sky-300">
-              {p.text}
-            </span>
-          )
-        if (p.kind === 'string')
-          return (
-            <span key={i} className="text-emerald-600 dark:text-emerald-300">
-              {p.text}
-            </span>
-          )
-        if (p.kind === 'number')
-          return (
-            <span key={i} className="text-amber-600 dark:text-amber-300">
-              {p.text}
-            </span>
-          )
-        if (p.kind === 'literal')
-          return (
-            <span
-              key={i}
-              className="text-fuchsia-600 dark:text-fuchsia-300 font-semibold"
-            >
-              {p.text}
-            </span>
-          )
-        return <span key={i}>{p.text}</span>
-      })}
-    </code>
   )
 }
 
