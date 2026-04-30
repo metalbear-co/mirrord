@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Users } from 'lucide-react'
+import { Users, Sparkles } from 'lucide-react'
 import type { OperatorSessionSummary } from '../types'
 import SessionRow from './SessionRow'
 import Avatar from './Avatar'
@@ -46,12 +46,14 @@ function relativeTime(iso: string): string {
   return `${Math.floor(diff / 86400)}d`
 }
 
-function shortKey(k: string): string {
-  return k.length > 6 ? k.slice(0, 6) : k
-}
-
 function firstName(full: string): string {
   return full.trim().split(/\s+/)[0] || full
+}
+
+const PREVIEW_OWNER_USERNAME = 'preview-env'
+
+function isPreviewSession(s: { owner: { username: string } }): boolean {
+  return s.owner.username === PREVIEW_OWNER_USERNAME
 }
 
 export default function OperatorList({
@@ -132,18 +134,24 @@ function KeyGroupSection({
   selectedId: string | null
   onSelect: (id: string) => void
 }) {
+  const groupIsPreview = group.sessions.every(isPreviewSession)
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2 px-1 text-[10.5px] uppercase tracking-wider text-muted-foreground font-semibold">
-        <span className="font-mono normal-case tracking-normal">
-          key {shortKey(group.key)}
+        <span className="font-mono normal-case tracking-normal break-all">
+          key {group.key}
         </span>
         {joined && (
-          <span className="px-1.5 rounded-full bg-primary/15 text-primary text-[9.5px] font-bold tracking-wider">
+          <span className="shrink-0 px-1.5 rounded-full bg-primary/15 text-primary text-[9.5px] font-bold tracking-wider">
             JOINED
           </span>
         )}
-        <span className="ml-auto normal-case tracking-normal font-medium">
+        {groupIsPreview && (
+          <span className="shrink-0 px-1.5 rounded-full border border-emerald-500/40 text-emerald-500 text-[9.5px] font-bold tracking-wider">
+            PREVIEW
+          </span>
+        )}
+        <span className="ml-auto shrink-0 normal-case tracking-normal font-medium">
           {group.sessions.length}
         </span>
       </div>
@@ -152,10 +160,16 @@ function KeyGroupSection({
           key={s.id}
           selected={selectedId === s.id}
           onClick={() => onSelect(s.id)}
-          lead={<Avatar name={s.owner.username} seed={s.owner.k8sUsername} />}
+          lead={
+            isPreviewSession(s) ? (
+              <PreviewBadge />
+            ) : (
+              <Avatar name={s.owner.username} seed={s.owner.k8sUsername} />
+            )
+          }
           target={s.target ? `${s.target.kind}/${s.target.name}` : 'targetless'}
           meta={[
-            firstName(s.owner.username),
+            isPreviewSession(s) ? 'preview env' : firstName(s.owner.username),
             s.namespace,
             relativeTime(s.createdAt),
           ]}
@@ -163,5 +177,17 @@ function KeyGroupSection({
         />
       ))}
     </div>
+  )
+}
+
+function PreviewBadge() {
+  return (
+    <span
+      className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300"
+      style={{ width: 26, height: 26 }}
+      title="preview environment"
+    >
+      <Sparkles className="h-3.5 w-3.5" />
+    </span>
   )
 }

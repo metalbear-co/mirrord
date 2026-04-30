@@ -4,7 +4,6 @@ import {
   Card,
   CardContent,
   CardHeader,
-  Code,
   Separator,
 } from '@metalbear/ui'
 import {
@@ -13,6 +12,7 @@ import {
   Network,
   Radio,
   Settings,
+  Sparkles,
   User,
 } from 'lucide-react'
 import type {
@@ -84,6 +84,7 @@ export default function OperatorSessionDetail({
     : 'targetless'
   const lockedPorts = session.lockedPorts ?? []
   const splits = session.queueSplits
+  const isPreview = session.owner.username === 'preview-env'
 
   const baseSecs = session.durationSecs ?? 0
   const baseAt = Date.now()
@@ -114,6 +115,15 @@ export default function OperatorSessionDetail({
             >
               operator
             </Badge>
+            {isPreview && (
+              <Badge
+                variant="outline"
+                className="text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal text-emerald-500 border-emerald-500/40 inline-flex items-center gap-1"
+              >
+                <Sparkles className="h-2.5 w-2.5" />
+                preview
+              </Badge>
+            )}
           </div>
           <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">
             read-only
@@ -189,26 +199,22 @@ export default function OperatorSessionDetail({
             </CardContent>
           </Card>
 
-          <Card className="overflow-hidden p-0">
-            <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
-              <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
-                Locked ports
-              </span>
-            </CardHeader>
-            <CardContent className="p-0">
-              {lockedPorts.length > 0 ? (
-                <div className="divide-y divide-border">
+          {lockedPorts.length > 0 && (
+            <Card className="overflow-hidden p-0">
+              <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
+                <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
+                  Locked ports
+                </span>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="px-4 py-2.5 flex flex-wrap items-center gap-1.5">
                   {lockedPorts.map((p, i) => (
-                    <PortRow key={`${p.port}-${i}`} port={p} />
+                    <PortChip key={`${p.port}-${i}`} port={p} />
                   ))}
                 </div>
-              ) : (
-                <div className="px-4 py-3 text-xs text-muted-foreground">
-                  No locked ports
-                </div>
-              )}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="overflow-hidden p-0">
             <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
@@ -246,16 +252,12 @@ export default function OperatorSessionDetail({
               title="Config"
               icon={<Settings className="h-3 w-3" />}
               collapsible
-              defaultOpen={false}
+              defaultOpen
             >
               <div className="p-4">
-                <Code
-                  variant="block"
-                  language="json"
-                  className="text-[11px] whitespace-pre-wrap bg-card/30 border border-border"
-                >
-                  {JSON.stringify(
-                    {
+                <pre className="text-[11px] whitespace-pre-wrap bg-card/30 border border-border rounded-md p-3 font-mono leading-relaxed overflow-x-auto">
+                  <JsonHighlight
+                    value={{
                       id: session.id,
                       key: session.key,
                       namespace: session.namespace,
@@ -270,11 +272,9 @@ export default function OperatorSessionDetail({
                         kafka: 0,
                       },
                       httpFilter: session.httpFilter ?? null,
-                    },
-                    null,
-                    2
-                  )}
-                </Code>
+                    }}
+                  />
+                </pre>
               </div>
             </Widget>
           </div>
@@ -295,28 +295,78 @@ function Row({ label, value }: { label: string; value: string }) {
   )
 }
 
-function PortRow({ port }: { port: OperatorLockedPort }) {
+const JSON_TOKEN_RE =
+  /("(?:\\.|[^"\\])*"\s*:)|("(?:\\.|[^"\\])*")|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g
+
+function JsonHighlight({ value }: { value: unknown }) {
+  const text = JSON.stringify(value, null, 2)
+  const parts: Array<{ kind: string; text: string }> = []
+  let last = 0
+  for (const match of text.matchAll(JSON_TOKEN_RE)) {
+    const idx = match.index ?? 0
+    if (idx > last) parts.push({ kind: 'plain', text: text.slice(last, idx) })
+    if (match[1]) parts.push({ kind: 'key', text: match[1] })
+    else if (match[2]) parts.push({ kind: 'string', text: match[2] })
+    else if (match[3]) parts.push({ kind: 'literal', text: match[3] })
+    else if (match[4]) parts.push({ kind: 'number', text: match[4] })
+    last = idx + match[0].length
+  }
+  if (last < text.length) parts.push({ kind: 'plain', text: text.slice(last) })
+
   return (
-    <div className="flex items-center justify-between px-4 py-2.5 gap-3">
-      <span className="text-xs font-mono font-medium text-foreground">
-        :{port.port}
+    <code data-language="json">
+      {parts.map((p, i) => {
+        if (p.kind === 'key')
+          return (
+            <span key={i} className="text-sky-500 dark:text-sky-300">
+              {p.text}
+            </span>
+          )
+        if (p.kind === 'string')
+          return (
+            <span key={i} className="text-emerald-600 dark:text-emerald-300">
+              {p.text}
+            </span>
+          )
+        if (p.kind === 'number')
+          return (
+            <span key={i} className="text-amber-600 dark:text-amber-300">
+              {p.text}
+            </span>
+          )
+        if (p.kind === 'literal')
+          return (
+            <span
+              key={i}
+              className="text-fuchsia-600 dark:text-fuchsia-300 font-semibold"
+            >
+              {p.text}
+            </span>
+          )
+        return <span key={i}>{p.text}</span>
+      })}
+    </code>
+  )
+}
+
+function PortChip({ port }: { port: OperatorLockedPort }) {
+  const tooltip = port.filter
+    ? `${port.kind} :${port.port} · ${port.filter}`
+    : `${port.kind} :${port.port}`
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/40 px-2 py-0.5 text-[11px] font-mono"
+      title={tooltip}
+    >
+      <span className="text-muted-foreground uppercase tracking-wider text-[9.5px]">
+        {port.kind}
       </span>
-      <div className="flex items-center gap-2 min-w-0">
-        {port.filter && (
-          <span
-            className="text-[11px] text-muted-foreground font-mono truncate"
-            title={port.filter}
-          >
-            {port.filter}
-          </span>
-        )}
-        <Badge
-          variant="outline"
-          className="text-xs px-2 py-0 font-mono font-normal shrink-0"
-        >
-          {port.kind}
-        </Badge>
-      </div>
-    </div>
+      <span className="text-foreground font-medium">:{port.port}</span>
+      {port.filter && (
+        <span className="text-muted-foreground/70 max-w-[120px] truncate">
+          {port.filter}
+        </span>
+      )}
+    </span>
   )
 }
