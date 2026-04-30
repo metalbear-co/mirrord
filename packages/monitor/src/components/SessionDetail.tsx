@@ -118,7 +118,7 @@ export default function SessionDetail({
     <div className="h-full flex flex-col">
       <SessionHeader session={session} processes={processes} onKill={onKill} />
       <div className="flex-1 overflow-auto">
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4 max-w-7xl mx-auto auto-rows-min">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4 max-w-7xl mx-auto auto-rows-min items-start">
           <div className="md:col-span-2 xl:col-span-3">
             <LiveStatusStrip
               session={session}
@@ -140,7 +140,7 @@ export default function SessionDetail({
           )}
 
           <SessionIdentity session={session} />
-          <PortSubscriptionsCard portSubs={portSubs} />
+          {portSubs.length > 0 && <PortSubscriptionsCard portSubs={portSubs} />}
 
           {processes.length > 0 && (
             <div className="md:col-span-2 xl:col-span-3">

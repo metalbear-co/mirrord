@@ -132,7 +132,7 @@ export default function OperatorSessionDetail({
       </div>
 
       <div className="flex-1 overflow-auto">
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4 max-w-7xl mx-auto auto-rows-min">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4 max-w-7xl mx-auto auto-rows-min items-start">
           <div className="md:col-span-2 xl:col-span-3">
             <Card className="bg-card/40">
               <CardContent className="flex items-center gap-6 px-4 py-3">
@@ -275,9 +275,9 @@ export default function OperatorSessionDetail({
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between px-4 py-2.5">
+    <div className="grid grid-cols-[110px_1fr] items-baseline gap-3 px-4 py-1.5">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-xs font-mono font-medium text-foreground break-all text-right">
+      <span className="text-xs font-mono font-medium text-foreground break-all">
         {value}
       </span>
     </div>
