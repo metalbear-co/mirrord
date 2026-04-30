@@ -1206,7 +1206,7 @@ jobs:
         with:
           fetch-depth: 0 # Required for commit history
 
-      - uses: linear/linear-release-action@v0
+      - uses: metalbear-co/linear-release-action@76a250988b9470b152ec13d24d661140084042c1
         with:
           access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
           version: ${{ needs.validate_release_request.outputs.version }}
