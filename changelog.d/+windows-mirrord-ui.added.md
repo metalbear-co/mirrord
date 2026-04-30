@@ -1,1 +1,1 @@
-`mirrord ui` now works on Windows. The session monitor's per-session HTTP API binds to a named pipe (with a DACL restricted to the current user) on Windows and to a Unix domain socket (mode 0o600) on unix. The same cross-platform integration test suite covers `/info`, `/events`, `/kill`, the internal updater task, and graceful shutdown on both platforms.
+`mirrord ui` now works on Windows, using a named pipe restricted to the current user instead of the mode 0o600 unix socket.
