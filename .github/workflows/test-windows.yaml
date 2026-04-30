@@ -35,6 +35,9 @@ jobs:
       - run: |
           cd mirrord/layer-tests/tests/apps/dns_resolve
           cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/rebind0
+          cargo build
       - name: build layer
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
