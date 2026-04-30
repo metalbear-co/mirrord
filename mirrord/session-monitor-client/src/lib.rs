@@ -121,13 +121,13 @@ pub fn session_endpoints(sessions_dir: &Path) -> Vec<(String, SessionEndpoint)> 
 #[cfg(windows)]
 async fn connect_named_pipe(pipe_name: &str) -> std::io::Result<TransportStream> {
     use tokio::net::windows::named_pipe::ClientOptions;
+    use winapi::shared::winerror::ERROR_PIPE_BUSY;
 
-    const ERROR_PIPE_BUSY: i32 = 231;
     let mut attempts = 0;
     loop {
         match ClientOptions::new().open(pipe_name) {
             Ok(client) => return Ok(client),
-            Err(err) if attempts < 20 && err.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
+            Err(err) if attempts < 20 && err.raw_os_error() == Some(ERROR_PIPE_BUSY as i32) => {
                 attempts += 1;
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
@@ -253,10 +253,8 @@ impl SessionClient {
         if !resp.status().is_success() {
             return Err(SessionError::BadStatus(resp.status()));
         }
-        let byte_stream =
-            BodyDataStream::new(resp.into_body()).map(|frame_result| -> SseByteResult {
-                frame_result.map_err(std::io::Error::other)
-            });
+        let byte_stream = BodyDataStream::new(resp.into_body())
+            .map(|frame_result| -> SseByteResult { frame_result.map_err(std::io::Error::other) });
         Ok(Box::pin(byte_stream.eventsource()))
     }
 }

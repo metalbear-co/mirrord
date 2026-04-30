@@ -35,18 +35,17 @@ pub struct PipeSecurity {
     _token_user_buffer: Vec<u8>,
     _acl_buffer: Vec<u8>,
     _sd_buffer: Vec<u8>,
-    sa: SECURITY_ATTRIBUTES,
+    security_attributes: SECURITY_ATTRIBUTES,
 }
 
-// SAFETY: The pointer inside `sa.lpSecurityDescriptor` points into `_sd_buffer`, which is
-// owned by `PipeSecurity` and follows it across thread boundaries. No other thread observes
-// the pointer concurrently because we only expose it via `as_raw` to a synchronous winapi
-// call that copies the descriptor into the kernel-side pipe handle.
+// SAFETY: The pointer inside `security_attributes.lpSecurityDescriptor` points into
+// `_sd_buffer`, which is owned by `PipeSecurity` and follows it across thread boundaries. No
+// other thread observes the pointer concurrently because we only expose it via `as_raw` to a
+// synchronous winapi call that copies the descriptor into the kernel-side pipe handle.
 unsafe impl Send for PipeSecurity {}
 unsafe impl Sync for PipeSecurity {}
 
 impl PipeSecurity {
-    /// Constructs a [`PipeSecurity`] for the calling process's user.
     pub fn for_current_user() -> io::Result<Self> {
         unsafe { build_security_attributes() }
     }
@@ -54,23 +53,24 @@ impl PipeSecurity {
     /// Pointer to the [`SECURITY_ATTRIBUTES`] suitable for passing to
     /// `ServerOptions::create_with_security_attributes_raw`. Valid only while `self` is alive.
     pub fn as_raw(&self) -> *mut std::ffi::c_void {
-        &self.sa as *const SECURITY_ATTRIBUTES as *mut std::ffi::c_void
+        &self.security_attributes as *const SECURITY_ATTRIBUTES as *mut _
     }
 }
 
 unsafe fn build_security_attributes() -> io::Result<PipeSecurity> {
-    // 1) Open the current process token so we can query the user SID.
     let mut token: HANDLE = null_mut();
     if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
         return Err(io::Error::last_os_error());
     }
     let token_guard = TokenHandle(token);
 
-    // 2) GetTokenInformation called twice: first to learn the buffer size, then for real.
     let mut needed: DWORD = 0;
     unsafe {
         GetTokenInformation(token_guard.0, TokenUser, null_mut(), 0, &mut needed);
     }
+    // SAFETY: `Vec<u8>` is guaranteed to be 1-byte aligned, which is sufficient for
+    // `GetTokenInformation` to write a [`TOKEN_USER`] into the buffer (the winapi struct is
+    // byte-packed; the kernel does not require higher alignment for this call).
     let mut token_user_buffer = vec![0u8; needed as usize];
     if unsafe {
         GetTokenInformation(
@@ -89,7 +89,8 @@ unsafe fn build_security_attributes() -> io::Result<PipeSecurity> {
     let sid: PSID = token_user.User.Sid;
     let sid_length = unsafe { GetLengthSid(sid) };
 
-    // 3) Build a small ACL holding one ACCESS_ALLOWED_ACE for the user SID.
+    // Build a small [`ACL`](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-acl)
+    // holding one ACCESS_ALLOWED_ACE for the user SID.
     // `sizeof(ACL) + sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + GetLengthSid()` is the
     // tight size; we add slack to accommodate any winapi struct alignment.
     let acl_size = (size_of::<ACL>() + 16 + sid_length as usize) as DWORD;
@@ -99,11 +100,15 @@ unsafe fn build_security_attributes() -> io::Result<PipeSecurity> {
     if unsafe { InitializeAcl(acl_ptr, acl_size, ACL_REVISION as DWORD) } == 0 {
         return Err(io::Error::last_os_error());
     }
+    // Add the ACEs (access control entries) to the ACL — here, a single GENERIC_ALL ACE for
+    // the current user's SID.
     if unsafe { AddAccessAllowedAce(acl_ptr, ACL_REVISION as DWORD, GENERIC_ALL, sid) } == 0 {
         return Err(io::Error::last_os_error());
     }
 
-    // 4) Build the security descriptor and attach the DACL.
+    // SAFETY: `Vec<u8>` is guaranteed to be 1-byte aligned, which is what
+    // `InitializeSecurityDescriptor` and `SetSecurityDescriptorDacl` need to populate the
+    // SECURITY_DESCRIPTOR fields below.
     let mut sd_buffer = vec![0u8; SECURITY_DESCRIPTOR_MIN_LENGTH];
     let sd_ptr = sd_buffer.as_mut_ptr().cast();
     if unsafe { InitializeSecurityDescriptor(sd_ptr, SECURITY_DESCRIPTOR_REVISION) } == 0 {
@@ -113,7 +118,7 @@ unsafe fn build_security_attributes() -> io::Result<PipeSecurity> {
         return Err(io::Error::last_os_error());
     }
 
-    let sa = SECURITY_ATTRIBUTES {
+    let security_attributes = SECURITY_ATTRIBUTES {
         nLength: size_of::<SECURITY_ATTRIBUTES>() as DWORD,
         lpSecurityDescriptor: sd_ptr,
         bInheritHandle: FALSE,
@@ -125,7 +130,7 @@ unsafe fn build_security_attributes() -> io::Result<PipeSecurity> {
         _token_user_buffer: token_user_buffer,
         _acl_buffer: acl_buffer,
         _sd_buffer: sd_buffer,
-        sa,
+        security_attributes,
     })
 }
 
@@ -133,6 +138,8 @@ struct TokenHandle(HANDLE);
 
 impl Drop for TokenHandle {
     fn drop(&mut self) {
-        unsafe { CloseHandle(self.0) };
+        if !self.0.is_null() {
+            unsafe { CloseHandle(self.0) };
+        }
     }
 }

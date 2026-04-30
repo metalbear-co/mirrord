@@ -94,8 +94,9 @@ fn pnpm_available() -> bool {
 }
 
 /// Pnpm is installed via `corepack` as a batch script on windows, so `Command::new("pnpm")`
-/// fails — Rust's `std::process::Command` on windows doesn't apply `PATHEXT` and only looks
-/// for `pnpm.exe`. Use the `.cmd` shim explicitly there.
+/// fails — [`std::process::Command`] on windows doesn't apply `PATHEXT` (see
+/// <https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/start>)
+/// and only looks for `pnpm.exe`. Use the `.cmd` shim explicitly there.
 fn pnpm_command() -> &'static str {
     if cfg!(windows) { "pnpm.cmd" } else { "pnpm" }
 }

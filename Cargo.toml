@@ -270,6 +270,7 @@ winapi = { version = "0.3.9", features = [
     "namedpipeapi",
     "minwinbase",
     "aclapi",
+    "winerror",
     "impl-default",
 ] }
 x509-certificate = "0.24"
