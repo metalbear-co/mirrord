@@ -132,140 +132,139 @@ export default function OperatorSessionDetail({
       </div>
 
       <div className="flex-1 overflow-auto">
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4 max-w-7xl mx-auto auto-rows-min items-start">
-          <div className="md:col-span-2 xl:col-span-3">
-            <Card className="bg-card/40">
-              <CardContent className="flex items-center gap-6 px-4 py-3">
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Clock className="h-3 w-3" />
-                  <span className="font-mono tabular-nums">
-                    {formatUptime(uptime)}
-                  </span>
-                </div>
-                <Separator orientation="vertical" className="h-4" />
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Network className="h-3 w-3" />
-                  <span>
-                    {lockedPorts.length}{' '}
-                    {lockedPorts.length === 1 ? 'port' : 'ports'}
-                  </span>
-                </div>
-                <Separator orientation="vertical" className="h-4" />
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Radio className="h-3 w-3" />
-                  <span>
-                    {splitsTotal} {splitsTotal === 1 ? 'split' : 'splits'}
-                  </span>
-                </div>
-                <Separator orientation="vertical" className="h-4" />
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <User className="h-3 w-3" />
-                  <span className="truncate" title={session.owner.k8sUsername}>
-                    {session.owner.username}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="md:col-span-2 xl:col-span-3">
-            <JoinBar
-              joinKey={session.key}
-              extensionState={extensionState}
-              onJoin={onJoin}
-              onLeave={onLeave}
-            />
-          </div>
-
-          <Card className="overflow-hidden p-0">
-            <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
-              <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
-                Session
-              </span>
-            </CardHeader>
-            <CardContent className="p-0 divide-y divide-border">
-              <Row label="Target" value={targetLabel} />
-              {session.target?.container && (
-                <Row label="Container" value={session.target.container} />
-              )}
-              <Row label="Namespace" value={session.namespace || '—'} />
-              <Row label="Session ID" value={session.id} />
-              <Row label="Key" value={session.key} />
-              <Row
-                label="Owner"
-                value={`${session.owner.username} · ${session.owner.k8sUsername}`}
-              />
-              {!isPreview && (
-                <Row
-                  label="HTTP filter"
-                  value={describeFilter(session.httpFilter)}
-                />
-              )}
-              <Row label="Started" value={relativeTime(session.createdAt)} />
+        <div className="flex flex-col gap-4 p-4 max-w-7xl mx-auto">
+          <Card className="bg-card/40">
+            <CardContent className="flex items-center gap-6 px-4 py-3">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Clock className="h-3 w-3" />
+                <span className="font-mono tabular-nums">
+                  {formatUptime(uptime)}
+                </span>
+              </div>
+              <Separator orientation="vertical" className="h-4" />
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Network className="h-3 w-3" />
+                <span>
+                  {lockedPorts.length}{' '}
+                  {lockedPorts.length === 1 ? 'port' : 'ports'}
+                </span>
+              </div>
+              <Separator orientation="vertical" className="h-4" />
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Radio className="h-3 w-3" />
+                <span>
+                  {splitsTotal} {splitsTotal === 1 ? 'split' : 'splits'}
+                </span>
+              </div>
+              <Separator orientation="vertical" className="h-4" />
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <User className="h-3 w-3" />
+                <span className="truncate" title={session.owner.k8sUsername}>
+                  {session.owner.username}
+                </span>
+              </div>
             </CardContent>
           </Card>
 
-          {lockedPorts.length > 0 && (
-            <Card className="overflow-hidden p-0">
-              <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
-                <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
-                  Locked ports
-                </span>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="px-4 py-2.5 flex flex-wrap items-center gap-1.5">
-                  {lockedPorts.map((p, i) => (
-                    <PortChip key={`${p.port}-${i}`} port={p} />
-                  ))}
+          <JoinBar
+            joinKey={session.key}
+            extensionState={extensionState}
+            onJoin={onJoin}
+            onLeave={onLeave}
+          />
+
+          <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4 items-start">
+            <div className="flex flex-col gap-4 min-w-0">
+              <Card className="overflow-hidden p-0">
+                <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
+                  <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
+                    Session
+                  </span>
+                </CardHeader>
+                <CardContent className="p-0 divide-y divide-border">
+                  <Row label="Target" value={targetLabel} />
+                  {session.target?.container && (
+                    <Row label="Container" value={session.target.container} />
+                  )}
+                  <Row label="Namespace" value={session.namespace || '—'} />
+                  <Row label="Session ID" value={session.id} />
+                  <Row label="Key" value={session.key} />
+                  <Row
+                    label="Owner"
+                    value={`${session.owner.username} · ${session.owner.k8sUsername}`}
+                  />
+                  {!isPreview && (
+                    <Row
+                      label="HTTP filter"
+                      value={describeFilter(session.httpFilter)}
+                    />
+                  )}
+                  <Row label="Started" value={relativeTime(session.createdAt)} />
+                </CardContent>
+              </Card>
+
+              {lockedPorts.length > 0 && (
+                <Card className="overflow-hidden p-0">
+                  <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
+                    <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
+                      Locked ports
+                    </span>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <div className="px-4 py-2.5 flex flex-wrap items-center gap-1.5">
+                      {lockedPorts.map((p, i) => (
+                        <PortChip key={`${p.port}-${i}`} port={p} />
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {splitsTotal > 0 && (
+                <Card className="overflow-hidden p-0">
+                  <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
+                    <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
+                      Queue splits
+                    </span>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <div className="px-4 py-2.5 text-xs font-mono">
+                      {splitSummary(splits)}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-4 min-w-0">
+              <Widget
+                title="Config"
+                icon={<Settings className="h-3 w-3" />}
+                collapsible
+                defaultOpen
+              >
+                <div className="p-4">
+                  <JsonHighlight
+                    value={{
+                      id: session.id,
+                      key: session.key,
+                      namespace: session.namespace,
+                      target: session.target,
+                      owner: session.owner,
+                      createdAt: session.createdAt,
+                      durationSecs: session.durationSecs,
+                      lockedPorts: session.lockedPorts ?? [],
+                      queueSplits: session.queueSplits ?? {
+                        sqs: 0,
+                        rabbitmq: 0,
+                        kafka: 0,
+                      },
+                      httpFilter: session.httpFilter ?? null,
+                    }}
+                  />
                 </div>
-              </CardContent>
-            </Card>
-          )}
-
-
-          {splitsTotal > 0 && (
-            <Card className="overflow-hidden p-0">
-              <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
-                <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
-                  Queue splits
-                </span>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="px-4 py-2.5 text-xs font-mono">
-                  {splitSummary(splits)}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          <div className="md:col-span-2 xl:col-span-3">
-            <Widget
-              title="Config"
-              icon={<Settings className="h-3 w-3" />}
-              collapsible
-              defaultOpen
-            >
-              <div className="p-4">
-                <JsonHighlight
-                  value={{
-                    id: session.id,
-                    key: session.key,
-                    namespace: session.namespace,
-                    target: session.target,
-                    owner: session.owner,
-                    createdAt: session.createdAt,
-                    durationSecs: session.durationSecs,
-                    lockedPorts: session.lockedPorts ?? [],
-                    queueSplits: session.queueSplits ?? {
-                      sqs: 0,
-                      rabbitmq: 0,
-                      kafka: 0,
-                    },
-                    httpFilter: session.httpFilter ?? null,
-                  }}
-                />
-              </div>
-            </Widget>
+              </Widget>
+            </div>
           </div>
         </div>
       </div>

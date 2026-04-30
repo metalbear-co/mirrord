@@ -118,54 +118,51 @@ export default function SessionDetail({
     <div className="h-full flex flex-col">
       <SessionHeader session={session} processes={processes} onKill={onKill} />
       <div className="flex-1 overflow-auto">
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4 max-w-7xl mx-auto auto-rows-min items-start">
-          <div className="md:col-span-2 xl:col-span-3">
-            <LiveStatusStrip
-              session={session}
-              portSubs={portSubs}
-              processes={processes}
-              eventCounts={eventCounts}
-            />
-          </div>
+        <div className="flex flex-col gap-4 p-4 max-w-7xl mx-auto">
+          <LiveStatusStrip
+            session={session}
+            portSubs={portSubs}
+            processes={processes}
+            eventCounts={eventCounts}
+          />
 
           {session.is_operator && session.key && (
-            <div className="md:col-span-2 xl:col-span-3">
-              <JoinBar
-                joinKey={session.key}
-                extensionState={extensionState}
-                onJoin={onJoin}
-                onLeave={onLeave}
-              />
-            </div>
+            <JoinBar
+              joinKey={session.key}
+              extensionState={extensionState}
+              onJoin={onJoin}
+              onLeave={onLeave}
+            />
           )}
 
-          <SessionIdentity session={session} />
-          {portSubs.length > 0 && <PortSubscriptionsCard portSubs={portSubs} />}
+          <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4 items-start">
+            <div className="flex flex-col gap-4 min-w-0">
+              <SessionIdentity session={session} />
+              {portSubs.length > 0 && <PortSubscriptionsCard portSubs={portSubs} />}
+              {processes.length > 0 && <ProcessesCard processes={processes} />}
+            </div>
 
-          {processes.length > 0 && <ProcessesCard processes={processes} />}
+            <div className="flex flex-col gap-4 min-w-0">
+              <Widget
+                title="Events"
+                icon={<Activity className="h-3 w-3" />}
+                collapsible
+                defaultOpen
+              >
+                <div className="h-[420px] flex flex-col">
+                  <EventStream session={session} />
+                </div>
+              </Widget>
 
-          <div className="md:col-span-2 xl:col-span-3">
-            <Widget
-              title="Events"
-              icon={<Activity className="h-3 w-3" />}
-              collapsible
-              defaultOpen
-            >
-              <div className="h-[420px] flex flex-col">
-                <EventStream session={session} />
-              </div>
-            </Widget>
-          </div>
-
-          <div className="md:col-span-2 xl:col-span-3">
-            <Widget
-              title="Config"
-              icon={<Settings className="h-3 w-3" />}
-              collapsible
-              defaultOpen
-            >
-              <ConfigTab config={session.config} />
-            </Widget>
+              <Widget
+                title="Config"
+                icon={<Settings className="h-3 w-3" />}
+                collapsible
+                defaultOpen
+              >
+                <ConfigTab config={session.config} />
+              </Widget>
+            </div>
           </div>
         </div>
       </div>
