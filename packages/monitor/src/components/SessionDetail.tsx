@@ -10,6 +10,8 @@ import SessionHeader from './SessionHeader'
 import SessionTabs from './SessionTabs'
 import OverviewTab from './OverviewTab'
 import ConfigTab from './ConfigTab'
+import JoinBar from './JoinBar'
+import type { ExtensionState } from '../extensionBridge'
 import {
   type DetailTab,
   type EventCounts,
@@ -20,9 +22,18 @@ import {
 interface Props {
   session: SessionInfo
   onKill: () => void
+  extensionState: ExtensionState
+  onJoin: () => Promise<{ ok: boolean; error?: string }>
+  onLeave: () => Promise<{ ok: boolean; error?: string }>
 }
 
-export default function SessionDetail({ session, onKill }: Props) {
+export default function SessionDetail({
+  session,
+  onKill,
+  extensionState,
+  onJoin,
+  onLeave,
+}: Props) {
   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
   const [portSubs, setPortSubs] = useState<PortSubscription[]>([])
   const [processes, setProcesses] = useState<ProcessInfo[]>([])
@@ -119,13 +130,27 @@ export default function SessionDetail({ session, onKill }: Props) {
       <SessionTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
       <div className="flex-1 overflow-hidden">
         {activeTab === 'overview' && (
-          <OverviewTab
-            session={session}
-            portSubs={portSubs}
-            processes={processes}
-            eventCounts={eventCounts}
-            onSwitchTab={setActiveTab}
-          />
+          <div className="overflow-auto h-full">
+            <div className="p-4 max-w-3xl">
+              {session.is_operator && session.key && (
+                <div className="mb-4">
+                  <JoinBar
+                    joinKey={session.key}
+                    extensionState={extensionState}
+                    onJoin={onJoin}
+                    onLeave={onLeave}
+                  />
+                </div>
+              )}
+            </div>
+            <OverviewTab
+              session={session}
+              portSubs={portSubs}
+              processes={processes}
+              eventCounts={eventCounts}
+              onSwitchTab={setActiveTab}
+            />
+          </div>
         )}
         {activeTab === 'events' && <EventStream session={session} />}
         {activeTab === 'config' && <ConfigTab config={session.config} />}

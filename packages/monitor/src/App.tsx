@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type {
   OperatorSessionSummary,
   OperatorSessionsResponse,
@@ -31,6 +31,10 @@ export default function App() {
   const [operatorSessions, setOperatorSessions] = useState<OperatorSessionSummary[]>([])
   const [watchStatus, setWatchStatus] = useState<OperatorWatchStatus | null>(null)
   const [selectedKind, setSelectedKind] = useState<'local' | 'operator' | null>(null)
+  const selectedKindRef = useRef(selectedKind)
+  useEffect(() => {
+    selectedKindRef.current = selectedKind
+  }, [selectedKind])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [connectModalOpen, setConnectModalOpen] = useState(false)
   const [extensionState, setExtensionState] = useState<ExtensionState>({
@@ -157,7 +161,9 @@ export default function App() {
         } else if (msg.type === 'session_removed') {
           const removedId = msg.session_id
           setSessions((prev) => prev.filter((s) => s.session_id !== removedId))
-          setSelectedId((prev) => (prev === removedId && selectedKind === 'local' ? null : prev))
+          setSelectedId((prev) =>
+            prev === removedId && selectedKindRef.current === 'local' ? null : prev
+          )
         } else if (msg.type === 'operator_session_added' || msg.type === 'operator_session_updated') {
           const session = msg.session
           setOperatorSessions((prev) => {
@@ -170,7 +176,11 @@ export default function App() {
         } else if (msg.type === 'operator_session_removed') {
           const removedId = msg.id
           setOperatorSessions((prev) => prev.filter((s) => s.id !== removedId))
-          setSelectedId((prev) => (prev === removedId && selectedKind === 'operator' ? null : prev))
+          setSelectedId((prev) =>
+            prev === removedId && selectedKindRef.current === 'operator'
+              ? null
+              : prev
+          )
         }
       }
     }
@@ -181,7 +191,7 @@ export default function App() {
       if (reconnectTimer) clearTimeout(reconnectTimer)
       ws?.close()
     }
-  }, [selectedKind])
+  }, [])
 
   const handleKill = useCallback(async (id: string) => {
     await api.killSession(id)
@@ -290,6 +300,9 @@ export default function App() {
             <SessionDetail
               session={selectedLocal}
               onKill={() => handleKill(selectedLocal.session_id)}
+              extensionState={extensionState}
+              onJoin={() => handleJoinViaExtension(selectedLocal.key ?? '')}
+              onLeave={handleLeaveViaExtension}
             />
           ) : selectedOperator ? (
             <OperatorSessionDetail

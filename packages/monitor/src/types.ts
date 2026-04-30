@@ -17,6 +17,8 @@ export interface SessionInfo {
   processes: ProcessInfo[]
   port_subscriptions: PortSubscription[]
   config: Record<string, unknown>
+  key?: string | null
+  namespace?: string | null
 }
 
 // Matches Rust MonitorEvent with #[serde(tag = "type", rename_all = "snake_case")]
@@ -48,6 +50,18 @@ export interface OperatorSessionTarget {
   container: string
 }
 
+export interface OperatorLockedPort {
+  port: number
+  kind: string
+  filter?: string | null
+}
+
+export interface OperatorQueueSplits {
+  sqs: number
+  rabbitmq: number
+  kafka: number
+}
+
 export interface OperatorSessionSummary {
   id: string
   key: string
@@ -55,6 +69,9 @@ export interface OperatorSessionSummary {
   owner: OperatorSessionOwner
   target: OperatorSessionTarget | null
   createdAt: string
+  durationSecs?: number
+  lockedPorts?: OperatorLockedPort[]
+  queueSplits?: OperatorQueueSplits
   httpFilter?: OperatorSessionHttpFilter | null
 }
 

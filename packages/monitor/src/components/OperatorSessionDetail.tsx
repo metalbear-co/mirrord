@@ -1,8 +1,45 @@
-import { Box, KeyRound, User } from 'lucide-react'
-import type { OperatorSessionSummary } from '../types'
+import { useEffect, useState } from 'react'
+import {
+  Badge,
+  Card,
+  CardContent,
+  CardHeader,
+  Code,
+  Separator,
+} from '@metalbear/ui'
+import {
+  Clock,
+  Filter,
+  Network,
+  Radio,
+  Server,
+  Settings,
+  User,
+} from 'lucide-react'
+import type {
+  OperatorLockedPort,
+  OperatorQueueSplits,
+  OperatorSessionSummary,
+} from '../types'
+import type { ExtensionState } from '../extensionBridge'
+import SessionTabs from './SessionTabs'
+import JoinBar from './JoinBar'
+import type { DetailTab, TabDef } from './sessionDetailTypes'
 
 interface OperatorSessionDetailProps {
   session: OperatorSessionSummary
+  extensionState: ExtensionState
+  onJoin: () => Promise<{ ok: boolean; error?: string }>
+  onLeave: () => Promise<{ ok: boolean; error?: string }>
+}
+
+function formatUptime(secs: number): string {
+  const seconds = Math.max(0, Math.floor(secs))
+  const minutes = Math.floor(seconds / 60)
+  const hours = Math.floor(minutes / 60)
+  if (hours > 0) return `${hours}h ${minutes % 60}m`
+  if (minutes > 0) return `${minutes}m ${seconds % 60}s`
+  return `${seconds}s`
 }
 
 function relativeTime(iso: string): string {
@@ -24,81 +61,261 @@ function describeFilter(f: OperatorSessionSummary['httpFilter']): string {
   return 'Custom filter'
 }
 
-export default function OperatorSessionDetail({ session }: OperatorSessionDetailProps) {
+function totalSplits(s: OperatorQueueSplits | undefined): number {
+  if (!s) return 0
+  return s.sqs + s.rabbitmq + s.kafka
+}
+
+function splitSummary(s: OperatorQueueSplits | undefined): string {
+  if (!s) return ''
+  const parts: string[] = []
+  if (s.sqs > 0) parts.push(`SQS ${s.sqs}`)
+  if (s.rabbitmq > 0) parts.push(`RabbitMQ ${s.rabbitmq}`)
+  if (s.kafka > 0) parts.push(`Kafka ${s.kafka}`)
+  return parts.join(' · ')
+}
+
+export default function OperatorSessionDetail({
+  session,
+  extensionState,
+  onJoin,
+  onLeave,
+}: OperatorSessionDetailProps) {
   const targetLabel = session.target
     ? `${session.target.kind}/${session.target.name}`
     : 'targetless'
+  const lockedPorts = session.lockedPorts ?? []
+  const splits = session.queueSplits
+
+  const baseSecs = session.durationSecs ?? 0
+  const baseAt = Date.now()
+  const [uptime, setUptime] = useState(baseSecs)
+  useEffect(() => {
+    setUptime(baseSecs)
+    const interval = setInterval(() => {
+      setUptime(baseSecs + Math.floor((Date.now() - baseAt) / 1000))
+    }, 1000)
+    return () => clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id, baseSecs])
+
+  const [activeTab, setActiveTab] = useState<DetailTab>('overview')
+  const tabs: TabDef[] = [
+    { id: 'overview', label: 'Overview', icon: Server },
+    { id: 'config', label: 'Config', icon: Settings },
+  ]
+
   return (
-    <div className="h-full overflow-y-auto p-6 max-w-3xl">
-      <div className="flex items-center gap-3 mb-6">
-        <Box className="h-5 w-5 text-muted-foreground" />
-        <div>
-          <h1 className="text-xl font-bold font-mono leading-none">{targetLabel}</h1>
-          <div className="text-xs text-muted-foreground mt-1">
-            {session.namespace} · started {relativeTime(session.createdAt)}
+    <div className="h-full flex flex-col">
+      <div className="border-b border-border px-4 py-2.5 bg-card/30 shrink-0">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            <span className="font-mono text-sm font-semibold text-foreground">
+              {targetLabel}
+            </span>
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal text-primary border-primary/40"
+            >
+              operator
+            </Badge>
           </div>
+          <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">
+            read-only
+          </span>
         </div>
-        <span className="ml-auto text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">
-          read-only
-        </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <Card title="Owner" icon={<User className="h-4 w-4" />}>
-          <div className="text-sm font-medium">{session.owner.username}</div>
-          <div className="text-[11px] text-muted-foreground font-mono mt-0.5 break-all">
-            {session.owner.k8sUsername}
-          </div>
-        </Card>
-        <Card title="Session key" icon={<KeyRound className="h-4 w-4" />}>
-          <div className="text-sm font-mono font-medium">{session.key}</div>
-          <div className="text-[11px] text-muted-foreground mt-0.5">id {session.id}</div>
-        </Card>
-        <Card title="HTTP filter" className="col-span-2">
-          <div className="text-xs font-mono break-all">{describeFilter(session.httpFilter)}</div>
-        </Card>
-        {session.target?.container && (
-          <Card title="Container" className="col-span-2">
-            <div className="text-xs font-mono">{session.target.container}</div>
+      <SessionTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
+
+      <div className="overflow-auto h-full" hidden={activeTab !== 'overview'}>
+        <div className="p-4 space-y-4 max-w-3xl">
+          <Card className="bg-card/40">
+            <CardContent className="flex items-center gap-6 px-4 py-3">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Clock className="h-3 w-3" />
+                <span className="font-mono tabular-nums">
+                  {formatUptime(uptime)}
+                </span>
+              </div>
+              <Separator orientation="vertical" className="h-4" />
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Network className="h-3 w-3" />
+                <span>
+                  {lockedPorts.length}{' '}
+                  {lockedPorts.length === 1 ? 'port' : 'ports'}
+                </span>
+              </div>
+              <Separator orientation="vertical" className="h-4" />
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Radio className="h-3 w-3" />
+                <span>
+                  {totalSplits(splits)}{' '}
+                  {totalSplits(splits) === 1 ? 'split' : 'splits'}
+                </span>
+              </div>
+              <Separator orientation="vertical" className="h-4" />
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <User className="h-3 w-3" />
+                <span className="truncate" title={session.owner.k8sUsername}>
+                  {session.owner.username}
+                </span>
+              </div>
+            </CardContent>
           </Card>
-        )}
+
+          <JoinBar
+            joinKey={session.key}
+            extensionState={extensionState}
+            onJoin={onJoin}
+            onLeave={onLeave}
+          />
+
+          <Card className="overflow-hidden p-0">
+            <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
+              <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
+                Session
+              </span>
+            </CardHeader>
+            <CardContent className="p-0 divide-y divide-border">
+              <Row label="Target" value={targetLabel} />
+              {session.target?.container && (
+                <Row label="Container" value={session.target.container} />
+              )}
+              <Row label="Namespace" value={session.namespace || '—'} />
+              <Row label="Session ID" value={session.id} />
+              <Row label="Key" value={session.key} />
+              <Row
+                label="Owner"
+                value={`${session.owner.username} · ${session.owner.k8sUsername}`}
+              />
+              <Row label="Started" value={relativeTime(session.createdAt)} />
+            </CardContent>
+          </Card>
+
+          <Card className="overflow-hidden p-0">
+            <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
+              <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
+                Locked ports
+              </span>
+            </CardHeader>
+            <CardContent className="p-0">
+              {lockedPorts.length > 0 ? (
+                <div className="divide-y divide-border">
+                  {lockedPorts.map((p, i) => (
+                    <PortRow key={`${p.port}-${i}`} port={p} />
+                  ))}
+                </div>
+              ) : (
+                <div className="px-4 py-3 text-xs text-muted-foreground">
+                  No locked ports
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="overflow-hidden p-0">
+            <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
+              <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
+                HTTP filter
+              </span>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="px-4 py-2.5 flex items-center gap-2">
+                <Filter className="h-3 w-3 text-muted-foreground shrink-0" />
+                <span className="text-xs font-mono break-all">
+                  {describeFilter(session.httpFilter)}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {totalSplits(splits) > 0 && (
+            <Card className="overflow-hidden p-0">
+              <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
+                <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
+                  Queue splits
+                </span>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="px-4 py-2.5 text-xs font-mono">
+                  {splitSummary(splits)}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       </div>
 
-      <p className="text-xs text-muted-foreground mt-6">
-        This session belongs to a teammate. Use the{' '}
-        <a
-          href="https://chromewebstore.google.com/detail/mirrord/bijejadnnfgjkfdocgocklekjhnhkhkf"
-          target="_blank"
-          rel="noreferrer"
-          className="text-primary hover:underline"
-        >
-          mirrord browser extension
-        </a>{' '}
-        to inject the matching header into your browser traffic and ride
-        along.
-      </p>
+      <div className="overflow-auto h-full" hidden={activeTab !== 'config'}>
+        <div className="p-4 max-w-3xl">
+          <Code
+            variant="block"
+            language="json"
+            className="text-[11px] whitespace-pre-wrap bg-card/30 border border-border"
+          >
+            {JSON.stringify(
+              {
+                id: session.id,
+                key: session.key,
+                namespace: session.namespace,
+                target: session.target,
+                owner: session.owner,
+                createdAt: session.createdAt,
+                durationSecs: session.durationSecs,
+                lockedPorts: session.lockedPorts ?? [],
+                queueSplits: session.queueSplits ?? {
+                  sqs: 0,
+                  rabbitmq: 0,
+                  kafka: 0,
+                },
+                httpFilter: session.httpFilter ?? null,
+              },
+              null,
+              2
+            )}
+          </Code>
+        </div>
+      </div>
     </div>
   )
 }
 
-function Card({
-  title,
-  icon,
-  className = '',
-  children,
-}: {
-  title: string
-  icon?: React.ReactNode
-  className?: string
-  children: React.ReactNode
-}) {
+function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className={`rounded-lg border border-border bg-card p-3 ${className}`}>
-      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-1.5">
-        {icon}
-        {title}
-      </div>
-      {children}
+    <div className="flex items-center justify-between px-4 py-2.5">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-xs font-mono font-medium text-foreground break-all text-right">
+        {value}
+      </span>
     </div>
   )
 }
+
+function PortRow({ port }: { port: OperatorLockedPort }) {
+  return (
+    <div className="flex items-center justify-between px-4 py-2.5 gap-3">
+      <span className="text-xs font-mono font-medium text-foreground">
+        :{port.port}
+      </span>
+      <div className="flex items-center gap-2 min-w-0">
+        {port.filter && (
+          <span
+            className="text-[11px] text-muted-foreground font-mono truncate"
+            title={port.filter}
+          >
+            {port.filter}
+          </span>
+        )}
+        <Badge
+          variant="outline"
+          className="text-xs px-2 py-0 font-mono font-normal shrink-0"
+        >
+          {port.kind}
+        </Badge>
+      </div>
+    </div>
+  )
+}
+
