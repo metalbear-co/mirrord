@@ -17,10 +17,14 @@ import OperatorSessionDetail from './components/OperatorSessionDetail'
 import { initAnalytics, setTelemetryEnabled, trackEvent } from './analytics'
 import { api } from './api'
 import { useTelemetryPref } from './hooks/useTelemetryPref'
+import {
+  pingExtension,
+  joinViaExtension,
+  leaveViaExtension,
+  type ExtensionState,
+} from './extensionBridge'
 
 const WS_RECONNECT_INTERVAL = 3000
-
-type SidebarTab = 'mine' | 'team'
 
 export default function App() {
   const [sessions, setSessions] = useState<SessionInfo[]>([])
@@ -29,7 +33,10 @@ export default function App() {
   const [selectedKind, setSelectedKind] = useState<'local' | 'operator' | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [connectModalOpen, setConnectModalOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<SidebarTab>('mine')
+  const [extensionState, setExtensionState] = useState<ExtensionState>({
+    installed: false,
+    supportsBridge: false,
+  })
   const [connected, setConnected] = useState(false)
   const [loading, setLoading] = useState(true)
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -89,6 +96,36 @@ export default function App() {
     return () => clearInterval(t)
   }, [refreshOperatorSessions])
 
+  const refreshExtensionState = useCallback(async () => {
+    const state = await pingExtension()
+    setExtensionState(state)
+  }, [])
+
+  useEffect(() => {
+    refreshExtensionState()
+    const t = setInterval(refreshExtensionState, 4000)
+    return () => clearInterval(t)
+  }, [refreshExtensionState])
+
+  const handleJoinViaExtension = useCallback(
+    async (key: string) => {
+      const result = await joinViaExtension(key)
+      if (result.ok) {
+        setExtensionState((prev) => ({ ...prev, joinedKey: result.joinedKey ?? key }))
+      }
+      return result
+    },
+    []
+  )
+
+  const handleLeaveViaExtension = useCallback(async () => {
+    const result = await leaveViaExtension()
+    if (result.ok) {
+      setExtensionState((prev) => ({ ...prev, joinedKey: null }))
+    }
+    return result
+  }, [])
+
   useEffect(() => {
     let ws: WebSocket | null = null
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -124,8 +161,11 @@ export default function App() {
         } else if (msg.type === 'operator_session_added' || msg.type === 'operator_session_updated') {
           const session = msg.session
           setOperatorSessions((prev) => {
-            const others = prev.filter((s) => s.id !== session.id)
-            return [...others, session]
+            const idx = prev.findIndex((s) => s.id === session.id)
+            if (idx === -1) return [...prev, session]
+            const next = prev.slice()
+            next[idx] = session
+            return next
           })
         } else if (msg.type === 'operator_session_removed') {
           const removedId = msg.id
@@ -169,6 +209,40 @@ export default function App() {
     setSelectedKind('operator')
   }, [])
 
+  const localIds = useMemo(() => new Set(sessions.map((s) => s.session_id)), [sessions])
+  const [currentUserK8s, setCurrentUserK8s] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    api
+      .currentUser()
+      .then(({ k8sUsername }) => {
+        if (!cancelled) setCurrentUserK8s(k8sUsername)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  const yoursOperatorSessions = useMemo(
+    () =>
+      currentUserK8s
+        ? operatorSessions.filter(
+            (s) =>
+              !localIds.has(s.id) && s.owner.k8sUsername === currentUserK8s
+          )
+        : [],
+    [operatorSessions, localIds, currentUserK8s]
+  )
+  const teamSessions = useMemo(
+    () =>
+      operatorSessions.filter(
+        (s) =>
+          !localIds.has(s.id) &&
+          (!currentUserK8s || s.owner.k8sUsername !== currentUserK8s)
+      ),
+    [operatorSessions, localIds, currentUserK8s]
+  )
+
   const selectedLocal = useMemo(
     () => (selectedKind === 'local' ? sessions.find((s) => s.session_id === selectedId) : undefined),
     [selectedKind, selectedId, sessions]
@@ -182,7 +256,7 @@ export default function App() {
   )
 
   const showFunnelHero =
-    activeTab === 'team' &&
+    !selectedLocal &&
     !selectedOperator &&
     watchStatus?.status === 'unavailable'
 
@@ -203,13 +277,13 @@ export default function App() {
           onSelect={handleSelectLocal}
           onKill={handleKill}
           onKillAll={handleKillAll}
-          operatorSessions={operatorSessions}
+          operatorSessions={teamSessions}
+          yoursOperatorSessions={yoursOperatorSessions}
           watchStatus={watchStatus}
           selectedOperatorId={selectedKind === 'operator' ? selectedId : null}
           onSelectOperator={handleSelectOperator}
           onConnectOperator={() => setConnectModalOpen(true)}
-          activeTab={activeTab}
-          onActiveTabChange={setActiveTab}
+          joinedKey={extensionState.joinedKey ?? null}
         />
         <div className="flex-1 overflow-hidden">
           {selectedLocal ? (
@@ -218,7 +292,12 @@ export default function App() {
               onKill={() => handleKill(selectedLocal.session_id)}
             />
           ) : selectedOperator ? (
-            <OperatorSessionDetail session={selectedOperator} />
+            <OperatorSessionDetail
+              session={selectedOperator}
+              extensionState={extensionState}
+              onJoin={() => handleJoinViaExtension(selectedOperator.key)}
+              onLeave={handleLeaveViaExtension}
+            />
           ) : showFunnelHero ? (
             <FunnelHero onConnect={() => setConnectModalOpen(true)} />
           ) : (
