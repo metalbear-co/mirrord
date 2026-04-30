@@ -1379,6 +1379,12 @@ pub(super) struct PreviewStatusArgs {
     /// Query all namespaces.
     #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
     pub all_namespaces: bool,
+
+    /// Show only failed sessions.
+    ///
+    /// By default, `mirrord preview status` only shows active sessions.
+    #[arg(long)]
+    pub failed: bool,
 }
 
 impl PreviewStatusArgs {
