@@ -1210,3 +1210,4 @@ jobs:
         with:
           access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
           version: ${{ needs.validate_release_request.outputs.version }}
+          name: ${{ needs.validate_release_request.outputs.version }}
