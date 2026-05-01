@@ -4,10 +4,14 @@ import { useState } from 'react'
 import { strings } from '../strings'
 import SettingsDialog from './SettingsDialog'
 
+import type { ThemePref } from '../theme'
+
 interface Props {
   connected: boolean
   isDarkMode: boolean
   onToggleTheme: () => void
+  theme: ThemePref
+  onThemeChange: (t: ThemePref) => void
   telemetryEnabled: boolean
   onTelemetryChange: (enabled: boolean) => void
 }
@@ -16,6 +20,8 @@ export default function AppHeader({
   connected,
   isDarkMode,
   onToggleTheme,
+  theme,
+  onThemeChange,
   telemetryEnabled,
   onTelemetryChange,
 }: Props) {
@@ -80,6 +86,8 @@ export default function AppHeader({
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
+        theme={theme}
+        onThemeChange={onThemeChange}
         telemetryEnabled={telemetryEnabled}
         onTelemetryChange={onTelemetryChange}
       />

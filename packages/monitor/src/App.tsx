@@ -14,6 +14,7 @@ import EmptySessionState from './components/EmptySessionState'
 import FunnelHero from './components/FunnelHero'
 import ConnectOperatorModal from './components/ConnectOperatorModal'
 import OperatorSessionDetail from './components/OperatorSessionDetail'
+import { applyDark, loadTheme, resolveDark, saveTheme, type ThemePref } from './theme'
 import { initAnalytics, setTelemetryEnabled, trackEvent } from './analytics'
 import { api } from './api'
 import { useTelemetryPref } from './hooks/useTelemetryPref'
@@ -43,11 +44,8 @@ export default function App() {
   })
   const [connected, setConnected] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    const saved = localStorage.getItem('session-monitor-theme')
-    if (saved) return saved === 'dark'
-    return window.matchMedia('(prefers-color-scheme: dark)').matches
-  })
+  const [theme, setTheme] = useState<ThemePref>(() => loadTheme())
+  const isDarkMode = resolveDark(theme)
   const [telemetryPref, setTelemetryPref] = useTelemetryPref()
 
   useEffect(() => {
@@ -61,9 +59,17 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', isDarkMode)
-    localStorage.setItem('session-monitor-theme', isDarkMode ? 'dark' : 'light')
-  }, [isDarkMode])
+    applyDark(isDarkMode)
+    saveTheme(theme)
+  }, [theme, isDarkMode])
+
+  useEffect(() => {
+    if (theme !== 'system') return
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = () => applyDark(media.matches)
+    media.addEventListener('change', handler)
+    return () => media.removeEventListener('change', handler)
+  }, [theme])
 
   useEffect(() => {
     if (selectedKind && selectedId) return
@@ -288,7 +294,9 @@ export default function App() {
       <AppHeader
         connected={connected}
         isDarkMode={isDarkMode}
-        onToggleTheme={() => setIsDarkMode(!isDarkMode)}
+        onToggleTheme={() => setTheme(isDarkMode ? 'light' : 'dark')}
+        theme={theme}
+        onThemeChange={setTheme}
         telemetryEnabled={telemetryPref}
         onTelemetryChange={setTelemetryPref}
       />
