@@ -29,12 +29,60 @@ jobs:
           components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
           toolchain: ${{ inputs.rust_toolchain }}
+      - name: free port 80 on GH Windows Runner (stop HTTP.sys)
+        run: |
+          $ErrorActionPreference = "Continue"
+          Write-Host "Port 80 listeners before stopping HTTP service:"
+          netstat -ano | findstr :80
+          Write-Host "Stopping HTTP service (http.sys) and dependencies if needed..."
+          net stop http /y
+          Write-Host "Port 80 listeners after stopping HTTP service:"
+          netstat -ano | findstr :80
       - run: |
           cd mirrord/layer-tests/tests/apps/outgoing
           cargo build
       - run: |
           cd mirrord/layer-tests/tests/apps/dns_resolve
           cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/rebind0
+          cargo build
+      - run: |
+          cd mirrord/layer-tests/tests/apps/issue2058
+          rustc issue2058.rs --out-dir target
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 24
+      - run: npm install express
+      - uses: actions/setup-python@v5
+      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: tests/go-e2e/go.sum
+      - run: |
+          go version
+      - run: |
+          . ./scripts/win_build_test_apps_utils.ps1
+          Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "24"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - run: |
+          go version
+      - run: |
+          . ./scripts/win_build_test_apps_utils.ps1
+          Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "25"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: false
+      - run: |
+          go version
+      - run: |
+          . ./scripts/win_build_test_apps_utils.ps1
+          Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "26"
       - name: build layer
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
