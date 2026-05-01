@@ -39,6 +39,9 @@ jobs:
           Write-Host "Port 80 listeners after stopping HTTP service:"
           netstat -ano | findstr :80
       - run: |
+          cd mirrord/layer-tests/tests/apps/issue1123
+          rustc issue1123.rs --out-dir target
+      - run: |
           cd mirrord/layer-tests/tests/apps/outgoing
           cargo build
       - run: |
