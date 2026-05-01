@@ -168,24 +168,18 @@ export default function OperatorSessionDetail({
                 </span>
               </CardHeader>
               <CardContent className="p-0 divide-y divide-border">
-                <Row label="Target" value={targetLabel} />
                 {session.target?.container && (
                   <Row label="Container" value={session.target.container} />
                 )}
                 <Row label="Namespace" value={session.namespace || '—'} />
                 <Row label="Session ID" value={session.id} />
                 <Row label="Key" value={session.key} />
-                <Row
-                  label="Owner"
-                  value={`${session.owner.username} · ${session.owner.k8sUsername}`}
-                />
                 {!isPreview && (
                   <Row
                     label="HTTP filter"
                     value={describeFilter(session.httpFilter)}
                   />
                 )}
-                <Row label="Started" value={relativeTime(session.createdAt)} />
               </CardContent>
             </Card>
 
@@ -228,7 +222,7 @@ export default function OperatorSessionDetail({
             collapsible
             defaultOpen
           >
-            <div className="p-4">
+            <div className="p-4 max-h-[480px] overflow-auto">
               <JsonHighlight
                 value={{
                   id: session.id,

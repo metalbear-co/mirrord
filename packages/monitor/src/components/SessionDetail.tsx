@@ -157,7 +157,9 @@ export default function SessionDetail({
               collapsible
               defaultOpen
             >
-              <ConfigTab config={session.config} />
+              <div className="max-h-[480px] overflow-auto">
+                <ConfigTab config={session.config} />
+              </div>
             </Widget>
           </div>
         </div>
