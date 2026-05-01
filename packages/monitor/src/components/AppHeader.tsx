@@ -126,11 +126,16 @@ export default function AppHeader({
             </Button>
 
             {currentUser && (
-              <Avatar
-                name={meDisplayName(currentUser)}
-                seed={currentUser}
-                size={28}
-              />
+              <span
+                title={currentUser}
+                className="inline-flex items-center cursor-default"
+              >
+                <Avatar
+                  name={meDisplayName(currentUser)}
+                  seed={currentUser}
+                  size={28}
+                />
+              </span>
             )}
           </div>
         </div>
