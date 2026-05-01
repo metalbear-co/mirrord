@@ -159,7 +159,6 @@ export default function SessionSidebar({
           icon={<Laptop className="h-3.5 w-3.5" />}
           label="Yours"
           count={yoursTotal}
-          accent
           actions={
             <>
               {sessions.length > 0 && (
@@ -317,13 +316,11 @@ function SectionHeader({
   icon,
   label,
   count,
-  accent = false,
   actions,
 }: {
   icon: React.ReactNode
   label: string
   count?: number | null
-  accent?: boolean
   actions?: React.ReactNode
 }) {
   return (
@@ -332,9 +329,7 @@ function SectionHeader({
         <span className="text-muted-foreground">{icon}</span>
         {label}
         {count != null && count > 0 && (
-          <span className={accent ? 'text-primary' : 'text-muted-foreground'}>
-            · {count}
-          </span>
+          <span className="text-muted-foreground">· {count}</span>
         )}
       </div>
       {actions && <div className="flex items-center gap-1">{actions}</div>}
