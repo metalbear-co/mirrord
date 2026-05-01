@@ -49,7 +49,7 @@ export default function SessionRow({
       </div>
       <div className="flex-1 min-w-0 flex flex-col gap-1">
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="font-mono text-[12.5px] font-semibold text-foreground truncate">
+          <span className="font-mono text-body font-semibold text-foreground truncate">
             {target}
           </span>
           {tags.map((t, i) => (
@@ -59,7 +59,7 @@ export default function SessionRow({
           ))}
         </div>
         {meta.length > 0 && (
-          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground min-w-0">
+          <div className="flex items-center gap-1.5 text-meta text-muted-foreground min-w-0">
             {meta.map((m, i) => (
               <span key={i} className="flex items-center gap-1.5 truncate">
                 {i > 0 && <span className="opacity-50">·</span>}

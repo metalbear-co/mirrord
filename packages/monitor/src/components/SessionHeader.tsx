@@ -33,19 +33,19 @@ export default function SessionHeader({
   }, [session.started_at])
 
   return (
-    <div className="border-b border-border px-4 py-2 bg-card/30 shrink-0">
+    <div className="border-b border-border px-4 py-2 surface-inset shrink-0">
       <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
-        <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
           <LiveDot active={processes.length > 0} />
-          <span className="font-mono text-sm font-semibold text-foreground truncate">
+          <span className="font-mono text-title text-foreground truncate">
             {session.target}
           </span>
           <Badge
             variant="outline"
             className={
               session.is_operator
-                ? 'text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal text-primary border-primary/40'
-                : 'text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal'
+                ? 'text-caps px-1.5 py-0 h-4 font-normal text-primary border-primary/40'
+                : 'text-caps px-1.5 py-0 h-4 font-normal'
             }
           >
             {session.is_operator
@@ -54,7 +54,7 @@ export default function SessionHeader({
           </Badge>
         </div>
 
-        <div className="flex items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground flex-wrap">
+        <div className="flex items-center gap-x-3 gap-y-1 text-meta text-muted-foreground flex-wrap">
           <span className="inline-flex items-center gap-1">
             <Clock className="h-3 w-3" />
             <span className="font-mono tabular-nums">{uptime}</span>
@@ -81,7 +81,7 @@ export default function SessionHeader({
         </div>
 
         <div className="ml-auto flex items-center gap-3">
-          <span className="text-[10px] text-muted-foreground font-mono">
+          <span className="text-meta text-muted-foreground font-mono">
             v{session.mirrord_version}
           </span>
           <Button
@@ -91,7 +91,7 @@ export default function SessionHeader({
               trackEvent('session_monitor_kill_session')
               onKill()
             }}
-            className="h-6 text-[10px] gap-1 px-2.5 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/60"
+            className="h-6 text-caps gap-1 px-2.5 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/60"
           >
             <Trash2 className="h-3 w-3" />
             {strings.session.kill}

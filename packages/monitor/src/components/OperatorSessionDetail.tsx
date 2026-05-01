@@ -98,23 +98,23 @@ export default function OperatorSessionDetail({
 
   return (
     <div className="h-full flex flex-col">
-      <div className="border-b border-border px-4 py-2 bg-card/30 shrink-0">
+      <div className="border-b border-border px-4 py-2 surface-inset shrink-0">
         <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
-            <span className="font-mono text-sm font-semibold text-foreground truncate">
+            <span className="font-mono text-title text-foreground truncate">
               {targetLabel}
             </span>
             <Badge
               variant="outline"
-              className="text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal text-primary border-primary/40 shrink-0"
+              className="text-caps px-1.5 py-0 h-4 font-normal text-primary border-primary/40 shrink-0"
             >
               operator
             </Badge>
             {isPreview && (
               <Badge
                 variant="outline"
-                className="text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal text-emerald-500 border-emerald-500/40 inline-flex items-center gap-1 shrink-0"
+                className="text-caps px-1.5 py-0 h-4 font-normal text-emerald-500 border-emerald-500/40 inline-flex items-center gap-1 shrink-0"
               >
                 <FlaskConical className="h-2.5 w-2.5" />
                 preview
@@ -122,7 +122,7 @@ export default function OperatorSessionDetail({
             )}
           </div>
 
-          <div className="flex items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground flex-wrap">
+          <div className="flex items-center gap-x-3 gap-y-1 text-meta text-muted-foreground flex-wrap">
             <span className="inline-flex items-center gap-1">
               <Clock className="h-3 w-3" />
               <span className="font-mono tabular-nums">
@@ -147,7 +147,7 @@ export default function OperatorSessionDetail({
             </span>
           </div>
 
-          <span className="ml-auto text-[10px] text-muted-foreground font-mono uppercase tracking-wider">
+          <span className="ml-auto text-caps text-muted-foreground font-mono">
             read-only
           </span>
         </div>
@@ -242,8 +242,8 @@ export default function OperatorSessionDetail({
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="grid grid-cols-[110px_1fr] items-baseline gap-3 px-4 py-1.5">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-xs font-mono font-medium text-foreground break-words">
+      <span className="text-body text-muted-foreground">{label}</span>
+      <span className="text-body font-mono font-medium text-foreground break-words">
         {value}
       </span>
     </div>
@@ -256,10 +256,10 @@ function PortChip({ port }: { port: OperatorLockedPort }) {
     : `${port.kind} :${port.port}`
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/40 px-2 py-0.5 text-[11px] font-mono"
+      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/40 px-2 py-0.5 text-meta font-mono"
       title={tooltip}
     >
-      <span className="text-muted-foreground uppercase tracking-wider text-[9.5px]">
+      <span className="text-muted-foreground text-caps">
         {port.kind}
       </span>
       <span className="text-foreground font-medium">:{port.port}</span>

@@ -52,6 +52,32 @@ body {
   animation: eventFadeIn 0.2s ease-out;
 }
 
+/* Typography scale — use these, not text-[Npx] literals */
+.text-caps {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.text-meta {
+  font-size: 11px;
+}
+.text-body {
+  font-size: 12px;
+}
+.text-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Surface tokens — pick one opacity per surface kind */
+.surface-section {
+  background: hsl(var(--card) / 0.5);
+}
+.surface-inset {
+  background: hsl(var(--card) / 0.3);
+}
+
 @keyframes detailFadeIn {
   from {
     opacity: 0;

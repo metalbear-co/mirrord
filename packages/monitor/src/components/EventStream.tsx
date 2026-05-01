@@ -102,7 +102,7 @@ export default function EventStream({ session }: Props) {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="border-b border-border px-4 py-2 bg-card/30 flex items-center gap-3">
+      <div className="border-b border-border px-4 py-2 surface-inset flex items-center gap-3">
         {hasEvents && (
           <div className="flex items-center gap-2 flex-1">
             <EventSearchBar query={searchQuery} onChange={setSearchQuery} />
@@ -119,7 +119,7 @@ export default function EventStream({ session }: Props) {
           </>
         )}
 
-        <span className="text-[10px] text-muted-foreground tabular-nums ml-auto inline-flex items-center gap-1.5">
+        <span className="text-meta text-muted-foreground tabular-nums ml-auto inline-flex items-center gap-1.5">
           {!hasEvents && streaming && (
             <Activity className="h-3 w-3 opacity-50 animate-pulse" />
           )}
@@ -145,7 +145,7 @@ export default function EventStream({ session }: Props) {
 
       <div ref={logRef} className="flex-1 overflow-y-auto text-xs font-mono">
         {filteredEvents.length === 0 && hasEvents && (
-          <div className="text-muted-foreground text-center py-4 text-[11px]">
+          <div className="text-muted-foreground text-center py-4 text-meta">
             No events match the current filter.
           </div>
         )}

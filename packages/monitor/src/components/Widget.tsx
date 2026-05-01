@@ -34,7 +34,7 @@ export default function Widget({
       {title && (
         <CardHeader
           className={cn(
-            'px-3 py-2 bg-card/50 border-b border-border flex flex-row items-center gap-2 shrink-0',
+            'px-3 py-2 surface-section border-b border-border flex flex-row items-center gap-2 shrink-0',
             collapsible && 'cursor-pointer hover:bg-card/70'
           )}
           onClick={collapsible ? () => setOpen((v) => !v) : undefined}
@@ -49,9 +49,7 @@ export default function Widget({
             </span>
           )}
           {icon && <span className="text-muted-foreground">{icon}</span>}
-          <span className="text-[10.5px] font-semibold uppercase tracking-wider text-foreground flex-1">
-            {title}
-          </span>
+          <span className="text-caps text-foreground flex-1">{title}</span>
           {trailing && <span className="shrink-0">{trailing}</span>}
         </CardHeader>
       )}
