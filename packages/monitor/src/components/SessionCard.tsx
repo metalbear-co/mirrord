@@ -16,11 +16,7 @@ interface Props {
 }
 
 export default function SessionCard({ session, selected, onSelect, onKill, owner, joined }: Props) {
-  const meta: (string | React.ReactNode)[] = [
-    formatUptime(session.started_at),
-    `${session.processes.length} proc`,
-    `v${session.mirrord_version}`,
-  ]
+  const meta: (string | React.ReactNode)[] = [formatUptime(session.started_at)]
   if (session.is_operator) {
     meta.push(
       <Badge
