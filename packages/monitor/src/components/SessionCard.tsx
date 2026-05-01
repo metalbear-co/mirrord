@@ -44,16 +44,17 @@ export default function SessionCard({ session, selected, onSelect, onKill }: Pro
       action={
         <span className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
           <Button
-            variant="outline"
-            size="sm"
+            variant="ghost"
+            size="icon"
             onClick={(e) => {
               e.stopPropagation()
               onKill()
             }}
-            className="h-6 text-caps gap-1 px-2 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/60"
+            title={strings.session.kill}
+            aria-label={strings.session.kill}
+            className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
           >
-            <Trash2 className="h-3 w-3" />
-            {strings.session.kill}
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </span>
       }
