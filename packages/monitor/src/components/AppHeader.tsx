@@ -9,7 +9,6 @@ import type { ThemePref } from '../theme'
 interface Props {
   connected: boolean
   isDarkMode: boolean
-  onToggleTheme: () => void
   theme: ThemePref
   onThemeChange: (t: ThemePref) => void
   telemetryEnabled: boolean
@@ -27,7 +26,6 @@ const SEARCH_HINT = isMac ? '⌘F' : 'Ctrl F'
 export default function AppHeader({
   connected,
   isDarkMode,
-  onToggleTheme,
   theme,
   onThemeChange,
   telemetryEnabled,

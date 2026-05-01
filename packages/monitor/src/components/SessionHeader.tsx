@@ -1,16 +1,13 @@
 import { Badge, Button } from '@metalbear/ui'
 import { Trash2 } from 'lucide-react'
-import type { SessionInfo, PortSubscription, ProcessInfo } from '../types'
+import type { SessionInfo, ProcessInfo } from '../types'
 import { trackEvent } from '../analytics'
 import { strings } from '../strings'
 import LiveDot from './LiveDot'
-import type { EventCounts } from './sessionDetailTypes'
 
 interface Props {
   session: SessionInfo
   processes: ProcessInfo[]
-  portSubs: PortSubscription[]
-  eventCounts: EventCounts
   onKill: () => void
 }
 

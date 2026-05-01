@@ -14,7 +14,6 @@ import CopyButton from './CopyButton'
 import ResizableSplit from './ResizableSplit'
 import Widget from './Widget'
 import type { ExtensionState } from '../extensionBridge'
-import { type EventCounts, initialEventCounts } from './sessionDetailTypes'
 
 interface Props {
   session: SessionInfo
@@ -33,12 +32,10 @@ export default function SessionDetail({
 }: Props) {
   const [portSubs, setPortSubs] = useState<PortSubscription[]>([])
   const [processes, setProcesses] = useState<ProcessInfo[]>([])
-  const [eventCounts, setEventCounts] = useState<EventCounts>(initialEventCounts)
 
   useEffect(() => {
     setPortSubs([])
     setProcesses([])
-    setEventCounts(initialEventCounts)
 
     let cancelled = false
 
@@ -74,12 +71,6 @@ export default function SessionDetail({
       } catch {
         return
       }
-
-      setEventCounts(prev => ({
-        ...prev,
-        [event.type]: (prev[event.type as keyof EventCounts] as number || 0) + 1,
-        total: prev.total + 1,
-      }))
 
       switch (event.type) {
         case EventType.PortSubscription:
@@ -119,8 +110,6 @@ export default function SessionDetail({
       <SessionHeader
         session={session}
         processes={processes}
-        portSubs={portSubs}
-        eventCounts={eventCounts}
         onKill={onKill}
       />
       <div className="flex-1 min-h-0 flex flex-col p-4 gap-4 max-w-7xl mx-auto w-full">

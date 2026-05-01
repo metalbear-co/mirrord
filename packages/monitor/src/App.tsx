@@ -295,7 +295,6 @@ export default function App() {
       <AppHeader
         connected={connected}
         isDarkMode={isDarkMode}
-        onToggleTheme={() => setTheme(isDarkMode ? 'light' : 'dark')}
         theme={theme}
         onThemeChange={setTheme}
         telemetryEnabled={telemetryPref}
