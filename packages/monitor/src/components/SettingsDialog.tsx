@@ -45,13 +45,15 @@ export default function SettingsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="mt-2 space-y-6">
-          <div className="space-y-2">
-            <Label className="text-section">Appearance</Label>
-            <p className="text-meta text-muted-foreground">
-              Match your operating system, or pick a fixed theme.
-            </p>
-            <div className="inline-flex items-center rounded-md border border-border p-0.5 self-start">
+        <div className="mt-2 flex flex-col divide-y divide-border rounded-lg border border-border overflow-hidden">
+          <div className="flex items-center justify-between gap-4 px-4 py-3 bg-card">
+            <div className="min-w-0">
+              <Label className="text-section font-medium">Appearance</Label>
+              <p className="text-meta text-muted-foreground mt-0.5">
+                Match your OS, or pick a fixed theme.
+              </p>
+            </div>
+            <div className="inline-flex items-center rounded-md border border-border p-0.5 shrink-0">
               {THEME_OPTIONS.map((opt) => {
                 const Icon = opt.icon
                 const active = theme === opt.value
@@ -61,11 +63,12 @@ export default function SettingsDialog({
                     type="button"
                     variant="ghost"
                     size="sm"
+                    aria-label={opt.label}
                     onClick={() => onThemeChange(opt.value)}
                     className={
                       active
-                        ? 'h-7 px-3 gap-1.5 text-foreground bg-muted'
-                        : 'h-7 px-3 gap-1.5 text-muted-foreground hover:text-foreground'
+                        ? 'h-7 px-2.5 gap-1.5 text-foreground bg-muted'
+                        : 'h-7 px-2.5 gap-1.5 text-muted-foreground hover:text-foreground'
                     }
                   >
                     <Icon className="h-3.5 w-3.5" />
@@ -76,26 +79,24 @@ export default function SettingsDialog({
             </div>
           </div>
 
-          <div className="flex items-start justify-between gap-6">
-            <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-4 px-4 py-3 bg-card">
+            <div className="min-w-0">
               <Label
                 htmlFor="telemetry-toggle"
                 className="text-section font-medium"
               >
-                Share anonymous usage analytics
+                Anonymous usage analytics
               </Label>
-              <p className="text-meta text-muted-foreground leading-relaxed">
-                Helps us see which parts of the session monitor are used. File
-                paths, pod names, URLs, and request bodies are never captured —
-                session replays mask all text and input values, so only click
-                and scroll behavior is recorded.
+              <p className="text-meta text-muted-foreground mt-0.5">
+                Click + scroll behavior only. No paths, hosts, headers, or
+                bodies.
               </p>
             </div>
             <Switch
               id="telemetry-toggle"
               checked={telemetryEnabled}
               onCheckedChange={onTelemetryChange}
-              className="mt-1 shrink-0"
+              className="shrink-0"
             />
           </div>
         </div>
