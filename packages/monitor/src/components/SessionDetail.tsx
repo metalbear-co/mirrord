@@ -6,9 +6,9 @@ import { EventType } from '../eventTypes'
 import { expectArray } from '../utils'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
-import SessionIdentity from './SessionIdentity'
-import PortSubscriptionsCard from './PortSubscriptionsCard'
-import ProcessesCard from './ProcessesCard'
+import MetadataStrip from './MetadataStrip'
+import { Badge } from '@metalbear/ui'
+import { extractLicenseKey } from '../utils'
 import ConfigTab from './ConfigTab'
 import JoinBar from './JoinBar'
 import Widget from './Widget'
@@ -122,48 +122,83 @@ export default function SessionDetail({
         eventCounts={eventCounts}
         onKill={onKill}
       />
-      <div className="flex-1 overflow-auto">
-        <div className="flex flex-col gap-4 p-4 max-w-7xl mx-auto">
-          {session.is_operator && session.key && (
-            <JoinBar
-              joinKey={session.key}
-              extensionState={extensionState}
-              onJoin={onJoin}
-              onLeave={onLeave}
-            />
-          )}
+      <div className="flex-1 min-h-0 flex flex-col p-4 gap-4 max-w-7xl mx-auto w-full">
+        {session.is_operator && session.key && (
+          <JoinBar
+            joinKey={session.key}
+            extensionState={extensionState}
+            onJoin={onJoin}
+            onLeave={onLeave}
+          />
+        )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
-            <SessionIdentity session={session} />
-            {portSubs.length > 0 && <PortSubscriptionsCard portSubs={portSubs} />}
-            {processes.length > 0 && <ProcessesCard processes={processes} />}
-          </div>
+        <MetadataStrip items={metadataItems(session, portSubs, processes)} />
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-            <Widget
-              title="Events"
-              icon={<Activity className="h-3 w-3" />}
-              collapsible
-              defaultOpen
-            >
-              <div className="max-h-[480px] flex flex-col">
-                <EventStream session={session} />
-              </div>
-            </Widget>
+        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Widget
+            title="Events"
+            icon={<Activity className="h-3 w-3" />}
+            collapsible
+            defaultOpen
+            className="min-h-0"
+          >
+            <div className="h-full flex flex-col">
+              <EventStream session={session} />
+            </div>
+          </Widget>
 
-            <Widget
-              title="Config"
-              icon={<Settings className="h-3 w-3" />}
-              collapsible
-              defaultOpen
-            >
-              <div className="max-h-[480px] overflow-auto">
-                <ConfigTab config={session.config} />
-              </div>
-            </Widget>
-          </div>
+          <Widget
+            title="Config"
+            icon={<Settings className="h-3 w-3" />}
+            collapsible
+            defaultOpen
+            className="min-h-0"
+          >
+            <ConfigTab config={session.config} />
+          </Widget>
         </div>
       </div>
     </div>
   )
+}
+
+function metadataItems(
+  session: SessionInfo,
+  portSubs: PortSubscription[],
+  processes: ProcessInfo[]
+) {
+  const items: { label: string; value: React.ReactNode }[] = [
+    { label: 'Session ID', value: session.session_id },
+  ]
+  const licenseKey = extractLicenseKey(session.config)
+  if (licenseKey) {
+    items.push({ label: 'License key', value: licenseKey })
+  }
+  if (portSubs.length > 0) {
+    items.push({
+      label: portSubs.length === 1 ? 'Port' : 'Ports',
+      value: (
+        <span className="inline-flex items-center gap-1.5">
+          {portSubs.map((p) => (
+            <span key={p.port} className="inline-flex items-center gap-1">
+              :{p.port}
+              <Badge
+                variant="outline"
+                className="text-[9px] px-1 py-0 font-mono font-normal"
+              >
+                {p.mode}
+              </Badge>
+            </span>
+          ))}
+        </span>
+      ),
+    })
+  }
+  if (processes.length > 0) {
+    items.push({
+      label: processes.length === 1 ? 'Process' : 'Processes',
+      value: processes.map((p) => `${p.process_name} ${p.pid}`).join(' · '),
+    })
+  }
+  return items
 }

@@ -16,6 +16,7 @@ import type {
 import type { ExtensionState } from '../extensionBridge'
 import JoinBar from './JoinBar'
 import JsonHighlight from './JsonHighlight'
+import MetadataStrip from './MetadataStrip'
 import Widget from './Widget'
 
 interface OperatorSessionDetailProps {
@@ -151,78 +152,60 @@ export default function OperatorSessionDetail({
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto">
-        <div className="flex flex-col gap-4 p-4 max-w-7xl mx-auto">
-          <JoinBar
-            joinKey={session.key}
-            extensionState={extensionState}
-            onJoin={onJoin}
-            onLeave={onLeave}
-          />
+      <div className="flex-1 min-h-0 flex flex-col p-4 gap-4 max-w-7xl mx-auto w-full">
+        <JoinBar
+          joinKey={session.key}
+          extensionState={extensionState}
+          onJoin={onJoin}
+          onLeave={onLeave}
+        />
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
-            <Card className="overflow-hidden p-0">
-              <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
-                <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
-                  Session
-                </span>
-              </CardHeader>
-              <CardContent className="p-0 divide-y divide-border">
-                {session.target?.container && (
-                  <Row label="Container" value={session.target.container} />
-                )}
-                <Row label="Namespace" value={session.namespace || '—'} />
-                <Row label="Session ID" value={session.id} />
-                <Row label="Key" value={session.key} />
-                {!isPreview && (
-                  <Row
-                    label="HTTP filter"
-                    value={describeFilter(session.httpFilter)}
-                  />
-                )}
-              </CardContent>
-            </Card>
+        <MetadataStrip
+          items={[
+            { label: 'Namespace', value: session.namespace || '—' },
+            { label: 'Session ID', value: session.id },
+            { label: 'Key', value: session.key },
+            ...(session.target?.container
+              ? [{ label: 'Container', value: session.target.container }]
+              : []),
+            ...(isPreview
+              ? []
+              : [
+                  {
+                    label: 'HTTP filter',
+                    value: describeFilter(session.httpFilter),
+                  },
+                ]),
+            ...(lockedPorts.length > 0
+              ? [
+                  {
+                    label:
+                      lockedPorts.length === 1 ? 'Locked port' : 'Locked ports',
+                    value: (
+                      <span className="inline-flex flex-wrap items-center gap-1.5">
+                        {lockedPorts.map((p, i) => (
+                          <PortChip key={`${p.port}-${i}`} port={p} />
+                        ))}
+                      </span>
+                    ),
+                  },
+                ]
+              : []),
+            ...(splitsTotal > 0
+              ? [{ label: 'Queue splits', value: splitSummary(splits) }]
+              : []),
+          ]}
+        />
 
-            {lockedPorts.length > 0 && (
-              <Card className="overflow-hidden p-0">
-                <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
-                  <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
-                    Locked ports
-                  </span>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="px-4 py-2.5 flex flex-wrap items-center gap-1.5">
-                    {lockedPorts.map((p, i) => (
-                      <PortChip key={`${p.port}-${i}`} port={p} />
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {splitsTotal > 0 && (
-              <Card className="overflow-hidden p-0">
-                <CardHeader className="px-4 py-2.5 bg-card/50 border-b border-border">
-                  <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
-                    Queue splits
-                  </span>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="px-4 py-2.5 text-xs font-mono">
-                    {splitSummary(splits)}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
+        <div className="flex-1 min-h-0">
           <Widget
             title="Config"
             icon={<Settings className="h-3 w-3" />}
             collapsible
             defaultOpen
+            className="h-full min-h-0"
           >
-            <div className="p-4 max-h-[480px] overflow-auto">
+            <div className="p-4">
               <JsonHighlight
                 value={{
                   id: session.id,
