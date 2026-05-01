@@ -8,7 +8,6 @@ import type {
 } from './types'
 import SessionSidebar from './components/SessionSidebar'
 import SessionDetail from './components/SessionDetail'
-import StatusBar from './components/StatusBar'
 import AppHeader from './components/AppHeader'
 import EmptySessionState from './components/EmptySessionState'
 import FunnelHero from './components/FunnelHero'
@@ -345,7 +344,6 @@ export default function App() {
           )}
         </div>
       </div>
-      <StatusBar wsConnected={connected} session={selectedLocal} />
       <ConnectOperatorModal
         open={connectModalOpen}
         onOpenChange={setConnectModalOpen}

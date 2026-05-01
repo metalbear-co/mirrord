@@ -12,7 +12,7 @@ import {
   Loader,
   cn,
 } from '@metalbear/ui'
-import { Activity, Cloud, Laptop, PanelLeftClose, PanelLeftOpen, Trash2 } from 'lucide-react'
+import { Activity, Cloud, Key as KeyIcon, Laptop, PanelLeftClose, PanelLeftOpen, Trash2 } from 'lucide-react'
 import type { OperatorSessionSummary, OperatorWatchStatus, SessionInfo } from '../types'
 import { strings } from '../strings'
 import SessionCard from './SessionCard'
@@ -220,33 +220,14 @@ export default function SessionSidebar({
           ) : (
             <>
               {filteredLocalSessions.length > 0 && (
-                <>
-                  <div className="text-meta font-medium text-muted-foreground px-1 -mb-1">
-                    Live on this machine
-                  </div>
-                  {filteredLocalSessions.map((s) => {
-                    const owner =
-                      allOperatorSessions.find((o) => o.id === s.session_id)
-                        ?.owner ?? null
-                    const isJoined =
-                      !!joinedKey && !!s.key && s.key === joinedKey
-                    return (
-                      <SessionCard
-                        key={s.session_id}
-                        session={s}
-                        selected={s.session_id === selectedId}
-                        onSelect={() =>
-                          onSelect(
-                            s.session_id === selectedId ? '' : s.session_id
-                          )
-                        }
-                        onKill={() => onKill(s.session_id)}
-                        owner={owner}
-                        joined={isJoined}
-                      />
-                    )
-                  })}
-                </>
+                <LocalSessionsByKey
+                  sessions={filteredLocalSessions}
+                  selectedId={selectedId}
+                  onSelect={onSelect}
+                  onKill={onKill}
+                  allOperatorSessions={allOperatorSessions}
+                  joinedKey={joinedKey}
+                />
               )}
               {yoursOperatorSessions.length > 0 && (
                 <>
@@ -311,6 +292,91 @@ export default function SessionSidebar({
         <div className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize" />
       </div>
     </>
+  )
+}
+
+interface LocalSessionsByKeyProps {
+  sessions: SessionInfo[]
+  selectedId: string | null
+  onSelect: (id: string) => void
+  onKill: (id: string) => void
+  allOperatorSessions: OperatorSessionSummary[]
+  joinedKey: string | null
+}
+
+const NO_KEY_GROUP = '__no_key__'
+
+function LocalSessionsByKey({
+  sessions,
+  selectedId,
+  onSelect,
+  onKill,
+  allOperatorSessions,
+  joinedKey,
+}: LocalSessionsByKeyProps) {
+  const groups = new Map<string, SessionInfo[]>()
+  for (const s of sessions) {
+    const key = s.key ?? NO_KEY_GROUP
+    const arr = groups.get(key)
+    if (arr) arr.push(s)
+    else groups.set(key, [s])
+  }
+  const orderedKeys = Array.from(groups.keys()).sort((a, b) => {
+    if (a === joinedKey) return -1
+    if (b === joinedKey) return 1
+    if (a === NO_KEY_GROUP) return 1
+    if (b === NO_KEY_GROUP) return -1
+    return a.localeCompare(b)
+  })
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      {orderedKeys.map((key) => {
+        const groupSessions = groups.get(key)!
+        const isJoinedGroup = key !== NO_KEY_GROUP && key === joinedKey
+        return (
+          <div key={key} className="flex flex-col gap-1">
+            <div className="flex items-center gap-2 px-1 text-meta font-medium text-muted-foreground">
+              <KeyIcon className="h-3 w-3 shrink-0" />
+              <span className="font-mono normal-case tracking-normal break-all">
+                {key === NO_KEY_GROUP ? 'No session key' : key}
+              </span>
+              {isJoinedGroup && (
+                <span
+                  style={{ fontSize: 10 }}
+                  className="shrink-0 px-1.5 rounded-full bg-muted text-foreground font-semibold tracking-wider"
+                >
+                  JOINED
+                </span>
+              )}
+              <span className="ml-auto shrink-0 normal-case tracking-normal font-medium">
+                {groupSessions.length}
+              </span>
+            </div>
+            {groupSessions.map((s) => {
+              const owner =
+                allOperatorSessions.find((o) => o.id === s.session_id)
+                  ?.owner ?? null
+              const isJoined =
+                !!joinedKey && !!s.key && s.key === joinedKey
+              return (
+                <SessionCard
+                  key={s.session_id}
+                  session={s}
+                  selected={s.session_id === selectedId}
+                  onSelect={() =>
+                    onSelect(s.session_id === selectedId ? '' : s.session_id)
+                  }
+                  onKill={() => onKill(s.session_id)}
+                  owner={owner}
+                  joined={isJoined}
+                />
+              )
+            })}
+          </div>
+        )
+      })}
+    </div>
   )
 }
 

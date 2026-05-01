@@ -1,14 +1,10 @@
 import { cn } from '@metalbear/ui'
 
 const PALETTE = [
-  'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-  'bg-amber-500/15 text-amber-700 dark:text-amber-300',
-  'bg-sky-500/15 text-sky-700 dark:text-sky-300',
-  'bg-rose-500/15 text-rose-700 dark:text-rose-300',
-  'bg-violet-500/15 text-violet-700 dark:text-violet-300',
-  'bg-teal-500/15 text-teal-700 dark:text-teal-300',
-  'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300',
-  'bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300',
+  'bg-zinc-500/15 text-zinc-700 dark:text-zinc-300',
+  'bg-stone-500/15 text-stone-700 dark:text-stone-300',
+  'bg-neutral-500/15 text-neutral-700 dark:text-neutral-300',
+  'bg-slate-500/15 text-slate-700 dark:text-slate-300',
 ]
 
 function initials(name: string): string {
