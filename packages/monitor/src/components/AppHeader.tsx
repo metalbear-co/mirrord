@@ -1,9 +1,8 @@
 import { Button, MirrordIcon, SearchInput, cn } from '@metalbear/ui'
-import { Moon, Settings, Sun } from 'lucide-react'
+import { Moon, Settings, Sun, User } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { strings } from '../strings'
 import SettingsDialog from './SettingsDialog'
-import Avatar from './Avatar'
 
 import type { ThemePref } from '../theme'
 
@@ -20,11 +19,6 @@ interface Props {
   currentUser: string | null
 }
 
-function meDisplayName(raw: string): string {
-  const at = raw.indexOf('@')
-  const head = at > 0 ? raw.slice(0, at) : raw
-  return head.replace(/[._-]+/g, ' ').trim() || raw
-}
 
 const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
 const SEARCH_HINT = isMac ? '⌘F' : 'Ctrl F'
@@ -128,13 +122,12 @@ export default function AppHeader({
             {currentUser && (
               <span
                 title={currentUser}
-                className="inline-flex items-center cursor-default"
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/50 px-2.5 h-7 max-w-[220px] cursor-default"
               >
-                <Avatar
-                  name={meDisplayName(currentUser)}
-                  seed={currentUser}
-                  size={28}
-                />
+                <User className="h-3 w-3 shrink-0 text-muted-foreground" />
+                <span className="font-mono text-meta text-foreground truncate">
+                  {currentUser}
+                </span>
               </span>
             )}
           </div>
