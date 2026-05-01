@@ -10,7 +10,7 @@ interface Props {
 
 export default function SessionTabs({ tabs, activeTab, onTabChange }: Props) {
   return (
-    <div className="flex border-b border-border bg-card/20 shrink-0">
+    <div className="flex border-b border-border surface-inset shrink-0">
       {tabs.map((tab) => {
         const Icon = tab.icon
         const isActive = activeTab === tab.id
@@ -33,7 +33,7 @@ export default function SessionTabs({ tabs, activeTab, onTabChange }: Props) {
             <Icon className="h-3 w-3" />
             {tab.label}
             {tab.count !== undefined && tab.count > 0 && (
-              <span className="text-[9px] font-mono tabular-nums text-muted-foreground ml-0.5">
+              <span className="text-caps font-mono tabular-nums text-muted-foreground ml-0.5">
                 {tab.count > 999 ? `${(tab.count / 1000).toFixed(1)}k` : tab.count}
               </span>
             )}

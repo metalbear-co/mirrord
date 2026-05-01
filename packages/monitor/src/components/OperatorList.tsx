@@ -94,7 +94,7 @@ export default function OperatorList({
   return (
     <div className="flex flex-col gap-2.5">
       {showCount && sessions.length > 0 && (
-        <div className="text-[11px] text-muted-foreground px-1">
+        <div className="text-meta text-muted-foreground px-1">
           {filtered.length} session{filtered.length === 1 ? '' : 's'}
         </div>
       )}
@@ -137,18 +137,18 @@ function KeyGroupSection({
   const groupIsPreview = group.sessions.every(isPreviewSession)
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2 px-1 text-[10.5px] uppercase tracking-wider text-muted-foreground font-semibold">
+      <div className="flex items-center gap-2 px-1 text-caps uppercase tracking-wider text-muted-foreground font-semibold">
         <KeyIcon className="h-3 w-3 shrink-0" />
         <span className="font-mono normal-case tracking-normal break-all">
           {group.key}
         </span>
         {joined && (
-          <span className="shrink-0 px-1.5 rounded-full bg-primary/15 text-primary text-[9.5px] font-bold tracking-wider">
+          <span className="shrink-0 px-1.5 rounded-full bg-primary/15 text-primary text-caps font-bold tracking-wider">
             JOINED
           </span>
         )}
         {groupIsPreview && (
-          <span className="shrink-0 px-1.5 rounded-full border border-emerald-500/40 text-emerald-500 text-[9.5px] font-bold tracking-wider">
+          <span className="shrink-0 px-1.5 rounded-full border border-emerald-500/40 text-emerald-500 text-caps font-bold tracking-wider">
             PREVIEW
           </span>
         )}

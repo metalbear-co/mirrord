@@ -219,7 +219,7 @@ function metadataItems(
               :{p.port}
               <Badge
                 variant="outline"
-                className="text-[9px] px-1 py-0 font-mono font-normal"
+                className="text-caps px-1 py-0 font-mono font-normal"
               >
                 {p.mode}
               </Badge>

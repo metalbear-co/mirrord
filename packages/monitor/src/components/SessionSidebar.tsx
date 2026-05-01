@@ -143,7 +143,7 @@ export default function SessionSidebar({
   return (
     <>
       <div
-        className="border-r border-border overflow-y-auto p-3 shrink-0 relative bg-card/20 flex flex-col gap-4"
+        className="border-r border-border overflow-y-auto p-3 shrink-0 relative surface-inset flex flex-col gap-4"
         style={{ width: sidebarWidth }}
       >
         {(yoursTotal > 0 || operatorSessions.length > 0) && (
@@ -228,7 +228,7 @@ export default function SessionSidebar({
             <>
               {filteredLocalSessions.length > 0 && (
                 <>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-1 -mb-1">
+                  <div className="text-caps uppercase tracking-wider text-muted-foreground font-semibold px-1 -mb-1">
                     Live on this machine
                   </div>
                   {filteredLocalSessions.map((s) => (
@@ -249,7 +249,7 @@ export default function SessionSidebar({
               {yoursOperatorSessions.length > 0 && (
                 <>
                   {filteredLocalSessions.length > 0 && (
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-1 mt-2 -mb-1">
+                    <div className="text-caps uppercase tracking-wider text-muted-foreground font-semibold px-1 mt-2 -mb-1">
                       Cluster-side
                     </div>
                   )}
@@ -278,7 +278,7 @@ export default function SessionSidebar({
         ) : teamError ? (
           <div className="px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/40">
             <div className="text-xs font-semibold text-destructive">Operator error</div>
-            <div className="text-[11px] text-destructive/80 mt-0.5 break-words">
+            <div className="text-meta text-destructive/80 mt-0.5 break-words">
               {watchStatus?.status === 'error' ? watchStatus.message || 'Could not reach the operator.' : ''}
             </div>
           </div>
@@ -325,7 +325,7 @@ function SectionHeader({
 }) {
   return (
     <div className="flex items-center justify-between px-1">
-      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground">
+      <div className="flex items-center gap-1.5 text-meta font-semibold uppercase tracking-wider text-foreground">
         <span className="text-muted-foreground">{icon}</span>
         {label}
         {count != null && count > 0 && (
@@ -351,7 +351,7 @@ function FunnelInline({ onConnect }: { onConnect: () => void }) {
           <span className="text-primary font-semibold">Connect operator →</span>
         </span>
       </button>
-      <div className="text-[11px] text-muted-foreground px-1">
+      <div className="text-meta text-muted-foreground px-1">
         0 sessions · operator not connected
       </div>
       <div

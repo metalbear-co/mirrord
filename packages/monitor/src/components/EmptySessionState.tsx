@@ -17,7 +17,7 @@ function CopyableCommand({ cmd }: { cmd: string }) {
         setCopied(true)
         setTimeout(() => setCopied(false), 1500)
       }}
-      className="group flex items-center gap-2 rounded-md border border-border bg-card/30 px-3 py-2 font-mono text-[11px] text-foreground hover:border-primary/50 hover:bg-card/60 transition-colors cursor-pointer"
+      className="group flex items-center gap-2 rounded-md border border-border surface-inset px-3 py-2 font-mono text-meta text-foreground hover:border-primary/50 hover:surface-section transition-colors cursor-pointer"
     >
       <Terminal className="h-3 w-3 text-muted-foreground shrink-0" />
       <span className="truncate flex-1">{cmd}</span>
@@ -46,39 +46,39 @@ export default function EmptySessionState() {
           </p>
         </div>
 
-        <Card className="bg-card/40">
+        <Card className="surface-section">
           <CardContent className="p-4 flex flex-col gap-3">
             <div className="flex items-center gap-2">
               <Terminal className="h-3 w-3 text-primary" />
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-foreground">
+              <span className="text-meta font-semibold uppercase tracking-wider text-foreground">
                 Run a session
               </span>
             </div>
             <CopyableCommand cmd={QUICK_START_CMD} />
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-meta text-muted-foreground">
               Targets a deployment, runs your local process in its context.
               Drop this into a terminal.
             </p>
           </CardContent>
         </Card>
 
-        <Card className="bg-card/40">
+        <Card className="surface-section">
           <CardContent className="p-4 flex flex-col gap-3">
             <div className="flex items-center gap-2">
               <Users className="h-3 w-3 text-emerald-500" />
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-foreground">
+              <span className="text-meta font-semibold uppercase tracking-wider text-foreground">
                 Spin up a preview env
               </span>
             </div>
             <CopyableCommand cmd={PREVIEW_CMD} />
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-meta text-muted-foreground">
               Spawns a long-lived preview pod from your image, shareable with
               teammates via a header key.
             </p>
           </CardContent>
         </Card>
 
-        <p className="text-[10px] text-muted-foreground/60 text-center">
+        <p className="text-caps text-muted-foreground/60 text-center">
           Sessions started anywhere on this machine, plus teammate sessions
           from the operator, show up automatically.
         </p>

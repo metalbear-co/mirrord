@@ -111,13 +111,13 @@ export default function JoinBar({
       <div className="text-xs leading-relaxed flex-1">
         Join this session to route your browser traffic through
         <span className="mx-1.5">
-          <Badge variant="outline" className="font-mono text-[10px]">
+          <Badge variant="outline" className="font-mono text-caps">
             {joinKey}
           </Badge>
         </span>
         — the extension will inject the matching header.
         {extensionState.joinedKey && (
-          <div className="text-[11px] text-muted-foreground mt-1">
+          <div className="text-meta text-muted-foreground mt-1">
             Currently joined to{' '}
             <span className="font-mono">{extensionState.joinedKey}</span>;
             joining here will switch you over.
@@ -133,7 +133,7 @@ export default function JoinBar({
         <LogIn className="h-3 w-3" />
         {busy ? 'Joining…' : 'Join'}
       </Button>
-      {err && <div className="text-[11px] text-destructive ml-3">{err}</div>}
+      {err && <div className="text-meta text-destructive ml-3">{err}</div>}
     </div>
   )
 }

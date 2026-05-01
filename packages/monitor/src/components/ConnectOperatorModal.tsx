@@ -79,7 +79,7 @@ function Stepper({ step }: { step: number }) {
             }`}
           >
             <span
-              className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-bold ${
+              className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-meta font-bold ${
                 step > i
                   ? 'bg-primary text-primary-foreground'
                   : step === i
@@ -154,7 +154,7 @@ function InstallStep({ onBack, onNext }: { onBack: () => void; onNext: () => voi
         <h3 className="text-sm font-bold mb-1">2. Install on your cluster</h3>
         <p className="text-xs text-muted-foreground leading-relaxed">
           Run these against your current kube context. Replace{' '}
-          <code className="font-mono text-[11px] px-1 rounded bg-muted">
+          <code className="font-mono text-meta px-1 rounded bg-muted">
             &lt;YOUR_KEY&gt;
           </code>{' '}
           with the license from step 1.
@@ -220,7 +220,7 @@ function VerifyStep({
           <div className="text-xs font-semibold">
             {isWatching ? 'Operator detected' : 'Watching your cluster…'}
           </div>
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-meta text-muted-foreground">
             {isWatching
               ? 'Closing this dialog now.'
               : 'Polling every 5s for the operator CRD'}
@@ -256,7 +256,7 @@ function CommandRow({ label, cmd }: { label: string; cmd: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <div>
-      <div className="text-[11px] font-semibold text-muted-foreground mb-1">
+      <div className="text-meta font-semibold text-muted-foreground mb-1">
         {label}
       </div>
       <div className="relative">
@@ -270,7 +270,7 @@ function CommandRow({ label, cmd }: { label: string; cmd: string }) {
             setCopied(true)
             setTimeout(() => setCopied(false), 1500)
           }}
-          className="absolute top-1.5 right-1.5 px-2 py-1 rounded text-[11px] font-semibold border border-zinc-700 bg-zinc-800 text-zinc-100 hover:bg-zinc-700"
+          className="absolute top-1.5 right-1.5 px-2 py-1 rounded text-meta font-semibold border border-zinc-700 bg-zinc-800 text-zinc-100 hover:bg-zinc-700"
         >
           {copied ? 'Copied' : 'Copy'}
         </button>
@@ -282,7 +282,7 @@ function CommandRow({ label, cmd }: { label: string; cmd: string }) {
 function Bullet({ children }: { children: React.ReactNode }) {
   return (
     <li className="flex gap-2 items-start text-xs">
-      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-primary/15 text-primary text-[10px] font-bold flex-shrink-0 mt-0.5">
+      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-primary/15 text-primary text-caps font-bold flex-shrink-0 mt-0.5">
         ✓
       </span>
       <span>{children}</span>

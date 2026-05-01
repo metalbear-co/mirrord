@@ -42,7 +42,7 @@ export default function FunnelHero({ onConnect }: FunnelHeroProps) {
 
       <div className="relative h-full flex flex-col items-start justify-center max-w-[720px] px-14 py-10">
         <div className="flex items-center gap-2 mb-4">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <span className="text-meta font-semibold uppercase tracking-wider text-muted-foreground">
             mirrord for Teams
           </span>
         </div>
@@ -63,7 +63,7 @@ export default function FunnelHero({ onConnect }: FunnelHeroProps) {
           {FEATURE_PILLS.map((label) => (
             <span
               key={label}
-              className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-card border border-border"
+              className="text-meta font-medium px-2.5 py-1 rounded-full bg-card border border-border"
             >
               {label}
             </span>

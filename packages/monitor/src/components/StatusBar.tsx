@@ -8,7 +8,7 @@ interface StatusBarProps {
 
 export default function StatusBar({ wsConnected, session }: StatusBarProps) {
   return (
-    <div className="flex items-center gap-3 px-4 py-1 border-t border-border bg-card/30 text-xs text-muted-foreground shrink-0">
+    <div className="flex items-center gap-3 px-4 py-1 border-t border-border surface-inset text-xs text-muted-foreground shrink-0">
       <div className="flex items-center gap-1.5">
         <div
           className={cn(

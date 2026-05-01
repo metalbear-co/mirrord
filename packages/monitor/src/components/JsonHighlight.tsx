@@ -17,7 +17,7 @@ export default function JsonHighlight({ value }: { value: unknown }) {
   if (last < text.length) parts.push({ kind: 'plain', text: text.slice(last) })
 
   return (
-    <pre className="text-[11px] whitespace-pre-wrap break-all font-mono leading-relaxed">
+    <pre className="text-meta whitespace-pre-wrap break-all font-mono leading-relaxed">
       <code data-language="json">
         {parts.map((p, i) => {
           if (p.kind === 'key')
