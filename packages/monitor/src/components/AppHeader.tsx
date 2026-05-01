@@ -3,6 +3,7 @@ import { Moon, Settings, Sun } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { strings } from '../strings'
 import SettingsDialog from './SettingsDialog'
+import Avatar from './Avatar'
 
 import type { ThemePref } from '../theme'
 
@@ -16,6 +17,13 @@ interface Props {
   onTelemetryChange: (enabled: boolean) => void
   query: string
   onQueryChange: (q: string) => void
+  currentUser: string | null
+}
+
+function meDisplayName(raw: string): string {
+  const at = raw.indexOf('@')
+  const head = at > 0 ? raw.slice(0, at) : raw
+  return head.replace(/[._-]+/g, ' ').trim() || raw
 }
 
 const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
@@ -31,6 +39,7 @@ export default function AppHeader({
   onTelemetryChange,
   query,
   onQueryChange,
+  currentUser,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -115,6 +124,14 @@ export default function AppHeader({
             >
               <Settings className="h-4 w-4" />
             </Button>
+
+            {currentUser && (
+              <Avatar
+                name={meDisplayName(currentUser)}
+                seed={currentUser}
+                size={28}
+              />
+            )}
           </div>
         </div>
       </div>

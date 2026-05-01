@@ -302,6 +302,7 @@ export default function App() {
         onTelemetryChange={setTelemetryPref}
         query={searchQuery}
         onQueryChange={setSearchQuery}
+        currentUser={currentUserK8s}
       />
       <div className="flex flex-1 overflow-hidden">
         <SessionSidebar
