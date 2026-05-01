@@ -41,7 +41,7 @@ export default function ConnectOperatorModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[560px]">
+      <DialogContent className="!max-w-[640px] sm:!max-w-[640px]">
         <DialogHeader>
           <DialogTitle>Connect the mirrord operator</DialogTitle>
           <DialogDescription>Three steps · about 2 minutes</DialogDescription>
@@ -121,7 +121,7 @@ function SignupStep({ onNext }: { onNext: () => void }) {
       <div className="flex items-center gap-3">
         <Button asChild size="sm">
           <a
-            href="https://app.metalbear.com"
+            href="https://app.metalbear.com/?utm_source=connect-operator-modal&utm_medium=session-monitor"
             target="_blank"
             rel="noreferrer"
             onClick={onNext}
@@ -168,7 +168,7 @@ function InstallStep({ onBack, onNext }: { onBack: () => void; onNext: () => voi
       <p className="text-xs text-muted-foreground">
         Prefer Terraform or Argo CD?{' '}
         <a
-          href="https://metalbear.com/mirrord/docs/managing-mirrord/operator"
+          href="https://metalbear.com/mirrord/docs/managing-mirrord/operator?utm_source=connect-operator-modal&utm_medium=session-monitor"
           target="_blank"
           rel="noreferrer"
           className="text-primary hover:underline"
@@ -230,7 +230,7 @@ function VerifyStep({
       <p className="text-xs text-muted-foreground">
         Stuck?{' '}
         <a
-          href="https://metalbear.com/mirrord/docs/troubleshooting/"
+          href="https://metalbear.com/mirrord/docs/troubleshooting/?utm_source=connect-operator-modal&utm_medium=session-monitor"
           target="_blank"
           rel="noreferrer"
           className="text-primary hover:underline"
@@ -255,12 +255,15 @@ function VerifyStep({
 function CommandRow({ label, cmd }: { label: string; cmd: string }) {
   const [copied, setCopied] = useState(false)
   return (
-    <div className="min-w-0">
+    <div className="min-w-0 max-w-full">
       <div className="text-meta font-semibold text-muted-foreground mb-1">
         {label}
       </div>
-      <div className="relative min-w-0 w-full bg-zinc-900 rounded-lg overflow-hidden">
-        <pre className="m-0 p-3 pr-16 text-zinc-100 font-mono text-xs leading-relaxed overflow-x-auto whitespace-nowrap">
+      <div className="relative bg-zinc-900 rounded-lg" style={{ maxWidth: '100%' }}>
+        <pre
+          className="m-0 p-3 pr-16 text-zinc-100 font-mono text-xs leading-relaxed overflow-x-auto whitespace-nowrap rounded-lg"
+          style={{ maxWidth: '100%' }}
+        >
           {cmd}
         </pre>
         <button
