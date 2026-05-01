@@ -43,11 +43,7 @@ export default function SessionHeader({
           <Badge
             variant="outline"
             style={{ fontSize: 10 }}
-            className={
-              session.is_operator
-                ? 'px-1.5 py-0 h-4 font-medium text-primary border-primary/40'
-                : 'px-1.5 py-0 h-4 font-medium'
-            }
+            className="px-1.5 py-0 h-4 font-medium text-muted-foreground border-border"
           >
             {session.is_operator
               ? strings.session.operator

@@ -143,12 +143,18 @@ function KeyGroupSection({
           {group.key}
         </span>
         {joined && (
-          <span className="shrink-0 px-1.5 rounded-full bg-primary/15 text-primary text-caps font-bold tracking-wider">
+          <span
+            style={{ fontSize: 10 }}
+            className="shrink-0 px-1.5 rounded-full bg-muted text-foreground font-semibold tracking-wider"
+          >
             JOINED
           </span>
         )}
         {groupIsPreview && (
-          <span className="shrink-0 px-1.5 rounded-full border border-emerald-500/40 text-emerald-500 text-caps font-bold tracking-wider">
+          <span
+            style={{ fontSize: 10 }}
+            className="shrink-0 px-1.5 rounded-full border border-border text-muted-foreground font-semibold tracking-wider"
+          >
             PREVIEW
           </span>
         )}
