@@ -11,6 +11,7 @@ import { Badge } from '@metalbear/ui'
 import { extractLicenseKey } from '../utils'
 import ConfigTab from './ConfigTab'
 import JoinBar from './JoinBar'
+import ResizableSplit from './ResizableSplit'
 import Widget from './Widget'
 import type { ExtensionState } from '../extensionBridge'
 import { type EventCounts, initialEventCounts } from './sessionDetailTypes'
@@ -134,7 +135,40 @@ export default function SessionDetail({
 
         <MetadataStrip items={metadataItems(session, portSubs, processes)} />
 
-        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="flex-1 min-h-0 hidden lg:block">
+          <ResizableSplit
+            storageKey={`session-monitor-split:${session.session_id}`}
+            left={
+              <div className="h-full pr-2">
+                <Widget
+                  title="Events"
+                  icon={<Activity className="h-3 w-3" />}
+                  collapsible
+                  defaultOpen
+                  className="h-full min-h-0"
+                >
+                  <div className="h-full flex flex-col">
+                    <EventStream session={session} />
+                  </div>
+                </Widget>
+              </div>
+            }
+            right={
+              <div className="h-full pl-2">
+                <Widget
+                  title="Config"
+                  icon={<Settings className="h-3 w-3" />}
+                  collapsible
+                  defaultOpen
+                  className="h-full min-h-0"
+                >
+                  <ConfigTab config={session.config} />
+                </Widget>
+              </div>
+            }
+          />
+        </div>
+        <div className="flex-1 min-h-0 grid grid-cols-1 gap-4 lg:hidden">
           <Widget
             title="Events"
             icon={<Activity className="h-3 w-3" />}
