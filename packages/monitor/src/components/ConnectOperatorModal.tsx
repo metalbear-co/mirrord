@@ -6,6 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  Separator,
 } from '@metalbear/ui'
 import { Check, Copy, ExternalLink, Loader2 } from 'lucide-react'
 import type { OperatorWatchStatus } from '../types'
@@ -41,26 +42,71 @@ export default function ConnectOperatorModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="!max-w-[640px] sm:!max-w-[640px]">
-        <DialogHeader>
+      <DialogContent className="!max-w-[640px] sm:!max-w-[640px] !gap-0 !p-0">
+        <DialogHeader className="px-6 pt-6 pb-4">
           <DialogTitle>Connect the mirrord operator</DialogTitle>
-          <DialogDescription>Three steps · about 2 minutes</DialogDescription>
+          <DialogDescription>Three steps, about 2 minutes.</DialogDescription>
+          <div className="pt-4">
+            <Stepper step={step} />
+          </div>
         </DialogHeader>
 
-        <Stepper step={step} />
+        <Separator />
 
-        <div className="min-h-[260px] min-w-0 overflow-hidden">
-          {step === 0 && <SignupStep onNext={() => setStep(1)} />}
-          {step === 1 && (
-            <InstallStep onBack={() => setStep(0)} onNext={() => setStep(2)} />
+        <div className="px-6 py-5 min-h-[260px] min-w-0 overflow-hidden">
+          {step === 0 && <SignupBody />}
+          {step === 1 && <InstallBody />}
+          {step === 2 && <VerifyBody watchStatus={watchStatus} />}
+        </div>
+
+        <Separator />
+
+        <div className="px-6 py-3 flex items-center gap-3">
+          {step > 0 ? (
+            <button
+              type="button"
+              onClick={() => setStep(step - 1)}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              ← Back
+            </button>
+          ) : (
+            <span />
           )}
-          {step === 2 && (
-            <VerifyStep
-              watchStatus={watchStatus}
-              onBack={() => setStep(1)}
-              onClose={() => onOpenChange(false)}
-            />
-          )}
+          <div className="ml-auto flex items-center gap-3">
+            {step === 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setStep(1)}
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                  I already have a key →
+                </button>
+                <Button asChild size="sm">
+                  <a
+                    href="https://app.metalbear.com/?utm_source=connect-operator-modal&utm_medium=session-monitor"
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => setStep(1)}
+                    className="inline-flex items-center gap-1.5"
+                  >
+                    Open app.metalbear.com <ExternalLink className="h-3 w-3" />
+                  </a>
+                </Button>
+              </>
+            )}
+            {step === 1 && (
+              <Button size="sm" onClick={() => setStep(2)}>
+                I&apos;ve installed it →
+              </Button>
+            )}
+            {step === 2 && (
+              <Button size="sm" onClick={() => onOpenChange(false)}>
+                Done
+              </Button>
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -102,11 +148,11 @@ function Stepper({ step }: { step: number }) {
   )
 }
 
-function SignupStep({ onNext }: { onNext: () => void }) {
+function SignupBody() {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h3 className="text-sm font-bold mb-1">1. Sign up at app.metalbear.com</h3>
+        <h3 className="text-sm font-bold mb-1">Sign up at app.metalbear.com</h3>
         <p className="text-xs text-muted-foreground leading-relaxed">
           Create an account to get a license key. Your key activates the
           operator on any cluster you run mirrord against. 14-day trial, no
@@ -114,49 +160,24 @@ function SignupStep({ onNext }: { onNext: () => void }) {
         </p>
       </div>
       <ul className="flex flex-col gap-2">
-        <Bullet>Concurrent debugging on the same target via HTTP filters</Bullet>
-        <Bullet>Queue splitting (SQS, Kafka, RabbitMQ) and DB branching</Bullet>
+        <Bullet>Queue splitting (SQS, Kafka, RabbitMQ)</Bullet>
+        <Bullet>Database branching (Postgres, MySQL, Mongo)</Bullet>
         <Bullet>MirrordPolicy CRDs for platform guardrails</Bullet>
       </ul>
-      <ModalFooter
-        left={null}
-        right={
-          <>
-            <button
-              type="button"
-              onClick={onNext}
-              className="text-xs text-muted-foreground hover:text-foreground"
-            >
-              I already have a key →
-            </button>
-            <Button asChild size="sm">
-              <a
-                href="https://app.metalbear.com/?utm_source=connect-operator-modal&utm_medium=session-monitor"
-                target="_blank"
-                rel="noreferrer"
-                onClick={onNext}
-                className="inline-flex items-center gap-1.5"
-              >
-                Open app.metalbear.com <ExternalLink className="h-3 w-3" />
-              </a>
-            </Button>
-          </>
-        }
-      />
     </div>
   )
 }
 
-function InstallStep({ onBack, onNext }: { onBack: () => void; onNext: () => void }) {
+function InstallBody() {
   const rows = [
-    { label: 'Add the Helm repository', cmd: HELM_REPO_CMD },
-    { label: 'Install the operator', cmd: INSTALL_CMD },
-    { label: 'Verify it picked up your license', cmd: VERIFY_CMD },
+    { label: '1. Add Helm repository', cmd: HELM_REPO_CMD },
+    { label: '2. Install the operator', cmd: INSTALL_CMD },
+    { label: '3. Verify installation', cmd: VERIFY_CMD },
   ]
   return (
     <div className="flex flex-col gap-4 min-w-0">
       <div>
-        <h3 className="text-sm font-bold mb-1">2. Install on your cluster</h3>
+        <h3 className="text-sm font-bold mb-1">Install on your cluster</h3>
         <p className="text-xs text-muted-foreground leading-relaxed">
           Run these against your current kube context. Replace{' '}
           <code className="font-mono text-meta px-1 rounded bg-muted">
@@ -182,28 +203,20 @@ function InstallStep({ onBack, onNext }: { onBack: () => void; onNext: () => voi
         </a>
         .
       </p>
-      <ModalFooter
-        left={<BackButton onClick={onBack} />}
-        right={<Button size="sm" onClick={onNext}>I&apos;ve installed it →</Button>}
-      />
     </div>
   )
 }
 
-function VerifyStep({
+function VerifyBody({
   watchStatus,
-  onBack,
-  onClose,
 }: {
   watchStatus: OperatorWatchStatus | null
-  onBack: () => void
-  onClose: () => void
 }) {
   const isWatching = watchStatus?.status === 'watching'
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h3 className="text-sm font-bold mb-1">3. Verify connection</h3>
+        <h3 className="text-sm font-bold mb-1">Verify connection</h3>
         <p className="text-xs text-muted-foreground leading-relaxed">
           mirrord ui will detect the operator on your kube context. This
           usually takes a few seconds after install.
@@ -237,32 +250,7 @@ function VerifyStep({
           Troubleshooting guide
         </a>
       </p>
-      <ModalFooter
-        left={<BackButton onClick={onBack} />}
-        right={<Button size="sm" onClick={onClose}>Done</Button>}
-      />
     </div>
-  )
-}
-
-function ModalFooter({ left, right }: { left: React.ReactNode; right: React.ReactNode }) {
-  return (
-    <div className="flex justify-between items-center border-t border-border -mx-6 px-6 pt-4 mt-2">
-      <div>{left}</div>
-      <div className="flex items-center gap-3">{right}</div>
-    </div>
-  )
-}
-
-function BackButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="text-xs text-muted-foreground hover:text-foreground"
-    >
-      ← Back
-    </button>
   )
 }
 
