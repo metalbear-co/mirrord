@@ -107,14 +107,16 @@ export default function OperatorSessionDetail({
             </span>
             <Badge
               variant="outline"
-              className="text-caps px-1.5 py-0 h-4 font-normal text-primary border-primary/40 shrink-0"
+              style={{ fontSize: 10 }}
+              className="px-1.5 py-0 h-4 font-medium text-primary border-primary/40 shrink-0"
             >
               operator
             </Badge>
             {isPreview && (
               <Badge
                 variant="outline"
-                className="text-caps px-1.5 py-0 h-4 font-normal text-emerald-500 border-emerald-500/40 inline-flex items-center gap-1 shrink-0"
+                style={{ fontSize: 10 }}
+                className="px-1.5 py-0 h-4 font-medium text-emerald-500 border-emerald-500/40 inline-flex items-center gap-1 shrink-0"
               >
                 <FlaskConical className="h-2.5 w-2.5" />
                 preview
