@@ -13,35 +13,33 @@ interface Props {
 }
 
 export default function SessionCard({ session, selected, onSelect, onKill }: Props) {
-  const meta: string[] = [
+  const meta: (string | React.ReactNode)[] = [
     formatUptime(session.started_at),
     `${session.processes.length} proc`,
     `v${session.mirrord_version}`,
   ]
-  const tags = session.is_operator
-    ? [
-        <Badge
-          key="op"
-          variant="outline"
-          className="text-[9px] px-1.5 py-0 h-4 tracking-wider font-medium text-primary border-primary/40"
-        >
-          {strings.session.operator}
-        </Badge>,
-      ]
-    : []
+  if (session.is_operator) {
+    meta.push(
+      <Badge
+        key="op"
+        variant="outline"
+        className="text-[9px] px-1.5 py-0 h-4 tracking-wider font-medium text-primary border-primary/40"
+      >
+        {strings.session.operator}
+      </Badge>
+    )
+  }
 
   return (
     <SessionRow
       selected={selected}
       onClick={onSelect}
       lead={
-        <span className="relative inline-flex items-center justify-center">
+        <span className="inline-flex items-center justify-center">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-          <span className="absolute inset-0 rounded-full bg-emerald-500/40 animate-ping" />
         </span>
       }
       target={session.target}
-      tags={tags}
       meta={meta}
       action={
         <Button
