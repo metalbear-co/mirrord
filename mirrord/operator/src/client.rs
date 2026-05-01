@@ -1638,6 +1638,8 @@ impl OperatorApi<PreparedClientCert> {
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
             gcp_pubsub_jq_filters: Default::default(),
+            azure_service_bus_splits: Default::default(),
+            azure_service_bus_jq_filters: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
