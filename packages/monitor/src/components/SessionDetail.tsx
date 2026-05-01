@@ -139,25 +139,27 @@ export default function SessionDetail({
             {processes.length > 0 && <ProcessesCard processes={processes} />}
           </div>
 
-          <Widget
-            title="Events"
-            icon={<Activity className="h-3 w-3" />}
-            collapsible
-            defaultOpen
-          >
-            <div className="max-h-[480px] flex flex-col">
-              <EventStream session={session} />
-            </div>
-          </Widget>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+            <Widget
+              title="Events"
+              icon={<Activity className="h-3 w-3" />}
+              collapsible
+              defaultOpen
+            >
+              <div className="max-h-[480px] flex flex-col">
+                <EventStream session={session} />
+              </div>
+            </Widget>
 
-          <Widget
-            title="Config"
-            icon={<Settings className="h-3 w-3" />}
-            collapsible
-            defaultOpen
-          >
-            <ConfigTab config={session.config} />
-          </Widget>
+            <Widget
+              title="Config"
+              icon={<Settings className="h-3 w-3" />}
+              collapsible
+              defaultOpen
+            >
+              <ConfigTab config={session.config} />
+            </Widget>
+          </div>
         </div>
       </div>
     </div>
