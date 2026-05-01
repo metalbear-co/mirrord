@@ -52,11 +52,13 @@ body {
   animation: eventFadeIn 0.2s ease-out;
 }
 
-/* Typography scale — use these, not text-[Npx] literals */
+/* Typography scale — use these, not text-[Npx] literals.
+ * Aligned with Apple HIG / SF Pro: minimum 10.5pt, sentence case for
+ * everything except very tight metadata pills. */
 .text-caps {
-  font-size: 9.5px;
+  font-size: 10.5px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 .text-meta {
@@ -64,6 +66,10 @@ body {
 }
 .text-body {
   font-size: 12px;
+}
+.text-section {
+  font-size: 12px;
+  font-weight: 600;
 }
 .text-title {
   font-size: 13px;

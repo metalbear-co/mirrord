@@ -42,7 +42,7 @@ export default function FunnelHero({ onConnect }: FunnelHeroProps) {
 
       <div className="relative h-full flex flex-col items-start justify-center max-w-[720px] px-14 py-10">
         <div className="flex items-center gap-2 mb-4">
-          <span className="text-meta font-semibold uppercase tracking-wider text-muted-foreground">
+          <span className="text-meta font-medium text-muted-foreground">
             mirrord for Teams
           </span>
         </div>

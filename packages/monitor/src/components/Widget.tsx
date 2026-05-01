@@ -49,7 +49,7 @@ export default function Widget({
             </span>
           )}
           {icon && <span className="text-muted-foreground">{icon}</span>}
-          <span className="text-caps text-foreground flex-1">{title}</span>
+          <span className="text-section text-foreground flex-1">{title}</span>
           {trailing && <span className="shrink-0">{trailing}</span>}
         </CardHeader>
       )}

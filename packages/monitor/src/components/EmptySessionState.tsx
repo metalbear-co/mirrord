@@ -50,7 +50,7 @@ export default function EmptySessionState() {
           <CardContent className="p-4 flex flex-col gap-3">
             <div className="flex items-center gap-2">
               <Terminal className="h-3 w-3 text-primary" />
-              <span className="text-meta font-semibold uppercase tracking-wider text-foreground">
+              <span className="text-section text-foreground">
                 Run a session
               </span>
             </div>
@@ -66,7 +66,7 @@ export default function EmptySessionState() {
           <CardContent className="p-4 flex flex-col gap-3">
             <div className="flex items-center gap-2">
               <Users className="h-3 w-3 text-emerald-500" />
-              <span className="text-meta font-semibold uppercase tracking-wider text-foreground">
+              <span className="text-section text-foreground">
                 Spin up a preview env
               </span>
             </div>

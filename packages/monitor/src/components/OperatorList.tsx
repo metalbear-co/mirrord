@@ -137,7 +137,7 @@ function KeyGroupSection({
   const groupIsPreview = group.sessions.every(isPreviewSession)
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2 px-1 text-caps uppercase tracking-wider text-muted-foreground font-semibold">
+      <div className="flex items-center gap-2 px-1 text-meta font-medium text-muted-foreground">
         <KeyIcon className="h-3 w-3 shrink-0" />
         <span className="font-mono normal-case tracking-normal break-all">
           {group.key}

@@ -7,7 +7,7 @@ export default function ProcessesCard({ processes }: { processes: ProcessInfo[] 
   return (
     <Card className="overflow-hidden p-0">
       <CardHeader className="px-4 py-2 surface-section border-b border-border">
-        <span className="text-caps text-foreground">
+        <span className="text-section text-foreground">
           {strings.session.sectionProcesses}
         </span>
       </CardHeader>

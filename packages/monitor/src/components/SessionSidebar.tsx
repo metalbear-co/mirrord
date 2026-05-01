@@ -228,7 +228,7 @@ export default function SessionSidebar({
             <>
               {filteredLocalSessions.length > 0 && (
                 <>
-                  <div className="text-caps uppercase tracking-wider text-muted-foreground font-semibold px-1 -mb-1">
+                  <div className="text-meta font-medium text-muted-foreground px-1 -mb-1">
                     Live on this machine
                   </div>
                   {filteredLocalSessions.map((s) => (
@@ -249,7 +249,7 @@ export default function SessionSidebar({
               {yoursOperatorSessions.length > 0 && (
                 <>
                   {filteredLocalSessions.length > 0 && (
-                    <div className="text-caps uppercase tracking-wider text-muted-foreground font-semibold px-1 mt-2 -mb-1">
+                    <div className="text-meta font-medium text-muted-foreground px-1 mt-2 -mb-1">
                       Cluster-side
                     </div>
                   )}
@@ -325,7 +325,7 @@ function SectionHeader({
 }) {
   return (
     <div className="flex items-center justify-between px-1">
-      <div className="flex items-center gap-1.5 text-meta font-semibold uppercase tracking-wider text-foreground">
+      <div className="flex items-center gap-1.5 text-section text-foreground">
         <span className="text-muted-foreground">{icon}</span>
         {label}
         {count != null && count > 0 && (
