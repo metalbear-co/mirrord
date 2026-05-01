@@ -7,12 +7,9 @@ interface FunnelHeroProps {
 
 const FEATURE_PILLS = [
   'Preview environments',
-  'Concurrent debugging',
-  'HTTP filters',
   'SQS · Kafka · RabbitMQ split',
   'Postgres · MySQL · Mongo branching',
   'MirrordPolicy CRDs',
-  'SSO + audit log',
 ]
 
 export default function FunnelHero({ onConnect }: FunnelHeroProps) {
@@ -48,15 +45,15 @@ export default function FunnelHero({ onConnect }: FunnelHeroProps) {
         </div>
 
         <h1 className="text-3xl font-bold leading-tight tracking-tight m-0 mb-3">
-          See what your team is mirroring —
+          See what your team is mirroring,
           <br />
           <span className="text-primary">and a lot more</span>.
         </h1>
 
         <p className="text-sm leading-relaxed text-muted-foreground m-0 mb-5 max-w-[540px]">
-          Install the mirrord operator on your cluster to unlock concurrent
-          debugging, preview environments, queue splitting, DB branching, and
-          platform-level policies — plus everything we ship next.
+          Install the mirrord operator on your cluster to unlock preview
+          environments, queue splitting, DB branching, and platform-level
+          policies. Plus everything we ship next.
         </p>
 
         <div className="flex flex-wrap gap-1.5 mb-6 max-w-[540px]">
@@ -75,7 +72,7 @@ export default function FunnelHero({ onConnect }: FunnelHeroProps) {
             Connect operator <ArrowRight className="h-3.5 w-3.5" />
           </Button>
           <a
-            href="https://metalbear.com/mirrord/pricing"
+            href="https://metalbear.com/mirrord/pricing?utm_source=funnel-hero&utm_medium=session-monitor"
             target="_blank"
             rel="noreferrer"
             className="text-xs text-muted-foreground hover:text-foreground transition-colors"

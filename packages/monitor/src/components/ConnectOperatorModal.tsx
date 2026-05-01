@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import {
   Button,
   Dialog,
@@ -49,7 +49,7 @@ export default function ConnectOperatorModal({
 
         <Stepper step={step} />
 
-        <div className="min-h-[260px]">
+        <div className="min-h-[260px] min-w-0 overflow-hidden">
           {step === 0 && <SignupStep onNext={() => setStep(1)} />}
           {step === 1 && (
             <InstallStep onBack={() => setStep(0)} onNext={() => setStep(2)} />
@@ -70,9 +70,9 @@ export default function ConnectOperatorModal({
 function Stepper({ step }: { step: number }) {
   const labels = ['Sign up', 'Install', 'Verify']
   return (
-    <div className="flex items-center gap-2 pb-3 border-b border-border mb-4">
+    <div className="flex items-center justify-center gap-3 pb-3 border-b border-border mb-4">
       {labels.map((label, i) => (
-        <div key={label} className="flex items-center gap-2 flex-1">
+        <Fragment key={label}>
           <div
             className={`flex items-center gap-1.5 text-xs font-semibold ${
               step >= i ? 'text-primary' : 'text-muted-foreground'
@@ -93,10 +93,10 @@ function Stepper({ step }: { step: number }) {
           </div>
           {i < labels.length - 1 && (
             <div
-              className={`flex-1 h-px ${step > i ? 'bg-primary' : 'bg-border'}`}
+              className={`w-12 h-px ${step > i ? 'bg-primary' : 'bg-border'}`}
             />
           )}
-        </div>
+        </Fragment>
       ))}
     </div>
   )
@@ -118,26 +118,31 @@ function SignupStep({ onNext }: { onNext: () => void }) {
         <Bullet>Queue splitting (SQS, Kafka, RabbitMQ) and DB branching</Bullet>
         <Bullet>MirrordPolicy CRDs for platform guardrails</Bullet>
       </ul>
-      <div className="flex items-center gap-3">
-        <Button asChild size="sm">
-          <a
-            href="https://app.metalbear.com/?utm_source=connect-operator-modal&utm_medium=session-monitor"
-            target="_blank"
-            rel="noreferrer"
-            onClick={onNext}
-            className="inline-flex items-center gap-1.5"
-          >
-            Open app.metalbear.com <ExternalLink className="h-3 w-3" />
-          </a>
-        </Button>
-        <button
-          type="button"
-          onClick={onNext}
-          className="text-xs text-muted-foreground hover:text-foreground"
-        >
-          I already have a key →
-        </button>
-      </div>
+      <ModalFooter
+        left={null}
+        right={
+          <>
+            <button
+              type="button"
+              onClick={onNext}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              I already have a key →
+            </button>
+            <Button asChild size="sm">
+              <a
+                href="https://app.metalbear.com/?utm_source=connect-operator-modal&utm_medium=session-monitor"
+                target="_blank"
+                rel="noreferrer"
+                onClick={onNext}
+                className="inline-flex items-center gap-1.5"
+              >
+                Open app.metalbear.com <ExternalLink className="h-3 w-3" />
+              </a>
+            </Button>
+          </>
+        }
+      />
     </div>
   )
 }
@@ -177,16 +182,10 @@ function InstallStep({ onBack, onNext }: { onBack: () => void; onNext: () => voi
         </a>
         .
       </p>
-      <div className="flex justify-between items-center">
-        <button
-          type="button"
-          onClick={onBack}
-          className="text-xs text-muted-foreground hover:text-foreground"
-        >
-          ← Back
-        </button>
-        <Button size="sm" onClick={onNext}>I&apos;ve installed it →</Button>
-      </div>
+      <ModalFooter
+        left={<BackButton onClick={onBack} />}
+        right={<Button size="sm" onClick={onNext}>I&apos;ve installed it →</Button>}
+      />
     </div>
   )
 }
@@ -238,17 +237,32 @@ function VerifyStep({
           Troubleshooting guide
         </a>
       </p>
-      <div className="flex justify-between items-center">
-        <button
-          type="button"
-          onClick={onBack}
-          className="text-xs text-muted-foreground hover:text-foreground"
-        >
-          ← Back
-        </button>
-        <Button size="sm" onClick={onClose}>Done</Button>
-      </div>
+      <ModalFooter
+        left={<BackButton onClick={onBack} />}
+        right={<Button size="sm" onClick={onClose}>Done</Button>}
+      />
     </div>
+  )
+}
+
+function ModalFooter({ left, right }: { left: React.ReactNode; right: React.ReactNode }) {
+  return (
+    <div className="flex justify-between items-center border-t border-border -mx-6 px-6 pt-4 mt-2">
+      <div>{left}</div>
+      <div className="flex items-center gap-3">{right}</div>
+    </div>
+  )
+}
+
+function BackButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="text-xs text-muted-foreground hover:text-foreground"
+    >
+      ← Back
+    </button>
   )
 }
 
