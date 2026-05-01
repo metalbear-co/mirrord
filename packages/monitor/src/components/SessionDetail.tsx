@@ -7,7 +7,6 @@ import { expectArray } from '../utils'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
 import MetadataStrip from './MetadataStrip'
-import { Badge } from '@metalbear/ui'
 import { extractLicenseKey } from '../utils'
 import ConfigTab from './ConfigTab'
 import JoinBar from './JoinBar'
@@ -212,21 +211,11 @@ function metadataItems(
   if (portSubs.length > 0) {
     items.push({
       label: portSubs.length === 1 ? 'Port' : 'Ports',
-      value: (
-        <span className="inline-flex items-center gap-1.5">
-          {portSubs.map((p) => (
-            <span key={p.port} className="inline-flex items-center gap-1">
-              :{p.port}
-              <Badge
-                variant="outline"
-                className="text-caps px-1 py-0 font-mono font-normal"
-              >
-                {p.mode}
-              </Badge>
-            </span>
-          ))}
-        </span>
-      ),
+      value: portSubs.map((p) => `:${p.port}`).join(' · '),
+    })
+    items.push({
+      label: 'Mode',
+      value: Array.from(new Set(portSubs.map((p) => p.mode))).join(' · '),
     })
   }
   if (processes.length > 0) {
