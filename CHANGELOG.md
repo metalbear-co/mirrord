@@ -8,6 +8,13 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.209.1](https://github.com/metalbear-co/mirrord/tree/3.209.1) - 2026-05-01
+
+
+### Fixed
+
+- Add missing `file` utility in `appleutils`
+
 ## [3.209.0](https://github.com/metalbear-co/mirrord/tree/3.209.0) - 2026-04-30
 
 
