@@ -57,7 +57,7 @@ mod bound_socket;
 pub mod http;
 mod http_gateway;
 mod metadata_store;
-mod port_subscription_ext;
+pub mod port_subscription_ext;
 mod subscriptions;
 pub mod tasks;
 mod tcp_proxy;

@@ -86,6 +86,11 @@ impl PreviewSessionSpec {
     pub fn has_infinite_ttl(&self) -> bool {
         self.ttl_secs >= PreviewTtl::INFINITE_TTL_SECS
     }
+
+    /// Returns `true` when `ttl_secs` should _not_ be treated as infinite.
+    pub fn has_ttl(&self) -> bool {
+        self.ttl_secs < PreviewTtl::INFINITE_TTL_SECS
+    }
 }
 
 impl PreviewSession {
@@ -203,8 +208,8 @@ impl PreviewStatusUpdate {
     }
 
     /// Sets `.status.expiresAt`.
-    pub fn expires_at(mut self, expires_at: MicroTime) -> Self {
-        self.expires_at = Some(expires_at);
+    pub fn expires_at(mut self, expires_at: Option<MicroTime>) -> Self {
+        self.expires_at = expires_at;
         self
     }
 

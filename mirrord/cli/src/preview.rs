@@ -253,7 +253,7 @@ async fn preview_start(
 
     let session = PreviewSession {
         metadata: ObjectMeta {
-            name: Some(session_name),
+            name: Some(session_name.clone()),
             labels: Some(session_labels),
             annotations,
             ..Default::default()
@@ -295,7 +295,7 @@ async fn preview_start(
 
     let mut last_known_phase: &str = "unknown";
 
-    let pod_name = loop {
+    loop {
         tokio::select! {
             _ = &mut timeout => {
                 if let Err(err) = delete::delete_and_finalize(api, &session.name_any(), &DeleteParams::default()).await {
@@ -328,8 +328,8 @@ async fn preview_start(
                                     last_known_phase = "waiting for preview pod to be ready";
                                 }
                                 PreviewSessionPhase::Ready => {
-                                    subtask.success(Some("preview pod is ready"));
-                                    break status.pod_name.clone().expect("Ready session must have pod_name");
+                                    subtask.success(Some("preview session is ready"));
+                                    break;
                                 }
                                 PreviewSessionPhase::Failed => {
                                     let failure_message = status.failure_message.clone().expect("Failed session must have failure_message");
@@ -370,7 +370,7 @@ async fn preview_start(
                 }
             }
         }
-    };
+    }
 
     // Display summary of the created preview environment.
 
@@ -393,7 +393,9 @@ async fn preview_start(
     progress
         .subtask(&format!("namespace: {namespace}"))
         .success(None);
-    progress.subtask(&format!("pod: {pod_name}")).success(None);
+    progress
+        .subtask(&format!("session: {session_name}"))
+        .success(None);
 
     Ok(())
 }
@@ -486,24 +488,20 @@ async fn preview_status(
 
     // Display sessions grouped by key.
 
-    let mut grouped: BTreeMap<&str, Vec<&PreviewSession>> = BTreeMap::new();
+    let mut sessions_by_key: BTreeMap<&str, Vec<&PreviewSession>> = BTreeMap::new();
 
     for session in &sessions {
-        grouped
+        sessions_by_key
             .entry(session.spec.key.as_str())
             .or_default()
             .push(session);
     }
 
-    for (key, sessions) in grouped {
+    for (key, sessions) in sessions_by_key {
         println!("  {key}:",);
 
         for session in sessions.iter() {
-            let pod_name = session
-                .status
-                .as_ref()
-                .and_then(|s| s.pod_name.as_deref())
-                .unwrap_or("<unknown>");
+            let session_name = session.metadata.name.as_deref().unwrap_or("<unknown>");
 
             let status = match session.status.as_ref().map(|status| status.phase) {
                 Some(PreviewSessionPhase::Initializing) => "initializing".to_owned(),
@@ -541,7 +539,7 @@ async fn preview_status(
 
             println!(
                 "    * {} ({} @ {}): {}",
-                pod_name,
+                session_name,
                 session.spec.target,
                 session.metadata.namespace.as_deref().unwrap_or("<unknown>"),
                 status
