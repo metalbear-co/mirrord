@@ -32,7 +32,7 @@ export default function SessionRow({
       type="button"
       onClick={handleClick}
       className={cn(
-        'relative w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-lg border transition-colors min-h-[54px]',
+        'group relative w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-lg border transition-colors min-h-[54px]',
         selected
           ? 'border-primary bg-primary/15'
           : 'border-border bg-card hover:border-muted-foreground'

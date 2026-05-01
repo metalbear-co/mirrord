@@ -42,18 +42,20 @@ export default function SessionCard({ session, selected, onSelect, onKill }: Pro
       target={session.target}
       meta={meta}
       action={
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation()
-            onKill()
-          }}
-          className="h-6 text-[10px] gap-1 px-2 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/60"
-        >
-          <Trash2 className="h-3 w-3" />
-          {strings.session.kill}
-        </Button>
+        <span className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation()
+              onKill()
+            }}
+            className="h-6 text-[10px] gap-1 px-2 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/60"
+          >
+            <Trash2 className="h-3 w-3" />
+            {strings.session.kill}
+          </Button>
+        </span>
       }
     />
   )
