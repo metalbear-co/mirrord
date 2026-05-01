@@ -119,7 +119,7 @@ function SignupStep({ onNext }: { onNext: () => void }) {
         <Bullet>MirrordPolicy CRDs for platform guardrails</Bullet>
       </ul>
       <div className="flex items-center gap-3">
-        <Button asChild>
+        <Button asChild size="sm">
           <a
             href="https://app.metalbear.com"
             target="_blank"
@@ -127,7 +127,7 @@ function SignupStep({ onNext }: { onNext: () => void }) {
             onClick={onNext}
             className="inline-flex items-center gap-1.5"
           >
-            Open app.metalbear.com <ExternalLink className="h-3.5 w-3.5" />
+            Open app.metalbear.com <ExternalLink className="h-3 w-3" />
           </a>
         </Button>
         <button
@@ -149,7 +149,7 @@ function InstallStep({ onBack, onNext }: { onBack: () => void; onNext: () => voi
     { label: 'Verify it picked up your license', cmd: VERIFY_CMD },
   ]
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 min-w-0">
       <div>
         <h3 className="text-sm font-bold mb-1">2. Install on your cluster</h3>
         <p className="text-xs text-muted-foreground leading-relaxed">
@@ -160,7 +160,7 @@ function InstallStep({ onBack, onNext }: { onBack: () => void; onNext: () => voi
           with the license from step 1.
         </p>
       </div>
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 min-w-0">
         {rows.map((row, i) => (
           <CommandRow key={i} label={row.label} cmd={row.cmd} />
         ))}
@@ -185,7 +185,7 @@ function InstallStep({ onBack, onNext }: { onBack: () => void; onNext: () => voi
         >
           ← Back
         </button>
-        <Button onClick={onNext}>I&apos;ve installed it →</Button>
+        <Button size="sm" onClick={onNext}>I&apos;ve installed it →</Button>
       </div>
     </div>
   )
@@ -246,7 +246,7 @@ function VerifyStep({
         >
           ← Back
         </button>
-        <Button onClick={onClose}>Done</Button>
+        <Button size="sm" onClick={onClose}>Done</Button>
       </div>
     </div>
   )
@@ -255,12 +255,12 @@ function VerifyStep({
 function CommandRow({ label, cmd }: { label: string; cmd: string }) {
   const [copied, setCopied] = useState(false)
   return (
-    <div>
+    <div className="min-w-0">
       <div className="text-meta font-semibold text-muted-foreground mb-1">
         {label}
       </div>
-      <div className="relative">
-        <pre className="m-0 p-3 pr-16 bg-zinc-900 text-zinc-100 rounded-lg font-mono text-xs leading-relaxed overflow-x-auto whitespace-nowrap">
+      <div className="relative min-w-0 w-full bg-zinc-900 rounded-lg overflow-hidden">
+        <pre className="m-0 p-3 pr-16 text-zinc-100 font-mono text-xs leading-relaxed overflow-x-auto whitespace-nowrap">
           {cmd}
         </pre>
         <button
