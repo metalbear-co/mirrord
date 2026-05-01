@@ -128,6 +128,7 @@ export default function JoinBar({
         onClick={handleJoin}
         disabled={busy}
         size="sm"
+        variant="outline"
         className="gap-1.5"
       >
         <LogIn className="h-3 w-3" />

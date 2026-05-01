@@ -23,7 +23,8 @@ export default function SessionCard({ session, selected, onSelect, onKill }: Pro
       <Badge
         key="op"
         variant="outline"
-        className="text-caps px-1.5 py-0 h-4 tracking-wider font-medium text-primary border-primary/40"
+        style={{ fontSize: 9 }}
+        className="px-1.5 py-0 h-4 font-medium text-muted-foreground border-border"
       >
         {strings.session.operator}
       </Badge>
