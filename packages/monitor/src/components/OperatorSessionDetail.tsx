@@ -197,11 +197,10 @@ export default function OperatorSessionDetail({
           ]}
         />
 
-        <div className="flex-1 min-h-0">
+        <div>
           <Widget
             title="Config"
             icon={<FileJson className="h-3 w-3" />}
-            className="h-full min-h-0"
           >
             <div className="p-4">
               <JsonHighlight

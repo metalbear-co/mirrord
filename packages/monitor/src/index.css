@@ -51,3 +51,33 @@ body {
 .event-row-animate {
   animation: eventFadeIn 0.2s ease-out;
 }
+
+@keyframes detailFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.detail-fade-in {
+  animation: detailFadeIn 0.18s ease-out;
+}
+
+@keyframes sidebarItemFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.sidebar-item-animate {
+  animation: sidebarItemFadeIn 0.16s ease-out;
+}
