@@ -133,35 +133,31 @@ export default function SessionDetail({
             />
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4 items-start">
-            <div className="flex flex-col gap-4 min-w-0">
-              <SessionIdentity session={session} />
-              {portSubs.length > 0 && <PortSubscriptionsCard portSubs={portSubs} />}
-              {processes.length > 0 && <ProcessesCard processes={processes} />}
-            </div>
-
-            <div className="flex flex-col gap-4 min-w-0">
-              <Widget
-                title="Events"
-                icon={<Activity className="h-3 w-3" />}
-                collapsible
-                defaultOpen
-              >
-                <div className="max-h-[480px] flex flex-col">
-                  <EventStream session={session} />
-                </div>
-              </Widget>
-
-              <Widget
-                title="Config"
-                icon={<Settings className="h-3 w-3" />}
-                collapsible
-                defaultOpen
-              >
-                <ConfigTab config={session.config} />
-              </Widget>
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
+            <SessionIdentity session={session} />
+            {portSubs.length > 0 && <PortSubscriptionsCard portSubs={portSubs} />}
+            {processes.length > 0 && <ProcessesCard processes={processes} />}
           </div>
+
+          <Widget
+            title="Events"
+            icon={<Activity className="h-3 w-3" />}
+            collapsible
+            defaultOpen
+          >
+            <div className="max-h-[480px] flex flex-col">
+              <EventStream session={session} />
+            </div>
+          </Widget>
+
+          <Widget
+            title="Config"
+            icon={<Settings className="h-3 w-3" />}
+            collapsible
+            defaultOpen
+          >
+            <ConfigTab config={session.config} />
+          </Widget>
         </div>
       </div>
     </div>
