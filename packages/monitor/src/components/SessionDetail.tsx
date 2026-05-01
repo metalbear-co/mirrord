@@ -148,8 +148,9 @@ export default function SessionDetail({
                 icon={<Activity className="h-3 w-3" />}
                 collapsible
                 defaultOpen
+                className="w-fit max-w-full"
               >
-                <div className="h-[420px] flex flex-col">
+                <div className="min-h-[140px] max-h-[480px] flex flex-col">
                   <EventStream session={session} />
                 </div>
               </Widget>
