@@ -19,11 +19,6 @@ interface Props {
   currentUser: string | null
 }
 
-const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
-  { value: 'system', label: 'System' },
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-]
 
 
 const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
@@ -138,49 +133,15 @@ export default function AppHeader({
               </button>
 
               {menuOpen && (
-                <div className="absolute right-0 top-full mt-1.5 z-50 min-w-[240px] rounded-lg border border-border bg-popover text-popover-foreground shadow-lg p-2 flex flex-col gap-2">
+                <div className="absolute right-0 top-full mt-1.5 z-50 min-w-[220px] rounded-lg border border-border bg-popover text-popover-foreground shadow-lg p-2 flex flex-col">
                   {currentUser && (
-                    <div className="px-2 py-1 border-b border-border -mx-2 mb-1">
+                    <div className="px-2 py-1.5">
                       <div className="text-caps text-muted-foreground">Signed in as</div>
                       <div className="font-mono text-meta text-foreground truncate" title={currentUser}>
                         {currentUser}
                       </div>
                     </div>
                   )}
-
-                  <div className="flex items-center justify-between px-2">
-                    <span className="text-meta text-muted-foreground">Connection</span>
-                    <span className="inline-flex items-center gap-1.5 text-meta">
-                      <span
-                        className={cn(
-                          'h-1.5 w-1.5 rounded-full',
-                          connected ? 'bg-green-500' : 'bg-red-500'
-                        )}
-                      />
-                      {connected ? strings.app.connected : strings.app.disconnected}
-                    </span>
-                  </div>
-
-                  <div className="px-2">
-                    <div className="text-meta text-muted-foreground mb-1">Theme</div>
-                    <div className="flex rounded-md border border-border overflow-hidden">
-                      {THEME_OPTIONS.map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => onThemeChange(opt.value)}
-                          className={cn(
-                            'flex-1 text-meta py-1.5 transition-colors',
-                            theme === opt.value
-                              ? 'bg-foreground text-background font-semibold'
-                              : 'text-muted-foreground hover:bg-muted'
-                          )}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
 
                   <button
                     type="button"
