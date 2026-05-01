@@ -11,6 +11,7 @@ import { Badge } from '@metalbear/ui'
 import { extractLicenseKey } from '../utils'
 import ConfigTab from './ConfigTab'
 import JoinBar from './JoinBar'
+import CopyButton from './CopyButton'
 import ResizableSplit from './ResizableSplit'
 import Widget from './Widget'
 import type { ExtensionState } from '../extensionBridge'
@@ -156,6 +157,14 @@ export default function SessionDetail({
                 <Widget
                   title="Config"
                   icon={<FileJson className="h-3 w-3" />}
+                  trailing={
+                    <CopyButton
+                      getText={() =>
+                        JSON.stringify(session.config, null, 2)
+                      }
+                      title="Copy config"
+                    />
+                  }
                   className="h-full min-h-0"
                 >
                   <ConfigTab config={session.config} />
