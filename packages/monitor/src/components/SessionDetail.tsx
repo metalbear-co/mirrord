@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Activity, Settings } from 'lucide-react'
+import { Activity, FileJson } from 'lucide-react'
 import type { SessionInfo, MonitorEvent, PortSubscription, ProcessInfo } from '../types'
 import { api } from '../api'
 import { EventType } from '../eventTypes'
@@ -143,8 +143,6 @@ export default function SessionDetail({
                 <Widget
                   title="Events"
                   icon={<Activity className="h-3 w-3" />}
-                  collapsible
-                  defaultOpen
                   className="h-full min-h-0"
                 >
                   <div className="h-full flex flex-col">
@@ -157,9 +155,7 @@ export default function SessionDetail({
               <div className="h-full pl-2">
                 <Widget
                   title="Config"
-                  icon={<Settings className="h-3 w-3" />}
-                  collapsible
-                  defaultOpen
+                  icon={<FileJson className="h-3 w-3" />}
                   className="h-full min-h-0"
                 >
                   <ConfigTab config={session.config} />
@@ -172,8 +168,6 @@ export default function SessionDetail({
           <Widget
             title="Events"
             icon={<Activity className="h-3 w-3" />}
-            collapsible
-            defaultOpen
             className="min-h-0"
           >
             <div className="h-full flex flex-col">
@@ -183,9 +177,7 @@ export default function SessionDetail({
 
           <Widget
             title="Config"
-            icon={<Settings className="h-3 w-3" />}
-            collapsible
-            defaultOpen
+            icon={<FileJson className="h-3 w-3" />}
             className="min-h-0"
           >
             <ConfigTab config={session.config} />

@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import { Badge, Card, CardContent, CardHeader } from '@metalbear/ui'
 import {
   Clock,
+  FileJson,
   FlaskConical,
   Network,
   Radio,
-  Settings,
   User,
 } from 'lucide-react'
 import type {
@@ -200,9 +200,7 @@ export default function OperatorSessionDetail({
         <div className="flex-1 min-h-0">
           <Widget
             title="Config"
-            icon={<Settings className="h-3 w-3" />}
-            collapsible
-            defaultOpen
+            icon={<FileJson className="h-3 w-3" />}
             className="h-full min-h-0"
           >
             <div className="p-4">
