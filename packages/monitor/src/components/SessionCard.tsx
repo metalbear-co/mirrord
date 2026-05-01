@@ -1,18 +1,24 @@
 import { Badge, Button } from '@metalbear/ui'
 import { Trash2 } from 'lucide-react'
-import type { SessionInfo } from '../types'
+import type { OperatorSessionOwner, SessionInfo } from '../types'
 import { strings } from '../strings'
 import { formatUptime } from '../utils'
 import SessionRow from './SessionRow'
+import Avatar from './Avatar'
 
 interface Props {
   session: SessionInfo
   selected: boolean
   onSelect: () => void
   onKill: () => void
+  owner?: OperatorSessionOwner | null
 }
 
-export default function SessionCard({ session, selected, onSelect, onKill }: Props) {
+function firstName(full: string): string {
+  return full.trim().split(/\s+/)[0] || full
+}
+
+export default function SessionCard({ session, selected, onSelect, onKill, owner }: Props) {
   const meta: (string | React.ReactNode)[] = [
     formatUptime(session.started_at),
     `${session.processes.length} proc`,
@@ -42,6 +48,16 @@ export default function SessionCard({ session, selected, onSelect, onKill }: Pro
       }
       target={session.target}
       meta={meta}
+      right={
+        owner ? (
+          <span className="flex items-center gap-1.5">
+            <span className="text-meta text-muted-foreground truncate max-w-[80px]">
+              {firstName(owner.username)}
+            </span>
+            <Avatar name={owner.username} seed={owner.k8sUsername} size={20} />
+          </span>
+        ) : undefined
+      }
       action={
         <span className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
           <Button

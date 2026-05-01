@@ -8,6 +8,7 @@ interface SessionRowProps {
   meta?: ReactNode[]
   tags?: ReactNode[]
   action?: ReactNode
+  right?: ReactNode
   selected?: boolean
   onClick?: () => void
   leftStrip?: string
@@ -19,6 +20,7 @@ export default function SessionRow({
   meta = [],
   tags = [],
   action,
+  right,
   selected = false,
   onClick,
   leftStrip,
@@ -69,6 +71,11 @@ export default function SessionRow({
           </div>
         )}
       </div>
+      {right && (
+        <div className="shrink-0 flex items-center">
+          {right}
+        </div>
+      )}
       <div
         className="shrink-0 flex items-center gap-1.5"
         onClick={(e) => e.stopPropagation()}

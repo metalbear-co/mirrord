@@ -10,7 +10,6 @@ import {
   DialogTitle,
   DialogTrigger,
   Loader,
-  SearchInput,
   cn,
 } from '@metalbear/ui'
 import { Activity, Cloud, Laptop, PanelLeftClose, PanelLeftOpen, Trash2 } from 'lucide-react'
@@ -52,11 +51,13 @@ interface SessionSidebarProps {
   onKillAll: () => void
   operatorSessions: OperatorSessionSummary[]
   yoursOperatorSessions: OperatorSessionSummary[]
+  allOperatorSessions: OperatorSessionSummary[]
   watchStatus: OperatorWatchStatus | null
   selectedOperatorId: string | null
   onSelectOperator: (id: string) => void
   onConnectOperator: () => void
   joinedKey: string | null
+  query: string
 }
 
 export default function SessionSidebar({
@@ -68,18 +69,19 @@ export default function SessionSidebar({
   onKillAll,
   operatorSessions,
   yoursOperatorSessions,
+  allOperatorSessions,
   watchStatus,
   selectedOperatorId,
   onSelectOperator,
   onConnectOperator,
   joinedKey,
+  query,
 }: SessionSidebarProps) {
   const yoursTotal = sessions.length + yoursOperatorSessions.length
   const [sidebarWidth, setSidebarWidth] = useState(getSavedSidebarWidth)
   const [sidebarHidden, setSidebarHidden] = useState(getSavedSidebarHidden)
   const isDraggingRef = useRef(false)
   const [isDragging, setIsDragging] = useState(false)
-  const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLowerCase()
 
   const matchesLocal = (s: SessionInfo): boolean => {
@@ -146,15 +148,6 @@ export default function SessionSidebar({
         className="border-r border-border overflow-y-auto p-3 shrink-0 relative surface-inset flex flex-col gap-4"
         style={{ width: sidebarWidth }}
       >
-        {(yoursTotal > 0 || operatorSessions.length > 0) && (
-          <SearchInput
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search owner, target, namespace, key"
-            className="h-8 text-xs"
-          />
-        )}
-
         <SectionHeader
           icon={<Laptop className="h-3.5 w-3.5" />}
           label="Yours"
@@ -231,19 +224,25 @@ export default function SessionSidebar({
                   <div className="text-meta font-medium text-muted-foreground px-1 -mb-1">
                     Live on this machine
                   </div>
-                  {filteredLocalSessions.map((s) => (
-                    <SessionCard
-                      key={s.session_id}
-                      session={s}
-                      selected={s.session_id === selectedId}
-                      onSelect={() =>
-                        onSelect(
-                          s.session_id === selectedId ? '' : s.session_id
-                        )
-                      }
-                      onKill={() => onKill(s.session_id)}
-                    />
-                  ))}
+                  {filteredLocalSessions.map((s) => {
+                    const owner =
+                      allOperatorSessions.find((o) => o.id === s.session_id)
+                        ?.owner ?? null
+                    return (
+                      <SessionCard
+                        key={s.session_id}
+                        session={s}
+                        selected={s.session_id === selectedId}
+                        onSelect={() =>
+                          onSelect(
+                            s.session_id === selectedId ? '' : s.session_id
+                          )
+                        }
+                        onKill={() => onKill(s.session_id)}
+                        owner={owner}
+                      />
+                    )
+                  })}
                 </>
               )}
               {yoursOperatorSessions.length > 0 && (
