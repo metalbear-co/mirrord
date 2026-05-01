@@ -6,7 +6,6 @@ import { EventType } from '../eventTypes'
 import { expectArray } from '../utils'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
-import LiveStatusStrip from './LiveStatusStrip'
 import SessionIdentity from './SessionIdentity'
 import PortSubscriptionsCard from './PortSubscriptionsCard'
 import ProcessesCard from './ProcessesCard'
@@ -116,16 +115,15 @@ export default function SessionDetail({
 
   return (
     <div className="h-full flex flex-col">
-      <SessionHeader session={session} processes={processes} onKill={onKill} />
+      <SessionHeader
+        session={session}
+        processes={processes}
+        portSubs={portSubs}
+        eventCounts={eventCounts}
+        onKill={onKill}
+      />
       <div className="flex-1 overflow-auto">
         <div className="flex flex-col gap-4 p-4 max-w-7xl mx-auto">
-          <LiveStatusStrip
-            session={session}
-            portSubs={portSubs}
-            processes={processes}
-            eventCounts={eventCounts}
-          />
-
           {session.is_operator && session.key && (
             <JoinBar
               joinKey={session.key}
@@ -150,7 +148,7 @@ export default function SessionDetail({
                 defaultOpen
                 className="w-fit max-w-full"
               >
-                <div className="min-h-[140px] max-h-[480px] flex flex-col">
+                <div className="max-h-[480px] flex flex-col">
                   <EventStream session={session} />
                 </div>
               </Widget>

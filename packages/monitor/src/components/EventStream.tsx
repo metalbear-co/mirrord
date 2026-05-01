@@ -98,37 +98,55 @@ export default function EventStream({ session }: Props) {
     ? `${filteredEvents.length}/${processedEvents.length}`
     : `${filteredEvents.length}`
 
+  const hasEvents = processedEvents.length > 0
+
   return (
     <div className="h-full flex flex-col">
       <div className="border-b border-border px-4 py-2 bg-card/30 flex items-center gap-3">
-        <div className="flex items-center gap-2 flex-1">
-          <EventSearchBar query={searchQuery} onChange={setSearchQuery} />
-        </div>
+        {hasEvents && (
+          <div className="flex items-center gap-2 flex-1">
+            <EventSearchBar query={searchQuery} onChange={setSearchQuery} />
+          </div>
+        )}
 
-        <EventFilterChips activeFilter={activeFilter} onChange={setActiveFilter} />
+        {hasEvents && (
+          <>
+            <EventFilterChips
+              activeFilter={activeFilter}
+              onChange={setActiveFilter}
+            />
+            <Separator orientation="vertical" className="h-3" />
+          </>
+        )}
 
-        <Separator orientation="vertical" className="h-3" />
-
-        <span className="text-[10px] text-muted-foreground tabular-nums">
-          {countLabel} {strings.events.countSuffix}
+        <span className="text-[10px] text-muted-foreground tabular-nums ml-auto inline-flex items-center gap-1.5">
+          {!hasEvents && streaming && (
+            <Activity className="h-3 w-3 opacity-50 animate-pulse" />
+          )}
+          {hasEvents
+            ? `${countLabel} ${strings.events.countSuffix}`
+            : streaming
+              ? strings.events.waiting
+              : `0 ${strings.events.countSuffix}`}
         </span>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setEvents([])}
-          title={strings.events.clear}
-          className="h-6 w-6"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </Button>
+        {hasEvents && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setEvents([])}
+            title={strings.events.clear}
+            className="h-6 w-6"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        )}
       </div>
 
       <div ref={logRef} className="flex-1 overflow-y-auto text-xs font-mono">
-        {filteredEvents.length === 0 && streaming && (
-          <div className="text-muted-foreground text-center py-8 flex flex-col items-center gap-2">
-            <Activity className="h-6 w-6 opacity-30 animate-pulse" />
-            <span>{strings.events.waiting}</span>
+        {filteredEvents.length === 0 && hasEvents && (
+          <div className="text-muted-foreground text-center py-4 text-[11px]">
+            No events match the current filter.
           </div>
         )}
         {filteredEvents.map(({ parsed, receivedAt }, i) => (

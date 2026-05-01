@@ -1,23 +1,45 @@
+import { useEffect, useState } from 'react'
 import { Badge, Button } from '@metalbear/ui'
-import { Trash2 } from 'lucide-react'
-import type { SessionInfo, ProcessInfo } from '../types'
+import { Activity, Clock, Cpu, Radio, Trash2 } from 'lucide-react'
+import type { SessionInfo, PortSubscription, ProcessInfo } from '../types'
 import { trackEvent } from '../analytics'
 import { strings } from '../strings'
+import { formatUptime } from '../utils'
 import LiveDot from './LiveDot'
+import type { EventCounts } from './sessionDetailTypes'
 
 interface Props {
   session: SessionInfo
   processes: ProcessInfo[]
+  portSubs: PortSubscription[]
+  eventCounts: EventCounts
   onKill: () => void
 }
 
-export default function SessionHeader({ session, processes, onKill }: Props) {
+export default function SessionHeader({
+  session,
+  processes,
+  portSubs,
+  eventCounts,
+  onKill,
+}: Props) {
+  const [uptime, setUptime] = useState(formatUptime(session.started_at))
+  useEffect(() => {
+    const interval = setInterval(
+      () => setUptime(formatUptime(session.started_at)),
+      1000
+    )
+    return () => clearInterval(interval)
+  }, [session.started_at])
+
   return (
-    <div className="border-b border-border px-4 py-2.5 bg-card/30 shrink-0">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
+    <div className="border-b border-border px-4 py-2 bg-card/30 shrink-0">
+      <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
+        <div className="flex items-center gap-2.5 min-w-0">
           <LiveDot active={processes.length > 0} />
-          <span className="font-mono text-sm font-semibold text-foreground">{session.target}</span>
+          <span className="font-mono text-sm font-semibold text-foreground truncate">
+            {session.target}
+          </span>
           <Badge
             variant="outline"
             className={
@@ -26,8 +48,42 @@ export default function SessionHeader({ session, processes, onKill }: Props) {
                 : 'text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal'
             }
           >
-            {session.is_operator ? strings.session.operator : strings.session.direct}
+            {session.is_operator
+              ? strings.session.operator
+              : strings.session.direct}
           </Badge>
+        </div>
+
+        <div className="flex items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground flex-wrap">
+          <span className="inline-flex items-center gap-1">
+            <Clock className="h-3 w-3" />
+            <span className="font-mono tabular-nums">{uptime}</span>
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Cpu className="h-3 w-3" />
+            {processes.length}{' '}
+            {processes.length === 1
+              ? strings.session.processSingular
+              : strings.session.processPlural}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Radio className="h-3 w-3" />
+            {portSubs.length}{' '}
+            {portSubs.length === 1
+              ? strings.session.portSingular
+              : strings.session.portPlural}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Activity className="h-3 w-3" />
+            <span className="font-mono tabular-nums">{eventCounts.total}</span>
+            {strings.session.eventsLabel}
+          </span>
+        </div>
+
+        <div className="ml-auto flex items-center gap-3">
+          <span className="text-[10px] text-muted-foreground font-mono">
+            v{session.mirrord_version}
+          </span>
           <Button
             variant="outline"
             size="sm"
@@ -41,7 +97,6 @@ export default function SessionHeader({ session, processes, onKill }: Props) {
             {strings.session.kill}
           </Button>
         </div>
-        <span className="text-[10px] text-muted-foreground font-mono">v{session.mirrord_version}</span>
       </div>
     </div>
   )

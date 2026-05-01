@@ -1,11 +1,5 @@
 import { useEffect, useState } from 'react'
-import {
-  Badge,
-  Card,
-  CardContent,
-  CardHeader,
-  Separator,
-} from '@metalbear/ui'
+import { Badge, Card, CardContent, CardHeader } from '@metalbear/ui'
 import {
   Clock,
   FlaskConical,
@@ -102,30 +96,56 @@ export default function OperatorSessionDetail({
 
   return (
     <div className="h-full flex flex-col">
-      <div className="border-b border-border px-4 py-2.5 bg-card/30 shrink-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
-            <span className="font-mono text-sm font-semibold text-foreground">
+      <div className="border-b border-border px-4 py-2 bg-card/30 shrink-0">
+        <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+            <span className="font-mono text-sm font-semibold text-foreground truncate">
               {targetLabel}
             </span>
             <Badge
               variant="outline"
-              className="text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal text-primary border-primary/40"
+              className="text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal text-primary border-primary/40 shrink-0"
             >
               operator
             </Badge>
             {isPreview && (
               <Badge
                 variant="outline"
-                className="text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal text-emerald-500 border-emerald-500/40 inline-flex items-center gap-1"
+                className="text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal text-emerald-500 border-emerald-500/40 inline-flex items-center gap-1 shrink-0"
               >
                 <FlaskConical className="h-2.5 w-2.5" />
                 preview
               </Badge>
             )}
           </div>
-          <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">
+
+          <div className="flex items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground flex-wrap">
+            <span className="inline-flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              <span className="font-mono tabular-nums">
+                {formatUptime(uptime)}
+              </span>
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <Network className="h-3 w-3" />
+              {lockedPorts.length}{' '}
+              {lockedPorts.length === 1 ? 'port' : 'ports'}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <Radio className="h-3 w-3" />
+              {splitsTotal} {splitsTotal === 1 ? 'split' : 'splits'}
+            </span>
+            <span
+              className="inline-flex items-center gap-1 truncate"
+              title={session.owner.k8sUsername}
+            >
+              <User className="h-3 w-3" />
+              {session.owner.username}
+            </span>
+          </div>
+
+          <span className="ml-auto text-[10px] text-muted-foreground font-mono uppercase tracking-wider">
             read-only
           </span>
         </div>
@@ -133,39 +153,6 @@ export default function OperatorSessionDetail({
 
       <div className="flex-1 overflow-auto">
         <div className="flex flex-col gap-4 p-4 max-w-7xl mx-auto">
-          <Card className="bg-card/40">
-            <CardContent className="flex items-center gap-6 px-4 py-3">
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Clock className="h-3 w-3" />
-                <span className="font-mono tabular-nums">
-                  {formatUptime(uptime)}
-                </span>
-              </div>
-              <Separator orientation="vertical" className="h-4" />
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Network className="h-3 w-3" />
-                <span>
-                  {lockedPorts.length}{' '}
-                  {lockedPorts.length === 1 ? 'port' : 'ports'}
-                </span>
-              </div>
-              <Separator orientation="vertical" className="h-4" />
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Radio className="h-3 w-3" />
-                <span>
-                  {splitsTotal} {splitsTotal === 1 ? 'split' : 'splits'}
-                </span>
-              </div>
-              <Separator orientation="vertical" className="h-4" />
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <User className="h-3 w-3" />
-                <span className="truncate" title={session.owner.k8sUsername}>
-                  {session.owner.username}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-
           <JoinBar
             joinKey={session.key}
             extensionState={extensionState}
