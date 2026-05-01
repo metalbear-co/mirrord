@@ -2,8 +2,8 @@
 //!
 //! The CLI creates a [`PreviewSession`] resource in the cluster, and the operator reconciles
 //! it by spawning a preview pod and routing traffic to it. The CR's status subresource
-//! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Failed`), which
-//! the CLI watches to report progress back to the user.
+//! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Failed`), which the
+//! CLI watches to report progress back to the user.
 
 use std::{collections::BTreeMap, time::Duration};
 
@@ -123,6 +123,10 @@ pub struct PreviewSessionStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_message: Option<String>,
 
+    /// Timestamp of when the session entered the `Failed` phase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_at: Option<MicroTime>,
+
     /// Timestamp when the session's TTL expires.
     ///
     /// Set when the session enters the `Ready` phase for finite TTL sessions.
@@ -135,8 +139,8 @@ pub struct PreviewSessionStatus {
 
 /// Phase of a preview session's lifecycle.
 ///
-/// Progresses through `Initializing` → `Waiting` → `Ready`. Any phase may transition to
-/// `Failed` on error.
+/// Progresses through `Initializing` → `Waiting` → `Ready`. Any phase may transition to `Failed`
+/// on error.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
 pub enum PreviewSessionPhase {
     /// Operator is setting up — the preview pod has not been created yet.
@@ -172,6 +176,9 @@ pub struct PreviewStatusUpdate {
     failure_message: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    failed_at: Option<MicroTime>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     expires_at: Option<MicroTime>,
 }
 
@@ -202,6 +209,12 @@ impl PreviewStatusUpdate {
     /// Sets `.status.failureMessage`.
     pub fn failure_message(mut self, failure_message: String) -> Self {
         self.failure_message = Some(failure_message);
+        self
+    }
+
+    /// Sets `.status.failedAt`.
+    pub fn failed_at(mut self, failed_at: MicroTime) -> Self {
+        self.failed_at = Some(failed_at);
         self
     }
 
