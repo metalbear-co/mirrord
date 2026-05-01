@@ -85,16 +85,17 @@ export default function SessionHeader({
             v{session.mirrord_version}
           </span>
           <Button
-            variant="outline"
-            size="sm"
+            variant="ghost"
+            size="icon"
             onClick={() => {
               trackEvent('session_monitor_kill_session')
               onKill()
             }}
-            className="h-6 text-caps gap-1 px-2.5 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/60"
+            title={strings.session.kill}
+            aria-label={strings.session.kill}
+            className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
           >
-            <Trash2 className="h-3 w-3" />
-            {strings.session.kill}
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
