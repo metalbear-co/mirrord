@@ -1,1 +1,1 @@
-Add missing `file` util in `appleutils`
+Add missing `file` utility in `appleutils`
