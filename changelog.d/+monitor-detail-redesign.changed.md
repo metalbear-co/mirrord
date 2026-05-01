@@ -1,0 +1,1 @@
+The session monitor's detail panel replaces the Overview / Events / Config tab navigation with a single scrolling grid of widgets, so events stream alongside session metadata, locked ports, and config without tab switching. The events and config panes share a draggable split on wide screens.

@@ -1,0 +1,1 @@
+`mirrord ui` exposes `GET /api/me`, returning the current Kubernetes user via `SelfSubjectReview`. The session monitor uses it to classify operator sessions as yours vs your teammates' without any per-user setup.
