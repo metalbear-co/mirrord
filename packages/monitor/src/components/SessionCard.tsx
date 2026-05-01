@@ -12,13 +12,10 @@ interface Props {
   onSelect: () => void
   onKill: () => void
   owner?: OperatorSessionOwner | null
+  joined?: boolean
 }
 
-function firstName(full: string): string {
-  return full.trim().split(/\s+/)[0] || full
-}
-
-export default function SessionCard({ session, selected, onSelect, onKill, owner }: Props) {
+export default function SessionCard({ session, selected, onSelect, onKill, owner, joined }: Props) {
   const meta: (string | React.ReactNode)[] = [
     formatUptime(session.started_at),
     `${session.processes.length} proc`,
@@ -50,12 +47,12 @@ export default function SessionCard({ session, selected, onSelect, onKill, owner
       meta={meta}
       right={
         owner ? (
-          <span className="flex items-center gap-1.5">
-            <span className="text-meta text-muted-foreground truncate max-w-[80px]">
-              {firstName(owner.username)}
-            </span>
-            <Avatar name={owner.username} seed={owner.k8sUsername} size={20} />
-          </span>
+          <Avatar
+            name={owner.username}
+            seed={owner.k8sUsername}
+            size={20}
+            ring={joined}
+          />
         ) : undefined
       }
       action={

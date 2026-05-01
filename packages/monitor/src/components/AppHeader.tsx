@@ -6,12 +6,6 @@ import SettingsDialog from './SettingsDialog'
 
 import type { ThemePref } from '../theme'
 
-export type HeaderActivity = {
-  status: 'Watching' | 'Joined'
-  target: string
-  uptime?: string
-}
-
 interface Props {
   connected: boolean
   isDarkMode: boolean
@@ -20,7 +14,6 @@ interface Props {
   onThemeChange: (t: ThemePref) => void
   telemetryEnabled: boolean
   onTelemetryChange: (enabled: boolean) => void
-  activity?: HeaderActivity | null
   query: string
   onQueryChange: (q: string) => void
 }
@@ -36,7 +29,6 @@ export default function AppHeader({
   onThemeChange,
   telemetryEnabled,
   onTelemetryChange,
-  activity,
   query,
   onQueryChange,
 }: Props) {
@@ -61,7 +53,7 @@ export default function AppHeader({
           glassy finish in both themes, replacing the prior brand-colored accent line. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-foreground/10 to-transparent" />
       <div className="px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center h-14 gap-3">
+        <div className="flex items-center justify-between h-14 gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <img
               src={MirrordIcon}
@@ -78,34 +70,7 @@ export default function AppHeader({
             <span className="font-semibold text-h4 sm:hidden">{strings.app.title}</span>
           </div>
 
-          <div className="flex justify-center min-w-0">
-            {activity && (
-              <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card/50 px-3 py-1 max-w-full">
-                <span
-                  className={cn(
-                    'h-2 w-2 rounded-full shrink-0',
-                    activity.status === 'Joined' ? 'bg-primary' : 'bg-emerald-500'
-                  )}
-                />
-                <span className="text-body-sm text-muted-foreground shrink-0">
-                  {activity.status}
-                </span>
-                <span className="font-mono text-body-sm text-foreground truncate">
-                  {activity.target}
-                </span>
-                {activity.uptime && (
-                  <>
-                    <span className="text-muted-foreground/50 shrink-0">·</span>
-                    <span className="text-body-sm text-muted-foreground shrink-0">
-                      {activity.uptime}
-                    </span>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center justify-end gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             <div className="relative w-44 sm:w-56 hidden md:block">
               <SearchInput
                 ref={searchRef}

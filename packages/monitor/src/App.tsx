@@ -9,8 +9,7 @@ import type {
 import SessionSidebar from './components/SessionSidebar'
 import SessionDetail from './components/SessionDetail'
 import StatusBar from './components/StatusBar'
-import AppHeader, { type HeaderActivity } from './components/AppHeader'
-import { formatUptime } from './utils'
+import AppHeader from './components/AppHeader'
 import EmptySessionState from './components/EmptySessionState'
 import FunnelHero from './components/FunnelHero'
 import ConnectOperatorModal from './components/ConnectOperatorModal'
@@ -292,30 +291,6 @@ export default function App() {
 
   const [searchQuery, setSearchQuery] = useState('')
 
-  const headerActivity = useMemo<HeaderActivity | null>(() => {
-    const joinedKey = extensionState.joinedKey ?? null
-    if (selectedLocal) {
-      const isJoined = !!joinedKey && selectedLocal.key === joinedKey
-      return {
-        status: isJoined ? 'Joined' : 'Watching',
-        target: selectedLocal.target,
-        uptime: formatUptime(selectedLocal.started_at),
-      }
-    }
-    if (selectedOperator) {
-      const isJoined = !!joinedKey && selectedOperator.key === joinedKey
-      const target = selectedOperator.target
-        ? `${selectedOperator.target.kind}/${selectedOperator.target.name}`
-        : 'targetless'
-      return {
-        status: isJoined ? 'Joined' : 'Watching',
-        target,
-        uptime: formatUptime(selectedOperator.createdAt),
-      }
-    }
-    return null
-  }, [selectedLocal, selectedOperator, extensionState.joinedKey])
-
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
       <AppHeader
@@ -326,7 +301,6 @@ export default function App() {
         onThemeChange={setTheme}
         telemetryEnabled={telemetryPref}
         onTelemetryChange={setTelemetryPref}
-        activity={headerActivity}
         query={searchQuery}
         onQueryChange={setSearchQuery}
       />

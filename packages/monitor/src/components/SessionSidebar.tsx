@@ -228,6 +228,8 @@ export default function SessionSidebar({
                     const owner =
                       allOperatorSessions.find((o) => o.id === s.session_id)
                         ?.owner ?? null
+                    const isJoined =
+                      !!joinedKey && !!s.key && s.key === joinedKey
                     return (
                       <SessionCard
                         key={s.session_id}
@@ -240,6 +242,7 @@ export default function SessionSidebar({
                         }
                         onKill={() => onKill(s.session_id)}
                         owner={owner}
+                        joined={isJoined}
                       />
                     )
                   })}
