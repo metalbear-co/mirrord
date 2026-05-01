@@ -59,11 +59,11 @@ export default function SessionRow({
           ))}
         </div>
         {meta.length > 0 && (
-          <div className="flex items-center gap-1.5 text-meta text-muted-foreground min-w-0">
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta text-muted-foreground min-w-0">
             {meta.map((m, i) => (
-              <span key={i} className="flex items-center gap-1.5 truncate">
+              <span key={i} className="inline-flex items-center gap-1.5 whitespace-nowrap">
                 {i > 0 && <span className="opacity-50">·</span>}
-                <span className="truncate">{m}</span>
+                {m}
               </span>
             ))}
           </div>
