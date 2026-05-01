@@ -1,29 +1,52 @@
-import { useState, useEffect, useCallback } from 'react'
-import type { SessionInfo, WsMessage } from './types'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import type {
+  OperatorSessionSummary,
+  OperatorSessionsResponse,
+  OperatorWatchStatus,
+  SessionInfo,
+  WsMessage,
+} from './types'
 import SessionSidebar from './components/SessionSidebar'
 import SessionDetail from './components/SessionDetail'
-import StatusBar from './components/StatusBar'
 import AppHeader from './components/AppHeader'
 import EmptySessionState from './components/EmptySessionState'
+import FunnelHero from './components/FunnelHero'
+import ConnectOperatorModal from './components/ConnectOperatorModal'
+import OperatorSessionDetail from './components/OperatorSessionDetail'
+import { applyDark, loadTheme, resolveDark, saveTheme, type ThemePref } from './theme'
 import { initAnalytics, setTelemetryEnabled, trackEvent } from './analytics'
 import { api } from './api'
 import { useTelemetryPref } from './hooks/useTelemetryPref'
+import {
+  pingExtension,
+  joinViaExtension,
+  leaveViaExtension,
+  type ExtensionState,
+} from './extensionBridge'
 
 const WS_RECONNECT_INTERVAL = 3000
 
 export default function App() {
   const [sessions, setSessions] = useState<SessionInfo[]>([])
+  const [operatorSessions, setOperatorSessions] = useState<OperatorSessionSummary[]>([])
+  const [watchStatus, setWatchStatus] = useState<OperatorWatchStatus | null>(null)
+  const [selectedKind, setSelectedKind] = useState<'local' | 'operator' | null>(null)
+  const selectedKindRef = useRef(selectedKind)
+  useEffect(() => {
+    selectedKindRef.current = selectedKind
+  }, [selectedKind])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [connectModalOpen, setConnectModalOpen] = useState(false)
+  const [extensionState, setExtensionState] = useState<ExtensionState>({
+    installed: false,
+    supportsBridge: false,
+  })
   const [connected, setConnected] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    const saved = localStorage.getItem('session-monitor-theme')
-    if (saved) return saved === 'dark'
-    return window.matchMedia('(prefers-color-scheme: dark)').matches
-  })
+  const [theme, setTheme] = useState<ThemePref>(() => loadTheme())
+  const isDarkMode = resolveDark(theme)
   const [telemetryPref, setTelemetryPref] = useTelemetryPref()
 
-  // Strip auth token from URL bar after page load (cookie is already set)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const token = params.get('token')
@@ -35,13 +58,31 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', isDarkMode)
-    localStorage.setItem('session-monitor-theme', isDarkMode ? 'dark' : 'light')
-  }, [isDarkMode])
+    applyDark(isDarkMode)
+    saveTheme(theme)
+  }, [theme, isDarkMode])
 
-  // Init PostHog once a session exists and both the session's own `config.telemetry` and
-  // the user's local preference allow it. After init, `setTelemetryEnabled` flips opt-in
-  // at runtime so toggling from Settings takes effect without a reload.
+  useEffect(() => {
+    if (theme !== 'system') return
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = () => applyDark(media.matches)
+    media.addEventListener('change', handler)
+    return () => media.removeEventListener('change', handler)
+  }, [theme])
+
+  useEffect(() => {
+    if (selectedKind && selectedId) return
+    if (sessions.length > 0) {
+      setSelectedKind('local')
+      setSelectedId(sessions[0].session_id)
+      return
+    }
+    if (operatorSessions.length > 0) {
+      setSelectedKind('operator')
+      setSelectedId(operatorSessions[0].id)
+    }
+  }, [sessions, operatorSessions, selectedKind, selectedId])
+
   useEffect(() => {
     if (sessions.length === 0) return
     const sessionAllowsTelemetry = sessions.every(
@@ -59,7 +100,54 @@ export default function App() {
       .finally(() => setLoading(false))
   }, [])
 
-  // WebSocket for live updates with reconnection
+  const refreshOperatorSessions = useCallback(() => {
+    api.listOperatorSessions()
+      .then((resp: OperatorSessionsResponse) => {
+        setOperatorSessions(resp.sessions)
+        setWatchStatus(resp.watch_status)
+      })
+      .catch((err) => {
+        console.error(err)
+        setWatchStatus({ status: 'unavailable', reason: String(err) })
+      })
+  }, [])
+
+  useEffect(() => {
+    refreshOperatorSessions()
+    const t = setInterval(refreshOperatorSessions, 5000)
+    return () => clearInterval(t)
+  }, [refreshOperatorSessions])
+
+  const refreshExtensionState = useCallback(async () => {
+    const state = await pingExtension()
+    setExtensionState(state)
+  }, [])
+
+  useEffect(() => {
+    refreshExtensionState()
+    const t = setInterval(refreshExtensionState, 4000)
+    return () => clearInterval(t)
+  }, [refreshExtensionState])
+
+  const handleJoinViaExtension = useCallback(
+    async (key: string) => {
+      const result = await joinViaExtension(key)
+      if (result.ok) {
+        setExtensionState((prev) => ({ ...prev, joinedKey: result.joinedKey ?? key }))
+      }
+      return result
+    },
+    []
+  )
+
+  const handleLeaveViaExtension = useCallback(async () => {
+    const result = await leaveViaExtension()
+    if (result.ok) {
+      setExtensionState((prev) => ({ ...prev, joinedKey: null }))
+    }
+    return result
+  }, [])
+
   useEffect(() => {
     let ws: WebSocket | null = null
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -72,9 +160,7 @@ export default function App() {
       ws.onopen = () => setConnected(true)
       ws.onclose = () => {
         setConnected(false)
-        if (!stopped) {
-          reconnectTimer = setTimeout(connect, WS_RECONNECT_INTERVAL)
-        }
+        if (!stopped) reconnectTimer = setTimeout(connect, WS_RECONNECT_INTERVAL)
       }
 
       ws.onmessage = (e) => {
@@ -87,14 +173,32 @@ export default function App() {
         }
         if (msg.type === 'session_added') {
           const session = msg.session
-          setSessions((prev) => {
-            if (prev.find((s) => s.session_id === session.session_id)) return prev
-            return [...prev, session]
-          })
+          setSessions((prev) =>
+            prev.find((s) => s.session_id === session.session_id) ? prev : [...prev, session]
+          )
         } else if (msg.type === 'session_removed') {
           const removedId = msg.session_id
           setSessions((prev) => prev.filter((s) => s.session_id !== removedId))
-          setSelectedId((prev) => (prev === removedId ? null : prev))
+          setSelectedId((prev) =>
+            prev === removedId && selectedKindRef.current === 'local' ? null : prev
+          )
+        } else if (msg.type === 'operator_session_added' || msg.type === 'operator_session_updated') {
+          const session = msg.session
+          setOperatorSessions((prev) => {
+            const idx = prev.findIndex((s) => s.id === session.id)
+            if (idx === -1) return [...prev, session]
+            const next = prev.slice()
+            next[idx] = session
+            return next
+          })
+        } else if (msg.type === 'operator_session_removed') {
+          const removedId = msg.id
+          setOperatorSessions((prev) => prev.filter((s) => s.id !== removedId))
+          setSelectedId((prev) =>
+            prev === removedId && selectedKindRef.current === 'operator'
+              ? null
+              : prev
+          )
         }
       }
     }
@@ -118,39 +222,133 @@ export default function App() {
     }
   }, [sessions])
 
-  const handleSelect = useCallback((id: string) => {
-    setSelectedId((prev) => (prev === id || id === '' ? null : id))
+  const handleSelectLocal = useCallback((id: string) => {
+    if (id === '') {
+      setSelectedId(null)
+      setSelectedKind(null)
+      return
+    }
+    setSelectedId(id)
+    setSelectedKind('local')
   }, [])
 
-  const selected = sessions.find((s) => s.session_id === selectedId)
+  const handleSelectOperator = useCallback((id: string) => {
+    setSelectedId(id)
+    setSelectedKind('operator')
+  }, [])
+
+  const localIds = useMemo(() => new Set(sessions.map((s) => s.session_id)), [sessions])
+  const [currentUserK8s, setCurrentUserK8s] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    api
+      .currentUser()
+      .then(({ k8sUsername }) => {
+        if (!cancelled) setCurrentUserK8s(k8sUsername)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  const yoursOperatorSessions = useMemo(
+    () =>
+      currentUserK8s
+        ? operatorSessions.filter(
+            (s) =>
+              !localIds.has(s.id) && s.owner.k8sUsername === currentUserK8s
+          )
+        : [],
+    [operatorSessions, localIds, currentUserK8s]
+  )
+  const teamSessions = useMemo(
+    () =>
+      operatorSessions.filter(
+        (s) =>
+          !localIds.has(s.id) &&
+          (!currentUserK8s || s.owner.k8sUsername !== currentUserK8s)
+      ),
+    [operatorSessions, localIds, currentUserK8s]
+  )
+
+  const selectedLocal = useMemo(
+    () => (selectedKind === 'local' ? sessions.find((s) => s.session_id === selectedId) : undefined),
+    [selectedKind, selectedId, sessions]
+  )
+  const selectedOperator = useMemo(
+    () =>
+      selectedKind === 'operator'
+        ? operatorSessions.find((s) => s.id === selectedId)
+        : undefined,
+    [selectedKind, selectedId, operatorSessions]
+  )
+
+  const showFunnelHero =
+    !selectedLocal &&
+    !selectedOperator &&
+    watchStatus?.status === 'unavailable'
+
+  const [searchQuery, setSearchQuery] = useState('')
 
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
       <AppHeader
         connected={connected}
         isDarkMode={isDarkMode}
-        onToggleTheme={() => setIsDarkMode(!isDarkMode)}
+        theme={theme}
+        onThemeChange={setTheme}
         telemetryEnabled={telemetryPref}
         onTelemetryChange={setTelemetryPref}
+        query={searchQuery}
+        onQueryChange={setSearchQuery}
+        currentUser={currentUserK8s}
       />
       <div className="flex flex-1 overflow-hidden">
         <SessionSidebar
           sessions={sessions}
-          selectedId={selectedId}
+          selectedId={selectedKind === 'local' ? selectedId : null}
           loading={loading}
-          onSelect={handleSelect}
+          onSelect={handleSelectLocal}
           onKill={handleKill}
           onKillAll={handleKillAll}
+          operatorSessions={teamSessions}
+          yoursOperatorSessions={yoursOperatorSessions}
+          allOperatorSessions={operatorSessions}
+          watchStatus={watchStatus}
+          selectedOperatorId={selectedKind === 'operator' ? selectedId : null}
+          onSelectOperator={handleSelectOperator}
+          onConnectOperator={() => setConnectModalOpen(true)}
+          joinedKey={extensionState.joinedKey ?? null}
+          query={searchQuery}
         />
         <div className="flex-1 overflow-hidden">
-          {selected ? (
-            <SessionDetail session={selected} onKill={() => handleKill(selected.session_id)} />
+          {selectedLocal ? (
+            <SessionDetail
+              session={selectedLocal}
+              onKill={() => handleKill(selectedLocal.session_id)}
+              extensionState={extensionState}
+              onJoin={() => handleJoinViaExtension(selectedLocal.key ?? '')}
+              onLeave={handleLeaveViaExtension}
+            />
+          ) : selectedOperator ? (
+            <OperatorSessionDetail
+              session={selectedOperator}
+              extensionState={extensionState}
+              onJoin={() => handleJoinViaExtension(selectedOperator.key)}
+              onLeave={handleLeaveViaExtension}
+            />
+          ) : showFunnelHero ? (
+            <FunnelHero onConnect={() => setConnectModalOpen(true)} />
           ) : (
             <EmptySessionState />
           )}
         </div>
       </div>
-      <StatusBar wsConnected={connected} session={selected} />
+      <ConnectOperatorModal
+        open={connectModalOpen}
+        onOpenChange={setConnectModalOpen}
+        watchStatus={watchStatus}
+      />
     </div>
   )
 }
