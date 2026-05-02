@@ -1,0 +1,1 @@
+Bump `hickory-resolver` to 0.26.1 to pull in the fix for RUSTSEC-2026-0119 (CPU exhaustion via O(n²) name compression in `hickory-proto`). The layer's local DNS fallback now uses `dns-lookup`, dropping `hickory-resolver` from the layer's dependencies entirely.
