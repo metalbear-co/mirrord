@@ -1,6 +1,6 @@
 use std::{
     env,
-    path::{Path, PathBuf},
+    path::{Path, PathBuf, absolute},
     process::Command,
 };
 
@@ -98,16 +98,13 @@ fn resolve_artifacts(
         }
         (None, Some(l)) => {
             let l = validate_path(&l, "MIRRORD_LAYER_FILE", "mirrord layer")?;
-            // Need this to be absolute because tests (e2e in
-            // particular) don't run from workspace root won't be able
-            // to resolve binary otherwise
-            let b = std::path::absolute(build_binary_for_host(&l)?)?;
+            let b = build_binary_for_host(&l)?;
             Ok((b, l))
         }
         (None, None) => {
             println!("No mirrord artifacts provided — building from source...");
             let l = build_layer_for_host()?;
-            let b = std::path::absolute(build_binary_for_host(&l)?)?;
+            let b = build_binary_for_host(&l)?;
             Ok((b, l))
         }
     }
@@ -126,13 +123,15 @@ fn host_target() -> Result<Target> {
 
 fn build_layer_for_host() -> Result<PathBuf> {
     let target = host_target()?;
-    layer::build_layer(target, false, &[])
+    let path = layer::build_layer(target, false, &[])?;
+    Ok(absolute(path)?)
 }
 
 fn build_binary_for_host(layer_path: &Path) -> Result<PathBuf> {
     let target = host_target()?;
     super::monitor::build_monitor()?;
-    super::cli::build_cli(target, false, layer_path, None, &[])
+    let path = super::cli::build_cli(target, false, layer_path, None, &[])?;
+    Ok(absolute(path)?)
 }
 
 /// Runs CLI unit tests with placeholder embedded assets.

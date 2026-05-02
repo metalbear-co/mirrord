@@ -1,14 +1,17 @@
 use std::{
-    collections::HashMap, future, io, path::PathBuf, sync::atomic::Ordering, time::Duration,
+    collections::HashMap,
+    future, io,
+    path::PathBuf,
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
 };
 
 use futures::{StreamExt, stream::FuturesOrdered};
 use hickory_resolver::{
-    Hosts, TokioAsyncResolver,
+    Hosts, Resolver,
     config::{LookupIpStrategy, ServerOrderingStrategy},
-    error::{ResolveError, ResolveErrorKind},
     lookup_ip::LookupIp,
-    proto::error::ProtoErrorKind,
+    net::{DnsError, NetError, runtime::TokioRuntimeProvider},
     system_conf::parse_resolv_conf,
 };
 use mirrord_agent_env::envs;
@@ -61,7 +64,7 @@ pub(crate) struct DnsWorker {
     /// Path to the `/etc` directory in the target container filesystem.
     ///
     /// This directory contains some configuration files we need
-    /// to prepare the [`TokioAsyncResolver`].
+    /// to prepare the [`Resolver`].
     etc_path: PathBuf,
     /// For receiving [`DnsCommand`]s from [`DnsApi`]s.
     request_rx: Receiver<DnsCommand>,
@@ -75,7 +78,7 @@ pub(crate) struct DnsWorker {
     timeout: Option<Duration>,
     /// Background tasks that handle the DNS requests.
     ///
-    /// Each of these builds a new [`TokioAsyncResolver`] and performs one lookup.
+    /// Each of these builds a new [`Resolver`] and performs one lookup.
     tasks: JoinSet<Result<DnsLookup, InternalLookupError>>,
     response_txs: HashMap<Id, oneshot::Sender<Result<DnsLookup, ResolveErrorKindInternal>>>,
 }
@@ -119,13 +122,13 @@ impl DnsWorker {
         }
     }
 
-    /// Reads `/etc/resolv.conf` and `/etc/hosts` files, then uses [`TokioAsyncResolver`] to
+    /// Reads `/etc/resolv.conf` and `/etc/hosts` files, then uses [`Resolver`] to
     /// resolve address of the given `host`.
     ///
     /// # TODO
     ///
     /// We could probably cache results here.
-    /// We cannot cache the [`TokioAsyncResolver`] itself, becaues the configuration in `etc` may
+    /// We cannot cache the [`Resolver`] itself, becaues the configuration in `etc` may
     /// change.
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn do_lookup(
@@ -159,14 +162,19 @@ impl DnsWorker {
 
             tracing::debug!(?config, ?options, "Updated resolv configuration");
 
-            let mut resolver = TokioAsyncResolver::tokio(config, options);
+            let mut resolver =
+                Resolver::builder_with_config(config, TokioRuntimeProvider::default())
+                    .with_options(options)
+                    .build()
+                    .map_err(From::from)?;
             tracing::debug!(?resolver, "Build a DNS resolver");
 
-            let hosts = Hosts::default()
+            let mut hosts = Hosts::default();
+            hosts
                 .read_hosts_conf(hosts_conf.as_slice())
                 .map_err(From::from)?;
 
-            resolver.set_hosts(Some(hosts));
+            resolver.set_hosts(Arc::new(hosts));
 
             resolver
         };
@@ -314,14 +322,14 @@ enum InternalLookupError {
     #[error("failed to read configuration from /etc: {0}")]
     ReadConfigurationError(#[from] io::Error),
     #[error("resolve error: {0}")]
-    ResolveError(#[from] ResolveError),
+    ResolveError(#[from] NetError),
 }
 
 impl From<InternalLookupError> for ResolveErrorKindInternal {
     fn from(value: InternalLookupError) -> Self {
         match value {
             InternalLookupError::ReadConfigurationError(error) => error.kind().convert(),
-            InternalLookupError::ResolveError(error) => error.kind().convert(),
+            InternalLookupError::ResolveError(error) => (&error).convert(),
         }
     }
 }
@@ -344,28 +352,24 @@ impl ProtocolConversion<ResolveErrorKindInternal> for io::ErrorKind {
     }
 }
 
-impl ProtocolConversion<ResolveErrorKindInternal> for &ResolveErrorKind {
+impl ProtocolConversion<ResolveErrorKindInternal> for &NetError {
     fn convert(self) -> ResolveErrorKindInternal {
         match self {
-            ResolveErrorKind::Message(message) => {
-                ResolveErrorKindInternal::Message(message.to_string())
+            NetError::Message(message) => ResolveErrorKindInternal::Message((*message).to_owned()),
+            NetError::Msg(message) => ResolveErrorKindInternal::Message(message.clone()),
+            NetError::NoConnections => ResolveErrorKindInternal::NoConnections,
+            NetError::Dns(DnsError::NoRecordsFound(no_records)) => {
+                ResolveErrorKindInternal::NoRecordsFound(no_records.response_code.into())
             }
-            ResolveErrorKind::Msg(message) => ResolveErrorKindInternal::Message(message.clone()),
-            ResolveErrorKind::NoConnections => ResolveErrorKindInternal::NoConnections,
-            ResolveErrorKind::NoRecordsFound { response_code, .. } => {
-                ResolveErrorKindInternal::NoRecordsFound((*response_code).into())
+            NetError::Proto(proto_error) => {
+                ResolveErrorKindInternal::Message(format!("proto error: {proto_error}"))
             }
-            ResolveErrorKind::Proto(proto_error) => match proto_error.kind.as_ref() {
-                ProtoErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
-                ProtoErrorKind::Io(e) => e.kind().convert(),
-                error => ResolveErrorKindInternal::Message(format!("proto error: {error}")),
-            },
-            ResolveErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
-            ResolveErrorKind::Io(e) => e.kind().convert(),
+            NetError::Timeout => ResolveErrorKindInternal::Timeout,
+            NetError::Io(e) => e.kind().convert(),
             _ => {
                 warn!(
-                    error_kind = ?self,
-                    "Detected an unhandled ResolveErrorKind, this is a bug"
+                    error = ?self,
+                    "Detected an unhandled NetError variant, this is a bug"
                 );
                 ResolveErrorKindInternal::Unknown
             }
@@ -377,12 +381,12 @@ impl ProtocolConversion<DnsLookup> for LookupIp {
     fn convert(self) -> DnsLookup {
         let lookup_records = self
             .as_lookup()
-            .records()
+            .answers()
             .iter()
             .filter_map(|record| {
-                let ip = record.data()?.ip_addr()?;
+                let ip = record.data.ip_addr()?;
                 Some(LookupRecord {
-                    name: record.name().to_string(),
+                    name: record.name.to_string(),
                     ip,
                 })
             })

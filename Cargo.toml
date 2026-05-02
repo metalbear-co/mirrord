@@ -122,7 +122,7 @@ futures = "0.3"
 futures-util = "0.3"
 glob = "0.3"
 hex = "0.4"
-hickory-resolver = { version = "0.24.3", features = ["serde", "tokio-runtime"] }
+hickory-resolver = { version = "0.26.1", features = ["serde", "tokio", "system-config"] }
 home = "0.5"
 http = { version = "1" }
 http-body = "1"
