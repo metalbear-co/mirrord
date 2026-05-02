@@ -721,7 +721,9 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
                         Err(e)
                             if matches!(
                                 e.kind(),
-                                LookupErrorKind::NoName | LookupErrorKind::NoData
+                                LookupErrorKind::NoName
+                                    | LookupErrorKind::NoData
+                                    | LookupErrorKind::Again
                             ) =>
                         {
                             vec![]
