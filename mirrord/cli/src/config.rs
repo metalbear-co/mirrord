@@ -25,6 +25,7 @@ use mirrord_config::{
     },
     target::TargetType,
 };
+use mirrord_up::ServiceMode;
 use thiserror::Error;
 
 use crate::config::ci::CiArgs;
@@ -1452,6 +1453,10 @@ pub(super) struct UpArgs {
     /// When using this argument without a value, defaults to `mirrord-up.yaml`
     #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml")]
     pub config_file: PathBuf,
+
+    /// Network mode to use for all defined services.
+    #[arg(short = 'm', long, value_enum, default_value_t = ServiceMode::default())]
+    pub mode: ServiceMode,
 
     /// Session key, used as the `{{ key }}` template variable.
     ///

@@ -15,7 +15,7 @@ use mirrord_config::config::{ConfigError, EnvKey};
 use thiserror::Error;
 mod config;
 
-pub use config::{SubprocessCfg, UpConfig};
+pub use config::{ServiceMode, SubprocessCfg, UpConfig};
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
