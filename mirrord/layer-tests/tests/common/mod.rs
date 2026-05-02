@@ -441,7 +441,7 @@ impl Application {
                 vec![app_path.to_string_lossy().to_string()]
             }
             Application::NodeIssue2283 => {
-                app_path.push("issue2883.js");
+                app_path.push("issue2283.js");
                 vec![app_path.to_string_lossy().to_string()]
             }
             Application::NodeIssue2807 => {
