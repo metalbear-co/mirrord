@@ -47,3 +47,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           cargo test -p mirrord -p mirrord-layer-win
+      - name: mirrord intproxy UT
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test -p mirrord-intproxy

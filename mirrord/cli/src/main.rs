@@ -306,7 +306,9 @@ use nix::errno::Errno;
 use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
-#[cfg(all(unix, debug_assertions))]
+// Suppressor for the `unused-extern-crate` lint: `rust_embed` is only referenced from the
+// `#[derive(Embed)]` in `ui_impl.rs` that's gated to release builds.
+#[cfg(debug_assertions)]
 use rust_embed as _;
 use semver::Version;
 use tracing::{error, info, trace, warn};
@@ -348,10 +350,8 @@ mod wsl;
 #[cfg(feature = "wizard")]
 mod wizard;
 
-#[cfg(unix)]
 mod session;
 
-#[cfg(unix)]
 mod ui;
 
 mod fix;
@@ -1190,11 +1190,8 @@ fn main() -> miette::Result<()> {
             }
             #[cfg(windows)]
             Commands::Pitm(args) => pitm::pitm_command(args)?,
-            #[cfg(unix)]
             Commands::Ui(args) => ui::ui_command(args).await?,
-            #[cfg(unix)]
             Commands::Session(args) => session::session_command(*args).await?,
-            #[cfg(unix)]
             Commands::Kill(args) => session::kill_command(*args).await?,
             #[cfg(unix)]
             Commands::CleanupGuardian {

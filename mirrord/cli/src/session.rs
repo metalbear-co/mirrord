@@ -12,7 +12,7 @@ use mirrord_operator::{
 };
 use mirrord_progress::NullProgress;
 use mirrord_session_monitor_client::{
-    SessionConnection, connect_to_session, kill_session, session_socket_entries, sessions_dir,
+    SessionConnection, connect_to_session, session_endpoints, sessions_dir,
 };
 use mirrord_session_monitor_protocol::{ProcessInfo, SessionInfo};
 use prettytable::{Table, row};
@@ -209,12 +209,12 @@ async fn load_sessions() -> Result<Vec<SessionConnection>, CliError> {
         .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
     let mut sessions = Vec::new();
 
-    for (session_id, socket_path) in session_socket_entries(&sessions_dir) {
-        match connect_to_session(&socket_path).await {
+    for (session_id, endpoint) in session_endpoints(&sessions_dir) {
+        match connect_to_session(&endpoint.sentinel_path).await {
             Ok(connection) => sessions.push(connection),
             Err(error) => {
-                tracing::debug!(%session_id, ?error, "Failed to load local session, removing stale socket");
-                let _ = std::fs::remove_file(&socket_path);
+                tracing::debug!(%session_id, ?error, "Failed to load local session, removing stale sentinel");
+                let _ = std::fs::remove_file(&endpoint.sentinel_path);
             }
         }
     }
@@ -284,7 +284,7 @@ async fn kill_local_then_remote(
     session_id: &str,
 ) -> Result<(), CliError> {
     let local_killed = if let Some(session) = local_session {
-        kill_session(&session.client).await.map_err(|error| {
+        session.client.kill().await.map_err(|error| {
             CliError::UiError(format!(
                 "failed to kill local session `{}`: {error}",
                 session.info.session_id
