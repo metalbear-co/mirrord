@@ -640,6 +640,11 @@ pub struct SqsQueueDetails {
     /// The filters will then be matched also against the message attributes that are found inside
     /// the body of the SQS message, and originate in SNS notification attributes.
     pub sns: Option<bool>,
+
+    /// When this is set, the mirrord SQS splitting operator will try to parse SQS messages as
+    /// S3 event notification JSONs. For each S3 object referenced in the notification, it will
+    /// fetch the object's metadata from S3 and match the jq filter against that metadata.
+    pub s3_event: Option<bool>,
 }
 
 // This is a proxy to generate a schemars schema that contains the common fields between
@@ -1052,6 +1057,7 @@ mod tests {
                 },
                 tags: None,
                 sns: None,
+                s3_event: None,
             }),
         );
 
