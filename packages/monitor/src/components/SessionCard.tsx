@@ -1,59 +1,73 @@
-import { Badge, Button, Card, CardContent, cn } from '@metalbear/ui'
-import { Clock, Trash2 } from 'lucide-react'
-import type { SessionInfo } from '../types'
+import { Badge, Button } from '@metalbear/ui'
+import { Trash2 } from 'lucide-react'
+import type { OperatorSessionOwner, SessionInfo } from '../types'
 import { strings } from '../strings'
 import { formatUptime } from '../utils'
+import SessionRow from './SessionRow'
+import Avatar from './Avatar'
 
 interface Props {
   session: SessionInfo
   selected: boolean
   onSelect: () => void
   onKill: () => void
+  owner?: OperatorSessionOwner | null
+  joined?: boolean
 }
 
-export default function SessionCard({ session, selected, onSelect, onKill }: Props) {
-  return (
-    <Card
-      onClick={onSelect}
-      className={cn(
-        'cursor-pointer transition-all duration-150 border group',
-        selected
-          ? 'border-border bg-muted/40'
-          : 'border-transparent hover:bg-muted/40 hover:border-border'
-      )}
-    >
-      <CardContent className="px-3 py-2.5 space-y-1.5">
-        <div className="font-mono text-xs font-medium text-foreground break-all leading-snug">
-          {session.target}
-        </div>
+export default function SessionCard({ session, selected, onSelect, onKill, owner, joined }: Props) {
+  const meta: (string | React.ReactNode)[] = [formatUptime(session.started_at)]
+  if (session.is_operator) {
+    meta.push(
+      <Badge
+        key="op"
+        variant="outline"
+        style={{ fontSize: 10 }}
+        className="px-1.5 py-0 h-4 font-medium text-muted-foreground border-border"
+      >
+        {strings.session.operator}
+      </Badge>
+    )
+  }
 
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <Clock className="h-2.5 w-2.5" />
-              {formatUptime(session.started_at)}
-            </span>
-            <span className="font-mono">v{session.mirrord_version}</span>
-            {session.is_operator && (
-              <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 tracking-wider font-normal text-primary border-primary/40">
-                {strings.session.operator}
-              </Badge>
-            )}
-          </div>
+  return (
+    <SessionRow
+      selected={selected}
+      onClick={onSelect}
+      lead={
+        <span className="inline-flex items-center justify-center">
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+        </span>
+      }
+      target={session.target}
+      meta={meta}
+      right={
+        owner ? (
+          <Avatar
+            name={owner.username}
+            seed={owner.k8sUsername}
+            size={20}
+            ring={joined}
+          />
+        ) : undefined
+      }
+      action={
+        <span className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
           <Button
-            variant="outline"
-            size="sm"
+            variant="ghost"
+            size="icon"
             onClick={(e) => {
               e.stopPropagation()
               onKill()
             }}
-            className="h-5 text-[9px] gap-1 px-2 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/60"
+            title={strings.session.kill}
+            aria-label={strings.session.kill}
+            className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
           >
-            <Trash2 className="h-2.5 w-2.5" />
-            {strings.session.kill}
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
-        </div>
-      </CardContent>
-    </Card>
+        </span>
+      }
+    />
   )
 }

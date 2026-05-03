@@ -1,37 +1,41 @@
 import { useState, useEffect } from 'react'
-import { Server, Settings, Activity } from 'lucide-react'
+import { Activity, FileJson } from 'lucide-react'
 import type { SessionInfo, MonitorEvent, PortSubscription, ProcessInfo } from '../types'
 import { api } from '../api'
-import { strings } from '../strings'
 import { EventType } from '../eventTypes'
 import { expectArray } from '../utils'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
-import SessionTabs from './SessionTabs'
-import OverviewTab from './OverviewTab'
+import MetadataStrip from './MetadataStrip'
+import { extractLicenseKey } from '../utils'
 import ConfigTab from './ConfigTab'
-import {
-  type DetailTab,
-  type EventCounts,
-  type TabDef,
-  initialEventCounts,
-} from './sessionDetailTypes'
+import JoinBar from './JoinBar'
+import CopyButton from './CopyButton'
+import ResizableSplit from './ResizableSplit'
+import Widget from './Widget'
+import type { ExtensionState } from '../extensionBridge'
 
 interface Props {
   session: SessionInfo
   onKill: () => void
+  extensionState: ExtensionState
+  onJoin: () => Promise<{ ok: boolean; error?: string }>
+  onLeave: () => Promise<{ ok: boolean; error?: string }>
 }
 
-export default function SessionDetail({ session, onKill }: Props) {
-  const [activeTab, setActiveTab] = useState<DetailTab>('overview')
+export default function SessionDetail({
+  session,
+  onKill,
+  extensionState,
+  onJoin,
+  onLeave,
+}: Props) {
   const [portSubs, setPortSubs] = useState<PortSubscription[]>([])
   const [processes, setProcesses] = useState<ProcessInfo[]>([])
-  const [eventCounts, setEventCounts] = useState<EventCounts>(initialEventCounts)
 
   useEffect(() => {
     setPortSubs([])
     setProcesses([])
-    setEventCounts(initialEventCounts)
 
     let cancelled = false
 
@@ -68,12 +72,6 @@ export default function SessionDetail({ session, onKill }: Props) {
         return
       }
 
-      setEventCounts(prev => ({
-        ...prev,
-        [event.type]: (prev[event.type as keyof EventCounts] as number || 0) + 1,
-        total: prev.total + 1,
-      }))
-
       switch (event.type) {
         case EventType.PortSubscription:
           setPortSubs(prev => (
@@ -107,29 +105,113 @@ export default function SessionDetail({ session, onKill }: Props) {
     }
   }, [session.session_id])
 
-  const tabs: TabDef[] = [
-    { id: 'overview', label: strings.session.overview, icon: Server },
-    { id: 'events', label: strings.session.eventsTab, icon: Activity, count: eventCounts.total },
-    { id: 'config', label: strings.session.configTab, icon: Settings },
-  ]
-
   return (
     <div className="h-full flex flex-col">
-      <SessionHeader session={session} processes={processes} onKill={onKill} />
-      <SessionTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-      <div className="flex-1 overflow-hidden">
-        {activeTab === 'overview' && (
-          <OverviewTab
-            session={session}
-            portSubs={portSubs}
-            processes={processes}
-            eventCounts={eventCounts}
-            onSwitchTab={setActiveTab}
+      <SessionHeader
+        session={session}
+        processes={processes}
+        onKill={onKill}
+      />
+      <div className="flex-1 min-h-0 flex flex-col p-4 gap-4 max-w-7xl mx-auto w-full">
+        {session.is_operator && session.key && (
+          <JoinBar
+            joinKey={session.key}
+            extensionState={extensionState}
+            onJoin={onJoin}
+            onLeave={onLeave}
           />
         )}
-        {activeTab === 'events' && <EventStream session={session} />}
-        {activeTab === 'config' && <ConfigTab config={session.config} />}
+
+        <MetadataStrip items={metadataItems(session, portSubs, processes)} />
+
+        <div className="flex-1 min-h-0 hidden lg:block">
+          <ResizableSplit
+            storageKey={`session-monitor-split:${session.session_id}`}
+            left={
+              <div className="h-full pr-2">
+                <Widget
+                  title="Events"
+                  icon={<Activity className="h-3 w-3" />}
+                  className="h-full min-h-0"
+                >
+                  <div className="h-full flex flex-col">
+                    <EventStream session={session} />
+                  </div>
+                </Widget>
+              </div>
+            }
+            right={
+              <div className="h-full pl-2">
+                <Widget
+                  title="Config"
+                  icon={<FileJson className="h-3 w-3" />}
+                  trailing={
+                    <CopyButton
+                      getText={() =>
+                        JSON.stringify(session.config, null, 2)
+                      }
+                      title="Copy config"
+                    />
+                  }
+                  className="h-full min-h-0"
+                >
+                  <ConfigTab config={session.config} />
+                </Widget>
+              </div>
+            }
+          />
+        </div>
+        <div className="flex-1 min-h-0 grid grid-cols-1 gap-4 lg:hidden">
+          <Widget
+            title="Events"
+            icon={<Activity className="h-3 w-3" />}
+            className="min-h-0"
+          >
+            <div className="h-full flex flex-col">
+              <EventStream session={session} />
+            </div>
+          </Widget>
+
+          <Widget
+            title="Config"
+            icon={<FileJson className="h-3 w-3" />}
+            className="min-h-0"
+          >
+            <ConfigTab config={session.config} />
+          </Widget>
+        </div>
       </div>
     </div>
   )
+}
+
+function metadataItems(
+  session: SessionInfo,
+  portSubs: PortSubscription[],
+  processes: ProcessInfo[]
+) {
+  const items: { label: string; value: React.ReactNode }[] = [
+    { label: 'Session ID', value: session.session_id },
+  ]
+  const licenseKey = extractLicenseKey(session.config)
+  if (licenseKey) {
+    items.push({ label: 'License key', value: licenseKey })
+  }
+  if (portSubs.length > 0) {
+    items.push({
+      label: portSubs.length === 1 ? 'Port' : 'Ports',
+      value: portSubs.map((p) => `:${p.port}`).join(' · '),
+    })
+    items.push({
+      label: 'Mode',
+      value: Array.from(new Set(portSubs.map((p) => p.mode))).join(' · '),
+    })
+  }
+  if (processes.length > 0) {
+    items.push({
+      label: processes.length === 1 ? 'Process' : 'Processes',
+      value: processes.map((p) => `${p.process_name} ${p.pid}`).join(' · '),
+    })
+  }
+  return items
 }
