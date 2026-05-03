@@ -49,6 +49,7 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
         envs::PASSTHROUGH_MIRRORING.as_k8s_spec(&true),
         envs::MAX_BODY_BUFFER_SIZE.as_k8s_spec(&agent.max_body_buffer_size),
         envs::MAX_BODY_BUFFER_TIMEOUT.as_k8s_spec(&agent.max_body_buffer_timeout),
+        envs::HTTP_DETECTION_TIMEOUT.as_k8s_spec(&agent.http_detection_timeout),
         envs::JAQ_TIME_LIMIT.as_k8s_spec(&agent.jaq_time_limit),
     ];
 

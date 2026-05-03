@@ -4,6 +4,7 @@ use std::{
     fmt,
     ops::Not,
     sync::Arc,
+    time::Duration,
 };
 
 use futures::{FutureExt, StreamExt, future::Shared};
@@ -172,6 +173,7 @@ where
         if state.mirror_txs.is_empty().not() || state.steal_tx.is_some() {
             let tx = self.internal_tx.clone();
             let tls_store = self.tls_store.clone();
+            let http_detection_timeout = self.config.http_detection_timeout;
             let shutdown = state.shutdown.child_token();
             Self::spawn_tracked_connection(
                 self.internal_tx.clone(),
@@ -179,7 +181,7 @@ where
                 state,
                 async move {
                     let detection_result = tokio::select! {
-                        r = MaybeHttp::detect(conn, &tls_store) => r,
+                        r = MaybeHttp::detect(conn, &tls_store, http_detection_timeout) => r,
                         _ = shutdown.cancelled() => {
                             tracing::debug!("Shutting down redirected connection during HTTP detection");
                             return;
@@ -558,12 +560,23 @@ impl<R> fmt::Debug for RedirectorTask<R> {
 pub struct RedirectorTaskConfig {
     /// Inject `Mirrord-Agent` headers into responses to stolen requests
     pub inject_headers: bool,
+    /// HTTP version detection timeout for a redirected connection. [`Duration::ZERO`] skips
+    /// detection.
+    pub http_detection_timeout: Duration,
 }
 
 impl RedirectorTaskConfig {
     pub fn from_env() -> Self {
+        let http_detection_timeout = envs::HTTP_DETECTION_TIMEOUT
+            .try_from_env()
+            .ok()
+            .flatten()
+            .map(Duration::from_secs)
+            .unwrap_or(Duration::from_secs(2));
+
         Self {
             inject_headers: envs::INJECT_HEADERS.from_env_or_default(),
+            http_detection_timeout,
         }
     }
 }

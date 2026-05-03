@@ -350,7 +350,7 @@
       "additionalProperties": false
     },
     "AgentFileConfig": {
-      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator.\nAgent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json\n{\n  \"agent\": {\n    \"log_level\": \"info\",\n    \"json_log\": false,\n    \"namespace\": \"default\",\n    \"image\": \"ghcr.io/metalbear-co/mirrord:latest\",\n    \"image_pull_policy\": \"IfNotPresent\",\n    \"image_pull_secrets\": [ { \"name\": \"secret\" } ],\n    \"ttl\": 30,\n    \"ephemeral\": false,\n    \"communication_timeout\": 30,\n    \"startup_timeout\": 360,\n    \"flush_connections\": false,\n    \"exclude_from_mesh\": false\n    \"inject_headers\": false,\n    \"max_body_buffer_size\": 65535,\n    \"max_body_buffer_timeout\": 1000\n  }\n}\n```",
+      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator.\nAgent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json\n{\n  \"agent\": {\n    \"log_level\": \"info\",\n    \"json_log\": false,\n    \"namespace\": \"default\",\n    \"image\": \"ghcr.io/metalbear-co/mirrord:latest\",\n    \"image_pull_policy\": \"IfNotPresent\",\n    \"image_pull_secrets\": [ { \"name\": \"secret\" } ],\n    \"ttl\": 30,\n    \"ephemeral\": false,\n    \"communication_timeout\": 30,\n    \"startup_timeout\": 360,\n    \"flush_connections\": false,\n    \"exclude_from_mesh\": false\n    \"inject_headers\": false,\n    \"max_body_buffer_size\": 65535,\n    \"max_body_buffer_timeout\": 1000,\n    \"http_detection_timeout\": 2\n  }\n}\n```",
       "type": "object",
       "properties": {
         "annotations": {
@@ -444,6 +444,16 @@
             "boolean",
             "null"
           ]
+        },
+        "http_detection_timeout": {
+          "title": "agent.http_detection_timeout {#agent-http_detection_timeout}",
+          "description": "How long, in seconds, to wait for HTTP protocol detection on a redirected\nconnection before treating it as raw TCP. A value of `0` skips detection entirely.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
         },
         "image": {
           "title": "agent.image {#agent-image}",
