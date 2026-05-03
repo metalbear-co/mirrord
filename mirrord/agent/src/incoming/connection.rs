@@ -156,14 +156,12 @@ pub struct MaybeHttp {
 }
 
 impl MaybeHttp {
-    /// Timeout for detemining if the redirected connection is HTTP.
-    pub const HTTP_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
-
     /// Accepts the (possibly TLS) connection and detects if the redirected connection is
     /// HTTP.
     pub async fn detect(
         redirected: Redirected,
         tls_handlers: &StealTlsHandlerStore,
+        http_detection_timeout: Duration,
     ) -> Result<Self, HttpDetectError> {
         let metric_guard = MetricGuard::new(&REDIRECTED_CONNECTIONS);
 
@@ -177,7 +175,7 @@ impl MaybeHttp {
 
         let Some(tls_handler) = tls_handler else {
             let (stream, http_version) =
-                crate::http::detect_http_version(redirected.stream, Self::HTTP_DETECTION_TIMEOUT)
+                crate::http::detect_http_version(redirected.stream, http_detection_timeout)
                     .await
                     .map_err(HttpDetectError::HttpDetect)?;
 
@@ -227,7 +225,7 @@ impl MaybeHttp {
             ),
             None => {
                 let (stream, http_version) =
-                    crate::http::detect_http_version(stream, Self::HTTP_DETECTION_TIMEOUT)
+                    crate::http::detect_http_version(stream, http_detection_timeout)
                         .await
                         .map_err(HttpDetectError::HttpDetect)?;
                 (

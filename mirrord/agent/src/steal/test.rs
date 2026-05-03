@@ -464,6 +464,7 @@ async fn header_injection(
         http_kind,
         RedirectorTaskConfig {
             inject_headers: true,
+            http_detection_timeout: Duration::from_secs(2),
         },
     )
     .await;

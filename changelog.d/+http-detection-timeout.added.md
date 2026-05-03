@@ -1,0 +1,1 @@
+HTTP protocol detection on redirected connections now uses a connect-relative timeout (default `2s`, configurable via `agent.http_detection_timeout` / `MIRRORD_AGENT_HTTP_DETECTION_TIMEOUT`), instead of waiting indefinitely for the client's first byte. This unblocks server-first protocols such as SMTP that previously stalled in detection.
