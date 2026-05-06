@@ -498,7 +498,8 @@ mod tests {
         DatabaseBranchBaseConfig {
             id: id.map(str::to_owned),
             name: None,
-            ttl_secs: 300,
+            ttl_secs: Some(300),
+            ttl_mins: None,
             creation_timeout_secs: 60,
             version: None,
             connection,
