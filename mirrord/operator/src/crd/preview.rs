@@ -16,7 +16,7 @@ use mirrord_config::{
     feature::{
         env::EnvConfig,
         network::incoming::{IncomingConfig, IncomingMode, http_filter::HttpFilterConfig},
-        preview::PreviewTtlMins,
+        preview::PreviewTtl,
         split_queues::{QueueId, SplitQueuesConfig},
     },
     target::Target,
@@ -84,7 +84,7 @@ impl PreviewSessionSpec {
 
     /// Returns `true` when `ttl_secs` should be treated as infinite.
     pub fn has_infinite_ttl(&self) -> bool {
-        self.ttl_secs >= PreviewTtlMins::INFINITE_TTL_SECS
+        self.ttl_secs >= PreviewTtl::INFINITE_TTL_SECS
     }
 }
 
