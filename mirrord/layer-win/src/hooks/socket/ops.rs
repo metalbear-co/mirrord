@@ -1,10 +1,16 @@
-use std::{net::SocketAddr, sync::OnceLock};
+use std::{
+    collections::HashMap,
+    mem::size_of,
+    net::SocketAddr,
+    slice,
+    sync::{LazyLock, Mutex, OnceLock},
+};
 
 use mirrord_layer_lib::{
     detour::Detour,
     error::{ConnectError, HookResult},
     socket::{
-        SocketAddrExt,
+        SOCKETS, SocketAddrExt,
         ops::{ConnectResult, connect_common},
     },
 };
@@ -35,8 +41,101 @@ type ConnectExFn = unsafe extern "system" fn(
 
 static CONNECTEX_ORIGINAL: OnceLock<ConnectExFn> = OnceLock::new();
 
+#[derive(Default)]
+pub struct SocketDuplicationManager {
+    protocol_info_to_source: HashMap<Vec<u8>, SOCKET>,
+    duplicate_to_source: HashMap<SOCKET, SOCKET>,
+}
+
+impl SocketDuplicationManager {
+    /// Records protocol-info produced by `WSADuplicateSocket*`.
+    ///
+    /// ## Warning
+    ///
+    /// This tracking is currently process-local only. We only use it to map
+    /// duplicated sockets created in the same process.
+    pub fn record_source_socket_for_protocol_info<T: 'static>(
+        &mut self,
+        source_socket: SOCKET,
+        protocol_info: *const T,
+    ) {
+        if let Some(key) = protocol_info_bytes(protocol_info) {
+            self.protocol_info_to_source.insert(key, source_socket);
+        }
+    }
+
+    pub fn register_socket_from_protocol_info<T: 'static>(
+        &mut self,
+        new_socket: SOCKET,
+        protocol_info: *const T,
+    ) {
+        let Some(key) = protocol_info_bytes(protocol_info) else {
+            return;
+        };
+        let Some(&source_socket) = self.protocol_info_to_source.get(&key) else {
+            return;
+        };
+
+        if !SOCKETS
+            .lock()
+            .expect("SOCKETS lock failed")
+            .contains_key(&source_socket)
+        {
+            tracing::debug!(
+                "WSASocket clone tracking: source socket {} not managed",
+                source_socket
+            );
+            return;
+        }
+
+        // Treat protocol-info as one-shot for duplication tracking.
+        // We remove it only after a successful registration to avoid losing
+        // valid retries, and to prevent stale protocol-info reuse from mapping
+        // unrelated future sockets to an old source socket.
+        let _ = self.protocol_info_to_source.remove(&key);
+        self.duplicate_to_source.insert(new_socket, source_socket);
+        tracing::debug!(
+            "WSASocket clone tracking: propagated state from socket {} to {}",
+            source_socket,
+            new_socket
+        );
+    }
+
+    pub fn resolve_source(&self, socket: SOCKET) -> SOCKET {
+        self.duplicate_to_source
+            .get(&socket)
+            .copied()
+            .unwrap_or(socket)
+    }
+
+    pub fn unregister_descriptor(&mut self, socket: SOCKET) {
+        if self.duplicate_to_source.remove(&socket).is_some() {
+            return;
+        }
+
+        self.duplicate_to_source
+            .retain(|_, source| *source != socket);
+    }
+}
+
+static SOCKET_DUPLICATION_MANAGER: LazyLock<Mutex<SocketDuplicationManager>> =
+    LazyLock::new(|| Mutex::new(SocketDuplicationManager::default()));
+
+pub fn socket_duplication_manager() -> &'static Mutex<SocketDuplicationManager> {
+    &SOCKET_DUPLICATION_MANAGER
+}
+
 pub fn get_connectex_original() -> Option<ConnectExFn> {
     CONNECTEX_ORIGINAL.get().copied()
+}
+
+fn protocol_info_bytes<T: 'static>(ptr: *const T) -> Option<Vec<u8>> {
+    if ptr.is_null() {
+        return None;
+    }
+
+    let bytes = unsafe { slice::from_raw_parts(ptr as *const u8, size_of::<T>()) };
+    Some(bytes.to_vec())
 }
 
 unsafe fn write_connectex_pointer(buffer: *mut c_void, len: u32, detour: LPFN_CONNECTEX) -> bool {

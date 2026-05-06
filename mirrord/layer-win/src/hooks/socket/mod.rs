@@ -53,7 +53,8 @@ use winapi::{
         winsock2::{
             HOSTENT, INVALID_SOCKET, IPPORT_RESERVED, LPWSAOVERLAPPED_COMPLETION_ROUTINE, SOCKET,
             SOCKET_ERROR, WSA_IO_PENDING, WSAEACCES, WSAECONNABORTED, WSAECONNREFUSED, WSAEFAULT,
-            WSAGetLastError, WSAHOST_NOT_FOUND, WSAOVERLAPPED, WSASend, WSASetLastError,
+            WSAGetLastError, WSAHOST_NOT_FOUND, WSAOVERLAPPED, WSAPROTOCOL_INFOA,
+            WSAPROTOCOL_INFOW, WSASend, WSASetLastError,
         },
     },
 };
@@ -61,7 +62,10 @@ use windows_strings::{PCSTR, PCWSTR};
 
 use self::{
     hostname::{handle_hostname_ansi, handle_hostname_unicode, is_remote_hostname},
-    ops::{WSABufferData, get_connectex_original, hook_connectex_extension, log_connection_result},
+    ops::{
+        WSABufferData, get_connectex_original, hook_connectex_extension, log_connection_result,
+        socket_duplication_manager,
+    },
     utils::{
         AutoCloseSocket, ERROR_SUCCESS_I32, create_thread_local_hostent, determine_local_address,
         get_actual_bound_address,
@@ -174,6 +178,14 @@ type WSASocketWType = unsafe extern "system" fn(
 ) -> SOCKET;
 static WSA_SOCKET_W_ORIGINAL: OnceLock<&WSASocketWType> = OnceLock::new();
 
+type WSADuplicateSocketAType =
+    unsafe extern "system" fn(s: SOCKET, dwProcessId: u32, lpProtocolInfo: *mut u8) -> INT;
+static WSA_DUPLICATE_SOCKET_A_ORIGINAL: OnceLock<&WSADuplicateSocketAType> = OnceLock::new();
+
+type WSADuplicateSocketWType =
+    unsafe extern "system" fn(s: SOCKET, dwProcessId: u32, lpProtocolInfo: *mut u16) -> INT;
+static WSA_DUPLICATE_SOCKET_W_ORIGINAL: OnceLock<&WSADuplicateSocketWType> = OnceLock::new();
+
 // WSA async I/O functions that Node.js uses for overlapped operations
 type WSAConnectType = unsafe extern "system" fn(
     s: SOCKET,
@@ -241,12 +253,19 @@ unsafe extern "system" fn wsa_socket_detour(
     dwFlags: u32,
 ) -> SOCKET {
     let original = WSA_SOCKET_ORIGINAL.get().unwrap();
+    let protocol_info = lpProtocolInfo as *const WSAPROTOCOL_INFOA;
     let call_original = || -> Detour<SocketDescriptor> {
         let socket_result =
             unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
         if socket_result == INVALID_SOCKET {
             Detour::Error(std::io::Error::from_raw_os_error(get_last_error()).into())
         } else {
+            if !lpProtocolInfo.is_null() {
+                socket_duplication_manager()
+                    .lock()
+                    .expect("SOCKET_DUPLICATION_MANAGER lock failed")
+                    .register_socket_from_protocol_info(socket_result, protocol_info);
+            }
             Detour::Success(socket_result)
         }
     };
@@ -265,18 +284,63 @@ unsafe extern "system" fn wsa_socket_w_detour(
     dwFlags: u32,
 ) -> SOCKET {
     let original = WSA_SOCKET_W_ORIGINAL.get().unwrap();
+    let protocol_info = lpProtocolInfo as *const WSAPROTOCOL_INFOW;
     let call_original = || -> Detour<SOCKET> {
         let socket_result =
             unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
         if socket_result == INVALID_SOCKET {
             Detour::Error(std::io::Error::from_raw_os_error(get_last_error()).into())
         } else {
+            if !lpProtocolInfo.is_null() {
+                socket_duplication_manager()
+                    .lock()
+                    .expect("SOCKET_DUPLICATION_MANAGER lock failed")
+                    .register_socket_from_protocol_info(socket_result, protocol_info);
+            }
             Detour::Success(socket_result)
         }
     };
     socket(call_original, af, socket_type, protocol).unwrap_or_bypass_windows_as::<WinSocket, _>(
         |_| unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) },
     )
+}
+
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn wsa_duplicate_socket_a_detour(
+    s: SOCKET,
+    dwProcessId: u32,
+    lpProtocolInfo: *mut u8,
+) -> INT {
+    let original = WSA_DUPLICATE_SOCKET_A_ORIGINAL.get().unwrap();
+    let result = unsafe { original(s, dwProcessId, lpProtocolInfo) };
+
+    if result == ERROR_SUCCESS_I32 {
+        socket_duplication_manager()
+            .lock()
+            .expect("SOCKET_DUPLICATION_MANAGER lock failed")
+            .record_source_socket_for_protocol_info(s, lpProtocolInfo as *const WSAPROTOCOL_INFOA);
+    }
+
+    result
+}
+
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn wsa_duplicate_socket_w_detour(
+    s: SOCKET,
+    dwProcessId: u32,
+    lpProtocolInfo: *mut u16,
+) -> INT {
+    let original = WSA_DUPLICATE_SOCKET_W_ORIGINAL.get().unwrap();
+    let result = unsafe { original(s, dwProcessId, lpProtocolInfo) };
+
+    if result == ERROR_SUCCESS_I32 {
+        socket_duplication_manager()
+            .lock()
+            .expect("SOCKET_DUPLICATION_MANAGER lock failed")
+            .record_source_socket_for_protocol_info(s, lpProtocolInfo as *const WSAPROTOCOL_INFOW);
+    }
+
+    result
 }
 
 /// Windows socket hook for bind
@@ -538,6 +602,10 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT {
     tracing::trace!("connect_detour -> socket: {}, namelen: {}", s, namelen);
+    let source_socket = socket_duplication_manager()
+        .lock()
+        .expect("SOCKET_DUPLICATION_MANAGER lock failed")
+        .resolve_source(s);
 
     let connect_fn = |addr: SockAddr| {
         let original = CONNECT_ORIGINAL.get().unwrap();
@@ -552,7 +620,7 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
         ConnectResult::from_with_addr_and_error(result, addr, last_error)
     };
 
-    match ops::connect(s, name, namelen, "connect_detour", connect_fn) {
+    match ops::connect(source_socket, name, namelen, "connect_detour", connect_fn) {
         Err(HookError::ConnectError(ConnectError::AddressUnreachable(_))) => {
             return SOCKET_ERROR;
         }
@@ -605,12 +673,16 @@ unsafe extern "system" fn accept_detour(
             .lock()
             .expect("accept_detour -> failed to lock sockets for socket retrieval");
 
-        let Some(socket) = sockets.get(&s) else {
+        let source_socket = socket_duplication_manager()
+            .lock()
+            .expect("SOCKET_DUPLICATION_MANAGER lock failed")
+            .resolve_source(s);
+        let Some(socket) = sockets.get(&source_socket) else {
             tracing::warn!(
-                "accept_detour -> socket {} is not tracked, using original accept",
-                s
+                "accept_detour -> socket {} (source {}) is not tracked, using original accept",
+                s,
+                source_socket
             );
-            // fallback / early return when the socket isn’t tracked
             return auto_close_socket.release();
         };
 
@@ -627,8 +699,9 @@ unsafe extern "system" fn accept_detour(
             ),
             _ => {
                 tracing::debug!(
-                    "accept_detour -> socket {} is not in Bound state, using original accept",
-                    s
+                    "accept_detour -> socket {} (source {}) is not in Listening state, using original accept",
+                    s,
+                    source_socket
                 );
                 return auto_close_socket.release();
             }
@@ -732,14 +805,22 @@ unsafe extern "system" fn getsockname_detour(
         unsafe { original(s, name, namelen) }
     };
 
+    let source_socket = socket_duplication_manager()
+        .lock()
+        .expect("SOCKET_DUPLICATION_MANAGER lock failed")
+        .resolve_source(s);
     let socket = match SOCKETS
         .lock()
         .expect("getsockname_detour -> failed to lock sockets for socket retrieval")
-        .get(&s)
+        .get(&source_socket)
     {
         Some(sock) => sock.clone(),
         None => {
-            tracing::warn!("getsockname_detour -> socket not managed: {}", s);
+            tracing::warn!(
+                "getsockname_detour -> socket {} (source {}) not managed",
+                s,
+                source_socket
+            );
             return getsockname_fn();
         }
     };
@@ -836,8 +917,13 @@ unsafe extern "system" fn getpeername_detour(
 ) -> INT {
     tracing::trace!("getpeername_detour -> socket: {}", s);
 
+    let source_socket = socket_duplication_manager()
+        .lock()
+        .expect("SOCKET_DUPLICATION_MANAGER lock failed")
+        .resolve_source(s);
+
     // Check if this socket is managed and get connected addresses
-    if let Some((remote_addr, _, _)) = get_connected_addresses(s) {
+    if let Some((remote_addr, _, _)) = get_connected_addresses(source_socket) {
         // Return the remote address for connected sockets
 
         match unsafe { remote_addr.copy_to(name, namelen) } {
@@ -869,9 +955,11 @@ unsafe extern "system" fn getpeername_detour(
                 return SOCKET_ERROR;
             }
         }
-    } else if is_socket_managed(s) {
+    } else if is_socket_managed(source_socket) {
         tracing::trace!(
-            "getpeername_detour -> managed socket not in connected state, using original"
+            "getpeername_detour -> managed socket {} (source {}) not in connected state, using original",
+            s,
+            source_socket
         );
     }
 
@@ -965,8 +1053,13 @@ unsafe extern "system" fn connectex_detour(
     };
     let raw_addr = SockAddr::from(socket_addr);
 
+    let source_socket = socket_duplication_manager()
+        .lock()
+        .expect("SOCKET_DUPLICATION_MANAGER lock failed")
+        .resolve_source(s);
+
     // Check if this socket is managed
-    let is_managed = is_socket_managed(s);
+    let is_managed = is_socket_managed(source_socket);
 
     // Unified connect function for both managed and unmanaged sockets
     let connect_fn = |addr: SockAddr| {
@@ -1015,7 +1108,7 @@ unsafe extern "system" fn connectex_detour(
     // For managed sockets, use connect which will call connect_fn with proxy
     // address
     if is_managed {
-        match ops::connect(s, name, namelen, "connectex_detour", connect_fn) {
+        match ops::connect(source_socket, name, namelen, "connectex_detour", connect_fn) {
             Ok(connect_result) => {
                 tracing::debug!(
                     "connectex_detour -> proxy connection result: {:?}",
@@ -1110,6 +1203,10 @@ unsafe extern "system" fn wsa_connect_detour(
     lpGQOS: *mut u8,
 ) -> INT {
     tracing::trace!("wsa_connect_detour -> socket: {}, namelen: {}", s, namelen);
+    let source_socket = socket_duplication_manager()
+        .lock()
+        .expect("SOCKET_DUPLICATION_MANAGER lock failed")
+        .resolve_source(s);
 
     let connect_fn = |addr: SockAddr| {
         // Call the original function with the prepared sockaddr
@@ -1147,7 +1244,13 @@ unsafe extern "system" fn wsa_connect_detour(
     };
     let raw_addr = SockAddr::from(socket_addr);
 
-    match ops::connect(s, name, namelen, "wsa_connect_detour", connect_fn) {
+    match ops::connect(
+        source_socket,
+        name,
+        namelen,
+        "wsa_connect_detour",
+        connect_fn,
+    ) {
         Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
             tracing::error!(
                 "wsa_connect_detour -> socket {} connect target {:?} is unreachable: {}",
@@ -1789,6 +1892,10 @@ unsafe extern "system" fn sendto_detour(
 unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();
     let res = unsafe { original(s) };
+    socket_duplication_manager()
+        .lock()
+        .expect("SOCKET_DUPLICATION_MANAGER lock failed")
+        .unregister_descriptor(s);
 
     if let Some(socket) = SOCKETS.lock().expect("SOCKETS lock failed").remove(&s)
         && matches!(socket.state, SocketState::Listening(_))
@@ -1942,6 +2049,24 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
             wsa_socket_w_detour,
             WSASocketWType,
             WSA_SOCKET_W_ORIGINAL
+        )?;
+
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "WSADuplicateSocketA",
+            wsa_duplicate_socket_a_detour,
+            WSADuplicateSocketAType,
+            WSA_DUPLICATE_SOCKET_A_ORIGINAL
+        )?;
+
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "WSADuplicateSocketW",
+            wsa_duplicate_socket_w_detour,
+            WSADuplicateSocketWType,
+            WSA_DUPLICATE_SOCKET_W_ORIGINAL
         )?;
 
         // Socket lifecycle management

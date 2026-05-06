@@ -30,6 +30,9 @@ jobs:
           target: x86_64-pc-windows-msvc
           toolchain: ${{ inputs.rust_toolchain }}
       - run: |
+          cd mirrord/layer-tests/tests/apps/issue1054
+          rustc issue1054.rs --out-dir target
+      - run: |
           cd mirrord/layer-tests/tests/apps/outgoing
           cargo build
       - run: |
