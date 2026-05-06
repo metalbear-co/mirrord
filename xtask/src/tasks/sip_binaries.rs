@@ -6,8 +6,8 @@ use std::{
 use anyhow::{Context, Result};
 
 const APPLE_UTILS_URL: &str =
-    "https://github.com/metalbear-co/appleutils/releases/download/v5/apple-utils-v5.tar.gz";
-const APPLE_UTILS_ARCHIVE_NAME: &str = "apple-utils-v5.tar.gz";
+    "https://github.com/metalbear-co/appleutils/releases/download/v6/apple-utils-v6.tar.gz";
+const APPLE_UTILS_ARCHIVE_NAME: &str = "apple-utils-v6.tar.gz";
 
 /// Fetches the SIP utilities bundle once per workspace and reuses the cached archive afterwards.
 pub fn download() -> Result<PathBuf> {
