@@ -1,6 +1,6 @@
 use std::{
     env,
-    path::{Path, PathBuf, absolute},
+    path::{Path, PathBuf},
     process::Command,
 };
 
@@ -123,15 +123,13 @@ fn host_target() -> Result<Target> {
 
 fn build_layer_for_host() -> Result<PathBuf> {
     let target = host_target()?;
-    let path = layer::build_layer(target, false, &[])?;
-    Ok(absolute(path)?)
+    layer::build_layer(target, false, &[])
 }
 
 fn build_binary_for_host(layer_path: &Path) -> Result<PathBuf> {
     let target = host_target()?;
     super::monitor::build_monitor()?;
-    let path = super::cli::build_cli(target, false, layer_path, None, &[])?;
-    Ok(absolute(path)?)
+    super::cli::build_cli(target, false, layer_path, None, &[])
 }
 
 /// Runs CLI unit tests with placeholder embedded assets.

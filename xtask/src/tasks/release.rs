@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use layer::Target;
 
 use super::{cli, layer, monitor, wizard};
+use crate::relative_to_root;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Platform {
@@ -204,6 +205,8 @@ pub fn build_release_cli(options: BuildOptions) -> Result<PathBuf> {
             .context("Failed to build CLI")?
         }
     };
+
+    let cli_path = relative_to_root(&cli_path);
 
     if options.quiet.not() {
         println!();

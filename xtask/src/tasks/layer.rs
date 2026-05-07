@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use which::which;
 
 use super::signing;
+use crate::relative_to_root;
 
 /// Target platform for building
 #[derive(Debug, Clone, Copy)]
@@ -97,7 +98,7 @@ pub fn build_layer(target: Target, release: bool, cargo_args: &[String]) -> Resu
         anyhow::bail!("cargo build failed for {}", target.triple());
     }
 
-    let layer_path = target.layer_file(release);
+    let layer_path = relative_to_root(&target.layer_file(release));
     println!("✓ Layer built: {}", layer_path.display());
     Ok(layer_path)
 }

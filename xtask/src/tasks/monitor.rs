@@ -5,6 +5,8 @@ use std::{
 
 use anyhow::{Context, Result};
 
+use crate::relative_to_root;
+
 /// Builds the monitor frontend (pnpm install + build).
 ///
 /// The CLI embeds these assets, so a missing `pnpm` means the resulting binary would have a
@@ -12,13 +14,10 @@ use anyhow::{Context, Result};
 pub fn build_monitor() -> Result<PathBuf> {
     println!("Building monitor frontend...");
 
-    let monitor_dir = Path::new("packages/monitor");
+    let monitor_dir = &relative_to_root(Path::new("packages/monitor"));
 
     if !monitor_dir.exists() {
-        anyhow::bail!(
-            "Monitor directory not found at {}. Are you in the mirrord repository root?",
-            monitor_dir.display()
-        );
+        anyhow::bail!("Monitor directory not found at {}.", monitor_dir.display());
     }
 
     if !pnpm_available() {
