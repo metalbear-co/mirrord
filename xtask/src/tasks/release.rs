@@ -3,9 +3,8 @@ use std::{env, ops::Not, path::PathBuf};
 use anyhow::{Context, Result};
 use layer::Target;
 
-use crate::relative_to_root;
-
 use super::{cli, layer, monitor, wizard};
+use crate::relative_to_root;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Platform {

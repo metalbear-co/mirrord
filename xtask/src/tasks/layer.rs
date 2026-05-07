@@ -6,9 +6,8 @@ use std::{
 use anyhow::{Context, Result};
 use which::which;
 
-use crate::relative_to_root;
-
 use super::signing;
+use crate::relative_to_root;
 
 /// Target platform for building
 #[derive(Debug, Clone, Copy)]

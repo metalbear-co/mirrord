@@ -17,10 +17,7 @@ pub fn build_monitor() -> Result<PathBuf> {
     let monitor_dir = &relative_to_root(Path::new("packages/monitor"));
 
     if !monitor_dir.exists() {
-        anyhow::bail!(
-            "Monitor directory not found at {}.",
-            monitor_dir.display()
-        );
+        anyhow::bail!("Monitor directory not found at {}.", monitor_dir.display());
     }
 
     if !pnpm_available() {
