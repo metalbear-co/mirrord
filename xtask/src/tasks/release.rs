@@ -3,6 +3,8 @@ use std::{env, ops::Not, path::PathBuf};
 use anyhow::{Context, Result};
 use layer::Target;
 
+use crate::relative_to_root;
+
 use super::{cli, layer, monitor, wizard};
 
 #[derive(Debug, Clone, Copy)]
@@ -204,6 +206,8 @@ pub fn build_release_cli(options: BuildOptions) -> Result<PathBuf> {
             .context("Failed to build CLI")?
         }
     };
+
+    let cli_path = relative_to_root(&cli_path);
 
     if options.quiet.not() {
         println!();

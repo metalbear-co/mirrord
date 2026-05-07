@@ -6,6 +6,8 @@ use std::{
 use anyhow::{Context, Result};
 use which::which;
 
+use crate::relative_to_root;
+
 use super::signing;
 
 /// Target platform for building
@@ -97,7 +99,7 @@ pub fn build_layer(target: Target, release: bool, cargo_args: &[String]) -> Resu
         anyhow::bail!("cargo build failed for {}", target.triple());
     }
 
-    let layer_path = target.layer_file(release);
+    let layer_path = relative_to_root(&target.layer_file(release));
     println!("✓ Layer built: {}", layer_path.display());
     Ok(layer_path)
 }

@@ -1,6 +1,9 @@
 mod tasks;
 
-use std::process::Command;
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -317,4 +320,13 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn relative_to_root(path: &Path) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        // Take the parent because here `CARGO_MANIFEST_DIR` is
+        // the xtask/ subdirectory
+        .parent()
+        .unwrap()
+        .join(path)
 }
