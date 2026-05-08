@@ -265,7 +265,8 @@ pub fn is_ignored_port(addr: &SocketAddr) -> bool {
 #[mirrord_layer_macro::instrument(level = "trace", skip(connect_fn), ret)]
 pub fn connect_common<F>(
     sockfd: SocketDescriptor,
-    mut remote_address: SockAddr,
+    #[cfg(unix)] mut remote_address: SockAddr,
+    #[cfg(not(unix))] remote_address: SockAddr,
     connect_fn: F,
 ) -> Detour<ConnectResult>
 where
