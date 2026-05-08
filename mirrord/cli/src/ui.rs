@@ -28,7 +28,8 @@ use axum::{
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use eventsource_stream::Eventsource;
 use futures::stream::StreamExt as _;
-use kube::{Api, Client};
+use k8s_openapi::api::authentication::v1::SelfSubjectReview;
+use kube::{Api, Client, api::PostParams};
 use mirrord_operator::crd::{
     MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, SessionHttpFilter, TARGETLESS_TARGET_NAME,
 };
@@ -84,8 +85,34 @@ pub struct OperatorSessionSummary {
     pub owner: OperatorSessionOwner,
     pub target: Option<OperatorSessionTarget>,
     pub created_at: String,
+    #[serde(default)]
+    pub duration_secs: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locked_ports: Vec<OperatorLockedPort>,
+    #[serde(default)]
+    pub queue_splits: OperatorQueueSplits,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_filter: Option<SessionHttpFilter>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorLockedPort {
+    pub port: u16,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorQueueSplits {
+    #[serde(default)]
+    pub sqs: usize,
+    #[serde(default)]
+    pub rabbitmq: usize,
+    #[serde(default)]
+    pub kafka: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -108,7 +135,10 @@ impl OperatorSessionSummary {
         let id = session.id.clone()?;
         let key = session.key.clone()?;
         let namespace = session.namespace.clone().unwrap_or_default();
-        let owner = parse_session_owner(&session.user)?;
+        let owner = parse_session_owner(&session.user).unwrap_or_else(|| OperatorSessionOwner {
+            username: session.user.clone(),
+            k8s_username: session.user.clone(),
+        });
         let target = parse_session_target(&session.target);
         let created_at = std::time::SystemTime::now()
             .checked_sub(std::time::Duration::from_secs(session.duration_secs))
@@ -120,6 +150,28 @@ impl OperatorSessionSummary {
         let http_filter = session.http_filter.as_ref().map(|f| SessionHttpFilter {
             header_filter: f.header_filter.clone(),
         });
+        let locked_ports = session
+            .locked_ports
+            .as_ref()
+            .map(|ports| {
+                ports
+                    .iter()
+                    .map(|lp| {
+                        let lp = lp.to_locked_port();
+                        OperatorLockedPort {
+                            port: lp.port,
+                            kind: lp.kind,
+                            filter: lp.filter,
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let queue_splits = OperatorQueueSplits {
+            sqs: session.sqs.as_ref().map(|v| v.len()).unwrap_or(0),
+            rabbitmq: session.rmq.as_ref().map(|v| v.len()).unwrap_or(0),
+            kafka: session.kafka.as_ref().map(|v| v.len()).unwrap_or(0),
+        };
         Some(Self {
             id,
             key,
@@ -127,6 +179,9 @@ impl OperatorSessionSummary {
             owner,
             target,
             created_at,
+            duration_secs: session.duration_secs,
+            locked_ports,
+            queue_splits,
             http_filter,
         })
     }
@@ -437,6 +492,45 @@ struct OperatorSessionsResponse {
     by_key: BTreeMap<String, Vec<OperatorSessionSummary>>,
     sessions: Vec<OperatorSessionSummary>,
     watch_status: OperatorWatchStatus,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CurrentUserResponse {
+    k8s_username: Option<String>,
+    error: Option<String>,
+}
+
+async fn current_user() -> axum::Json<CurrentUserResponse> {
+    let client = match Client::try_default().await {
+        Ok(c) => c,
+        Err(err) => {
+            return axum::Json(CurrentUserResponse {
+                k8s_username: None,
+                error: Some(format!("kube client init failed: {err}")),
+            });
+        }
+    };
+    let api: Api<SelfSubjectReview> = Api::all(client);
+    match api
+        .create(&PostParams::default(), &SelfSubjectReview::default())
+        .await
+    {
+        Ok(review) => {
+            let username = review
+                .status
+                .and_then(|s| s.user_info)
+                .and_then(|u| u.username);
+            axum::Json(CurrentUserResponse {
+                k8s_username: username,
+                error: None,
+            })
+        }
+        Err(err) => axum::Json(CurrentUserResponse {
+            k8s_username: None,
+            error: Some(format!("self-subject-review failed: {err}")),
+        }),
+    }
 }
 
 async fn list_operator_sessions(
@@ -757,7 +851,8 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/sessions/{id}", get(get_session))
         .route("/sessions/{id}/events", get(session_events_sse))
         .route("/sessions/{id}/kill", post(kill_session))
-        .route("/operator-sessions", get(list_operator_sessions));
+        .route("/operator-sessions", get(list_operator_sessions))
+        .route("/me", get(current_user));
 
     let authenticated_routes = Router::new()
         .nest("/api", api_routes)
