@@ -186,6 +186,9 @@ pub enum Application {
     DupListen,
     /// Rust app that listens on a socket twice
     DoubleListen,
+    /// C app that calls `connect(2)` on a unix socket with a too-large `addrlen`
+    /// so that `sun_path` carries trailing null bytes.
+    UnixConnectAddrlen,
 }
 
 impl Application {
@@ -379,6 +382,11 @@ impl Application {
                     "../../target/debug/double_listen"
                 )
             }
+            Application::UnixConnectAddrlen => format!(
+                "{}/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                "tests/apps/unix_connect_addrlen/out.c_test_app",
+            ),
         }
     }
 
@@ -501,7 +509,8 @@ impl Application {
             | Application::DlopenCgo
             | Application::Connectx
             | Application::DoubleListen
-            | Application::DupListen => vec![],
+            | Application::DupListen
+            | Application::UnixConnectAddrlen => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
@@ -597,6 +606,7 @@ impl Application {
             | Application::NodeMakeConnections
             | Application::DoubleListen
             | Application::PythonSocketPair
+            | Application::UnixConnectAddrlen
             | Application::Connectx => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
