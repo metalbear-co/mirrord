@@ -1,1 +1,0 @@
-`mirrord ui` no longer drops operator sessions whose `user` field doesn't match the `username/k8s_username@hostname` format. Falls back to the raw user string for both fields, so synthetic owners like preview environments surface in the session list.
