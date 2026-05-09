@@ -8,6 +8,18 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.209.2](https://github.com/metalbear-co/mirrord/tree/3.209.2) - 2026-05-09
+
+
+### Fixed
+
+- Fixed remote Unix socket connections failing for some applications, including
+  when the socket lives in a directory mounted into the target pod.
+- `mirrord ui` no longer drops operator sessions whose `user` field doesn't
+  match the `username/k8s_username@hostname` format. Falls back to the raw user
+  string for both fields, so synthetic owners like preview environments surface
+  in the session list.
+
 ## [3.209.1](https://github.com/metalbear-co/mirrord/tree/3.209.1) - 2026-05-01
 
 
