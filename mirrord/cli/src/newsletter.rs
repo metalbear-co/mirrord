@@ -58,7 +58,7 @@ pub async fn suggest_newsletter_signup<P: Progress>(user_data: &mut UserData, pr
             format!(
                 "\n\n{}\n>> To subscribe to the mirrord newsletter, run:\n\
         >> mirrord newsletter\n\
-        >> or sign up here: {NEWSLETTER_SIGNUP_URL}{}\n",
+        >> or sign up here: {NEWSLETTER_SIGNUP_URL}&utm_content=prompt-{}\n",
                 message, current_sessions
             )
             .as_str(),
@@ -69,8 +69,8 @@ pub async fn suggest_newsletter_signup<P: Progress>(user_data: &mut UserData, pr
 /// Attempts to open the mirrord newsletter sign-up page in the default browser.
 /// In case of failure, prints the link.
 pub async fn newsletter_command() {
-    // open URL with param utm_source=newslettercmd
-    let url = format!("{NEWSLETTER_SIGNUP_URL}cmd");
+    // distinguish the explicit `mirrord newsletter` invocation from the auto-prompt
+    let url = format!("{NEWSLETTER_SIGNUP_URL}&utm_content=command");
     if let Err(error) = opener::open(&url) {
         tracing::trace!("failed to open browser, command result: {error:?}");
         println!(
