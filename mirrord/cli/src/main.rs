@@ -325,6 +325,7 @@ mod execution;
 mod extension;
 mod external_proxy;
 mod extract;
+mod interactive_session;
 mod internal_proxy;
 #[cfg(target_os = "linux")]
 mod is_static;

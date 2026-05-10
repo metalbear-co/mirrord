@@ -1,0 +1,1 @@
+Suppress the in-CLI newsletter prompt in non-interactive sessions (CI, AI agent runners, piped output). The session counter is not bumped either, so automated runs don't push human users past prompt thresholds.
