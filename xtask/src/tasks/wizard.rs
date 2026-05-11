@@ -5,17 +5,16 @@ use std::{
 
 use anyhow::{Context, Result};
 
+use crate::relative_to_root;
+
 /// Builds the wizard frontend (npm install + build)
 pub fn build_wizard() -> Result<PathBuf> {
     println!("Building wizard frontend...");
 
-    let wizard_dir = Path::new("packages/wizard");
+    let wizard_dir = &relative_to_root(Path::new("packages/wizard"));
 
     if !wizard_dir.exists() {
-        anyhow::bail!(
-            "Wizard directory not found at {}. Are you in the mirrord repository root?",
-            wizard_dir.display()
-        );
+        anyhow::bail!("Wizard directory not found at {}.", wizard_dir.display());
     }
 
     // npm install

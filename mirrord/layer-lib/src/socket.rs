@@ -13,7 +13,7 @@ use std::{collections::HashSet, net::SocketAddr, str::FromStr};
 use bincode::{Decode, Encode};
 // Re-export dns module items
 pub use dns::reverse_dns::get_hostname_for_ip;
-use hickory_resolver::{Resolver, error::ResolveErrorKind};
+use dns_lookup::{LookupErrorKind, getaddrinfo};
 use libc::c_int;
 // Cross-platform socket constants
 #[cfg(unix)]
@@ -618,10 +618,8 @@ impl OutgoingSelector {
         #[cfg(unix)]
         let _guard = DetourGuard::new();
 
-        Resolver::from_system_conf()?
-            .lookup_ip(hostname)
+        dns_lookup::lookup_host(&hostname)
             .map_err(|_| HookError::DNSNoName)?
-            .into_iter()
             .next()
             .map(|resolved| SocketAddr::new(resolved, address.port()))
             .ok_or(HookError::DNSNoName)
@@ -715,15 +713,24 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
                     let _guard = DetourGuard::new();
 
                     // Fall back to local resolution.
-                    match Resolver::from_system_conf()?.lookup_ip(name) {
-                        Ok(addresses) => addresses.into_iter().collect(),
+                    match getaddrinfo(Some(name), None, None) {
+                        Ok(infos) => infos
+                            .filter_map(Result::ok)
+                            .map(|info| info.sockaddr.ip())
+                            .collect(),
+                        Err(e)
+                            if matches!(
+                                e.kind(),
+                                LookupErrorKind::NoName
+                                    | LookupErrorKind::NoData
+                                    | LookupErrorKind::Again
+                            ) =>
+                        {
+                            vec![]
+                        }
                         Err(e) => {
-                            if matches!(e.kind(), ResolveErrorKind::NoRecordsFound { .. }) {
-                                vec![]
-                            } else {
-                                tracing::error!(error = ?e, "Local resolution of OutgoingFilter failed");
-                                return Err(HookError::DNSNoName);
-                            }
+                            tracing::error!(error = ?e, "Local resolution of OutgoingFilter failed");
+                            return Err(HookError::DNSNoName);
                         }
                     }
                 };
