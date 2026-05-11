@@ -462,10 +462,10 @@ where
     sub_progress.success(Some("ready to launch process"));
 
     // print an invitation to the newsletter on certain run count numbers
-    suggest_newsletter_signup(user_data, progress).await;
+    let session_count = suggest_newsletter_signup(user_data, progress).await;
 
     // suggest mirrord for Teams to repeat OSS users who haven't adopted the operator
-    suggest_operator_features(user_data, execution_info.uses_operator, progress).await;
+    suggest_operator_features(session_count, execution_info.uses_operator, progress).await;
 
     #[cfg(not(target_os = "windows"))]
     if config.experimental.browser_extension_config {

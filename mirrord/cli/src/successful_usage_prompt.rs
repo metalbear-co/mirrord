@@ -2,8 +2,6 @@ use std::collections::HashMap;
 
 use mirrord_progress::Progress;
 
-use crate::user_data::UserData;
-
 /// Link to the mirrord for Teams sign-up page (with UTM query params)
 const TEAMS_SIGNUP_URL: &str =
     "https://app.metalbear.com/?utm_medium=cli&utm_source=successful_usage";
@@ -17,7 +15,7 @@ const PROMPT_AFTER_SECOND: u32 = 50;
 /// Suggests mirrord for Teams to users who have run mirrord successfully a certain number of
 /// times without the operator. Skipped when the current run uses the operator.
 pub async fn suggest_operator_features<P: Progress>(
-    user_data: &UserData,
+    session_count: u32,
     uses_operator: bool,
     progress: &mut P,
 ) {
@@ -42,7 +40,7 @@ pub async fn suggest_operator_features<P: Progress>(
         ),
     ]);
 
-    if let Some((message, content_tag)) = prompts.get(&user_data.session_count()) {
+    if let Some((message, content_tag)) = prompts.get(&session_count) {
         progress.print(
             format!(
                 "\n\n{}\n>> To try it, run:\n\

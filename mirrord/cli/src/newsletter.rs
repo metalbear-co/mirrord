@@ -18,8 +18,11 @@ const NEWSLETTER_COUNTER_PROMPT_AFTER_FIRST: u32 = 20;
 const NEWSLETTER_COUNTER_PROMPT_AFTER_SECOND: u32 = 100;
 
 /// Called during normal execution, suggests newsletter signup if the user has run mirrord a certain
-/// number of times.
-pub async fn suggest_newsletter_signup<P: Progress>(user_data: &mut UserData, progress: &mut P) {
+/// number of times. Returns the bumped session count so callers can reuse it for other prompts.
+pub async fn suggest_newsletter_signup<P: Progress>(
+    user_data: &mut UserData,
+    progress: &mut P,
+) -> u32 {
     let newsletter_invites = HashMap::from([
         (
             NEWSLETTER_COUNTER_PROMPT_AFTER_FIRST,
@@ -56,6 +59,8 @@ pub async fn suggest_newsletter_signup<P: Progress>(user_data: &mut UserData, pr
             .as_str(),
         );
     }
+
+    current_sessions
 }
 
 /// Attempts to open the mirrord newsletter sign-up page in the default browser.

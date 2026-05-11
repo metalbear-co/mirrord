@@ -148,9 +148,4 @@ impl UserData {
     pub(crate) fn machine_id(&self) -> Uuid {
         self.machine_id
     }
-
-    /// Current session count. Updated by [`Self::bump_session_count`] on each mirrord run.
-    pub(crate) fn session_count(&self) -> u32 {
-        self.session_count
-    }
 }
