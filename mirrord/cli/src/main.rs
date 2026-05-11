@@ -337,6 +337,7 @@ mod operator;
 mod port_forward;
 mod preview;
 mod profile;
+mod successful_usage_prompt;
 mod teams;
 mod up;
 mod user_data;
@@ -371,6 +372,7 @@ use crate::{
     ci::{MirrordCi, ci_api_key_available},
     config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
     newsletter::suggest_newsletter_signup,
+    successful_usage_prompt::suggest_operator_features,
     user_data::UserData,
     util::{apply_test_env_overrides, get_user_git_branch},
 };
@@ -459,6 +461,12 @@ where
 
     sub_progress.success(Some("ready to launch process"));
 
+    // print an invitation to the newsletter on certain run count numbers
+    suggest_newsletter_signup(user_data, progress).await;
+
+    // suggest mirrord for Teams to repeat OSS users who haven't adopted the operator
+    suggest_operator_features(user_data, execution_info.uses_operator, progress).await;
+
     #[cfg(not(target_os = "windows"))]
     if config.experimental.browser_extension_config {
         browser::init_browser_extension(&config.feature.network, progress);
@@ -476,9 +484,6 @@ where
     // Without the success message, the final progress displays the last info message
     // as the subtask title.
     sub_progress_config.success(Some("config summary"));
-
-    // print an invitation to the newsletter on certain run count numbers
-    suggest_newsletter_signup(user_data, progress).await;
 
     let sub_progress = progress.subtask("running process");
 
