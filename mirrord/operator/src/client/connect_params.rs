@@ -93,6 +93,9 @@ pub struct ConnectParams<'a> {
     )]
     pub rmq_output_queues: HashMap<String, String>,
 
+    /// When set to `false`, forces a single-cluster session on a multi-cluster Primary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multi_cluster: Option<bool>,
     /// Multi-cluster: prefilled temporary resource names from the default cluster.
     /// The envoy reads these from the default cluster's Ready status and passes
     /// them to remote clusters so they reuse the same broker resources.
@@ -170,6 +173,7 @@ impl<'a> ConnectParams<'a> {
             is_default_cluster: None,
             sqs_output_queues: HashMap::new(),
             rmq_output_queues: HashMap::new(),
+            multi_cluster: config.multi_cluster,
             output_tmp_resources: Vec::new(),
             key: Some(key),
             header_filter: config

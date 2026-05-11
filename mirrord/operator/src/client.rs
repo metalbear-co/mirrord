@@ -603,14 +603,21 @@ where
             .as_deref()
             .unwrap_or(self.client.default_namespace());
 
-        // In multi-cluster management-only mode, create CRDs in operator's namespace
-        // with an annotation specifying the target namespace for the sync controller.
-        let (api_namespace, target_ns_annotation) =
-            if let Some(op_ns) = &self.operator.spec.operator_namespace {
-                (op_ns.as_str(), Some(target_namespace.to_string()))
-            } else {
-                (target_namespace, None)
-            };
+        // Management-only operators set operator_namespace so the sync controller can
+        // pick up CRDs and forward them to the default cluster. When the user forces
+        // single-cluster mode we skip that redirect and put CRDs straight into the
+        // target namespace where the local branching controller will handle them.
+        let use_operator_namespace = layer_config.multi_cluster != Some(false);
+        let (api_namespace, target_ns_annotation) = match self
+            .operator
+            .spec
+            .operator_namespace
+            .as_deref()
+            .filter(|_| use_operator_namespace)
+        {
+            Some(op_ns) => (op_ns, Some(target_namespace.to_string())),
+            None => (target_namespace, None),
+        };
 
         let timeout_secs = layer_config
             .feature
@@ -679,6 +686,17 @@ where
                     params
                         .annotations
                         .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                }
+            }
+
+            // Single-cluster session on a multi-cluster Primary: mark the CRD so the
+            // sync controller ignores it and the local branching controller picks it up.
+            if layer_config.multi_cluster == Some(false) {
+                for params in create_params.values_mut() {
+                    params.labels.insert(
+                        crate::types::MULTI_CLUSTER_SKIP_SYNC_LABEL.to_string(),
+                        "true".to_string(),
+                    );
                 }
             }
 
@@ -1629,7 +1647,8 @@ impl OperatorApi<PreparedClientCert> {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
-            output_tmp_resources: Vec::new(),
+            multi_cluster: None,
+            output_tmp_resources: Default::default(),
             key: Some(key),
             header_filter: None,
         };
@@ -2292,6 +2311,7 @@ mod test {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
+            multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
             header_filter: None,
@@ -2416,6 +2436,7 @@ mod test {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
+            multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
             header_filter: None,

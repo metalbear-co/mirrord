@@ -5,10 +5,14 @@ fn main() {
     assert!(domain_x_addrs.is_ok());
 
     let domain_y_addrs = ("nonexistent-domain", 0).to_socket_addrs();
-    #[cfg(target_os = "macos")]
-    let error_text =
-        "failed to lookup address information: nodename nor servname provided, or not known";
-    #[cfg(not(target_os = "macos"))]
-    let error_text = "failed to lookup address information: Name or service not known";
-    assert_eq!(domain_y_addrs.unwrap_err().to_string(), error_text);
+    let domain_y_error = domain_y_addrs.unwrap_err().to_string();
+
+    let error_text = if cfg!(target_os = "macos") {
+        "failed to lookup address information: nodename nor servname provided, or not known"
+    } else if cfg!(windows) {
+        "No such host is known. (os error 11001)"
+    } else {
+        "failed to lookup address information: Name or service not known"
+    };
+    assert_eq!(domain_y_error, error_text);
 }

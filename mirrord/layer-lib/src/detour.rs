@@ -14,7 +14,14 @@ use std::{net::SocketAddr, sync::OnceLock};
 
 #[cfg(target_os = "macos")]
 use libc::c_char;
+#[cfg(windows)]
+use winapi::{
+    shared::minwindef::INT,
+    um::winsock2::{INVALID_SOCKET, SOCKET, WSASetLastError},
+};
 
+#[cfg(windows)]
+use crate::error::get_platform_errno;
 use crate::{error::HookError, socket::sockets::SocketDescriptor};
 
 #[cfg(unix)]
@@ -494,6 +501,90 @@ impl<T> OnceLockExt<T> for OnceLock<T> {
             let value = f()?;
 
             Detour::Success(self.get_or_init(|| value))
+        }
+    }
+}
+
+#[cfg(windows)]
+/// Encodes Windows ABI-specific return/error behavior for a detoured hook.
+///
+/// Windows APIs with similar C signatures can still require different error semantics.
+/// For example:
+/// - `SOCKET`-returning creation calls use `INVALID_SOCKET` plus `WSASetLastError`.
+/// - many WinSock operations use `SOCKET_ERROR` plus `WSASetLastError`.
+/// - `getaddrinfo` returns its error code directly instead of setting WinSock last error.
+///
+/// Marker types implementing this trait let hooks state that contract explicitly and avoid
+/// accidental conversions from a generic `HookError -> ReturnType`.
+pub trait WindowsDetourReturn<S> {
+    type Return;
+
+    fn error_return(errno: i32) -> Self::Return;
+
+    fn set_wsa_last_error() -> bool {
+        true
+    }
+
+    fn from_success(value: S) -> Self::Return
+    where
+        S: Into<Self::Return>,
+    {
+        value.into()
+    }
+
+    fn from_error(error: HookError) -> Self::Return {
+        let errno = get_platform_errno(error) as i32;
+        if Self::set_wsa_last_error() {
+            unsafe { WSASetLastError(errno) };
+        }
+
+        Self::error_return(errno)
+    }
+}
+
+#[cfg(windows)]
+macro_rules! impl_windows_detour_return {
+    ($name:ident, $ret:ty, $body:expr) => {
+        pub struct $name;
+
+        impl<S> WindowsDetourReturn<S> for $name
+        where
+            S: Into<$ret>,
+        {
+            type Return = $ret;
+
+            fn error_return(errno: i32) -> Self::Return {
+                ($body)(errno)
+            }
+        }
+    };
+}
+
+#[cfg(windows)]
+impl_windows_detour_return!(WinSocket, SOCKET, |_| INVALID_SOCKET);
+
+#[cfg(windows)]
+impl_windows_detour_return!(WinGetAddrInfoInt, INT, |errno: i32| errno as INT);
+
+#[cfg(windows)]
+impl<S> Detour<S> {
+    /// Windows helper for hooks, using a type parameter to define return ABI semantics.
+    ///
+    /// `K` controls how `Success` and `Error` are converted into return values and how
+    /// errors are surfaced to the caller.
+    ///
+    /// Use this for Windows hooks instead of relying on generic `From<HookError>`
+    /// conversions.
+    pub fn unwrap_or_bypass_windows_as<K, F>(self, op: F) -> K::Return
+    where
+        K: WindowsDetourReturn<S>,
+        S: Into<K::Return>,
+        F: FnOnce(Bypass) -> K::Return,
+    {
+        match self {
+            Detour::Success(value) => K::from_success(value),
+            Detour::Bypass(reason) => op(reason),
+            Detour::Error(error) => K::from_error(error),
         }
     }
 }

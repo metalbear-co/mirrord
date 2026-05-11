@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
           submodules: recursive
@@ -103,7 +103,7 @@ jobs:
           
           if (-not (Test-Path $exe)) { throw "mirrord.exe not found" }
           
-          "MIRRORD_EXE=$exe" | Out-File -Append -FilePath $env:GITHUB_ENV
+          "MIRRORD_TESTS_USE_BINARY=$exe" | Out-File -Append -FilePath $env:GITHUB_ENV
           "MIRRORD_LAYER_FILE=$dll" | Out-File -Append -FilePath $env:GITHUB_ENV
 
       - name: Run Windows E2E Tests
