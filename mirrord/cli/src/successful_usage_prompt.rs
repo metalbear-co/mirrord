@@ -28,11 +28,17 @@ pub async fn suggest_operator_features<P: Progress>(
     let prompts = HashMap::from([
         (
             PROMPT_AFTER_FIRST,
-            ("Working with mirrord in a team? With mirrord for Teams, multiple devs can target the same service without stepping on each other.", "prompt-1"),
+            (
+                "Working with mirrord in a team? With mirrord for Teams, multiple devs can target the same service without stepping on each other.",
+                "prompt-1",
+            ),
         ),
         (
             PROMPT_AFTER_SECOND,
-            ("mirrord for Teams unlocks team workflow features: DB branching for parallel devs, preview environments for branch testing, and shared targets with queue splitting.", "prompt-2"),
+            (
+                "mirrord for Teams unlocks team workflow features: DB branching for parallel devs, preview environments for branch testing, and shared targets with queue splitting.",
+                "prompt-2",
+            ),
         ),
     ]);
 
