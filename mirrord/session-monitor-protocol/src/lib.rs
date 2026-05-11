@@ -2,9 +2,9 @@ use serde::{Deserialize, Serialize};
 
 /// File extension used for the per-session sentinel file in `~/.mirrord/sessions/`. On unix
 /// this file IS the bound Unix domain socket; on windows it is an empty marker file pointing
-/// at the named pipe whose name is given by [`pipe_name_for_session`]. Producer (intproxy)
-/// and consumer (session-monitor-client) both use this constant so filesystem-watcher-based
-/// discovery agrees on what to look for.
+/// at the named pipe whose name is given by `pipe_name_for_session` (windows-only). Producer
+/// (intproxy) and consumer (session-monitor-client) both use this constant so filesystem-
+/// watcher-based discovery agrees on what to look for.
 pub const SESSION_SENTINEL_EXTENSION: &str = if cfg!(windows) { "pipe" } else { "sock" };
 
 /// Address of the named pipe a session's HTTP API binds to on windows. The producer creates
