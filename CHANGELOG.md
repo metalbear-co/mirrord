@@ -8,6 +8,37 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.209.2](https://github.com/metalbear-co/mirrord/tree/3.209.2) - 2026-05-09
+
+
+### Fixed
+
+- Fixed remote Unix socket connections failing for some applications, including
+  when the socket lives in a directory mounted into the target pod.
+- `mirrord ui` no longer drops operator sessions whose `user` field doesn't
+  match the `username/k8s_username@hostname` format. Falls back to the raw user
+  string for both fields, so synthetic owners like preview environments surface
+  in the session list.
+
+## [3.209.1](https://github.com/metalbear-co/mirrord/tree/3.209.1) - 2026-05-01
+
+
+### Fixed
+
+- Add missing `file` utility in `appleutils`
+
+## [3.209.0](https://github.com/metalbear-co/mirrord/tree/3.209.0) - 2026-04-30
+
+
+### Added
+
+- Support for single cluster sessions in Multi Cluster.
+
+
+### Changed
+
+- Bump bundled `appleutils`
+
 ## [3.208.0](https://github.com/metalbear-co/mirrord/tree/3.208.0) - 2026-04-30
 
 
