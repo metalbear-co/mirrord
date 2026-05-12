@@ -222,4 +222,7 @@ uutils
 teardown
 portforward
 portforwards
+
+# Customer / company names
+Zooplus
 ```

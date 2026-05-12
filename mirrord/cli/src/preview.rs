@@ -30,7 +30,6 @@ use mirrord_analytics::{
 use mirrord_config::{
     LayerConfig,
     config::ConfigContext,
-    feature::preview::PreviewTtlMins,
     target::{Target, TargetDisplay},
 };
 use mirrord_kube::api::runtime::RuntimeDataProvider;
@@ -213,10 +212,7 @@ async fn preview_start(
         image: image.clone(),
         key: layer_config.key.as_str().to_owned(),
         target: session_target,
-        ttl_secs: match layer_config.feature.preview.ttl_mins {
-            PreviewTtlMins::Finite(mins) => mins.saturating_mul(60),
-            PreviewTtlMins::Infinite(_) => PreviewTtlMins::INFINITE_TTL_SECS,
-        },
+        ttl_secs: layer_config.feature.preview.resolved_ttl_secs(),
         incoming: PreviewIncomingConfig::from_config(
             &layer_config.feature.network.incoming,
             layer_config.key.as_str(),

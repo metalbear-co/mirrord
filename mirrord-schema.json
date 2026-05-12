@@ -1071,12 +1071,24 @@
                 "null"
               ]
             },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
             "ttl_secs": {
               "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.",
-              "type": "integer",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "uint64",
-              "default": 300,
               "minimum": 0
             },
             "type": {
@@ -1138,12 +1150,24 @@
                 "null"
               ]
             },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
             "ttl_secs": {
               "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.",
-              "type": "integer",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "uint64",
-              "default": 300,
               "minimum": 0
             },
             "type": {
@@ -1205,12 +1229,24 @@
                 "null"
               ]
             },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
             "ttl_secs": {
               "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.",
-              "type": "integer",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "uint64",
-              "default": 300,
               "minimum": 0
             },
             "type": {
@@ -1284,12 +1320,24 @@
                 "null"
               ]
             },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
             "ttl_secs": {
               "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.",
-              "type": "integer",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "uint64",
-              "default": 300,
               "minimum": 0
             },
             "type": {
@@ -3114,10 +3162,22 @@
         },
         "ttl_mins": {
           "title": "feature.preview.ttl_mins {#feature-preview-ttl_mins}",
-          "description": "How long (in minutes) the preview session is allowed to live after creation.\nThe operator will terminate the session when this time elapses.\n\nSet to `\"infinite\"` to disable TTL.",
+          "description": "How long (in minutes) the preview session is allowed to live after creation.\nThe operator will terminate the session when this time elapses.\n\nSet to `\"infinite\"` to disable TTL.\n\nMutually exclusive with [`ttl_secs`](#feature-preview-ttl_secs); when neither is set,\ndefaults to 60 minutes.",
           "anyOf": [
             {
-              "$ref": "#/$defs/PreviewTtlMins"
+              "$ref": "#/$defs/PreviewTtl"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ttl_secs": {
+          "title": "feature.preview.ttl_secs {#feature-preview-ttl_secs}",
+          "description": "Same as [`ttl_mins`](#feature-preview-ttl_mins) but expressed in seconds.\n\nSet to `\"infinite\"` to disable TTL.\n\nMutually exclusive with [`ttl_mins`](#feature-preview-ttl_mins).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviewTtl"
             },
             {
               "type": "null"
@@ -3127,13 +3187,8 @@
       },
       "additionalProperties": false
     },
-    "PreviewTtlKeyword": {
-      "type": "string",
-      "enum": [
-        "infinite"
-      ]
-    },
-    "PreviewTtlMins": {
+    "PreviewTtl": {
+      "description": "A TTL value usable for either [`PreviewConfig::ttl_mins`] or [`PreviewConfig::ttl_secs`].\n\nThe unit (minutes or seconds) depends on which field carries the value; the variants\nthemselves are unit-agnostic.",
       "anyOf": [
         {
           "type": "integer",
@@ -3143,6 +3198,12 @@
         {
           "$ref": "#/$defs/PreviewTtlKeyword"
         }
+      ]
+    },
+    "PreviewTtlKeyword": {
+      "type": "string",
+      "enum": [
+        "infinite"
       ]
     },
     "QueueFilter": {

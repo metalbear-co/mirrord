@@ -17,7 +17,13 @@ We're proud to be used by the most innovative teams around the world! If you're 
 | [BforeAI](https://bfore.ai) | [User Story](https://metalbear.com/mirrord/stories/bfore-ai/) |
 | [Utila](https://utila.io) | [User Story](https://metalbear.com/mirrord/stories/utila/) |
 | [Savvy Security](https://www.savvy.security) | [User Story](https://metalbear.com/mirrord/stories/savvy/) |
-| [HM Courts & Tribunal Service](https://www.gov.uk/government/organisations/hm-courts-and-tribunals-service) | [Use Case](https://github.com/hmcts/civil-citizen-ui/blob/master/README.md#development--debugging-environment---preview-with-mirrord) | 
+| [monday.com](https://monday.com) | [Case Study](https://metalbear.com/mirrord/case-study/monday/) |
+| [SurveyMonkey](https://www.surveymonkey.com) | [Case Study](https://metalbear.com/mirrord/case-study/surveymonkey/) |
+| [Cadence](https://www.cadence.com) | [Case Study](https://metalbear.com/mirrord/case-study/cadence/) |
+| [CoLab](https://www.colabsoftware.com) | [Case Study](https://metalbear.com/mirrord/case-study/colab/) |
+| [Daylight Security](https://www.daylight.security) | [Case Study](https://metalbear.com/mirrord/case-study/daylight/) |
+| [Zooplus](https://www.zooplus.com) | [Case Study](https://metalbear.com/mirrord/case-study/zooplus/) |
+| [HM Courts & Tribunal Service](https://www.gov.uk/government/organisations/hm-courts-and-tribunals-service) | [Use Case](https://github.com/hmcts/civil-citizen-ui/blob/master/README.md#development--debugging-environment---preview-with-mirrord) |
 
 \* Optional: link to a blog post, tweet, internal write-up, or leave blank.
 

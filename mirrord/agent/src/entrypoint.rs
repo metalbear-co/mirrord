@@ -383,7 +383,9 @@ impl ClientConnectionHandler {
 
         let pid = state.container_pid();
 
-        let file_manager = FileManager::new(pid.or_else(|| state.ephemeral.then_some(1)));
+        let file_pid = pid.or_else(|| state.ephemeral.then_some(1));
+
+        let file_manager = FileManager::new(file_pid);
 
         let tcp_mirror_api = bg_tasks
             .mirror_handle
@@ -397,7 +399,7 @@ impl ClientConnectionHandler {
         .await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
         let reverse_dns_api = ReverseDnsApi::new(&state.network_runtime);
-        let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime);
+        let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime, file_pid);
         let udp_outgoing_api = UdpOutgoingApi::new(&state.network_runtime);
 
         let client_handler = Self {

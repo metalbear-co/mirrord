@@ -809,6 +809,8 @@ impl LayerConfig {
         self.feature.network.dns.verify(context)?;
         self.feature.network.outgoing.verify(context)?;
         self.feature.split_queues.verify(context)?;
+        self.feature.db_branches.verify()?;
+        self.feature.preview.verify()?;
 
         if self.feature.fs.readonly_file_buffer > READONLY_FILE_BUFFER_HARD_LIMIT {
             return Err(ConfigError::InvalidValue {
