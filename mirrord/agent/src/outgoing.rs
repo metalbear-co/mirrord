@@ -81,10 +81,10 @@ impl TcpOutgoingApi {
     ///
     /// * `runtime` - tokio runtime to spawn the background task on.
     ///
-    /// * `fs_pid` - In targeted mode (both in pod and ephemeral), the
-    ///   PID of the main process. This will be passed to an
-    ///   [`InTargetPathResolver`](crate::util::path_resolver::InTargetPathResolver)
-    ///   to resolve unix socket paths.
+    /// * `fs_pid` - In targeted mode (both in pod and ephemeral), the PID of the main process. This
+    ///   will be passed to an
+    ///   [`InTargetPathResolver`](crate::util::path_resolver::InTargetPathResolver) to resolve unix
+    ///   socket paths.
     pub(crate) fn new(runtime: &BgTaskRuntime, pid: Option<u64>) -> Self {
         // IMPORTANT: this makes tokio tasks spawn on `runtime`.
         // Do not remove this.
