@@ -291,7 +291,11 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
         let res = unsafe { original(s, addr, addr_len) };
 
         if res != ERROR_SUCCESS_I32 {
-            tracing::error!("bind_detour -> {} failed", reason);
+            tracing::error!(
+                "bind_detour -> {} failed (wsa_last_error={})",
+                reason,
+                unsafe { WSAGetLastError() }
+            );
         } else {
             tracing::debug!("bind_detour -> {} succeeded", reason);
         }
