@@ -67,7 +67,7 @@ pub struct PreviewConfig {
 
 impl PreviewConfig {
     /// Default TTL in seconds when neither `ttl_mins` nor `ttl_secs` is set.
-    pub const DEFAULT_TTL_SECS: u64 = 60 * 60;
+    pub const DEFAULT_TTL_SECS: u64 = 3600; // 1 hour
 
     /// Returns the configured TTL converted to seconds, applying the default if neither
     /// `ttl_mins` nor `ttl_secs` is set. An infinite TTL (from either field) collapses to
