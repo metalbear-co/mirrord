@@ -1,1 +1,1 @@
-Made some more existing layer integration tests run on windows as well
+More of the layer tests now run on Windows as well as Unix in CI.
