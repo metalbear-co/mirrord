@@ -105,6 +105,17 @@ pub struct FsConfig {
     /// #### feature.fs.read_write {#feature-fs-read_write}
     ///
     /// Specify file path patterns that if matched will be read and written to the remote.
+    ///
+    /// ##### Windows
+    ///
+    /// Patterns are matched against a unix-style form of the requested path, not the raw
+    /// Windows path. Before matching, the drive letter is stripped and backslashes are
+    /// converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
+    /// `/Workspaces/myapp/app.json`.
+    ///
+    /// Patterns must therefore be written with forward slashes. Backslashes in the regex
+    /// (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
+    /// regex sees contains no backslashes at all — they were stripped during translation.
     #[config(env = "MIRRORD_FILE_READ_WRITE_PATTERN")]
     pub read_write: Option<VecOrSingle<String>>,
 
@@ -112,36 +123,104 @@ pub struct FsConfig {
     ///
     /// Specify file path patterns that if matched will be read from the remote.
     /// if file matching the pattern is opened for writing or read/write it will be opened locally.
+    ///
+    /// ##### Windows
+    ///
+    /// Patterns are matched against a unix-style form of the requested path, not the raw
+    /// Windows path. Before matching, the drive letter is stripped and backslashes are
+    /// converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
+    /// `/Workspaces/myapp/app.json`.
+    ///
+    /// Patterns must therefore be written with forward slashes. Backslashes in the regex
+    /// (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
+    /// regex sees contains no backslashes at all — they were stripped during translation.
     pub read_only: Option<VecOrSingle<String>>,
 
     /// #### feature.fs.local {#feature-fs-local}
     ///
     /// Specify file path patterns that if matched will be opened locally.
+    ///
+    /// ##### Windows
+    ///
+    /// Patterns are matched against a unix-style form of the requested path, not the raw
+    /// Windows path. Before matching, the drive letter is stripped and backslashes are
+    /// converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
+    /// `/Workspaces/myapp/app.json`.
+    ///
+    /// Patterns must therefore be written with forward slashes. Backslashes in the regex
+    /// (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
+    /// regex sees contains no backslashes at all — they were stripped during translation.
     #[config(env = "MIRRORD_FILE_LOCAL_PATTERN")]
     pub local: Option<VecOrSingle<String>>,
 
     /// #### feature.fs.not_found {#feature-fs-not_found}
     ///
     /// Specify file path patterns that if matched will be treated as non-existent.
+    ///
+    /// ##### Windows
+    ///
+    /// Patterns are matched against a unix-style form of the requested path, not the raw
+    /// Windows path. Before matching, the drive letter is stripped and backslashes are
+    /// converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
+    /// `/Workspaces/myapp/app.json`.
+    ///
+    /// Patterns must therefore be written with forward slashes. Backslashes in the regex
+    /// (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
+    /// regex sees contains no backslashes at all — they were stripped during translation.
     pub not_found: Option<VecOrSingle<String>>,
 
     /// #### feature.fs.mapping {#feature-fs-mapping}
     ///
     /// Specify map of patterns that if matched will replace the path according to specification.
     ///
-    /// *Capture groups are allowed.*
+    /// *Capture groups are allowed.* Matching is case-insensitive and uses
+    /// [`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace),
+    /// so the replacement value supports `$1` / `${name}` substitutions.
+    ///
+    /// ##### Unix (Linux, macOS)
+    ///
+    /// Patterns are matched against the path exactly as the application requested it.
     ///
     /// Example:
     /// ```json
     /// {
-    ///   "^/home/(?<user>\\S+)/dev/tomcat": "/etc/tomcat"
+    ///   "^/home/(?<user>\\S+)/dev/tomcat": "/etc/tomcat",
     ///   "^/home/(?<user>\\S+)/dev/config/(?<app>\\S+)": "/mnt/configs/${user}-$app"
     /// }
     /// ```
-    /// Will do the next replacements for any io operation
+    ///
+    /// Will produce the following replacements for any io operation:
     ///
     /// `/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml`
     /// `/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`
+    ///
+    /// ##### Windows
+    ///
+    /// Patterns are matched against a unix-style form of the requested path, not the raw
+    /// Windows path. Before matching, the drive letter is stripped and backslashes are
+    /// converted to forward slashes, so:
+    ///
+    /// `D:\Workspaces\myapp\config\app.json` is matched as `/Workspaces/myapp/config/app.json`
+    ///
+    /// Patterns must therefore be written with forward slashes. Backslashes in the regex
+    /// (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
+    /// regex sees contains no backslashes at all — they were stripped during translation.
+    ///
+    /// The replacement value is sent to the agent as-is and is what the remote (Linux) pod
+    /// will see on disk, so it should also use forward slashes.
+    ///
+    /// Example:
+    /// ```json
+    /// {
+    ///   "^/Workspaces/(?<app>[^/]+)/config/(?<file>.+)": "/etc/${app}/$file"
+    /// }
+    /// ```
+    ///
+    /// Will produce the following replacement:
+    ///
+    /// `D:\Workspaces\myapp\config\app.json` => `/etc/myapp/app.json`
+    ///
+    /// ##### Caveats
     ///
     /// - Relative paths: this feature (currently) does not apply mappings to relative paths, e.g.
     ///   `../dev`.
