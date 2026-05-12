@@ -361,6 +361,9 @@ impl ProtocolConversion<ResolveErrorKindInternal> for &NetError {
             NetError::Dns(DnsError::NoRecordsFound(no_records)) => {
                 ResolveErrorKindInternal::NoRecordsFound(no_records.response_code.into())
             }
+            NetError::Dns(DnsError::ResponseCode(code)) => {
+                ResolveErrorKindInternal::Message(format!("DNS server error response: {code}"))
+            }
             NetError::Proto(proto_error) => {
                 ResolveErrorKindInternal::Message(format!("proto error: {proto_error}"))
             }
