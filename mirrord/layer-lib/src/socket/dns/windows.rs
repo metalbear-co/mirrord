@@ -113,6 +113,15 @@ pub unsafe fn free_managed_addrinfo<T: WindowsAddrInfo>(addrinfo: *mut T) -> boo
 /// - Non-zero error code on failure (address unreachable or resolution failed)
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub fn check_address_reachability(socket: SOCKET, remote_addr: &SocketAddr) -> Detour<()> {
+    if remote_addr.port() == 53 {
+        tracing::debug!(
+            "check_address_reachability -> skipping reachability check for DNS destination on socket {} ({})",
+            socket,
+            remote_addr
+        );
+        return Detour::Success(());
+    }
+
     let rawish_sock_addr = SockAddr::from(*remote_addr);
     let sock_addr_len = rawish_sock_addr.len();
 
