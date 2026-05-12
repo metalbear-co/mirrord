@@ -447,7 +447,7 @@
         },
         "http_detection_timeout": {
           "title": "agent.http_detection_timeout {#agent-http_detection_timeout}",
-          "description": "How long, in seconds, to wait for HTTP protocol detection on a redirected\nconnection before treating it as raw TCP. A value of `0` skips detection entirely.",
+          "description": "How long, in seconds, to wait for data on a redirected connection during HTTP protocol\ndetection before giving up and treating it as raw TCP. The timer resets on every read,\nso total detection time may exceed this value for connections that send data in many\nsmall chunks.",
           "type": [
             "integer",
             "null"

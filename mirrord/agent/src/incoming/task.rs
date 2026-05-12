@@ -560,8 +560,7 @@ impl<R> fmt::Debug for RedirectorTask<R> {
 pub struct RedirectorTaskConfig {
     /// Inject `Mirrord-Agent` headers into responses to stolen requests
     pub inject_headers: bool,
-    /// HTTP version detection timeout for a redirected connection. [`Duration::ZERO`] skips
-    /// detection.
+    /// HTTP version detection read timeout for a redirected connection.
     pub http_detection_timeout: Duration,
 }
 

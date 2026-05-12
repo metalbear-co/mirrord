@@ -81,8 +81,8 @@ pub const IDDLE_TTL: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_AGENT_IDLE_TTL")
 /// responses that went through the agent.
 pub const INJECT_HEADERS: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_INJECT_HEADERS");
 
-/// Sets how long (in seconds) to wait for HTTP protocol detection on a redirected connection
-/// before treating it as raw TCP. A value of `0` skips detection entirely.
+/// Sets how long (in seconds) to wait for data on a redirected connection during HTTP protocol
+/// detection before treating it as raw TCP.
 pub const HTTP_DETECTION_TIMEOUT: CheckedEnv<u64> =
     CheckedEnv::new("MIRRORD_AGENT_HTTP_DETECTION_TIMEOUT");
 

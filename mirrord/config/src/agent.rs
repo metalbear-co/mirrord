@@ -458,8 +458,10 @@ pub struct AgentConfig {
 
     /// ### agent.http_detection_timeout {#agent-http_detection_timeout}
     ///
-    /// How long, in seconds, to wait for HTTP protocol detection on a redirected
-    /// connection before treating it as raw TCP. A value of `0` skips detection entirely.
+    /// How long, in seconds, to wait for data on a redirected connection during HTTP protocol
+    /// detection before giving up and treating it as raw TCP. The timer resets on every read,
+    /// so total detection time may exceed this value for connections that send data in many
+    /// small chunks.
     #[config(env = "MIRRORD_AGENT_HTTP_DETECTION_TIMEOUT", default = 2)]
     pub http_detection_timeout: u64,
 
