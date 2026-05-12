@@ -5,7 +5,7 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize, ser::SerializeMap};
 
-use crate::config::{self, source::MirrordConfigSource};
+use crate::config::{self, ConfigError, source::MirrordConfigSource};
 
 /// Deserializes from either a single value or a JSON array.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -293,6 +293,29 @@ impl DatabaseBranchesConfig {
             .filter(|db| matches!(db, DatabaseBranchConfig::Redis { .. }))
             .count()
     }
+
+    /// Verifies invariants that span individual branch configs (e.g. `ttl_secs`/`ttl_mins`
+    /// mutual exclusion).
+    pub fn verify(&self) -> Result<(), ConfigError> {
+        for branch in &self.0 {
+            if let Some(base) = branch.base() {
+                base.verify()?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl DatabaseBranchConfig {
+    fn base(&self) -> Option<&DatabaseBranchBaseConfig> {
+        match self {
+            Self::Mongodb(cfg) => Some(&cfg.base),
+            Self::Mssql(cfg) => Some(&cfg.base),
+            Self::Mysql(cfg) => Some(&cfg.base),
+            Self::Pg(cfg) => Some(&cfg.base),
+            Self::Redis(_) => None,
+        }
+    }
 }
 
 /// Configuration for a database branch.
@@ -348,8 +371,18 @@ pub struct DatabaseBranchBaseConfig {
     /// Users can set `ttl_secs` to customize this value according to their need. Please note
     /// that longer TTL paired with frequent mirrord session turnover can result in increased
     /// resource usage. For this reason, branch database TTL caps out at 15 min.
-    #[serde(default = "default_ttl_secs")]
-    pub ttl_secs: u64,
+    ///
+    /// Mutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_secs: Option<u64>,
+
+    /// #### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}
+    ///
+    /// Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.
+    ///
+    /// Mutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_mins: Option<u64>,
 
     /// #### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
     ///
@@ -370,6 +403,33 @@ pub struct DatabaseBranchBaseConfig {
     /// When the branch database is ready for use, Mirrord operator will replace the connection
     /// information with the branch database's.
     pub connection: ConnectionSource,
+}
+
+impl DatabaseBranchBaseConfig {
+    /// Default TTL in seconds applied when neither `ttl_secs` nor `ttl_mins` is set.
+    pub const DEFAULT_TTL_SECS: u64 = 300;
+
+    /// Returns the configured TTL in seconds. `ttl_mins` (if set) takes precedence over
+    /// `ttl_secs`; if both are unset, [`Self::DEFAULT_TTL_SECS`] is returned. Configurations
+    /// that set both fields are rejected by [`Self::verify`].
+    pub fn resolved_ttl_secs(&self) -> u64 {
+        if let Some(mins) = self.ttl_mins {
+            mins.saturating_mul(60)
+        } else {
+            self.ttl_secs.unwrap_or(Self::DEFAULT_TTL_SECS)
+        }
+    }
+
+    pub fn verify(&self) -> Result<(), ConfigError> {
+        if self.ttl_secs.is_some() && self.ttl_mins.is_some() {
+            return Err(ConfigError::Conflict(
+                "`feature.db_branches[].ttl_secs` and `feature.db_branches[].ttl_mins` \
+                 cannot both be set."
+                    .to_owned(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Different ways of connecting to the source database.
@@ -593,10 +653,6 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
         analytics.add("pg_branch_count", self.count_pg());
         analytics.add("redis_branch_count", self.count_redis());
     }
-}
-
-fn default_ttl_secs() -> u64 {
-    300
 }
 
 pub fn default_creation_timeout_secs() -> u64 {
@@ -968,5 +1024,47 @@ mod tests {
             ConnectionSource::FlatUrl { url, .. } => assert_eq!(url.len(), 2),
             other => panic!("expected FlatUrl, got {:?}", other),
         }
+    }
+
+    fn base_with_ttl(ttl_secs: Option<u64>, ttl_mins: Option<u64>) -> DatabaseBranchBaseConfig {
+        DatabaseBranchBaseConfig {
+            id: None,
+            name: None,
+            ttl_secs,
+            ttl_mins,
+            creation_timeout_secs: 60,
+            version: None,
+            connection: ConnectionSource::FlatUrl {
+                source_type: None,
+                url: "DB_URL".to_owned().into(),
+            },
+        }
+    }
+
+    #[test]
+    fn db_branch_resolved_ttl_prefers_minutes_when_only_minutes_set() {
+        let base = base_with_ttl(None, Some(5));
+        assert_eq!(base.resolved_ttl_secs(), 300);
+    }
+
+    #[test]
+    fn db_branch_resolved_ttl_falls_back_to_default() {
+        let base = base_with_ttl(None, None);
+        assert_eq!(
+            base.resolved_ttl_secs(),
+            DatabaseBranchBaseConfig::DEFAULT_TTL_SECS
+        );
+    }
+
+    #[test]
+    fn db_branch_resolved_ttl_uses_seconds_when_set() {
+        let base = base_with_ttl(Some(123), None);
+        assert_eq!(base.resolved_ttl_secs(), 123);
+    }
+
+    #[test]
+    fn db_branch_verify_rejects_both_ttl_fields() {
+        let base = base_with_ttl(Some(120), Some(2));
+        assert!(matches!(base.verify(), Err(ConfigError::Conflict(_))));
     }
 }
