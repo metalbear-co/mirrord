@@ -8,6 +8,35 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.210.0](https://github.com/metalbear-co/mirrord/tree/3.210.0) - 2026-05-13
+
+
+### Added
+
+- Added `feature.preview.ttl_secs` and `feature.db_branches[].ttl_mins` so each
+  feature accepts the TTL in either unit. Setting both `ttl_secs` and
+  `ttl_mins` on the same item is rejected.
+- Added clarifications for Windows-specific `fs` mapping and `fs` filter quirks
+- Document jq filtering support for GCP Pub/Sub in the configuration docs.
+
+
+### Changed
+
+- In mirrord-up, renamed `mode` to `default_mode` and added a CLI argument to
+  set it.
+
+
+### Fixed
+
+- Agent now falls back to an IPv4 client listener when setting up the
+  dual-stack IPv6 one fails (e.g. on clusters with IPv6 disabled).
+- Fixed `getaddrinfo` truncating IPv6 addresses resolved through the agent.
+- Fixed outgoing connections to path-addressed Unix sockets failing with a "not
+  found" error when the agent runs as an ephemeral container.
+- The agent no longer logs a spurious warning when a DNS server returns an
+  error response code, and layer no longer logs bogus DNS errors with error
+  level.
+
 ## [3.209.2](https://github.com/metalbear-co/mirrord/tree/3.209.2) - 2026-05-09
 
 
