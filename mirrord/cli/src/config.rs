@@ -21,7 +21,7 @@ use mirrord_config::{
             MIRRORD_OVERRIDE_ENV_FILE_ENV, MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV,
             MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV,
         },
-        preview::PreviewTtlMins,
+        preview::PreviewTtl,
     },
     target::TargetType,
 };
@@ -1302,7 +1302,7 @@ pub(super) struct PreviewStartArgs {
     ///
     /// Set to `"infinite"` to disable TTL.
     #[arg(long)]
-    pub ttl: Option<PreviewTtlMins>,
+    pub ttl: Option<PreviewTtl>,
 
     /// How long (in seconds) to wait for the preview to become ready.
     ///
