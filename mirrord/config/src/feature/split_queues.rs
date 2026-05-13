@@ -227,12 +227,16 @@ pub type QueueMessageFilter = BTreeMap<String, String>;
 #[serde(tag = "queue_type", deny_unknown_fields)]
 pub enum QueueFilter {
     /// ### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
-    /// Only supported with `queue_type` of `SQS`.
-    /// When this field is specified, for each SQS message, the jq filter runs on a JSON
-    /// representation of the SQS `Message` object. If the jq program outputs `true`, that
+    /// Only supported with `queue_type` of `SQS`, or `GCPPubSub`.
+    /// When this field is specified, for each message, the jq filter runs on a JSON
+    /// representation of the message. If the jq program outputs `true`, that
     /// message is considered as matching the filter.
     ///
-    /// See [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).
+    /// For **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)
+    /// is used.
+    ///
+    /// For **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)
+    /// us used.
     ///
     /// This can be used to filter messages based on their body content, for example.
     ///
