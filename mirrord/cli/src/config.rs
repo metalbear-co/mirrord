@@ -1463,6 +1463,21 @@ pub(super) struct UpArgs {
     /// If not provided, a key is generated automatically from the system username.
     #[arg(long)]
     pub key: Option<String>,
+
+    /// Subcommand. When absent, `mirrord up` runs the sessions defined in
+    /// the config file. With a subcommand, the flags above are ignored.
+    #[command(subcommand)]
+    pub command: Option<UpSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+pub(super) enum UpSubcommand {
+    /// Launch an interactive wizard that generates a skeleton mirrord-up.yaml.
+    Init {
+        /// Default path for the generated config (overrideable in the wizard).
+        #[arg(short = 'o', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml")]
+        output: PathBuf,
+    },
 }
 /// `mirrord attach` args.
 #[cfg(windows)]

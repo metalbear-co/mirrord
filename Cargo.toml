@@ -135,6 +135,7 @@ humantime = "2"
 hyper = { version = "1.7", features = ["full"] }
 hyper-util = { version = "0.1" }
 indicatif = "0.18"
+inquire = "0.9.4"
 ipnet = "2.8"
 iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }
 itertools = "0.14.0"
