@@ -584,7 +584,7 @@ impl LayerConfig {
         }
 
         let dns_filter = &mut self.feature.network.dns.filter;
-        match dbg!((outgoing_is_local, dns_filter.take())) {
+        match (outgoing_is_local, dns_filter.take()) {
             (true, None) => {
                 *dns_filter = Some(DnsFilterConfig::Local(VecOrSingle::Multiple(names)));
             }
@@ -1034,13 +1034,16 @@ impl LayerConfig {
 
 /// Append `additions` onto `existing`, skipping entries already present and preserving order.
 fn append_dedup(existing: VecOrSingle<String>, additions: Vec<String>) -> VecOrSingle<String> {
-    let mut out: Vec<String> = existing.into();
-    for item in additions {
-        if !out.iter().any(|e| e == &item) {
-            out.push(item);
-        }
-    }
-    VecOrSingle::Multiple(out)
+    Vec::from(existing)
+        .into_iter()
+        .chain(additions)
+        .fold(vec![], |mut acc, s| {
+            if acc.contains(&s).not() {
+                acc.push(s);
+            }
+            acc
+        })
+        .into()
 }
 
 /// Emits a [`ConfigContext`] warning if any name appearing in the injected set is also present
