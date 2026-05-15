@@ -8,7 +8,7 @@
 [![Github CI](https://github.com/metalbear-co/mirrord/actions/workflows/ci.yaml/badge.svg)](https://github.com/metalbear-co/mirrord/actions/workflows/ci.yaml)
 [![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/metalbear-co/mirrord/blob/main/LICENSE)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/metalbear-co/mirrord)](https://github.com/metalbear-co/mirrord/releases)
-[![Twitter Follow](https://img.shields.io/twitter/follow/metalbearco?style=social)](https://twitter.com/metalbearco)
+[![Twitter Follow](https://img.shields.io/twitter/follow/metalbear?style=social)](https://twitter.com/metalbear)
 
 [mirrord runs your local process inside a live Kubernetes cluster](https://metalbear.com/mirrord/).
 It works the same way for a developer in an IDE and for an AI coding agent (Claude Code, Cursor, Codex, Copilot, Windsurf):
@@ -172,7 +172,7 @@ mirrord works first-class with Claude Code, Cursor, Codex CLI, Gemini CLI, and o
 letting them run and verify generated code against real cluster services without deploying.
 
 For setup guides and ready-made workflow skills,
-see [metalbear-co/skills](https://github.com/metalbear-co/skills) or the [mirrord for AI Agents](https://metalbear.comm/mirrord/ai) page.
+see [metalbear-co/skills](https://github.com/metalbear-co/skills) or the [mirrord for AI Agents](https://metalbear.com/mirrord/ai) page.
 
 ## FAQ
 
