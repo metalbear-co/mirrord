@@ -77,7 +77,7 @@ pub trait MirrordClientRetry {
         mode: IncomingMode,
         filter: Option<HttpFilter>,
         timeout: Duration,
-    ) -> impl 'static + Send + Stream<Item = ClientResult<TunneledIncoming>>;
+    ) -> impl 'static + Stream<Item = ClientResult<TunneledIncoming>> + Send + Unpin;
 
     /// Creates a retrying [`MirrordClient::subscribe_logs`] stream.
     ///
@@ -85,7 +85,7 @@ pub trait MirrordClientRetry {
     fn subscribe_logs_retry(
         self,
         timeout: Duration,
-    ) -> impl 'static + Send + Stream<Item = ClientResult<LogMessage>>;
+    ) -> impl 'static + Stream<Item = ClientResult<LogMessage>> + Send + Unpin;
 }
 
 impl MirrordClientRetry for MirrordClient {
@@ -129,7 +129,7 @@ impl MirrordClientRetry for MirrordClient {
         mode: IncomingMode,
         filter: Option<HttpFilter>,
         timeout: Duration,
-    ) -> impl 'static + Send + Stream<Item = ClientResult<TunneledIncoming>> {
+    ) -> impl 'static + Stream<Item = ClientResult<TunneledIncoming>> + Send + Unpin {
         let start_subscription = move |(client, filter): (MirrordClient, Option<HttpFilter>)| async move {
             let fifo = retry_op(
                 || client.subscribe_port(port, mode, filter.clone()),
@@ -159,7 +159,7 @@ impl MirrordClientRetry for MirrordClient {
     fn subscribe_logs_retry(
         self,
         timeout: Duration,
-    ) -> impl 'static + Send + Stream<Item = ClientResult<LogMessage>> {
+    ) -> impl 'static + Stream<Item = ClientResult<LogMessage>> + Send + Unpin {
         let start_subscription = move |client: MirrordClient| async move {
             let fifo = retry_op(|| client.subscribe_logs(), timeout).await?;
             Ok::<_, ClientError>(Some((fifo, client)))
