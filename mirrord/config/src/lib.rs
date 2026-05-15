@@ -23,7 +23,7 @@ pub mod retry;
 pub mod target;
 pub mod util;
 
-use std::{collections::HashMap, ffi::OsStr, path::Path};
+use std::{collections::HashMap, ffi::OsStr, ops::Not, path::Path};
 
 use base64::prelude::*;
 use config::{ConfigContext, ConfigError, MirrordConfig};
@@ -31,6 +31,8 @@ use experimental::ExperimentalConfig;
 use feature::{
     env::mapper::EnvVarsRemapper,
     network::{
+        dns::DnsFilterConfig,
+        filter::{AddressFilter, ProtocolAndAddressFilter},
         incoming::{
             IncomingMode,
             http_filter::{BodyFilter, InnerFilter},
@@ -535,7 +537,73 @@ impl LayerConfig {
             LayerFileConfig::default().generate_config(context)?
         };
         config.apply_magic();
+        config.reflect_outgoing_filter_in_dns(context);
         Ok(config)
+    }
+
+    /// Mirrors host names from [`feature.network.outgoing.filter`](OutgoingFilterConfig)
+    /// into [`feature.network.dns.filter`](DnsFilterConfig), so that a name routed to one
+    /// side (local app vs remote pod) is also resolved on that same side.
+    ///
+    /// Without this propagation, a config like `outgoing.filter.local = ["docker.lala"]`
+    /// silently breaks: DNS queries go to the remote pod by default, which cannot resolve
+    /// a local-only name, so the connection fails before the outgoing filter ever runs.
+    ///
+    /// Behaviour (only applied when [`DnsConfig::enabled`](feature::network::dns::DnsConfig)
+    /// is `true`, and only for [`AddressFilter::Name`] entries in the outgoing filter):
+    ///
+    /// | outgoing \ dns.filter | unset                          | `Local(L)`             | `Remote(R)`            |
+    /// |-----------------------|--------------------------------|------------------------|------------------------|
+    /// | `Local(N)`            | create `Local(N)`              | append `N` to `L`      | leave; warn on overlap |
+    /// | `Remote(N)`           | leave (DNS already all-remote) | leave; warn on overlap | append `N` to `R`      |
+    fn reflect_outgoing_filter_in_dns(&mut self, context: &mut ConfigContext) {
+        if self.feature.network.dns.enabled.not() {
+            return;
+        }
+        let Some(outgoing) = self.feature.network.outgoing.filter.as_ref() else {
+            return;
+        };
+
+        let (outgoing_is_local, raw): (bool, &[String]) = match outgoing {
+            OutgoingFilterConfig::Local(v) => (true, v),
+            OutgoingFilterConfig::Remote(v) => (false, v),
+        };
+
+        let names: Vec<String> = raw
+            .iter()
+            .filter_map(|s| s.parse::<ProtocolAndAddressFilter>().ok())
+            .filter_map(|paf| match paf.address {
+                AddressFilter::Name(name, 0) => Some(name),
+                AddressFilter::Name(name, port) => Some(format!("{name}:{port}")),
+                _ => None,
+            })
+            .collect();
+
+        if names.is_empty() {
+            return;
+        }
+
+        let dns_filter = &mut self.feature.network.dns.filter;
+        match dbg!((outgoing_is_local, dns_filter.take())) {
+            (true, None) => {
+                *dns_filter = Some(DnsFilterConfig::Local(VecOrSingle::Multiple(names)));
+            }
+            (true, Some(DnsFilterConfig::Local(existing))) => {
+                *dns_filter = Some(DnsFilterConfig::Local(append_dedup(existing, names)));
+            }
+            (false, Some(DnsFilterConfig::Remote(existing))) => {
+                *dns_filter = Some(DnsFilterConfig::Remote(append_dedup(existing, names)));
+            }
+            (true, Some(DnsFilterConfig::Remote(existing))) => {
+                warn_filter_conflict(context, &existing, &names, "local", "remote");
+                *dns_filter = Some(DnsFilterConfig::Remote(existing));
+            }
+            (false, Some(DnsFilterConfig::Local(existing))) => {
+                warn_filter_conflict(context, &existing, &names, "remote", "local");
+                *dns_filter = Some(DnsFilterConfig::Local(existing));
+            }
+            (false, None) => {}
+        }
     }
 
     /// Applies the presets in `feature.magic` to the config, modifying it in-place.
@@ -961,6 +1029,42 @@ impl LayerConfig {
         }
 
         self.verify(context)
+    }
+}
+
+/// Append `additions` onto `existing`, skipping entries already present and preserving order.
+fn append_dedup(existing: VecOrSingle<String>, additions: Vec<String>) -> VecOrSingle<String> {
+    let mut out: Vec<String> = existing.into();
+    for item in additions {
+        if !out.iter().any(|e| e == &item) {
+            out.push(item);
+        }
+    }
+    VecOrSingle::Multiple(out)
+}
+
+/// Emits a [`ConfigContext`] warning if any name appearing in the injected set is also present
+/// in the opposite-side DNS filter, since that means the user has explicitly asked for a name to
+/// be routed and resolved on different sides of the local/remote boundary.
+fn warn_filter_conflict(
+    context: &mut ConfigContext,
+    existing: &[String],
+    injected: &[String],
+    routed_side: &str,
+    dns_side: &str,
+) {
+    let conflicting: Vec<&str> = injected
+        .iter()
+        .filter(|n| existing.contains(n))
+        .map(String::as_str)
+        .collect();
+
+    if conflicting.is_empty().not() {
+        context.add_warning(format!(
+            "feature.network.outgoing.filter routes {conflicting:?} via the {routed_side} side, \
+             but feature.network.dns.filter resolves them via the {dns_side} side. \
+             The resolved address may be meaningless across the local/remote boundary."
+        ));
     }
 }
 
