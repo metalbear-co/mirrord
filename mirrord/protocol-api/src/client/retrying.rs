@@ -142,7 +142,7 @@ impl MirrordClientRetry for MirrordClient {
         let mut had_error = false;
 
         futures::stream::try_unfold((self, filter), start_subscription)
-            .map_ok(|fifo| fifo.map(|item| Ok::<_, ClientError>(item)))
+            .map_ok(|fifo| fifo.map(Ok))
             .try_flatten()
             .take_while(move |item| match item {
                 Ok(..) => std::future::ready(true),
@@ -168,7 +168,7 @@ impl MirrordClientRetry for MirrordClient {
         let mut had_error = false;
 
         futures::stream::try_unfold(self, start_subscription)
-            .map_ok(|fifo| fifo.map(|item| Ok::<_, ClientError>(item)))
+            .map_ok(|fifo| fifo.map(Ok))
             .try_flatten()
             .take_while(move |item| match item {
                 Ok(..) => std::future::ready(true),
