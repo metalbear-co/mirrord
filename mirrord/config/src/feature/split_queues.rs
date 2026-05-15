@@ -60,7 +60,7 @@ impl SplitQueuesConfig {
     }
 
     /// Get all the SQS queue ids from the config.
-    pub fn sqs_queues(&self) -> impl '_ + Iterator<Item = &'_ str> {
+    pub fn sqs_queues(&self) -> impl Iterator<Item = &str> {
         self.0.iter().filter_map(|(name, filter)| match filter {
             QueueFilter::Sqs { .. } => Some(name.as_str()),
             _ => None,
@@ -68,7 +68,7 @@ impl SplitQueuesConfig {
     }
 
     /// Out of the whole queue splitting config, get only the sqs message attribute filters.
-    pub fn sqs(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ QueueMessageFilter)> {
+    pub fn sqs(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
         self.0.iter().filter_map(|(name, filter)| match filter {
             QueueFilter::Sqs {
                 message_filter: Some(message_filter),
@@ -79,7 +79,7 @@ impl SplitQueuesConfig {
     }
 
     /// Out of the whole queue splitting config, get only the sqs jq filters.
-    pub fn sqs_jq_filters(&self) -> impl '_ + Iterator<Item = (&'_ str, &str)> {
+    pub fn sqs_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
         self.0.iter().filter_map(|(name, filter)| match filter {
             QueueFilter::Sqs {
                 jq_filter: Some(jq),
@@ -90,21 +90,21 @@ impl SplitQueuesConfig {
     }
 
     /// Out of the whole queue splitting config, get only the kafka topics.
-    pub fn kafka(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ QueueMessageFilter)> {
+    pub fn kafka(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
         self.0.iter().filter_map(|(name, filter)| match filter {
             QueueFilter::Kafka { message_filter, .. } => Some((name.as_str(), message_filter)),
             _ => None,
         })
     }
 
-    pub fn rmq(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ QueueMessageFilter)> {
+    pub fn rmq(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
         self.0.iter().filter_map(|(name, filter)| match filter {
             QueueFilter::Rmq { message_filter } => Some((name.as_str(), message_filter)),
             _ => None,
         })
     }
 
-    pub fn gcp_pubsub(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ QueueMessageFilter)> {
+    pub fn gcp_pubsub(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
         self.0.iter().filter_map(|(name, filter)| match filter {
             QueueFilter::GcpPubSub {
                 message_filter: Some(message_filter),
@@ -114,7 +114,7 @@ impl SplitQueuesConfig {
         })
     }
 
-    pub fn gcp_pubsub_jq_filters(&self) -> impl '_ + Iterator<Item = (&'_ str, &str)> {
+    pub fn gcp_pubsub_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
         self.0.iter().filter_map(|(name, filter)| match filter {
             QueueFilter::GcpPubSub {
                 jq_filter: Some(jq),
@@ -124,9 +124,36 @@ impl SplitQueuesConfig {
         })
     }
 
-    pub fn gcp_pubsub_queues(&self) -> impl '_ + Iterator<Item = &'_ str> {
+    pub fn gcp_pubsub_queues(&self) -> impl Iterator<Item = &str> {
         self.0.iter().filter_map(|(name, filter)| match filter {
             QueueFilter::GcpPubSub { .. } => Some(name.as_str()),
+            _ => None,
+        })
+    }
+
+    pub fn azure_service_bus(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::AzureServiceBus {
+                message_filter: Some(message_filter),
+                ..
+            } => Some((name.as_str(), message_filter)),
+            _ => None,
+        })
+    }
+
+    pub fn azure_service_bus_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::AzureServiceBus {
+                jq_filter: Some(jq),
+                ..
+            } => Some((name.as_str(), jq.as_str())),
+            _ => None,
+        })
+    }
+
+    pub fn azure_service_bus_queues(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::AzureServiceBus { .. } => Some(name.as_str()),
             _ => None,
         })
     }
@@ -170,6 +197,10 @@ impl SplitQueuesConfig {
                     jq_filter,
                 }
                 | QueueFilter::GcpPubSub {
+                    message_filter,
+                    jq_filter,
+                }
+                | QueueFilter::AzureServiceBus {
                     message_filter,
                     jq_filter,
                 } => {
@@ -303,6 +334,24 @@ pub enum QueueFilter {
         jq_filter: Option<String>,
     },
 
+    #[serde(rename = "AzureServiceBus")]
+    AzureServiceBus {
+        /// A filter is a mapping between Azure Service Bus application property names and
+        /// regexes they should match. The local application will only receive messages whose
+        /// application properties match **all** of the given patterns.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message_filter: Option<QueueMessageFilter>,
+
+        /// A jq filter.
+        ///
+        /// When this is specified, for each Service Bus message, the jq filter runs on a JSON
+        /// representation of the full `ServiceBusMessage` object.
+        ///
+        /// If the jq program outputs `true`, that message is considered as matching the filter.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        jq_filter: Option<String>,
+    },
+
     // When a newer client sends a new filter kind to an older operator, that does not yet know
     // about that filter type, the filter will be deserialized to unknown.
     #[schemars(skip)]
@@ -323,6 +372,14 @@ impl CollectAnalytics for &SplitQueuesConfig {
         analytics.add(
             "gcp_pubsub_jq_filter_count",
             self.gcp_pubsub_jq_filters().count(),
+        );
+        analytics.add(
+            "azure_service_bus_queue_count",
+            self.azure_service_bus_queues().count(),
+        );
+        analytics.add(
+            "azure_service_bus_jq_filter_count",
+            self.azure_service_bus_jq_filters().count(),
         );
     }
 }
