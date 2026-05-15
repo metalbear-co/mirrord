@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use mirrord_protocol::{DaemonMessage, ResponseError};
 use thiserror::Error;
@@ -29,6 +29,9 @@ pub enum ClientError {
         "request refers to a file descriptor {0} that was lost after reconnecting to the server"
     )]
     LostFileDescriptor(u64),
+    /// The background task did not complete the request within the given timeout.
+    #[error("request did not complete within the configured time limit of {:.2}s", .0.as_secs_f32())]
+    Timeout(Duration),
 }
 
 pub type ClientResult<T, E = ClientError> = Result<T, E>;

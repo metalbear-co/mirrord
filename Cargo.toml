@@ -226,7 +226,7 @@ tokio-rustls = "0.26"
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-tungstenite = { version = "0.24" }
 tokio-util = { version = "0.7", features = ["net", "codec"] }
-toml = "0.8"
+toml = "1.1.2"
 tonic = "0.12"
 tower = "0.5"
 tower-http = { version = "0.6.6", features = ["fs", "set-header"] }

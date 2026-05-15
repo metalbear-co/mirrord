@@ -28,6 +28,7 @@ pub use crate::client::{
     connector::{Connection, ProtocolConnector},
     error::ClientError,
     request::ClientRequest,
+    retrying::MirrordClientRetry,
 };
 use crate::{
     client::{
@@ -51,6 +52,7 @@ mod outgoing;
 mod ping_pong;
 mod queue_kind;
 mod request;
+mod retrying;
 mod simple_request;
 mod task;
 #[cfg(test)]
@@ -80,10 +82,8 @@ mod tunnels;
 ///
 /// As long as the [`ProtocolConnector`] allows it, this client will attempt
 /// reconnecting to the server after connection failures.
-///
 /// After a reconnection, this client remains valid and functional.
-/// The background task does not consume requests while reconnecting,
-/// so requests can be retried with a "busy" loop.
+/// Use [`MirrordClientRetry`] for API with automatic retries.
 ///
 /// # Fairness
 ///

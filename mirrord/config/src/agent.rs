@@ -65,7 +65,8 @@ impl fmt::Display for LinuxCapability {
 ///     "exclude_from_mesh": false
 ///     "inject_headers": false,
 ///     "max_body_buffer_size": 65535,
-///     "max_body_buffer_timeout": 1000
+///     "max_body_buffer_timeout": 1000,
+///     "http_detection_timeout": 2
 ///   }
 /// }
 /// ```
@@ -454,6 +455,15 @@ pub struct AgentConfig {
     /// bodies do not arrive within this timeout.
     #[config(default = 1000)]
     pub max_body_buffer_timeout: u32,
+
+    /// ### agent.http_detection_timeout {#agent-http_detection_timeout}
+    ///
+    /// How long, in seconds, to wait for data on a redirected connection during HTTP protocol
+    /// detection before giving up and treating it as raw TCP. The timer resets on every read,
+    /// so total detection time may exceed this value for connections that send data in many
+    /// small chunks.
+    #[config(env = "MIRRORD_AGENT_HTTP_DETECTION_TIMEOUT", default = 2)]
+    pub http_detection_timeout: u64,
 
     /// ### agent.security_context {#agent-security_context}
     ///
