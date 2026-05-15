@@ -202,15 +202,32 @@ fn prompt_http_filter(mode: &ServiceMode) -> Result<HttpFilterConfig, InitError>
             let s = Text::new("HTTP header filter (regex; blank for auto session-key filter):")
                 .with_help_message("Example: `session-id: my-session-identifier`")
                 .prompt()?;
-            Ok(match s.trim() {
+
+            let filter = match s.trim() {
                 "" => HttpFilterConfig::default(),
                 hf => HttpFilterConfig {
                     header_filter: Some(hf.to_owned()),
                     ..Default::default()
                 },
-            })
+            };
+
+            Ok(filter)
         }
     }
+}
+
+/// Parses a comma-separated list of u16 ports. Whitespace and empty entries
+/// are ignored. On failure, the error is the user-facing message naming the
+/// offending token.
+fn parse_ports(s: &str) -> Result<HashSet<u16>, String> {
+    s.split(',')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            p.parse::<u16>()
+                .map_err(|_| format!("`{p}` is not a valid u16 port"))
+        })
+        .collect()
 }
 
 fn prompt_ignore_ports() -> Result<HashSet<u16>, InitError> {
@@ -229,22 +246,12 @@ fn prompt_ignore_ports() -> Result<HashSet<u16>, InitError> {
 
     if choice == "Custom..." {
         let s = Text::new("Comma-separated ports:")
-            .with_validator(|s: &str| {
-                for p in s.split(',') {
-                    let t = p.trim();
-                    if t.is_empty() {
-                        continue;
-                    }
-                    if t.parse::<u16>().is_err() {
-                        return Ok(Validation::Invalid(
-                            format!("`{t}` is not a valid u16 port").into(),
-                        ));
-                    }
-                }
-                Ok(Validation::Valid)
+            .with_validator(|s: &str| match parse_ports(s) {
+                Ok(_) => Ok(Validation::Valid),
+                Err(e) => Ok(Validation::Invalid(e.into())),
             })
             .prompt()?;
-        return Ok(s.split(',').filter_map(|p| p.trim().parse().ok()).collect());
+        return Ok(parse_ports(&s).expect("validated above"));
     }
 
     let ports = presets
