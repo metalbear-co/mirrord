@@ -3313,6 +3313,36 @@
           "required": [
             "queue_type"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each Service Bus message, the jq filter runs on a JSON\nrepresentation of the full `ServiceBusMessage` object.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between Azure Service Bus application property names and\nregexes they should match. The local application will only receive messages whose\napplication properties match **all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "AzureServiceBus"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "queue_type"
+          ]
         }
       ]
     },
