@@ -48,6 +48,16 @@ pub struct ConnectParams<'a> {
     )]
     pub gcp_pubsub_jq_filters: HashMap<&'a str, &'a str>,
 
+    #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
+    pub azure_service_bus_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
+
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub azure_service_bus_jq_filters: HashMap<&'a str, &'a str>,
+
     /// User's current git branch name - may be an empty string if user is in detached head mode or
     /// another error occurred: this case handled by the operator
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -163,6 +173,12 @@ impl<'a> ConnectParams<'a> {
                 .feature
                 .split_queues
                 .gcp_pubsub_jq_filters()
+                .collect(),
+            azure_service_bus_splits: config.feature.split_queues.azure_service_bus().collect(),
+            azure_service_bus_jq_filters: config
+                .feature
+                .split_queues
+                .azure_service_bus_jq_filters()
                 .collect(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
