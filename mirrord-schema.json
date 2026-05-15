@@ -268,7 +268,7 @@
       "properties": {
         "local": {
           "title": "feature.fs.local {#feature-fs-local}",
-          "description": "Specify file path patterns that if matched will be opened locally.",
+          "description": "Specify file path patterns that if matched will be opened locally.\n\n##### Windows\n\nPatterns are matched against a unix-style form of the requested path, not the raw\nWindows path. Before matching, the drive letter is stripped and backslashes are\nconverted to forward slashes, so `D:\\Workspaces\\myapp\\app.json` is matched as\n`/Workspaces/myapp/app.json`.\n\nPatterns must therefore be written with forward slashes. Backslashes in the regex\n(e.g. `\"\\\\\\\\Workspaces\\\\\\\\\"`) will never match anything, because the input string the\nregex sees contains no backslashes at all — they were stripped during translation.",
           "anyOf": [
             {
               "$ref": "#/$defs/VecOrSingle"
@@ -280,7 +280,7 @@
         },
         "mapping": {
           "title": "feature.fs.mapping {#feature-fs-mapping}",
-          "description": "Specify map of patterns that if matched will replace the path according to specification.\n\n*Capture groups are allowed.*\n\nExample:\n```json\n{\n  \"^/home/(?<user>\\\\S+)/dev/tomcat\": \"/etc/tomcat\"\n  \"^/home/(?<user>\\\\S+)/dev/config/(?<app>\\\\S+)\": \"/mnt/configs/${user}-$app\"\n}\n```\nWill do the next replacements for any io operation\n\n`/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml`\n`/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`\n\n- Relative paths: this feature (currently) does not apply mappings to relative paths, e.g.\n  `../dev`.",
+          "description": "Specify map of patterns that if matched will replace the path according to specification.\n\n*Capture groups are allowed.* Matching is case-insensitive and uses\n[`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace),\nso the replacement value supports `$1` / `${name}` substitutions.\n\n##### Unix (Linux, macOS)\n\nPatterns are matched against the path exactly as the application requested it.\n\nExample:\n```json\n{\n  \"^/home/(?<user>\\\\S+)/dev/tomcat\": \"/etc/tomcat\",\n  \"^/home/(?<user>\\\\S+)/dev/config/(?<app>\\\\S+)\": \"/mnt/configs/${user}-$app\"\n}\n```\n\nWill produce the following replacements for any io operation:\n\n`/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml`\n`/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`\n\n##### Windows\n\nPatterns are matched against a unix-style form of the requested path, not the raw\nWindows path. Before matching, the drive letter is stripped and backslashes are\nconverted to forward slashes, so:\n\n`D:\\Workspaces\\myapp\\config\\app.json` is matched as `/Workspaces/myapp/config/app.json`\n\nPatterns must therefore be written with forward slashes. Backslashes in the regex\n(e.g. `\"\\\\\\\\Workspaces\\\\\\\\\"`) will never match anything, because the input string the\nregex sees contains no backslashes at all — they were stripped during translation.\n\nThe replacement value is sent to the agent as-is and is what the remote (Linux) pod\nwill see on disk, so it should also use forward slashes.\n\nExample:\n```json\n{\n  \"^/Workspaces/(?<app>[^/]+)/config/(?<file>.+)\": \"/etc/${app}/$file\"\n}\n```\n\nWill produce the following replacement:\n\n`D:\\Workspaces\\myapp\\config\\app.json` => `/etc/myapp/app.json`\n\n##### Caveats\n\n- Relative paths: this feature (currently) does not apply mappings to relative paths, e.g.\n  `../dev`.",
           "type": [
             "object",
             "null"
@@ -302,7 +302,7 @@
         },
         "not_found": {
           "title": "feature.fs.not_found {#feature-fs-not_found}",
-          "description": "Specify file path patterns that if matched will be treated as non-existent.",
+          "description": "Specify file path patterns that if matched will be treated as non-existent.\n\n##### Windows\n\nPatterns are matched against a unix-style form of the requested path, not the raw\nWindows path. Before matching, the drive letter is stripped and backslashes are\nconverted to forward slashes, so `D:\\Workspaces\\myapp\\app.json` is matched as\n`/Workspaces/myapp/app.json`.\n\nPatterns must therefore be written with forward slashes. Backslashes in the regex\n(e.g. `\"\\\\\\\\Workspaces\\\\\\\\\"`) will never match anything, because the input string the\nregex sees contains no backslashes at all — they were stripped during translation.",
           "anyOf": [
             {
               "$ref": "#/$defs/VecOrSingle"
@@ -314,7 +314,7 @@
         },
         "read_only": {
           "title": "feature.fs.read_only {#feature-fs-read_only}",
-          "description": "Specify file path patterns that if matched will be read from the remote.\nif file matching the pattern is opened for writing or read/write it will be opened locally.",
+          "description": "Specify file path patterns that if matched will be read from the remote.\nif file matching the pattern is opened for writing or read/write it will be opened locally.\n\n##### Windows\n\nPatterns are matched against a unix-style form of the requested path, not the raw\nWindows path. Before matching, the drive letter is stripped and backslashes are\nconverted to forward slashes, so `D:\\Workspaces\\myapp\\app.json` is matched as\n`/Workspaces/myapp/app.json`.\n\nPatterns must therefore be written with forward slashes. Backslashes in the regex\n(e.g. `\"\\\\\\\\Workspaces\\\\\\\\\"`) will never match anything, because the input string the\nregex sees contains no backslashes at all — they were stripped during translation.",
           "anyOf": [
             {
               "$ref": "#/$defs/VecOrSingle"
@@ -326,7 +326,7 @@
         },
         "read_write": {
           "title": "feature.fs.read_write {#feature-fs-read_write}",
-          "description": "Specify file path patterns that if matched will be read and written to the remote.",
+          "description": "Specify file path patterns that if matched will be read and written to the remote.\n\n##### Windows\n\nPatterns are matched against a unix-style form of the requested path, not the raw\nWindows path. Before matching, the drive letter is stripped and backslashes are\nconverted to forward slashes, so `D:\\Workspaces\\myapp\\app.json` is matched as\n`/Workspaces/myapp/app.json`.\n\nPatterns must therefore be written with forward slashes. Backslashes in the regex\n(e.g. `\"\\\\\\\\Workspaces\\\\\\\\\"`) will never match anything, because the input string the\nregex sees contains no backslashes at all — they were stripped during translation.",
           "anyOf": [
             {
               "$ref": "#/$defs/VecOrSingle"
@@ -1071,12 +1071,24 @@
                 "null"
               ]
             },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
             "ttl_secs": {
               "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.",
-              "type": "integer",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "uint64",
-              "default": 300,
               "minimum": 0
             },
             "type": {
@@ -1138,12 +1150,24 @@
                 "null"
               ]
             },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
             "ttl_secs": {
               "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.",
-              "type": "integer",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "uint64",
-              "default": 300,
               "minimum": 0
             },
             "type": {
@@ -1205,12 +1229,24 @@
                 "null"
               ]
             },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
             "ttl_secs": {
               "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.",
-              "type": "integer",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "uint64",
-              "default": 300,
               "minimum": 0
             },
             "type": {
@@ -1284,12 +1320,24 @@
                 "null"
               ]
             },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
             "ttl_secs": {
               "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.",
-              "type": "integer",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "uint64",
-              "default": 300,
               "minimum": 0
             },
             "type": {
@@ -3114,10 +3162,22 @@
         },
         "ttl_mins": {
           "title": "feature.preview.ttl_mins {#feature-preview-ttl_mins}",
-          "description": "How long (in minutes) the preview session is allowed to live after creation.\nThe operator will terminate the session when this time elapses.\n\nSet to `\"infinite\"` to disable TTL.",
+          "description": "How long (in minutes) the preview session is allowed to live after creation.\nThe operator will terminate the session when this time elapses.\n\nSet to `\"infinite\"` to disable TTL.\n\nMutually exclusive with [`ttl_secs`](#feature-preview-ttl_secs); when neither is set,\ndefaults to 60 minutes.",
           "anyOf": [
             {
-              "$ref": "#/$defs/PreviewTtlMins"
+              "$ref": "#/$defs/PreviewTtl"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ttl_secs": {
+          "title": "feature.preview.ttl_secs {#feature-preview-ttl_secs}",
+          "description": "Same as [`ttl_mins`](#feature-preview-ttl_mins) but expressed in seconds.\n\nSet to `\"infinite\"` to disable TTL.\n\nMutually exclusive with [`ttl_mins`](#feature-preview-ttl_mins).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviewTtl"
             },
             {
               "type": "null"
@@ -3127,13 +3187,8 @@
       },
       "additionalProperties": false
     },
-    "PreviewTtlKeyword": {
-      "type": "string",
-      "enum": [
-        "infinite"
-      ]
-    },
-    "PreviewTtlMins": {
+    "PreviewTtl": {
+      "description": "A TTL value usable for either [`PreviewConfig::ttl_mins`] or [`PreviewConfig::ttl_secs`].\n\nThe unit (minutes or seconds) depends on which field carries the value; the variants\nthemselves are unit-agnostic.",
       "anyOf": [
         {
           "type": "integer",
@@ -3145,13 +3200,19 @@
         }
       ]
     },
+    "PreviewTtlKeyword": {
+      "type": "string",
+      "enum": [
+        "infinite"
+      ]
+    },
     "QueueFilter": {
       "title": "feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}",
       "description": "For each queue, `message_filter` is a mapping between message attribute names and regexes they\nshould match. The local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the attributes in the\nfilter, with values of those attributes matching the respective patterns.\n\n### feature.split_queues.{}.queue_type {#feature-split_queues-queue_id-queue_type}\n\nThe type of queue to be split, currently `SQS` and `Kafka` are supported. More queue types might\nbe added in the future.",
       "oneOf": [
         {
           "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
-          "description": "Only supported with `queue_type` of `SQS`.\nWhen this field is specified, for each SQS message, the jq filter runs on a JSON\nrepresentation of the SQS `Message` object. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nSee [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
+          "description": "Only supported with `queue_type` of `SQS`, or `GCPPubSub`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nus used.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
           "type": "object",
           "properties": {
             "jq_filter": {
