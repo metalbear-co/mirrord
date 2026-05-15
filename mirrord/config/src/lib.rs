@@ -1849,6 +1849,197 @@ mod tests {
         assert_eq!(pod_target.pod, "test-my-session");
     }
 
+    /// Builds and resolves a [`LayerConfig`] from a JSON string, then runs the outgoing-to-DNS
+    /// filter propagation in a fresh [`ConfigContext`] so that the returned warnings reflect
+    /// only what the propagation emitted (and not, for example, unstable-field warnings from
+    /// the initial `generate_config` call).
+    fn resolve_with_propagation(json: &str) -> (LayerConfig, Vec<String>) {
+        let mut gen_ctx = ConfigContext::default();
+        let mut cfg = ConfigType::Json
+            .parse(json)
+            .generate_config(&mut gen_ctx)
+            .expect("config generation should succeed");
+        let mut prop_ctx = ConfigContext::default();
+        cfg.reflect_outgoing_filter_in_dns(&mut prop_ctx);
+        (cfg, prop_ctx.into_warnings())
+    }
+
+    fn names(filter: &DnsFilterConfig) -> (&'static str, Vec<String>) {
+        match filter {
+            DnsFilterConfig::Local(v) => ("local", v.iter().cloned().collect()),
+            DnsFilterConfig::Remote(v) => ("remote", v.iter().cloned().collect()),
+        }
+    }
+
+    #[test]
+    fn outgoing_local_with_no_dns_filter_creates_local_dns_filter() {
+        let (cfg, warnings) = resolve_with_propagation(
+            r#"{"feature":{"network":{"outgoing":{"filter":{"local":["docker.lala"]}}}}}"#,
+        );
+        let filter = cfg
+            .feature
+            .network
+            .dns
+            .filter
+            .as_ref()
+            .expect("dns.filter should have been created");
+        assert_eq!(names(filter), ("local", vec!["docker.lala".to_owned()]));
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+    }
+
+    #[test]
+    fn outgoing_local_appends_to_existing_local_dns_filter() {
+        let (cfg, _) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "outgoing":{"filter":{"local":["docker.lala"]}},
+                "dns":{"enabled":true,"filter":{"local":["foo.com"]}}
+            }}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(
+            names(filter),
+            (
+                "local",
+                vec!["foo.com".to_owned(), "docker.lala".to_owned()]
+            )
+        );
+    }
+
+    #[test]
+    fn outgoing_local_skips_names_already_in_local_dns_filter() {
+        let (cfg, _) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "outgoing":{"filter":{"local":["docker.lala","foo.com"]}},
+                "dns":{"enabled":true,"filter":{"local":["foo.com"]}}
+            }}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(
+            names(filter),
+            (
+                "local",
+                vec!["foo.com".to_owned(), "docker.lala".to_owned()]
+            )
+        );
+    }
+
+    #[test]
+    fn outgoing_remote_with_no_dns_filter_leaves_it_unset() {
+        let (cfg, warnings) = resolve_with_propagation(
+            r#"{"feature":{"network":{"outgoing":{"filter":{"remote":["svc.cluster.local"]}}}}}"#,
+        );
+        assert!(cfg.feature.network.dns.filter.is_none());
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+    }
+
+    #[test]
+    fn outgoing_remote_appends_to_existing_remote_dns_filter() {
+        let (cfg, _) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "outgoing":{"filter":{"remote":["svc.cluster.local"]}},
+                "dns":{"enabled":true,"filter":{"remote":["foo.com"]}}
+            }}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(
+            names(filter),
+            (
+                "remote",
+                vec!["foo.com".to_owned(), "svc.cluster.local".to_owned()]
+            )
+        );
+    }
+
+    #[test]
+    fn outgoing_local_leaves_remote_dns_filter_without_overlap_and_does_not_warn() {
+        let (cfg, warnings) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "outgoing":{"filter":{"local":["docker.lala"]}},
+                "dns":{"enabled":true,"filter":{"remote":["foo.com"]}}
+            }}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(names(filter), ("remote", vec!["foo.com".to_owned()]));
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+    }
+
+    #[test]
+    fn outgoing_local_warns_when_remote_dns_filter_overlaps() {
+        let (cfg, warnings) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "outgoing":{"filter":{"local":["docker.lala"]}},
+                "dns":{"enabled":true,"filter":{"remote":["docker.lala"]}}
+            }}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(names(filter), ("remote", vec!["docker.lala".to_owned()]));
+        assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn outgoing_remote_warns_when_local_dns_filter_overlaps() {
+        let (cfg, warnings) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "outgoing":{"filter":{"remote":["svc.cluster.local"]}},
+                "dns":{"enabled":true,"filter":{"local":["svc.cluster.local"]}}
+            }}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(
+            names(filter),
+            ("local", vec!["svc.cluster.local".to_owned()])
+        );
+        assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn non_name_outgoing_filter_entries_are_ignored() {
+        let (cfg, _) = resolve_with_propagation(
+            r#"{"feature":{"network":{"outgoing":{"filter":{"local":[
+                "tcp://1.1.1.0/24:1337",
+                ":53",
+                "192.168.0.1:80",
+                "docker.lala:8080"
+            ]}}}}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(
+            names(filter),
+            ("local", vec!["docker.lala:8080".to_owned()])
+        );
+    }
+
+    #[test]
+    fn dns_disabled_skips_propagation() {
+        let (cfg, _) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "outgoing":{"filter":{"local":["docker.lala"]}},
+                "dns":false
+            }}}"#,
+        );
+        assert!(cfg.feature.network.dns.filter.is_none());
+    }
+
+    #[test]
+    fn no_outgoing_filter_leaves_dns_filter_alone() {
+        let (cfg, _) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "dns":{"enabled":true,"filter":{"local":["foo.com"]}}
+            }}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(names(filter), ("local", vec!["foo.com".to_owned()]));
+    }
+
+    #[test]
+    fn bare_string_outgoing_filter_is_still_mirrored() {
+        let (cfg, _) = resolve_with_propagation(
+            r#"{"feature":{"network":{"outgoing":{"filter":{"local":"docker.lala"}}}}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(names(filter), ("local", vec!["docker.lala".to_owned()]));
+    }
+
     #[test]
     fn empty_http_filter_strings_are_rejected() {
         let config = ConfigType::Json.parse(
