@@ -32,8 +32,8 @@ use crate::{
 /// # Retrying streams
 ///
 /// [`MirrordClientRetry::subscribe_port_retry`] and [`MirrordClientRetry::subscribe_logs_retry`]
-/// return [`Stream`]s that transparently handle resubscribing after reconnects.
-/// The streams have to be polled in order to progress (re)subscription requests.
+/// return [`Stream`](futures::stream::Stream)s that transparently handle resubscribing after
+/// reconnects. The streams have to be polled in order to progress (re)subscription requests.
 ///
 /// Every (re)subscription is subject to the timeout policy explained above.
 ///
