@@ -1967,11 +1967,12 @@ impl OperatorApi<PreparedClientCert> {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
             })?
-            .with(|e: Vec<u8>| async {
-                Ok::<_, OperatorClientError>(tungstenite::Message::Binary(e))
+            .with(|outbound: Vec<u8>| {
+                let ws_message = tungstenite::Message::Binary(outbound);
+                std::future::ready(Ok::<_, OperatorClientError>(ws_message))
             })
-            .map(|i| match i.map_err(OperatorClientError::from)? {
-                tungstenite::Message::Binary(pl) => Ok(pl),
+            .map(|inbound| match inbound? {
+                tungstenite::Message::Binary(payload) => Ok(payload),
                 other => Err(OperatorClientError::InvalidMessage(Box::new(other))),
             });
 
