@@ -1,11 +1,9 @@
-use std::{
-    collections::{HashMap, hash_map::Entry},
-    net::SocketAddr,
-};
+use std::collections::{HashMap, hash_map::Entry};
 
 use futures::future::Either;
 use mirrord_intproxy_protocol::{
-    IncomingResponse, LayerId, MessageId, PortSubscribe, PortUnsubscribe, ProxyToLayerMessage,
+    IncomingResponse, LayerId, ListeningOn, MessageId, PortSubscribe, PortUnsubscribe,
+    ProxyToLayerMessage,
 };
 use mirrord_protocol::{BlockedAction, ClientMessage, Port, RemoteResult, ResponseError};
 use semver::Version;
@@ -124,15 +122,15 @@ impl Subscription {
 
     /// Removed a source from this subscription.
     /// If this source is the last one, returns [`Err`] with a message to be sent to the agent.
-    fn remove_source(mut self, listening_on: SocketAddr) -> Result<Self, Box<ClientMessage>> {
+    fn remove_source(mut self, listening_on: &ListeningOn) -> Result<Self, Box<ClientMessage>> {
         let queue_size = self.queued_sources.len();
         self.queued_sources
-            .retain(|source| source.request.listening_on != listening_on);
+            .retain(|source| source.request.listening_on != *listening_on);
         if queue_size != self.queued_sources.len() {
             return Ok(self);
         }
 
-        if self.active_source.request.listening_on != listening_on {
+        if self.active_source.request.listening_on != *listening_on {
             return Ok(self);
         }
 
@@ -170,7 +168,7 @@ impl Subscription {
 ///    subscription request
 #[derive(Default)]
 pub struct SubscriptionsManager {
-    remote_ports: RemoteResources<(Port, SocketAddr)>,
+    remote_ports: RemoteResources<(Port, ListeningOn)>,
     subscriptions: HashMap<Port, Subscription>,
 }
 
@@ -198,7 +196,7 @@ impl SubscriptionsManager {
     ) -> Option<Either<ProxyMessage, ClientMessage>> {
         self.remote_ports.add(
             layer_id,
-            (request.subscription.port(), request.listening_on),
+            (request.subscription.port(), request.listening_on.clone()),
         );
 
         let port = request.subscription.port();
@@ -231,14 +229,14 @@ impl SubscriptionsManager {
     ) -> Option<ClientMessage> {
         let closed_in_all_forks = self
             .remote_ports
-            .remove(layer_id, (request.port, request.listening_on));
+            .remove(layer_id, (request.port, request.listening_on.clone()));
         if !closed_in_all_forks {
             return None;
         }
 
         let subscription = self.subscriptions.remove(&request.port)?;
 
-        match subscription.remove_source(request.listening_on) {
+        match subscription.remove_source(&request.listening_on) {
             Ok(subscription) => {
                 self.subscriptions.insert(request.port, subscription);
                 None
@@ -322,7 +320,7 @@ impl SubscriptionsManager {
             .remove_all(layer_id)
             .filter_map(|(port, listening_on)| {
                 let subscription = self.subscriptions.remove(&port)?;
-                match subscription.remove_source(listening_on) {
+                match subscription.remove_source(&listening_on) {
                     Ok(subscription) => {
                         self.subscriptions.insert(port, subscription);
                         None
@@ -352,8 +350,14 @@ mod test {
 
     #[test]
     fn with_double_subscribe() {
-        let listener_1 = "127.0.0.1:1111".parse().unwrap();
-        let listener_2 = "127.0.0.1:2222".parse().unwrap();
+        let listener_1: ListeningOn = "127.0.0.1:1111"
+            .parse::<std::net::SocketAddr>()
+            .unwrap()
+            .into();
+        let listener_2: ListeningOn = "127.0.0.1:2222"
+            .parse::<std::net::SocketAddr>()
+            .unwrap()
+            .into();
 
         let mut manager = SubscriptionsManager::default();
 
@@ -361,7 +365,7 @@ mod test {
             LayerId(0),
             0,
             PortSubscribe {
-                listening_on: listener_1,
+                listening_on: listener_1.clone(),
                 subscription: PortSubscription::Mirror(MirrorType::All(80)),
             },
             None,
@@ -380,7 +384,7 @@ mod test {
             LayerId(0),
             1,
             PortSubscribe {
-                listening_on: listener_2,
+                listening_on: listener_2.clone(),
                 subscription: PortSubscription::Mirror(MirrorType::All(80)),
             },
             None,
@@ -434,7 +438,10 @@ mod test {
 
     #[test]
     fn with_fork() {
-        let listening_on = "127.0.0.1:1111".parse().unwrap();
+        let listening_on: ListeningOn = "127.0.0.1:1111"
+            .parse::<std::net::SocketAddr>()
+            .unwrap()
+            .into();
 
         let mut manager = SubscriptionsManager::default();
 
@@ -442,7 +449,7 @@ mod test {
             LayerId(0),
             0,
             PortSubscribe {
-                listening_on,
+                listening_on: listening_on.clone(),
                 subscription: PortSubscription::Mirror(MirrorType::All(80)),
             },
             None,
@@ -479,7 +486,7 @@ mod test {
             LayerId(0),
             PortUnsubscribe {
                 port: 80,
-                listening_on,
+                listening_on: listening_on.clone(),
             },
         );
         assert!(response.is_none(), "{response:?}");
@@ -501,7 +508,10 @@ mod test {
 
     #[test]
     fn with_double_response() {
-        let listening_on = "127.0.0.1:1111".parse().unwrap();
+        let listening_on: ListeningOn = "127.0.0.1:1111"
+            .parse::<std::net::SocketAddr>()
+            .unwrap()
+            .into();
 
         let mut manager = SubscriptionsManager::default();
 
@@ -509,7 +519,7 @@ mod test {
             LayerId(0),
             0,
             PortSubscribe {
-                listening_on,
+                listening_on: listening_on.clone(),
                 subscription: PortSubscription::Mirror(MirrorType::All(80)),
             },
             None,

@@ -204,15 +204,51 @@ pub struct ConnMetadataResponse {
     pub local_address: IpAddr,
 }
 
+/// Where the internal proxy should forward traffic for a [`PortSubscribe`].
+///
+/// [`Self::Socket`] is used by the regular layer (the layer hooked `listen()` and the user
+/// application is bound to that address). [`Self::Hostname`] is used by preview environments,
+/// where the operator creates a headless Service for the preview pods and passes its DNS name.
+/// Using a hostname spreads load across the backing pods and avoids burning a ClusterIP per
+/// session, which matters in clusters that exhaust their service CIDR.
+#[derive(Encode, Decode, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ListeningOn {
+    Socket(SocketAddr),
+    Hostname { host: String, port: u16 },
+}
+
+impl ListeningOn {
+    /// Port the layer / preview environment subscribed on.
+    pub fn port(&self) -> u16 {
+        match self {
+            Self::Socket(addr) => addr.port(),
+            Self::Hostname { port, .. } => *port,
+        }
+    }
+}
+
+impl From<SocketAddr> for ListeningOn {
+    fn from(addr: SocketAddr) -> Self {
+        Self::Socket(addr)
+    }
+}
+
+impl fmt::Display for ListeningOn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Socket(addr) => write!(f, "{addr}"),
+            Self::Hostname { host, port } => write!(f, "{host}:{port}"),
+        }
+    }
+}
+
 /// A request to start proxying incoming connections.
 ///
-/// For each connection incoming to the remote port,
-/// the internal proxy will initiate a new connection to the local port specified in `listening_on`.
+/// For each connection incoming to the remote port, the internal proxy will initiate a new
+/// connection to the destination described by [`PortSubscribe::listening_on`].
 #[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
 pub struct PortSubscribe {
-    /// Local address on which the layer is listening.
-    pub listening_on: SocketAddr,
-    /// Instructions on how to execute mirroring.
+    pub listening_on: ListeningOn,
     pub subscription: PortSubscription,
 }
 
@@ -228,10 +264,8 @@ pub enum PortSubscription {
 /// A request to stop proxying incoming connections.
 #[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub struct PortUnsubscribe {
-    /// Port on the remote pod that layer mirrored.
     pub port: Port,
-    /// Local address on which the layer was listening.
-    pub listening_on: SocketAddr,
+    pub listening_on: ListeningOn,
 }
 
 /// Messages sent by the internal proxy and handled by the layer.
