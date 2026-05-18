@@ -12,10 +12,12 @@ use mirrord_config::{
 };
 use serde::{Deserialize, Serialize};
 use strum::VariantArray;
-use strum_macros::{IntoStaticStr, VariantArray};
+use strum_macros::{Display, IntoStaticStr, VariantArray};
 
 /// Incoming traffic mode for a service.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, VariantArray, IntoStaticStr)]
+#[derive(
+    Clone, Debug, Default, Serialize, Deserialize, PartialEq, VariantArray, IntoStaticStr, Display,
+)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum ServiceMode {
@@ -44,7 +46,9 @@ If no filter is provided, a header filter matching the regex `baggage: .*mirrord
 
 /// Specifies if this service should be run with `mirrord exec` or
 /// `mirrord container`
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default, IntoStaticStr)]
+#[derive(
+    Clone, Debug, Serialize, Deserialize, PartialEq, Default, IntoStaticStr, Display, VariantArray,
+)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum RunType {
@@ -67,9 +71,9 @@ pub struct RunConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct CommonConfig {
-    accept_invalid_certificates: Option<bool>,
-    operator: Option<bool>,
-    telemetry: Option<bool>,
+    pub(crate) accept_invalid_certificates: Option<bool>,
+    pub(crate) operator: Option<bool>,
+    pub(crate) telemetry: Option<bool>,
 }
 
 /// Separate from [`mirrord_config::target::TargetConfig`] because we
@@ -79,8 +83,8 @@ pub struct CommonConfig {
 #[serde(deny_unknown_fields)]
 pub struct TargetConfig {
     #[serde(deserialize_with = "mirrord_config::util::string_or_struct_option")]
-    path: Option<Target>,
-    namespace: Option<String>,
+    pub(crate) path: Option<Target>,
+    pub(crate) namespace: Option<String>,
 }
 
 impl From<TargetConfig> for mirrord_config::target::TargetConfig {
@@ -97,21 +101,21 @@ impl From<TargetConfig> for mirrord_config::target::TargetConfig {
 #[serde(deny_unknown_fields)]
 pub struct ServiceConfig {
     #[serde(default)]
-    target: TargetConfig,
+    pub(crate) target: TargetConfig,
 
     #[serde(default)]
-    env: EnvConfig,
+    pub(crate) env: EnvConfig,
 
     #[serde(default)]
-    default_mode: ServiceMode,
+    pub(crate) default_mode: ServiceMode,
 
     #[serde(default)]
-    http_filter: HttpFilterConfig,
+    pub(crate) http_filter: HttpFilterConfig,
 
     #[serde(default)]
-    ignore_ports: HashSet<u16>,
+    pub(crate) ignore_ports: HashSet<u16>,
 
-    run: RunConfig,
+    pub(crate) run: RunConfig,
 }
 
 /// Resolved top-level `mirrord-up.yaml` configuration.

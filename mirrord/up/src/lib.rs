@@ -14,8 +14,10 @@ use miette::Diagnostic;
 use mirrord_config::config::{ConfigError, EnvKey};
 use thiserror::Error;
 mod config;
+mod init;
 
 pub use config::{ServiceMode, SubprocessCfg, UpConfig};
+pub use init::{InitError, run_wizard};
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
