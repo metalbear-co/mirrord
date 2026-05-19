@@ -14,15 +14,27 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.25) transparent;
+}
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: hsl(var(--background));
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--primary));
-  border-radius: 3px;
+  background: hsl(var(--muted-foreground) / 0.25);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
+  background-clip: padding-box;
+  border: 2px solid transparent;
 }
 
 @keyframes eventFadeIn {
@@ -38,4 +50,88 @@ body {
 
 .event-row-animate {
   animation: eventFadeIn 0.2s ease-out;
+}
+
+/* Typography scale — use these, not text-[Npx] literals.
+ * Aligned with Apple HIG / SF Pro: minimum 10.5pt, sentence case for
+ * everything except very tight metadata pills. */
+.text-caps {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.text-meta {
+  font-size: 11px;
+}
+.text-body {
+  font-size: 12px;
+}
+.text-section {
+  font-size: 12px;
+  font-weight: 600;
+}
+.text-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Surface tokens — pick one opacity per surface kind */
+.surface-section {
+  background: hsl(var(--card) / 0.5);
+}
+.surface-inset {
+  background: hsl(var(--card) / 0.3);
+}
+
+/* Neutralize the prebuilt @metalbear/ui purple. Buttons + active states use
+   near-black in light mode and near-white in dark mode; muted/accent tints
+   collapse to neutral grays so the monitor reads as monochrome. */
+:root {
+  --primary: 0 0% 12%;
+  --primary-foreground: 0 0% 100%;
+  --muted: 0 0% 95%;
+  --muted-foreground: 0 0% 35%;
+  --accent: 0 0% 95%;
+  --accent-foreground: 0 0% 12%;
+  --ring: 0 0% 60%;
+}
+.dark {
+  --primary: 0 0% 90%;
+  --primary-foreground: 0 0% 0%;
+  --muted: 240 4% 22%;
+  --muted-foreground: 0 0% 70%;
+  --accent: 240 4% 22%;
+  --accent-foreground: 0 0% 95%;
+  --ring: 0 0% 60%;
+}
+
+@keyframes detailFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.detail-fade-in {
+  animation: detailFadeIn 0.18s ease-out;
+}
+
+@keyframes sidebarItemFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.sidebar-item-animate {
+  animation: sidebarItemFadeIn 0.16s ease-out;
 }
