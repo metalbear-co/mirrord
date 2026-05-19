@@ -1,1 +1,0 @@
-Add support for `Azure Servicebus` queue splitting.
