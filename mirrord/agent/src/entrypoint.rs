@@ -113,12 +113,15 @@ static IP_VERSION_AVAILABILITY: LazyLock<IpVersionAvailability> = LazyLock::new(
         }
 
         if let Some(v6) = addr.as_sockaddr_in6()
-            && v6.ip().is_loopback().not()
             && v6.ip().is_unspecified().not()
-            // these are automatically assigned, they don't mean
-            // anything
+            // link-local are automatically assigned, they don't mean
+            // anything for external connectivity
             && v6.ip().is_unicast_link_local().not()
         {
+            // Note: loopback (::1) is intentionally NOT excluded here.
+            // Even without global IPv6, processes can connect to [::1]:port
+            // (e.g. Go's HTTP client prefers IPv6 for "localhost").
+            // The OUTPUT chain ip6tables rules must capture this traffic.
             has_v6 = true;
         }
     }
