@@ -551,9 +551,9 @@ impl LayerConfig {
             unset.push("AWS_PROFILE".to_owned());
             self.feature.env.unset = Some(VecOrSingle::Multiple(unset));
 
-            if let Ok(home) = std::env::var("HOME") {
+            if let Some(home) = util::home_dir_for_path_mapping() {
                 let tmpdir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_owned());
-                let pattern = format!("^{home}/\\.aws(/.*)?");
+                let pattern = format!("^{}/\\.aws(/.*)?", regex::escape(&home));
                 let replacement = format!("{tmpdir}/.aws$1");
                 self.feature
                     .fs
@@ -564,6 +564,7 @@ impl LayerConfig {
             }
         }
     }
+
     /// Verifies that there are no conflicting settings in this config.
     ///
     /// Fills the given [`ConfigContext`] with warnings.
