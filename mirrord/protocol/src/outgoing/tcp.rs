@@ -29,6 +29,9 @@ pub enum LayerTcpOutgoing {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum LayerSeqpacket {}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonTcpOutgoing {
     /// The agent attempted a connection to the remote address specified by
     /// [`LayerTcpOutgoing::Connect`], and it might've been successful or not.
@@ -50,3 +53,6 @@ pub enum DaemonTcpOutgoing {
     /// [`Uid`].
     ConnectV2(DaemonConnectV2),
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum DaemonSeqpacket {}

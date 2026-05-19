@@ -247,6 +247,7 @@ impl OutgoingProxy {
         match protocol {
             NetProtocol::Datagrams => &mut self.datagrams_reqs,
             NetProtocol::Stream => &mut self.stream_reqs,
+            NetProtocol::SeqPacket => todo!(),
         }
     }
 
@@ -323,6 +324,12 @@ impl OutgoingProxy {
                 }
                 (None, NetProtocol::Stream) => {
                     DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(connect))
+                }
+                (Some(uid), NetProtocol::SeqPacket) => {
+                    todo!()
+                }
+                (None, NetProtocol::SeqPacket) => {
+                    todo!()
                 }
             };
             return Err(UnexpectedAgentMessage(message.into()).into());

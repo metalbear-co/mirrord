@@ -47,7 +47,7 @@ use crate::{
     metrics,
     mirror::TcpMirrorApi,
     namespace::NamespaceType,
-    outgoing::{TcpOutgoingApi, UdpOutgoingApi},
+    outgoing::{TcpOutgoingApi, UdpOutgoingApi, seqpacket::SeqpacketApi},
     reverse_dns::ReverseDnsApi,
     runtime::{self, get_container},
     steal::{StealerCommand, TcpStealerApi},
@@ -402,6 +402,7 @@ impl ClientConnectionHandler {
         let reverse_dns_api = ReverseDnsApi::new(&state.network_runtime);
         let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime, file_pid);
         let udp_outgoing_api = UdpOutgoingApi::new(&state.network_runtime);
+        let seqpacket_api = SeqpacketApi::new(&state.network_runtime, file_pid);
 
         let client_handler = Self {
             id,

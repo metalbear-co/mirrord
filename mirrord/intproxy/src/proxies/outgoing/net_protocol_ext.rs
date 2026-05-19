@@ -61,6 +61,7 @@ impl NetProtocolExt for NetProtocol {
                 connection_id,
                 bytes: bytes.into(),
             })),
+            Self::SeqPacket => todo!(),
         }
     }
 
@@ -72,6 +73,7 @@ impl NetProtocolExt for NetProtocol {
             Self::Stream => {
                 ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(LayerClose { connection_id }))
             }
+            Self::SeqPacket => todo!(),
         }
     }
 
@@ -99,6 +101,12 @@ impl NetProtocolExt for NetProtocol {
                     remote_address,
                 }))
             }
+            (Self::SeqPacket, None) => {
+                todo!()
+            }
+            (Self::SeqPacket, Some(uid)) => {
+                todo!()
+            }
         }
     }
 
@@ -114,6 +122,7 @@ impl NetProtocolExt for NetProtocol {
                 match self {
                     Self::Datagrams => PreparedSocket::UdpSocket(UdpSocket::bind(bind_at).await?),
                     Self::Stream => PreparedSocket::TcpListener(TcpListener::bind(bind_at).await?),
+                    Self::SeqPacket => todo!(),
                 }
             }
             #[cfg(not(target_os = "windows"))]
@@ -128,6 +137,7 @@ impl NetProtocolExt for NetProtocol {
                     );
                     panic!("layer requested outgoing datagrams over unix sockets");
                 }
+                Self::SeqPacket => todo!(),
             },
             #[cfg(target_os = "windows")]
             _ => {

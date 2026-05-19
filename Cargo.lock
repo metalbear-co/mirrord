@@ -2766,6 +2766,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "filedesc"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4960c866d9cf4c48f64f11ef0020c98900d0cb32e9b019c000ed838470daa1d"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "fileops"
 version = "3.211.0"
 dependencies = [
@@ -4869,6 +4878,7 @@ dependencies = [
  "tokio",
  "tokio-retry",
  "tokio-rustls",
+ "tokio-seqpacket",
  "tokio-stream",
  "tokio-util",
  "tonic",
@@ -8549,6 +8559,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
 dependencies = [
  "rustls",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-seqpacket"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24d1294c36e418ee280e57ba514cc260c0c80c69571abf44109eef2823a1c1c6"
+dependencies = [
+ "filedesc",
+ "libc",
  "tokio",
 ]
 

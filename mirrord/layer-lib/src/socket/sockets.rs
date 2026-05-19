@@ -129,7 +129,7 @@ pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
 /// ```ignore
 /// let user_socket = match SOCKETS.lock()?.remove(&sockfd) {
 ///     Some(socket) => socket,
-///     None => reconstruct_user_socket(sockfd)?
+
 /// };
 /// ```
 pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> Detour<Arc<UserSocket>> {

@@ -38,6 +38,7 @@ use crate::{
     },
 };
 
+pub(crate) mod seqpacket;
 mod socket_stream;
 mod throttle;
 mod udp;
