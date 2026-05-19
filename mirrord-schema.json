@@ -1223,6 +1223,18 @@
               "default": 60,
               "minimum": 0
             },
+            "iam_auth": {
+              "title": "feature.db_branches[].iam_auth (type: mysql) {#feature-db_branches-mysql-iam_auth}",
+              "description": "IAM authentication for the source database.\nUse this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication\ninstead of password-based authentication.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/IamAuthConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "id": {
               "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
