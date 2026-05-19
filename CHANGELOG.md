@@ -8,6 +8,22 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.211.0](https://github.com/metalbear-co/mirrord/tree/3.211.0) - 2026-05-19
+
+
+### Added
+
+- Add `iam` auth for `mysql`.
+- Add support for `Azure Servicebus` queue splitting.
+- Add support for unified queue splitting `azure` + `gcp` for preview env.
+- Added `mirrord up init`, an interactive wizard that generates a skeleton
+  `mirrord-up.yaml`.
+- HTTP protocol detection on redirected connections now applies a read timeout
+  (default `2s`, configurable via `agent.http_detection_timeout` /
+  `MIRRORD_AGENT_HTTP_DETECTION_TIMEOUT`) instead of waiting indefinitely for
+  the client's first byte. This unblocks server-first protocols such as SMTP
+  that previously stalled in detection.
+
 ## [3.210.0](https://github.com/metalbear-co/mirrord/tree/3.210.0) - 2026-05-13
 
 
