@@ -8,7 +8,7 @@
 [![Github CI](https://github.com/metalbear-co/mirrord/actions/workflows/ci.yaml/badge.svg)](https://github.com/metalbear-co/mirrord/actions/workflows/ci.yaml)
 [![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/metalbear-co/mirrord/blob/main/LICENSE)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/metalbear-co/mirrord)](https://github.com/metalbear-co/mirrord/releases)
-[![Twitter Follow](https://img.shields.io/twitter/follow/metalbear?style=social)](https://twitter.com/metalbear)
+[![X Follow](https://img.shields.io/twitter/follow/metalbear?style=social)](https://x.com/metalbear)
 
 [mirrord runs your local process inside a live Kubernetes cluster](https://metalbear.com/mirrord/).
 It works the same way for a developer in an IDE and for an AI coding agent (Claude Code, Cursor, Codex, Copilot, Windsurf):
