@@ -18,6 +18,10 @@ pub mod udp;
 pub static OUTGOING_CONNECT_V2: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.22.0".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that allows unix seqpacket outgoing messages.
+pub static OUTGOING_SEQPACKET: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.26.3".parse().expect("Bad Identifier"));
+
 /// A serializable socket address type that can represent IP addresses or addresses of unix sockets.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum SocketAddress {

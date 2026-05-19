@@ -15,8 +15,10 @@ use mirrord_intproxy_protocol::{
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, RemoteResult, ResponseError,
     outgoing::{
-        DaemonConnect, DaemonConnectV2, DaemonRead, OUTGOING_CONNECT_V2, SocketAddress,
-        tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing,
+        DaemonConnect, DaemonConnectV2, DaemonRead, OUTGOING_CONNECT_V2, OUTGOING_SEQPACKET,
+        SocketAddress,
+        tcp::{DaemonSeqpacket, DaemonTcpOutgoing},
+        udp::DaemonUdpOutgoing,
     },
     uid::Uid,
 };
@@ -56,6 +58,9 @@ pub enum OutgoingProxyError {
     /// The proxy failed to prepare a new local socket for the intercepted connection.
     #[error("failed to prepare local socket: {0}")]
     SocketSetupError(#[from] io::Error),
+    /// The agent sent a queue-based seqpacket connect response. Seqpacket supports only ConnectV2.
+    #[error("agent sent an unexpected seqpacket Connect response")]
+    UnexpectedSeqpacketConnect,
 }
 
 /// Id of a single [`Interceptor`] task.
@@ -178,6 +183,13 @@ pub struct OutgoingProxy {
     /// These are processed sequentially by the agent.
     stream_reqs: RequestQueue<ConnectInProgress>,
     /// In progress [`OutgoingConnectRequest`]s originating from
+    /// [`LayerConnect`](mirrord_protocol::outgoing::LayerConnect), related to
+    /// [`NetProtocol::SeqPacket`].
+    ///
+    /// These are kept for completeness in queue-based paths, but new seqpacket requests are sent
+    /// only through [`LayerConnectV2`](mirrord_protocol::outgoing::LayerConnectV2).
+    seqpacket_reqs: RequestQueue<ConnectInProgress>,
+    /// In progress [`OutgoingConnectRequest`]s originating from
     /// [`LayerConnectV2`](mirrord_protocol::outgoing::LayerConnectV2).
     ///
     /// These are processed in parallel by the agent.
@@ -230,6 +242,7 @@ impl OutgoingProxy {
         Self {
             datagrams_reqs: Default::default(),
             stream_reqs: Default::default(),
+            seqpacket_reqs: Default::default(),
             v2_reqs: Default::default(),
             txs: Default::default(),
             background_tasks: Default::default(),
@@ -247,7 +260,7 @@ impl OutgoingProxy {
         match protocol {
             NetProtocol::Datagrams => &mut self.datagrams_reqs,
             NetProtocol::Stream => &mut self.stream_reqs,
-            NetProtocol::SeqPacket => todo!(),
+            NetProtocol::Seqpacket => &mut self.seqpacket_reqs,
         }
     }
 
@@ -306,32 +319,33 @@ impl OutgoingProxy {
                 .map(|(_, _, in_progress)| in_progress),
         };
         let Some(in_progress) = in_progress else {
-            let message = match (uid, protocol) {
-                (Some(uid), NetProtocol::Datagrams) => {
-                    DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::ConnectV2(DaemonConnectV2 {
-                        uid,
-                        connect,
-                    }))
-                }
-                (None, NetProtocol::Datagrams) => {
-                    DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(connect))
-                }
-                (Some(uid), NetProtocol::Stream) => {
-                    DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(DaemonConnectV2 {
-                        uid,
-                        connect,
-                    }))
-                }
-                (None, NetProtocol::Stream) => {
-                    DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(connect))
-                }
-                (Some(uid), NetProtocol::SeqPacket) => {
-                    todo!()
-                }
-                (None, NetProtocol::SeqPacket) => {
-                    todo!()
-                }
-            };
+            let message =
+                match (uid, protocol) {
+                    (Some(uid), NetProtocol::Datagrams) => {
+                        DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::ConnectV2(DaemonConnectV2 {
+                            uid,
+                            connect,
+                        }))
+                    }
+                    (None, NetProtocol::Datagrams) => {
+                        DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(connect))
+                    }
+                    (Some(uid), NetProtocol::Stream) => {
+                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(DaemonConnectV2 {
+                            uid,
+                            connect,
+                        }))
+                    }
+                    (None, NetProtocol::Stream) => {
+                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(connect))
+                    }
+                    (Some(uid), NetProtocol::Seqpacket) => DaemonMessage::SeqpacketOutgoing(
+                        DaemonSeqpacket::ConnectV2(DaemonConnectV2 { uid, connect }),
+                    ),
+                    (None, NetProtocol::Seqpacket) => {
+                        return Err(OutgoingProxyError::UnexpectedSeqpacketConnect);
+                    }
+                };
             return Err(UnexpectedAgentMessage(message.into()).into());
         };
 
@@ -428,6 +442,28 @@ impl OutgoingProxy {
         request: OutgoingConnectRequest,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), OutgoingProxyError> {
+        let supports_connect_v2 = self
+            .protocol_version
+            .as_ref()
+            .is_some_and(|version| OUTGOING_CONNECT_V2.matches(version));
+        let supports_seqpacket = self
+            .protocol_version
+            .as_ref()
+            .is_some_and(|version| OUTGOING_SEQPACKET.matches(version));
+
+        if request.protocol == NetProtocol::Seqpacket && !supports_seqpacket {
+            message_bus
+                .send(ToLayer {
+                    message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(
+                        ResponseError::NotImplemented,
+                    ))),
+                    message_id,
+                    layer_id: session_id,
+                })
+                .await;
+            return Ok(());
+        }
+
         // The chance for collision here is negligible.
         let connection_id = rand::random::<u128>();
         self.connections_in_layers.add(session_id, connection_id);
@@ -462,11 +498,7 @@ impl OutgoingProxy {
             None
         };
 
-        let uid = if self
-            .protocol_version
-            .as_ref()
-            .is_some_and(|version| OUTGOING_CONNECT_V2.matches(version))
-        {
+        let uid = if supports_connect_v2 {
             let request_uid = Uid::new_v4();
             self.v2_reqs.insert(
                 (request_uid, request.protocol),
@@ -542,6 +574,18 @@ impl OutgoingProxy {
                 }
 
                 tracing::debug!(
+                    responses = self.seqpacket_reqs.len(),
+                    "Flushing error responses to seqpacket connect requests"
+                );
+                while let Some((message_id, layer_id)) = self.seqpacket_reqs.pop_front() {
+                    message_bus
+                        .send(ToLayer::from(AgentLostOutgoingResponse(
+                            layer_id, message_id,
+                        )))
+                        .await;
+                }
+
+                tracing::debug!(
                     responses = self.v2_reqs.len(),
                     "Flushing error responses to V2 connect requests"
                 );
@@ -607,6 +651,7 @@ impl OutgoingProxy {
 pub enum OutgoingProxyMessage {
     AgentStream(DaemonTcpOutgoing),
     AgentDatagrams(DaemonUdpOutgoing),
+    AgentSeqpacket(DaemonSeqpacket),
     AgentProtocolVersion(Version),
     Layer(OutgoingRequest, MessageId, LayerId),
     ConnectionRefresh(ConnectionRefresh),
@@ -659,6 +704,19 @@ impl BackgroundTask for OutgoingProxy {
                         DaemonUdpOutgoing::ConnectV2(connect) => self.handle_connect_response(
                             connect.connect,
                             NetProtocol::Datagrams,
+                            Some(connect.uid),
+                            message_bus,
+                        ).await?,
+                    }
+                    Some(OutgoingProxyMessage::AgentSeqpacket(req)) => match req {
+                        DaemonSeqpacket::Close(close) => {
+                            let id = InterceptorId { connection_id: close, protocol: NetProtocol::Seqpacket };
+                            self.txs.remove(&id);
+                        }
+                        DaemonSeqpacket::Read(read) => self.handle_agent_read(read, NetProtocol::Seqpacket).await?,
+                        DaemonSeqpacket::ConnectV2(connect) => self.handle_connect_response(
+                            connect.connect,
+                            NetProtocol::Seqpacket,
                             Some(connect.uid),
                             message_bus,
                         ).await?,

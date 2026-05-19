@@ -11,7 +11,7 @@ use std::{
 
 use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
 #[cfg(unix)]
-use libc::{self, SOCK_DGRAM, SOCK_STREAM};
+use libc::{self, SOCK_DGRAM, SOCK_SEQPACKET, SOCK_STREAM};
 #[cfg(unix)]
 use nix::sys::socket::{SockaddrLike, SockaddrStorage, getsockname, getsockopt, sockopt};
 #[cfg(windows)]
@@ -108,11 +108,30 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
             .unwrap_or_default()
     });
 
-// Helper function to convert socket types to SocketKind
+// Helper function to convert socket types to SocketKind (unix only)
+#[cfg(unix)]
 pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
-    if (socket_type & SOCK_STREAM) == SOCK_STREAM {
+    let raw_socket_type = socket_type & 0xf;
+
+    if raw_socket_type == SOCK_STREAM {
         Ok(SocketKind::Tcp(socket_type))
-    } else if (socket_type & SOCK_DGRAM) == SOCK_DGRAM {
+    } else if raw_socket_type == SOCK_DGRAM {
+        Ok(SocketKind::Udp(socket_type))
+    } else if raw_socket_type == SOCK_SEQPACKET {
+        Ok(SocketKind::Seqpacket(socket_type))
+    } else {
+        Err(format!("Unsupported socket type: {}", socket_type))
+    }
+}
+
+// Helper function to convert socket types to SocketKind (not unix).
+#[cfg(not(unix))]
+pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
+    let raw_socket_type = socket_type;
+
+    if raw_socket_type == SOCK_STREAM {
+        Ok(SocketKind::Tcp(socket_type))
+    } else if raw_socket_type == SOCK_DGRAM {
         Ok(SocketKind::Udp(socket_type))
     } else {
         Err(format!("Unsupported socket type: {}", socket_type))
@@ -129,7 +148,7 @@ pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
 /// ```ignore
 /// let user_socket = match SOCKETS.lock()?.remove(&sockfd) {
 ///     Some(socket) => socket,
-
+///     None => reconstruct_user_socket(sockfd)?,
 /// };
 /// ```
 pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> Detour<Arc<UserSocket>> {

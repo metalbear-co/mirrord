@@ -5056,6 +5056,7 @@ dependencies = [
  "tokio",
  "tokio-retry",
  "tokio-rustls",
+ "tokio-seqpacket",
  "tokio-stream",
  "tokio-util",
  "tracing",

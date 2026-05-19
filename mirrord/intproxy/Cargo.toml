@@ -53,6 +53,7 @@ axum.workspace = true
 serde_json.workspace = true
 home.workspace = true
 mirrord-session-monitor-protocol.workspace = true
+tokio-seqpacket.workspace = true
 
 [dev-dependencies]
 rcgen.workspace = true
