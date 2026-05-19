@@ -12,7 +12,7 @@
 
 [mirrord runs your local process inside a live Kubernetes cluster](https://metalbear.com/mirrord/).
 It works the same way for developers and for AI coding agents (Claude Code, Cursor, Codex, Copilot, Windsurf):
-your code runs on your machine, but mirrord routes its traffic, files, and environment through a target pod in the cluster.
+your code runs on your machine, but mirrord routes its traffic, files, and environment variables through a target pod in the cluster.
 
 That covers both halves of the software development loop. Read live cluster context while writing the code (real env vars, real service responses, real queue contents)
 so the change is grounded in what's actually deployed. Then run the code against those same services and data to confirm it works end-to-end.
