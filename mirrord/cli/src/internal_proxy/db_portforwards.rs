@@ -510,6 +510,7 @@ mod tests {
         DatabaseBranchConfig::Mysql(Box::new(MysqlBranchConfig {
             base: base(id, conn),
             copy: Default::default(),
+            iam_auth: None,
         }))
     }
 

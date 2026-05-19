@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::DatabaseBranchBaseConfig;
+use super::{DatabaseBranchBaseConfig, IamAuthConfig};
 
 /// When configuring a branch for MySQL, set `type` to `mysql`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
@@ -14,6 +14,14 @@ pub struct MysqlBranchConfig {
 
     #[serde(default)]
     pub copy: MysqlBranchCopyConfig,
+
+    /// #### feature.db_branches[].iam_auth (type: mysql) {#feature-db_branches-mysql-iam_auth}
+    ///
+    /// IAM authentication for the source database.
+    /// Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication
+    /// instead of password-based authentication.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_auth: Option<IamAuthConfig>,
 }
 
 /// Users can choose from the following copy mode to bootstrap their MySQL branch database:
