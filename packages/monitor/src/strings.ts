@@ -69,4 +69,18 @@ export const strings = {
     portPlural: 'ports',
     eventsLabel: 'events',
   },
+  operatorWizard: {
+    title: 'Connect the mirrord operator',
+    subtitle: 'Three steps, about 2 minutes.',
+    iAlreadyHaveKey: 'I already have a key →',
+    iveInstalledIt: "I've installed it →",
+    done: 'Done',
+    back: '← Back',
+    copy: 'Copy',
+    copied: 'Copied',
+  },
+  joinBar: {
+    legacyExtension:
+      "Browser extension is installed but doesn't support one-click join yet. Open the extension popup and click Join on key",
+  },
 } as const

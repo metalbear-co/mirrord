@@ -14,7 +14,13 @@ import FunnelHero from './components/FunnelHero'
 import ConnectOperatorModal from './components/ConnectOperatorModal'
 import OperatorSessionDetail from './components/OperatorSessionDetail'
 import { applyDark, loadTheme, resolveDark, saveTheme, type ThemePref } from './theme'
-import { initAnalytics, setTelemetryEnabled, trackEvent } from './analytics'
+import {
+  initAnalytics,
+  setTelemetryEnabled,
+  trackEvent,
+  emitUserBlocked,
+  emitUserSucceeded,
+} from './analytics'
 import { api } from './api'
 import { useTelemetryPref } from './hooks/useTelemetryPref'
 import {
@@ -25,6 +31,8 @@ import {
 } from './extensionBridge'
 
 const WS_RECONNECT_INTERVAL = 3000
+
+let wsHealthy = false
 
 export default function App() {
   const [sessions, setSessions] = useState<SessionInfo[]>([])
@@ -134,6 +142,12 @@ export default function App() {
       const result = await joinViaExtension(key)
       if (result.ok) {
         setExtensionState((prev) => ({ ...prev, joinedKey: result.joinedKey ?? key }))
+        emitUserSucceeded('operator_session_joined', 'user_action', { key })
+      } else {
+        emitUserBlocked('operator_session_join_failed', 'user_action', {
+          key,
+          ...(result.error && { error: result.error }),
+        })
       }
       return result
     },
@@ -157,9 +171,24 @@ export default function App() {
       if (stopped) return
       ws = new WebSocket(api.wsUrl())
 
-      ws.onopen = () => setConnected(true)
-      ws.onclose = () => {
+      ws.onopen = () => {
+        setConnected(true)
+        if (!wsHealthy) {
+          wsHealthy = true
+          emitUserSucceeded('websocket_connected', 'health')
+        }
+      }
+      ws.onclose = (e: CloseEvent) => {
         setConnected(false)
+        if (wsHealthy && e.code !== 1000) {
+          wsHealthy = false
+          emitUserBlocked('websocket_disconnected', 'health', {
+            code: e.code,
+            ...(e.reason && { reason: e.reason }),
+          })
+        } else if (e.code === 1000) {
+          wsHealthy = false
+        }
         if (!stopped) reconnectTimer = setTimeout(connect, WS_RECONNECT_INTERVAL)
       }
 

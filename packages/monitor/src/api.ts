@@ -1,4 +1,5 @@
 import type { OperatorSessionsResponse, SessionInfo } from './types'
+import { emitUserBlocked, emitUserSucceeded } from './analytics'
 
 let authToken: string | null = null
 
@@ -18,44 +19,125 @@ function withToken(path: string): string {
   return `${path}${sep}token=${encodeURIComponent(authToken)}`
 }
 
+let sessionsHealthy = true
+let operatorSessionsHealthy = true
+
+function reportSessionsHealth(
+  endpoint: 'sessions' | 'operator_sessions',
+  healthy: boolean,
+  error?: string,
+  status?: number,
+): void {
+  const currentlyHealthy =
+    endpoint === 'sessions' ? sessionsHealthy : operatorSessionsHealthy
+  if (healthy && !currentlyHealthy) {
+    if (endpoint === 'sessions') sessionsHealthy = true
+    else operatorSessionsHealthy = true
+    emitUserSucceeded('sessions_healthy', 'health', { endpoint })
+  } else if (!healthy && currentlyHealthy) {
+    if (endpoint === 'sessions') sessionsHealthy = false
+    else operatorSessionsHealthy = false
+    emitUserBlocked('sessions_unhealthy', 'health', {
+      endpoint,
+      ...(error !== undefined && { error }),
+      ...(status !== undefined && { status }),
+    })
+  }
+}
+
 export const api = {
   listSessions: async (): Promise<SessionInfo[]> => {
-    const r = await fetch(withToken('/api/sessions'), { credentials: 'include' })
-    if (!r.ok) throw new Error(`Failed to fetch sessions: ${r.status} ${r.statusText}`)
-    return r.json()
+    try {
+      const r = await fetch(withToken('/api/sessions'), { credentials: 'include' })
+      if (!r.ok) {
+        reportSessionsHealth('sessions', false, r.statusText, r.status)
+        throw new Error(`Failed to fetch sessions: ${r.status} ${r.statusText}`)
+      }
+      reportSessionsHealth('sessions', true)
+      return r.json()
+    } catch (err) {
+      if (!(err instanceof Error) || !err.message.startsWith('Failed to fetch sessions')) {
+        const error = err instanceof Error ? err.message : String(err)
+        reportSessionsHealth('sessions', false, error)
+      }
+      throw err
+    }
   },
 
   getSession: async (sessionId: string): Promise<SessionInfo | null> => {
     const r = await fetch(withToken(`/api/sessions/${encodeURIComponent(sessionId)}`), {
       credentials: 'include',
     })
-    return r.ok ? r.json() : null
+    if (!r.ok) {
+      if (r.status !== 404) {
+        emitUserBlocked('session_fetch_failed', 'user_action', {
+          session_id: sessionId,
+          status: r.status,
+          error: r.statusText,
+        })
+      }
+      return null
+    }
+    emitUserSucceeded('session_loaded', 'user_action', { session_id: sessionId })
+    return r.json()
   },
 
-  killSession: (sessionId: string): Promise<Response> =>
-    fetch(withToken(`/api/sessions/${encodeURIComponent(sessionId)}/kill`), {
+  killSession: async (sessionId: string): Promise<Response> => {
+    const r = await fetch(withToken(`/api/sessions/${encodeURIComponent(sessionId)}/kill`), {
       method: 'POST',
       credentials: 'include',
-    }),
+    })
+    if (!r.ok) {
+      emitUserBlocked('session_kill_failed', 'user_action', {
+        session_id: sessionId,
+        status: r.status,
+        error: r.statusText,
+      })
+    } else {
+      emitUserSucceeded('session_killed', 'user_action', { session_id: sessionId })
+    }
+    return r
+  },
 
   eventStreamUrl: (sessionId: string): string =>
     withToken(`/api/sessions/${encodeURIComponent(sessionId)}/events`),
 
   listOperatorSessions: async (): Promise<OperatorSessionsResponse> => {
-    const r = await fetch(withToken('/api/operator-sessions'), {
-      credentials: 'include',
-    })
-    if (!r.ok)
-      throw new Error(
-        `Failed to fetch operator sessions: ${r.status} ${r.statusText}`
-      )
-    return r.json()
+    try {
+      const r = await fetch(withToken('/api/operator-sessions'), {
+        credentials: 'include',
+      })
+      if (!r.ok) {
+        reportSessionsHealth('operator_sessions', false, r.statusText, r.status)
+        throw new Error(
+          `Failed to fetch operator sessions: ${r.status} ${r.statusText}`
+        )
+      }
+      reportSessionsHealth('operator_sessions', true)
+      return r.json()
+    } catch (err) {
+      if (
+        !(err instanceof Error) ||
+        !err.message.startsWith('Failed to fetch operator sessions')
+      ) {
+        const error = err instanceof Error ? err.message : String(err)
+        reportSessionsHealth('operator_sessions', false, error)
+      }
+      throw err
+    }
   },
 
   currentUser: async (): Promise<{ k8sUsername: string | null }> => {
     const r = await fetch(withToken('/api/me'), { credentials: 'include' })
-    if (!r.ok) return { k8sUsername: null }
+    if (!r.ok) {
+      emitUserBlocked('me_fetch_failed', 'user_action', {
+        status: r.status,
+        error: r.statusText,
+      })
+      return { k8sUsername: null }
+    }
     const data = (await r.json()) as { k8sUsername?: string | null }
+    emitUserSucceeded('me_loaded', 'user_action')
     return { k8sUsername: data.k8sUsername ?? null }
   },
 

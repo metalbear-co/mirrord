@@ -75,11 +75,18 @@ export interface OperatorSessionSummary {
   httpFilter?: OperatorSessionHttpFilter | null
 }
 
+export const OPERATOR_WATCH = {
+  NotStarted: 'not_started',
+  Watching: 'watching',
+  Error: 'error',
+  Unavailable: 'unavailable',
+} as const
+
 export type OperatorWatchStatus =
-  | { status: 'not_started' }
-  | { status: 'watching' }
-  | { status: 'error'; message: string }
-  | { status: 'unavailable'; reason: string }
+  | { status: typeof OPERATOR_WATCH.NotStarted }
+  | { status: typeof OPERATOR_WATCH.Watching }
+  | { status: typeof OPERATOR_WATCH.Error; message: string }
+  | { status: typeof OPERATOR_WATCH.Unavailable; reason: string }
 
 export interface OperatorSessionsResponse {
   by_key: Record<string, OperatorSessionSummary[]>

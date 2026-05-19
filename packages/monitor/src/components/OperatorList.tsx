@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Users, FlaskConical, Key as KeyIcon } from 'lucide-react'
 import type { OperatorSessionSummary } from '../types'
+import { firstName, relativeTimeFromIso } from '../utils'
 import SessionRow from './SessionRow'
 import Avatar from './Avatar'
 
@@ -34,20 +35,6 @@ function matchesQuery(s: OperatorSessionSummary, q: string): boolean {
     .join(' ')
     .toLowerCase()
   return haystack.includes(q)
-}
-
-function relativeTime(iso: string): string {
-  const t = new Date(iso).getTime()
-  if (!Number.isFinite(t)) return ''
-  const diff = (Date.now() - t) / 1000
-  if (diff < 60) return `${Math.max(0, Math.floor(diff))}s`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`
-  return `${Math.floor(diff / 86400)}d`
-}
-
-function firstName(full: string): string {
-  return full.trim().split(/\s+/)[0] || full
 }
 
 const PREVIEW_OWNER_USERNAME = 'preview-env'
@@ -178,7 +165,7 @@ function KeyGroupSection({
           meta={[
             isPreviewSession(s) ? 'preview env' : firstName(s.owner.username),
             s.namespace,
-            relativeTime(s.createdAt),
+            relativeTimeFromIso(s.createdAt),
           ]}
           leftStrip={joined ? 'hsl(var(--primary))' : undefined}
         />

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Activity, FileJson } from 'lucide-react'
 import type { SessionInfo, MonitorEvent, PortSubscription, ProcessInfo } from '../types'
 import { api } from '../api'
+import { emitUserBlocked } from '../analytics'
 import { EventType } from '../eventTypes'
 import { expectArray } from '../utils'
 import EventStream from './EventStream'
@@ -57,7 +58,12 @@ export default function SessionDetail({
           .map(p => ({ port: p.port, mode: p.mode }))
         if (ports.length > 0) setPortSubs(ports)
       } catch (err) {
+        const error = err instanceof Error ? err.message : String(err)
         console.warn('Failed to fetch session snapshot', err)
+        emitUserBlocked('snapshot_fetch_failed', 'user_action', {
+          session_id: session.session_id,
+          error,
+        })
       }
     }
     hydrateFromSnapshot()

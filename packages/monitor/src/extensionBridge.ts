@@ -1,3 +1,5 @@
+import { emitUserBlocked } from './analytics'
+
 declare const chrome: any | undefined
 
 const EXTENSION_ID = 'bijejadnnfgjkfdocgocklekjhnhkhkf'
@@ -87,15 +89,39 @@ export async function joinViaExtension(
     type: 'join',
     key,
   })
-  if (!response) return { ok: false, error: 'No response from extension' }
-  if (response.type !== 'join_result') return { ok: false, error: 'Unsupported response' }
+  if (!response) {
+    emitUserBlocked('extension_bridge_failed', 'user_action', {
+      action: 'join',
+      error: 'No response from extension',
+    })
+    return { ok: false, error: 'No response from extension' }
+  }
+  if (response.type !== 'join_result') {
+    emitUserBlocked('extension_bridge_failed', 'user_action', {
+      action: 'join',
+      error: 'Unsupported response',
+    })
+    return { ok: false, error: 'Unsupported response' }
+  }
   return { ok: response.ok ?? false, joinedKey: response.joinedKey ?? null, error: response.error }
 }
 
 export async function leaveViaExtension(): Promise<{ ok: boolean; error?: string }> {
   const response = await send<{ type?: string; ok?: boolean; error?: string }>({ type: 'leave' })
-  if (!response) return { ok: false, error: 'No response from extension' }
-  if (response.type !== 'leave_result') return { ok: false, error: 'Unsupported response' }
+  if (!response) {
+    emitUserBlocked('extension_bridge_failed', 'user_action', {
+      action: 'leave',
+      error: 'No response from extension',
+    })
+    return { ok: false, error: 'No response from extension' }
+  }
+  if (response.type !== 'leave_result') {
+    emitUserBlocked('extension_bridge_failed', 'user_action', {
+      action: 'leave',
+      error: 'Unsupported response',
+    })
+    return { ok: false, error: 'Unsupported response' }
+  }
   return { ok: response.ok ?? false, error: response.error }
 }
 
