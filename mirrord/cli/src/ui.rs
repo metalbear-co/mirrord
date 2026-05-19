@@ -1206,6 +1206,15 @@ mod tests {
             assert_eq!(summary.owner.k8s_username, "alice@ex");
         }
 
+        #[test]
+        fn summary_from_session_accepts_preview_env_owner() {
+            let mut session = sample_session("preview-1", "han-preview");
+            session.user = "preview-env".to_owned();
+            let summary = OperatorSessionSummary::from_session(&session).unwrap();
+            assert_eq!(summary.owner.username, "preview-env");
+            assert_eq!(summary.owner.k8s_username, "preview-env");
+        }
+
         #[tokio::test]
         async fn operator_sessions_groups_by_key_with_none_bucket() {
             let (tx, _rx) = broadcast::channel::<SessionNotification>(16);
