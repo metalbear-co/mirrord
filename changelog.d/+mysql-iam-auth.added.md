@@ -1,1 +1,1 @@
-Add iam auth for `mysql`.
+Add `iam` auth for `mysql`.
