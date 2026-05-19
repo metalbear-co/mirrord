@@ -8,6 +8,7 @@ import {
   LogOut,
 } from 'lucide-react'
 import { CHROME_WEB_STORE_URL, type ExtensionState } from '../extensionBridge'
+import { strings } from '../strings'
 
 interface JoinBarProps {
   joinKey: string | null | undefined
@@ -74,10 +75,9 @@ export default function JoinBar({
       <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-card border border-border">
         <LogIn className="h-4 w-4 text-muted-foreground shrink-0" />
         <div className="text-xs leading-relaxed flex-1">
-          Browser extension is installed but doesn&apos;t support one-click join
-          yet. Open the extension popup and click Join on key{' '}
-          <span className="font-mono font-semibold">{joinKey}</span>, or update
-          the extension.
+          {strings.joinBar.legacyExtensionPrefix}{' '}
+          <span className="font-mono font-semibold">{joinKey}</span>
+          {strings.joinBar.legacyExtensionSuffix}
         </div>
       </div>
     )

@@ -7,6 +7,7 @@ export const strings = {
     themeLight: 'Switch to light mode',
     themeDark: 'Switch to dark mode',
     settings: 'Settings',
+    searchPlaceholder: 'Search',
     emptyTitle: 'Select a session to get started',
     emptyBody:
       'Choose a session from the sidebar to see live activity, configuration, and intercepted traffic',
@@ -80,7 +81,8 @@ export const strings = {
     copied: 'Copied',
   },
   joinBar: {
-    legacyExtension:
+    legacyExtensionPrefix:
       "Browser extension is installed but doesn't support one-click join yet. Open the extension popup and click Join on key",
+    legacyExtensionSuffix: ', or update the extension.',
   },
 } as const

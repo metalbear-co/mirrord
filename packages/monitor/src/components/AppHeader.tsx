@@ -99,7 +99,7 @@ export default function AppHeader({
                 value={query}
                 onChange={(e) => onQueryChange(e.target.value)}
                 onClear={() => onQueryChange('')}
-                placeholder="Search"
+                placeholder={strings.app.searchPlaceholder}
                 className="h-8 pr-12 text-xs"
               />
               {!query && (
