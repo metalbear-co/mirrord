@@ -6,7 +6,6 @@ interface FunnelHeroProps {
 }
 
 const FEATURE_PILLS = [
-  'Preview environments',
   'SQS · Kafka · RabbitMQ split',
   'Postgres · MySQL · Mongo branching',
   'MirrordPolicy CRDs',
