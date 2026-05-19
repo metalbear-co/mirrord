@@ -247,6 +247,7 @@ impl FileResponseExt for DaemonMessage {
             | Self::TcpSteal(_)
             | Self::TcpOutgoing(_)
             | Self::UdpOutgoing(_)
+            | Self::SeqpacketOutgoing(_)
             | Self::LogMessage(_)
             | Self::Pong
             | Self::GetEnvVarsResponse(_)
