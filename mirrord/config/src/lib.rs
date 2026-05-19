@@ -1777,4 +1777,98 @@ mod tests {
             "invalid feature.network.incoming.http_filter value ``: HTTP filter `header_filter` cannot be an empty string",
         );
     }
+
+    /// Serializes the magic.aws tests that mutate the global `HOME` /
+    /// `USERPROFILE` env vars, since cargo runs tests multi-threaded by default
+    /// and these vars are process-global.
+    #[cfg(target_os = "windows")]
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[cfg(target_os = "windows")]
+    fn with_env<R>(home: Option<&str>, user_profile: Option<&str>, f: impl FnOnce() -> R) -> R {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let prev_home = std::env::var_os("HOME");
+        let prev_user = std::env::var_os("USERPROFILE");
+        // SAFETY: `ENV_LOCK` serializes every mutator within this test binary,
+        // and the previous values are restored before the guard is released.
+        unsafe {
+            match home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+            match user_profile {
+                Some(value) => std::env::set_var("USERPROFILE", value),
+                None => std::env::remove_var("USERPROFILE"),
+            }
+        }
+        let out = f();
+        // SAFETY: see above.
+        unsafe {
+            match prev_home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+            match prev_user {
+                Some(value) => std::env::set_var("USERPROFILE", value),
+                None => std::env::remove_var("USERPROFILE"),
+            }
+        }
+        out
+    }
+
+    /// Regression for the original Windows layer panic at
+    /// `mirrord-layer-lib::file::mapper::FileRemapper::new`.
+    ///
+    /// Pre-fix `apply_magic` interpolated `$HOME` straight into the `.aws`
+    /// mapping regex. On Windows with `HOME=C:\Users\foo` (e.g. set by Git
+    /// Bash), the resulting `^C:\Users\foo/\.aws(/.*)?` contained `\U`, which
+    /// the `regex` crate rejects as an invalid hex escape — panicking the
+    /// layer during init and timing out the CLI. Post-fix `apply_magic` reads
+    /// `USERPROFILE` on Windows via `home_dir_for_path_mapping`, so a hostile
+    /// `HOME` is ignored and every mapping pattern must still compile.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn magic_aws_does_not_panic_on_windows_home() {
+        // `HOME` carries the value the pre-fix code would have spliced
+        // straight into a regex. `USERPROFILE` carries a normal-looking
+        // Windows path so the post-fix helper still produces a mapping (and
+        // so we exercise the regex-compilation path).
+        let config = with_env(Some(r"C:\Users\fake"), Some(r"C:\Users\testuser"), || {
+            LayerConfig::resolve(&mut ConfigContext::default())
+                .expect("default config with magic.aws enabled should resolve")
+        });
+        let mapping = config
+            .feature
+            .fs
+            .mapping
+            .expect("magic.aws populates fs.mapping when enabled");
+        for pattern in mapping.keys() {
+            regex::Regex::new(pattern).unwrap_or_else(|err| {
+                panic!("apply_magic produced an invalid regex {pattern:?}: {err}")
+            });
+        }
+    }
+
+    /// On Windows, the `.aws` mapping prefix must come from `USERPROFILE` in
+    /// the same unix-form the layer's file remapper sees at runtime — drive
+    /// letter stripped, backslashes flipped, regex-escaped — so the regex
+    /// actually matches the paths the layer feeds into it.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn magic_aws_windows_userprofile_is_unix_form() {
+        let config = with_env(None, Some(r"C:\Users\fake"), || {
+            LayerConfig::resolve(&mut ConfigContext::default())
+                .expect("default config with magic.aws enabled should resolve")
+        });
+        let mapping = config
+            .feature
+            .fs
+            .mapping
+            .expect("magic.aws populates fs.mapping when enabled");
+        let aws_pattern = mapping
+            .keys()
+            .find(|key| key.contains(r"\.aws"))
+            .expect("magic.aws should produce a .aws mapping entry");
+        assert_eq!(aws_pattern, r"^/Users/fake/\.aws(/.*)?");
+    }
 }
