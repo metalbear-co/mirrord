@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-05-13T00:00:00.000Z
+lastmod: 2026-05-19T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -53,7 +53,8 @@ We provide sane defaults for this option, so you don't have to set up anything h
     "exclude_from_mesh": false
     "inject_headers": false,
     "max_body_buffer_size": 65535,
-    "max_body_buffer_timeout": 1000
+    "max_body_buffer_timeout": 1000,
+    "http_detection_timeout": 2
   }
 }
 ```
@@ -146,6 +147,13 @@ Flushes existing connections when starting to steal, might fix issues where conn
 aren't stolen (due to being already established)
 
 Defaults to `true`.
+
+### agent.http_detection_timeout {#agent-http_detection_timeout}
+
+How long, in seconds, to wait for data on a redirected connection during HTTP protocol
+detection before giving up and treating it as raw TCP. The timer resets on every read,
+so total detection time may exceed this value for connections that send data in many
+small chunks.
 
 ### agent.image {#agent-image}
 
@@ -1209,6 +1217,66 @@ Users can choose from the following copy mode to bootstrap their MySQL branch da
 
   Copies both schema and data of all tables. This option shall only be used
   when the data volume of the source database is minimal.
+
+#### feature.db_branches[].iam_auth (type: mysql) {#feature-db_branches-mysql-iam_auth}
+
+IAM authentication for the source database.
+Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication
+instead of password-based authentication.
+
+IAM authentication for the source database.
+Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication
+instead of password-based authentication.
+
+Environment variable sources follow the same pattern as `connection.url`:
+- `{ "type": "env", "variable": "VAR_NAME" }` - direct env var from pod spec
+- `{ "type": "env_from", "variable": "VAR_NAME" }` - from configMapRef/secretRef
+
+For AWS RDS/Aurora IAM authentication, set `type` to `"aws_rds"`.
+
+Example:
+```json
+{
+  "iam_auth": {
+    "type": "aws_rds",
+    "region": { "type": "env", "variable": "MY_AWS_REGION" },
+    "access_key_id": { "type": "env_from", "variable": "AWS_KEY" }
+  }
+}
+```
+
+The init container must have AWS credentials (via IRSA, instance profile, or env vars).
+
+Parameters:
+- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
+- `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
+- `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
+- `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses
+  AWS_SESSION_TOKEN.
+
+For GCP Cloud SQL IAM authentication, set `type` to `"gcp_cloud_sql"`.
+
+Example for GCP Cloud SQL with credentials from a secret:
+```json
+{
+  "iam_auth": {
+    "type": "gcp_cloud_sql",
+    "credentials_json": { "type": "env_from", "variable": "GOOGLE_APPLICATION_CREDENTIALS_JSON" }
+  }
+}
+```
+
+The init container must have GCP credentials (via Workload Identity or service account key).
+Use either `credentials_json` OR `credentials_path`, not both.
+
+Parameters:
+- `credentials_json`: Inline service account JSON key content. Specify the env var that
+  contains the raw JSON content of the service account key. Example: ` { "type": "env",
+  "variable": "GOOGLE_APPLICATION_CREDENTIALS_JSON" } `.
+- `credentials_path`: Path to service account JSON key file. Specify the env var that
+  contains the file path to the service account key. The file must be accessible from the
+  init container. Example: `{"type": "env", "variable": "GOOGLE_APPLICATION_CREDENTIALS"}`.
+- `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
 
 When configuring a branch for PostgreSQL, set `type` to `pg`.
 
