@@ -23,8 +23,8 @@ do
     cd $directory
 
     1>&2 echo "Building test app $directory/$1.go_test_app"
-    go build -o "$1.go_test_app"
-
+    # This `||` is necessary because //go:build linux prevents certain Go test apps from being built on macOS
+    go build -o "$1.go_test_app" || echo "Failed to build $directory/$1.go_test_app"
     cd - 1>/dev/null
 done
 

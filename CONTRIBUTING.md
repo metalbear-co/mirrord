@@ -29,11 +29,56 @@ The following guide details the steps to setup a local development environment f
 - [GCC](https://gcc.gnu.org/) - only on Linux, GCC is needed for Go dynamic linking
 - [Rust](https://www.rust-lang.org/)
 - [NodeJS](https://nodejs.org/en/), [ExpressJS](https://expressjs.com/), [portfinder](https://www.npmjs.com/package/portfinder)
-- [Python](https://www.python.org/), [Flask](https://flask.palletsprojects.com/en/2.1.x/), [FastAPI](https://fastapi.tiangolo.com/), [Uvicorn](https://www.uvicorn.org/)
+- [Python (recommended 3.13+)](https://www.python.org/), [Flask](https://flask.palletsprojects.com/en/2.1.x/), [FastAPI](https://fastapi.tiangolo.com/), [Uvicorn](https://www.uvicorn.org/)
 - [Go](https://go.dev/)
 - Kubernetes Cluster (local/remote)
 - [Argo Rollouts CRD](https://argoproj.github.io/argo-rollouts/) - required for rollout-related E2E tests (`kubectl create namespace argo-rollouts && kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml`)
 
+### Building mirrord layer and binary
+
+If you run integration or e2e tests, both are automatically built.
+To build it from scratch, run `cargo xtask build-layer`. 
+This will result in a `target/<arch>/debug/<layer binary name>` 
+Then, build the project with `MIRRORD_LAYER_FILE=$(pwd)/target/<arch>/debug/<layer binary name> cargo build --all` 
+On macOS, always use `universal-apple-darwin` arch (rather than e.g. `aarch64-apple-darwin`) whenever an explicit path to the layer binary is required.
+
+<layer binary name> is OS specific:
+- Linux: libmirrord_layer.so
+- macOS: libmirrord_layer.dylib
+- Windows: mirrord_layer_win.dll
+
+### Compiling Rust test binaries
+
+There are a couple rough edges which are tested with standalone Rust binaries.
+For more info on these, check the respective GitHub issues.
+`rustc` is used rather than `cargo` for faster and lighter compilation
+
+```rust
+    cd mirrord/layer-tests/tests/apps
+    rustc issue1123/issue1123.rs --out-dir target
+    rustc issue1054/issue1054.rs --out-dir target
+    rustc issue1458/issue1458.rs --out-dir target
+    rustc issue1458portnot53/issue1458portnot53.rs --out-dir target
+    rustc issue2058/issue2058.rs --out-dir target
+    rustc issue2204/issue2204.rs --out-dir target
+```
+
+### Build Go and C test apps
+
+Both E2E and integration run tests with simple C, Go, Python and Node.js apps.
+C and Go need to be built before testing. ([this should be automated in the future](https://github.com/metalbear-co/mirrord/issues/982)).
+
+Build Go test apps:
+```bash
+./scripts/build_go_apps.sh 24
+./scripts/build_go_apps.sh 25
+./scripts/build_go_apps.sh 26
+```
+
+Build C test apps: (script uses clang, but feel free to use another compiler);
+```bash
+./scripts/build_c_apps.sh
+```
 ### Setup a Kubernetes cluster
 
 For E2E tests and testing mirrord manually you will need a working Kubernetes cluster. A minimal cluster can be easily setup locally using either of the following:
@@ -90,29 +135,33 @@ kubectl config use-context minikube
 
 ## E2E Tests
 
-The E2E tests create Kubernetes resources in the cluster that kubectl is configured to use and then run sample apps
-with the mirrord CLI. The mirrord CLI spawns an agent for the target on the cluster, and runs the test app, with the
-layer injected into it. Some test apps need to be compiled before they can be used in the tests
-([this should be automated in the future](https://github.com/metalbear-co/mirrord/issues/982)).
+The E2E tests create Kubernetes resources in the cluster that kubectl is configured to use and then run sample apps with the mirrord CLI. The mirrord CLI spawns an agent for the target on the cluster, and runs the test app, with the layer injected into it. 
 
-> **Note:** `//go:build linux` prevents certain Go test apps from being built on macOS. When using
-> `scripts/build_go_apps.sh`, make the change below so the script continues building all other apps.
-> ```bash
-> go build -o "$1.go_test_app" || echo "Failed to build $directory/$1.go_test_app"
-> ```
+Both E2E and integration tests require a mirrord binary and a layer binary. These can be provided as args:  
 
-The basic command to run the E2E tests is:
 ```bash
-cargo xtask test-e2e
+cargo xtask test-e2e \
+--binary $(pwd)/target/<arch>/debug/mirrord \
+--layer $(pwd)/target/<arch>/debug/<layer binary name>
+```
+... or as envars: 
+
+```bash
+MIRRORD_TESTS_USE_BINARY=$(pwd)/target/<arch>/debug/mirrord \
+MIRRORD_LAYER_FILE=$(pwd)/target/<arch>/debug/<layer binary name> \ 
+cargo xtask test-e2e 
 ```
 
-If no binary or layer is provided, xtask builds them from source automatically. To use
-pre-built artifacts instead, pass `--binary` / `--layer` or set `MIRRORD_TESTS_USE_BINARY` /
-`MIRRORD_LAYER_FILE`:
+For each binary, args have precendence over envvars. If neither is passed in for that binary, then it is built from source:
+
+Ex1:
 ```bash
-MIRRORD_TESTS_USE_BINARY=target/universal-apple-darwin/debug/mirrord \
-MIRRORD_LAYER_FILE=target/universal-apple-darwin/debug/libmirrord_layer.dylib \
-cargo xtask test-e2e
+cargo xtask test-e2e # builds both mirrord binary and layer binary from source
+```
+
+Ex2:
+```bash
+cargo xtask test-e2e --binary <path to mirrord binary> # builds only layer binary from source, takes mirrord binary from arg
 ```
 
 If new tests are added, decorate them with `cfg_attr` attribute macro to define what the tests target.
@@ -120,6 +169,7 @@ For example, a test which only tests sanity of the ephemeral container feature s
 `#[cfg_attr(not(feature = "ephemeral"), ignore)]`
 
 On Linux, running tests may exhaust a large amount of RAM and crash the machine. To prevent this, limit the number of concurrent jobs by running the command with e.g. `-j 4`
+If running on a laptop, you might want to pass the `--no-fail-fast` flag, as some tests can timeout. This is applicable to both integration and e2e.
 
 ### IPv6
 
@@ -160,7 +210,8 @@ IPv6 tests (they currently don't run in the CI):
 The Kubernetes resources created by the E2E tests are automatically deleted when the test exits. However, you can preserve resources from failed tests for debugging. To do this, set the `MIRRORD_E2E_PRESERVE_FAILED` variable to any value.
 
 ```bash
-MIRRORD_E2E_PRESERVE_FAILED=y cargo xtask test-e2e
+MIRRORD_E2E_PRESERVE_FAILED=y \
+cargo xtask test-e2e
 ```
 
 All test resources share a common label `mirrord-e2e-test-resource=true`. To delete them, simply run:
@@ -183,20 +234,8 @@ Therefore, whenever possible we create integration tests, and only resort to E2E
 
 ### Running the Integration Tests
 
-Some test apps need to be compiled before they can be used in the tests
-([this should be automated in the future](https://github.com/metalbear-co/mirrord/issues/982)).
-
 The basic command to run the integration tests is:
 ```bash
-cargo xtask test-integration
-```
-
-If no binary or layer is provided, xtask builds them from source automatically. To use
-pre-built artifacts instead, pass `--binary` / `--layer` or set `MIRRORD_TESTS_USE_BINARY` /
-`MIRRORD_LAYER_FILE`:
-```bash
-MIRRORD_TESTS_USE_BINARY=target/x86_64-unknown-linux-gnu/debug/mirrord \
-MIRRORD_LAYER_FILE=target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so \
 cargo xtask test-integration
 ```
 
