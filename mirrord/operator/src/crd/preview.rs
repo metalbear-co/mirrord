@@ -74,6 +74,10 @@ pub struct PreviewSessionSpec {
     /// User-configured environment variable settings for this preview session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<PreviewEnvVarsConfig>,
+
+    /// File-based config mount settings for this preview session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub config_mounts: Vec<PreviewEnvConfigMount>,
 }
 
 impl PreviewSessionSpec {
@@ -553,4 +557,28 @@ impl PreviewEnvVarsConfig {
             }))
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewEnvConfigMount {
+    /// Path where the file should be mounted.
+    pub path: String,
+
+    /// `text` or `binary`
+    pub r#type: PreviewEnvConfigMountType,
+
+    /// Payload of the mount.
+    pub data: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PreviewEnvConfigMountType {
+    /// Specifies that `data` should be dumped into the file as-is.
+    Text,
+
+    /// Specifies that `data` is base64-encoded and should be decoded
+    /// before being dumped into the file.
+    Binary,
 }
