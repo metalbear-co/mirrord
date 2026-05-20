@@ -182,7 +182,7 @@ impl DnsWorker {
 
         // hickory is too eager when validating hostnames.
         // This is the way to explicitly request a relaxed parsing
-        // (e.g. with uppercase ASCII characters allowed).
+        // (e.g. with `_` character allowed).
         let host = Name::from_str_relaxed(request.node)
             .map_err(|error| format!("node name rejected by hickory: {error:?}"))
             .map_err(NetError::Msg)?;
@@ -428,12 +428,13 @@ impl ProtocolConversion<LookupIpStrategy> for AddressFamily {
 
 #[cfg(test)]
 mod test {
-    use hickory_resolver::proto::rr::Name;
+    use hickory_resolver::{Resolver, proto::rr::Name};
     use rstest::rstest;
 
     #[rstest]
     #[case("google.com")]
     #[case("UPPERCASE-IS-FINE.mydomain.com")]
+    #[case("underscore_is_fine.mydomain.com")]
     #[test]
     fn parse_dns_name_with_hickory(#[case] node_name: &str) {
         Name::from_str_relaxed(node_name).unwrap();
