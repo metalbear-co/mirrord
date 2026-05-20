@@ -1,1 +1,1 @@
-Fixed an issue where remote DNS resolution would always fail for hostnames containing an underscore.
+Fixed an issue where remote DNS resolution would always fail for host names containing an underscore.
