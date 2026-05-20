@@ -1,0 +1,1 @@
+Fixed an issue where remote DNS resolution would always fail for hostnames with uppercase ASCII characters.
