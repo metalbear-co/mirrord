@@ -428,7 +428,7 @@ impl ProtocolConversion<LookupIpStrategy> for AddressFamily {
 
 #[cfg(test)]
 mod test {
-    use hickory_resolver::{Resolver, proto::rr::Name};
+    use hickory_resolver::proto::rr::Name;
     use rstest::rstest;
 
     #[rstest]
