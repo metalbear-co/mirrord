@@ -794,6 +794,59 @@
         }
       ]
     },
+    "ConfigMount": {
+      "description": "A single file to project into the preview pod's container filesystem.\n\nEither `payload`+`type` (inline) or `from_file` (load from disk) must\nbe set; the two forms are mutually exclusive. After\n[`ConfigMount::resolve`] has been called, the result is guaranteed\nto have `payload` and `r#type` set and `from_file` cleared. This form\ngets sent to the operator.",
+      "type": "object",
+      "properties": {
+        "from_file": {
+          "description": "Local filesystem path to read the file from. The contents are loaded\nat session creation time and sent as `\"text\"` (verbatim) if valid\nUTF-8, otherwise base64-encoded and sent as `\"binary\"`. Mutually\nexclusive with `payload`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mount_at": {
+          "description": "Absolute path inside the preview pod's container where the file should\nappear. The surrounding directory's other contents\n(if any) are left untouched, only this one path is overlaid.",
+          "type": "string"
+        },
+        "payload": {
+          "description": "Inline file contents. Interpretation depends on `type`: for `\"text\"`,\nwritten to the file byte-for-byte; for `\"binary\"`, base64-decoded\nfirst. Mutually exclusive with `from_file`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "description": "How the `payload` payload should be interpreted when writing it to the\nfile. `\"text\"` for verbatim UTF-8 content, `\"binary\"` for\nbase64-encoded bytes. Required when `payload` is set; determined\nautomatically when `from_file` is used.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConfigMountType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "mount_at"
+      ]
+    },
+    "ConfigMountType": {
+      "description": "Encoding of a [`ConfigMount::payload`] payload.",
+      "oneOf": [
+        {
+          "description": "`payload` is written to the file verbatim. Used for\nhuman-readable config files (YAML, TOML, JSON, env files,\nshell scripts, ...).",
+          "type": "string",
+          "const": "text"
+        },
+        {
+          "description": "`payload` is base64-encoded and is decoded before being\nwritten. Used for binary files that can't safely live in a\nJSON string.",
+          "type": "string",
+          "const": "binary"
+        }
+      ]
+    },
     "ConnectionParamsConfig": {
       "description": "Connection parameters specified as individual environment variable names.\nThe `type` field is optional - when omitted, the operator auto-detects\nwhether the variable comes from `env` or `envFrom` on the target pod.",
       "type": "object",
@@ -3164,6 +3217,17 @@
       "description": "Controls the lifetime and creation behavior of preview sessions.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"image\": \"my-registry/my-app:latest\",\n      \"ttl_mins\": 60,\n      \"creation_timeout_secs\": 60\n    }\n  }\n}\n```",
       "type": "object",
       "properties": {
+        "config_mounts": {
+          "title": "feature.preview.config_mounts {#feature-preview-config_mounts}",
+          "description": "Files to mount into the preview pod at session start.\n\nEach entry projects a single file at an absolute path inside the\ncontainer's filesystem, without shadowing the surrounding directory's\nother contents. Useful for overriding individual config files\n(`/etc/app/config.yaml`, `/etc/nginx/conf.d/custom.conf`, ...) without\nrebuilding the image.\n\nFiles are read once at session creation and never refreshed — re-run\n`mirrord preview start` with the same `key` to change them.\n\n`config_mounts` is not a confidentiality boundary: the `payload` is\nstored on the `PreviewSession` resource and is visible to anyone with\n`get` permission on it. Do not put credentials or secrets here.\n\nEach entry sources its content one of two ways:\n- **Inline:** set `type` (`\"text\"` or `\"binary\"`) and `payload` directly.\n- **From file:** set `from_file` to a path on the local filesystem. The file is read at\n  session creation time; valid UTF-8 contents are sent as `\"text\"`, anything else is\n  base64-encoded and sent as `\"binary\"`. The local path is not transmitted to the operator.\n\n`payload`/`type` and `from_file` are mutually exclusive on a single entry.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"config_mounts\": [\n        {\n          \"mount_at\": \"/etc/app/config.yaml\",\n          \"type\": \"text\",\n          \"payload\": \"server:\\n  listen: 8080\\n\"\n        },\n        {\n          \"mount_at\": \"/usr/local/bin/probe\",\n          \"from_file\": \"./build/probe\"\n        }\n      ]\n    }\n  }\n}\n```\n\n##### Implementation\n\nEach session creates one `ConfigMap` owned by the `PreviewSession`,\nholding all mount payloads. The ConfigMap is mounted into the preview pod\nwith one per-file `subPath` bind per entry, so each mount overlays a\nsingle path without shadowing the surrounding directory. The ConfigMap is\ngarbage-collected automatically when the session ends.\n\nBecause both the `PreviewSession` resource and the generated `ConfigMap`\nlive in etcd, the **combined size of all `payload` payloads in a single\nsession is bound by Kubernetes' ~1 MiB per-object limit**. For `\"text\"`\npayloads that's roughly 1 MiB of content; for `\"binary\"`, base64\ninflates the encoded form by ~33%, leaving roughly 750 KiB of raw bytes.\nExceeding the limit causes the apiserver to reject the session at\ncreation time.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ConfigMount"
+          }
+        },
         "creation_timeout_secs": {
           "title": "feature.preview.creation_timeout_secs {#feature-preview-creation_timeout_secs}",
           "description": "How long (in seconds) the CLI waits for the preview session to become ready.\nIf the session hasn't reached `Ready` within this time, the CLI deletes it.",
