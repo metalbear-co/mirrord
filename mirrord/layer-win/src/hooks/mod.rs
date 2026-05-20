@@ -14,6 +14,11 @@ use mirrord_layer_lib::{
 pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
     let setup = setup();
 
+    // Initialize IOCP module prerequisites. Pre-step: must run before
+    // any FS hook is initialized so the async-read worker can post
+    // completion packets.
+    crate::iocp::initialize()?;
+
     // Always enable process hooks (required for Windows DLL injection)
     if setup.process_hooks_enabled() {
         tracing::info!("Enabling process hooks (always required on Windows)");
