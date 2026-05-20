@@ -218,7 +218,7 @@ impl UserSocket {
             } => {
                 let _ = make_proxy_request_no_response(PortUnsubscribe {
                     port: bound.requested_address.port(),
-                    listening_on: bound.address,
+                    listening_on: bound.address.into(),
                 });
             }
             Self {
