@@ -28,7 +28,7 @@ where
         context.get_env(self.0).ok().map(|var| {
             var.parse::<Self::Value>()
                 .map_err(|err| ConfigError::InvalidValue {
-                    name: self.0,
+                    name: self.0.into(),
                     provided: var,
                     error: Box::new(err),
                 })

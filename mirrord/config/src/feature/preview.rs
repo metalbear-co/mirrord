@@ -243,6 +243,49 @@ impl PreviewConfig {
                     .to_owned(),
             ));
         }
+
+        for (idx, config_mount) in self.config_mounts.iter().enumerate() {
+            match (&config_mount.payload, &config_mount.from_file) {
+                (Some(_), Some(_)) => {
+                    return Err(ConfigError::Conflict(format!(
+                        "`feature.preview.config_mounts[{idx}]` has both `payload` and `from_file` \
+                         set; specify exactly one"
+                    )));
+                }
+                (None, None) => {
+                    return Err(ConfigError::Conflict(format!(
+                        "`feature.preview.config_mounts[{idx}]` must specify either `payload` or \
+                         `from_file`"
+                    )));
+                }
+                (Some(payload), None) => {
+                    let Some(kind) = &config_mount.r#type else {
+                        return Err(ConfigError::Conflict(format!(
+                            "`feature.preview.config_mounts[{idx}].type` is required when `payload` \
+                             is set"
+                        )));
+                    };
+                    if *kind == ConfigMountType::Binary {
+                        BASE64_STANDARD.decode(payload).map_err(|err| {
+                            ConfigError::InvalidValue {
+                                name: format!("feature.preview.config_mounts[{idx}].payload")
+                                    .into(),
+                                provided: payload.clone(),
+                                error: Box::new(err),
+                            }
+                        })?;
+                    }
+                }
+                (None, Some(_)) => {
+                    if config_mount.r#type.is_some() {
+                        return Err(ConfigError::Conflict(format!(
+                            "`feature.preview.config_mounts[{idx}]` has both `from_file` and `type` set; `type` is resolved automatically when `from_file` is used and should not be specified."
+                        )));
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 }
