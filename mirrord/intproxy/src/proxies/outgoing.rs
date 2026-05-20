@@ -4,6 +4,7 @@ use std::{
     collections::HashMap,
     fmt, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    ops::Not,
     time::Instant,
 };
 
@@ -451,7 +452,7 @@ impl OutgoingProxy {
             .as_ref()
             .is_some_and(|version| OUTGOING_SEQPACKET.matches(version));
 
-        if request.protocol == NetProtocol::Seqpacket && !supports_seqpacket {
+        if request.protocol == NetProtocol::Seqpacket && supports_seqpacket.not() {
             message_bus
                 .send(ToLayer {
                     message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(

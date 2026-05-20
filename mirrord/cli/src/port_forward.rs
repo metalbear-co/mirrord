@@ -390,6 +390,7 @@ impl PortForwarder {
             | DaemonMessage::PauseTarget(..)
             | DaemonMessage::SwitchProtocolVersionResponse(..)
             | DaemonMessage::UdpOutgoing(..)
+            | DaemonMessage::SeqpacketOutgoing(..)
             | DaemonMessage::Vpn(..)
             | DaemonMessage::TcpSteal(..)
             | DaemonMessage::ReverseDnsLookup(..)) => {
@@ -699,6 +700,7 @@ impl ReversePortForwarder {
             }
             message @ DaemonMessage::UdpOutgoing(_)
             | message @ DaemonMessage::TcpOutgoing(_)
+            | message @ DaemonMessage::SeqpacketOutgoing(_)
             | message @ DaemonMessage::File(_)
             | message @ DaemonMessage::GetEnvVarsResponse(_)
             | message @ DaemonMessage::GetAddrInfoResponse(_)
