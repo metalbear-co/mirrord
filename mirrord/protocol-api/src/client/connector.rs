@@ -4,7 +4,7 @@ use futures::{Sink, Stream};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 
 /// Trait for mirrord-protocol client->server connection provider.
-pub trait ProtocolConnector: 'static + Send + Sync + fmt::Debug {
+pub trait ProtocolConnector: 'static + Send + fmt::Debug {
     /// Type of error that can occur when connecting to the server or working with an established
     /// connection.
     type Error: 'static + std::error::Error + Send + Sync;

@@ -172,7 +172,7 @@ impl AgentConnection {
                     OperatorApi::connect_in_existing_session(config, session.clone(), analytics)
                         .await?;
                 (
-                    connection.conn,
+                    Connection::from_channel(connection.conn),
                     if session.allow_reconnect {
                         ReconnectFlow::ConnectInfo {
                             config: Box::new(config.clone()),
@@ -196,7 +196,7 @@ impl AgentConnection {
 
                 let conn = match tls_pem {
                     Some(tls_pem) => tls::wrap_raw_connection(stream, tls_pem.as_path()).await?,
-                    None => Connection::from_stream(stream).await,
+                    None => Connection::from_stream(stream),
                 };
 
                 (conn, ReconnectFlow::Break(kind))
@@ -229,7 +229,7 @@ impl AgentConnection {
 
     pub async fn new_for_raw_address(address: SocketAddr) -> Result<Self, AgentConnectionError> {
         let stream = TcpStream::connect(address).await?;
-        let connection = Connection::<Client>::from_stream(stream).await;
+        let connection = Connection::<Client>::from_stream(stream);
 
         Ok(Self {
             connection,

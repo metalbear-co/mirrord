@@ -53,6 +53,12 @@ use crate::{
 /// ```
 ///
 /// Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
+///
+/// Host names listed here are automatically mirrored into
+/// [`feature.network.dns.filter`](super::dns::DnsFilterConfig) on the matching side, so the
+/// name is resolved on the side that handles the connection. For example,
+/// `{ "local": ["some.domain.com"] }` implies `dns.filter.local = ["some.domain.com"]` even if
+/// `dns.filter` is otherwise unset.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum OutgoingFilterConfig {

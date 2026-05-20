@@ -10,7 +10,7 @@ use std::path::Path;
 /// 2. Using the overrides for `read_only`, `read_write` and `local`.
 use mirrord_config::{
     feature::fs::{FsConfig, FsModeConfig},
-    util::VecOrSingle,
+    util::{VecOrSingle, home_dir_for_path_mapping},
 };
 use regex::{RegexSet, RegexSetBuilder};
 
@@ -18,7 +18,6 @@ use regex::{RegexSet, RegexSetBuilder};
 use super::unix::*;
 #[cfg(windows)]
 use super::windows::*;
-use crate::util::get_home_path;
 
 /// List of files that mirrord should use locally, as they probably exist only in the local user
 /// machine, or are system configuration files (that could break the process if we used the remote
@@ -43,10 +42,11 @@ pub fn generate_remote_ro_set() -> RegexSet {
 }
 
 pub fn generate_not_found_set() -> RegexSet {
-    let Some(home_clean) = get_home_path().map(|x| x.to_string_lossy().into_owned()) else {
+    let Some(home) = home_dir_for_path_mapping() else {
         tracing::warn!("Unable to resolve home directory, generating empty not-found set");
         return Default::default();
     };
+    let home_clean = regex::escape(&home);
 
     let patterns = not_found_by_default::PATHS
         .into_iter()

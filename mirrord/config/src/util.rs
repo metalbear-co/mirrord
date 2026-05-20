@@ -305,3 +305,27 @@ pub fn read_resolved_config() -> Result<LayerConfig, ConfigError> {
 
     LayerConfig::decode(&encoded)
 }
+
+/// Returns the user's home directory in the form the mirrord-layer's path matchers see at
+/// runtime, so a regex built here will line up with paths the layer feeds into it.
+///
+/// On Windows the layer normalizes paths via `str_win::path_to_unix_path` (strips the drive
+/// letter, flips backslashes) before matching, so we apply the same transform here and read
+/// from `USERPROFILE` rather than `HOME`.
+///
+/// The returned string is *not* regex-escaped; callers that build a regex from it must call
+/// [`regex::escape`] themselves.
+pub fn home_dir_for_path_mapping() -> Option<String> {
+    #[cfg(windows)]
+    {
+        let home = std::env::var("USERPROFILE").ok()?;
+        let home = str_win::path_to_unix_path(home)?;
+        Some(home.trim_end_matches('/').to_owned())
+    }
+
+    #[cfg(unix)]
+    {
+        let home = std::env::var("HOME").ok()?;
+        Some(home.trim_end_matches('/').to_owned())
+    }
+}

@@ -17,6 +17,8 @@ export interface SessionInfo {
   processes: ProcessInfo[]
   port_subscriptions: PortSubscription[]
   config: Record<string, unknown>
+  key?: string | null
+  namespace?: string | null
 }
 
 // Matches Rust MonitorEvent with #[serde(tag = "type", rename_all = "snake_case")]
@@ -30,6 +32,71 @@ export type MonitorEvent =
   | { type: 'layer_connected'; pid: number; process_name: string }
   | { type: 'layer_disconnected'; pid: number }
 
+export interface OperatorSessionHttpFilter {
+  headerFilter?: string | null
+  pathFilter?: string | null
+  allOf?: OperatorSessionHttpFilter[] | null
+  anyOf?: OperatorSessionHttpFilter[] | null
+}
+
+export interface OperatorSessionOwner {
+  username: string
+  k8sUsername: string
+}
+
+export interface OperatorSessionTarget {
+  kind: string
+  name: string
+  container: string
+}
+
+export interface OperatorLockedPort {
+  port: number
+  kind: string
+  filter?: string | null
+}
+
+export interface OperatorQueueSplits {
+  sqs: number
+  rabbitmq: number
+  kafka: number
+}
+
+export interface OperatorSessionSummary {
+  id: string
+  key: string
+  namespace: string
+  owner: OperatorSessionOwner
+  target: OperatorSessionTarget | null
+  createdAt: string
+  durationSecs?: number
+  lockedPorts?: OperatorLockedPort[]
+  queueSplits?: OperatorQueueSplits
+  httpFilter?: OperatorSessionHttpFilter | null
+}
+
+export const OPERATOR_WATCH = {
+  NotStarted: 'not_started',
+  Watching: 'watching',
+  Error: 'error',
+  Unavailable: 'unavailable',
+} as const
+
+export type OperatorWatchStatus =
+  | { status: typeof OPERATOR_WATCH.NotStarted }
+  | { status: typeof OPERATOR_WATCH.Watching }
+  | { status: typeof OPERATOR_WATCH.Error; message: string }
+  | { status: typeof OPERATOR_WATCH.Unavailable; reason: string }
+
+export interface OperatorSessionsResponse {
+  by_key: Record<string, OperatorSessionSummary[]>
+  sessions: OperatorSessionSummary[]
+  watch_status: OperatorWatchStatus
+}
+
 export type WsMessage =
   | { type: 'session_added'; session: SessionInfo }
   | { type: 'session_removed'; session_id: string }
+  | { type: 'operator_session_added'; session: OperatorSessionSummary }
+  | { type: 'operator_session_removed'; id: string }
+  | { type: 'operator_session_updated'; session: OperatorSessionSummary }
