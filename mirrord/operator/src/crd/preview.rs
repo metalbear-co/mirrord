@@ -16,7 +16,7 @@ use mirrord_config::{
     feature::{
         env::EnvConfig,
         network::incoming::{IncomingConfig, IncomingMode, http_filter::HttpFilterConfig},
-        preview::PreviewTtl,
+        preview::{ConfigMount, ConfigMountType, PreviewTtl},
         split_queues::{QueueId, QueueMessageFilter, SplitQueuesConfig},
     },
     target::Target,
@@ -581,4 +581,33 @@ pub enum PreviewEnvConfigMountType {
     /// Specifies that `data` is base64-encoded and should be decoded
     /// before being dumped into the file.
     Binary,
+}
+
+impl From<ConfigMount> for PreviewEnvConfigMount {
+    /// Assumes `value` has been passed through [`ConfigMount::resolve`], which
+    /// guarantees `data` and `r#type` are both `Some` and `from_file` is `None`.
+    fn from(value: ConfigMount) -> Self {
+        let ConfigMount {
+            mount_at: path,
+            r#type,
+            payload: data,
+            from_file: _,
+        } = value;
+        Self {
+            path,
+            r#type: r#type
+                .expect("ConfigMount must be resolved before conversion")
+                .into(),
+            data: data.expect("ConfigMount must be resolved before conversion"),
+        }
+    }
+}
+
+impl From<ConfigMountType> for PreviewEnvConfigMountType {
+    fn from(value: ConfigMountType) -> Self {
+        match value {
+            ConfigMountType::Text => Self::Text,
+            ConfigMountType::Binary => Self::Binary,
+        }
+    }
 }
