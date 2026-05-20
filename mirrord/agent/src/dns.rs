@@ -12,6 +12,7 @@ use hickory_resolver::{
     config::{LookupIpStrategy, ServerOrderingStrategy},
     lookup_ip::LookupIp,
     net::{DnsError, NetError, runtime::TokioRuntimeProvider},
+    proto::rr::Name,
     system_conf::parse_resolv_conf,
 };
 use mirrord_agent_env::envs;
@@ -179,9 +180,16 @@ impl DnsWorker {
             resolver
         };
 
+        // hickory is too eager when validating hostnames.
+        // This is the way to explicitly request a relaxed parsing
+        // (e.g. with uppercase ASCII characters allowed).
+        let host = Name::from_str_relaxed(request.node)
+            .map_err(|error| format!("node name rejected by hickory: {error:?}"))
+            .map_err(NetError::Msg)?;
+
         let lookup = resolver
             .inspect_err(|fail| tracing::error!(?fail, "Failed to build a DNS resolver"))?
-            .lookup_ip(request.node)
+            .lookup_ip(host)
             .await
             .inspect(|lookup| tracing::trace!(?lookup, "DNS lookup finished"))
             .inspect_err(|e| tracing::debug!(%e, "DNS lookup failed"))?
@@ -415,5 +423,19 @@ impl ProtocolConversion<LookupIpStrategy> for AddressFamily {
                 LookupIpStrategy::Ipv4AndIpv6
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use hickory_resolver::proto::rr::Name;
+    use rstest::rstest;
+
+    #[rstest]
+    #[case("google.com")]
+    #[case("UPPERCASE-IS-FINE.mydomain.com")]
+    #[test]
+    fn parse_dns_name_with_hickory(#[case] node_name: &str) {
+        Name::from_str_relaxed(node_name).unwrap();
     }
 }
