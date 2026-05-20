@@ -405,4 +405,133 @@ mod tests {
         let cfg = config_with_ttl(Some(PreviewTtl::Finite(5)), Some(PreviewTtl::Finite(60)));
         assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
     }
+
+    fn config_with_mount(mount: ConfigMount) -> PreviewConfig {
+        PreviewConfig {
+            image: None,
+            ttl_mins: None,
+            ttl_secs: None,
+            creation_timeout_secs: 60,
+            config_mounts: vec![mount],
+        }
+    }
+
+    #[test]
+    fn verify_rejects_mount_with_both_payload_and_from_file() {
+        let cfg = config_with_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: Some(ConfigMountType::Text),
+            payload: Some("hi".into()),
+            from_file: Some("/tmp/foo".into()),
+        });
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn verify_rejects_mount_with_neither_payload_nor_from_file() {
+        let cfg = config_with_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: None,
+        });
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn verify_rejects_inline_payload_without_type() {
+        let cfg = config_with_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: Some("hi".into()),
+            from_file: None,
+        });
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn verify_accepts_from_file_alone() {
+        let cfg = config_with_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: Some("/tmp/foo".into()),
+        });
+        assert!(cfg.verify().is_ok());
+    }
+
+    #[test]
+    fn verify_rejects_file_with_type() {
+        let cfg = config_with_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: Some(ConfigMountType::Binary),
+            payload: None,
+            from_file: Some("/tmp/foo".into()),
+        });
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn resolve_reads_utf8_file_as_text() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), "hello\n").unwrap();
+        let mount = ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: Some(tmp.path().to_path_buf()),
+        };
+        let resolved = mount.resolve().unwrap();
+        assert_eq!(resolved.r#type, Some(ConfigMountType::Text));
+        assert_eq!(resolved.payload.as_deref(), Some("hello\n"));
+        assert!(resolved.from_file.is_none());
+    }
+
+    #[test]
+    fn resolve_reads_non_utf8_file_as_base64_binary() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let raw: &[u8] = &[0x00, 0xFF, 0xFE, 0xC3, 0x28]; // 0xC3 0x28 is invalid UTF-8
+        std::fs::write(tmp.path(), raw).unwrap();
+        let mount = ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: Some(tmp.path().to_path_buf()),
+        };
+        let resolved = mount.resolve().unwrap();
+        assert_eq!(resolved.r#type, Some(ConfigMountType::Binary));
+        assert_eq!(
+            BASE64_STANDARD
+                .decode(resolved.payload.as_deref().unwrap())
+                .unwrap(),
+            raw,
+        );
+        assert!(resolved.from_file.is_none());
+    }
+
+    #[test]
+    fn resolve_passes_through_inline_mount_unchanged() {
+        let mount = ConfigMount {
+            mount_at: "/x".into(),
+            r#type: Some(ConfigMountType::Text),
+            payload: Some("inline".into()),
+            from_file: None,
+        };
+        let resolved = mount.clone().resolve().unwrap();
+        assert_eq!(resolved, mount);
+    }
+
+    #[test]
+    fn resolve_reports_missing_file() {
+        let mount = ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: Some("/definitely/does/not/exist/xyz".into()),
+        };
+        assert!(matches!(
+            mount.resolve(),
+            Err(ConfigError::FileAccessFailed { .. })
+        ));
+    }
 }
