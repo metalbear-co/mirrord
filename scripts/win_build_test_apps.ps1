@@ -85,4 +85,9 @@ Build-GoE2EApps -TestsDir $testsDir
 # mirrors scripts/build_go_apps.sh (builds generic Go test binaries across the repo)
 Build-RepoGoApps -RepoRoot $repoRoot -OutputPrefix '25'
 
+# every cs-e2e/<app>/build_test_app.ps1 is auto-discovered and executed
+# -- adding a new C# e2e app needs no changes to this script or the CI
+# workflow.
+Build-CsE2EApps -TestsDir $testsDir
+
 Write-Host 'Finished building test apps.'

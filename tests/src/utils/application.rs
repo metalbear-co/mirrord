@@ -62,6 +62,13 @@ pub enum Application {
     /// Waits for any child process to finish, and verifies that the `wait` call fails with
     /// `ECHILD`.
     IntproxyChild,
+    /// Windows-only C# binary that reads `C:\app\test.txt` via
+    /// `File.ReadAllTextAsync` -- .NET's overlapped+IOCP code path on
+    /// Windows. Exits non-zero if the bytes don't equal the Lorem Ipsum
+    /// the `mirrord-pytest:latest` image ships. Stresses the IOCP
+    /// plumbing through the .NET runtime's `FileStream`+`ThreadPool`
+    /// machinery.
+    AsyncTextCsharp,
 }
 
 impl Application {
@@ -123,6 +130,9 @@ impl Application {
             Application::IntproxyChild => {
                 ["intproxy_child/out.c_test_app"].map(String::from).to_vec()
             }
+            Application::AsyncTextCsharp => ["cs-e2e/AsyncText/bin/AsyncText.exe"]
+                .map(String::from)
+                .to_vec(),
         }
     }
 

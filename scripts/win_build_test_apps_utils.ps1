@@ -196,3 +196,31 @@ function Build-RustApps {
         Pop-Location
     }
 }
+
+# Compile every `tests/cs-e2e/<app>/build_test_app.ps1` that exists.
+# Convention: each C# e2e app owns its own build script
+# (`dotnet publish`-wrapped) and emits a sibling `.exe` under `bin/`.
+# Adding a new C# e2e app then needs no CI changes.
+function Build-CsE2EApps {
+    param([string]$TestsDir)
+
+    $csRoot = Join-Path $TestsDir 'cs-e2e'
+    if (-not (Test-Path $csRoot)) {
+        Write-Host "No cs-e2e/ directory at $csRoot; skipping C# test app builds."
+        return
+    }
+
+    $scripts = Get-ChildItem -Path $csRoot -Recurse -Filter 'build_test_app.ps1'
+    if ($scripts.Count -eq 0) {
+        Write-Host "No build_test_app.ps1 found under $csRoot; nothing to build."
+        return
+    }
+
+    foreach ($script in $scripts) {
+        Write-Host "Building C# e2e test app via $($script.FullName)"
+        & $script.FullName
+        if ($LASTEXITCODE -ne 0) {
+            throw "C# e2e build script $($script.FullName) failed with exit code $LASTEXITCODE"
+        }
+    }
+}
