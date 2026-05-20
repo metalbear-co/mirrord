@@ -142,7 +142,7 @@ impl DnsConfig {
             };
 
             return Err(ConfigError::InvalidValue {
-                name: "feature.network.dns.filter",
+                name: "feature.network.dns.filter".into(),
                 provided: filter.to_string(),
                 error: Box::new(error),
             });

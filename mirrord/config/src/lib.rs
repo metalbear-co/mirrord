@@ -686,7 +686,7 @@ impl LayerConfig {
         http_filter
             .ensure_no_empty_strings()
             .map_err(|error| ConfigError::InvalidValue {
-                name: "feature.network.incoming.http_filter",
+                name: "feature.network.incoming.http_filter".into(),
                 provided: String::new(),
                 error: Box::new(error),
             })?;
@@ -698,7 +698,7 @@ impl LayerConfig {
                 // `mirrord_protocol::tcp::JsonPathQuery::new_unchecked`
                 JsonPathQuery::new(query.clone()).map(|_| ()).map_err(|e| {
                     ConfigError::InvalidValue {
-                        name: "feature.network.incoming.http_filter.body_filter.query",
+                        name: "feature.network.incoming.http_filter.body_filter.query".into(),
                         provided: query.to_string(),
                         error: Box::new(e),
                     }
@@ -883,7 +883,7 @@ impl LayerConfig {
 
         if self.feature.fs.readonly_file_buffer > READONLY_FILE_BUFFER_HARD_LIMIT {
             return Err(ConfigError::InvalidValue {
-                name: "feature.fs.readonly_file_buffer",
+                name: "feature.fs.readonly_file_buffer".into(),
                 provided: self.feature.fs.readonly_file_buffer.to_string(),
                 error: format!(
                     "the value of feature.fs.readonly_file_buffer must be {} Megabytes or less.",
@@ -920,7 +920,7 @@ impl LayerConfig {
 
         if self.startup_retry.min_ms > self.startup_retry.max_ms {
             return Err(ConfigError::InvalidValue {
-                name: "startup_retry.min_ms",
+                name: "startup_retry.min_ms".into(),
                 provided: self.startup_retry.min_ms.to_string(),
                 error: format!(
                     "the value of startup_retry.min_ms `{}` cannot be greater than \
@@ -933,7 +933,7 @@ impl LayerConfig {
 
         if self.startup_retry.max_ms == 0 {
             return Err(ConfigError::InvalidValue {
-                name: "startup_retry.max_ms",
+                name: "startup_retry.max_ms".into(),
                 provided: self.startup_retry.max_ms.to_string(),
                 error: "the value of startup_retry.max_ms has to be greater than 0.".into(),
             });

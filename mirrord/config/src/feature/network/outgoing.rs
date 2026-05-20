@@ -210,7 +210,7 @@ impl OutgoingConfig {
             };
 
             return Err(ConfigError::InvalidValue {
-                name: "feature.network.outgoing.filter",
+                name: "feature.network.outgoing.filter".into(),
                 provided: filter.to_string(),
                 error: Box::new(error),
             });
