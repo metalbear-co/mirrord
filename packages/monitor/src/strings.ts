@@ -7,6 +7,7 @@ export const strings = {
     themeLight: 'Switch to light mode',
     themeDark: 'Switch to dark mode',
     settings: 'Settings',
+    searchPlaceholder: 'Search',
     emptyTitle: 'Select a session to get started',
     emptyBody:
       'Choose a session from the sidebar to see live activity, configuration, and intercepted traffic',
@@ -36,17 +37,17 @@ export const strings = {
     countPlural: 'sessions',
     showSidebar: 'Show sidebar',
     hideSidebar: 'Hide sidebar',
-    killAllTooltip: 'Kill all sessions',
-    killAllTitle: 'Kill all sessions?',
+    killAllTooltip: 'Stop all sessions',
+    killAllTitle: 'Stop all sessions?',
     killAllDescription: (count: number) =>
-      `This will terminate ${count} active mirrord ${count === 1 ? 'session' : 'sessions'}. This action cannot be undone.`,
-    killAllButton: 'Kill All',
+      `This will end ${count} active mirrord ${count === 1 ? 'session' : 'sessions'}. This action cannot be undone.`,
+    killAllButton: 'Stop all',
     cancel: 'Cancel',
     emptyTitle: 'No active sessions',
     emptyBody: 'Start mirrord to see sessions here',
   },
   session: {
-    kill: 'Kill',
+    kill: 'Stop session',
     operator: 'Operator',
     direct: 'Direct',
     overview: 'Overview',
@@ -68,5 +69,20 @@ export const strings = {
     portSingular: 'port',
     portPlural: 'ports',
     eventsLabel: 'events',
+  },
+  operatorWizard: {
+    title: 'Connect the mirrord operator',
+    subtitle: 'Three steps, about 2 minutes.',
+    iAlreadyHaveKey: 'I already have a key →',
+    iveInstalledIt: "I've installed it →",
+    done: 'Done',
+    back: '← Back',
+    copy: 'Copy',
+    copied: 'Copied',
+  },
+  joinBar: {
+    legacyExtensionPrefix:
+      "Browser extension is installed but doesn't support one-click join yet. Open the extension popup and click Join on key",
+    legacyExtensionSuffix: ', or update the extension.',
   },
 } as const

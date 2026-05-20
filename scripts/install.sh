@@ -17,7 +17,7 @@ file_issue_prompt() {
 }
 
 get_latest_version() {
-  local res=$(curl -fsSL https://github.com/metalbear-co/mirrord/raw/latest/Cargo.toml | grep -m 1 version | cut -d' ' -f3 | tr -d '\"')
+  local res=$(curl -fsSL https://github.com/metalbear-co/mirrord/raw/latest/Cargo.toml | grep version | head -n 1 | cut -d' ' -f3 | tr -d '\"')
   echo $res
 }
 
