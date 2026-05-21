@@ -7,14 +7,13 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::{Duration, Instant},
 };
 
 use bytes::{Bytes, BytesMut};
 use futures::{FutureExt, Stream, StreamExt, future::BoxFuture, stream::FuturesUnordered};
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, LogMessage, RemoteError, RemoteResult, ResponseError,
-    outgoing::{UnixAddr, tcp::*, *},
+    outgoing::{seqpacket::*, *},
     uid::Uid,
 };
 use streammap_ext::StreamMap;
@@ -39,6 +38,10 @@ use crate::{
     util::path_resolver::InTargetPathResolver,
 };
 
+/// The agent uses this api to communicate with the [`SeqpacketTask`].
+///
+/// Handles [`LayerSeqpacket`] messages sending them to the [`SeqpacketTask`] with
+/// [`Self::send_to_task`], and receiving [`DaemonSeqpacket`] with [`Self::recv_from_task`].
 pub(crate) struct SeqpacketApi {
     task_status: BgTaskStatus,
 
@@ -48,6 +51,8 @@ pub(crate) struct SeqpacketApi {
 }
 
 impl SeqpacketApi {
+    /// Creates a new [`SeqpacketApi`] instance, spawning the [`SeqpacketTask`] on the given
+    /// [`BgTaskRuntime`].
     pub(crate) fn new(runtime: &BgTaskRuntime, pid: Option<u64>) -> Self {
         // IMPORTANT: this makes tokio tasks spawn on `runtime`.
         // Do not remove this.
@@ -66,6 +71,7 @@ impl SeqpacketApi {
         }
     }
 
+    /// Sends a [`LayerSeqpacket`] message to the [`SeqpacketTask`].
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub(crate) async fn send_to_task(&mut self, message: LayerSeqpacket) -> AgentResult<()> {
         if self.layer_tx.send(message).await.is_ok() {
@@ -85,6 +91,8 @@ impl SeqpacketApi {
     }
 }
 
+/// Background task that handles [`LayerSeqpacket`] messages from the agent, running in a specific
+/// background runtime.
 struct SeqpacketTask {
     next_connection_id: ConnectionId,
     /// Writing handles of peer connections made on layer's requests.
@@ -125,13 +133,7 @@ impl SeqpacketTask {
     /// This **must** be larger than [`Self::READ_BUFFER_SIZE`].
     const THROTTLE_PERMITS: usize = 512 * 1024;
 
-    /// Timeout for connect attempts.
-    ///
-    /// # TODO(alex)
-    /// This timeout works around the issue where golang tries to connect
-    /// to an invalid socket address and hangs until the socket times out.
-    const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
-
+    /// Creates this task, but doesn't start it.
     fn new(
         pid: Option<u64>,
         layer_rx: Receiver<LayerSeqpacket>,
@@ -161,6 +163,7 @@ impl SeqpacketTask {
                     None => true,
                 },
 
+                // Polls the `SeqpacketReadStream` for incoming data.
                 Some((connection_id, remote_read)) = self.readers.next() => {
                     self.handle_connection_read(connection_id, remote_read.transpose()).await.is_err()
                 },
@@ -177,6 +180,10 @@ impl SeqpacketTask {
         }
     }
 
+    /// It's more of a "post-read" handler than an actual "read", since the bytes have already been
+    /// received when we polled the [`SeqpacketReadStream`] (where the `poll_recv` actually
+    /// happens). So in here we're just sending the bytes through a [`DaemonSeqpacket::Read`]
+    /// message.
     #[tracing::instrument(
         level = Level::TRACE,
         skip(read),
@@ -246,23 +253,14 @@ impl SeqpacketTask {
         Ok(())
     }
 
+    /// Connects to the remote [`SocketAddress`] using a [`UnixSeqpacket`] socket.
+    #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::DEBUG))]
     async fn connect(
         remote_address: SocketAddress,
         target_pid: Option<u64>,
     ) -> RemoteResult<ConnectedSeqpacket> {
-        let started_at = Instant::now();
         let path = Self::connect_path(remote_address.clone(), target_pid)?;
-        let socket =
-            tokio::time::timeout(Self::CONNECT_TIMEOUT, UnixSeqpacket::connect(path)).await;
-        let socket = socket.map_err(|_| {
-            ResponseError::Remote(RemoteError::ConnectTimedOut(remote_address.clone()))
-        })??;
-
-        tracing::debug!(
-            %remote_address,
-            elapsed = ?started_at.elapsed(),
-            "Outgoing seqpacket connection made",
-        );
+        let socket = UnixSeqpacket::connect(path).await?;
 
         Ok(ConnectedSeqpacket {
             socket,
@@ -271,6 +269,7 @@ impl SeqpacketTask {
         })
     }
 
+    /// Connect [`PathBuf`] for a [`UnixSeqpacket`] socket.
     fn connect_path(
         remote_address: SocketAddress,
         target_pid: Option<u64>,
@@ -287,7 +286,7 @@ impl SeqpacketTask {
                 name.insert(0, 0);
                 Ok(OsString::from_vec(name).into())
             }
-            address => Err(ResponseError::Remote(RemoteError::InvalidAddress(address))),
+            invalid => Err(ResponseError::Remote(RemoteError::InvalidAddress(invalid))),
         }
     }
 
@@ -347,6 +346,8 @@ impl SeqpacketTask {
                 self.connects.push(fut);
                 Ok(())
             }
+
+            // There's no `AsyncWriteExt` available for `UnixSeqpacket`, so we use `send` instead.
             LayerSeqpacket::Write(LayerWrite {
                 connection_id,
                 bytes,
@@ -415,6 +416,12 @@ impl SeqpacketTask {
 
 type SeqpacketReadStream = ThrottledStream<SeqpacketReadHalf>;
 
+/// Helps us implement [`Stream`] for [`UnixSeqpacket`], so we can keep the pattern we use in the
+/// other outgoing handlers.
+///
+/// Since `SOCK_SEQPACKET` works on packets, and not streams, it doesn't have a `WriteHalf` and
+/// `ReadHalf`, it's just a socket, so we use this to implement [`Stream`] in a way that plays nice
+/// with [`ThrottledStream`].
 struct SeqpacketReadHalf {
     socket: Arc<UnixSeqpacket>,
     buffer: BytesMut,
@@ -439,6 +446,8 @@ impl Stream for SeqpacketReadHalf {
     }
 }
 
+/// The connected [`UnixSeqpacket`] socket, along with its remote and local addresses.
+#[derive(Debug)]
 struct ConnectedSeqpacket {
     socket: UnixSeqpacket,
     remote_address: SocketAddress,

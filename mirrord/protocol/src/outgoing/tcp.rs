@@ -11,8 +11,7 @@ pub enum LayerTcpOutgoing {
     Connect(LayerConnect),
 
     /// Write data to the remote address the agent is `connect`ed to.
-    ///
-    /// There's no `Read` message, as we're calling `read` in the agent, and we send
+
     /// a [`DaemonTcpOutgoing::Read`] message in case we get some data from this connection.
     Write(LayerWrite),
 
@@ -25,18 +24,6 @@ pub enum LayerTcpOutgoing {
     Close(LayerClose),
 
     /// Same as [`LayerTcpOutgoing::Connect`], but contains a [`Uid`].
-    ConnectV2(LayerConnectV2),
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum LayerSeqpacket {
-    /// Write one packet to the remote address the agent is connected to.
-    Write(LayerWrite),
-
-    /// The layer closed the connection, this message syncs up the agent, closing it there as well.
-    Close(LayerClose),
-
-    /// User is interested in connecting via unix seqpacket to some remote address.
     ConnectV2(LayerConnectV2),
 }
 
@@ -60,17 +47,5 @@ pub enum DaemonTcpOutgoing {
 
     /// Same as [`DaemonTcpOutgoing::Connect`], but can be tracked back to the request with a
     /// [`Uid`].
-    ConnectV2(DaemonConnectV2),
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum DaemonSeqpacket {
-    /// Read one packet from the connection.
-    Read(RemoteResult<DaemonRead>),
-
-    /// Tell the layer that this connection has been closed.
-    Close(ConnectionId),
-
-    /// The agent attempted a connection, tracked back to the request with a [`Uid`].
     ConnectV2(DaemonConnectV2),
 }

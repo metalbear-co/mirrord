@@ -27,7 +27,8 @@ use crate::{
     },
     file::*,
     outgoing::{
-        tcp::{DaemonSeqpacket, DaemonTcpOutgoing, LayerSeqpacket, LayerTcpOutgoing},
+        seqpacket::{DaemonSeqpacket, LayerSeqpacket},
+        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},

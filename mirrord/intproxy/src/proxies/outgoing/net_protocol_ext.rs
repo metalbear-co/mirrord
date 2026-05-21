@@ -22,8 +22,7 @@ use mirrord_protocol::{
     ClientMessage, ConnectionId,
     outgoing::{
         LayerClose, LayerConnect, LayerConnectV2, LayerWrite, SocketAddress,
-        tcp::{LayerSeqpacket, LayerTcpOutgoing},
-        udp::LayerUdpOutgoing,
+        seqpacket::LayerSeqpacket, tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing,
     },
     uid::Uid,
 };

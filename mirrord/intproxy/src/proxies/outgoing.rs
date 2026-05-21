@@ -17,9 +17,7 @@ use mirrord_protocol::{
     ConnectionId, DaemonMessage, RemoteResult, ResponseError,
     outgoing::{
         DaemonConnect, DaemonConnectV2, DaemonRead, OUTGOING_CONNECT_V2, OUTGOING_SEQPACKET,
-        SocketAddress,
-        tcp::{DaemonSeqpacket, DaemonTcpOutgoing},
-        udp::DaemonUdpOutgoing,
+        SocketAddress, seqpacket::DaemonSeqpacket, tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing,
     },
     uid::Uid,
 };
@@ -59,7 +57,12 @@ pub enum OutgoingProxyError {
     /// The proxy failed to prepare a new local socket for the intercepted connection.
     #[error("failed to prepare local socket: {0}")]
     SocketSetupError(#[from] io::Error),
+
     /// The agent sent a queue-based seqpacket connect response. Seqpacket supports only ConnectV2.
+    ///
+    /// Should never really happen, it should not be possible to start a mirrord managed
+    /// `SOCK_SEQPACKET` socket with a mix of mirrord-cli and mirrord-agent versions that do not
+    /// support `ConnectV2`.
     #[error("agent sent an unexpected seqpacket Connect response")]
     UnexpectedSeqpacketConnect,
 }
@@ -184,13 +187,6 @@ pub struct OutgoingProxy {
     /// These are processed sequentially by the agent.
     stream_reqs: RequestQueue<ConnectInProgress>,
     /// In progress [`OutgoingConnectRequest`]s originating from
-    /// [`LayerConnect`](mirrord_protocol::outgoing::LayerConnect), related to
-    /// [`NetProtocol::SeqPacket`].
-    ///
-    /// These are kept for completeness in queue-based paths, but new seqpacket requests are sent
-    /// only through [`LayerConnectV2`](mirrord_protocol::outgoing::LayerConnectV2).
-    seqpacket_reqs: RequestQueue<ConnectInProgress>,
-    /// In progress [`OutgoingConnectRequest`]s originating from
     /// [`LayerConnectV2`](mirrord_protocol::outgoing::LayerConnectV2).
     ///
     /// These are processed in parallel by the agent.
@@ -243,7 +239,6 @@ impl OutgoingProxy {
         Self {
             datagrams_reqs: Default::default(),
             stream_reqs: Default::default(),
-            seqpacket_reqs: Default::default(),
             v2_reqs: Default::default(),
             txs: Default::default(),
             background_tasks: Default::default(),
@@ -261,7 +256,9 @@ impl OutgoingProxy {
         match protocol {
             NetProtocol::Datagrams => &mut self.datagrams_reqs,
             NetProtocol::Stream => &mut self.stream_reqs,
-            NetProtocol::Seqpacket => &mut self.seqpacket_reqs,
+            NetProtocol::Seqpacket => unreachable!(
+                "BUG: should not be possible to create a `SOCK_SEQPACKET` socket connection using this outdated queue!"
+            ),
         }
     }
 
@@ -567,18 +564,6 @@ impl OutgoingProxy {
                     "Flushing error responses to TCP connect requests"
                 );
                 while let Some((message_id, layer_id)) = self.stream_reqs.pop_front() {
-                    message_bus
-                        .send(ToLayer::from(AgentLostOutgoingResponse(
-                            layer_id, message_id,
-                        )))
-                        .await;
-                }
-
-                tracing::debug!(
-                    responses = self.seqpacket_reqs.len(),
-                    "Flushing error responses to seqpacket connect requests"
-                );
-                while let Some((message_id, layer_id)) = self.seqpacket_reqs.pop_front() {
                     message_bus
                         .send(ToLayer::from(AgentLostOutgoingResponse(
                             layer_id, message_id,

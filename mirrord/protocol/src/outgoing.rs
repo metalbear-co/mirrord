@@ -11,6 +11,7 @@ use semver::VersionReq;
 
 use crate::{ConnectionId, Payload, RemoteResult, SerializationError, uid::Uid};
 
+pub mod seqpacket;
 pub mod tcp;
 pub mod udp;
 
