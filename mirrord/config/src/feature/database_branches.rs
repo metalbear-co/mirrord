@@ -307,13 +307,82 @@ impl DatabaseBranchesConfig {
 }
 
 impl DatabaseBranchConfig {
-    fn base(&self) -> Option<&DatabaseBranchBaseConfig> {
+    pub(crate) fn base(&self) -> Option<&DatabaseBranchBaseConfig> {
         match self {
             Self::Mongodb(cfg) => Some(&cfg.base),
             Self::Mssql(cfg) => Some(&cfg.base),
             Self::Mysql(cfg) => Some(&cfg.base),
             Self::Pg(cfg) => Some(&cfg.base),
             Self::Redis(_) => None,
+        }
+    }
+
+    /// Names of target-pod env vars that the operator uses to redirect this branch's
+    /// connection. Locally overriding any of these (via `feature.env.override`) would
+    /// fight the operator's redirection, so [`LayerConfig::verify`] rejects such configs.
+    ///
+    /// [`LayerConfig::verify`]: crate::LayerConfig::verify
+    pub(crate) fn connection_env_keys(&self) -> Vec<&str> {
+        let mut keys = Vec::new();
+        if let Some(base) = self.base() {
+            base.connection.collect_env_keys(&mut keys);
+        }
+        if let Self::Redis(cfg) = self {
+            cfg.connection.collect_env_keys(&mut keys);
+        }
+        keys
+    }
+}
+
+impl ConnectionSource {
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            Self::Url { url } => url.collect_env_keys(out),
+            Self::FlatUrl { url, .. } => out.extend(url.iter().map(String::as_str)),
+            Self::Params(config) => config.params.collect_env_keys(out),
+        }
+    }
+}
+
+impl TargetEnvironmentVariableSource {
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            Self::Env { variable, .. } | Self::EnvFrom { variable, .. } => out.push(variable),
+            Self::Secret {
+                env_var_name: Some(name),
+                ..
+            } => out.push(name),
+            Self::Secret {
+                env_var_name: None, ..
+            } => {}
+        }
+    }
+}
+
+impl ConnectionParamsVars {
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        for sources in [
+            &self.host,
+            &self.port,
+            &self.user,
+            &self.password,
+            &self.database,
+        ] {
+            let Some(sources) = sources else { continue };
+            for source in &sources.0 {
+                match source {
+                    ParamSource::Variable(v) => out.push(v),
+                    ParamSource::Env { env_var_name, .. }
+                    | ParamSource::Pattern { env_var_name, .. } => out.push(env_var_name),
+                    ParamSource::Secret {
+                        env_var_name: Some(name),
+                        ..
+                    } => out.push(name),
+                    ParamSource::Secret {
+                        env_var_name: None, ..
+                    } => {}
+                }
+            }
         }
     }
 }

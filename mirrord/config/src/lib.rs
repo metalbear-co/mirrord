@@ -29,6 +29,7 @@ use base64::prelude::*;
 use config::{ConfigContext, ConfigError, MirrordConfig};
 use experimental::ExperimentalConfig;
 use feature::{
+    database_branches::DatabaseBranchConfig,
     env::mapper::EnvVarsRemapper,
     network::{
         dns::DnsFilterConfig,
@@ -879,6 +880,33 @@ impl LayerConfig {
         self.feature.network.outgoing.verify(context)?;
         self.feature.split_queues.verify(context)?;
         self.feature.db_branches.verify()?;
+
+        if let Some(overrides) = self.feature.env.r#override.as_ref()
+            && !overrides.is_empty()
+        {
+            let mut conflicts: Vec<&str> = self
+                .feature
+                .db_branches
+                .0
+                .iter()
+                .flat_map(DatabaseBranchConfig::connection_env_keys)
+                .filter(|key| overrides.contains_key(*key))
+                .collect();
+
+            if conflicts.is_empty().not() {
+                conflicts.sort();
+                conflicts.dedup();
+                return Err(ConfigError::Conflict(format!(
+                    "the following environment variables appear in both \
+                     `feature.env.override` and `feature.db_branches[].connection`: {}. \
+                     Database branching redirects these variables through the operator, \
+                     so overriding them locally would defeat the redirection. Remove \
+                     them from `feature.env.override`.",
+                    conflicts.join(", "),
+                )));
+            }
+        }
+
         self.feature.preview.verify()?;
 
         if self.feature.fs.readonly_file_buffer > READONLY_FILE_BUFFER_HARD_LIMIT {
