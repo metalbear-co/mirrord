@@ -361,29 +361,18 @@ impl TargetEnvironmentVariableSource {
 
 impl ConnectionParamsVars {
     fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
-        for sources in [
+        [
             &self.host,
             &self.port,
             &self.user,
             &self.password,
             &self.database,
-        ] {
-            let Some(sources) = sources else { continue };
-            for source in &sources.0 {
-                match source {
-                    ParamSource::Variable(v) => out.push(v),
-                    ParamSource::Env { env_var_name, .. }
-                    | ParamSource::Pattern { env_var_name, .. } => out.push(env_var_name),
-                    ParamSource::Secret {
-                        env_var_name: Some(name),
-                        ..
-                    } => out.push(name),
-                    ParamSource::Secret {
-                        env_var_name: None, ..
-                    } => {}
-                }
-            }
-        }
+        ]
+        .iter()
+        .map(|t| t.as_ref())
+        .flatten()
+        .flatten()
+        .for_each(|var| var.collect_env_keys(out));
     }
 }
 
@@ -644,6 +633,22 @@ impl ParamSource {
                 Some(env_var_name)
             }
             Self::Secret { .. } => None,
+        }
+    }
+
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            ParamSource::Variable(v) => out.push(v),
+            ParamSource::Env { env_var_name, .. } | ParamSource::Pattern { env_var_name, .. } => {
+                out.push(env_var_name)
+            }
+            ParamSource::Secret {
+                env_var_name: Some(name),
+                ..
+            } => out.push(name),
+            ParamSource::Secret {
+                env_var_name: None, ..
+            } => {}
         }
     }
 }

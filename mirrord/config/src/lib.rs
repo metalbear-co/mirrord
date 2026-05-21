@@ -881,6 +881,7 @@ impl LayerConfig {
         self.feature.split_queues.verify(context)?;
         self.feature.db_branches.verify()?;
 
+        // guard against env overrides conflicting with db branching keys
         if let Some(overrides) = self.feature.env.r#override.as_ref()
             && !overrides.is_empty()
         {
