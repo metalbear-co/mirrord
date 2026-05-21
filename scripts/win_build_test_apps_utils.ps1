@@ -196,3 +196,38 @@ function Build-RustApps {
         Pop-Location
     }
 }
+
+# Install the .NET SDK the cs-e2e app needs at test time. It runs as a
+# file-based program (`dotnet run Program.cs`), so `dotnet` must be on
+# PATH or mirrord's binary resolution fails with
+# `BinaryWhichError("dotnet", ...)`. `actions/setup-dotnet` can't be used
+# here: the self-hosted runner user has no write access to
+# `C:\Program Files\dotnet`. So fetch the official installer and drop the
+# SDK into a per-user dir, then prepend it to PATH (and to GITHUB_PATH so
+# the later test step sees it too).
+function Install-DotnetSdk {
+    param(
+        [string]$Channel = '10.0',
+        [string]$InstallDir = (Join-Path $env:USERPROFILE '.dotnet')
+    )
+
+    $dotnetExe = Join-Path $InstallDir 'dotnet.exe'
+    if (-not (Test-Path $dotnetExe)) {
+        Write-Host "Installing .NET SDK ($Channel) to $InstallDir"
+        $installer = Join-Path $env:TEMP 'dotnet-install.ps1'
+        Invoke-WebRequest -Uri 'https://dot.net/v1/dotnet-install.ps1' -OutFile $installer -UseBasicParsing
+        & $installer -Channel $Channel -InstallDir $InstallDir -NoPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "dotnet-install.ps1 failed with exit code $LASTEXITCODE"
+        }
+    } else {
+        Write-Host ".NET SDK already present at $InstallDir"
+    }
+
+    # Prepend to PATH for this process and persist for subsequent CI steps.
+    $env:PATH = "$InstallDir;$env:PATH"
+    if ($env:GITHUB_PATH) {
+        $InstallDir | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+    }
+    Write-Host "Using dotnet at $dotnetExe"
+}

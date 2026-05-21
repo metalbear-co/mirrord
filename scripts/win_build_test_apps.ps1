@@ -86,7 +86,8 @@ Build-GoE2EApps -TestsDir $testsDir
 Build-RepoGoApps -RepoRoot $repoRoot -OutputPrefix '25'
 
 # C# e2e apps are run straight from source with `dotnet run` (see
-# `Application::AsyncTextCsharp`), so there's no precompile step here --
-# the runner's .NET SDK builds them at test time, like the node/python apps.
+# `Application::AsyncTextCsharp`), so there's no precompile step -- but the
+# .NET SDK has to be on PATH for the test step to launch them.
+Install-DotnetSdk
 
 Write-Host 'Finished building test apps.'
