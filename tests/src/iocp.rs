@@ -21,11 +21,6 @@ mod iocp_tests {
         application::Application, kube_service::KubeService, services::basic_service,
     };
 
-    /// Default 30s timeout for every IOCP e2e test. The C# binary is a
-    /// single read. Bump only if a new test legitimately needs more
-    /// wallclock.
-    const IOCP_TIMEOUT: Duration = Duration::from_secs(30);
-
     /// Shared launcher: open the file mode override so the layer remotes
     /// `/app/test.txt`, `mirrord exec` the test binary, assert exit code 0.
     /// Each test that hangs surfaces via the per-test rstest timeout, not
@@ -59,11 +54,14 @@ mod iocp_tests {
     /// `FileStream` + overlapped IO + an IOCP managed by the runtime
     /// thread pool. The exe `memcmp`s the read content against a vendored
     /// copy of the expected Lorem Ipsum and exits non-zero on mismatch.
+    // 120s: the actual file IO is a single read, but the C# app runs from
+    // source via `dotnet run`, so the first invocation pays for a cold
+    // restore + build before the read happens -- 30s wasn't enough.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[trace]
     #[tokio::test]
-    #[timeout(IOCP_TIMEOUT)]
+    #[timeout(Duration::from_secs(120))]
     pub async fn asynctext_csharp(
         #[future]
         #[notrace]
