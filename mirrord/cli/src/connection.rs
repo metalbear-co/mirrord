@@ -219,7 +219,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
         }
         return Ok((
             AgentConnectInfo::Operator(connection.session),
-            connection.conn,
+            Connection::from_channel(connection.conn),
         ));
     }
 
@@ -258,8 +258,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
             .map_err(|error| {
                 CliError::friendlier_error_or_else(error, CliError::AgentConnectionFailed)
             })?,
-    )
-    .await;
+    );
 
     Ok((AgentConnectInfo::DirectKubernetes(agent_connect_info), conn))
 }

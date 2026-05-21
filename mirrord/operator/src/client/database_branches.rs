@@ -1355,6 +1355,7 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
+        let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         let spec = BranchDatabaseSpec {
             id: id.to_string(),
             database_name: config.base.name.clone(),
@@ -1365,6 +1366,7 @@ impl UnifiedBranchParams {
             postgres_options: None,
             mysql_options: Some(MysqlOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
+                iam_auth,
             }),
             mongodb_options: None,
             mssql_options: None,

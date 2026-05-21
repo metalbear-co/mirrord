@@ -56,3 +56,31 @@ export function trackEvent(event: string, properties?: Record<string, unknown>) 
   if (!initialized) return
   posthog.capture(event, { source: 'session-monitor', ...properties })
 }
+
+export type EventKind = 'user_action' | 'health'
+
+export function emitUserBlocked(
+  reason: string,
+  kind: EventKind,
+  properties: Record<string, unknown> = {},
+): void {
+  trackEvent('monitor_user_blocked', {
+    reason,
+    kind,
+    surface: 'monitor',
+    ...properties,
+  })
+}
+
+export function emitUserSucceeded(
+  reason: string,
+  kind: EventKind,
+  properties: Record<string, unknown> = {},
+): void {
+  trackEvent('monitor_user_succeeded', {
+    reason,
+    kind,
+    surface: 'monitor',
+    ...properties,
+  })
+}

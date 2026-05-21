@@ -794,6 +794,59 @@
         }
       ]
     },
+    "ConfigMount": {
+      "description": "A single file to project into the preview pod's container filesystem.\n\nEither `payload`+`type` (inline) or `from_file` (load from disk) must\nbe set; the two forms are mutually exclusive. After\n[`ConfigMount::resolve`] has been called, the result is guaranteed\nto have `payload` and `r#type` set and `from_file` cleared. This form\ngets sent to the operator.",
+      "type": "object",
+      "properties": {
+        "from_file": {
+          "description": "Local filesystem path to read the file from. The contents are loaded\nat session creation time and sent as `\"text\"` (verbatim) if valid\nUTF-8, otherwise base64-encoded and sent as `\"binary\"`. Mutually\nexclusive with `payload`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mount_at": {
+          "description": "Absolute path inside the preview pod's container where the file should\nappear. The surrounding directory's other contents\n(if any) are left untouched, only this one path is overlaid.",
+          "type": "string"
+        },
+        "payload": {
+          "description": "Inline file contents. Interpretation depends on `type`: for `\"text\"`,\nwritten to the file byte-for-byte; for `\"binary\"`, base64-decoded\nfirst. Mutually exclusive with `from_file`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "description": "How the `payload` payload should be interpreted when writing it to the\nfile. `\"text\"` for verbatim UTF-8 content, `\"binary\"` for\nbase64-encoded bytes. Required when `payload` is set; determined\nautomatically when `from_file` is used.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConfigMountType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "mount_at"
+      ]
+    },
+    "ConfigMountType": {
+      "description": "Encoding of a [`ConfigMount::payload`] payload.",
+      "oneOf": [
+        {
+          "description": "`payload` is written to the file verbatim. Used for\nhuman-readable config files (YAML, TOML, JSON, env files,\nshell scripts, ...).",
+          "type": "string",
+          "const": "text"
+        },
+        {
+          "description": "`payload` is base64-encoded and is decoded before being\nwritten. Used for binary files that can't safely live in a\nJSON string.",
+          "type": "string",
+          "const": "binary"
+        }
+      ]
+    },
     "ConnectionParamsConfig": {
       "description": "Connection parameters specified as individual environment variable names.\nThe `type` field is optional - when omitted, the operator auto-detects\nwhether the variable comes from `env` or `envFrom` on the target pod.",
       "type": "object",
@@ -1223,6 +1276,18 @@
               "default": 60,
               "minimum": 0
             },
+            "iam_auth": {
+              "title": "feature.db_branches[].iam_auth (type: mysql) {#feature-db_branches-mysql-iam_auth}",
+              "description": "IAM authentication for the source database.\nUse this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication\ninstead of password-based authentication.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/IamAuthConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "id": {
               "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
@@ -1611,7 +1676,7 @@
       "additionalProperties": false
     },
     "DnsFilterConfig": {
-      "description": "List of addresses/ports/subnets that should be resolved through either the remote pod or local\napp, depending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when DNS resolution is done from the remote pod (which\nis the default behavior when you enable remote DNS), or from the local app (default when\nyou have remote DNS disabled).\n\nTakes a list of values, such as:\n\n- Only queries for hostname `my-service-in-cluster` will go through the remote pod.\n\n```json\n{\n  \"remote\": [\"my-service-in-cluster\"]\n}\n```\n\n- Only queries for addresses in subnet `1.1.1.0/24` with service port `1337` will go through the\n  remote pod.\n\n```json\n{\n  \"remote\": [\"1.1.1.0/24:1337\"]\n}\n```\n\n- Only queries for hostname `google.com` with service port `1337` or `7331` will go through the\n  remote pod.\n\n```json\n{\n  \"remote\": [\"google.com:1337\", \"google.com:7331\"]\n}\n```\n\n- Only queries for `localhost` with service port `1337` will go through the local app.\n\n```json\n{\n  \"local\": [\"localhost:1337\"]\n}\n```\n\n- Only queries with service port `1337` or `7331` will go through the local app.\n\n```json\n{\n  \"local\": [\":1337\", \":7331\"]\n}\n```\n\nValid values follow this pattern: `[name|address|subnet/mask][:port]`.",
+      "description": "List of addresses/ports/subnets that should be resolved through either the remote pod or local\napp, depending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when DNS resolution is done from the remote pod (which\nis the default behavior when you enable remote DNS), or from the local app (default when\nyou have remote DNS disabled).\n\nTakes a list of values, such as:\n\n- Only queries for hostname `my-service-in-cluster` will go through the remote pod.\n\n```json\n{\n  \"remote\": [\"my-service-in-cluster\"]\n}\n```\n\n- Only queries for addresses in subnet `1.1.1.0/24` with service port `1337` will go through the\n  remote pod.\n\n```json\n{\n  \"remote\": [\"1.1.1.0/24:1337\"]\n}\n```\n\n- Only queries for hostname `google.com` with service port `1337` or `7331` will go through the\n  remote pod.\n\n```json\n{\n  \"remote\": [\"google.com:1337\", \"google.com:7331\"]\n}\n```\n\n- Only queries for `localhost` with service port `1337` will go through the local app.\n\n```json\n{\n  \"local\": [\"localhost:1337\"]\n}\n```\n\n- Only queries with service port `1337` or `7331` will go through the local app.\n\n```json\n{\n  \"local\": [\":1337\", \":7331\"]\n}\n```\n\nValid values follow this pattern: `[name|address|subnet/mask][:port]`.\n\nHost names listed in\n[`feature.network.outgoing.filter`](super::outgoing::OutgoingFilterConfig) are automatically\nappended here on the matching side, so DNS resolution stays on the same side as the\nconnection (e.g. `outgoing.filter.local = [\"some.domain.com\"]` implies\n`dns.filter.local = [\"some.domain.com\"]`).",
       "oneOf": [
         {
           "description": "When filters are specified under `remote`, matching DNS queries will go through the remote\npod, everything else will go through local.",
@@ -3036,7 +3101,7 @@
       "additionalProperties": false
     },
     "OutgoingFilterConfig": {
-      "description": "List of addresses/ports/subnets that should be sent through either the remote pod or local app,\ndepending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when outgoing traffic is sent from the remote pod (which\nis the default behavior when you enable outgoing traffic), or from the local app (default when\nyou have outgoing traffic disabled).\n\nTakes a list of values, such as:\n\n- Only UDP traffic on subnet `1.1.1.0/24` on port 1337 will go through the remote pod.\n\n```json\n{\n  \"remote\": [\"udp://1.1.1.0/24:1337\"]\n}\n```\n\n- Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331` will go\n  through the remote pod.\n```json\n{\n  \"remote\": [\"google.com:1337\", \"google.com:7331\"]\n}\n```\n\n- Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will be\n  emitted remotely in the cluster.\n\n```json\n{\n  \"local\": [\"tcp://localhost:1337\"]\n}\n```\n\n- Only outgoing traffic on port `1337` and `7331` will go through the local app.\n```json\n{\n  \"local\": [\":1337\", \":7331\"]\n}\n```\n\nValid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.",
+      "description": "List of addresses/ports/subnets that should be sent through either the remote pod or local app,\ndepending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when outgoing traffic is sent from the remote pod (which\nis the default behavior when you enable outgoing traffic), or from the local app (default when\nyou have outgoing traffic disabled).\n\nTakes a list of values, such as:\n\n- Only UDP traffic on subnet `1.1.1.0/24` on port 1337 will go through the remote pod.\n\n```json\n{\n  \"remote\": [\"udp://1.1.1.0/24:1337\"]\n}\n```\n\n- Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331` will go\n  through the remote pod.\n```json\n{\n  \"remote\": [\"google.com:1337\", \"google.com:7331\"]\n}\n```\n\n- Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will be\n  emitted remotely in the cluster.\n\n```json\n{\n  \"local\": [\"tcp://localhost:1337\"]\n}\n```\n\n- Only outgoing traffic on port `1337` and `7331` will go through the local app.\n```json\n{\n  \"local\": [\":1337\", \":7331\"]\n}\n```\n\nValid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.\n\nHost names listed here are automatically mirrored into\n[`feature.network.dns.filter`](super::dns::DnsFilterConfig) on the matching side, so the\nname is resolved on the side that handles the connection. For example,\n`{ \"local\": [\"some.domain.com\"] }` implies `dns.filter.local = [\"some.domain.com\"]` even if\n`dns.filter` is otherwise unset.",
       "oneOf": [
         {
           "description": "When filters are specified under `remote`, matching traffic will go through the remote pod,\neverything else will go through local.",
@@ -3152,6 +3217,17 @@
       "description": "Controls the lifetime and creation behavior of preview sessions.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"image\": \"my-registry/my-app:latest\",\n      \"ttl_mins\": 60,\n      \"creation_timeout_secs\": 60\n    }\n  }\n}\n```",
       "type": "object",
       "properties": {
+        "config_mounts": {
+          "title": "feature.preview.config_mounts {#feature-preview-config_mounts}",
+          "description": "Files to mount into the preview pod at session start.\n\nEach entry projects a single file at an absolute path inside the\ncontainer's filesystem, without shadowing the surrounding directory's\nother contents. Useful for overriding individual config files\n(`/etc/app/config.yaml`, `/etc/nginx/conf.d/custom.conf`, ...) without\nrebuilding the image.\n\nFiles are read once at session creation and never refreshed — re-run\n`mirrord preview start` with the same `key` to change them.\n\n`config_mounts` is not a confidentiality boundary: the `payload` is\nstored on the `PreviewSession` resource and is visible to anyone with\n`get` permission on it. Do not put credentials or secrets here.\n\nEach entry sources its content one of two ways:\n- **Inline:** set `type` (`\"text\"` or `\"binary\"`) and `payload` directly.\n- **From file:** set `from_file` to a path on the local filesystem. The file is read at\n  session creation time; valid UTF-8 contents are sent as `\"text\"`, anything else is\n  base64-encoded and sent as `\"binary\"`. The local path is not transmitted to the operator.\n\n`payload`/`type` and `from_file` are mutually exclusive on a single entry.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"config_mounts\": [\n        {\n          \"mount_at\": \"/etc/app/config.yaml\",\n          \"type\": \"text\",\n          \"payload\": \"server:\\n  listen: 8080\\n\"\n        },\n        {\n          \"mount_at\": \"/usr/local/bin/probe\",\n          \"from_file\": \"./build/probe\"\n        }\n      ]\n    }\n  }\n}\n```\n\n##### Implementation\n\nEach session creates one `ConfigMap` owned by the `PreviewSession`,\nholding all mount payloads. The ConfigMap is mounted into the preview pod\nwith one per-file `subPath` bind per entry, so each mount overlays a\nsingle path without shadowing the surrounding directory. The ConfigMap is\ngarbage-collected automatically when the session ends.\n\nBecause both the `PreviewSession` resource and the generated `ConfigMap`\nlive in etcd, the **combined size of all `payload` payloads in a single\nsession is bound by Kubernetes' ~1 MiB per-object limit**. For `\"text\"`\npayloads that's roughly 1 MiB of content; for `\"binary\"`, base64\ninflates the encoded form by ~33%, leaving roughly 750 KiB of raw bytes.\nExceeding the limit causes the apiserver to reject the session at\ncreation time.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ConfigMount"
+          }
+        },
         "creation_timeout_secs": {
           "title": "feature.preview.creation_timeout_secs {#feature-preview-creation_timeout_secs}",
           "description": "How long (in seconds) the CLI waits for the preview session to become ready.\nIf the session hasn't reached `Ready` within this time, the CLI deletes it.",
