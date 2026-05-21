@@ -369,8 +369,7 @@ impl ConnectionParamsVars {
             &self.database,
         ]
         .iter()
-        .map(|t| t.as_ref())
-        .flatten()
+        .filter_map(|t| t.as_ref())
         .flatten()
         .for_each(|var| var.collect_env_keys(out));
     }
