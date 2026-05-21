@@ -2073,6 +2073,69 @@ mod tests {
     }
 
     #[test]
+    fn db_branches_env_override_conflict_is_rejected() {
+        let config = ConfigType::Json.parse(
+            r#"
+            {
+                "feature": {
+                    "env": {
+                        "override": { "DB_URL": "postgres://localhost/local" }
+                    },
+                    "db_branches": [
+                        {
+                            "type": "pg",
+                            "connection": { "url": { "type": "env", "variable": "DB_URL" } }
+                        }
+                    ]
+                }
+            }
+            "#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        let error = resolved
+            .verify(&mut context)
+            .expect_err("overlapping env.override and db_branches keys should be rejected");
+
+        assert!(
+            matches!(&error, ConfigError::Conflict(msg) if msg.contains("DB_URL")),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn db_branches_without_env_override_overlap_pass_verification() {
+        let config = ConfigType::Json.parse(
+            r#"
+            {
+                "feature": {
+                    "env": {
+                        "override": { "OTHER_VAR": "value" }
+                    },
+                    "db_branches": [
+                        {
+                            "type": "pg",
+                            "connection": { "url": { "type": "env", "variable": "DB_URL" } }
+                        }
+                    ]
+                }
+            }
+            "#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify(&mut context)
+            .expect("non-overlapping keys should verify");
+    }
+
+    #[test]
     fn empty_http_filter_strings_are_rejected() {
         let config = ConfigType::Json.parse(
             r#"

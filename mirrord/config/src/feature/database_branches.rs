@@ -1136,4 +1136,90 @@ mod tests {
         let base = base_with_ttl(Some(120), Some(2));
         assert!(matches!(base.verify(), Err(ConfigError::Conflict(_))));
     }
+
+    fn pg_branch_with_connection(connection: ConnectionSource) -> DatabaseBranchConfig {
+        DatabaseBranchConfig::Pg(Box::new(pg::PgBranchConfig {
+            base: DatabaseBranchBaseConfig {
+                id: None,
+                name: None,
+                ttl_secs: None,
+                ttl_mins: None,
+                creation_timeout_secs: 60,
+                version: None,
+                connection,
+            },
+            copy: Default::default(),
+            iam_auth: None,
+        }))
+    }
+
+    #[test]
+    fn connection_env_keys_url_variant() {
+        let branch = pg_branch_with_connection(ConnectionSource::Url {
+            url: TargetEnvironmentVariableSource::Env {
+                container: None,
+                variable: "DB_URL".to_owned(),
+                value: None,
+            },
+        });
+        assert_eq!(branch.connection_env_keys(), vec!["DB_URL"]);
+    }
+
+    #[test]
+    fn connection_env_keys_flat_url_variant() {
+        let branch = pg_branch_with_connection(ConnectionSource::FlatUrl {
+            source_type: Some(ConnectionSourceType::Env),
+            url: vec!["WRITE_URL".to_owned(), "READ_URL".to_owned()].into(),
+        });
+        assert_eq!(branch.connection_env_keys(), vec!["WRITE_URL", "READ_URL"]);
+    }
+
+    #[test]
+    fn connection_env_keys_params_variant_skips_secret_without_env_name() {
+        let branch =
+            pg_branch_with_connection(ConnectionSource::Params(Box::new(ConnectionParamsConfig {
+                source_type: None,
+                params: ConnectionParamsVars {
+                    host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
+                    port: None,
+                    user: Some(ParamSource::Variable("DB_USER".to_owned()).into()),
+                    password: Some(
+                        ParamSource::Secret {
+                            name: "rds".to_owned(),
+                            key: "password".to_owned(),
+                            env_var_name: None,
+                        }
+                        .into(),
+                    ),
+                    database: Some(ParamSource::Variable("DB_NAME".to_owned()).into()),
+                },
+            })));
+        assert_eq!(
+            branch.connection_env_keys(),
+            vec!["DB_HOST", "DB_USER", "DB_NAME"]
+        );
+    }
+
+    #[test]
+    fn connection_env_keys_redis() {
+        let branch = DatabaseBranchConfig::Redis(Box::new(redis::RedisBranchConfig {
+            id: None,
+            location: Default::default(),
+            connection: redis::RedisConnectionConfig {
+                url: Some(redis::RedisValueSource::Env(redis::RedisEnvSource {
+                    source_type: redis::RedisEnvSourceType::Env,
+                    variable: "REDIS_URL".to_owned(),
+                    container: None,
+                })),
+                host: None,
+                port: None,
+                password: Some(redis::RedisValueSource::Direct("hunter2".to_owned())),
+                username: None,
+                database: None,
+                tls: None,
+            },
+            local: Default::default(),
+        }));
+        assert_eq!(branch.connection_env_keys(), vec!["REDIS_URL"]);
+    }
 }
