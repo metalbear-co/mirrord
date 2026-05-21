@@ -26,6 +26,10 @@ build/
 *.test_app
 mirrord/layer-tests/tests/apps/*/target
 
+### C# (dotnet) test apps ###
+/tests/cs-e2e/**/bin/
+/tests/cs-e2e/**/obj/
+
 ### VSCode ###
 vscode-ext/bin
 .vscode/settings.json
