@@ -228,7 +228,6 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-tungstenite = { version = "0.24" }
 tokio-util = { version = "0.7", features = ["net", "codec"] }
 toml = "1.1.2"
-toml = "0.8"
 tokio-seqpacket = { version = "0.8.2" }
 tonic = "0.12"
 tower = "0.5"
