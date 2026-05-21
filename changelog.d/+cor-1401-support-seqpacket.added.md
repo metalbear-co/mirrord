@@ -1,1 +1,1 @@
-Add support for the unix socket of type `SOCK_SEQPACKET`.
+Add support for Unix sockets of type `SOCK_SEQPACKET`.
