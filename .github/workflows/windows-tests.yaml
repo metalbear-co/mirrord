@@ -71,6 +71,15 @@ jobs:
           $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
           & "$ScriptsDir\win_build_test_apps.ps1"
 
+      # The cs-e2e app runs from source as a file-based program
+      # (`dotnet run Program.cs`), so the runner needs the .NET 10 SDK on
+      # PATH -- otherwise mirrord's binary resolution fails with
+      # `BinaryWhichError("dotnet", ...)` before the app ever launches.
+      - name: Setup .NET 10 SDK (cs-e2e dotnet run)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
       - name: Ensure Python test deps (flask/uvicorn/fastapi)
         run: |
           $ErrorActionPreference = "Stop"
