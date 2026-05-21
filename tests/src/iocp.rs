@@ -29,9 +29,18 @@ mod iocp_tests {
         // Force the layer to treat /app/test.txt as a remote read regardless
         // of the platform default (MIRRORD_FILE_MODE=local on Windows per
         // `mirrord/layer-tests/tests/common/mod.rs:718`).
+        //
+        // Keep DNS and outgoing traffic local: the C# app runs from source via
+        // `dotnet run`, whose build-time NuGet restore must reach the real
+        // internet. Routing it through the pod fails restore with `NU1301:
+        // Unable to load the service index for source api.nuget.org`. Only the
+        // `/app/test.txt` read needs to be remote; everything else stays local.
         let env = vec![
             ("MIRRORD_FILE_MODE", "localwithoverrides"),
             ("MIRRORD_FILE_READ_ONLY_PATTERN", "/app/test.txt"),
+            ("MIRRORD_REMOTE_DNS", "false"),
+            ("MIRRORD_TCP_OUTGOING", "false"),
+            ("MIRRORD_UDP_OUTGOING", "false"),
         ];
         let mut process = app
             .run(
