@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use futures::{StreamExt, stream::FuturesOrdered};
+use futures::{StreamExt, TryFutureExt, stream::FuturesOrdered};
 use hickory_resolver::{
     Hosts, Resolver,
     config::{LookupIpStrategy, ServerOrderingStrategy},
@@ -194,8 +194,10 @@ impl DnsWorker {
             // For example, it rejects names containing `_` character.
             let host = Name::from_str_relaxed(request.node)
                 .map_err(|error| format!("node name rejected by hickory: {error:?}"))
-                .map_err(NetError::Msg)?;
-            resolver.lookup_ip(host).await
+                .map_err(NetError::Msg);
+            std::future::ready(host)
+                .and_then(|host| resolver.lookup_ip(host))
+                .await
         };
 
         let lookup = result
