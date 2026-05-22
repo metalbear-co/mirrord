@@ -447,7 +447,7 @@ mod test {
     use rstest::rstest;
 
     /// Verifies that [`Name::from_str_relaxed`] behaves as expected.
-    /// 
+    ///
     /// This includes accepting underscores in names.
     #[rstest]
     #[case("google.com")]
