@@ -12,7 +12,7 @@ use hickory_resolver::{
     config::{LookupIpStrategy, ServerOrderingStrategy},
     lookup_ip::LookupIp,
     net::{DnsError, NetError, runtime::TokioRuntimeProvider},
-    proto::rr::Name,
+    proto::rr::{IntoName, Name},
     system_conf::parse_resolv_conf,
 };
 use mirrord_agent_env::envs;
@@ -179,18 +179,26 @@ impl DnsWorker {
 
             resolver
         };
+        let resolver = resolver
+            .inspect_err(|error| tracing::error!(%error, "Failed to build a DNS resolver"))?;
 
-        // hickory is too eager when validating hostnames.
-        // This is the way to explicitly request a relaxed parsing
-        // (e.g. with `_` character allowed).
-        let host = Name::from_str_relaxed(request.node)
-            .map_err(|error| format!("node name rejected by hickory: {error:?}"))
-            .map_err(NetError::Msg)?;
+        let result = if request.node.to_ip().is_some() {
+            // If `request.node` is an IP address,
+            // we don't want to convert it to `Name`.
+            // `IntoName::to_ip` implementation of `Name` always returns `None`.
+            resolver.lookup_ip(request.node).await
+        } else {
+            // If `request.node` is not an IP address,
+            // we convert it to `Name` using relaxed parsing mode,
+            // because hickory is too eager when validating hostnames.
+            // For example, it rejects names containing `_` character.
+            let host = Name::from_str_relaxed(request.node)
+                .map_err(|error| format!("node name rejected by hickory: {error:?}"))
+                .map_err(NetError::Msg)?;
+            resolver.lookup_ip(host).await
+        };
 
-        let lookup = resolver
-            .inspect_err(|error| tracing::error!(%error, "Failed to build a DNS resolver"))?
-            .lookup_ip(host)
-            .await
+        let lookup = result
             .inspect(|lookup| tracing::trace!(?lookup, "DNS lookup finished"))
             .inspect_err(|error| tracing::debug!(%error, "DNS lookup failed"))?
             .convert();
@@ -440,7 +448,6 @@ mod test {
     #[case("google.com")]
     #[case("UPPERCASE-IS-FINE.mydomain.com")]
     #[case("underscore_is_fine.mydomain.com")]
-    #[case("0.0.0.0")]
     #[test]
     fn parse_dns_name_with_hickory(#[case] node_name: &str) {
         Name::from_str_relaxed(node_name).unwrap();
