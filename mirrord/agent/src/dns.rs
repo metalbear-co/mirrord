@@ -446,6 +446,9 @@ mod test {
     use hickory_resolver::proto::rr::Name;
     use rstest::rstest;
 
+    /// Verifies that [`Name::from_str_relaxed`] behaves as expected.
+    /// 
+    /// This includes accepting underscores in names.
     #[rstest]
     #[case("google.com")]
     #[case("UPPERCASE-IS-FINE.mydomain.com")]
