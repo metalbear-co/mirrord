@@ -30,7 +30,7 @@ use mirrord_protocol::{
 use rand::distr::{Alphanumeric, SampleString};
 #[cfg(not(target_os = "windows"))]
 use tokio::net::{UnixListener, UnixStream};
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 use tokio_seqpacket::{UnixSeqpacket, UnixSeqpacketListener};
 
 /// Trait for [`NetProtocol`] that handles differences in [`mirrord_protocol::outgoing`] between
@@ -157,8 +157,19 @@ impl NetProtocolExt for NetProtocol {
                     panic!("layer requested outgoing datagrams over unix sockets");
                 }
                 Self::Seqpacket => {
-                    let path = PreparedSocket::generate_uds_path().await?;
-                    PreparedSocket::UnixSeqpacketListener(UnixSeqpacketListener::bind(path)?)
+                    #[cfg(all(unix, not(target_os = "macos")))]
+                    {
+                        let path = PreparedSocket::generate_uds_path().await?;
+                        PreparedSocket::UnixSeqpacketListener(UnixSeqpacketListener::bind(path)?)
+                    }
+
+                    #[cfg(any(not(unix), target_os = "macos"))]
+                    {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Unsupported,
+                            "seqpacket outgoing is not supported on this platform",
+                        ));
+                    }
                 }
             },
             #[cfg(target_os = "windows")]
@@ -182,7 +193,7 @@ pub enum PreparedSocket {
     TcpListener(TcpListener),
     #[cfg(unix)]
     UnixListener(UnixListener),
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "macos")))]
     UnixSeqpacketListener(UnixSeqpacketListener),
 }
 
@@ -213,7 +224,7 @@ impl PreparedSocket {
                 let pathname = addr.as_pathname().unwrap().to_path_buf();
                 SocketAddress::Unix(UnixAddr::Pathname(pathname))
             }
-            #[cfg(unix)]
+            #[cfg(all(unix, not(target_os = "macos")))]
             Self::UnixSeqpacketListener(listener) => {
                 SocketAddress::Unix(UnixAddr::Pathname(listener.local_addr()?))
             }
@@ -236,7 +247,7 @@ impl PreparedSocket {
                 let (stream, _) = listener.accept().await?;
                 (InnerConnectedSocket::UnixStream(stream), true)
             }
-            #[cfg(unix)]
+            #[cfg(all(unix, not(target_os = "macos")))]
             Self::UnixSeqpacketListener(mut listener) => {
                 let stream = listener.accept().await?;
                 (InnerConnectedSocket::UnixSeqpacket(stream), true)
@@ -256,7 +267,7 @@ enum InnerConnectedSocket {
     TcpStream(TcpStream),
     #[cfg(unix)]
     UnixStream(UnixStream),
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "macos")))]
     UnixSeqpacket(UnixSeqpacket),
 }
 
@@ -284,7 +295,7 @@ impl ConnectedSocket {
             InnerConnectedSocket::TcpStream(stream) => stream.write_all(bytes).await,
             #[cfg(unix)]
             InnerConnectedSocket::UnixStream(stream) => stream.write_all(bytes).await,
-            #[cfg(unix)]
+            #[cfg(all(unix, not(target_os = "macos")))]
             InnerConnectedSocket::UnixSeqpacket(stream) => {
                 let bytes_sent = stream.send(bytes).await?;
 
@@ -325,7 +336,7 @@ impl ConnectedSocket {
                 self.buffer.clear();
                 Ok(bytes)
             }
-            #[cfg(unix)]
+            #[cfg(all(unix, not(target_os = "macos")))]
             InnerConnectedSocket::UnixSeqpacket(stream) => {
                 self.buffer.resize(self.buffer.capacity(), 0);
                 let bytes_read = stream.recv(&mut self.buffer).await?;
@@ -347,7 +358,7 @@ impl ConnectedSocket {
             InnerConnectedSocket::TcpStream(stream) => stream.shutdown().await,
             #[cfg(unix)]
             InnerConnectedSocket::UnixStream(stream) => stream.shutdown().await,
-            #[cfg(unix)]
+            #[cfg(all(unix, not(target_os = "macos")))]
             InnerConnectedSocket::UnixSeqpacket(stream) => {
                 stream.shutdown(std::net::Shutdown::Both)
             }

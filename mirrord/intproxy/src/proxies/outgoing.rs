@@ -444,12 +444,17 @@ impl OutgoingProxy {
             .protocol_version
             .as_ref()
             .is_some_and(|version| OUTGOING_CONNECT_V2.matches(version));
+
+        #[cfg(target_os = "linux")]
         let supports_seqpacket = self
             .protocol_version
             .as_ref()
             .is_some_and(|version| OUTGOING_SEQPACKET.matches(version));
 
-        if request.protocol == NetProtocol::Seqpacket && supports_seqpacket.not() {
+        #[cfg(not(target_os = "linux"))]
+        let supports_seqpacket_interceptor = false;
+
+        if (request.protocol == NetProtocol::Seqpacket) && supports_seqpacket.not() {
             message_bus
                 .send(ToLayer {
                     message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(

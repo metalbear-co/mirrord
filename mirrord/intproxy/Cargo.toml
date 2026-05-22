@@ -53,6 +53,8 @@ axum.workspace = true
 serde_json.workspace = true
 home.workspace = true
 mirrord-session-monitor-protocol.workspace = true
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 tokio-seqpacket.workspace = true
 
 [dev-dependencies]
