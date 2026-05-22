@@ -248,7 +248,13 @@ function Build-CsE2EApps {
         return
     }
 
-    $apps = Get-ChildItem -Path $csRoot -Recurse -Filter '*.cs'
+    # Match each app's source `.cs` but skip generated files under bin/obj.
+    # @(...) so a single match is still an array -- under `Set-StrictMode
+    # -Version Latest` a scalar FileInfo has no `.Count`.
+    $apps = @(
+        Get-ChildItem -Path $csRoot -Recurse -Filter '*.cs' |
+            Where-Object { $_.FullName -notmatch '[\\/](bin|obj)[\\/]' }
+    )
     if ($apps.Count -eq 0) {
         Write-Host "No .cs apps found under $csRoot; nothing to build."
         return
