@@ -23,6 +23,7 @@ import ALL_API_ROUTES from "../../lib/routes";
 interface Target {
   target_path: string;
   target_namespace: string;
+  containers: string[];
   detected_ports: number[];
 }
 
@@ -40,19 +41,28 @@ const TargetTab = ({
   const [namespace, setNamespace] = useState<string>("default");
   const [targetType, setTargetType] = useState<string>("all");
   const [targetSearchText, setTargetSearchText] = useState<string>("");
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerSearchText, setContainerSearchText] = useState<string>("");
+  const [targetDropdownOpen, setTargetDropdownOpen] = useState(false);
+  const [containerDropdownOpen, setContainerDropdownOpen] = useState(false);
+  const targetDropdownRef = useRef<HTMLDivElement>(null);
+  const containerDropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
   useEffect(() => {
-    if (!dropdownOpen) return;
+    if (!targetDropdownOpen && !containerDropdownOpen) return;
 
     const handleClickOutside = (event: MouseEvent) => {
       if (
-        containerRef.current &&
-        !containerRef.current.contains(event.target as Node)
+        targetDropdownRef.current &&
+        !targetDropdownRef.current.contains(event.target as Node)
       ) {
-        setDropdownOpen(false);
+        setTargetDropdownOpen(false);
+      }
+      if (
+        containerDropdownRef.current &&
+        !containerDropdownRef.current.contains(event.target as Node)
+      ) {
+        setContainerDropdownOpen(false);
       }
     };
 
@@ -65,7 +75,7 @@ const TargetTab = ({
       clearTimeout(timeoutId);
       document.removeEventListener("click", handleClickOutside);
     };
-  }, [dropdownOpen]);
+  }, [targetDropdownOpen, containerDropdownOpen]);
 
   const clusterDetailsQuery = useQuery<ClusterDetails>({
     staleTime: 30 * 1000,
@@ -106,21 +116,50 @@ const TargetTab = ({
       : (targetsQuery.data ?? []);
 
   const selectedTarget = readCurrentTargetDetails(config);
+  const selectedTargetPath = selectedTarget.name
+    ? `${selectedTarget.type}/${selectedTarget.name}`
+    : undefined;
+  const selectedTargetInfo = availableTargets.find(
+    (target) => target.target_path === selectedTargetPath,
+  );
+  const availableContainers = selectedTargetInfo?.containers ?? [];
+  const selectedContainer = selectedTarget.container ?? availableContainers[0];
 
   const handleTargetSelect = (target: Target) => {
+    const defaultContainer = target.containers[0];
     const updated = updateConfigTarget(
       config,
       target.target_path,
       target.target_namespace,
+      defaultContainer,
     );
     setTargetPorts(target.detected_ports);
     const updatedPorts = updateConfigPorts(target.detected_ports, updated);
     setConfig(updatedPorts);
-    setDropdownOpen(false);
+    setContainerSearchText("");
+    setTargetDropdownOpen(false);
+  };
+
+  const handleContainerSelect = (container: string) => {
+    if (!selectedTargetPath) {
+      return;
+    }
+
+    const updated = updateConfigTarget(
+      config,
+      selectedTargetPath,
+      selectedTargetInfo?.target_namespace ?? namespace,
+      container,
+    );
+    setConfig(updated);
+    setContainerDropdownOpen(false);
   };
 
   const filteredTargets = availableTargets.filter((target) =>
     target.target_path.toLowerCase().includes(targetSearchText.toLowerCase()),
+  );
+  const filteredContainers = availableContainers.filter((container) =>
+    container.toLowerCase().includes(containerSearchText.toLowerCase()),
   );
 
   return (
@@ -186,11 +225,11 @@ const TargetTab = ({
           <Label htmlFor="target-search" className="text-sm font-medium">
             Target
           </Label>
-          <div className="relative" ref={containerRef}>
+          <div className="relative" ref={targetDropdownRef}>
             <Button
               variant="outline"
               className="w-full h-10 justify-between font-normal hover:bg-[var(--muted)]/50"
-              onClick={() => setDropdownOpen(!dropdownOpen)}
+              onClick={() => setTargetDropdownOpen(!targetDropdownOpen)}
               type="button"
             >
               {selectedTarget.name ? (
@@ -209,11 +248,11 @@ const TargetTab = ({
                 </span>
               )}
               <ChevronDown
-                className={`h-4 w-4 text-[var(--muted-foreground)] transition-transform duration-200 ${dropdownOpen ? "rotate-180" : ""}`}
+                className={`h-4 w-4 text-[var(--muted-foreground)] transition-transform duration-200 ${targetDropdownOpen ? "rotate-180" : ""}`}
               />
             </Button>
 
-            {dropdownOpen && (
+            {targetDropdownOpen && (
               <div className="absolute z-50 w-full mt-2 rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-lg overflow-hidden animate-scale-in">
                 <div className="p-3 border-b border-[var(--border)] bg-[var(--muted)]/30">
                   <div className="relative">
@@ -246,8 +285,7 @@ const TargetTab = ({
                     <div className="p-2">
                       {filteredTargets.map((target) => {
                         const isSelected =
-                          selectedTarget.name ===
-                          target.target_path.split("/")[1];
+                          selectedTargetPath === target.target_path;
                         return (
                           <div
                             key={`${target.target_namespace}/${target.target_path}`}
@@ -294,6 +332,89 @@ const TargetTab = ({
             </p>
           )}
         </div>
+
+        {selectedTarget.name && (
+          <div className="space-y-2">
+            <Label htmlFor="container-search" className="text-sm font-medium">
+              Container
+            </Label>
+            <div className="relative" ref={containerDropdownRef}>
+              <Button
+                variant="outline"
+                className="w-full h-10 justify-between font-normal hover:bg-[var(--muted)]/50 disabled:opacity-70"
+                onClick={() => setContainerDropdownOpen(!containerDropdownOpen)}
+                type="button"
+                disabled={availableContainers.length === 0}
+              >
+                {selectedContainer ? (
+                  <span className="font-medium">{selectedContainer}</span>
+                ) : (
+                  <span className="text-[var(--muted-foreground)]">
+                    No containers found
+                  </span>
+                )}
+                <ChevronDown
+                  className={`h-4 w-4 text-[var(--muted-foreground)] transition-transform duration-200 ${containerDropdownOpen ? "rotate-180" : ""}`}
+                />
+              </Button>
+
+              {containerDropdownOpen && (
+                <div className="absolute z-50 w-full mt-2 rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-lg overflow-hidden animate-scale-in">
+                  <div className="p-3 border-b border-[var(--border)] bg-[var(--muted)]/30">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--muted-foreground)]" />
+                      <Input
+                        placeholder="Search containers..."
+                        className="pl-9 h-9 bg-[var(--card)]"
+                        value={containerSearchText}
+                        onChange={(e) => setContainerSearchText(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto">
+                    {filteredContainers.length === 0 ? (
+                      <div className="p-6 text-center bg-[var(--muted)]/20 m-2 rounded-lg">
+                        <p className="text-sm text-[var(--muted-foreground)]">
+                          No containers found
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="p-2">
+                        {filteredContainers.map((container) => {
+                          const isSelected = selectedContainer === container;
+                          return (
+                            <div
+                              key={`${selectedTargetPath}/${container}`}
+                              className={`
+                                w-full flex items-center justify-between p-3 rounded-lg transition-all duration-150 cursor-pointer
+                                ${
+                                  isSelected
+                                    ? "bg-primary/10 border border-primary/20"
+                                    : "hover:bg-[var(--muted)]/50"
+                                }
+                              `}
+                              onClick={() => handleContainerSelect(container)}
+                            >
+                              <span
+                                className={`font-medium ${isSelected ? "text-primary" : "text-[var(--foreground)]"}`}
+                              >
+                                {container}
+                              </span>
+                              {isSelected && (
+                                <Check className="h-4 w-4 text-primary" />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

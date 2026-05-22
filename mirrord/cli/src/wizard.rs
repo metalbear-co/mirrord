@@ -41,7 +41,7 @@ use itertools::Itertools;
 use k8s_openapi::api::{
     apps::v1::{Deployment, ReplicaSet, StatefulSet},
     batch::v1::{CronJob, Job},
-    core::v1::{Namespace, Pod, Service},
+    core::v1::{Container, Namespace, Pod, Service},
 };
 use kube::{Client, client::ClientBuilder, runtime::reflector::Lookup};
 use mirrord_analytics::{AnalyticsReporter, ExecutionKind};
@@ -214,6 +214,8 @@ struct TargetInfo {
     target_path: String,
     /// ### Shown in the wizard's `Target` tab
     target_namespace: String,
+    /// ### Shown in the wizard's `Target` tab
+    containers: Vec<String>,
     /// ### Shown in the wizard's `Network` tab
     ///
     /// Ports exposed by the target's Pod or Pods that we have auto-detected.
@@ -228,14 +230,31 @@ impl TargetInfo {
         target_type: TargetType,
         target_name: String,
         target_namespace: String,
+        containers: Vec<String>,
         detected_ports: Vec<u16>,
     ) -> Self {
         Self {
             target_path: format!("{target_type}/{target_name}"),
             target_namespace,
+            containers,
             detected_ports,
         }
     }
+}
+
+fn container_names(containers: &[Container]) -> Vec<String> {
+    containers
+        .iter()
+        .map(|container| container.name.clone())
+        .collect()
+}
+
+fn detected_ports(containers: &[Container]) -> Vec<u16> {
+    containers
+        .iter()
+        .flat_map(|container| container.ports.clone().unwrap_or_default())
+        .map(|port| port.container_port.unsigned_abs() as u16)
+        .collect()
 }
 
 #[derive(Debug, Deserialize)]
@@ -392,10 +411,12 @@ async fn into_info<T: IntoTargetInfo>(
             |TargetInfo {
                  target_path,
                  target_namespace,
+                 containers,
                  detected_ports,
              }| TargetInfo {
                 target_path,
                 target_namespace,
+                containers: containers.into_iter().unique().collect(),
                 detected_ports: detected_ports.into_iter().unique().collect(),
             },
         )
@@ -424,17 +445,14 @@ impl IntoTargetInfo for Pod {
         fn into_info_option(pod: Pod) -> Option<TargetInfo> {
             let target_name = pod.name()?.to_string();
             let target_namespace = pod.namespace()?.to_string();
-            let detected_ports = pod
-                .spec?
-                .containers
-                .iter()
-                .flat_map(|container| container.ports.clone().unwrap_or_default())
-                .map(|port| port.container_port.unsigned_abs() as u16)
-                .collect();
+            let containers = pod.spec?.containers;
+            let detected_ports = detected_ports(&containers);
+            let containers = container_names(&containers);
             Some(TargetInfo::new(
                 TargetType::Pod,
                 target_name,
                 target_namespace,
+                containers,
                 detected_ports,
             ))
         }
@@ -451,19 +469,14 @@ impl IntoTargetInfo for Deployment {
         fn into_info_option(deployment: Deployment) -> Option<TargetInfo> {
             let target_name = deployment.name()?.to_string();
             let target_namespace = deployment.namespace()?.to_string();
-            let detected_ports = deployment
-                .spec?
-                .template
-                .spec?
-                .containers
-                .iter()
-                .flat_map(|container| container.ports.clone().unwrap_or_default())
-                .map(|port| port.container_port.unsigned_abs() as u16)
-                .collect();
+            let containers = deployment.spec?.template.spec?.containers;
+            let detected_ports = detected_ports(&containers);
+            let containers = container_names(&containers);
             Some(TargetInfo::new(
                 TargetType::Deployment,
                 target_name,
                 target_namespace,
+                containers,
                 detected_ports,
             ))
         }
@@ -485,25 +498,26 @@ impl IntoTargetInfo for Rollout {
                 target_name,
                 target_namespace,
                 vec![],
+                vec![],
             ))
         }
 
         let result = into_info_option(&self);
-        let detected_ports = self
+        let pod_template = self
             .get_pod_template(client)
             .await
-            .map_err(CliError::WizardTargetError)?
+            .map_err(CliError::WizardTargetError)?;
+        let containers = pod_template
             .spec
             .as_ref()
-            .map(|spec| spec.containers.clone())
-            .unwrap_or_default()
-            .iter()
-            .flat_map(|container| container.ports.clone().unwrap_or_default())
-            .map(|port| port.container_port.unsigned_abs() as u16)
-            .collect();
+            .map(|spec| spec.containers.as_slice())
+            .unwrap_or_default();
+        let detected_ports = detected_ports(containers);
+        let containers = container_names(containers);
 
         if let Some(info) = result {
             Ok(Some(TargetInfo {
+                containers,
                 detected_ports,
                 ..info
             }))
@@ -522,19 +536,14 @@ impl IntoTargetInfo for Job {
         fn into_info_option(job: Job) -> Option<TargetInfo> {
             let target_name = job.name()?.to_string();
             let target_namespace = job.namespace()?.to_string();
-            let detected_ports = job
-                .spec?
-                .template
-                .spec?
-                .containers
-                .iter()
-                .flat_map(|container| container.ports.clone().unwrap_or_default())
-                .map(|port| port.container_port.unsigned_abs() as u16)
-                .collect();
+            let containers = job.spec?.template.spec?.containers;
+            let detected_ports = detected_ports(&containers);
+            let containers = container_names(&containers);
             Some(TargetInfo::new(
                 TargetType::Job,
                 target_name,
                 target_namespace,
+                containers,
                 detected_ports,
             ))
         }
@@ -551,21 +560,14 @@ impl IntoTargetInfo for CronJob {
         fn into_info_option(cronjob: CronJob) -> Option<TargetInfo> {
             let target_name = cronjob.name()?.to_string();
             let target_namespace = cronjob.namespace()?.to_string();
-            let detected_ports = cronjob
-                .spec?
-                .job_template
-                .spec?
-                .template
-                .spec?
-                .containers
-                .iter()
-                .flat_map(|container| container.ports.clone().unwrap_or_default())
-                .map(|port| port.container_port.unsigned_abs() as u16)
-                .collect();
+            let containers = cronjob.spec?.job_template.spec?.template.spec?.containers;
+            let detected_ports = detected_ports(&containers);
+            let containers = container_names(&containers);
             Some(TargetInfo::new(
                 TargetType::CronJob,
                 target_name,
                 target_namespace,
+                containers,
                 detected_ports,
             ))
         }
@@ -582,19 +584,14 @@ impl IntoTargetInfo for StatefulSet {
         fn into_info_option(stateful_set: StatefulSet) -> Option<TargetInfo> {
             let target_name = stateful_set.name()?.to_string();
             let target_namespace = stateful_set.namespace()?.to_string();
-            let detected_ports = stateful_set
-                .spec?
-                .template
-                .spec?
-                .containers
-                .iter()
-                .flat_map(|container| container.ports.clone().unwrap_or_default())
-                .map(|port| port.container_port.unsigned_abs() as u16)
-                .collect();
+            let containers = stateful_set.spec?.template.spec?.containers;
+            let detected_ports = detected_ports(&containers);
+            let containers = container_names(&containers);
             Some(TargetInfo::new(
                 TargetType::StatefulSet,
                 target_name,
                 target_namespace,
+                containers,
                 detected_ports,
             ))
         }
@@ -615,6 +612,7 @@ impl IntoTargetInfo for Service {
                 TargetType::Service,
                 target_name,
                 target_namespace,
+                vec![],
                 vec![],
             ))
         }
@@ -637,13 +635,18 @@ impl IntoTargetInfo for Service {
             );
         }
 
-        let detected_ports: Vec<u16> = infos
-            .into_iter()
-            .flat_map(|info| info.detected_ports)
-            .collect();
+        let (detected_ports, containers): (Vec<u16>, Vec<String>) =
+            infos
+                .into_iter()
+                .fold((Vec::new(), Vec::new()), |mut acc, info| {
+                    acc.0.extend(info.detected_ports);
+                    acc.1.extend(info.containers);
+                    acc
+                });
 
         if let Some(info) = result {
             Ok(Some(TargetInfo {
+                containers,
                 detected_ports,
                 ..info
             }))
@@ -662,19 +665,14 @@ impl IntoTargetInfo for ReplicaSet {
         fn into_info_option(replica_set: ReplicaSet) -> Option<TargetInfo> {
             let target_name = replica_set.name()?.to_string();
             let target_namespace = replica_set.namespace()?.to_string();
-            let detected_ports = replica_set
-                .spec?
-                .template?
-                .spec?
-                .containers
-                .iter()
-                .flat_map(|container| container.ports.clone().unwrap_or_default())
-                .map(|port| port.container_port.unsigned_abs() as u16)
-                .collect();
+            let containers = replica_set.spec?.template?.spec?.containers;
+            let detected_ports = detected_ports(&containers);
+            let containers = container_names(&containers);
             Some(TargetInfo::new(
                 TargetType::ReplicaSet,
                 target_name,
                 target_namespace,
+                containers,
                 detected_ports,
             ))
         }

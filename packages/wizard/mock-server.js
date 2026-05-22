@@ -10,21 +10,25 @@ const mockData = {
       {
         target_path: "deployment/api-server",
         target_namespace: "default",
+        containers: ["api", "sidecar"],
         detected_ports: [8080, 3000],
       },
       {
         target_path: "deployment/web-frontend",
         target_namespace: "default",
+        containers: ["web"],
         detected_ports: [80, 443],
       },
       {
         target_path: "pod/redis-master-0",
         target_namespace: "default",
+        containers: ["redis"],
         detected_ports: [6379],
       },
       {
         target_path: "statefulset/postgres",
         target_namespace: "default",
+        containers: ["postgres"],
         detected_ports: [5432],
       },
     ],
@@ -32,26 +36,31 @@ const mockData = {
       {
         target_path: "deployment/prod-api",
         target_namespace: "production",
+        containers: ["api", "metrics"],
         detected_ports: [8080],
       },
       {
         target_path: "deployment/prod-worker",
         target_namespace: "production",
+        containers: ["worker"],
         detected_ports: [9090],
       },
       {
         target_path: "pod/prod-api-abc123",
         target_namespace: "production",
+        containers: ["api", "sidecar"],
         detected_ports: [8080],
       },
       {
         target_path: "pod/prod-worker-xyz789",
         target_namespace: "production",
+        containers: ["worker"],
         detected_ports: [9090],
       },
       {
         target_path: "rollout/prod-canary",
         target_namespace: "production",
+        containers: ["api"],
         detected_ports: [8080],
       },
     ],
@@ -59,11 +68,13 @@ const mockData = {
       {
         target_path: "deployment/staging-api",
         target_namespace: "staging",
+        containers: ["api", "debug"],
         detected_ports: [8080, 9090],
       },
       {
         target_path: "deployment/staging-web",
         target_namespace: "staging",
+        containers: ["web"],
         detected_ports: [3000],
       },
     ],
@@ -71,11 +82,13 @@ const mockData = {
       {
         target_path: "deployment/dev-api",
         target_namespace: "development",
+        containers: ["api"],
         detected_ports: [8080],
       },
       {
         target_path: "pod/dev-debug",
         target_namespace: "development",
+        containers: ["debug"],
         detected_ports: [5005],
       },
     ],
