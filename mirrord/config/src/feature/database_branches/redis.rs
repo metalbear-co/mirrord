@@ -156,6 +156,14 @@ impl RedisConnectionConfig {
             .and_then(|u| u.env_variable())
             .or_else(|| self.host.as_ref().and_then(|h| h.env_variable()))
     }
+
+    pub(crate) fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        for source in [&self.url, &self.host, &self.password, &self.username] {
+            if let Some(name) = source.as_ref().and_then(RedisValueSource::env_variable) {
+                out.push(name);
+            }
+        }
+    }
 }
 
 /// <!--${internal}-->

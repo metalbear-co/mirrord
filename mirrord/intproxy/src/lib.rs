@@ -1247,7 +1247,10 @@ mod test {
                 message_id: 0,
                 inner: LayerToProxyMessage::Incoming(IncomingRequest::PortSubscribe(
                     PortSubscribe {
-                        listening_on: "0.0.0.0:42069".parse().unwrap(),
+                        listening_on: "0.0.0.0:42069"
+                            .parse::<std::net::SocketAddr>()
+                            .unwrap()
+                            .into(),
                         subscription: PortSubscription::Steal(StealType::All(42069)),
                     },
                 )),
@@ -1536,7 +1539,7 @@ mod test {
                 message_id: 0,
                 inner: LayerToProxyMessage::Incoming(IncomingRequest::PortSubscribe(
                     PortSubscribe {
-                        listening_on: addr,
+                        listening_on: addr.into(),
                         subscription: PortSubscription::Steal(StealType::All(80)),
                     },
                 )),

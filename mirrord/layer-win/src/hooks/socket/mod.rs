@@ -504,7 +504,7 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
 
     // Make the request to the agent
     match make_proxy_request_with_response(PortSubscribe {
-        listening_on: bound_state.address,
+        listening_on: bound_state.address.into(),
         subscription: setup().incoming_mode().subscription(mapped_port),
     }) {
         Ok(Ok(_)) => {

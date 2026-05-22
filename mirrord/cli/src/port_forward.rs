@@ -617,7 +617,7 @@ impl ReversePortForwarder {
             let message_id = i as u64;
             let layer_id = LayerId(1);
             let req = IncomingRequest::PortSubscribe(PortSubscribe {
-                listening_on: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), local),
+                listening_on: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), local).into(),
                 subscription,
             });
             incoming

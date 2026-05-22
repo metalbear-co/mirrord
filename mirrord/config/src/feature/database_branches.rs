@@ -307,7 +307,7 @@ impl DatabaseBranchesConfig {
 }
 
 impl DatabaseBranchConfig {
-    fn base(&self) -> Option<&DatabaseBranchBaseConfig> {
+    pub(crate) fn base(&self) -> Option<&DatabaseBranchBaseConfig> {
         match self {
             Self::Mongodb(cfg) => Some(&cfg.base),
             Self::Mssql(cfg) => Some(&cfg.base),
@@ -315,6 +315,63 @@ impl DatabaseBranchConfig {
             Self::Pg(cfg) => Some(&cfg.base),
             Self::Redis(_) => None,
         }
+    }
+
+    /// Names of target-pod env vars that the operator uses to redirect this branch's
+    /// connection. Locally overriding any of these (via `feature.env.override`) would
+    /// fight the operator's redirection, so [`LayerConfig::verify`] rejects such configs.
+    ///
+    /// [`LayerConfig::verify`]: crate::LayerConfig::verify
+    pub(crate) fn connection_env_keys(&self) -> Vec<&str> {
+        let mut keys = Vec::new();
+        if let Some(base) = self.base() {
+            base.connection.collect_env_keys(&mut keys);
+        }
+        if let Self::Redis(cfg) = self {
+            cfg.connection.collect_env_keys(&mut keys);
+        }
+        keys
+    }
+}
+
+impl ConnectionSource {
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            Self::Url { url } => url.collect_env_keys(out),
+            Self::FlatUrl { url, .. } => out.extend(url.iter().map(String::as_str)),
+            Self::Params(config) => config.params.collect_env_keys(out),
+        }
+    }
+}
+
+impl TargetEnvironmentVariableSource {
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            Self::Env { variable, .. } | Self::EnvFrom { variable, .. } => out.push(variable),
+            Self::Secret {
+                env_var_name: Some(name),
+                ..
+            } => out.push(name),
+            Self::Secret {
+                env_var_name: None, ..
+            } => {}
+        }
+    }
+}
+
+impl ConnectionParamsVars {
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        [
+            &self.host,
+            &self.port,
+            &self.user,
+            &self.password,
+            &self.database,
+        ]
+        .iter()
+        .filter_map(|t| t.as_ref())
+        .flatten()
+        .for_each(|var| var.collect_env_keys(out));
     }
 }
 
@@ -575,6 +632,22 @@ impl ParamSource {
                 Some(env_var_name)
             }
             Self::Secret { .. } => None,
+        }
+    }
+
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            ParamSource::Variable(v) => out.push(v),
+            ParamSource::Env { env_var_name, .. } | ParamSource::Pattern { env_var_name, .. } => {
+                out.push(env_var_name)
+            }
+            ParamSource::Secret {
+                env_var_name: Some(name),
+                ..
+            } => out.push(name),
+            ParamSource::Secret {
+                env_var_name: None, ..
+            } => {}
         }
     }
 }
@@ -1066,5 +1139,91 @@ mod tests {
     fn db_branch_verify_rejects_both_ttl_fields() {
         let base = base_with_ttl(Some(120), Some(2));
         assert!(matches!(base.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    fn pg_branch_with_connection(connection: ConnectionSource) -> DatabaseBranchConfig {
+        DatabaseBranchConfig::Pg(Box::new(pg::PgBranchConfig {
+            base: DatabaseBranchBaseConfig {
+                id: None,
+                name: None,
+                ttl_secs: None,
+                ttl_mins: None,
+                creation_timeout_secs: 60,
+                version: None,
+                connection,
+            },
+            copy: Default::default(),
+            iam_auth: None,
+        }))
+    }
+
+    #[test]
+    fn connection_env_keys_url_variant() {
+        let branch = pg_branch_with_connection(ConnectionSource::Url {
+            url: TargetEnvironmentVariableSource::Env {
+                container: None,
+                variable: "DB_URL".to_owned(),
+                value: None,
+            },
+        });
+        assert_eq!(branch.connection_env_keys(), vec!["DB_URL"]);
+    }
+
+    #[test]
+    fn connection_env_keys_flat_url_variant() {
+        let branch = pg_branch_with_connection(ConnectionSource::FlatUrl {
+            source_type: Some(ConnectionSourceType::Env),
+            url: vec!["WRITE_URL".to_owned(), "READ_URL".to_owned()].into(),
+        });
+        assert_eq!(branch.connection_env_keys(), vec!["WRITE_URL", "READ_URL"]);
+    }
+
+    #[test]
+    fn connection_env_keys_params_variant_skips_secret_without_env_name() {
+        let branch =
+            pg_branch_with_connection(ConnectionSource::Params(Box::new(ConnectionParamsConfig {
+                source_type: None,
+                params: ConnectionParamsVars {
+                    host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
+                    port: None,
+                    user: Some(ParamSource::Variable("DB_USER".to_owned()).into()),
+                    password: Some(
+                        ParamSource::Secret {
+                            name: "rds".to_owned(),
+                            key: "password".to_owned(),
+                            env_var_name: None,
+                        }
+                        .into(),
+                    ),
+                    database: Some(ParamSource::Variable("DB_NAME".to_owned()).into()),
+                },
+            })));
+        assert_eq!(
+            branch.connection_env_keys(),
+            vec!["DB_HOST", "DB_USER", "DB_NAME"]
+        );
+    }
+
+    #[test]
+    fn connection_env_keys_redis() {
+        let branch = DatabaseBranchConfig::Redis(Box::new(redis::RedisBranchConfig {
+            id: None,
+            location: Default::default(),
+            connection: redis::RedisConnectionConfig {
+                url: Some(redis::RedisValueSource::Env(redis::RedisEnvSource {
+                    source_type: redis::RedisEnvSourceType::Env,
+                    variable: "REDIS_URL".to_owned(),
+                    container: None,
+                })),
+                host: None,
+                port: None,
+                password: Some(redis::RedisValueSource::Direct("hunter2".to_owned())),
+                username: None,
+                database: None,
+                tls: None,
+            },
+            local: Default::default(),
+        }));
+        assert_eq!(branch.connection_env_keys(), vec!["REDIS_URL"]);
     }
 }
