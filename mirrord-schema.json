@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Getting Started",
-  "description": "mirrord allows for a high degree of customization when it comes to which features you want to\nenable, and how they should function.\n\nAll of the configuration fields have a default value, so a minimal configuration would be no\nconfiguration at all.\n\nThe configuration supports templating using the [Tera](https://keats.github.io/tera/docs/) template engine.\nCurrently we don't provide additional values to the context, if you have anything you want us to\nprovide please let us know.\n\nTo use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag.\nOr if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file\nor use the UI.\n\n## Examples\n\nTo help you get started, here are examples of a basic configuration file, and a complete\nconfiguration file containing all fields.\n\n### Basic `config.json` {#root-basic}\n\n```json\n{\n  \"target\": \"pod/bear-pod\",\n  \"feature\": {\n    \"env\": true,\n    \"fs\": \"read\",\n    \"network\": true\n  }\n}\n```\n\n### Basic `config.json` with templating {#root-basic-templating}\n\n```json\n{\n  \"target\": \"{{ get_env(name=\"TARGET\", default=\"pod/fallback\") }}\",\n  \"feature\": {\n    \"env\": true,\n    \"fs\": \"read\",\n    \"network\": true\n  }\n}\n```\n\n### Complete `config.json` {#root-complete}\n\n Don't use this example as a starting point, it's just here to show you all the available\n options.\n```json\n{\n  \"accept_invalid_certificates\": false,\n  \"skip_processes\": \"ide-debugger\",\n  \"target\": {\n    \"path\": \"pod/bear-pod\",\n    \"namespace\": \"default\"\n  },\n  \"connect_tcp\": null,\n  \"agent\": {\n    \"log_level\": \"info\",\n    \"json_log\": false,\n    \"labels\": { \"user\": \"meow\" },\n    \"annotations\": { \"cats.io/inject\": \"enabled\" },\n    \"namespace\": \"default\",\n    \"image\": \"ghcr.io/metalbear-co/mirrord:latest\",\n    \"image_pull_policy\": \"IfNotPresent\",\n    \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ],\n    \"ttl\": 30,\n    \"ephemeral\": false,\n    \"communication_timeout\": 30,\n    \"startup_timeout\": 360,\n    \"flush_connections\": true,\n    \"metrics\": \"0.0.0.0:9000\",\n  },\n  \"feature\": {\n    \"env\": {\n      \"include\": \"DATABASE_USER;PUBLIC_ENV\",\n      \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\",\n      \"override\": {\n        \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\",\n        \"LOCAL_BEAR\": \"panda\"\n      },\n      \"mapping\": {\n        \".+_TIMEOUT\": \"1000\"\n      }\n    },\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ]\n    },\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        },\n        \"port_mapping\": [[ 7777, 8888 ]],\n        \"ignore_localhost\": false,\n        \"ignore_ports\": [9999, 10000]\n      },\n      \"outgoing\": {\n        \"tcp\": true,\n        \"udp\": true,\n        \"filter\": {\n          \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"]\n        },\n        \"ignore_localhost\": false,\n        \"unix_streams\": \"bear.+\"\n      },\n      \"dns\": {\n        \"enabled\": true,\n        \"filter\": {\n          \"local\": [\"1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\"]\n        }\n      }\n    },\n    \"copy_target\": {\n      \"scale_down\": false\n    }\n  },\n  \"operator\": true,\n  \"kubeconfig\": \"~/.kube/config\",\n  \"sip_binaries\": \"bash\",\n  \"telemetry\": true,\n  \"kube_context\": \"my-cluster\"\n}\n```\n\n# Options {#root-options}",
+  "description": "mirrord allows for a high degree of customization when it comes to which features you want to\nenable, and how they should function.\n\nAll of the configuration fields have a default value, so a minimal configuration would be no\nconfiguration at all.\n\nThe configuration supports templating using the [Tera](https://keats.github.io/tera/docs/) template engine.\nCurrently we don't provide additional values to the context, if you have anything you want us to\nprovide please let us know.\n\nTo use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag.\nOr if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file\nor use the UI.\n\n## Examples\n\nTo help you get started, here are examples of a basic configuration file, and a complete\nconfiguration file containing all fields.\n\n### Basic `config.json` {#root-basic}\n\n```json\n{\n  \"target\": \"pod/bear-pod\",\n  \"feature\": {\n    \"env\": true,\n    \"fs\": \"read\",\n    \"network\": true\n  }\n}\n```\n\n### Basic `config.json` with templating {#root-basic-templating}\n\n```json\n{\n  \"target\": \"{{ get_env(name=\"TARGET\", default=\"pod/fallback\") }}\",\n  \"feature\": {\n    \"env\": true,\n    \"fs\": \"read\",\n    \"network\": true\n  }\n}\n```\n\n### Complete `config.json` {#root-complete}\n\n Don't use this example as a starting point, it's just here to show you all the available\n options.\n```json\n{\n  \"accept_invalid_certificates\": false,\n  \"skip_processes\": \"ide-debugger\",\n  \"target\": {\n    \"path\": \"pod/bear-pod\",\n    \"namespace\": \"default\"\n  },\n  \"connect_tcp\": null,\n  \"agent\": {\n    \"log_level\": \"info\",\n    \"json_log\": false,\n    \"labels\": { \"user\": \"meow\" },\n    \"annotations\": { \"cats.io/inject\": \"enabled\" },\n    \"namespace\": \"default\",\n    \"image\": \"ghcr.io/metalbear-co/mirrord:latest\",\n    \"image_pull_policy\": \"IfNotPresent\",\n    \"image_pull_secrets\": [ { \"name\": \"secret\" } ],\n    \"ttl\": 30,\n    \"ephemeral\": false,\n    \"communication_timeout\": 30,\n    \"startup_timeout\": 360,\n    \"flush_connections\": true,\n    \"metrics\": \"0.0.0.0:9000\",\n  },\n  \"feature\": {\n    \"env\": {\n      \"include\": \"DATABASE_USER;PUBLIC_ENV\",\n      \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\",\n      \"override\": {\n        \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\",\n        \"LOCAL_BEAR\": \"panda\"\n      },\n      \"mapping\": {\n        \".+_TIMEOUT\": \"1000\"\n      }\n    },\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ]\n    },\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        },\n        \"port_mapping\": [[ 7777, 8888 ]],\n        \"ignore_localhost\": false,\n        \"ignore_ports\": [9999, 10000]\n      },\n      \"outgoing\": {\n        \"tcp\": true,\n        \"udp\": true,\n        \"filter\": {\n          \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"]\n        },\n        \"ignore_localhost\": false,\n        \"unix_streams\": \"bear.+\"\n      },\n      \"dns\": {\n        \"enabled\": true,\n        \"filter\": {\n          \"local\": [\"1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\"]\n        }\n      }\n    },\n    \"copy_target\": {\n      \"scale_down\": false\n    }\n  },\n  \"operator\": true,\n  \"kubeconfig\": \"~/.kube/config\",\n  \"sip_binaries\": \"bash\",\n  \"telemetry\": true,\n  \"kube_context\": \"my-cluster\"\n}\n```\n\n# Options {#root-options}",
   "type": "object",
   "properties": {
     "accept_invalid_certificates": {
@@ -133,6 +133,14 @@
         "null"
       ]
     },
+    "multi_cluster": {
+      "title": "multi_cluster {#root-multi_cluster}",
+      "description": "Controls multi-cluster session behavior when connecting to a multi-cluster Primary\noperator. When set to `false`, forces a single-cluster session on the Primary cluster\ninstead of creating a multi-cluster session that spans all workload clusters.\nWhen `true` or unset, multi-cluster sessions are used when the operator supports them.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "operator": {
       "title": "operator {#root-operator}",
       "description": "Whether mirrord should use the operator.\nIf not set, mirrord will first attempt to use the operator, but continue without it in case\nof failure.",
@@ -260,7 +268,7 @@
       "properties": {
         "local": {
           "title": "feature.fs.local {#feature-fs-local}",
-          "description": "Specify file path patterns that if matched will be opened locally.",
+          "description": "Specify file path patterns that if matched will be opened locally.\n\n##### Windows\n\nPatterns are matched against a unix-style form of the requested path, not the raw\nWindows path. Before matching, the drive letter is stripped and backslashes are\nconverted to forward slashes, so `D:\\Workspaces\\myapp\\app.json` is matched as\n`/Workspaces/myapp/app.json`.\n\nPatterns must therefore be written with forward slashes. Backslashes in the regex\n(e.g. `\"\\\\\\\\Workspaces\\\\\\\\\"`) will never match anything, because the input string the\nregex sees contains no backslashes at all — they were stripped during translation.",
           "anyOf": [
             {
               "$ref": "#/$defs/VecOrSingle"
@@ -272,7 +280,7 @@
         },
         "mapping": {
           "title": "feature.fs.mapping {#feature-fs-mapping}",
-          "description": "Specify map of patterns that if matched will replace the path according to specification.\n\n*Capture groups are allowed.*\n\nExample:\n```json\n{\n  \"^/home/(?<user>\\\\S+)/dev/tomcat\": \"/etc/tomcat\"\n  \"^/home/(?<user>\\\\S+)/dev/config/(?<app>\\\\S+)\": \"/mnt/configs/${user}-$app\"\n}\n```\nWill do the next replacements for any io operation\n\n`/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml`\n`/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`\n\n- Relative paths: this feature (currently) does not apply mappings to relative paths, e.g.\n  `../dev`.",
+          "description": "Specify map of patterns that if matched will replace the path according to specification.\n\n*Capture groups are allowed.* Matching is case-insensitive and uses\n[`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace),\nso the replacement value supports `$1` / `${name}` substitutions.\n\n##### Unix (Linux, macOS)\n\nPatterns are matched against the path exactly as the application requested it.\n\nExample:\n```json\n{\n  \"^/home/(?<user>\\\\S+)/dev/tomcat\": \"/etc/tomcat\",\n  \"^/home/(?<user>\\\\S+)/dev/config/(?<app>\\\\S+)\": \"/mnt/configs/${user}-$app\"\n}\n```\n\nWill produce the following replacements for any io operation:\n\n`/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml`\n`/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`\n\n##### Windows\n\nPatterns are matched against a unix-style form of the requested path, not the raw\nWindows path. Before matching, the drive letter is stripped and backslashes are\nconverted to forward slashes, so:\n\n`D:\\Workspaces\\myapp\\config\\app.json` is matched as `/Workspaces/myapp/config/app.json`\n\nPatterns must therefore be written with forward slashes. Backslashes in the regex\n(e.g. `\"\\\\\\\\Workspaces\\\\\\\\\"`) will never match anything, because the input string the\nregex sees contains no backslashes at all — they were stripped during translation.\n\nThe replacement value is sent to the agent as-is and is what the remote (Linux) pod\nwill see on disk, so it should also use forward slashes.\n\nExample:\n```json\n{\n  \"^/Workspaces/(?<app>[^/]+)/config/(?<file>.+)\": \"/etc/${app}/$file\"\n}\n```\n\nWill produce the following replacement:\n\n`D:\\Workspaces\\myapp\\config\\app.json` => `/etc/myapp/app.json`\n\n##### Caveats\n\n- Relative paths: this feature (currently) does not apply mappings to relative paths, e.g.\n  `../dev`.",
           "type": [
             "object",
             "null"
@@ -294,7 +302,7 @@
         },
         "not_found": {
           "title": "feature.fs.not_found {#feature-fs-not_found}",
-          "description": "Specify file path patterns that if matched will be treated as non-existent.",
+          "description": "Specify file path patterns that if matched will be treated as non-existent.\n\n##### Windows\n\nPatterns are matched against a unix-style form of the requested path, not the raw\nWindows path. Before matching, the drive letter is stripped and backslashes are\nconverted to forward slashes, so `D:\\Workspaces\\myapp\\app.json` is matched as\n`/Workspaces/myapp/app.json`.\n\nPatterns must therefore be written with forward slashes. Backslashes in the regex\n(e.g. `\"\\\\\\\\Workspaces\\\\\\\\\"`) will never match anything, because the input string the\nregex sees contains no backslashes at all — they were stripped during translation.",
           "anyOf": [
             {
               "$ref": "#/$defs/VecOrSingle"
@@ -306,7 +314,7 @@
         },
         "read_only": {
           "title": "feature.fs.read_only {#feature-fs-read_only}",
-          "description": "Specify file path patterns that if matched will be read from the remote.\nif file matching the pattern is opened for writing or read/write it will be opened locally.",
+          "description": "Specify file path patterns that if matched will be read from the remote.\nif file matching the pattern is opened for writing or read/write it will be opened locally.\n\n##### Windows\n\nPatterns are matched against a unix-style form of the requested path, not the raw\nWindows path. Before matching, the drive letter is stripped and backslashes are\nconverted to forward slashes, so `D:\\Workspaces\\myapp\\app.json` is matched as\n`/Workspaces/myapp/app.json`.\n\nPatterns must therefore be written with forward slashes. Backslashes in the regex\n(e.g. `\"\\\\\\\\Workspaces\\\\\\\\\"`) will never match anything, because the input string the\nregex sees contains no backslashes at all — they were stripped during translation.",
           "anyOf": [
             {
               "$ref": "#/$defs/VecOrSingle"
@@ -318,7 +326,7 @@
         },
         "read_write": {
           "title": "feature.fs.read_write {#feature-fs-read_write}",
-          "description": "Specify file path patterns that if matched will be read and written to the remote.",
+          "description": "Specify file path patterns that if matched will be read and written to the remote.\n\n##### Windows\n\nPatterns are matched against a unix-style form of the requested path, not the raw\nWindows path. Before matching, the drive letter is stripped and backslashes are\nconverted to forward slashes, so `D:\\Workspaces\\myapp\\app.json` is matched as\n`/Workspaces/myapp/app.json`.\n\nPatterns must therefore be written with forward slashes. Backslashes in the regex\n(e.g. `\"\\\\\\\\Workspaces\\\\\\\\\"`) will never match anything, because the input string the\nregex sees contains no backslashes at all — they were stripped during translation.",
           "anyOf": [
             {
               "$ref": "#/$defs/VecOrSingle"
@@ -342,7 +350,7 @@
       "additionalProperties": false
     },
     "AgentFileConfig": {
-      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator.\nAgent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json\n{\n  \"agent\": {\n    \"log_level\": \"info\",\n    \"json_log\": false,\n    \"namespace\": \"default\",\n    \"image\": \"ghcr.io/metalbear-co/mirrord:latest\",\n    \"image_pull_policy\": \"IfNotPresent\",\n    \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ],\n    \"ttl\": 30,\n    \"ephemeral\": false,\n    \"communication_timeout\": 30,\n    \"startup_timeout\": 360,\n    \"flush_connections\": false,\n    \"exclude_from_mesh\": false\n    \"inject_headers\": false,\n    \"max_body_buffer_size\": 65535,\n    \"max_body_buffer_timeout\": 1000\n  }\n}\n```",
+      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator.\nAgent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json\n{\n  \"agent\": {\n    \"log_level\": \"info\",\n    \"json_log\": false,\n    \"namespace\": \"default\",\n    \"image\": \"ghcr.io/metalbear-co/mirrord:latest\",\n    \"image_pull_policy\": \"IfNotPresent\",\n    \"image_pull_secrets\": [ { \"name\": \"secret\" } ],\n    \"ttl\": 30,\n    \"ephemeral\": false,\n    \"communication_timeout\": 30,\n    \"startup_timeout\": 360,\n    \"flush_connections\": false,\n    \"exclude_from_mesh\": false\n    \"inject_headers\": false,\n    \"max_body_buffer_size\": 65535,\n    \"max_body_buffer_timeout\": 1000,\n    \"http_detection_timeout\": 2\n  }\n}\n```",
       "type": "object",
       "properties": {
         "annotations": {
@@ -436,6 +444,16 @@
             "boolean",
             "null"
           ]
+        },
+        "http_detection_timeout": {
+          "title": "agent.http_detection_timeout {#agent-http_detection_timeout}",
+          "description": "How long, in seconds, to wait for data on a redirected connection during HTTP protocol\ndetection before giving up and treating it as raw TCP. The timer resets on every read,\nso total detection time may exceed this value for connections that send data in many\nsmall chunks.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
         },
         "image": {
           "title": "agent.image {#agent-image}",
@@ -776,6 +794,59 @@
         }
       ]
     },
+    "ConfigMount": {
+      "description": "A single file to project into the preview pod's container filesystem.\n\nEither `payload`+`type` (inline) or `from_file` (load from disk) must\nbe set; the two forms are mutually exclusive. After\n[`ConfigMount::resolve`] has been called, the result is guaranteed\nto have `payload` and `r#type` set and `from_file` cleared. This form\ngets sent to the operator.",
+      "type": "object",
+      "properties": {
+        "from_file": {
+          "description": "Local filesystem path to read the file from. The contents are loaded\nat session creation time and sent as `\"text\"` (verbatim) if valid\nUTF-8, otherwise base64-encoded and sent as `\"binary\"`. Mutually\nexclusive with `payload`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mount_at": {
+          "description": "Absolute path inside the preview pod's container where the file should\nappear. The surrounding directory's other contents\n(if any) are left untouched, only this one path is overlaid.",
+          "type": "string"
+        },
+        "payload": {
+          "description": "Inline file contents. Interpretation depends on `type`: for `\"text\"`,\nwritten to the file byte-for-byte; for `\"binary\"`, base64-decoded\nfirst. Mutually exclusive with `from_file`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "description": "How the `payload` payload should be interpreted when writing it to the\nfile. `\"text\"` for verbatim UTF-8 content, `\"binary\"` for\nbase64-encoded bytes. Required when `payload` is set; determined\nautomatically when `from_file` is used.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConfigMountType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "mount_at"
+      ]
+    },
+    "ConfigMountType": {
+      "description": "Encoding of a [`ConfigMount::payload`] payload.",
+      "oneOf": [
+        {
+          "description": "`payload` is written to the file verbatim. Used for\nhuman-readable config files (YAML, TOML, JSON, env files,\nshell scripts, ...).",
+          "type": "string",
+          "const": "text"
+        },
+        {
+          "description": "`payload` is base64-encoded and is decoded before being\nwritten. Used for binary files that can't safely live in a\nJSON string.",
+          "type": "string",
+          "const": "binary"
+        }
+      ]
+    },
     "ConnectionParamsConfig": {
       "description": "Connection parameters specified as individual environment variable names.\nThe `type` field is optional - when omitted, the operator auto-detects\nwhether the variable comes from `env` or `envFrom` on the target pod.",
       "type": "object",
@@ -1063,12 +1134,24 @@
                 "null"
               ]
             },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
             "ttl_secs": {
               "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.",
-              "type": "integer",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "uint64",
-              "default": 300,
               "minimum": 0
             },
             "type": {
@@ -1130,12 +1213,24 @@
                 "null"
               ]
             },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
             "ttl_secs": {
               "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.",
-              "type": "integer",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "uint64",
-              "default": 300,
               "minimum": 0
             },
             "type": {
@@ -1181,6 +1276,18 @@
               "default": 60,
               "minimum": 0
             },
+            "iam_auth": {
+              "title": "feature.db_branches[].iam_auth (type: mysql) {#feature-db_branches-mysql-iam_auth}",
+              "description": "IAM authentication for the source database.\nUse this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication\ninstead of password-based authentication.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/IamAuthConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "id": {
               "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
@@ -1197,12 +1304,24 @@
                 "null"
               ]
             },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
             "ttl_secs": {
               "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.",
-              "type": "integer",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "uint64",
-              "default": 300,
               "minimum": 0
             },
             "type": {
@@ -1276,12 +1395,24 @@
                 "null"
               ]
             },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
             "ttl_secs": {
               "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.",
-              "type": "integer",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "uint64",
-              "default": 300,
               "minimum": 0
             },
             "type": {
@@ -1545,7 +1676,7 @@
       "additionalProperties": false
     },
     "DnsFilterConfig": {
-      "description": "List of addresses/ports/subnets that should be resolved through either the remote pod or local\napp, depending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when DNS resolution is done from the remote pod (which\nis the default behavior when you enable remote DNS), or from the local app (default when\nyou have remote DNS disabled).\n\nTakes a list of values, such as:\n\n- Only queries for hostname `my-service-in-cluster` will go through the remote pod.\n\n```json\n{\n  \"remote\": [\"my-service-in-cluster\"]\n}\n```\n\n- Only queries for addresses in subnet `1.1.1.0/24` with service port `1337` will go through the\n  remote pod.\n\n```json\n{\n  \"remote\": [\"1.1.1.0/24:1337\"]\n}\n```\n\n- Only queries for hostname `google.com` with service port `1337` or `7331` will go through the\n  remote pod.\n\n```json\n{\n  \"remote\": [\"google.com:1337\", \"google.com:7331\"]\n}\n```\n\n- Only queries for `localhost` with service port `1337` will go through the local app.\n\n```json\n{\n  \"local\": [\"localhost:1337\"]\n}\n```\n\n- Only queries with service port `1337` or `7331` will go through the local app.\n\n```json\n{\n  \"local\": [\":1337\", \":7331\"]\n}\n```\n\nValid values follow this pattern: `[name|address|subnet/mask][:port]`.",
+      "description": "List of addresses/ports/subnets that should be resolved through either the remote pod or local\napp, depending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when DNS resolution is done from the remote pod (which\nis the default behavior when you enable remote DNS), or from the local app (default when\nyou have remote DNS disabled).\n\nTakes a list of values, such as:\n\n- Only queries for hostname `my-service-in-cluster` will go through the remote pod.\n\n```json\n{\n  \"remote\": [\"my-service-in-cluster\"]\n}\n```\n\n- Only queries for addresses in subnet `1.1.1.0/24` with service port `1337` will go through the\n  remote pod.\n\n```json\n{\n  \"remote\": [\"1.1.1.0/24:1337\"]\n}\n```\n\n- Only queries for hostname `google.com` with service port `1337` or `7331` will go through the\n  remote pod.\n\n```json\n{\n  \"remote\": [\"google.com:1337\", \"google.com:7331\"]\n}\n```\n\n- Only queries for `localhost` with service port `1337` will go through the local app.\n\n```json\n{\n  \"local\": [\"localhost:1337\"]\n}\n```\n\n- Only queries with service port `1337` or `7331` will go through the local app.\n\n```json\n{\n  \"local\": [\":1337\", \":7331\"]\n}\n```\n\nValid values follow this pattern: `[name|address|subnet/mask][:port]`.\n\nHost names listed in\n[`feature.network.outgoing.filter`](super::outgoing::OutgoingFilterConfig) are automatically\nappended here on the matching side, so DNS resolution stays on the same side as the\nconnection (e.g. `outgoing.filter.local = [\"some.domain.com\"]` implies\n`dns.filter.local = [\"some.domain.com\"]`).",
       "oneOf": [
         {
           "description": "When filters are specified under `remote`, matching DNS queries will go through the remote\npod, everything else will go through local.",
@@ -2970,7 +3101,7 @@
       "additionalProperties": false
     },
     "OutgoingFilterConfig": {
-      "description": "List of addresses/ports/subnets that should be sent through either the remote pod or local app,\ndepending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when outgoing traffic is sent from the remote pod (which\nis the default behavior when you enable outgoing traffic), or from the local app (default when\nyou have outgoing traffic disabled).\n\nTakes a list of values, such as:\n\n- Only UDP traffic on subnet `1.1.1.0/24` on port 1337 will go through the remote pod.\n\n```json\n{\n  \"remote\": [\"udp://1.1.1.0/24:1337\"]\n}\n```\n\n- Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331` will go\n  through the remote pod.\n```json\n{\n  \"remote\": [\"google.com:1337\", \"google.com:7331\"]\n}\n```\n\n- Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will be\n  emitted remotely in the cluster.\n\n```json\n{\n  \"local\": [\"tcp://localhost:1337\"]\n}\n```\n\n- Only outgoing traffic on port `1337` and `7331` will go through the local app.\n```json\n{\n  \"local\": [\":1337\", \":7331\"]\n}\n```\n\nValid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.",
+      "description": "List of addresses/ports/subnets that should be sent through either the remote pod or local app,\ndepending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when outgoing traffic is sent from the remote pod (which\nis the default behavior when you enable outgoing traffic), or from the local app (default when\nyou have outgoing traffic disabled).\n\nTakes a list of values, such as:\n\n- Only UDP traffic on subnet `1.1.1.0/24` on port 1337 will go through the remote pod.\n\n```json\n{\n  \"remote\": [\"udp://1.1.1.0/24:1337\"]\n}\n```\n\n- Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331` will go\n  through the remote pod.\n```json\n{\n  \"remote\": [\"google.com:1337\", \"google.com:7331\"]\n}\n```\n\n- Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will be\n  emitted remotely in the cluster.\n\n```json\n{\n  \"local\": [\"tcp://localhost:1337\"]\n}\n```\n\n- Only outgoing traffic on port `1337` and `7331` will go through the local app.\n```json\n{\n  \"local\": [\":1337\", \":7331\"]\n}\n```\n\nValid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.\n\nHost names listed here are automatically mirrored into\n[`feature.network.dns.filter`](super::dns::DnsFilterConfig) on the matching side, so the\nname is resolved on the side that handles the connection. For example,\n`{ \"local\": [\"some.domain.com\"] }` implies `dns.filter.local = [\"some.domain.com\"]` even if\n`dns.filter` is otherwise unset.",
       "oneOf": [
         {
           "description": "When filters are specified under `remote`, matching traffic will go through the remote pod,\neverything else will go through local.",
@@ -3086,6 +3217,17 @@
       "description": "Controls the lifetime and creation behavior of preview sessions.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"image\": \"my-registry/my-app:latest\",\n      \"ttl_mins\": 60,\n      \"creation_timeout_secs\": 60\n    }\n  }\n}\n```",
       "type": "object",
       "properties": {
+        "config_mounts": {
+          "title": "feature.preview.config_mounts {#feature-preview-config_mounts}",
+          "description": "Files to mount into the preview pod at session start.\n\nEach entry projects a single file at an absolute path inside the\ncontainer's filesystem, without shadowing the surrounding directory's\nother contents. Useful for overriding individual config files\n(`/etc/app/config.yaml`, `/etc/nginx/conf.d/custom.conf`, ...) without\nrebuilding the image.\n\nFiles are read once at session creation and never refreshed — re-run\n`mirrord preview start` with the same `key` to change them.\n\n`config_mounts` is not a confidentiality boundary: the `payload` is\nstored on the `PreviewSession` resource and is visible to anyone with\n`get` permission on it. Do not put credentials or secrets here.\n\nEach entry sources its content one of two ways:\n- **Inline:** set `type` (`\"text\"` or `\"binary\"`) and `payload` directly.\n- **From file:** set `from_file` to a path on the local filesystem. The file is read at\n  session creation time; valid UTF-8 contents are sent as `\"text\"`, anything else is\n  base64-encoded and sent as `\"binary\"`. The local path is not transmitted to the operator.\n\n`payload`/`type` and `from_file` are mutually exclusive on a single entry.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"config_mounts\": [\n        {\n          \"mount_at\": \"/etc/app/config.yaml\",\n          \"type\": \"text\",\n          \"payload\": \"server:\\n  listen: 8080\\n\"\n        },\n        {\n          \"mount_at\": \"/usr/local/bin/probe\",\n          \"from_file\": \"./build/probe\"\n        }\n      ]\n    }\n  }\n}\n```\n\n##### Implementation\n\nEach session creates one `ConfigMap` owned by the `PreviewSession`,\nholding all mount payloads. The ConfigMap is mounted into the preview pod\nwith one per-file `subPath` bind per entry, so each mount overlays a\nsingle path without shadowing the surrounding directory. The ConfigMap is\ngarbage-collected automatically when the session ends.\n\nBecause both the `PreviewSession` resource and the generated `ConfigMap`\nlive in etcd, the **combined size of all `payload` payloads in a single\nsession is bound by Kubernetes' ~1 MiB per-object limit**. For `\"text\"`\npayloads that's roughly 1 MiB of content; for `\"binary\"`, base64\ninflates the encoded form by ~33%, leaving roughly 750 KiB of raw bytes.\nExceeding the limit causes the apiserver to reject the session at\ncreation time.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ConfigMount"
+          }
+        },
         "creation_timeout_secs": {
           "title": "feature.preview.creation_timeout_secs {#feature-preview-creation_timeout_secs}",
           "description": "How long (in seconds) the CLI waits for the preview session to become ready.\nIf the session hasn't reached `Ready` within this time, the CLI deletes it.",
@@ -3106,10 +3248,22 @@
         },
         "ttl_mins": {
           "title": "feature.preview.ttl_mins {#feature-preview-ttl_mins}",
-          "description": "How long (in minutes) the preview session is allowed to live after creation.\nThe operator will terminate the session when this time elapses.\n\nSet to `\"infinite\"` to disable TTL.",
+          "description": "How long (in minutes) the preview session is allowed to live after creation.\nThe operator will terminate the session when this time elapses.\n\nSet to `\"infinite\"` to disable TTL.\n\nMutually exclusive with [`ttl_secs`](#feature-preview-ttl_secs); when neither is set,\ndefaults to 60 minutes.",
           "anyOf": [
             {
-              "$ref": "#/$defs/PreviewTtlMins"
+              "$ref": "#/$defs/PreviewTtl"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ttl_secs": {
+          "title": "feature.preview.ttl_secs {#feature-preview-ttl_secs}",
+          "description": "Same as [`ttl_mins`](#feature-preview-ttl_mins) but expressed in seconds.\n\nSet to `\"infinite\"` to disable TTL.\n\nMutually exclusive with [`ttl_mins`](#feature-preview-ttl_mins).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviewTtl"
             },
             {
               "type": "null"
@@ -3119,13 +3273,8 @@
       },
       "additionalProperties": false
     },
-    "PreviewTtlKeyword": {
-      "type": "string",
-      "enum": [
-        "infinite"
-      ]
-    },
-    "PreviewTtlMins": {
+    "PreviewTtl": {
+      "description": "A TTL value usable for either [`PreviewConfig::ttl_mins`] or [`PreviewConfig::ttl_secs`].\n\nThe unit (minutes or seconds) depends on which field carries the value; the variants\nthemselves are unit-agnostic.",
       "anyOf": [
         {
           "type": "integer",
@@ -3137,13 +3286,19 @@
         }
       ]
     },
+    "PreviewTtlKeyword": {
+      "type": "string",
+      "enum": [
+        "infinite"
+      ]
+    },
     "QueueFilter": {
       "title": "feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}",
       "description": "For each queue, `message_filter` is a mapping between message attribute names and regexes they\nshould match. The local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the attributes in the\nfilter, with values of those attributes matching the respective patterns.\n\n### feature.split_queues.{}.queue_type {#feature-split_queues-queue_id-queue_type}\n\nThe type of queue to be split, currently `SQS` and `Kafka` are supported. More queue types might\nbe added in the future.",
       "oneOf": [
         {
           "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
-          "description": "Only supported with `queue_type` of `SQS`.\nWhen this field is specified, for each SQS message, the jq filter runs on a JSON\nrepresentation of the SQS `Message` object. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nSee [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
+          "description": "Only supported with `queue_type` of `SQS`, or `GCPPubSub`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nus used.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
           "type": "object",
           "properties": {
             "jq_filter": {
@@ -3238,6 +3393,36 @@
             "queue_type": {
               "type": "string",
               "const": "GCPPubSub"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each Service Bus message, the jq filter runs on a JSON\nrepresentation of the full `ServiceBusMessage` object.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between Azure Service Bus application property names and\nregexes they should match. The local application will only receive messages whose\napplication properties match **all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "AzureServiceBus"
             }
           },
           "additionalProperties": false,

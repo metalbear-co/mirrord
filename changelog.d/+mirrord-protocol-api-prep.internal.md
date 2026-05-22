@@ -1,0 +1,1 @@
+`OperatorApi` now returns an established `mirrord-protocol` connection as a named `Stream+Sink` type.

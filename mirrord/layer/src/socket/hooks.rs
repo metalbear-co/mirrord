@@ -388,7 +388,9 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
             let mut current = addrinfo;
             while !current.is_null() {
                 let current_box = Box::from_raw(current);
-                let ai_addr = Box::from_raw(current_box.ai_addr);
+                // `ai_addr` was allocated as a boxed `sockaddr_storage` in `getaddrinfo`, so it
+                // must be reclaimed with the same layout.
+                let ai_addr = Box::from_raw(current_box.ai_addr.cast::<libc::sockaddr_storage>());
                 let ai_canonname = CString::from_raw(current_box.ai_canonname);
 
                 current = (*current).ai_next;

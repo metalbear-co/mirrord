@@ -36,9 +36,9 @@ use crate::{
 
 /// Trait for simple [`mirrord_protocol`] requests that trigger a response from server, for example
 /// [`GetAddrInfoRequest`]s.
-pub trait SimpleRequest: Sized {
+pub trait SimpleRequest: Sized + Send {
     /// Type of expected response.
-    type Response;
+    type Response: Send;
 
     /// Prepares this request to be processed by the client API, with the given [`mirrord_protocol`]
     /// version.
@@ -46,6 +46,13 @@ pub trait SimpleRequest: Sized {
     /// This function is expected to handle request downgrade, if necessary.
     /// For example, [`GetAddrInfoRequestV2`] -> [`GetAddrInfoRequest`].
     fn prepare(self, version: &semver::Version) -> ClientResult<Prepared<Self>>;
+
+    /// Returns whether this request is stateless and can be retried in a new [`mirrord_protocol`]
+    /// connection after a reconnect.
+    ///
+    /// An example of a stateful request is [`ReadFileRequest`]. It refers to a remote file
+    /// descriptor, which is lost after reconnect.
+    fn is_stateless(&self) -> bool;
 }
 
 /// Handles a result of a [`SimpleRequest`].
@@ -97,6 +104,10 @@ impl SimpleRequest for GetEnvVarsRequest {
             result_rx,
         })
     }
+
+    fn is_stateless(&self) -> bool {
+        true
+    }
 }
 
 impl SimpleRequest for GetAddrInfoRequest {
@@ -126,6 +137,10 @@ impl SimpleRequest for GetAddrInfoRequest {
             result_handler,
             result_rx,
         })
+    }
+
+    fn is_stateless(&self) -> bool {
+        true
     }
 }
 
@@ -162,6 +177,10 @@ impl SimpleRequest for GetAddrInfoRequestV2 {
             result_handler,
             result_rx,
         })
+    }
+
+    fn is_stateless(&self) -> bool {
+        true
     }
 }
 
@@ -200,6 +219,10 @@ impl SimpleRequest for ReverseDnsLookupRequest {
             result_rx,
         })
     }
+
+    fn is_stateless(&self) -> bool {
+        true
+    }
 }
 
 /// Trait for file requests that trigger a response from the server.
@@ -217,7 +240,7 @@ pub trait FileRequestWithResponse: FileRequestExt + Sized {
 
 impl<T> SimpleRequest for T
 where
-    T: FileRequestWithResponse,
+    T: FileRequestWithResponse + Send,
     T::Response: 'static + Send,
 {
     type Response = <Self as FileRequestWithResponse>::Response;
@@ -250,6 +273,10 @@ where
             result_handler,
             result_rx,
         })
+    }
+
+    fn is_stateless(&self) -> bool {
+        self.remote_fd().is_none()
     }
 }
 

@@ -1,14 +1,10 @@
 use std::{io, ops::Not, time::Duration};
 
 use bytes::{Bytes, BytesMut};
-use futures::future::OptionFuture;
 use http::Response;
 use http_body_util::combinators::BoxBody;
 use httparse::Status;
-use tokio::{
-    io::{AsyncRead, AsyncReadExt},
-    time::Instant,
-};
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tracing::Level;
 
 use crate::util::rolledback_stream::RolledBackStream;
@@ -115,12 +111,16 @@ impl DetectedHttpVersion {
 
 /// Attempts to detect HTTP version from the first bytes of a stream.
 ///
-/// Keeps reading data until the timeout elapses or we're certain whether the stream is an HTTP
-/// connection or not.
+/// Keeps reading data until we're certain whether the stream is an HTTP connection or not,
+/// or a read attempt fails to produce data within `timeout`.
 ///
 /// # Notes
 ///
-/// * The given `timeout` starts elapsing only after we complete the first read.
+/// * `timeout` is applied per read attempt — every successful read resets the deadline. A stream
+///   that never sends any bytes (e.g. a server-first protocol like SMTP) returns within roughly
+///   `timeout` instead of blocking indefinitely, but a trickling stream can extend total detection
+///   time beyond `timeout`. In practice this is bounded, since [`HttpVersion::detect`] reaches a
+///   verdict within ~14 bytes.
 /// * This function can read arbitrarily large amount of data from the stream. However,
 ///   [`HttpVersion::detect`] should almost always be able to determine the stream type after
 ///   reading no more than ~2kb (assuming **very** long request URI).
@@ -135,22 +135,17 @@ where
 {
     let mut buf = BytesMut::with_capacity(1024);
     let mut detected = DetectedHttpVersion::Unknown;
-    let mut timeout_at: Option<Instant> = None;
 
     while detected.is_known().not() {
-        let timeout_fut = OptionFuture::from(timeout_at.map(tokio::time::sleep_until));
-
-        let result = tokio::select! {
-            Some(..) = timeout_fut => break,
-            result = stream.read_buf(&mut buf) => result,
+        let read_size = match tokio::time::timeout(timeout, stream.read_buf(&mut buf)).await {
+            Ok(result) => result?,
+            Err(_) => break,
         };
 
-        let read_size = result?;
         if read_size == 0 {
             break;
         }
 
-        timeout_at = timeout_at.or_else(|| Some(Instant::now() + timeout));
         detected = HttpVersion::detect(buf.as_ref());
     }
 
@@ -159,9 +154,15 @@ where
 
 #[cfg(test)]
 mod test {
-    use rstest::rstest;
+    use std::time::Duration;
 
-    use super::{DetectedHttpVersion, HttpVersion};
+    use rstest::rstest;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt, duplex},
+        time::Instant,
+    };
+
+    use super::{DetectedHttpVersion, HttpVersion, detect_http_version};
 
     #[rstest]
     #[case::known_bug(b"hello ther", DetectedHttpVersion::Unknown)]
@@ -184,5 +185,57 @@ mod test {
     fn http_detect(#[case] input: &[u8], #[case] expected: DetectedHttpVersion) {
         let detected = HttpVersion::detect(input);
         assert_eq!(detected, expected,)
+    }
+
+    /// A server-first protocol that never sends a byte returns within ~timeout instead of
+    /// blocking on the first read.
+    #[tokio::test]
+    async fn timeout_fires_on_silent_stream() {
+        let (_server, client) = duplex(64);
+
+        let started = Instant::now();
+        let (_rolled, version) = detect_http_version(client, Duration::from_millis(100))
+            .await
+            .unwrap();
+        let elapsed = started.elapsed();
+
+        assert_eq!(version, None);
+        assert!(
+            elapsed < Duration::from_millis(900),
+            "detect_http_version took {elapsed:?}, expected ~100ms",
+        );
+    }
+
+    /// `Duration::ZERO` is a valid configured value and must not hang on a silent stream.
+    #[tokio::test]
+    async fn timeout_zero_returns_immediately_on_silent_stream() {
+        let (_server, client) = duplex(64);
+
+        let started = Instant::now();
+        let (_rolled, version) = detect_http_version(client, Duration::ZERO).await.unwrap();
+        let elapsed = started.elapsed();
+
+        assert_eq!(version, None);
+        assert!(
+            elapsed < Duration::from_millis(50),
+            "detect_http_version took {elapsed:?}, expected ~0ms",
+        );
+    }
+
+    /// A complete HTTP/1.1 request is still detected, and the bytes are preserved in the
+    /// returned [`super::RolledBackStream`] so downstream readers see them.
+    #[tokio::test]
+    async fn detects_http1_request_and_preserves_bytes() {
+        let (mut server, client) = duplex(64);
+        server.write_all(b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
+
+        let (mut rolled, version) = detect_http_version(client, Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert_eq!(version, Some(HttpVersion::V1));
+
+        let mut buf = [0; 18];
+        rolled.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"GET / HTTP/1.1\r\n\r\n");
     }
 }

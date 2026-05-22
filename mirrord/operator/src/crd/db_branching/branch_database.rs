@@ -141,6 +141,9 @@ pub struct PostgresOptions {
 pub struct MysqlOptions {
     #[serde(default)]
     pub copy: SqlBranchCopyConfig,
+    /// IAM auth config for cloud-managed databases (RDS, Cloud SQL).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_auth: Option<IamAuthConfig>,
 }
 
 /// MySQL-specific branch options.

@@ -4,7 +4,7 @@ pub mod from_env;
 pub mod source;
 pub mod unstable;
 
-use std::{error::Error, fmt, io, path::PathBuf};
+use std::{borrow::Cow, error::Error, fmt, io, path::PathBuf};
 
 pub use context::ConfigContext;
 use thiserror::Error;
@@ -25,7 +25,7 @@ pub enum ConfigError {
     #[error("invalid {} value `{}`: {}", .name, .provided, .error)]
     InvalidValue {
         // Name of parsed env var or field path in the config.
-        name: &'static str,
+        name: Cow<'static, str>,
         // Value provided by the user.
         provided: String,
         // Error that occurred when processing the value.
