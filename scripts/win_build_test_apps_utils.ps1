@@ -231,3 +231,35 @@ function Install-DotnetSdk {
     }
     Write-Host "Using dotnet at $dotnetExe"
 }
+
+# Pre-build the cs-e2e file-based programs OUTSIDE mirrord, where the
+# build-time NuGet restore can reach the real network. The test then runs
+# `dotnet run Program.cs` against the warm, offline artifact cache, so no
+# restore or compile happens under the layer (which would otherwise route the
+# restore through the pod and fail). `dotnet run` defaults to the Debug
+# configuration, so build with that same default for a cache hit.
+# Auto-discovers every cs-e2e/<app>/Program.cs -- adding an app needs no CI
+# change.
+function Build-CsE2EApps {
+    param([string]$TestsDir)
+
+    $csRoot = Join-Path $TestsDir 'cs-e2e'
+    if (-not (Test-Path $csRoot)) {
+        Write-Host "No cs-e2e/ directory at $csRoot; skipping C# pre-build."
+        return
+    }
+
+    $programs = Get-ChildItem -Path $csRoot -Recurse -Filter 'Program.cs'
+    if ($programs.Count -eq 0) {
+        Write-Host "No Program.cs found under $csRoot; nothing to pre-build."
+        return
+    }
+
+    foreach ($program in $programs) {
+        Write-Host "Pre-building C# e2e app $($program.FullName)"
+        & dotnet build $program.FullName --nologo --verbosity minimal
+        if ($LASTEXITCODE -ne 0) {
+            throw "dotnet build $($program.FullName) failed with exit code $LASTEXITCODE"
+        }
+    }
+}
