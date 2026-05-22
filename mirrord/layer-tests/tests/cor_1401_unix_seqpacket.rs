@@ -21,7 +21,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn outgoing_unix_seqpacket(config_dir: &Path) {
+async fn cor_1401_unix_seqpacket(config_dir: &Path) {
     let config = config_dir.join("cor_1401_seqpacket.toml");
     let (mut test_process, mut intproxy) = Application::PythonCor1401Seqpacket
         .start_process(vec![], Some(&config))
