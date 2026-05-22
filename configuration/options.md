@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-05-19T00:00:00.000Z
+lastmod: 2026-05-22T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -2094,6 +2094,12 @@ Takes a list of values, such as:
 
 Valid values follow this pattern: `[name|address|subnet/mask][:port]`.
 
+Host names listed in
+[`feature.network.outgoing.filter`](super::outgoing::OutgoingFilterConfig) are automatically
+appended here on the matching side, so DNS resolution stays on the same side as the
+connection (e.g. `outgoing.filter.local = ["some.domain.com"]` implies
+`dns.filter.local = ["some.domain.com"]`).
+
 When filters are specified under `local`, matching DNS queries will go through the local
 app , everything else will go through the remote pod.
 
@@ -2780,6 +2786,12 @@ Takes a list of values, such as:
 
 Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
 
+Host names listed here are automatically mirrored into
+[`feature.network.dns.filter`](super::dns::DnsFilterConfig) on the matching side, so the
+name is resolved on the side that handles the connection. For example,
+`{ "local": ["some.domain.com"] }` implies `dns.filter.local = ["some.domain.com"]` even if
+`dns.filter` is otherwise unset.
+
 When filters are specified under `local`, matching traffic will go through the local app,
 everything else will go through the remote pod.
 
@@ -2829,6 +2841,103 @@ Controls the lifetime and creation behavior of preview sessions.
   }
 }
 ```
+
+#### feature.preview.config_mounts {#feature-preview-config_mounts}
+
+Files to mount into the preview pod at session start.
+
+Each entry projects a single file at an absolute path inside the
+container's filesystem, without shadowing the surrounding directory's
+other contents. Useful for overriding individual config files
+(`/etc/app/config.yaml`, `/etc/nginx/conf.d/custom.conf`, ...) without
+rebuilding the image.
+
+Files are read once at session creation and never refreshed — re-run
+`mirrord preview start` with the same `key` to change them.
+
+`config_mounts` is not a confidentiality boundary: the `payload` is
+stored on the `PreviewSession` resource and is visible to anyone with
+`get` permission on it. Do not put credentials or secrets here.
+
+Each entry sources its content one of two ways:
+- **Inline:** set `type` (`"text"` or `"binary"`) and `payload` directly.
+- **From file:** set `from_file` to a path on the local filesystem. The file is read at
+  session creation time; valid UTF-8 contents are sent as `"text"`, anything else is
+  base64-encoded and sent as `"binary"`. The local path is not transmitted to the operator.
+
+`payload`/`type` and `from_file` are mutually exclusive on a single entry.
+
+```json
+{
+  "feature": {
+    "preview": {
+      "config_mounts": [
+        {
+          "mount_at": "/etc/app/config.yaml",
+          "type": "text",
+          "payload": "server:\n  listen: 8080\n"
+        },
+        {
+          "mount_at": "/usr/local/bin/probe",
+          "from_file": "./build/probe"
+        }
+      ]
+    }
+  }
+}
+```
+
+##### Implementation
+
+Each session creates one `ConfigMap` owned by the `PreviewSession`,
+holding all mount payloads. The ConfigMap is mounted into the preview pod
+with one per-file `subPath` bind per entry, so each mount overlays a
+single path without shadowing the surrounding directory. The ConfigMap is
+garbage-collected automatically when the session ends.
+
+Because both the `PreviewSession` resource and the generated `ConfigMap`
+live in etcd, the **combined size of all `payload` payloads in a single
+session is bound by Kubernetes' ~1 MiB per-object limit**. For `"text"`
+payloads that's roughly 1 MiB of content; for `"binary"`, base64
+inflates the encoded form by ~33%, leaving roughly 750 KiB of raw bytes.
+Exceeding the limit causes the apiserver to reject the session at
+creation time.
+
+A single file to project into the preview pod's container filesystem.
+
+Either `payload`+`type` (inline) or `from_file` (load from disk) must
+be set; the two forms are mutually exclusive. After
+[`ConfigMount::resolve`] has been called, the result is guaranteed
+to have `payload` and `r#type` set and `from_file` cleared. This form
+gets sent to the operator.
+
+Local filesystem path to read the file from. The contents are loaded
+at session creation time and sent as `"text"` (verbatim) if valid
+UTF-8, otherwise base64-encoded and sent as `"binary"`. Mutually
+exclusive with `payload`.
+
+Absolute path inside the preview pod's container where the file should
+appear. The surrounding directory's other contents
+(if any) are left untouched, only this one path is overlaid.
+
+Inline file contents. Interpretation depends on `type`: for `"text"`,
+written to the file byte-for-byte; for `"binary"`, base64-decoded
+first. Mutually exclusive with `from_file`.
+
+How the `payload` payload should be interpreted when writing it to the
+file. `"text"` for verbatim UTF-8 content, `"binary"` for
+base64-encoded bytes. Required when `payload` is set; determined
+automatically when `from_file` is used.
+
+Encoding of a [`ConfigMount::payload`] payload.
+
+`payload` is base64-encoded and is decoded before being
+written. Used for binary files that can't safely live in a
+JSON string.
+
+`payload` is written to the file verbatim. Used for
+human-readable config files (YAML, TOML, JSON, env files,
+shell scripts, ...).
 
 #### feature.preview.creation_timeout_secs {#feature-preview-creation_timeout_secs}
 
