@@ -29,6 +29,7 @@ use base64::prelude::*;
 use config::{ConfigContext, ConfigError, MirrordConfig};
 use experimental::ExperimentalConfig;
 use feature::{
+    database_branches::DatabaseBranchConfig,
     env::mapper::EnvVarsRemapper,
     network::{
         dns::DnsFilterConfig,
@@ -879,6 +880,34 @@ impl LayerConfig {
         self.feature.network.outgoing.verify(context)?;
         self.feature.split_queues.verify(context)?;
         self.feature.db_branches.verify()?;
+
+        // guard against env overrides conflicting with db branching keys
+        if let Some(overrides) = self.feature.env.r#override.as_ref()
+            && !overrides.is_empty()
+        {
+            let mut conflicts: Vec<&str> = self
+                .feature
+                .db_branches
+                .0
+                .iter()
+                .flat_map(DatabaseBranchConfig::connection_env_keys)
+                .filter(|key| overrides.contains_key(*key))
+                .collect();
+
+            if conflicts.is_empty().not() {
+                conflicts.sort();
+                conflicts.dedup();
+                return Err(ConfigError::Conflict(format!(
+                    "the following environment variables appear in both \
+                     `feature.env.override` and `feature.db_branches[].connection`: {}. \
+                     Database branching redirects these variables through the operator, \
+                     so overriding them locally would defeat the redirection. Remove \
+                     them from `feature.env.override`.",
+                    conflicts.join(", "),
+                )));
+            }
+        }
+
         self.feature.preview.verify()?;
 
         if self.feature.fs.readonly_file_buffer > READONLY_FILE_BUFFER_HARD_LIMIT {
@@ -2042,6 +2071,69 @@ mod tests {
         );
         let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
         assert_eq!(names(filter), ("local", vec!["docker.lala".to_owned()]));
+    }
+
+    #[test]
+    fn db_branches_env_override_conflict_is_rejected() {
+        let config = ConfigType::Json.parse(
+            r#"
+            {
+                "feature": {
+                    "env": {
+                        "override": { "DB_URL": "postgres://localhost/local" }
+                    },
+                    "db_branches": [
+                        {
+                            "type": "pg",
+                            "connection": { "url": { "type": "env", "variable": "DB_URL" } }
+                        }
+                    ]
+                }
+            }
+            "#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        let error = resolved
+            .verify(&mut context)
+            .expect_err("overlapping env.override and db_branches keys should be rejected");
+
+        assert!(
+            matches!(&error, ConfigError::Conflict(msg) if msg.contains("DB_URL")),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn db_branches_without_env_override_overlap_pass_verification() {
+        let config = ConfigType::Json.parse(
+            r#"
+            {
+                "feature": {
+                    "env": {
+                        "override": { "OTHER_VAR": "value" }
+                    },
+                    "db_branches": [
+                        {
+                            "type": "pg",
+                            "connection": { "url": { "type": "env", "variable": "DB_URL" } }
+                        }
+                    ]
+                }
+            }
+            "#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify(&mut context)
+            .expect("non-overlapping keys should verify");
     }
 
     #[test]
