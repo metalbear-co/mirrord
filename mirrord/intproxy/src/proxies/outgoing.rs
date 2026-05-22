@@ -13,11 +13,13 @@ use mirrord_intproxy_protocol::{
     LayerId, MessageId, NetProtocol, OutgoingConnMetadataResponse, OutgoingConnectRequest,
     OutgoingConnectResponse, OutgoingRequest, OutgoingResponse, ProxyToLayerMessage,
 };
+#[cfg(target_os = "linux")]
+use mirrord_protocol::outgoing::OUTGOING_SEQPACKET;
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, RemoteResult, ResponseError,
     outgoing::{
-        DaemonConnect, DaemonConnectV2, DaemonRead, OUTGOING_CONNECT_V2, OUTGOING_SEQPACKET,
-        SocketAddress, seqpacket::DaemonSeqpacket, tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing,
+        DaemonConnect, DaemonConnectV2, DaemonRead, OUTGOING_CONNECT_V2, SocketAddress,
+        seqpacket::DaemonSeqpacket, tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing,
     },
     uid::Uid,
 };
