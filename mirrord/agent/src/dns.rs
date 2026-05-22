@@ -440,6 +440,7 @@ mod test {
     #[case("google.com")]
     #[case("UPPERCASE-IS-FINE.mydomain.com")]
     #[case("underscore_is_fine.mydomain.com")]
+    #[case("0.0.0.0")]
     #[test]
     fn parse_dns_name_with_hickory(#[case] node_name: &str) {
         Name::from_str_relaxed(node_name).unwrap();
