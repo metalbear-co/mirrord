@@ -452,7 +452,7 @@ impl OutgoingProxy {
             .is_some_and(|version| OUTGOING_SEQPACKET.matches(version));
 
         #[cfg(not(target_os = "linux"))]
-        let supports_seqpacket_interceptor = false;
+        let supports_seqpacket = false;
 
         if (request.protocol == NetProtocol::Seqpacket) && supports_seqpacket.not() {
             message_bus
