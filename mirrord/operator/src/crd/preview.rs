@@ -16,8 +16,8 @@ use mirrord_config::{
     feature::{
         env::EnvConfig,
         network::incoming::{IncomingConfig, IncomingMode, http_filter::HttpFilterConfig},
-        preview::PreviewTtlMins,
-        split_queues::{QueueId, SplitQueuesConfig},
+        preview::{ConfigMount, ConfigMountType, PreviewTtl},
+        split_queues::{QueueId, QueueMessageFilter, SplitQueuesConfig},
     },
     target::Target,
 };
@@ -74,6 +74,10 @@ pub struct PreviewSessionSpec {
     /// User-configured environment variable settings for this preview session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<PreviewEnvVarsConfig>,
+
+    /// File-based config mount settings for this preview session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub config_mounts: Vec<PreviewEnvConfigMount>,
 }
 
 impl PreviewSessionSpec {
@@ -84,7 +88,7 @@ impl PreviewSessionSpec {
 
     /// Returns `true` when `ttl_secs` should be treated as infinite.
     pub fn has_infinite_ttl(&self) -> bool {
-        self.ttl_secs >= PreviewTtlMins::INFINITE_TTL_SECS
+        self.ttl_secs >= PreviewTtl::INFINITE_TTL_SECS
     }
 }
 
@@ -358,17 +362,22 @@ mod tests {
 #[serde(rename_all = "camelCase")]
 pub struct PreviewQueueSplittingConfig {
     /// SQS queue splitting filters, keyed by queue ID.
-    ///
-    /// Each entry configures how messages from a specific SQS queue should be filtered
-    /// for this preview session.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub sqs_queue_filters: BTreeMap<QueueId, PreviewSqsFilter>,
+    pub sqs_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
 
     /// Kafka queue splitting filters, keyed by topic ID.
     ///
     /// Each value maps header names to regex patterns that messages must match.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub kafka_queue_filters: BTreeMap<QueueId, BTreeMap<String, String>>,
+
+    /// GCP Pub/Sub queue splitting filters, keyed by queue ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub gcp_pubsub_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
+    /// Azure Service Bus queue splitting filters, keyed by queue ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub azure_service_bus_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
 }
 
 impl PreviewQueueSplittingConfig {
@@ -379,14 +388,14 @@ impl PreviewQueueSplittingConfig {
         for (id, message_filter) in value.sqs() {
             sqs_queue_filters
                 .entry(id.to_owned())
-                .or_insert_with(PreviewSqsFilter::default)
+                .or_insert_with(PreviewQueueFilter::default)
                 .message_filter = Some(message_filter.clone());
         }
 
         for (id, jq_filter) in value.sqs_jq_filters() {
             sqs_queue_filters
                 .entry(id.to_owned())
-                .or_insert_with(PreviewSqsFilter::default)
+                .or_insert_with(PreviewQueueFilter::default)
                 .jq_filter = Some(jq_filter.to_owned());
         }
 
@@ -395,35 +404,66 @@ impl PreviewQueueSplittingConfig {
             .map(|(id, filter)| (id.to_owned(), filter.clone()))
             .collect();
 
-        if sqs_queue_filters.is_empty() && kafka_queue_filters.is_empty() {
+        let gcp_pubsub_queue_filters =
+            collect_queue_filters(value.gcp_pubsub(), value.gcp_pubsub_jq_filters());
+
+        let azure_service_bus_queue_filters = collect_queue_filters(
+            value.azure_service_bus(),
+            value.azure_service_bus_jq_filters(),
+        );
+
+        let config = Self {
+            sqs_queue_filters,
+            kafka_queue_filters,
+            gcp_pubsub_queue_filters,
+            azure_service_bus_queue_filters,
+        };
+
+        if config == Self::default() {
             None
         } else {
-            Some(Self {
-                sqs_queue_filters,
-                kafka_queue_filters,
-            })
+            Some(config)
         }
     }
 }
 
-/// Per-queue SQS filter configuration for preview sessions.
+/// Per-queue filter configuration for preview sessions.
+/// Used by SQS, GCP Pub/Sub, and Azure Service Bus.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct PreviewSqsFilter {
-    /// Message attribute filter: a mapping from attribute names to regex patterns.
-    ///
-    /// Only messages whose attributes match **all** patterns will be delivered
+pub struct PreviewQueueFilter {
+    /// Message attribute/header filter: a mapping from attribute names to regex patterns.
+    /// Only messages whose attributes match all patterns will be delivered
     /// to the preview environment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message_filter: Option<BTreeMap<String, String>>,
 
-    /// A jq filter expression.
-    ///
-    /// For each SQS message, the jq filter runs on a JSON representation of the
-    /// SQS `Message` object. If the jq program outputs `true`, the message is
-    /// considered as matching.
+    /// A jq filter expression applied to message content.
+    /// If the jq program outputs `true`, the message is considered as matching.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jq_filter: Option<String>,
+}
+
+/// Builds a `BTreeMap<QueueId, PreviewQueueFilter>` from header-filter and jq-filter iterators.
+fn collect_queue_filters<'a>(
+    header_filters: impl Iterator<Item = (&'a str, &'a QueueMessageFilter)>,
+    jq_filters: impl Iterator<Item = (&'a str, &'a str)>,
+) -> BTreeMap<QueueId, PreviewQueueFilter> {
+    let mut map = BTreeMap::new();
+
+    for (id, message_filter) in header_filters {
+        map.entry(id.to_owned())
+            .or_insert_with(PreviewQueueFilter::default)
+            .message_filter = Some(message_filter.clone());
+    }
+
+    for (id, jq_filter) in jq_filters {
+        map.entry(id.to_owned())
+            .or_insert_with(PreviewQueueFilter::default)
+            .jq_filter = Some(jq_filter.to_owned());
+    }
+
+    map
 }
 
 /// Database branching configuration for preview environments.
@@ -515,6 +555,59 @@ impl PreviewEnvVarsConfig {
                 exclude,
                 overrides,
             }))
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewEnvConfigMount {
+    /// Path where the file should be mounted.
+    pub path: String,
+
+    /// `text` or `binary`
+    pub r#type: PreviewEnvConfigMountType,
+
+    /// Payload of the mount.
+    pub data: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PreviewEnvConfigMountType {
+    /// Specifies that `data` should be dumped into the file as-is.
+    Text,
+
+    /// Specifies that `data` is base64-encoded and should be decoded
+    /// before being dumped into the file.
+    Binary,
+}
+
+impl From<ConfigMount> for PreviewEnvConfigMount {
+    /// Assumes `value` has been passed through [`ConfigMount::resolve`], which
+    /// guarantees `data` and `r#type` are both `Some` and `from_file` is `None`.
+    fn from(value: ConfigMount) -> Self {
+        let ConfigMount {
+            mount_at: path,
+            r#type,
+            payload: data,
+            from_file: _,
+        } = value;
+        Self {
+            path,
+            r#type: r#type
+                .expect("ConfigMount must be resolved before conversion")
+                .into(),
+            data: data.expect("ConfigMount must be resolved before conversion"),
+        }
+    }
+}
+
+impl From<ConfigMountType> for PreviewEnvConfigMountType {
+    fn from(value: ConfigMountType) -> Self {
+        match value {
+            ConfigMountType::Text => Self::Text,
+            ConfigMountType::Binary => Self::Binary,
         }
     }
 }

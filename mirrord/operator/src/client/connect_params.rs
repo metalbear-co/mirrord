@@ -48,6 +48,16 @@ pub struct ConnectParams<'a> {
     )]
     pub gcp_pubsub_jq_filters: HashMap<&'a str, &'a str>,
 
+    #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
+    pub azure_service_bus_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
+
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub azure_service_bus_jq_filters: HashMap<&'a str, &'a str>,
+
     /// User's current git branch name - may be an empty string if user is in detached head mode or
     /// another error occurred: this case handled by the operator
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -93,6 +103,9 @@ pub struct ConnectParams<'a> {
     )]
     pub rmq_output_queues: HashMap<String, String>,
 
+    /// When set to `false`, forces a single-cluster session on a multi-cluster Primary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multi_cluster: Option<bool>,
     /// Multi-cluster: prefilled temporary resource names from the default cluster.
     /// The envoy reads these from the default cluster's Ready status and passes
     /// them to remote clusters so they reuse the same broker resources.
@@ -161,6 +174,12 @@ impl<'a> ConnectParams<'a> {
                 .split_queues
                 .gcp_pubsub_jq_filters()
                 .collect(),
+            azure_service_bus_splits: config.feature.split_queues.azure_service_bus().collect(),
+            azure_service_bus_jq_filters: config
+                .feature
+                .split_queues
+                .azure_service_bus_jq_filters()
+                .collect(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -170,6 +189,7 @@ impl<'a> ConnectParams<'a> {
             is_default_cluster: None,
             sqs_output_queues: HashMap::new(),
             rmq_output_queues: HashMap::new(),
+            multi_cluster: config.multi_cluster,
             output_tmp_resources: Vec::new(),
             key: Some(key),
             header_filter: config

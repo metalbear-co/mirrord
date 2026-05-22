@@ -789,7 +789,7 @@ impl MysqlBranchParams {
             database_name: config.base.name.clone(),
             connection_source,
             target: target.clone(),
-            ttl_secs: config.base.ttl_secs,
+            ttl_secs: config.base.resolved_ttl_secs(),
             mysql_version: config.base.version.clone(),
             copy: config.copy.clone().into(),
         };
@@ -827,7 +827,7 @@ impl PgBranchParams {
             database_name: config.base.name.clone(),
             connection_source,
             target: target.clone(),
-            ttl_secs: config.base.ttl_secs,
+            ttl_secs: config.base.resolved_ttl_secs(),
             postgres_version: config.base.version.clone(),
             copy: config.copy.clone().into(),
             iam_auth,
@@ -862,7 +862,7 @@ impl MongodbBranchParams {
             database_name: config.base.name.clone(),
             connection_source,
             target: target.clone(),
-            ttl_secs: config.base.ttl_secs,
+            ttl_secs: config.base.resolved_ttl_secs(),
             mongodb_version: config.base.version.clone(),
             copy: config.copy.clone().into(),
         };
@@ -1325,7 +1325,7 @@ impl UnifiedBranchParams {
             database_name: config.base.name.clone(),
             connection_source,
             target: session_target.clone(),
-            ttl_secs: config.base.ttl_secs,
+            ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             postgres_options: Some(PostgresOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
@@ -1355,16 +1355,18 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
+        let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         let spec = BranchDatabaseSpec {
             id: id.to_string(),
             database_name: config.base.name.clone(),
             connection_source,
             target: session_target.clone(),
-            ttl_secs: config.base.ttl_secs,
+            ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             postgres_options: None,
             mysql_options: Some(MysqlOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
+                iam_auth,
             }),
             mongodb_options: None,
             mssql_options: None,
@@ -1394,7 +1396,7 @@ impl UnifiedBranchParams {
             database_name: config.base.name.clone(),
             connection_source,
             target: session_target.clone(),
-            ttl_secs: config.base.ttl_secs,
+            ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             postgres_options: None,
             mysql_options: None,
@@ -1428,7 +1430,7 @@ impl UnifiedBranchParams {
             database_name: config.base.name.clone(),
             connection_source,
             target: session_target.clone(),
-            ttl_secs: config.base.ttl_secs,
+            ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             postgres_options: None,
             mysql_options: None,

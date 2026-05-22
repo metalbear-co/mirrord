@@ -265,7 +265,8 @@ pub fn is_ignored_port(addr: &SocketAddr) -> bool {
 #[mirrord_layer_macro::instrument(level = "trace", skip(connect_fn), ret)]
 pub fn connect_common<F>(
     sockfd: SocketDescriptor,
-    remote_address: SockAddr,
+    #[cfg(unix)] mut remote_address: SockAddr,
+    #[cfg(not(unix))] remote_address: SockAddr,
     connect_fn: F,
 ) -> Detour<ConnectResult>
 where
@@ -315,6 +316,26 @@ where
     } else if remote_address.is_unix() {
         #[cfg(unix)]
         {
+            // Apps may pass `connect(2)` an `addrlen` larger than the actual
+            // `sun_path` length, padding the rest with null bytes — the kernel
+            // tolerates this. Rust's `SockAddr::as_pathname`, however, derives
+            // the path's length from `addrlen` rather than the first null, so
+            // the trailing nulls leak into the returned `&Path`. That breaks
+            // the layer's `unix_streams` `RegexSet` match, and on the agent
+            // side the path is later fed to a `CStr` conversion that rejects
+            // embedded nulls.
+            //
+            // Trim the trailing nulls by counting the non-null leading bytes
+            // of `sun_path` and shrinking `remote_address.len` to match.
+
+            if let Some(path) = remote_address.as_pathname() {
+                use std::os::unix::ffi::OsStrExt;
+                let bytes = path.as_os_str().as_bytes();
+                let nonzero = bytes.iter().take_while(|f| **f != 0).count();
+                let diff = bytes.len() - nonzero;
+                unsafe { remote_address.set_length(remote_address.len() - diff as u32) }
+            }
+
             let address = remote_address
                 .as_pathname()
                 .map(|path| path.to_string_lossy())

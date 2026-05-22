@@ -56,3 +56,8 @@ pub const OPERATOR_ISOLATION_MARKER_ENV: &str = "OPERATOR_ISOLATION_MARKER";
 /// Default value for the [`OPERATOR_OWNERSHIP_LABEL`] when
 /// [`OPERATOR_ISOLATION_MARKER_ENV`] is not set.
 pub const DEFAULT_OPERATOR_ISOLATION_MARKER: &str = "mirrord-operator";
+
+/// Label applied to CRDs created during single-cluster sessions on a multi-cluster Primary.
+/// The sync controllers check for this label and skip syncing the resource to other clusters,
+/// keeping it local to the Primary.
+pub const MULTI_CLUSTER_SKIP_SYNC_LABEL: &str = "operator.metalbear.co/skip-mc-sync";

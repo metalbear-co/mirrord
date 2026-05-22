@@ -27,12 +27,13 @@ export default function EventRow({ parsed, receivedAt, zebra, onClick }: Props) 
       )}
       onClick={hasDetail ? onClick : undefined}
     >
-      <span className="text-muted-foreground text-[10px] shrink-0 w-[60px] tabular-nums">
+      <span className="text-muted-foreground text-caps shrink-0 w-[60px] tabular-nums">
         {time}
       </span>
       <Badge
         variant={config.variant}
-        className={cn('shrink-0 w-[44px] justify-center text-[9px] font-semibold px-1 py-0 gap-0.5', config.className)}
+        style={{ fontSize: 10 }}
+        className={cn('shrink-0 w-[44px] justify-center font-semibold px-1 py-0 gap-0.5 h-4', config.className)}
       >
         <Icon className="h-2.5 w-2.5" />
         {config.label}

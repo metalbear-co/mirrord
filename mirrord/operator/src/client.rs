@@ -4,7 +4,6 @@ use base64::{Engine, engine::general_purpose};
 use chrono::{DateTime, Utc};
 use connect_params::{BranchDbNames, ConnectParams};
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
-use futures::{SinkExt, StreamExt, future::Either};
 use http::{HeaderName, HeaderValue, request::Request};
 use k8s_openapi::api::apps::v1::Deployment;
 use kube::{
@@ -34,20 +33,20 @@ use mirrord_kube::{
     retry::retry_policy_from_config,
 };
 use mirrord_progress::Progress;
-use mirrord_protocol::{ClientMessage, DaemonMessage};
-use mirrord_protocol_io::{Client as ProtocolClient, Connection};
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use tokio_tungstenite::tungstenite;
 use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
 use crate::{
-    client::database_branches::{
-        DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
-        create_mongodb_branches, create_mysql_branches, create_pg_branches, list_existing_branches,
-        list_reusable_mongodb_branches, list_reusable_mysql_branches, list_reusable_pg_branches,
-        wait_for_pending_branches,
+    client::{
+        connection::OperatorConnection,
+        database_branches::{
+            DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
+            create_mongodb_branches, create_mysql_branches, create_pg_branches,
+            list_existing_branches, list_reusable_mongodb_branches, list_reusable_mysql_branches,
+            list_reusable_pg_branches, wait_for_pending_branches,
+        },
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
@@ -66,6 +65,7 @@ use crate::{
 };
 
 pub mod connect_params;
+pub mod connection;
 mod credentials;
 pub mod database_branches;
 mod discovery;
@@ -141,7 +141,6 @@ pub struct OperatorSession {
     /// Version of the operator, right now only for [`fmt::Debug`] implementation.
     operator_version: Version,
     /// Version of [`mirrord_protocol`] used by the operator.
-    /// Used to create [`Connection`].
     pub operator_protocol_version: Option<Version>,
     /// Allow the layer to attempt reconnection
     pub allow_reconnect: bool,
@@ -183,15 +182,14 @@ impl fmt::Debug for OperatorSession {
 /// Connection to an operator target.
 pub struct OperatorSessionConnection {
     pub session: Box<OperatorSession>,
-    pub conn: Connection<ProtocolClient>,
+    pub conn: OperatorConnection,
 }
 
 impl fmt::Debug for OperatorSessionConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OperatorSessionConnection")
-            .field("session", &self.session)
-            .field("closed", &self.conn.is_closed())
-            .finish()
+        f.debug_tuple("OperatorSessionConnection")
+            .field(&self.session)
+            .finish_non_exhaustive()
     }
 }
 
@@ -603,14 +601,21 @@ where
             .as_deref()
             .unwrap_or(self.client.default_namespace());
 
-        // In multi-cluster management-only mode, create CRDs in operator's namespace
-        // with an annotation specifying the target namespace for the sync controller.
-        let (api_namespace, target_ns_annotation) =
-            if let Some(op_ns) = &self.operator.spec.operator_namespace {
-                (op_ns.as_str(), Some(target_namespace.to_string()))
-            } else {
-                (target_namespace, None)
-            };
+        // Management-only operators set operator_namespace so the sync controller can
+        // pick up CRDs and forward them to the default cluster. When the user forces
+        // single-cluster mode we skip that redirect and put CRDs straight into the
+        // target namespace where the local branching controller will handle them.
+        let use_operator_namespace = layer_config.multi_cluster != Some(false);
+        let (api_namespace, target_ns_annotation) = match self
+            .operator
+            .spec
+            .operator_namespace
+            .as_deref()
+            .filter(|_| use_operator_namespace)
+        {
+            Some(op_ns) => (op_ns, Some(target_namespace.to_string())),
+            None => (target_namespace, None),
+        };
 
         let timeout_secs = layer_config
             .feature
@@ -679,6 +684,17 @@ where
                     params
                         .annotations
                         .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                }
+            }
+
+            // Single-cluster session on a multi-cluster Primary: mark the CRD so the
+            // sync controller ignores it and the local branching controller picks it up.
+            if layer_config.multi_cluster == Some(false) {
+                for params in create_params.values_mut() {
+                    params.labels.insert(
+                        crate::types::MULTI_CLUSTER_SKIP_SYNC_LABEL.to_string(),
+                        "true".to_string(),
+                    );
                 }
             }
 
@@ -1620,6 +1636,8 @@ impl OperatorApi<PreparedClientCert> {
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
             gcp_pubsub_jq_filters: Default::default(),
+            azure_service_bus_splits: Default::default(),
+            azure_service_bus_jq_filters: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -1629,7 +1647,8 @@ impl OperatorApi<PreparedClientCert> {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
-            output_tmp_resources: Vec::new(),
+            multi_cluster: None,
+            output_tmp_resources: Default::default(),
             key: Some(key),
             header_filter: None,
         };
@@ -1905,7 +1924,7 @@ impl OperatorApi<PreparedClientCert> {
     async fn connect_target(
         client: &Client,
         session: &OperatorSession,
-    ) -> OperatorApiResult<Connection<ProtocolClient>> {
+    ) -> OperatorApiResult<OperatorConnection> {
         let request_builder = Request::builder()
             .uri(&session.connect_url)
             .header(SESSION_ID_HEADER, session.id.to_string());
@@ -1924,58 +1943,13 @@ impl OperatorApi<PreparedClientCert> {
             .body(vec![])
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
 
-        #[derive(thiserror::Error, Debug)]
-        enum OperatorClientError {
-            #[error(transparent)]
-            DecodeError(#[from] bincode::error::DecodeError),
-            #[error(transparent)]
-            WsError(#[from] Box<tungstenite::Error>),
-            #[error("invalid message: {0:?}")]
-            InvalidMessage(Box<tungstenite::Message>),
-        }
-
-        impl From<tungstenite::Error> for OperatorClientError {
-            fn from(error: tungstenite::Error) -> Self {
-                Self::WsError(Box::new(error))
-            }
-        }
-
-        let ws = upgrade::connect_ws(client, request)
+        upgrade::connect_ws(client, request)
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
-            })?
-            .with(|e: Vec<u8>| async {
-                Ok::<_, OperatorClientError>(tungstenite::Message::Binary(e))
             })
-            .map(|i| match i.map_err(OperatorClientError::from)? {
-                tungstenite::Message::Binary(pl) => Ok(pl),
-                other => Err(OperatorClientError::InvalidMessage(Box::new(other))),
-            });
-
-        let operator_protocol_version = session.operator_protocol_version.clone();
-
-        let conn = Connection::<ProtocolClient>::from_channel(
-            ws,
-            // Mock protocol version negotiation if the operator does not support it.
-            Some(move |msg| match msg {
-                ClientMessage::SwitchProtocolVersion(version) => match &operator_protocol_version {
-                    Some(operator_protocol_version) => {
-                        Either::Left(ClientMessage::SwitchProtocolVersion(
-                            operator_protocol_version.min(&version).clone(),
-                        ))
-                    }
-                    _ => Either::Right(DaemonMessage::SwitchProtocolVersionResponse(
-                        semver::Version::new(1, 2, 1),
-                    )),
-                },
-                other => Either::Left(other),
-            }),
-        )
-        .await?;
-
-        Ok(conn)
+            .map(OperatorConnection)
     }
 }
 
@@ -2292,6 +2266,9 @@ mod test {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
+            azure_service_bus_splits: Default::default(),
+            azure_service_bus_jq_filters: Default::default(),
+            multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
             header_filter: None,
@@ -2416,6 +2393,9 @@ mod test {
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
+            azure_service_bus_splits: Default::default(),
+            azure_service_bus_jq_filters: Default::default(),
+            multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
             header_filter: None,

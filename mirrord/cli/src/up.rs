@@ -4,15 +4,18 @@ use std::io::ErrorKind;
 
 use miette::Diagnostic;
 use mirrord_config::config::EnvKey;
-use mirrord_up::{UpError, load_up_config};
+use mirrord_up::{InitError, UpError, load_up_config, run_wizard};
 use thiserror::Error;
 
-use crate::config::UpArgs;
+use crate::config::{UpArgs, UpSubcommand};
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum UpCliError {
     #[error(transparent)]
     Up(#[from] UpError),
+
+    #[error(transparent)]
+    Init(#[from] InitError),
 
     #[error("mirrord-up.yaml file not found.")]
     #[diagnostic(help(
@@ -29,6 +32,10 @@ pub enum UpCliError {
 
 /// The `mirrord up` command handler.
 pub(crate) async fn up_command(args: UpArgs) -> Result<(), UpCliError> {
+    if let Some(UpSubcommand::Init { output }) = args.command {
+        return Ok(run_wizard(output)?);
+    }
+
     let up_config = match load_up_config(&args.config_file) {
         Ok(cfg) => cfg,
         Err(UpError::Io(err)) if err.kind() == ErrorKind::NotFound => {

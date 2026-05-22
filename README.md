@@ -4,18 +4,23 @@
 
 </div>
 
-[![Community Slack](https://img.shields.io/badge/Join-e5f7f7?logo=slack&label=Community%20Slack)](https://metalbear.co/slack)
+[![Community Slack](https://img.shields.io/badge/Join-e5f7f7?logo=slack&label=Community%20Slack)](https://metalbear.com/slack)
 [![Github CI](https://github.com/metalbear-co/mirrord/actions/workflows/ci.yaml/badge.svg)](https://github.com/metalbear-co/mirrord/actions/workflows/ci.yaml)
 [![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/metalbear-co/mirrord/blob/main/LICENSE)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/metalbear-co/mirrord)](https://github.com/metalbear-co/mirrord/releases)
-[![Twitter Follow](https://img.shields.io/twitter/follow/metalbearco?style=social)](https://twitter.com/metalbearco)
+[![X Follow](https://img.shields.io/twitter/follow/metalbear?style=social)](https://x.com/metalbear)
 
-[mirrord lets developers run local processes in the context of their Kubernetes environment](https://metalbear.co/mirrord/).
-It’s meant to provide the benefits of running your service on a cloud environment (e.g. staging) without actually
-going through the hassle of deploying it there, and without disrupting the environment by deploying untested code.
-It comes as a Visual Studio Code extension, an IntelliJ plugin and a CLI tool. [You can read more about it here](https://metalbear.co/mirrord/docs/overview/introduction/).
+[mirrord runs your local process inside a live Kubernetes cluster](https://metalbear.com/mirrord/).
+It works the same way for developers and for AI coding agents (Claude Code, Cursor, Codex, Copilot, Windsurf):
+your code runs on your machine, but mirrord routes its traffic, files, and environment variables through a target pod in the cluster.
 
-Or maybe you're just Looking for the [KubeCon Atlanta raffle password](#kubecon-atlanta-raffle).
+That covers both halves of the software development loop. Read live cluster context while writing the code (real env vars, real service responses, real queue contents)
+so the change is grounded in what's actually deployed. Then run the code against those same services and data to confirm it works end-to-end.
+
+You get the feedback of a deploy in seconds, without the deploy, and without disrupting the cluster for anyone else.
+mirrord ships as a VS Code extension, IntelliJ plugin, and CLI tool. [Read more](https://metalbear.com/mirrord/docs/overview/introduction/).
+
+**Adopted by**: monday.com, SurveyMonkey, Cadence, CoLab, Daylight Security, Zooplus, and [others](./ADOPTERS.md).
 
 # Contents
 
@@ -32,6 +37,7 @@ Or maybe you're just Looking for the [KubeCon Atlanta raffle password](#kubecon-
     - [How To Use](#how-to-use-2)
   - [How It Works](#how-it-works)
     - [Additional capabilities](#additional-capabilities)
+  - [Using mirrord with AI coding agents](#using-mirrord-with-ai-coding-agents)
   - [FAQ](#faq)
   - [Contributing](#contributing)
   - [Help and Community](#help-and-community)
@@ -139,7 +145,7 @@ mirrord exec node app.js --target pod/my-pod
 When you select a pod to impersonate, mirrord launches a pod on the same node as the pod you selected.
 The new pod is then used to connect your local process and the impersonated pod: it mirrors incoming traffic from the pod to your process,
 routes outgoing traffic from your process through the pod, and does the same for file reads, file writes, and environment variables.
-[You can read more about it here](https://metalbear.co/mirrord/docs/overview/introduction/).
+[You can read more about it here](https://metalbear.com/mirrord/docs/overview/introduction/).
 
 ### Additional capabilities
 
@@ -149,7 +155,7 @@ Container run inside the pod launched by mirrord requires additional [Linux capa
 - `CAP_SYS_PTRACE` - for reading target pod environment
 - `CAP_SYS_ADMIN` - for joining target pod network namespace
 
-However, you can disable any subset of those in the [configuration](https://metalbear.co/mirrord/docs/reference/configuration/).
+However, you can disable any subset of those in the [configuration](https://metalbear.com/mirrord/docs/reference/configuration/).
 This will possibly limit mirrord functionalities or even make it unusable in some setups.
 
 ```bash
@@ -160,30 +166,33 @@ MIRRORD_AGENT_DISABLED_CAPABILITIES=CAP_NET_RAW,CAP_SYS_PTRACE mirrord exec node
   <img src="./images/how_it_works.svg" alt="How It Works"/>
 </p>
 
+## Using mirrord with AI coding agents
+
+mirrord works first-class with Claude Code, Cursor, Codex CLI, Gemini CLI, and other AI coding agents,
+letting them run and verify generated code against real cluster services without deploying.
+
+For setup guides and ready-made workflow skills,
+see [metalbear-co/skills](https://github.com/metalbear-co/skills) or the [mirrord for AI Agents](https://metalbear.com/mirrord/ai) page.
+
 ## FAQ
 
-[Our FAQ is available here](https://metalbear.co/mirrord/docs/faq/general/).
+[Our FAQ is available here](https://metalbear.com/mirrord/docs/faq/general/).
 If you have a question that's not on there, feel free to ask in our [Discussions](https://github.com/metalbear-co/mirrord/discussions)
-or on [Slack](https://metalbear.co/slack).
+or on [Slack](https://metalbear.com/slack).
 
 ## Contributing
 
 Contributions are very welcome.
 Start by checking out our [open issues](https://github.com/metalbear-co/mirrord/issues), and by going through our [contributing guide](CONTRIBUTING.md).
-We're available on [Slack](https://metalbear.co/slack) for any questions.
+We're available on [Slack](https://metalbear.com/slack) for any questions.
 
 ## Help and Community
 
-Join our [Slack](https://metalbear.co/slack) for questions, support and fun.
+Join our [Slack](https://metalbear.com/slack) for questions, support and fun.
 
 We always appreciate hearing how mirrord has made a difference for our users.  
 Check out our [ADOPTERS.md](./ADOPTERS.md) to see how others are using mirrord —  
 and [open a pull request](https://github.com/metalbear-co/mirrord/pulls) to add your organization if you’d like to share how mirrord has been useful to you.
-
-## KubeCon Atlanta Raffle
-
-The password is: **"The blind rooster crows at midnight."**
-Say it to one of our team members at Booth #1560.
 
 ## Code of Conduct
 

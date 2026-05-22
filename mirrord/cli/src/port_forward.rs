@@ -1214,22 +1214,19 @@ mod test {
 
     #[tokio::test]
     async fn single_port_forwarding() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_destination = listener.local_addr().unwrap();
-        drop(listener);
-
         let (mut test_connection, agent_connection) = TestAgentConnection::new();
 
         let remote_ip = "152.37.40.40".parse::<Ipv4Addr>().unwrap();
         let remote_destination = (RemoteAddr::Ip(remote_ip), 3038);
-        let mappings = [(local_destination, remote_destination.clone())];
+        let ephemeral: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let mappings = [(ephemeral, remote_destination.clone())];
 
         let (agent_tx, agent_rx) = agent_connection.destructure();
 
-        // Prepare listeners before sending work to the background task.
         let mut port_forwarder = PortForwarder::new(agent_tx, agent_rx, mappings, None)
             .await
             .unwrap();
+        let (local_destination, _) = port_forwarder.listeners().next().unwrap();
         tokio::spawn(async move { port_forwarder.run().await.unwrap() });
 
         // Connect to PortForwarders listener and send some data to trigger remote connection
@@ -1312,26 +1309,27 @@ mod test {
     #[tokio::test]
     async fn multiple_mappings_port_forwarding() {
         let remote_destination_1 = (RemoteAddr::Ip("152.37.40.40".parse().unwrap()), 1018);
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_destination_1 = listener.local_addr().unwrap();
-        drop(listener);
-
         let remote_destination_2 = (RemoteAddr::Ip("152.37.40.40".parse().unwrap()), 2028);
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_destination_2 = listener.local_addr().unwrap();
-        drop(listener);
 
         let (mut test_connection, agent_connection) = TestAgentConnection::new();
+        let ephemeral: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let mappings = [
-            (local_destination_1, remote_destination_1.clone()),
-            (local_destination_2, remote_destination_2.clone()),
+            (ephemeral, remote_destination_1.clone()),
+            (ephemeral, remote_destination_2.clone()),
         ];
         let (agent_tx, agent_rx) = agent_connection.destructure();
 
-        // Prepare listeners before sending work to the background task.
         let mut port_forwarder = PortForwarder::new(agent_tx, agent_rx, mappings, None)
             .await
             .unwrap();
+
+        let mut resolved: HashMap<(RemoteAddr, u16), SocketAddr> = port_forwarder
+            .listeners()
+            .map(|(local, remote)| (remote.clone(), local))
+            .collect();
+        let local_destination_1 = resolved.remove(&remote_destination_1).unwrap();
+        let local_destination_2 = resolved.remove(&remote_destination_2).unwrap();
+
         tokio::spawn(async move { port_forwarder.run().await.unwrap() });
 
         // send data to first socket

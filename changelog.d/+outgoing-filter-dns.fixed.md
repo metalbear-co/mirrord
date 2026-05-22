@@ -1,0 +1,1 @@
+Host names listed in `feature.network.outgoing.filter` are now automatically mirrored into `feature.network.dns.filter` so that DNS resolution for each host happens on the same side (local app or remote pod) the connection is routed to.

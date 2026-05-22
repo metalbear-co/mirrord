@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     mem,
-    net::{Ipv6Addr, SocketAddr},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
     path::PathBuf,
     sync::{
@@ -21,6 +21,7 @@ use mirrord_agent_iptables::{
     error::{IPTablesError, IPTablesResult},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
+use socket2::SockRef;
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
     process::Command,
@@ -383,7 +384,9 @@ impl ClientConnectionHandler {
 
         let pid = state.container_pid();
 
-        let file_manager = FileManager::new(pid.or_else(|| state.ephemeral.then_some(1)));
+        let file_pid = pid.or_else(|| state.ephemeral.then_some(1));
+
+        let file_manager = FileManager::new(file_pid);
 
         let tcp_mirror_api = bg_tasks
             .mirror_handle
@@ -397,7 +400,7 @@ impl ClientConnectionHandler {
         .await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
         let reverse_dns_api = ReverseDnsApi::new(&state.network_runtime);
-        let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime);
+        let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime, file_pid);
         let udp_outgoing_api = UdpOutgoingApi::new(&state.network_runtime);
 
         let client_handler = Self {
@@ -866,14 +869,35 @@ async fn check_leftover_rules(
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent(args: Args) -> AgentResult<()> {
     let listener = {
-        let listener = TcpSocket::new_v6()?;
-        // SO_REUSEADDR is required to handle rapid agent restarts.
-        listener.set_reuseaddr(true)?;
-        listener.bind(SocketAddr::new(
-            Ipv6Addr::UNSPECIFIED.into(),
-            args.communicate_port,
-        ))?;
-        listener.listen(1024).map_err(AgentError::from)?
+        // Prefer a dual-stack IPv6 socket so both IPv4 and IPv6 clients can connect.
+        // If anything in that setup fails (e.g. IPv6 is disabled in the cluster),
+        // fall back to a plain IPv4 listener.
+        let create_dual_stack = || -> AgentResult<TcpListener> {
+            let listener = TcpSocket::new_v6()?;
+            // SO_REUSEADDR is required to handle rapid agent restarts.
+            listener.set_reuseaddr(true)?;
+            // Accept IPv4 clients on this socket as well, not only IPv6 ones.
+            SockRef::from(&listener).set_only_v6(false)?;
+            listener.bind(SocketAddr::new(
+                Ipv6Addr::UNSPECIFIED.into(),
+                args.communicate_port,
+            ))?;
+            listener.listen(1024).map_err(AgentError::from)
+        };
+
+        match create_dual_stack() {
+            Ok(listener) => listener,
+            Err(error) => {
+                warn!(%error, "Failed to set up an IPv6 client listener, falling back to IPv4.");
+                let listener = TcpSocket::new_v4()?;
+                listener.set_reuseaddr(true)?;
+                listener.bind(SocketAddr::new(
+                    Ipv4Addr::UNSPECIFIED.into(),
+                    args.communicate_port,
+                ))?;
+                listener.listen(1024).map_err(AgentError::from)?
+            }
+        }
     };
 
     let client_listener_address = listener.local_addr()?;

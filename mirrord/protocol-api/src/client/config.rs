@@ -1,7 +1,7 @@
 use std::{num::NonZeroUsize, time::Duration};
 
 /// Configuration for a new [`MirrordClient`](crate::client::MirrordClient).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ClientConfig {
     /// How often should ping messages be sent
     pub ping_pong_interval: Duration,

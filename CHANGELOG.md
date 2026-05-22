@@ -8,6 +8,111 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.211.0](https://github.com/metalbear-co/mirrord/tree/3.211.0) - 2026-05-19
+
+
+### Added
+
+- Add `iam` auth for `mysql`.
+- Add support for `Azure Servicebus` queue splitting.
+- Add support for unified queue splitting `azure` + `gcp` for preview env.
+- Added `mirrord up init`, an interactive wizard that generates a skeleton
+  `mirrord-up.yaml`.
+- HTTP protocol detection on redirected connections now applies a read timeout
+  (default `2s`, configurable via `agent.http_detection_timeout` /
+  `MIRRORD_AGENT_HTTP_DETECTION_TIMEOUT`) instead of waiting indefinitely for
+  the client's first byte. This unblocks server-first protocols such as SMTP
+  that previously stalled in detection.
+
+## [3.210.0](https://github.com/metalbear-co/mirrord/tree/3.210.0) - 2026-05-13
+
+
+### Added
+
+- Added `feature.preview.ttl_secs` and `feature.db_branches[].ttl_mins` so each
+  feature accepts the TTL in either unit. Setting both `ttl_secs` and
+  `ttl_mins` on the same item is rejected.
+- Added clarifications for Windows-specific `fs` mapping and `fs` filter quirks
+- Document jq filtering support for GCP Pub/Sub in the configuration docs.
+
+
+### Changed
+
+- In mirrord-up, renamed `mode` to `default_mode` and added a CLI argument to
+  set it.
+
+
+### Fixed
+
+- Agent now falls back to an IPv4 client listener when setting up the
+  dual-stack IPv6 one fails (e.g. on clusters with IPv6 disabled).
+- Fixed `getaddrinfo` truncating IPv6 addresses resolved through the agent.
+- Fixed outgoing connections to path-addressed Unix sockets failing with a "not
+  found" error when the agent runs as an ephemeral container.
+- The agent no longer logs a spurious warning when a DNS server returns an
+  error response code, and layer no longer logs bogus DNS errors with error
+  level.
+
+## [3.209.2](https://github.com/metalbear-co/mirrord/tree/3.209.2) - 2026-05-09
+
+
+### Fixed
+
+- Fixed remote Unix socket connections failing for some applications, including
+  when the socket lives in a directory mounted into the target pod.
+- `mirrord ui` no longer drops operator sessions whose `user` field doesn't
+  match the `username/k8s_username@hostname` format. Falls back to the raw user
+  string for both fields, so synthetic owners like preview environments surface
+  in the session list.
+
+## [3.209.1](https://github.com/metalbear-co/mirrord/tree/3.209.1) - 2026-05-01
+
+
+### Fixed
+
+- Add missing `file` utility in `appleutils`
+
+## [3.209.0](https://github.com/metalbear-co/mirrord/tree/3.209.0) - 2026-04-30
+
+
+### Added
+
+- Support for single cluster sessions in Multi Cluster.
+
+
+### Changed
+
+- Bump bundled `appleutils`
+
+## [3.208.0](https://github.com/metalbear-co/mirrord/tree/3.208.0) - 2026-04-30
+
+
+### Added
+
+- Added support for GCP Pub Sub.
+
+
+### Changed
+
+- `mirrord up` now rejects unknown fields in `mirrord-up.yaml` to catch typos
+  in configuration.
+- `mirrord up` now reports a clear error when `mirrord-up.yaml` is missing,
+  with help text on how to specify a custom path.
+
+
+### Fixed
+
+- Fixed Windows DNS hook error reporting so DNS lookup failures now return the
+  correct WinSock error, for example `WSAHOST_NOT_FOUND` code `11001`, instead
+  of surfacing unrelated errors like `ERROR_INVALID_HANDLE` with `os error 6`.
+- Fixed a Node/libuv crash when mirrord's Unix `getaddrinfo` hook returned a
+  non-`EAI_*` error after remote DNS found no records.
+- Fixed example in `agent.image_pull_secrets` configuration docs to use `name`
+  instead of `secret-key`.
+- Fixed local `Redis` containers/processes not being cleaned up.
+- mirrord now expands templates inside the root `key` field, so you can derive
+  session keys from expressions like `{{ get_env(...) }}` in the config file.
+
 ## [3.207.0](https://github.com/metalbear-co/mirrord/tree/3.207.0) - 2026-04-28
 
 
