@@ -300,7 +300,7 @@ Operator License
         let mut sqs_rows: HashMap<QueueConsumer, Vec<Row>> = HashMap::new();
         let mut kafka_rows: HashMap<String, Vec<Row>> = HashMap::new();
 
-        for session in &status.sessions {
+        for session in status.sessions.iter().filter(|s| !s.is_preview()) {
             let locked_ports = session
                 .locked_ports
                 .as_deref()

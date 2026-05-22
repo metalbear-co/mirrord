@@ -429,6 +429,14 @@ impl LockedPortCompat {
     }
 }
 
+/// Marker value the operator emits in [`Session::user`] for entries that represent a
+/// preview environment rather than a real mirrord exec session. Preview-env entries are
+/// folded into the [`MirrordOperatorCrd`] status `sessions` list so the local mirrord UI
+/// and the browser extension can surface them, but they don't behave like normal sessions
+/// (different id shape, no locked ports, no queue-splitting state), so the CLI's
+/// session-management surfaces should filter them out.
+pub const PREVIEW_SESSION_USER: &str = "preview-env";
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Session {
     pub id: Option<String>,
@@ -445,6 +453,12 @@ pub struct Session {
     pub key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_filter: Option<SessionHttpFilter>,
+}
+
+impl Session {
+    pub fn is_preview(&self) -> bool {
+        self.user == PREVIEW_SESSION_USER
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
