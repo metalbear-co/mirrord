@@ -431,8 +431,8 @@ impl LockedPortCompat {
 
 /// Marker value the operator emits in [`Session::user`] for entries that represent a
 /// preview environment rather than a real mirrord exec session. Preview-env entries are
-/// folded into [`MirrordOperatorCrd::status.sessions`] so the local mirrord UI and the
-/// browser extension can surface them, but they don't behave like normal sessions
+/// folded into the [`MirrordOperatorCrd`] status `sessions` list so the local mirrord UI
+/// and the browser extension can surface them, but they don't behave like normal sessions
 /// (different id shape, no locked ports, no queue-splitting state), so the CLI's
 /// session-management surfaces should filter them out.
 pub const PREVIEW_SESSION_USER: &str = "preview-env";
