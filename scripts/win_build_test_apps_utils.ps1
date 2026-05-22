@@ -232,13 +232,17 @@ function Install-DotnetSdk {
     Write-Host "Using dotnet at $dotnetExe"
 }
 
-# Build the cs-e2e file-based apps OUTSIDE mirrord, where the build-time NuGet
-# restore can reach the real network. The test then runs the produced `.exe`
-# under mirrord -- nothing compiles or restores under the layer (which would
-# otherwise route the restore through the pod and fail), only the finished
-# binary runs. Each app is one file-based `.cs` named after what it tests
-# (e.g. AsyncText/AsyncText.cs -> bin/AsyncText.exe); this builds every such
-# file under cs-e2e/ into a sibling `bin/`, so adding an app needs no CI change.
+# Publish the cs-e2e file-based apps OUTSIDE mirrord, where the build-time
+# NuGet restore can reach the real network. The test then runs the produced
+# `.exe` under mirrord -- nothing compiles or restores under the layer (which
+# would otherwise route the restore through the pod and fail), only the
+# finished binary runs. Publishing is self-contained for win-x64: the runner
+# only has a per-user .NET SDK (no system-wide runtime), so a framework-
+# dependent apphost would fail at launch with `.NET location: Not found`
+# (0x80070003); a self-contained build bundles the runtime and needs nothing
+# installed. Each app is one file-based `.cs` named after what it tests (e.g.
+# AsyncText/AsyncText.cs -> bin/AsyncText.exe); this publishes every such file
+# under cs-e2e/ into a sibling `bin/`, so adding an app needs no CI change.
 function Build-CsE2EApps {
     param([string]$TestsDir)
 
@@ -263,7 +267,11 @@ function Build-CsE2EApps {
     foreach ($app in $apps) {
         $outDir = Join-Path $app.DirectoryName 'bin'
         Write-Host "Building C# e2e app $($app.FullName) -> $outDir"
-        & dotnet build $app.FullName --output $outDir --nologo --verbosity minimal
+        # `build` (not `publish`) with --self-contained -r win-x64: a
+        # self-contained CoreCLR layout without triggering Native AOT (which
+        # `publish` defaults to for file-based apps and needs a C++ linker).
+        & dotnet build $app.FullName --runtime win-x64 --self-contained `
+            --output $outDir --nologo --verbosity minimal
         if ($LASTEXITCODE -ne 0) {
             throw "dotnet build $($app.FullName) failed with exit code $LASTEXITCODE"
         }
