@@ -130,7 +130,7 @@ impl Application {
             Application::IntproxyChild => {
                 ["intproxy_child/out.c_test_app"].map(String::from).to_vec()
             }
-            Application::AsyncTextCsharp => ["dotnet", "run", "cs-e2e/AsyncText/Program.cs"]
+            Application::AsyncTextCsharp => ["cs-e2e/AsyncText/bin/AsyncText.exe"]
                 .map(String::from)
                 .to_vec(),
         }

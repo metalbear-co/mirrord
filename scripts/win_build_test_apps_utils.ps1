@@ -232,34 +232,34 @@ function Install-DotnetSdk {
     Write-Host "Using dotnet at $dotnetExe"
 }
 
-# Pre-build the cs-e2e file-based programs OUTSIDE mirrord, where the
-# build-time NuGet restore can reach the real network. The test then runs
-# `dotnet run Program.cs` against the warm, offline artifact cache, so no
-# restore or compile happens under the layer (which would otherwise route the
-# restore through the pod and fail). `dotnet run` defaults to the Debug
-# configuration, so build with that same default for a cache hit.
-# Auto-discovers every cs-e2e/<app>/Program.cs -- adding an app needs no CI
-# change.
+# Build the cs-e2e file-based apps OUTSIDE mirrord, where the build-time NuGet
+# restore can reach the real network. The test then runs the produced `.exe`
+# under mirrord -- nothing compiles or restores under the layer (which would
+# otherwise route the restore through the pod and fail), only the finished
+# binary runs. Each app is one file-based `.cs` named after what it tests
+# (e.g. AsyncText/AsyncText.cs -> bin/AsyncText.exe); this builds every such
+# file under cs-e2e/ into a sibling `bin/`, so adding an app needs no CI change.
 function Build-CsE2EApps {
     param([string]$TestsDir)
 
     $csRoot = Join-Path $TestsDir 'cs-e2e'
     if (-not (Test-Path $csRoot)) {
-        Write-Host "No cs-e2e/ directory at $csRoot; skipping C# pre-build."
+        Write-Host "No cs-e2e/ directory at $csRoot; skipping C# build."
         return
     }
 
-    $programs = Get-ChildItem -Path $csRoot -Recurse -Filter 'Program.cs'
-    if ($programs.Count -eq 0) {
-        Write-Host "No Program.cs found under $csRoot; nothing to pre-build."
+    $apps = Get-ChildItem -Path $csRoot -Recurse -Filter '*.cs'
+    if ($apps.Count -eq 0) {
+        Write-Host "No .cs apps found under $csRoot; nothing to build."
         return
     }
 
-    foreach ($program in $programs) {
-        Write-Host "Pre-building C# e2e app $($program.FullName)"
-        & dotnet build $program.FullName --nologo --verbosity minimal
+    foreach ($app in $apps) {
+        $outDir = Join-Path $app.DirectoryName 'bin'
+        Write-Host "Building C# e2e app $($app.FullName) -> $outDir"
+        & dotnet build $app.FullName --output $outDir --nologo --verbosity minimal
         if ($LASTEXITCODE -ne 0) {
-            throw "dotnet build $($program.FullName) failed with exit code $LASTEXITCODE"
+            throw "dotnet build $($app.FullName) failed with exit code $LASTEXITCODE"
         }
     }
 }

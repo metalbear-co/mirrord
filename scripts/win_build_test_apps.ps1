@@ -85,10 +85,10 @@ Build-GoE2EApps -TestsDir $testsDir
 # mirrors scripts/build_go_apps.sh (builds generic Go test binaries across the repo)
 Build-RepoGoApps -RepoRoot $repoRoot -OutputPrefix '25'
 
-# C# e2e apps run from source via `dotnet run` (see
-# `Application::AsyncTextCsharp`). Install the SDK so `dotnet` is on PATH,
-# then pre-build here -- outside mirrord -- so the build-time NuGet restore
-# reaches the real network and the test-time run hits a warm offline cache.
+# C# e2e apps are file-based programs built to a sibling `bin/<app>.exe` (see
+# `Application::AsyncTextCsharp`). Install the SDK, then build here -- outside
+# mirrord -- so the build-time NuGet restore reaches the real network; the test
+# then runs the finished `.exe` under mirrord with nothing to compile.
 Install-DotnetSdk
 Build-CsE2EApps -TestsDir $testsDir
 

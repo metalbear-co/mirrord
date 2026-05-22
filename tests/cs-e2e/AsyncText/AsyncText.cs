@@ -12,9 +12,10 @@
 // `mirrord-pytest:latest` image ships at /app/test.txt (cited at
 // `tests/python-e2e/files_ro.py:7` and `tests/src/utils.rs:27`).
 //
-// Run as a file-based program (`dotnet run Program.cs`, .NET 10+) from
-// the mirrord-tests `Application::AsyncTextCsharp` variant -- no csproj,
-// mirroring how the node/python e2e apps run straight from source.
+// A file-based program (.NET 10+, no csproj) built via `dotnet build
+// AsyncText.cs` into a sibling `bin/AsyncText.exe`. The mirrord-tests
+// `Application::AsyncTextCsharp` variant runs that finished `.exe` under
+// mirrord, so nothing compiles or restores under the layer.
 //
 // Exits non-zero on any mismatch; the Rust driver in
 // `tests/src/iocp.rs` asserts on the exit code.
