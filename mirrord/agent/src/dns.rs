@@ -216,7 +216,6 @@ impl DnsWorker {
         DNS_REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) async fn run(mut self, cancellation_token: CancellationToken) {
         loop {
             tokio::select! {
@@ -307,7 +306,13 @@ impl DnsApi {
     /// [`Self::make_request`]).
     ///
     /// If there is no outstanding DNS request, never returns.
-    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
+    ///
+    /// # Tracing
+    ///
+    /// Do not instrument this method. It gets called and aborted a lot,
+    /// so the logs are just spam.
+    ///
+    /// DNS results are logged in the background task methods.
     pub(crate) async fn recv(&mut self) -> AgentResult<GetAddrInfoResponse> {
         let Some(response) = self.responses.next().await else {
             return future::pending().await;
