@@ -188,11 +188,11 @@ impl DnsWorker {
             .map_err(NetError::Msg)?;
 
         let lookup = resolver
-            .inspect_err(|fail| tracing::error!(?fail, "Failed to build a DNS resolver"))?
+            .inspect_err(|error| tracing::error!(%error, "Failed to build a DNS resolver"))?
             .lookup_ip(host)
             .await
             .inspect(|lookup| tracing::trace!(?lookup, "DNS lookup finished"))
-            .inspect_err(|e| tracing::debug!(%e, "DNS lookup failed"))?
+            .inspect_err(|error| tracing::debug!(%error, "DNS lookup failed"))?
             .convert();
 
         Ok(lookup)
