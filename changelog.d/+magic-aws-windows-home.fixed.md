@@ -1,1 +1,0 @@
-Fixed panic on Windows when resolving config with `feature.magic.aws` enabled. The auto-generated `~/.aws` path mapping now uses the same home-directory transform as the `layer-win` filter logic (drive letter stripped, slashes flipped, regex-escaped), so it no longer produces an invalid regex from a Windows `USERPROFILE` (`HOME`) like `C:\Users\foo`.
