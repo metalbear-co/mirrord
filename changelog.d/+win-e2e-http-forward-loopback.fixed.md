@@ -1,0 +1,1 @@
+Fixed mirrored/stolen HTTP traffic failing to reach a local server bound to a wildcard address (e.g. `0.0.0.0`) on Windows: the intproxy HTTP gateway now normalizes the forward address to loopback before connecting, matching the raw-TCP path.
