@@ -29,10 +29,5 @@ swap:
   VSCode: VS Code
   VScode: VS Code
 
-  # WinGet capitalization
-  Winget: WinGet
-  winget: WinGet
-  WINGET: WinGet
-
   # Kubernetes always capitalized in prose
   kubernetes: Kubernetes
