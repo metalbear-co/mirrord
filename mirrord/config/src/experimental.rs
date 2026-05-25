@@ -139,11 +139,24 @@ pub struct ExperimentalConfig {
     )]
     pub force_hook_connect: bool,
 
-    /// ### _experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
+    /// ### _experimental_non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
     ///
     /// Enables better support for outgoing connections using
-    /// non-blocking TCP sockets. For technical reasons, enabling this
-    /// will cause `getsockname` to always return a localhost address.
+    /// non-blocking TCP sockets.
+    ///
+    /// Due to technical reasons, enabling this causes the existence
+    /// of the internal proxy acting as a TCP proxy observable to the
+    /// application. Notable consequences of this include:
+    ///
+    /// 1. `getsockname(2)` will always return a localhost address,
+    /// 2. `connect(2)` will succeed immediately, before the remote side of the connection is
+    ///    established. If the remote side of the connection fails, the connection to the app will
+    ///    be closed after the fact.
+    ///
+    /// Essentially your application has to assume that it might be
+    /// sitting behind a TCP proxy. Most "standard" apps (e.g. HTTP
+    /// clients) should be unaffected, but custom implementations of
+    /// other protocols may not.
     ///
     /// Defaults to `true` in OSS.
     /// Defaults to `false` in mfT.
