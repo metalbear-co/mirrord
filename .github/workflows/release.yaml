@@ -155,7 +155,7 @@ jobs:
   build_binaries_windows:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: windows-latest
+    runs-on: windows-2025-vs2026
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -953,7 +953,7 @@ jobs:
 
   release_chocolatey:
     needs: [validate_release_request, release_gh]
-    runs-on: windows-latest
+    runs-on: windows-2025-vs2026
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -1079,7 +1079,7 @@ jobs:
 
   release_winget:
     needs: [validate_release_request, release_gh]
-    runs-on: windows-latest
+    runs-on: windows-2025-vs2026
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

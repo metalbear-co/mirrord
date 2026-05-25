@@ -16,7 +16,7 @@ env:
 
 jobs:
   windows-tests:
-    runs-on: windows-latest
+    runs-on: windows-2025-vs2026
     env:
       MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord.exe
       MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/mirrord_layer_win.dll
