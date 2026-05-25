@@ -187,9 +187,9 @@ impl TryFrom<c_int> for SocketKind {
 
     #[cfg(windows)]
     fn try_from(type_: c_int) -> Result<Self, Self::Error> {
-        if (type_ & SOCK_STREAM) > 0 {
+        if (type_ & SOCK_STREAM) == SOCK_STREAM {
             Ok(SocketKind::Tcp(type_))
-        } else if (type_ & SOCK_DGRAM) > 0 {
+        } else if (type_ & SOCK_DGRAM) == SOCK_DGRAM {
             Ok(SocketKind::Udp(type_))
         } else {
             Err(Bypass::Type(type_))

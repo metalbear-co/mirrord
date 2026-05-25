@@ -109,9 +109,9 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
 // Helper function to convert socket types to SocketKind (not unix).
 #[cfg(not(unix))]
 pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
-    if (socket_type & SOCK_STREAM) > 0 {
+    if (socket_type & SOCK_STREAM) == SOCK_STREAM {
         Ok(SocketKind::Tcp(type_))
-    } else if (socket_type & SOCK_DGRAM) > 0 {
+    } else if (socket_type & SOCK_DGRAM) == SOCK_DGRAM {
         Ok(SocketKind::Udp(type_))
     } else {
         Err(format!("Unsupported socket type: {}", socket_type))
