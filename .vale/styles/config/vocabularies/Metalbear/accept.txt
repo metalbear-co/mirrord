@@ -145,7 +145,7 @@ gradle
 sbt
 protoc
 nixpkgs
-winget
+WinGet
 Chocolatey
 choco
 asdf
