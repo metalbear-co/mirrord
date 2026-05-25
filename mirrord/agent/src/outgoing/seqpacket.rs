@@ -163,7 +163,6 @@ impl SeqpacketTask {
                     None => true,
                 },
 
-                // Polls the `SeqpacketReadStream` for incoming data.
                 Some((connection_id, remote_read)) = self.readers.next() => {
                     self.handle_connection_read(connection_id, remote_read.transpose()).await.is_err()
                 },
