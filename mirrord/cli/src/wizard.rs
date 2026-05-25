@@ -635,14 +635,14 @@ impl IntoTargetInfo for Service {
             );
         }
 
-        let (detected_ports, containers): (Vec<u16>, Vec<String>) =
-            infos
-                .into_iter()
-                .fold((Vec::new(), Vec::new()), |mut acc, info| {
-                    acc.0.extend(info.detected_ports);
-                    acc.1.extend(info.containers);
-                    acc
-                });
+        let (detected_ports, containers): (Vec<u16>, Vec<String>) = infos.into_iter().fold(
+            (Vec::new(), Vec::new()),
+            |(mut ports, mut containers), info| {
+                ports.extend(info.detected_ports);
+                containers.extend(info.containers);
+                (ports, containers)
+            },
+        );
 
         if let Some(info) = result {
             Ok(Some(TargetInfo {
