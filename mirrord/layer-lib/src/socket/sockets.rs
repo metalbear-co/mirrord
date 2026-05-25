@@ -11,8 +11,6 @@ use std::{
 
 use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
 #[cfg(unix)]
-use libc::{self, SOCK_DGRAM, SOCK_SEQPACKET, SOCK_STREAM};
-#[cfg(unix)]
 use nix::sys::socket::{SockaddrLike, SockaddrStorage, getsockname, getsockopt, sockopt};
 #[cfg(windows)]
 use winapi::{
@@ -108,31 +106,13 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
             .unwrap_or_default()
     });
 
-// Helper function to convert socket types to SocketKind (unix only)
-#[cfg(unix)]
-pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
-    let raw_socket_type = socket_type & 0xf;
-
-    if raw_socket_type == SOCK_STREAM {
-        Ok(SocketKind::Tcp(socket_type))
-    } else if raw_socket_type == SOCK_DGRAM {
-        Ok(SocketKind::Udp(socket_type))
-    } else if raw_socket_type == SOCK_SEQPACKET {
-        Ok(SocketKind::Seqpacket(socket_type))
-    } else {
-        Err(format!("Unsupported socket type: {}", socket_type))
-    }
-}
-
 // Helper function to convert socket types to SocketKind (not unix).
 #[cfg(not(unix))]
 pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
-    let raw_socket_type = socket_type;
-
-    if raw_socket_type == SOCK_STREAM {
-        Ok(SocketKind::Tcp(socket_type))
-    } else if raw_socket_type == SOCK_DGRAM {
-        Ok(SocketKind::Udp(socket_type))
+    if (socket_type & SOCK_STREAM) > 0 {
+        Ok(SocketKind::Tcp(type_))
+    } else if (socket_type & SOCK_DGRAM) > 0 {
+        Ok(SocketKind::Udp(type_))
     } else {
         Err(format!("Unsupported socket type: {}", socket_type))
     }

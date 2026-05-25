@@ -170,6 +170,8 @@ impl TryFrom<c_int> for SocketKind {
 
     #[cfg(unix)]
     fn try_from(type_: c_int) -> Result<Self, Self::Error> {
+        // Gets the lower bits so we can compare just the `SOCK_STREAM`, `SOCK_DGRAM` or
+        // `SOCK_SEQPACKET` part.
         let socket_type = type_ & 0xf;
 
         if socket_type == SOCK_STREAM {
@@ -185,11 +187,9 @@ impl TryFrom<c_int> for SocketKind {
 
     #[cfg(windows)]
     fn try_from(type_: c_int) -> Result<Self, Self::Error> {
-        let socket_type = type_;
-
-        if socket_type == SOCK_STREAM {
+        if (type_ & SOCK_STREAM) > 0 {
             Ok(SocketKind::Tcp(type_))
-        } else if socket_type == SOCK_DGRAM {
+        } else if (type_ & SOCK_DGRAM) > 0 {
             Ok(SocketKind::Udp(type_))
         } else {
             Err(Bypass::Type(type_))
