@@ -164,7 +164,7 @@ impl TcpOutgoingTask {
     /// How much incoming data we can accumulate in memory, before it's flushed to the client.
     ///
     /// This **must** be larger than [`Self::READ_BUFFER_SIZE`].
-    const THROTTLE_PERMITS: usize = 512 * 1024;
+    const THROTTLE_PERMITS: usize = Self::READ_BUFFER_SIZE * 8;
 
     /// Timeout for connect attempts.
     ///
