@@ -109,6 +109,8 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
   };
 
   const boilerplateType = readBoilerplateType(config);
+  const isTargetConfigView =
+    currentStep === "config" && currentTab === "target";
 
   const getStepInfo = () => {
     switch (currentStep) {
@@ -138,7 +140,11 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
       open={open}
       onOpenChange={(isOpen: boolean) => !isOpen && handleClose()}
     >
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-[var(--card)] border border-[var(--border)] shadow-xl [&>button]:hidden">
+      <DialogContent
+        className={`max-w-2xl max-h-[90vh] overflow-y-auto bg-[var(--card)] border border-[var(--border)] shadow-xl [&>button]:hidden ${
+          isTargetConfigView ? "h-[min(90vh,750px)]" : ""
+        }`}
+      >
         <DialogHeader className="border-b border-[var(--border)] pb-4 -mx-6 px-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
