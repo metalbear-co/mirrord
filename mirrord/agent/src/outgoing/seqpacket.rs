@@ -214,9 +214,7 @@ impl SeqpacketTask {
                     "Reading from seqpacket connection failed, sending close message.",
                 );
 
-                self.readers.remove(&connection_id);
-                self.writers.remove(&connection_id);
-                SEQPACKET_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                self.dispose_connection(connection_id);
 
                 self.daemon_tx
                     .send(
@@ -236,9 +234,7 @@ impl SeqpacketTask {
             Ok(None) => {
                 tracing::trace!(connection_id, "Seqpacket peer connection closed.");
 
-                self.readers.remove(&connection_id);
-                self.writers.remove(&connection_id);
-                SEQPACKET_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                self.dispose_connection(connection_id);
 
                 self.daemon_tx
                     .send(
@@ -372,15 +368,14 @@ impl SeqpacketTask {
                 match write_result {
                     Ok(()) => Ok(()),
                     Err(error) => {
-                        self.writers.remove(&connection_id);
-                        self.readers.remove(&connection_id);
-                        SEQPACKET_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-
                         tracing::trace!(
                             connection_id,
                             ?error,
                             "Failed to handle seqpacket layer write, sending close message to the client.",
                         );
+
+                        self.dispose_connection(connection_id);
+
                         self.daemon_tx
                             .send(
                                 DaemonMessage::LogMessage(LogMessage::warn(format!(
@@ -403,13 +398,18 @@ impl SeqpacketTask {
                 }
             }
             LayerSeqpacket::Close(LayerClose { connection_id }) => {
-                self.writers.remove(&connection_id);
-                self.readers.remove(&connection_id);
-                SEQPACKET_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                self.dispose_connection(connection_id);
 
                 Ok(())
             }
         }
+    }
+
+    /// Removes the reader and writer half for this [`ConnectionId`] connection.
+    fn dispose_connection(&mut self, connection_id: ConnectionId) {
+        self.readers.remove(&connection_id);
+        self.writers.remove(&connection_id);
+        SEQPACKET_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
