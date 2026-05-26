@@ -41,6 +41,7 @@ use feature::{
         outgoing::OutgoingFilterConfig,
     },
 };
+use k8s_openapi::api::core::v1::PodSpec;
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use mirrord_protocol::tcp::JsonPathQuery;
@@ -632,6 +633,88 @@ impl LayerConfig {
                     .or_insert(replacement);
             }
         }
+    }
+
+    /// Adds the target container's volume-mount paths to
+    /// [`feature.fs.read_only`](feature::fs::advanced::FsConfig), so files mounted into the remote
+    /// pod (ConfigMaps, Secrets, PVCs) are read from the remote pod while writes stay local.
+    ///
+    /// Mount paths the user has explicitly marked local via `feature.fs.local` are left untouched,
+    /// so auto_mount never overrides an intentional local override.
+    ///
+    /// Enabled by [`feature.magic.auto_mount`](feature::magic::MagicConfig). Unlike
+    /// [`apply_magic`](Self::apply_magic), this is not applied during [`resolve`](Self::resolve):
+    /// it needs the resolved target's pod spec, which is only available after the target is
+    /// fetched (well after config resolution). The caller fetches `pod_spec`; this is otherwise
+    /// a pure function of `pod_spec` and the target `container` (the name of the targeted
+    /// container, or [`None`] to fall back to the first container in the spec).
+    pub fn apply_auto_mount(&mut self, pod_spec: &PodSpec, container: Option<&str>) {
+        // Guard against accidental calls.
+        if self.feature.magic.auto_mount.not() {
+            tracing::warn!(
+                "apply_auto_mount called when `feature.magic.auto_mount` is disabled, please report this."
+            );
+            return;
+        }
+
+        let container = match container {
+            Some(name) => pod_spec.containers.iter().find(|c| c.name == name),
+            None => pod_spec.containers.first(),
+        };
+        let Some(container) = container else {
+            return;
+        };
+
+        // Paths the user has explicitly marked local win over auto_mount: skip any mount whose path
+        // matches `feature.fs.local`, so we don't override an intentional local override.
+        // (`read_only` is checked before `local` in the file filter, so without this an auto-added
+        // entry would shadow the user's choice.)
+        let local_overrides = self
+            .feature
+            .fs
+            .local
+            .as_ref()
+            .map(|patterns| Vec::from(patterns.clone()))
+            .and_then(|patterns| {
+                regex::RegexSetBuilder::new(patterns)
+                    .case_insensitive(true)
+                    .build()
+                    .ok()
+            });
+
+        let patterns = container
+            .volume_mounts
+            .iter()
+            .flatten()
+            .filter(|mount| {
+                local_overrides
+                    .as_ref()
+                    .is_none_or(|local| local.is_match(&mount.mount_path).not())
+            })
+            .map(|mount| {
+                let path = regex::escape(&mount.mount_path);
+                // A `subPath` mount points at a single file, so match it exactly. A plain mount is
+                // a directory, so match the directory and everything beneath it.
+                if mount.sub_path.is_some() {
+                    format!("^{path}$")
+                } else {
+                    format!("^{path}(/.*)?$")
+                }
+            })
+            .collect::<Vec<_>>();
+
+        if patterns.is_empty() {
+            return;
+        }
+
+        let existing = self
+            .feature
+            .fs
+            .read_only
+            .take()
+            .unwrap_or_else(|| VecOrSingle::Multiple(Vec::new()));
+
+        self.feature.fs.read_only = Some(append_dedup(existing, patterns));
     }
 
     /// Verifies that there are no conflicting settings in this config.
