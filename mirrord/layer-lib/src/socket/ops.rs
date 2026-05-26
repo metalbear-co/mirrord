@@ -393,6 +393,22 @@ where
             _ => Detour::Bypass(Bypass::DisabledOutgoing),
         },
 
+        NetProtocol::Seqpacket => match user_socket_info.state {
+            SocketState::Initialized | SocketState::Bound { .. }
+                if remote_address.is_unix() && !unix_streams.is_empty() =>
+            {
+                connect_outgoing_common(
+                    sockfd,
+                    remote_address,
+                    user_socket_info,
+                    NetProtocol::Seqpacket,
+                    call_connect_fn,
+                )
+            }
+
+            _ => Detour::Bypass(Bypass::DisabledOutgoing),
+        },
+
         _ => Detour::Bypass(Bypass::DisabledOutgoing),
     }
 }

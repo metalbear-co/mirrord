@@ -115,6 +115,7 @@ pub enum NetProtocol {
     /// which alters this socket's behavior. Currently, we require this call to happen before we
     /// intercept outgoing UDP.
     Datagrams,
+    Seqpacket,
 }
 
 impl fmt::Display for NetProtocol {
@@ -122,6 +123,7 @@ impl fmt::Display for NetProtocol {
         let as_str = match self {
             Self::Stream => "STREAM",
             Self::Datagrams => "DGRAM",
+            Self::Seqpacket => "SEQPACKET",
         };
 
         f.write_str(as_str)

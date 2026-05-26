@@ -11,8 +11,7 @@ pub enum LayerTcpOutgoing {
     Connect(LayerConnect),
 
     /// Write data to the remote address the agent is `connect`ed to.
-    ///
-    /// There's no `Read` message, as we're calling `read` in the agent, and we send
+
     /// a [`DaemonTcpOutgoing::Read`] message in case we get some data from this connection.
     Write(LayerWrite),
 

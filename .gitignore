@@ -11,6 +11,7 @@ __pycache__
 build/
 .mirrord
 .helix/
+.zed/
 .porchlight/
 .claude/settings.local.json
 

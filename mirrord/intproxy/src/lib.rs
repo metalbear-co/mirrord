@@ -561,6 +561,12 @@ impl IntProxy {
                     .send(OutgoingProxyMessage::AgentDatagrams(msg))
                     .await
             }
+            DaemonMessage::SeqpacketOutgoing(msg) => {
+                self.task_txs
+                    .outgoing
+                    .send(OutgoingProxyMessage::AgentSeqpacket(msg))
+                    .await
+            }
             DaemonMessage::File(msg) => {
                 self.task_txs
                     .files

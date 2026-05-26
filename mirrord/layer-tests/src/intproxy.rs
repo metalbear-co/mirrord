@@ -23,6 +23,7 @@ use mirrord_protocol::{
     },
     outgoing::{
         DaemonConnect, DaemonConnectV2, LayerConnectV2, SocketAddress,
+        seqpacket::{DaemonSeqpacket, LayerSeqpacket},
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
@@ -150,6 +151,41 @@ impl TestIntProxy {
                 }),
             },
         )))
+        .await
+    }
+
+    pub async fn recv_seqpacket_connect(&mut self) -> (Uid, SocketAddress) {
+        match self.recv().await {
+            ClientMessage::SeqpacketOutgoing(LayerSeqpacket::ConnectV2(LayerConnectV2 {
+                uid,
+                remote_address,
+            })) => {
+                println!(
+                    "Received seqpacket connect request for address {remote_address} with uid {uid}"
+                );
+                (uid, remote_address)
+            }
+            other => panic!("unexpected message received from the intproxy: {other:?}"),
+        }
+    }
+
+    pub async fn send_seqpacket_connect_ok(
+        &mut self,
+        uid: Uid,
+        connection_id: ConnectionId,
+        remote_address: SocketAddress,
+        local_address: SocketAddress,
+    ) {
+        self.send(DaemonMessage::SeqpacketOutgoing(
+            DaemonSeqpacket::ConnectV2(DaemonConnectV2 {
+                uid,
+                connect: Ok(DaemonConnect {
+                    connection_id,
+                    remote_address,
+                    local_address,
+                }),
+            }),
+        ))
         .await
     }
 

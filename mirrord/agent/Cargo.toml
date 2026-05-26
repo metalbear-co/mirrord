@@ -48,6 +48,7 @@ thiserror.workspace = true
 hickory-resolver.workspace = true
 bollard.workspace = true
 tokio-util.workspace = true
+tokio-seqpacket.workspace = true
 streammap-ext.workspace = true
 libc.workspace = true
 faccess.workspace = true

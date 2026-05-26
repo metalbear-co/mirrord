@@ -47,7 +47,7 @@ use crate::{
     metrics,
     mirror::TcpMirrorApi,
     namespace::NamespaceType,
-    outgoing::{TcpOutgoingApi, UdpOutgoingApi},
+    outgoing::{TcpOutgoingApi, UdpOutgoingApi, seqpacket::SeqpacketApi},
     reverse_dns::ReverseDnsApi,
     runtime::{self, get_container},
     steal::{StealerCommand, TcpStealerApi},
@@ -356,6 +356,7 @@ struct ClientConnectionHandler {
     tcp_stealer_api: Option<TcpStealerApi>,
     tcp_outgoing_api: TcpOutgoingApi,
     udp_outgoing_api: UdpOutgoingApi,
+    seqpacket_api: SeqpacketApi,
     dns_api: DnsApi,
     reverse_dns_api: ReverseDnsApi,
     state: State,
@@ -402,6 +403,7 @@ impl ClientConnectionHandler {
         let reverse_dns_api = ReverseDnsApi::new(&state.network_runtime);
         let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime, file_pid);
         let udp_outgoing_api = UdpOutgoingApi::new(&state.network_runtime);
+        let seqpacket_api = SeqpacketApi::new(&state.network_runtime, file_pid);
 
         let client_handler = Self {
             id,
@@ -411,6 +413,7 @@ impl ClientConnectionHandler {
             tcp_stealer_api,
             tcp_outgoing_api,
             udp_outgoing_api,
+            seqpacket_api,
             dns_api,
             reverse_dns_api,
             state,
@@ -523,6 +526,15 @@ impl ClientConnectionHandler {
                     },
                     Err(e) => break e,
                 },
+                message = self.seqpacket_api.recv_from_task() => match message {
+                    Ok(message) => {
+                        // Being explicit here.
+                        // Throttle permits should be dropped only when the message has been sent and flushed.
+                        let _throttle = message.throttle;
+                        self.respond(message.message).await?
+                    },
+                    Err(e) => break e,
+                },
                 message = self.dns_api.recv() => match message {
                     Ok(message) => self.respond(DaemonMessage::GetAddrInfoResponse(message)).await?,
                     Err(e) => break e,
@@ -575,6 +587,9 @@ impl ClientConnectionHandler {
             }
             ClientMessage::UdpOutgoing(layer_message) => {
                 self.udp_outgoing_api.send_to_task(layer_message).await?
+            }
+            ClientMessage::SeqpacketOutgoing(layer_message) => {
+                self.seqpacket_api.send_to_task(layer_message).await?
             }
             ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
