@@ -8,6 +8,54 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.212.0](https://github.com/metalbear-co/mirrord/tree/3.212.0) - 2026-05-22
+
+
+### Added
+
+- Added operator-session listings to the local `mirrord ui`: a Team tab that
+  shows cluster-wide sessions, and a 3-step Connect operator wizard for the
+  no-operator state.
+- Preview environments are now resilient to pod crashes and evictions.
+- Preview environments now support mounting user-supplied files in the preview
+  pod via a new `spec.config_mounts` field on `PreviewSession`.
+
+
+### Changed
+
+- Preview sessions are now deleted automatically when their TTL expires, and
+  failed sessions are cleaned up automatically after the retention window
+  configured by `operator.preview.cleanupAfterMins` in the chart configuration.
+  Alongside this change, `mirrord preview status` now only shows active
+  sessions by default, and a new `--failed` flag lets you inspect failed
+  sessions that haven't been cleaned up yet.
+- Rewrite README intro to name both halves of the developer + AI coding agent
+  feedback loop. Update `metalbear.co` links to `metalbear.com`.
+
+
+### Fixed
+
+- Fixed an issue where remote DNS resolution would always fail for host names
+  containing an underscore.
+- Fixed broken pipe error in install script.
+- Fixed panic on Windows when resolving config with `feature.magic.aws`
+  enabled. The auto-generated `~/.aws` path mapping now uses the same
+  home-directory transform as the `layer-win` filter logic (drive letter
+  stripped, slashes flipped, regex-escaped), so it no longer produces an
+  invalid regex from a Windows `USERPROFILE` (`HOME`) like `C:\Users\foo`.
+- Host names listed in `feature.network.outgoing.filter` are now automatically
+  mirrored into `feature.network.dns.filter` so that DNS resolution for each
+  host happens on the same side (local app or remote pod) the connection is
+  routed to.
+- Reject configurations that put the same environment variable in both
+  `feature.env.override` and `feature.db_branches[].connection`.
+- `mirrord operator status` and `mirrord session list` no longer show
+  preview-env entries. Previews are still surfaced in the local `mirrord ui`
+  and browser extension via `MirrordOperator.status.sessions`, but the CLI's
+  session-management surfaces hide them so the displayed ids, ports, and
+  queue-splitting state always reflect real exec sessions. Long-term
+  unification of previews and exec sessions is tracked separately.
+
 ## [3.211.0](https://github.com/metalbear-co/mirrord/tree/3.211.0) - 2026-05-19
 
 

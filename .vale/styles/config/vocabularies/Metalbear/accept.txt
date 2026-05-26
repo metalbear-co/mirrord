@@ -70,6 +70,7 @@ fd
 fds
 syscalls
 subcommand
+ASCII
 
 # Linux syscalls and C API
 openat
@@ -144,7 +145,7 @@ gradle
 sbt
 protoc
 nixpkgs
-winget
+WinGet
 Chocolatey
 choco
 asdf
