@@ -14,6 +14,11 @@ use mirrord_layer_lib::{
 pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
     let setup = setup();
 
+    // Eagerly spawn the shared background thread pool from this safe layer
+    // thread, so a later `task_pool::submit` from inside a hook (async file
+    // read, async DNS) never has to spawn a thread under the loader lock.
+    crate::task_pool::initialize();
+
     // Initialize IOCP module prerequisites. Pre-step: must run before
     // any FS hook is initialized so the async-read worker can post
     // completion packets.

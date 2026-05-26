@@ -6,7 +6,7 @@ use winapi::{
         in6addr::IN6_ADDR,
         inaddr::IN_ADDR,
         minwindef::INT,
-        ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR, SOCKADDR_IN},
+        ws2def::{ADDRINFOA, ADDRINFOEXW, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR, SOCKADDR_IN},
         ws2ipdef::SOCKADDR_IN6,
     },
     um::winsock2::SOCK_STREAM,
@@ -245,6 +245,63 @@ impl WindowsAddrInfo for ADDRINFOW {
     }
 }
 
+impl WindowsAddrInfo for ADDRINFOEXW {
+    // ADDRINFOEXW shares ADDRINFOW's wide canonical-name type; it adds
+    // `ai_blob`/`ai_bloblen`/`ai_provider` (provider-specific, used only by
+    // NS_EMAIL), which we always leave empty.
+    type CanonName = *mut u16;
+    type CanonNameOwned = Vec<u16>;
+
+    fn init_defaults(node: &mut Self) {
+        node.ai_flags = 0;
+        node.ai_socktype = SOCK_STREAM;
+        node.ai_protocol = 0;
+        node.ai_next = ptr::null_mut();
+        // The three fields ADDRINFOEXW adds over ADDRINFOW. `Box::new_zeroed`
+        // in `ManagedAddrInfo::try_from` already zeroes the node, but we set
+        // them explicitly so correctness does not silently depend on that
+        // allocation choice (a future switch to `MaybeUninit::uninit` would
+        // otherwise ship uninitialized provider/blob pointers to the app).
+        node.ai_blob = ptr::null_mut();
+        node.ai_bloblen = 0;
+        node.ai_provider = ptr::null_mut();
+    }
+
+    fn fill(
+        node: &mut Self,
+        family: i32,
+        addrlen: usize,
+        canonname: Self::CanonName,
+        addr: *mut SOCKADDR,
+    ) {
+        node.ai_family = family;
+        node.ai_addrlen = addrlen;
+        node.ai_canonname = canonname;
+        node.ai_addr = addr;
+    }
+
+    fn set_next(node: &mut Self, next: *mut Self) {
+        node.ai_next = next;
+    }
+
+    fn canonname_from_string(s: String) -> HookResult<Self::CanonNameOwned> {
+        let wide: Vec<u16> = s.encode_utf16().chain(Some(0)).collect();
+        Ok(wide)
+    }
+
+    fn canonname_ptr(owned: &mut Self::CanonNameOwned) -> Self::CanonName {
+        owned.as_mut_ptr()
+    }
+
+    fn null_canonname_ptr() -> Self::CanonName {
+        ptr::null_mut()
+    }
+
+    fn get_family_socktype_protocol(&self) -> (i32, i32, i32) {
+        (self.ai_family, self.ai_socktype, self.ai_protocol)
+    }
+}
+
 /// RAII wrapper for Windows ADDRINFO structures that owns node, sockaddr, and canonname storage.
 pub struct ManagedAddrInfo<T: WindowsAddrInfo> {
     nodes: Vec<Box<T>>,
@@ -276,6 +333,10 @@ impl<T: WindowsAddrInfo> std::hash::Hash for ManagedAddrInfo<T> {
 pub enum ManagedAddrInfoAny {
     A(ManagedAddrInfo<ADDRINFOA>),
     W(ManagedAddrInfo<ADDRINFOW>),
+    /// `ADDRINFOEXW` chain produced by the `GetAddrInfoExW` hook. Freed via the
+    /// dedicated `FreeAddrInfoExW` detour (a different OS allocator than the
+    /// `FreeAddrInfoW` path used for the `A`/`W` variants).
+    Ex(ManagedAddrInfo<ADDRINFOEXW>),
 }
 
 impl Eq for ManagedAddrInfoAny {}
@@ -285,6 +346,7 @@ impl std::fmt::Debug for ManagedAddrInfoAny {
         match self {
             Self::A(info) => write!(f, "A({:p})", info.as_ptr()),
             Self::W(info) => write!(f, "W({:p})", info.as_ptr()),
+            Self::Ex(info) => write!(f, "Ex({:p})", info.as_ptr()),
         }
     }
 }

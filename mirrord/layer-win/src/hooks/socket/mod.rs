@@ -4,6 +4,7 @@
 #![allow(non_upper_case_globals)]
 #![allow(clippy::too_many_arguments)]
 
+pub(crate) mod addrinfo_ex;
 pub(crate) mod hostname;
 pub(crate) mod ops;
 pub(crate) mod utils;
@@ -29,7 +30,8 @@ use mirrord_layer_lib::{
         dns::{
             remote_dns_resolve_via_proxy,
             windows::{
-                MANAGED_ADDRINFO, free_managed_addrinfo, getaddrinfo, utils::ManagedAddrInfoAny,
+                MANAGED_ADDRINFO, free_managed_addrinfo, getaddrinfo,
+                utils::{ManagedAddrInfoAny, WindowsAddrInfo},
             },
         },
         get_connected_addresses,
@@ -43,9 +45,13 @@ use socket2::SockAddr;
 use winapi::{
     ctypes::c_void,
     shared::{
-        minwindef::{BOOL, FALSE, INT, TRUE},
+        guiddef::GUID,
+        minwindef::{BOOL, FALSE, INT, LPHANDLE, TRUE},
         winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA},
-        ws2def::{ADDRINFOA, ADDRINFOW, LPWSABUF, SIO_GET_EXTENSION_FUNCTION_POINTER, SOCKADDR},
+        ws2def::{
+            ADDRINFOA, ADDRINFOEXW, ADDRINFOW, LPWSABUF, NS_ALL, NS_DNS, NS_NETBT, PADDRINFOEXW,
+            SIO_GET_EXTENSION_FUNCTION_POINTER, SOCKADDR,
+        },
     },
     um::{
         minwinbase::OVERLAPPED,
@@ -53,8 +59,9 @@ use winapi::{
         winsock2::{
             HOSTENT, INVALID_SOCKET, IPPORT_RESERVED, LPWSAOVERLAPPED_COMPLETION_ROUTINE, SOCKET,
             SOCKET_ERROR, WSA_IO_PENDING, WSAEACCES, WSAECONNABORTED, WSAECONNREFUSED, WSAEFAULT,
-            WSAGetLastError, WSAHOST_NOT_FOUND, WSAOVERLAPPED, WSASend, WSASetLastError,
+            WSAGetLastError, WSAHOST_NOT_FOUND, WSAOVERLAPPED, WSASend, WSASetLastError, timeval,
         },
+        ws2tcpip::LPLOOKUPSERVICE_COMPLETION_ROUTINE,
     },
 };
 use windows_strings::{PCSTR, PCWSTR};
@@ -122,6 +129,32 @@ static GET_ADDR_INFO_W_ORIGINAL: OnceLock<&GetAddrInfoWType> = OnceLock::new();
 // static FREE_ADDR_INFO_ORIGINAL: OnceLock<&FreeAddrInfoType> = OnceLock::new();
 type FreeAddrInfoWType = unsafe extern "system" fn(addrinfo: *mut ADDRINFOW);
 static FREE_ADDR_INFO_W_ORIGINAL: OnceLock<&FreeAddrInfoWType> = OnceLock::new();
+
+// Async-capable DNS resolution (the overlapped/completion-routine form .NET's
+// Dns.GetHostAddressesAsync / Socket.ConnectAsync use).
+type GetAddrInfoExWType = unsafe extern "system" fn(
+    pName: *const u16,
+    pServiceName: *const u16,
+    dwNameSpace: u32,
+    lpNspId: *mut GUID,
+    hints: *const ADDRINFOEXW,
+    ppResult: *mut PADDRINFOEXW,
+    timeout: *mut timeval,
+    lpOverlapped: *mut OVERLAPPED,
+    lpCompletionRoutine: LPLOOKUPSERVICE_COMPLETION_ROUTINE,
+    lpNameHandle: LPHANDLE,
+) -> INT;
+static GET_ADDR_INFO_EX_W_ORIGINAL: OnceLock<&GetAddrInfoExWType> = OnceLock::new();
+
+// ADDRINFOEXW chains we allocate must be freed by this (different OS allocator
+// than FreeAddrInfoW), so it gets its own dedicated detour + original.
+type FreeAddrInfoExWType = unsafe extern "system" fn(pAddrInfoEx: PADDRINFOEXW);
+static FREE_ADDR_INFO_EX_W_ORIGINAL: OnceLock<&FreeAddrInfoExWType> = OnceLock::new();
+
+// Cancellation for in-flight async resolutions. We recognize our synthetic
+// handles and fall back to the original for anything else.
+type GetAddrInfoExCancelType = unsafe extern "system" fn(lpHandle: LPHANDLE) -> INT;
+static GET_ADDR_INFO_EX_CANCEL_ORIGINAL: OnceLock<&GetAddrInfoExCancelType> = OnceLock::new();
 
 // Kernel32 hostname functions that Python might use
 type GetComputerNameAType = unsafe extern "system" fn(lpBuffer: *mut i8, nSize: *mut u32) -> i32;
@@ -1712,6 +1745,188 @@ unsafe extern "system" fn freeaddrinfo_t_detour(addrinfo: *mut ADDRINFOW) {
     }
 }
 
+/// Trim a NetBIOS name to its usable length.
+///
+/// A NetBIOS name occupies a 16-byte field: up to 15 usable characters plus a
+/// trailing resource-type *suffix* byte — a service identifier (e.g. 0x20 for
+/// the Server service), NOT a null terminator. So the usable name is capped at
+/// 15 bytes.
+///
+/// We trim in place to match Windows' own truncation before handing the
+/// (short) name to remote DNS resolution.
+///
+/// Regular DNS (`NS_DNS` / `NS_ALL`) is left untouched and follows the usual
+/// length limits.
+fn trim_netbios_name(name: &mut String) {
+    const NETBIOS_MAX_BYTES: usize = 15;
+    if name.len() <= NETBIOS_MAX_BYTES {
+        return;
+    }
+    // Bound by *bytes* (the NetBIOS field is 15 OEM bytes), truncating at the
+    // largest UTF-8 char boundary that fits. For the usual ASCII names this is
+    // the same as taking 15 characters.
+    let mut end = 0;
+    for (i, ch) in name.char_indices() {
+        if i + ch.len_utf8() > NETBIOS_MAX_BYTES {
+            break;
+        }
+        end = i + ch.len_utf8();
+    }
+    let trimmed = name[..end].to_string();
+    tracing::debug!(original = %name, %trimmed, "GetAddrInfoExW: trimmed NetBIOS name to <=15 bytes");
+    *name = trimmed;
+}
+
+/// Hook for `GetAddrInfoExW` — the async-capable resolver.
+///
+/// Synchronous calls (no overlapped/routine) resolve inline and return 0 with
+/// the chain in `*ppResult`; .NET (and the MSDN contract) handle this
+/// inline-completion form.
+///
+/// Asynchronous calls return `WSA_IO_PENDING` and complete later from a worker
+/// thread — see [`addrinfo_ex`].
+///
+/// Namespace policy:
+/// - `NS_ALL` / `NS_DNS`: remoted through the proxy.
+/// - `NS_NETBT`: remoted, with the name first trimmed to the NetBIOS limit.
+/// - `NS_WINS` and everything else: passed straight to the OS.
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn getaddrinfoexw_detour(
+    p_name: *const u16,
+    p_service_name: *const u16,
+    dw_name_space: u32,
+    lp_nsp_id: *mut GUID,
+    hints: *const ADDRINFOEXW,
+    pp_result: *mut PADDRINFOEXW,
+    timeout: *mut timeval,
+    lp_overlapped: *mut OVERLAPPED,
+    lp_completion_routine: LPLOOKUPSERVICE_COMPLETION_ROUTINE,
+    lp_name_handle: LPHANDLE,
+) -> INT {
+    let original = || unsafe {
+        GET_ADDR_INFO_EX_W_ORIGINAL.get().unwrap()(
+            p_name,
+            p_service_name,
+            dw_name_space,
+            lp_nsp_id,
+            hints,
+            pp_result,
+            timeout,
+            lp_overlapped,
+            lp_completion_routine,
+            lp_name_handle,
+        )
+    };
+
+    // A null result out-param is something only the OS can validate/reject
+    // (it's a required [out] parameter); don't dereference it ourselves.
+    if pp_result.is_null() {
+        return original();
+    }
+
+    // Namespace gate. NS_WINS and anything else go straight to the OS so native
+    // behavior is preserved (the proxy can only do DNS-style resolution).
+    if !matches!(dw_name_space, NS_ALL | NS_DNS | NS_NETBT) {
+        tracing::trace!(dw_name_space, "GetAddrInfoExW: non-DNS namespace, bypassing");
+        return original();
+    }
+
+    // Decode the node name; a null name (e.g. AI_PASSIVE) isn't ours to resolve.
+    let mut node = if p_name.is_null() {
+        return original();
+    } else {
+        unsafe { str_win::u16_buffer_to_string(PCWSTR(p_name).as_wide()) }
+    };
+    if dw_name_space == NS_NETBT {
+        trim_netbios_name(&mut node);
+    }
+
+    let service_opt = if p_service_name.is_null() {
+        None
+    } else {
+        Some(unsafe { str_win::u16_buffer_to_string(PCWSTR(p_service_name).as_wide()) })
+    };
+    let port = service_opt
+        .as_deref()
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(0);
+
+    let is_async = !lp_overlapped.is_null() || lp_completion_routine.is_some();
+
+    if is_async {
+        // Make the local/remote (DNS selector) decision synchronously, while
+        // the caller's borrowed args are valid. If local, hand the whole async
+        // call to the OS unchanged (true passthrough — the OS fires the
+        // caller's completion, we add nothing, so there's no double-fire).
+        if let Detour::Bypass(reason) = setup().dns_selector().check_query(&node, port) {
+            tracing::debug!(?reason, %node, "GetAddrInfoExW async: selector says local, bypassing");
+            return original();
+        }
+        // Capture hints fields now; the hints pointer may not outlive the call.
+        let (ai_family, ai_socktype, ai_protocol) = unsafe { hints.as_ref() }
+            .map(|h| h.get_family_socktype_protocol())
+            .unwrap_or((0, 0, 0));
+        return unsafe {
+            addrinfo_ex::begin(
+                node,
+                port,
+                ai_family,
+                ai_socktype,
+                ai_protocol,
+                pp_result,
+                lp_overlapped,
+                lp_completion_routine,
+                lp_name_handle,
+            )
+        };
+    }
+
+    // Synchronous path: resolve inline, return 0 with the chain in *ppResult.
+    // `getaddrinfo::<T>` runs the DNS-selector check itself.
+    getaddrinfo::<ADDRINFOEXW>(Some(node), service_opt, unsafe { hints.as_ref() })
+        .map(|managed| {
+            let head = managed.as_ptr();
+            MANAGED_ADDRINFO
+                .lock()
+                .expect("getaddrinfoexw: MANAGED_ADDRINFO was poisoned")
+                .insert(head as usize, ManagedAddrInfoAny::Ex(managed));
+            unsafe { *pp_result = head };
+            // No async completion pending, so no cancel handle.
+            if !lp_name_handle.is_null() {
+                unsafe { *lp_name_handle = ptr::null_mut() };
+            }
+            ERROR_SUCCESS_I32
+        })
+        .unwrap_or_bypass_windows_as::<WinGetAddrInfoInt, _>(|bypass| {
+            tracing::debug!(?bypass, "GetAddrInfoExW sync: falling back to original");
+            original()
+        })
+}
+
+/// Frees `ADDRINFOEXW` chains. Ours (tracked in `MANAGED_ADDRINFO`) are dropped
+/// by us; anything else goes to the original `FreeAddrInfoExW`.
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn freeaddrinfoexw_detour(addrinfo: PADDRINFOEXW) {
+    unsafe {
+        if !free_managed_addrinfo(addrinfo) {
+            FREE_ADDR_INFO_EX_W_ORIGINAL.get().unwrap()(addrinfo);
+        }
+    }
+}
+
+/// Cancels an in-flight async resolution. Recognizes our synthetic handles via
+/// [`addrinfo_ex::cancel`]; for any other handle, defers to the original.
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn getaddrinfoexcancel_detour(lp_handle: LPHANDLE) -> INT {
+    if !lp_handle.is_null() {
+        let handle_value = unsafe { *lp_handle } as usize;
+        if let Some(code) = unsafe { addrinfo_ex::cancel(handle_value) } {
+            return code;
+        }
+    }
+    unsafe { GET_ADDR_INFO_EX_CANCEL_ORIGINAL.get().unwrap()(lp_handle) }
+}
+
 /// Data transfer detour for sendto() - sends data to a socket with destination address
 ///
 /// This implementation uses the shared layer-lib sendto functionality to handle DNS resolution
@@ -1865,6 +2080,36 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
             freeaddrinfo_t_detour,
             FreeAddrInfoWType,
             FREE_ADDR_INFO_W_ORIGINAL
+        )?;
+
+        // Async-capable resolver (.NET's *Async DNS path) + its dedicated free
+        // and cancel functions. ADDRINFOEXW has its own free (different OS
+        // allocator than FreeAddrInfoW), so it must not share the hook above.
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "GetAddrInfoExW",
+            getaddrinfoexw_detour,
+            GetAddrInfoExWType,
+            GET_ADDR_INFO_EX_W_ORIGINAL
+        )?;
+
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "GetAddrInfoExCancel",
+            getaddrinfoexcancel_detour,
+            GetAddrInfoExCancelType,
+            GET_ADDR_INFO_EX_CANCEL_ORIGINAL
+        )?;
+
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "FreeAddrInfoExW",
+            freeaddrinfoexw_detour,
+            FreeAddrInfoExWType,
+            FREE_ADDR_INFO_EX_W_ORIGINAL
         )?;
 
         // Hostname hooks
