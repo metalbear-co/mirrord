@@ -29,12 +29,16 @@ pub async fn mirrord_ls() {
     .await;
 
     let mut process = run_ls(&namespace, cfg!(feature = "operator")).await;
-    let res = process.wait().await;
-    assert!(res.success(), "mirrord ls command failed");
+    process.wait_assert_success().await;
 
     let stdout = process.get_stdout().await;
     let targets: Vec<String> =
         serde_json::from_str(&stdout).expect("mirrord ls output should be a valid JSON");
+
+    assert!(
+        !targets.is_empty(),
+        "mirrord ls returned an empty target list"
+    );
 
     let types = [
         "pod",

@@ -7,7 +7,7 @@ mod env_tests {
     use rstest::*;
 
     use crate::utils::{
-        application::{env::EnvApp, GoVersion},
+        application::{GoVersion, env::EnvApp},
         kube_service::KubeService,
         services::basic_service,
     };
@@ -47,7 +47,6 @@ mod env_tests {
             None,
         )
         .await;
-        let res = process.wait().await;
-        assert!(res.success());
+        process.wait_assert_success().await;
     }
 }
