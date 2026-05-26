@@ -1303,6 +1303,7 @@ mod tests {
         io::{Read, Write},
     };
 
+    use k8s_openapi::api::core::v1::{Container, VolumeMount};
     use rstest::*;
     use schemars::Schema;
     use tempfile::NamedTempFile;
@@ -2344,5 +2345,120 @@ mod tests {
             .find(|key| key.contains(r"\.aws"))
             .expect("magic.aws should produce a .aws mapping entry");
         assert_eq!(aws_pattern, r"^/Users/fake/\.aws(/.*)?");
+    }
+
+    /// Builds a [`PodSpec`] with a single named container that mounts the given paths. Each entry
+    /// is `(mount_path, sub_path)`.
+    fn pod_spec_with_mounts(container: &str, mounts: &[(&str, Option<&str>)]) -> PodSpec {
+        PodSpec {
+            containers: vec![Container {
+                name: container.to_owned(),
+                volume_mounts: Some(
+                    mounts
+                        .iter()
+                        .map(|(mount_path, sub_path)| VolumeMount {
+                            mount_path: (*mount_path).to_owned(),
+                            sub_path: sub_path.map(str::to_owned),
+                            ..Default::default()
+                        })
+                        .collect(),
+                ),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn default_config() -> LayerConfig {
+        LayerConfig::resolve(&mut ConfigContext::default().strict_env(true))
+            .expect("default config should resolve")
+    }
+
+    fn read_only(config: &LayerConfig) -> Vec<String> {
+        config
+            .feature
+            .fs
+            .read_only
+            .clone()
+            .map(Vec::from)
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn auto_mount_adds_volume_mount_paths_to_read_only() {
+        let pod_spec = pod_spec_with_mounts(
+            "app",
+            &[("/etc/config", None), ("/etc/secret/token", Some("token"))],
+        );
+        let mut config = default_config();
+        config.apply_auto_mount(&pod_spec, Some("app"));
+
+        // A directory mount matches the directory and everything under it.
+        assert!(read_only(&config).contains(&r"^/etc/config(/.*)?$".to_owned()));
+        // A `subPath` mount targets a single file, so it's matched exactly.
+        assert!(read_only(&config).contains(&r"^/etc/secret/token$".to_owned()));
+    }
+
+    #[test]
+    fn auto_mount_falls_back_to_first_container_when_none_given() {
+        let pod_spec = pod_spec_with_mounts("app", &[("/data", None)]);
+        let mut config = default_config();
+        config.apply_auto_mount(&pod_spec, None);
+
+        assert_eq!(read_only(&config), vec![r"^/data(/.*)?$".to_owned()]);
+    }
+
+    #[test]
+    fn auto_mount_disabled_is_noop() {
+        let pod_spec = pod_spec_with_mounts("app", &[("/etc/config", None)]);
+        let mut config = default_config();
+        config.feature.magic.auto_mount = false;
+        config.apply_auto_mount(&pod_spec, Some("app"));
+
+        assert!(config.feature.fs.read_only.is_none());
+    }
+
+    #[test]
+    fn auto_mount_dedups_against_existing_read_only() {
+        let pod_spec = pod_spec_with_mounts("app", &[("/etc/config", None)]);
+        let mut config = default_config();
+        config.feature.fs.read_only = Some(VecOrSingle::Multiple(vec![
+            r"^/etc/config(/.*)?$".to_owned(),
+        ]));
+        config.apply_auto_mount(&pod_spec, Some("app"));
+
+        assert_eq!(read_only(&config), vec![r"^/etc/config(/.*)?$".to_owned()]);
+    }
+
+    /// A specified-but-missing container is a no-op (the first-container fallback only applies when
+    /// no container is given).
+    #[test]
+    fn auto_mount_unknown_container_is_noop() {
+        let pod_spec = pod_spec_with_mounts("app", &[("/etc/config", None)]);
+        let mut config = default_config();
+        config.apply_auto_mount(&pod_spec, Some("does-not-exist"));
+
+        assert!(config.feature.fs.read_only.is_none());
+    }
+
+    /// Mounts the user explicitly marked local via `feature.fs.local` are left alone; others are
+    /// still added.
+    #[test]
+    fn auto_mount_respects_user_local_overrides() {
+        let pod_spec = pod_spec_with_mounts("app", &[("/etc/config", None), ("/etc/secret", None)]);
+        let mut config = default_config();
+        config.feature.fs.local = Some(VecOrSingle::Multiple(vec![
+            r"^/etc/secret(/.*)?$".to_owned(),
+        ]));
+        config.apply_auto_mount(&pod_spec, Some("app"));
+
+        let ro = read_only(&config);
+        assert!(ro.contains(&r"^/etc/config(/.*)?$".to_owned()));
+        assert!(ro.iter().all(|pattern| pattern.contains("secret").not()));
+    }
+
+    #[test]
+    fn magic_auto_mount_defaults_to_enabled() {
+        assert!(default_config().feature.magic.auto_mount);
     }
 }
