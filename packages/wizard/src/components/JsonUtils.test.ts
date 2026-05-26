@@ -186,6 +186,33 @@ describe("JsonUtils", () => {
         name: "my-app",
       });
     });
+
+    it("parses string target format with container", () => {
+      const config: LayerFileConfig = {
+        target: "deployment/my-app/container/api",
+      };
+      const result = readCurrentTargetDetails(config);
+      expect(result).toEqual({
+        type: "deployment",
+        name: "my-app",
+        container: "api",
+      });
+    });
+
+    it("parses object target format with container", () => {
+      const config: LayerFileConfig = {
+        target: {
+          pod: "my-pod",
+          container: "api",
+        },
+      };
+      const result = readCurrentTargetDetails(config);
+      expect(result).toEqual({
+        type: "pod",
+        name: "my-pod",
+        container: "api",
+      });
+    });
   });
 
   describe("updateConfigTarget", () => {
@@ -194,6 +221,20 @@ describe("JsonUtils", () => {
       const result = updateConfigTarget(config, "deployment/api", "staging");
       expect(result.target).toEqual({
         path: "deployment/api",
+        namespace: "staging",
+      });
+    });
+
+    it("sets target path with container", () => {
+      const config: LayerFileConfig = {};
+      const result = updateConfigTarget(
+        config,
+        "deployment/api",
+        "staging",
+        "api-container",
+      );
+      expect(result.target).toEqual({
+        path: "deployment/api/container/api-container",
         namespace: "staging",
       });
     });
