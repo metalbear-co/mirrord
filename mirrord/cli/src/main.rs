@@ -537,7 +537,7 @@ async fn run_process_with_mirrord<P: Progress>(
     // Foreground CI start command with no given log output location is treated same as mirrord exec
     // upon this point, while background CI start command spawns a child process
     match mirrord_for_ci {
-        Some(mirrord_ci) if mirrord_ci.is_foreground().not() | config.ci.output_dir.is_some() => {
+        Some(mirrord_ci) if mirrord_ci.is_foreground().not() || config.ci.output_dir.is_some() => {
             mirrord_ci
                 .prepare_command(
                     &mut progress,
