@@ -110,9 +110,9 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
 #[cfg(not(unix))]
 pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
     if (socket_type & SOCK_STREAM) == SOCK_STREAM {
-        Ok(SocketKind::Tcp(type_))
+        Ok(SocketKind::Tcp(socket_type))
     } else if (socket_type & SOCK_DGRAM) == SOCK_DGRAM {
-        Ok(SocketKind::Udp(type_))
+        Ok(SocketKind::Udp(socket_type))
     } else {
         Err(format!("Unsupported socket type: {}", socket_type))
     }
