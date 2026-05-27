@@ -9,8 +9,6 @@ mod cli;
 mod env;
 mod file_ops;
 mod http;
-#[cfg(target_os = "windows")]
-mod iocp;
 #[cfg(any(feature = "cli", feature = "operator"))]
 mod ls;
 mod targetless;
