@@ -1,0 +1,1 @@
+Agent now sets up ip6tables rules whenever the IPv6 stack is usable (including IPv4-only clusters that still have an IPv6 loopback), so traffic to `[::1]` is no longer silently excluded from steal/mirror.
