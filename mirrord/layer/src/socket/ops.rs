@@ -358,7 +358,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
                 .unwrap_or_else(|| requested_address.port());
 
             make_proxy_request_with_response(PortSubscribe {
-                listening_on: address,
+                listening_on: address.into(),
                 subscription: setup.incoming_mode().subscription(mapped_port),
             })??;
 

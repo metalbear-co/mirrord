@@ -11,12 +11,17 @@ use semver::VersionReq;
 
 use crate::{ConnectionId, Payload, RemoteResult, SerializationError, uid::Uid};
 
+pub mod seqpacket;
 pub mod tcp;
 pub mod udp;
 
 /// Minimal mirrord-protocol version that allows for [`LayerConnectV2`] and [`DaemonConnectV2`].
 pub static OUTGOING_CONNECT_V2: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.22.0".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows unix seqpacket outgoing messages.
+pub static OUTGOING_SEQPACKET: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.27.0".parse().expect("Bad Identifier"));
 
 /// A serializable socket address type that can represent IP addresses or addresses of unix sockets.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

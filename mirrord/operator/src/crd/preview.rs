@@ -2,8 +2,8 @@
 //!
 //! The CLI creates a [`PreviewSession`] resource in the cluster, and the operator reconciles
 //! it by spawning a preview pod and routing traffic to it. The CR's status subresource
-//! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Failed`), which
-//! the CLI watches to report progress back to the user.
+//! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Failed`), which the
+//! CLI watches to report progress back to the user.
 
 use std::{collections::BTreeMap, time::Duration};
 
@@ -16,7 +16,7 @@ use mirrord_config::{
     feature::{
         env::EnvConfig,
         network::incoming::{IncomingConfig, IncomingMode, http_filter::HttpFilterConfig},
-        preview::PreviewTtl,
+        preview::{ConfigMount, ConfigMountType, PreviewTtl},
         split_queues::{QueueId, QueueMessageFilter, SplitQueuesConfig},
     },
     target::Target,
@@ -74,6 +74,10 @@ pub struct PreviewSessionSpec {
     /// User-configured environment variable settings for this preview session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<PreviewEnvVarsConfig>,
+
+    /// File-based config mount settings for this preview session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub config_mounts: Vec<PreviewEnvConfigMount>,
 }
 
 impl PreviewSessionSpec {
@@ -85,6 +89,11 @@ impl PreviewSessionSpec {
     /// Returns `true` when `ttl_secs` should be treated as infinite.
     pub fn has_infinite_ttl(&self) -> bool {
         self.ttl_secs >= PreviewTtl::INFINITE_TTL_SECS
+    }
+
+    /// Returns `true` when `ttl_secs` should _not_ be treated as infinite.
+    pub fn has_ttl(&self) -> bool {
+        self.ttl_secs < PreviewTtl::INFINITE_TTL_SECS
     }
 }
 
@@ -110,18 +119,15 @@ pub struct PreviewSessionStatus {
     /// Timestamp of when the operator started processing this session.
     pub started_at: MicroTime,
 
-    /// Name of the preview pod created for this session.
-    ///
-    /// Set once the pod is created (from the `Waiting` phase onward). `None` during
-    /// `Initializing` or if pod creation failed before a name was assigned.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pod_name: Option<String>,
-
     /// Human-readable description of why the session failed.
     ///
     /// Only set when `phase` is `Failed`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_message: Option<String>,
+
+    /// Timestamp of when the session entered the `Failed` phase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_at: Option<MicroTime>,
 
     /// Timestamp when the session's TTL expires.
     ///
@@ -135,8 +141,8 @@ pub struct PreviewSessionStatus {
 
 /// Phase of a preview session's lifecycle.
 ///
-/// Progresses through `Initializing` → `Waiting` → `Ready`. Any phase may transition to
-/// `Failed` on error.
+/// The session will transition linearly through each of these phases.
+/// Any phase may transition to `Failed` on error.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
 pub enum PreviewSessionPhase {
     /// Operator is setting up — the preview pod has not been created yet.
@@ -166,10 +172,10 @@ pub struct PreviewStatusUpdate {
     started_at: Option<MicroTime>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pod_name: Option<String>,
+    failure_message: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    failure_message: Option<String>,
+    failed_at: Option<MicroTime>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     expires_at: Option<MicroTime>,
@@ -193,21 +199,21 @@ impl PreviewStatusUpdate {
         self
     }
 
-    /// Sets `.status.podName`.
-    pub fn pod_name(mut self, pod_name: String) -> Self {
-        self.pod_name = Some(pod_name);
-        self
-    }
-
     /// Sets `.status.failureMessage`.
     pub fn failure_message(mut self, failure_message: String) -> Self {
         self.failure_message = Some(failure_message);
         self
     }
 
+    /// Sets `.status.failedAt`.
+    pub fn failed_at(mut self, failed_at: MicroTime) -> Self {
+        self.failed_at = Some(failed_at);
+        self
+    }
+
     /// Sets `.status.expiresAt`.
-    pub fn expires_at(mut self, expires_at: MicroTime) -> Self {
-        self.expires_at = Some(expires_at);
+    pub fn expires_at(mut self, expires_at: Option<MicroTime>) -> Self {
+        self.expires_at = expires_at;
         self
     }
 
@@ -551,6 +557,59 @@ impl PreviewEnvVarsConfig {
                 exclude,
                 overrides,
             }))
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewEnvConfigMount {
+    /// Path where the file should be mounted.
+    pub path: String,
+
+    /// `text` or `binary`
+    pub r#type: PreviewEnvConfigMountType,
+
+    /// Payload of the mount.
+    pub data: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PreviewEnvConfigMountType {
+    /// Specifies that `data` should be dumped into the file as-is.
+    Text,
+
+    /// Specifies that `data` is base64-encoded and should be decoded
+    /// before being dumped into the file.
+    Binary,
+}
+
+impl From<ConfigMount> for PreviewEnvConfigMount {
+    /// Assumes `value` has been passed through [`ConfigMount::resolve`], which
+    /// guarantees `data` and `r#type` are both `Some` and `from_file` is `None`.
+    fn from(value: ConfigMount) -> Self {
+        let ConfigMount {
+            mount_at: path,
+            r#type,
+            payload: data,
+            from_file: _,
+        } = value;
+        Self {
+            path,
+            r#type: r#type
+                .expect("ConfigMount must be resolved before conversion")
+                .into(),
+            data: data.expect("ConfigMount must be resolved before conversion"),
+        }
+    }
+}
+
+impl From<ConfigMountType> for PreviewEnvConfigMountType {
+    fn from(value: ConfigMountType) -> Self {
+        match value {
+            ConfigMountType::Text => Self::Text,
+            ConfigMountType::Binary => Self::Binary,
         }
     }
 }

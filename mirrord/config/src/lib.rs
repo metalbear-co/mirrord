@@ -29,6 +29,7 @@ use base64::prelude::*;
 use config::{ConfigContext, ConfigError, MirrordConfig};
 use experimental::ExperimentalConfig;
 use feature::{
+    database_branches::DatabaseBranchConfig,
     env::mapper::EnvVarsRemapper,
     network::{
         dns::DnsFilterConfig,
@@ -686,7 +687,7 @@ impl LayerConfig {
         http_filter
             .ensure_no_empty_strings()
             .map_err(|error| ConfigError::InvalidValue {
-                name: "feature.network.incoming.http_filter",
+                name: "feature.network.incoming.http_filter".into(),
                 provided: String::new(),
                 error: Box::new(error),
             })?;
@@ -698,7 +699,7 @@ impl LayerConfig {
                 // `mirrord_protocol::tcp::JsonPathQuery::new_unchecked`
                 JsonPathQuery::new(query.clone()).map(|_| ()).map_err(|e| {
                     ConfigError::InvalidValue {
-                        name: "feature.network.incoming.http_filter.body_filter.query",
+                        name: "feature.network.incoming.http_filter.body_filter.query".into(),
                         provided: query.to_string(),
                         error: Box::new(e),
                     }
@@ -879,11 +880,39 @@ impl LayerConfig {
         self.feature.network.outgoing.verify(context)?;
         self.feature.split_queues.verify(context)?;
         self.feature.db_branches.verify()?;
+
+        // guard against env overrides conflicting with db branching keys
+        if let Some(overrides) = self.feature.env.r#override.as_ref()
+            && !overrides.is_empty()
+        {
+            let mut conflicts: Vec<&str> = self
+                .feature
+                .db_branches
+                .0
+                .iter()
+                .flat_map(DatabaseBranchConfig::connection_env_keys)
+                .filter(|key| overrides.contains_key(*key))
+                .collect();
+
+            if conflicts.is_empty().not() {
+                conflicts.sort();
+                conflicts.dedup();
+                return Err(ConfigError::Conflict(format!(
+                    "the following environment variables appear in both \
+                     `feature.env.override` and `feature.db_branches[].connection`: {}. \
+                     Database branching redirects these variables through the operator, \
+                     so overriding them locally would defeat the redirection. Remove \
+                     them from `feature.env.override`.",
+                    conflicts.join(", "),
+                )));
+            }
+        }
+
         self.feature.preview.verify()?;
 
         if self.feature.fs.readonly_file_buffer > READONLY_FILE_BUFFER_HARD_LIMIT {
             return Err(ConfigError::InvalidValue {
-                name: "feature.fs.readonly_file_buffer",
+                name: "feature.fs.readonly_file_buffer".into(),
                 provided: self.feature.fs.readonly_file_buffer.to_string(),
                 error: format!(
                     "the value of feature.fs.readonly_file_buffer must be {} Megabytes or less.",
@@ -920,7 +949,7 @@ impl LayerConfig {
 
         if self.startup_retry.min_ms > self.startup_retry.max_ms {
             return Err(ConfigError::InvalidValue {
-                name: "startup_retry.min_ms",
+                name: "startup_retry.min_ms".into(),
                 provided: self.startup_retry.min_ms.to_string(),
                 error: format!(
                     "the value of startup_retry.min_ms `{}` cannot be greater than \
@@ -933,7 +962,7 @@ impl LayerConfig {
 
         if self.startup_retry.max_ms == 0 {
             return Err(ConfigError::InvalidValue {
-                name: "startup_retry.max_ms",
+                name: "startup_retry.max_ms".into(),
                 provided: self.startup_retry.max_ms.to_string(),
                 error: "the value of startup_retry.max_ms has to be greater than 0.".into(),
             });
@@ -2042,6 +2071,69 @@ mod tests {
         );
         let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
         assert_eq!(names(filter), ("local", vec!["docker.lala".to_owned()]));
+    }
+
+    #[test]
+    fn db_branches_env_override_conflict_is_rejected() {
+        let config = ConfigType::Json.parse(
+            r#"
+            {
+                "feature": {
+                    "env": {
+                        "override": { "DB_URL": "postgres://localhost/local" }
+                    },
+                    "db_branches": [
+                        {
+                            "type": "pg",
+                            "connection": { "url": { "type": "env", "variable": "DB_URL" } }
+                        }
+                    ]
+                }
+            }
+            "#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        let error = resolved
+            .verify(&mut context)
+            .expect_err("overlapping env.override and db_branches keys should be rejected");
+
+        assert!(
+            matches!(&error, ConfigError::Conflict(msg) if msg.contains("DB_URL")),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn db_branches_without_env_override_overlap_pass_verification() {
+        let config = ConfigType::Json.parse(
+            r#"
+            {
+                "feature": {
+                    "env": {
+                        "override": { "OTHER_VAR": "value" }
+                    },
+                    "db_branches": [
+                        {
+                            "type": "pg",
+                            "connection": { "url": { "type": "env", "variable": "DB_URL" } }
+                        }
+                    ]
+                }
+            }
+            "#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify(&mut context)
+            .expect("non-overlapping keys should verify");
     }
 
     #[test]

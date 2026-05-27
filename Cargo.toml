@@ -50,7 +50,7 @@ ignored-paths = [
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.211.0"
+version = "3.212.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -228,6 +228,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-tungstenite = { version = "0.24" }
 tokio-util = { version = "0.7", features = ["net", "codec"] }
 toml = "1.1.2"
+tokio-seqpacket = { version = "0.8.2" }
 tonic = "0.12"
 tower = "0.5"
 tower-http = { version = "0.6.6", features = ["fs", "set-header"] }

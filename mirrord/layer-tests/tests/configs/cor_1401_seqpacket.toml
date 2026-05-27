@@ -1,0 +1,5 @@
+[feature]
+fs = "local"
+
+[feature.network.outgoing]
+unix_streams = "^/tmp/ochorowicz\\.sock$"
