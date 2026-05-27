@@ -152,7 +152,7 @@ where
 
         if layer_config.feature.magic.auto_mount {
             progress.warning(
-                "auto_mount: skipped in multi-cluster mode (target is resolved server-side",
+                "auto_mount: skipped in multi-cluster mode (target is resolved server-side)",
             );
         }
 
