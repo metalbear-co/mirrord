@@ -228,8 +228,7 @@ impl WindowsAddrInfo for ADDRINFOW {
     }
 
     fn canonname_from_string(s: String) -> HookResult<Self::CanonNameOwned> {
-        let wide: Vec<u16> = s.encode_utf16().chain(Some(0)).collect();
-        Ok(wide)
+        Ok(str_win::string_to_u16_buffer(s))
     }
 
     fn canonname_ptr(owned: &mut Self::CanonNameOwned) -> Self::CanonName {
@@ -285,8 +284,7 @@ impl WindowsAddrInfo for ADDRINFOEXW {
     }
 
     fn canonname_from_string(s: String) -> HookResult<Self::CanonNameOwned> {
-        let wide: Vec<u16> = s.encode_utf16().chain(Some(0)).collect();
-        Ok(wide)
+        Ok(str_win::string_to_u16_buffer(s))
     }
 
     fn canonname_ptr(owned: &mut Self::CanonNameOwned) -> Self::CanonName {
