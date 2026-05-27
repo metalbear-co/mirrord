@@ -112,18 +112,8 @@ static IP_VERSION_AVAILABILITY: LazyLock<IpVersionAvailability> = LazyLock::new(
         let Some(addr) = addr.address else {
             continue;
         };
-        if let Some(v4) = addr.as_sockaddr_in()
-            && v4.ip().is_broadcast().not()
-            && v4.ip().is_unspecified().not()
-        {
-            has_v4 = true;
-        }
-
-        if let Some(v6) = addr.as_sockaddr_in6()
-            && v6.ip().is_unspecified().not()
-        {
-            has_v6 = true;
-        }
+        has_v4 |= addr.as_sockaddr_in().is_some();
+        has_v6 |= addr.as_sockaddr_in6().is_some();
     }
 
     if has_v4.not() && has_v6.not() {

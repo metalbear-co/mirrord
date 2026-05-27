@@ -111,6 +111,7 @@ darwin
 preload
 dylib
 intproxy
+loopback
 
 # Networking
 TCP
