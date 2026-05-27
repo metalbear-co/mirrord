@@ -1827,7 +1827,10 @@ unsafe extern "system" fn getaddrinfoexw_detour(
     // Namespace gate. NS_WINS and anything else go straight to the OS so native
     // behavior is preserved (the proxy can only do DNS-style resolution).
     if !matches!(dw_name_space, NS_ALL | NS_DNS | NS_NETBT) {
-        tracing::trace!(dw_name_space, "GetAddrInfoExW: non-DNS namespace, bypassing");
+        tracing::trace!(
+            dw_name_space,
+            "GetAddrInfoExW: non-DNS namespace, bypassing"
+        );
         return original();
     }
 

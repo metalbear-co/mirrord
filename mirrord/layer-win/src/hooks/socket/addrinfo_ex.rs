@@ -61,8 +61,8 @@ use winapi::{
         minwinbase::OVERLAPPED,
         synchapi::SetEvent,
         winsock2::{
-            LPWSAOVERLAPPED, WSA_E_CANCELLED, WSA_INVALID_HANDLE, WSA_IO_PENDING, WSAHOST_NOT_FOUND,
-            WSATRY_AGAIN,
+            LPWSAOVERLAPPED, WSA_E_CANCELLED, WSA_INVALID_HANDLE, WSA_IO_PENDING,
+            WSAHOST_NOT_FOUND, WSATRY_AGAIN,
         },
         ws2tcpip::LPLOOKUPSERVICE_COMPLETION_ROUTINE,
     },
@@ -221,7 +221,9 @@ fn forget(handle: HANDLE) {
         }
         std::hint::spin_loop();
     }
-    tracing::warn!("addrinfo_ex: DNS query registry write lock stayed contended; leaking one entry");
+    tracing::warn!(
+        "addrinfo_ex: DNS query registry write lock stayed contended; leaking one entry"
+    );
 }
 
 /// Owns the worker's obligation to complete the query exactly once. On `Drop`
@@ -382,7 +384,10 @@ pub(crate) unsafe fn begin(
             Detour::Bypass(reason) => {
                 // The selector check already ran synchronously before `begin`,
                 // so a bypass here is unexpected; treat as "not found".
-                tracing::debug!(?reason, "GetAddrInfoExW async: resolution bypassed, failing");
+                tracing::debug!(
+                    ?reason,
+                    "GetAddrInfoExW async: resolution bypassed, failing"
+                );
                 guard.fail(WSAHOST_NOT_FOUND as DWORD);
             }
             Detour::Error(err) => {

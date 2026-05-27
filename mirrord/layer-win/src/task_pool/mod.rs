@@ -15,8 +15,8 @@
 //! workers serialize on `rx.lock()`; the mutex is held only for the `recv()`
 //! call, not while the job runs).
 //!
-//! - **`PROXY_CONNECTION` serializes** at the layer-lib level: only one worker can talk to the agent
-//!   at a time, so a large pool wouldn't increase agent throughput.
+//! - **`PROXY_CONNECTION` serializes** at the layer-lib level: only one worker can talk to the
+//!   agent at a time, so a large pool wouldn't increase agent throughput.
 //! - **But** workers also do local work (buffer copies, chain building, lock juggling) outside the
 //!   proxy mutex; 4 workers comfortably absorb bursts.
 //! - **Worker threads are cheap to keep alive** (they `recv()` and park), and avoiding per-call
