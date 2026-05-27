@@ -125,6 +125,7 @@ TTL
 RTT
 VPN
 URI
+loopback
 
 # File formats
 YAML

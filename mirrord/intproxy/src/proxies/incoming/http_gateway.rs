@@ -26,7 +26,6 @@ use tracing::Level;
 use super::{
     ListeningOnExt,
     http::{ClientStore, LocalHttpError, ResponseMode, StreamingBody, mirrord_error_response},
-    normalize_connection_address,
     tasks::{HttpOut, InProxyTaskMessage},
 };
 use crate::background_tasks::{BackgroundTask, MessageBus};
@@ -230,16 +229,14 @@ impl HttpGatewayTask {
     /// sending [`ChunkedResponse::Start`]. The agent would get a duplicated response.
     #[tracing::instrument(level = Level::DEBUG, skip_all, err(level = Level::WARN))]
     async fn send_attempt(&self, message_bus: &mut MessageBus<Self>) -> Result<(), LocalHttpError> {
-        // Normalize a wildcard listen address (e.g. `0.0.0.0`) to loopback before connecting,
-        // matching the raw-TCP path in `IncomingProxy`. Connecting to `0.0.0.0` happens to route
-        // to loopback on Linux but fails on Windows, so without this the HTTP gateway can't reach
-        // a server bound to the wildcard address.
-        let server_addr = normalize_connection_address(
-            self.listening_on
-                .resolve_addr()
-                .await
-                .map_err(LocalHttpError::ConnectTcpFailed)?,
-        );
+        // `resolve_addr` returns a connectable address, normalizing a wildcard listen address
+        // (e.g. `0.0.0.0`) to loopback. That matters on Windows, where connecting to `0.0.0.0`
+        // fails outright (on Linux it happens to route to loopback).
+        let server_addr = self
+            .listening_on
+            .resolve_addr()
+            .await
+            .map_err(LocalHttpError::ConnectTcpFailed)?;
         let mut client = self
             .client_store
             .get(

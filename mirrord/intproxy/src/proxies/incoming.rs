@@ -395,12 +395,12 @@ impl IncomingProxy {
             return Ok(());
         };
 
+        // `resolve_addr` already normalizes a wildcard listen address to loopback.
         let peer_address = subscription
             .listening_on
             .resolve_addr()
             .await
             .map_err(IncomingProxyError::SocketSetupFailed)?;
-        let peer_address = normalize_connection_address(peer_address);
 
         let socket = BoundTcpSocket::bind_specified_or_localhost(peer_address.ip())
             .map_err(IncomingProxyError::SocketSetupFailed)?;
@@ -1021,29 +1021,37 @@ fn normalize_connection_address(listen_addr: SocketAddr) -> SocketAddr {
 }
 
 pub trait ListeningOnExt {
-    /// Returns a concrete [`SocketAddr`] to forward traffic to.
+    /// Returns a concrete, connectable [`SocketAddr`] to forward traffic to.
     ///
     /// For [`ListeningOn::Hostname`], resolves it via DNS and picks one of the returned addresses
     /// at random. Call this per request / per new connection so load gets spread across the
     /// backing pods of a headless Service.
+    ///
+    /// The returned address is always connectable: a wildcard listen address (`0.0.0.0` / `::`) is
+    /// normalized to loopback (see [`normalize_connection_address`]). Centralizing that here keeps
+    /// every caller on a connectable address — the raw-TCP and HTTP-gateway paths drifted apart
+    /// once (regressed in #4264, restored in #4302), and folding it in is what stops that
+    /// recurring.
     fn resolve_addr(&self) -> impl Future<Output = io::Result<SocketAddr>>;
 }
 
 impl ListeningOnExt for ListeningOn {
     async fn resolve_addr(&self) -> io::Result<SocketAddr> {
-        match self {
-            Self::Socket(addr) => Ok(*addr),
+        let addr = match self {
+            Self::Socket(addr) => *addr,
             Self::Hostname { host, port } => {
                 let addrs = tokio::net::lookup_host((host.as_str(), *port))
                     .await?
                     .collect::<Vec<_>>();
-                addrs.choose(&mut rand::rng()).copied().ok_or_else(|| {
+                *addrs.choose(&mut rand::rng()).ok_or_else(|| {
                     io::Error::new(
                         io::ErrorKind::AddrNotAvailable,
                         format!("DNS lookup for {host}:{port} returned no addresses"),
                     )
-                })
+                })?
             }
-        }
+        };
+
+        Ok(normalize_connection_address(addr))
     }
 }
