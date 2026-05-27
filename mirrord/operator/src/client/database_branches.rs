@@ -899,6 +899,37 @@ pub mod labels {
 pub use crate::crd::TARGET_NAMESPACE_ANNOTATION;
 use crate::crd::session::SessionTarget;
 
+fn generate_branch_name(name_prefix: String, database_id: &BranchDatabaseId) -> (Option<String>, Option<String>) {
+    match database_id {
+        BranchDatabaseId::Generated(_) if name_prefix.len() <= 63 => (None, Some(name_prefix)),
+        BranchDatabaseId::Generated(_) => {
+            use std::hash::{Hash, Hasher};
+            
+            let mut prefix_hasher = std::collections::hash_map::DefaultHasher::new();
+            name_prefix.hash(&mut prefix_hasher);
+            
+            (None, Some(format!("{:x}", prefix_hasher.finish())))
+        },
+        BranchDatabaseId::Specified(branch_id) => {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            branch_id.hash(&mut hasher);
+            let hash = format!("{:x}", hasher.finish());
+
+            let name = if name_prefix.len() + hash.len() <= 63 {
+                format!("{name_prefix}-{hash}")
+            } else {
+                let mut prefix_hasher = std::collections::hash_map::DefaultHasher::new();
+                name_prefix.hash(&mut prefix_hasher);
+
+                format!("{:x}-{hash}", prefix_hasher.finish())
+            };
+
+            (Some(name), None)
+        }
+    }
+}
+
 /// Create unified branch databases and wait for their readiness.
 #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
 pub async fn create_branches<P: Progress>(
@@ -916,22 +947,13 @@ pub async fn create_branches<P: Progress>(
     let mut reused_branches = HashMap::new();
 
     for (id, params) in params {
-        let name_prefix = params.name_prefix;
         let annotations = if params.annotations.is_empty() {
             None
         } else {
             Some(params.annotations)
         };
 
-        let (name, generate_name) = match &id {
-            BranchDatabaseId::Specified(branch_id) => {
-                use std::hash::{Hash, Hasher};
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                branch_id.hash(&mut hasher);
-                (Some(format!("{name_prefix}{:x}", hasher.finish())), None)
-            }
-            BranchDatabaseId::Generated(_) => (None, Some(name_prefix)),
-        };
+        let (name, generate_name) = generate_branch_name(params.name_prefix, &id);
 
         let branch = BranchDatabase {
             metadata: ObjectMeta {
