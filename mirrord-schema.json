@@ -3254,6 +3254,15 @@
             "null"
           ]
         },
+        "replicas": {
+          "title": "feature.preview.replicas {#feature-preview-replicas}",
+          "description": "Number of preview pods to deploy.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
         "ttl_mins": {
           "title": "feature.preview.ttl_mins {#feature-preview-ttl_mins}",
           "description": "How long (in minutes) the preview session is allowed to live after creation.\nThe operator will terminate the session when this time elapses.\n\nSet to `\"infinite\"` to disable TTL.\n\nMutually exclusive with [`ttl_secs`](#feature-preview-ttl_secs); when neither is set,\ndefaults to 60 minutes.",
