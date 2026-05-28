@@ -15,6 +15,7 @@ mod macros;
 mod managed;
 pub mod process;
 mod subprocess;
+mod task_pool;
 
 use std::{io::Write, thread};
 
