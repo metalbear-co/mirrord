@@ -451,7 +451,7 @@ unsafe fn do_async_deferred(
     drop(handle_context);
     drop(handles);
 
-    iocp::worker::submit(move || {
+    crate::task_pool::submit(move || {
         do_async_read(
             fd,
             path,

@@ -14,9 +14,10 @@
 //!   whether to take the async path.
 //! - [`packet`] — the [`IocpPacket`] struct and [`enqueue_packet`], which posts to the OS port via
 //!   the captured original `NtSetIoCompletion`.
-//! - [`worker`] — fixed-size thread pool consuming submitted closures. The FS hook submits a
-//!   closure that does the agent IO and then calls `enqueue_packet`; the caller's thread returns
-//!   `STATUS_PENDING` immediately.
+//!
+//! The deferred closures run on the shared [`crate::task_pool`]. The FS hook
+//! submits a closure there that does the agent IO and then calls
+//! [`enqueue_packet`]; the caller's thread returns `STATUS_PENDING` immediately.
 //!
 //! ## Wire-up
 //!
@@ -28,7 +29,6 @@
 
 pub(crate) mod binding;
 pub(crate) mod packet;
-pub(crate) mod worker;
 
 pub(crate) use binding::{bind_file_to_port, binding_for_file, unbind_file};
 use mirrord_layer_lib::LayerResult;

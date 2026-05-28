@@ -22,6 +22,7 @@ Linkerd
 # Container / cloud
 OCI
 PVC
+PVCs
 crio
 colima
 WSL

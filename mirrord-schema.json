@@ -2812,6 +2812,14 @@
       "description": "Sensible default behaviors that help most users. Disable individual flags only if they conflict\nwith your setup.\n\n```json\n{\n  \"feature\": {\n    \"magic\": {\n      \"aws\": true\n    }\n  }\n}\n```",
       "type": "object",
       "properties": {
+        "auto_mount": {
+          "title": "feature.magic.auto_mount {#feature-magic-auto_mount}",
+          "description": "Kubernetes mounts ConfigMaps, Secrets, and volumes (e.g. PVCs) into the target container at\nfixed paths. When mirrord runs your process locally, those paths either don't exist or hold\nunrelated local data, so the process can't read the configuration or secrets it expects\nfrom the pod.\n\nWhen enabled, mirrord reads the target container's volume mounts from the remote pod spec\nand adds their mount paths to [`feature.fs.read_only`](#feature-fs-read_only), so the\nlocal process transparently reads those files from the remote pod while still writing\nlocally.\n\nThis matters when the file system mode is `localwithoverrides`: the mounted paths would\notherwise be served locally and not exist, so `auto_mount` forces them to be read from the\nremote pod. In the default `read` mode files are already read remotely, and in fully\n`local` mode all overrides are ignored, so `auto_mount` has no observable effect in\neither of those modes.\n\nPaths you've explicitly marked local via `feature.fs.local` are left untouched.\n\nDisable this only if you intentionally want the mounted paths served from the local file\nsystem.\n\nDefaults to `true`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "aws": {
           "title": "feature.magic.aws {#feature-magic-aws}",
           "description": "The AWS CLI prefers local credentials (e.g. `~/.aws`, `AWS_PROFILE`) over the remote pod's\nidentity (IAM role, instance profile, IRSA). When those local credentials are present, the\npod's own identity is never used, which is rarely what you want in a mirrord session.\n\nWhen enabled, mirrord makes local AWS configuration unavailable to the process by:\n- Unsetting `AWS_PROFILE` and related AWS environment variables.\n- Mapping `~/.aws` to a temporary directory, so the AWS CLI cannot read local credentials\n  and also has a writable location for its credential cache (avoiding errors on cache\n  writes).\n\nThis allows the remote pod's IAM role / instance profile to be used as intended.\n\nDisable this only if you intentionally need local AWS credentials inside the local mirrord'\nprocess.\n\nDefaults to `true`.",
