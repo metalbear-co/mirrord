@@ -941,7 +941,7 @@ fn generate_branch_name(name_prefix: String, database_id: &BranchDatabaseId) -> 
             let hash = format!("{:x}", hasher.finish());
 
             // 62 and not 63 because of the "-" name_prefix and hash in the template.
-            let name = if name_prefix.len() + hash.len() <= 62 { 
+            let name = if name_prefix.len() + hash.len() <= 62 {
                 format!("{name_prefix}-{hash}")
             } else {
                 let mut prefix_hasher = std::collections::hash_map::DefaultHasher::new();
