@@ -1,0 +1,1 @@
+mirrord now automatically reads the target container's volume mounts (ConfigMaps, Secrets, PVCs) from the remote pod and serves those paths read-only from the remote, so the local process transparently sees its mounted files. Controlled by the new `feature.magic.auto_mount` flag, enabled by default.
