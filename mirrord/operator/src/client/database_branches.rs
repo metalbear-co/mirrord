@@ -899,17 +899,41 @@ pub mod labels {
 pub use crate::crd::TARGET_NAMESPACE_ANNOTATION;
 use crate::crd::session::SessionTarget;
 
-fn generate_branch_name(name_prefix: String, database_id: &BranchDatabaseId) -> (Option<String>, Option<String>) {
+/// Possible options to create the [`BranchDatabase`] name
+enum GeneratedName {
+    /// An explicit name for the resource expected to be the [`ObjectMeta::name`]
+    Explicit(String),
+    /// A prefix for the [`ObjectMeta::generate_name`] value where k8s will generate the actual
+    /// name.
+    Generate(String),
+}
+
+impl GeneratedName {
+    /// Split the name to either a `name` or `generate_name` variables to create [`ObjectMeta`]
+    fn into_parts(self) -> (Option<String>, Option<String>) {
+        match self {
+            GeneratedName::Explicit(name) => (Some(name), None),
+            GeneratedName::Generate(name) => (None, Some(name)),
+        }
+    }
+}
+
+/// Create the future [`BranchDatabase`]'s name,
+///
+/// Important: Make sure that the returning value will not exceed the 63 character limit of k8s.
+fn generate_branch_name(name_prefix: String, database_id: &BranchDatabaseId) -> GeneratedName {
     match database_id {
-        BranchDatabaseId::Generated(_) if name_prefix.len() <= 63 => (None, Some(name_prefix)),
+        BranchDatabaseId::Generated(_) if name_prefix.len() <= 63 => {
+            GeneratedName::Generate(name_prefix)
+        }
         BranchDatabaseId::Generated(_) => {
             use std::hash::{Hash, Hasher};
-            
+
             let mut prefix_hasher = std::collections::hash_map::DefaultHasher::new();
             name_prefix.hash(&mut prefix_hasher);
-            
-            (None, Some(format!("{:x}", prefix_hasher.finish())))
-        },
+
+            GeneratedName::Generate(format!("{:x}", prefix_hasher.finish()))
+        }
         BranchDatabaseId::Specified(branch_id) => {
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -925,7 +949,7 @@ fn generate_branch_name(name_prefix: String, database_id: &BranchDatabaseId) -> 
                 format!("{:x}-{hash}", prefix_hasher.finish())
             };
 
-            (Some(name), None)
+            GeneratedName::Explicit(name)
         }
     }
 }
@@ -953,7 +977,7 @@ pub async fn create_branches<P: Progress>(
             Some(params.annotations)
         };
 
-        let (name, generate_name) = generate_branch_name(params.name_prefix, &id);
+        let (name, generate_name) = generate_branch_name(params.name_prefix, &id).into_parts();
 
         let branch = BranchDatabase {
             metadata: ObjectMeta {
