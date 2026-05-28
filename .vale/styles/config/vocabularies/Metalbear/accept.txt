@@ -111,6 +111,7 @@ darwin
 preload
 dylib
 intproxy
+loopback
 
 # Networking
 TCP
@@ -125,6 +126,7 @@ TTL
 RTT
 VPN
 URI
+loopback
 
 # File formats
 YAML

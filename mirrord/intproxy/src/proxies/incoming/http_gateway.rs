@@ -229,6 +229,9 @@ impl HttpGatewayTask {
     /// sending [`ChunkedResponse::Start`]. The agent would get a duplicated response.
     #[tracing::instrument(level = Level::DEBUG, skip_all, err(level = Level::WARN))]
     async fn send_attempt(&self, message_bus: &mut MessageBus<Self>) -> Result<(), LocalHttpError> {
+        // `resolve_addr` returns a connectable address, normalizing a wildcard listen address
+        // (e.g. `0.0.0.0`) to loopback. That matters on Windows, where connecting to `0.0.0.0`
+        // fails outright (on Linux it happens to route to loopback).
         let server_addr = self
             .listening_on
             .resolve_addr()

@@ -83,8 +83,16 @@ struct IpVersionAvailability {
     v6: bool,
 }
 
-/// Checks whether or not IPv4 and IPv6 addresses are present on any
-/// available network interfaces.
+/// Checks whether the IPv4 and IPv6 stacks are usable in the current network namespace,
+/// by looking for an assigned address of each family on any interface.
+///
+/// We deliberately count loopback (`127.0.0.1`/`::1`) here. The kernel assigns these
+/// automatically exactly when the corresponding stack is enabled, and removes them when it
+/// is disabled (e.g. `net.ipv6.conf.all.disable_ipv6=1`). So their presence is a reliable
+/// signal that `ip(6)tables` will work *and* that processes in the pod can talk to that
+/// family's loopback. The latter matters: in an IPv4-only cluster a pod still has `::1`, and
+/// Go's resolver in particular prefers `[::1]` for `localhost`, so without IPv6 rules that
+/// traffic would silently bypass mirrord's steal/mirror.
 static IP_VERSION_AVAILABILITY: LazyLock<IpVersionAvailability> = LazyLock::new(|| {
     let addrs = match nix::ifaddrs::getifaddrs() {
         Ok(addrs) => addrs,
@@ -104,23 +112,8 @@ static IP_VERSION_AVAILABILITY: LazyLock<IpVersionAvailability> = LazyLock::new(
         let Some(addr) = addr.address else {
             continue;
         };
-        if let Some(v4) = addr.as_sockaddr_in()
-            && v4.ip().is_loopback().not()
-            && v4.ip().is_broadcast().not()
-            && v4.ip().is_unspecified().not()
-        {
-            has_v4 = true;
-        }
-
-        if let Some(v6) = addr.as_sockaddr_in6()
-            && v6.ip().is_loopback().not()
-            && v6.ip().is_unspecified().not()
-            // these are automatically assigned, they don't mean
-            // anything
-            && v6.ip().is_unicast_link_local().not()
-        {
-            has_v6 = true;
-        }
+        has_v4 |= addr.as_sockaddr_in().is_some();
+        has_v6 |= addr.as_sockaddr_in6().is_some();
     }
 
     if has_v4.not() && has_v6.not() {
