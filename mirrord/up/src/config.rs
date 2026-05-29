@@ -185,6 +185,11 @@ pub struct SubprocessCfg {
 }
 
 impl UpConfig {
+    /// True unless the user opted out of telemetry.
+    pub fn telemetry_enabled(&self) -> bool {
+        self.common.telemetry.unwrap_or(true)
+    }
+
     /// Produces an iterator of [`SubprocessCfg`]s, one per service defined in the configuration.
     pub fn service_configs<'a>(
         self,
