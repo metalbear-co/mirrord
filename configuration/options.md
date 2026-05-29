@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-05-22T00:00:00.000Z
+lastmod: 2026-05-29T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -653,11 +653,24 @@ Delay in milliseconds for outgoing send operations (Layer → Agent).
 
 Defaults to `0` (no delay).
 
-### _experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
+### _experimental_non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
 
 Enables better support for outgoing connections using
-non-blocking TCP sockets. For technical reasons, enabling this
-will cause `getsockname` to always return a localhost address.
+non-blocking TCP sockets.
+
+Due to technical reasons, enabling this causes the existence
+of the internal proxy acting as a TCP proxy observable to the
+application. Notable consequences of this include:
+
+1. `getsockname(2)` will always return a localhost address,
+2. `connect(2)` will succeed immediately, before the remote side of the connection is
+   established. If the remote side of the connection fails, the connection to the app will
+   be closed after the fact.
+
+Essentially your application has to assume that it might be
+sitting behind a TCP proxy. Most "standard" apps (e.g. HTTP
+clients) should be unaffected, but custom implementations of
+other protocols may not.
 
 Defaults to `true` in OSS.
 Defaults to `false` in mfT.
@@ -1962,6 +1975,31 @@ with your setup.
   }
 }
 ```
+
+#### feature.magic.auto_mount {#feature-magic-auto_mount}
+
+Kubernetes mounts ConfigMaps, Secrets, and volumes (e.g. PVCs) into the target container at
+fixed paths. When mirrord runs your process locally, those paths either don't exist or hold
+unrelated local data, so the process can't read the configuration or secrets it expects
+from the pod.
+
+When enabled, mirrord reads the target container's volume mounts from the remote pod spec
+and adds their mount paths to [`feature.fs.read_only`](#feature-fs-read_only), so the
+local process transparently reads those files from the remote pod while still writing
+locally.
+
+This matters when the file system mode is `localwithoverrides`: the mounted paths would
+otherwise be served locally and not exist, so `auto_mount` forces them to be read from the
+remote pod. In the default `read` mode files are already read remotely, and in fully
+`local` mode all overrides are ignored, so `auto_mount` has no observable effect in
+either of those modes.
+
+Paths you've explicitly marked local via `feature.fs.local` are left untouched.
+
+Disable this only if you intentionally want the mounted paths served from the local file
+system.
+
+Defaults to `true`.
 
 #### feature.magic.aws {#feature-magic-aws}
 
