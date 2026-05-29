@@ -116,7 +116,8 @@ fn host_target() -> Result<Target> {
         ("macos", "aarch64") => Ok(Target::MacosAarch64),
         ("linux", "x86_64") => Ok(Target::LinuxX86_64),
         ("linux", "aarch64") => Ok(Target::LinuxAarch64),
-        ("windows", _) => Ok(Target::Windows),
+        ("windows", "aarch64") => Ok(Target::WindowsAarch64),
+        ("windows", _) => Ok(Target::WindowsX86_64),
         (os, arch) => bail!("Unsupported host platform: {os} {arch}"),
     }
 }

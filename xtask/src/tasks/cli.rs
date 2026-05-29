@@ -104,7 +104,7 @@ pub fn build_cli(
     }
 
     let mode = if release { "release" } else { "debug" };
-    let binary_name = if matches!(target, Target::Windows) {
+    let binary_name = if matches!(target, Target::WindowsAarch64 | Target::WindowsX86_64) {
         "mirrord.exe"
     } else {
         "mirrord"

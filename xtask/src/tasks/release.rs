@@ -13,7 +13,8 @@ pub enum Platform {
     MacosX86_64,
     MacosAarch64,
     MacosUniversal,
-    Windows,
+    WindowsAarch64,
+    WindowsX86_64,
 }
 
 impl Platform {
@@ -26,7 +27,8 @@ impl Platform {
             ("macos", _) => Ok(Platform::MacosUniversal),
             ("linux", "x86_64") => Ok(Platform::LinuxX86_64),
             ("linux", "aarch64") => Ok(Platform::LinuxAarch64),
-            ("windows", _) => Ok(Platform::Windows),
+            ("windows", "aarch64") => Ok(Platform::WindowsAarch64),
+            ("windows", _) => Ok(Platform::WindowsX86_64),
             _ => anyhow::bail!("Unsupported platform: {} {}", os, arch),
         }
     }
@@ -38,7 +40,8 @@ impl Platform {
             Platform::MacosX86_64 => "macOS x86_64",
             Platform::MacosAarch64 => "macOS aarch64",
             Platform::MacosUniversal => "macOS Universal",
-            Platform::Windows => "Windows",
+            Platform::WindowsAarch64 => "Windows aarch64",
+            Platform::WindowsX86_64 => "Windows x86_64",
         }
     }
 }
@@ -189,8 +192,23 @@ pub fn build_release_cli(options: BuildOptions) -> Result<PathBuf> {
             )
             .context("Failed to build CLI")?
         }
-        Platform::Windows => {
-            let target = Target::Windows;
+        Platform::WindowsAarch64 => {
+            let target = Target::WindowsAarch64;
+            let layer_path = layer::build_layer(target, options.release, &options.cargo_args)
+                .context("Failed to build layer")?;
+            println!();
+
+            cli::build_cli(
+                target,
+                options.release,
+                &layer_path,
+                wizard_archive.as_deref(),
+                &options.cargo_args,
+            )
+            .context("Failed to build CLI")?
+        }
+        Platform::WindowsX86_64 => {
+            let target = Target::WindowsX86_64;
             let layer_path = layer::build_layer(target, options.release, &options.cargo_args)
                 .context("Failed to build layer")?;
             println!();

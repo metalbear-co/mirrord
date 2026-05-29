@@ -18,7 +18,8 @@ pub enum Target {
     MacosAarch64,
     #[allow(dead_code)]
     MacosUniversal,
-    Windows,
+    WindowsX86_64,
+    WindowsAarch64,
 }
 
 impl Target {
@@ -29,19 +30,20 @@ impl Target {
             Target::MacosX86_64 => "x86_64-apple-darwin",
             Target::MacosAarch64 => "aarch64-apple-darwin",
             Target::MacosUniversal => "universal-apple-darwin",
-            Target::Windows => "x86_64-pc-windows-msvc",
+            Target::WindowsX86_64 => "x86_64-pc-windows-msvc",
+            Target::WindowsAarch64 => "aarch64-pc-windows-msvc",
         }
     }
 
     pub fn layer_file(&self, release: bool) -> PathBuf {
         let mode = if release { "release" } else { "debug" };
         let ext = match self {
-            Target::Windows => "dll",
+            Target::WindowsAarch64 | Target::WindowsX86_64 => "dll",
             Target::MacosX86_64 | Target::MacosAarch64 | Target::MacosUniversal => "dylib",
             _ => "so",
         };
         let name = match self {
-            Target::Windows => "mirrord_layer_win",
+            Target::WindowsAarch64 | Target::WindowsX86_64 => "mirrord_layer_win",
             _ => "libmirrord_layer",
         };
 
@@ -76,7 +78,7 @@ pub fn build_layer(target: Target, release: bool, cargo_args: &[String]) -> Resu
     cmd.arg("-p");
 
     match target {
-        Target::Windows => cmd.arg("mirrord-layer-win"),
+        Target::WindowsAarch64 | Target::WindowsX86_64 => cmd.arg("mirrord-layer-win"),
         _ => cmd.arg("mirrord-layer"),
     };
 

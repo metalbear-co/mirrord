@@ -150,9 +150,11 @@ fn parse_platform(s: &str) -> Result<Platform, String> {
         "macos-x86_64" | "macos-x86-64" | "macos-intel" => Ok(Platform::MacosX86_64),
         "macos-aarch64" | "macos-arm64" | "macos-apple-silicon" => Ok(Platform::MacosAarch64),
         "macos-universal" | "macos" | "darwin" => Ok(Platform::MacosUniversal),
-        "windows" | "win" => Ok(Platform::Windows),
+        "windows-aarch64" | "windows-arm64" => Ok(Platform::WindowsAarch64),
+        "windows-x86_64" | "windows-x86-64" => Ok(Platform::WindowsX86_64),
+        "windows" | "win" => Ok(Platform::WindowsX86_64),
         _ => Err(format!(
-            "Invalid platform: {}. Valid options: linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64, macos-universal, windows",
+            "Invalid platform: {}. Valid options: linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64, macos-universal, windows-aarch64, windows-x86_64, windows",
             s
         )),
     }
@@ -245,8 +247,11 @@ fn main() -> Result<()> {
                         &cargo_args,
                     )?;
                 }
-                Platform::Windows => {
-                    tasks::layer::build_layer(tasks::layer::Target::Windows, release, &cargo_args)?;
+                Platform::WindowsAarch64 => {
+                    tasks::layer::build_layer(tasks::layer::Target::WindowsAarch64, release, &cargo_args)?;
+                }
+                Platform::WindowsX86_64 => {
+                    tasks::layer::build_layer(tasks::layer::Target::WindowsX86_64, release, &cargo_args)?;
                 }
             }
         }
