@@ -1,6 +1,6 @@
 #![deny(unused_crate_dependencies)]
 
-use std::{collections::HashMap, ops::Not, str::FromStr, time::Instant};
+use std::{collections::HashMap, str::FromStr, time::Instant};
 
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};

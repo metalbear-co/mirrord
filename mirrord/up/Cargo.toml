@@ -14,6 +14,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+mirrord-analytics = { path = "../analytics" }
 mirrord-config = { path = "../config" }
 mirrord-progress = { path = "../progress/" }
 
@@ -26,6 +27,10 @@ strum.workspace = true
 tokio = { workspace = true, features = ["process"] }
 clap.workspace = true
 inquire.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+assert-json-diff.workspace = true
 
 [lints]
 workspace = true
