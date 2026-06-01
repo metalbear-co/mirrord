@@ -55,6 +55,10 @@ pub struct PreviewSessionSpec {
     /// Values >= `u32::MAX` are treated as infinite.
     pub ttl_secs: u64,
 
+    /// Number of replicas created by the deployment.
+    #[serde(default = "PreviewSessionSpec::default_replicas")]
+    pub replicas: i32,
+
     /// Incoming traffic configuration for the preview environment.
     ///
     /// Specifies which ports to steal/mirror traffic from and optional HTTP filters.
@@ -81,6 +85,10 @@ pub struct PreviewSessionSpec {
 }
 
 impl PreviewSessionSpec {
+    fn default_replicas() -> i32 {
+        1
+    }
+
     /// Convert the [`SessionTarget`] into a [`mirrord_config::target::Target`].
     pub fn config_target(&self) -> Option<Target> {
         self.target.clone().into_config()

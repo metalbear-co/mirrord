@@ -213,6 +213,7 @@ async fn preview_start(
         key: layer_config.key.as_str().to_owned(),
         target: session_target,
         ttl_secs: layer_config.feature.preview.resolved_ttl_secs(),
+        replicas: layer_config.feature.preview.replicas,
         incoming: PreviewIncomingConfig::from_config(
             &layer_config.feature.network.incoming,
             layer_config.key.as_str(),

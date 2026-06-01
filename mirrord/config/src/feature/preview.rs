@@ -67,6 +67,12 @@ pub struct PreviewConfig {
     #[config(env = "MIRRORD_PREVIEW_CREATION_TIMEOUT_SECS", default = 60)]
     pub creation_timeout_secs: u64,
 
+    /// #### feature.preview.replicas {#feature-preview-replicas}
+    ///
+    /// Number of preview pods to deploy.
+    #[config(env = "MIRRORD_PREVIEW_REPLICAS", default = 1)]
+    pub replicas: i32,
+
     /// #### feature.preview.config_mounts {#feature-preview-config_mounts}
     ///
     /// Files to mount into the preview pod at session start.
@@ -244,6 +250,12 @@ impl PreviewConfig {
             ));
         }
 
+        if self.replicas < 0 {
+            return Err(ConfigError::Conflict(
+                "`feature.preview.replicas` cannot be negative.".to_owned(),
+            ));
+        }
+
         for (idx, config_mount) in self.config_mounts.iter().enumerate() {
             match (&config_mount.payload, &config_mount.from_file) {
                 (Some(_), Some(_)) => {
@@ -369,6 +381,7 @@ mod tests {
             ttl_mins,
             ttl_secs,
             creation_timeout_secs: 60,
+            replicas: 1,
             config_mounts: vec![],
         }
     }
@@ -412,6 +425,7 @@ mod tests {
             ttl_mins: None,
             ttl_secs: None,
             creation_timeout_secs: 60,
+            replicas: 1,
             config_mounts: vec![mount],
         }
     }
