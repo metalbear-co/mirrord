@@ -1,1 +1,1 @@
-Add stalebot
+Add `stalebot`
