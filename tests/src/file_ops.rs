@@ -306,7 +306,7 @@ mod file_ops_tests {
     #[timeout(Duration::from_secs(240))]
     pub async fn go_statfs(
         #[future] go_statfs_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
     ) {
         let app = FileOps::GoStatfs(GoVersion::GO_1_25);
         let service = go_statfs_service.await;

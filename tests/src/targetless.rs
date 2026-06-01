@@ -8,13 +8,13 @@ mod targetless_tests {
         api::{core::v1::Pod, scheduling::v1::PriorityClass},
         apimachinery::pkg::apis::meta::v1::ObjectMeta,
     };
-    use kube::{api::ListParams, Api, Client};
+    use kube::{api::ListParams, Api};
     use rstest::rstest;
     use tempfile::NamedTempFile;
 
     use crate::utils::{
         application::Application, kube_client, operator_installed, random_string,
-        resource_guard::ResourceGuard,
+        resource_guard::ResourceGuard, KubeClient,
     };
 
     /// `mirrord exec` a program that connects to the kubernetes api service by its internal name
@@ -44,7 +44,7 @@ mod targetless_tests {
     #[cfg_attr(not(feature = "targetless"), ignore)]
     #[rstest]
     #[tokio::test]
-    pub async fn targetless_agent_with_priority_class(#[future] kube_client: Client) {
+    pub async fn targetless_agent_with_priority_class(#[future] kube_client: KubeClient) {
         let kube_client = kube_client.await;
         if operator_installed(&kube_client).await.unwrap() {
             return;
@@ -59,9 +59,10 @@ mod targetless_tests {
             ..Default::default()
         };
         let (_guard, priority_class) = ResourceGuard::create(
-            Api::<PriorityClass>::all(kube_client.clone()),
+            Api::<PriorityClass>::all(kube_client.get_client()),
             &priority_class,
             true,
+            kube_client.get_config(),
         )
         .await
         .unwrap();
@@ -92,7 +93,7 @@ mod targetless_tests {
             .await;
 
         // assert agent priority class
-        let pods: Api<Pod> = Api::namespaced(kube_client.clone(), "default");
+        let pods: Api<Pod> = Api::namespaced(kube_client.get_client(), "default");
         let lp = ListParams::default().labels(&format!("test-id={}", priority_class_name));
         // Wait for the agent pod to be ready and find it
         let agent_pod = tokio::time::timeout(Duration::from_secs(20), async {

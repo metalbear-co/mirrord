@@ -4,7 +4,7 @@ use k8s_openapi::api::{
     apps::v1::{Deployment, StatefulSet},
     core::v1::{ConfigMap, EnvFromSource, Namespace, Service},
 };
-use kube::{api::DeleteParams, Api, Client, Resource, ResourceExt};
+use kube::{api::DeleteParams, Api, Resource, ResourceExt};
 use kube_service::KubeService;
 use mirrord_kube::api::kubernetes::rollout::Rollout;
 use mirrord_test_utils::format_time;
@@ -14,8 +14,8 @@ use serde_json::{json, Value};
 
 use super::{cluster_resource, kube_service, resource_guard};
 use crate::utils::{
-    default_env, kube_client, random_string, set_ipv6_only, watch, PRESERVE_FAILED_ENV_NAME,
-    TEST_RESOURCE_LABEL,
+    KubeClient, default_env, kube_client, random_string, set_ipv6_only, watch,
+    PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
 };
 
 pub(crate) mod operator;
@@ -31,7 +31,7 @@ pub async fn basic_service(
     #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
     #[default("http-echo")] service_name: &str,
     #[default(true)] randomize_name: bool,
-    #[future] kube_client: Client,
+    #[future] kube_client: KubeClient,
 ) -> KubeService {
     internal_service(
         namespace,
@@ -62,7 +62,7 @@ pub async fn service_with_env(
     image: &str,
     service_name: &str,
     randomize_name: bool,
-    kube_client: Client,
+    kube_client: KubeClient,
     env: Value,
 ) -> KubeService {
     internal_service(
@@ -88,7 +88,7 @@ pub async fn service_with_env_and_env_from(
     image: &str,
     service_name: &str,
     randomize_name: bool,
-    kube_client: Client,
+    kube_client: KubeClient,
     env: Value,
     env_from: Option<Vec<EnvFromSource>>,
     config_maps: Option<Vec<ConfigMap>>,
@@ -139,9 +139,9 @@ async fn create_rollout(
     guards: &mut Vec<ResourceGuard>,
     name: &str,
     namespace: &str,
-    kube_client: &Client,
+    kube_client: &KubeClient,
 ) {
-    let (rollout_guard, rollout) = ResourceGuard::create(rollout_api, rollout, delete_after_fail)
+    let (rollout_guard, rollout) = ResourceGuard::create(rollout_api, rollout, delete_after_fail, kube_client.get_config())
         .await
         .unwrap_or_else(|err| {
             panic!(
@@ -156,7 +156,7 @@ async fn create_rollout(
     guards.push(rollout_guard);
 
     // Wait for the rollout to have at least 1 available replica
-    watch::wait_until_rollout_available(name, namespace, 1, kube_client.clone()).await;
+    watch::wait_until_rollout_available(name, namespace, 1, kube_client.get_client()).await;
 }
 
 async fn create_stateful_set(
@@ -166,10 +166,10 @@ async fn create_stateful_set(
     guards: &mut Vec<ResourceGuard>,
     name: &str,
     namespace: &str,
-    kube_client: &Client,
+    kube_client: &KubeClient,
 ) {
     let (stateful_set_guard, stateful_set) =
-        ResourceGuard::create(stateful_set_api, stateful_set, delete_after_fail)
+        ResourceGuard::create(stateful_set_api, stateful_set, delete_after_fail, kube_client.get_config())
             .await
             .unwrap_or_else(|err| {
                 panic!(
@@ -184,7 +184,7 @@ async fn create_stateful_set(
     guards.push(stateful_set_guard);
 
     // Wait for the stateful set to have at least 1 available replica
-    watch::wait_until_stateful_set_available(name, namespace, 1, kube_client.clone()).await;
+    watch::wait_until_stateful_set_available(name, namespace, 1, kube_client.get_client()).await;
 }
 
 /// Internal function to create a custom [`KubeService`].
@@ -205,7 +205,7 @@ pub async fn internal_service(
     image: &str,
     service_name: &str,
     randomize_name: bool,
-    kube_client: Client,
+    kube_client: KubeClient,
     env: Value,
     env_from: Option<Vec<EnvFromSource>>,
     config_maps: Option<Vec<ConfigMap>>,
@@ -214,11 +214,11 @@ pub async fn internal_service(
 ) -> KubeService {
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
 
-    let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
-    let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
-    let rollout_api: Api<Rollout> = Api::namespaced(kube_client.clone(), namespace);
-    let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
-    let stateful_set_api: Api<StatefulSet> = Api::namespaced(kube_client.clone(), namespace);
+    let namespace_api: Api<Namespace> = Api::all(kube_client.get_client());
+    let deployment_api: Api<Deployment> = Api::namespaced(kube_client.get_client(), namespace);
+    let rollout_api: Api<Rollout> = Api::namespaced(kube_client.get_client(), namespace);
+    let service_api: Api<Service> = Api::namespaced(kube_client.get_client(), namespace);
+    let stateful_set_api: Api<StatefulSet> = Api::namespaced(kube_client.get_client(), namespace);
     let mut guards = Vec::with_capacity(5);
 
     let name = if randomize_name {
@@ -260,6 +260,7 @@ pub async fn internal_service(
         }))
         .unwrap(),
         delete_after_fail,
+        kube_client.get_config(),
     )
     .await
     {
@@ -267,7 +268,7 @@ pub async fn internal_service(
     }
 
     if let Some(config_maps) = config_maps {
-        let api = Api::<ConfigMap>::namespaced(kube_client.clone(), namespace);
+        let api = Api::<ConfigMap>::namespaced(kube_client.get_client(), namespace);
         for map in config_maps {
             println!(
                 "creating {} {} in namespace {}",
@@ -283,7 +284,7 @@ pub async fn internal_service(
         TestWorkloadType::Deployment => {
             let deployment = deployment_from_json(&name, image, env, env_from, 1);
             let (deployment_guard, _deployment) =
-                ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
+                ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail, kube_client.get_config())
                     .await
                     .unwrap();
             guards.push(deployment_guard);
@@ -291,7 +292,7 @@ pub async fn internal_service(
         TestWorkloadType::ArgoRolloutWithWorkloadRef => {
             let deployment = deployment_from_json(&name, image, env, env_from, 0);
             let (deployment_guard, deployment) =
-                ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
+                ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail, kube_client.get_config())
                     .await
                     .unwrap();
             guards.push(deployment_guard);
@@ -345,12 +346,12 @@ pub async fn internal_service(
         set_ipv6_only(&mut service);
     }
     let (service_guard, service) =
-        ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
+        ResourceGuard::create(service_api.clone(), &service, delete_after_fail, kube_client.get_config())
             .await
             .unwrap();
     guards.push(service_guard);
 
-    let ready_pod = watch::wait_until_pods_ready(&service, 1, kube_client.clone())
+    let ready_pod = watch::wait_until_pods_ready(&service, 1, kube_client.get_client())
         .await
         .into_iter()
         .next()
@@ -379,7 +380,7 @@ pub async fn service_for_mirrord_ls(
     #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
     #[default("http-echo")] service_name: &str,
     #[default(true)] randomize_name: bool,
-    #[future] kube_client: Client,
+    #[future] kube_client: KubeClient,
 ) -> KubeService {
     basic_service(
         namespace,
@@ -396,7 +397,7 @@ pub async fn service_for_mirrord_ls(
 /// for testing outgoing traffic. If this service receives the application's messages, they
 /// must have been intercepted and forwarded via the agent to be sent from the impersonated pod.
 #[fixture]
-pub async fn udp_logger_service(#[future] kube_client: Client) -> KubeService {
+pub async fn udp_logger_service(#[future] kube_client: KubeClient) -> KubeService {
     basic_service(
         "default",
         "ClusterIP",
@@ -411,7 +412,7 @@ pub async fn udp_logger_service(#[future] kube_client: Client) -> KubeService {
 /// Service that listens on port 80 and returns `remote: <DATA>` when getting `<DATA>` directly
 /// over TCP, not HTTP.
 #[fixture]
-pub async fn tcp_echo_service(#[future] kube_client: Client) -> KubeService {
+pub async fn tcp_echo_service(#[future] kube_client: KubeClient) -> KubeService {
     basic_service(
         "default",
         "NodePort",
@@ -427,7 +428,7 @@ pub async fn tcp_echo_service(#[future] kube_client: Client) -> KubeService {
 /// that listens on port 80 and returns `remote: <DATA>` when getting `<DATA>` over a websocket
 /// connection, allowing us to test HTTP upgrade requests.
 #[fixture]
-pub async fn websocket_service(#[future] kube_client: Client) -> KubeService {
+pub async fn websocket_service(#[future] kube_client: KubeClient) -> KubeService {
     basic_service(
         "default",
         "NodePort",
@@ -440,7 +441,7 @@ pub async fn websocket_service(#[future] kube_client: Client) -> KubeService {
 }
 
 #[fixture]
-pub async fn http2_service(#[future] kube_client: Client) -> KubeService {
+pub async fn http2_service(#[future] kube_client: KubeClient) -> KubeService {
     basic_service(
         "default",
         "NodePort",
@@ -455,7 +456,7 @@ pub async fn http2_service(#[future] kube_client: Client) -> KubeService {
 /// Service that listens on port 80 and returns `remote: <DATA>` when getting `<DATA>` directly
 /// over TCP, not HTTP.
 #[fixture]
-pub async fn hostname_service(#[future] kube_client: Client) -> KubeService {
+pub async fn hostname_service(#[future] kube_client: KubeClient) -> KubeService {
     basic_service(
         "default",
         "NodePort",
@@ -468,7 +469,7 @@ pub async fn hostname_service(#[future] kube_client: Client) -> KubeService {
 }
 
 #[fixture]
-pub async fn random_namespace_self_deleting_service(#[future] kube_client: Client) -> KubeService {
+pub async fn random_namespace_self_deleting_service(#[future] kube_client: KubeClient) -> KubeService {
     let namespace = format!("random-namespace-{}", random_string());
     basic_service(
         &namespace,
@@ -482,7 +483,7 @@ pub async fn random_namespace_self_deleting_service(#[future] kube_client: Clien
 }
 
 #[fixture]
-pub async fn go_statfs_service(#[future] kube_client: Client) -> KubeService {
+pub async fn go_statfs_service(#[future] kube_client: KubeClient) -> KubeService {
     basic_service(
         "default",
         "ClusterIP",
@@ -495,7 +496,7 @@ pub async fn go_statfs_service(#[future] kube_client: Client) -> KubeService {
 }
 
 #[fixture]
-pub async fn fs_service(#[future] kube_client: kube::Client) -> KubeService {
+pub async fn fs_service(#[future] kube_client: KubeClient) -> KubeService {
     let namespace = format!("e2e-tests-fs-policies-{}", crate::utils::random_string());
 
     basic_service(
@@ -516,7 +517,7 @@ pub async fn rollout_service(
     #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
     #[default("http-echo")] service_name: &str,
     #[default(true)] randomize_name: bool,
-    #[future] kube_client: Client,
+    #[future] kube_client: KubeClient,
 ) -> KubeService {
     internal_service(
         namespace,
@@ -541,7 +542,7 @@ pub async fn stateful_set_service(
     #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
     #[default("http-echo")] service_name: &str,
     #[default(true)] randomize_name: bool,
-    #[future] kube_client: Client,
+    #[future] kube_client: KubeClient,
 ) -> KubeService {
     internal_service(
         namespace,

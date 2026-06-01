@@ -51,8 +51,40 @@ pub fn random_string() -> String {
 
 static CRYPTO_PROVIDER_INSTALLED: Once = Once::new();
 
+/// A kube [`Client`] bundled with the [`Config`] it was created from.
+///
+/// Carrying the config lets cleanup code (running in a fresh runtime inside `Drop`) create a new
+/// client pointed at the same cluster without calling [`Config::infer`] again — which would break
+/// in multi-cluster setups where the active kubeconfig context may differ at deletion time.
+///
+/// Derefs to [`Client`] so it can be used where `&Client` is expected without an explicit field
+/// access. For owned [`Client`] values (e.g. `Api::all(...)`) use `.client.clone()` directly.
+#[derive(Clone)]
+pub struct KubeClient {
+    client: Client,
+    config: Config,
+}
+
+impl KubeClient {
+    pub fn get_client(&self) -> Client {
+        self.client.clone()
+    }
+
+    pub fn get_config(&self) -> Config {
+        self.config.clone()
+    }
+}
+
+impl std::ops::Deref for KubeClient {
+    type Target = Client;
+
+    fn deref(&self) -> &Client {
+        &self.client
+    }
+}
+
 #[fixture]
-pub async fn kube_client() -> Client {
+pub async fn kube_client() -> KubeClient {
     CRYPTO_PROVIDER_INSTALLED.call_once(|| {
         rustls::crypto::aws_lc_rs::default_provider()
             .install_default()
@@ -61,7 +93,8 @@ pub async fn kube_client() -> Client {
 
     let mut config = Config::infer().await.unwrap();
     config.accept_invalid_certs = true;
-    Client::try_from(config).unwrap()
+    let client = Client::try_from(config.clone()).unwrap();
+    KubeClient { client, config }
 }
 
 /// Change the `ipFamilies` and `ipFamilyPolicy` fields to make the service IPv6-only.

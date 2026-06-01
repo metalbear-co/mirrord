@@ -3,7 +3,6 @@
 
 use std::{cmp::Ordering, time::Duration};
 
-use kube::Client;
 use reqwest::header::HeaderMap;
 use rstest::rstest;
 use serde_json::json;
@@ -11,7 +10,7 @@ use tempfile::NamedTempFile;
 
 use crate::utils::{
     application::Application, kube_client, kube_service::KubeService, send_request,
-    services::basic_service,
+    services::basic_service, KubeClient,
 };
 
 /// Test mirror mode with HTTP header filter.
@@ -22,7 +21,7 @@ use crate::utils::{
 #[timeout(Duration::from_secs(240))]
 async fn mirror_with_http_header_filter(
     #[future] basic_service: KubeService,
-    #[future] kube_client: Client,
+    #[future] kube_client: KubeClient,
     #[values(
         Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
@@ -33,7 +32,7 @@ async fn mirror_with_http_header_filter(
     let service = basic_service.await;
     let kube_client = kube_client.await;
     let portforwarder = crate::utils::port_forwarder::PortForwarder::new(
-        kube_client.clone(),
+        kube_client.get_client(),
         &service.pod_name,
         &service.namespace,
         80,

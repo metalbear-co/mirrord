@@ -8,11 +8,9 @@ use futures_util::future::BoxFuture;
 use k8s_openapi::{ClusterResourceScope, NamespaceResourceScope};
 use kube::{
     api::{ApiResource, DeleteParams, DynamicObject, PostParams},
-    Api, Error, Resource,
+    Api, Client, Config, Error, Resource,
 };
 use serde::{de::DeserializeOwned, Serialize};
-
-use crate::utils::kube_client;
 
 /// RAII-style guard for deleting kube resources after tests.
 /// This guard deletes the kube resource when dropped.
@@ -52,6 +50,7 @@ impl ResourceGuard {
         api: Api<K>,
         data: &K,
         delete_on_fail: bool,
+        config: Config,
     ) -> Result<(ResourceGuard, K), Error> {
         let name = data.meta().name.clone().unwrap();
         let namespace = data
@@ -69,14 +68,17 @@ impl ResourceGuard {
             // created on. When `Drop` runs, the test runtime is blocked waiting for the
             // drop to finish, so reusing the original `Api` would deadlock: the deleter
             // needs the worker to advance, but the worker lives on the blocked runtime.
-            // Creating a fresh client here gives the deleter its own worker on the new
-            // single-threaded runtime, avoiding the deadlock.
+            //
+            // We create a fresh client from the captured `Config` (the same cluster config used
+            // at resource creation time) so that multi-cluster setups are handled correctly —
+            // `Config::infer()` would read the current kubeconfig default context which may
+            // have changed by the time `Drop` runs.
             //
             // Deletion only requires the resource name and GVK (group/version/kind), which
             // `ApiResource::erase` captures from `K` at creation time. `DynamicObject`
             // is sufficient here since the deleter doesn't need a typed representation of `K`.
             let dyntype = ApiResource::erase::<K>(&());
-            let client = kube_client().await;
+            let client = Client::try_from(config).expect("failed to create kube client for deletion");
             let api: Api<DynamicObject> = match K::scope() {
                 ResourceScope::Cluster => Api::all_with(client, &dyntype),
                 ResourceScope::Namespaced => Api::namespaced_with(client, &namespace, &dyntype),
