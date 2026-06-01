@@ -19,7 +19,7 @@ jobs:
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
       - run: cargo build --manifest-path=./Cargo.toml -p mirrord
       - name: upload mirrord CLI
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: mirrord-artifacts
           path: |

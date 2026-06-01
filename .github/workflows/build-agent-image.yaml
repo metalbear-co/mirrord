@@ -18,7 +18,7 @@ jobs:
           AGENT_TAGS: "test"
         run: docker buildx bake -f ci/docker-bake.hcl agent --set "agent.output=type=docker,dest=${{ github.workspace }}/test.tar"
       - name: upload image
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: test
           path: ${{ github.workspace }}/test.tar
