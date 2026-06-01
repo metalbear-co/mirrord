@@ -130,9 +130,7 @@ http-body-util = "0.1"
 http-serde = "2"
 httparse = "1"
 humantime = "2"
-# If you update `hyper`, check that `h2` version is compatible in `intproxy/Cargo.toml`.
-# There is a test for this: `cargo test -p mirrord-intproxy hyper_and_h2_versions_in_sync`
-hyper = { version = "1.7", features = ["full"] }
+hyper = { version = "1.10", features = ["full"] }
 hyper-util = { version = "0.1" }
 indicatif = "0.18"
 inquire = "0.9.4"
