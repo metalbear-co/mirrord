@@ -301,7 +301,10 @@ use mirrord_config::{
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_operator::client::database_branches::resolve_branch_id;
-use mirrord_progress::{JsonProgress, Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
+use mirrord_progress::{
+    JsonProgress, Progress, ProgressTracker,
+    messages::{EXEC_CONTAINER_BINARY, SESSION_READY_MESSAGE},
+};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
 use operator::operator_command;
@@ -533,7 +536,7 @@ async fn run_process_with_mirrord<P: Progress>(
         .map(|(k, v)| CString::new(format!("{k}={v}")))
         .collect::<CliResult<Vec<_>, _>>()?;
 
-    progress.success(Some("Ready!"));
+    progress.success(Some(SESSION_READY_MESSAGE));
 
     // Foreground CI start command with no given log output location is treated same as mirrord exec
     // upon this point, while background CI start command spawns a child process
@@ -981,7 +984,7 @@ async fn port_forward(
 
     let connection_2 = agent_conn.connection;
 
-    progress.success(Some("Ready!"));
+    progress.success(Some(SESSION_READY_MESSAGE));
     let _ = tokio::try_join!(
         async {
             if !args.port_mapping.is_empty() {

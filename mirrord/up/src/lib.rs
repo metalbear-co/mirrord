@@ -6,8 +6,14 @@
 #![deny(missing_docs)]
 
 use std::{
+    ops::Not,
     path::PathBuf,
     process::{ExitStatus, Stdio},
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::{Duration, Instant},
 };
 
 use miette::Diagnostic;
@@ -19,13 +25,31 @@ mod init;
 
 pub use config::{ServiceMode, SubprocessCfg, UpConfig};
 pub use init::{InitError, run_wizard};
-use mirrord_progress::MIRRORD_PROGRESS_ENV;
+use mirrord_progress::{MIRRORD_PROGRESS_ENV, messages::SESSION_READY_MESSAGE};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Command,
     task::{JoinError, JoinSet},
 };
 use uuid::Uuid;
+
+/// Shared slot that [`run`] fills with the time it took for **all** child
+/// sessions to become ready, measured from process spawn.
+///
+/// The caller constructs one, passes a clone to [`run`], and reads
+/// [`ReadyTracker::time_to_ready`] afterwards (the value is captured even if
+/// `run` later returns an error, as long as readiness was reached first).
+#[derive(Clone, Default)]
+pub struct ReadyTracker {
+    elapsed: Arc<OnceLock<Duration>>,
+}
+
+impl ReadyTracker {
+    /// The time from spawn until every session became ready, if that happened.
+    pub fn time_to_ready(&self) -> Option<Duration> {
+        self.elapsed.get().copied()
+    }
+}
 
 /// Environment variable used to pass the resolved configuration to child mirrord processes.
 pub const RESOLVED_CONFIG_ENV: &str = "MIRRORD_UP_RESOLVED_CONFIG";
@@ -71,8 +95,16 @@ pub fn load_up_config(path: &PathBuf) -> Result<UpConfig, UpError> {
 /// children will be printed to the console, prefixed with the name of
 /// the session.
 ///
+/// `ready` is filled with the time-to-ready once every session has signalled
+/// readiness (see [`ReadyTracker`]).
+///
 /// Returns when one of the child mirrord sessions exits.
-pub async fn run(up_config: UpConfig, key: EnvKey, correlation_id: Uuid) -> Result<(), UpError> {
+pub async fn run(
+    up_config: UpConfig,
+    key: EnvKey,
+    correlation_id: Uuid,
+    ready: ReadyTracker,
+) -> Result<(), UpError> {
     let commands: Vec<_> = up_config
         .service_configs(&key)
         .map(|config| {
@@ -100,17 +132,39 @@ pub async fn run(up_config: UpConfig, key: EnvKey, correlation_id: Uuid) -> Resu
         })
         .collect::<Result<_, UpError>>()?;
 
+    let start = Instant::now();
+    let total = commands.len();
+    let ready_count = Arc::new(AtomicUsize::new(0));
+
     let mut handles = JoinSet::new();
     for (name, mut command) in commands {
         let mut child = command.spawn().unwrap();
+        let ready_count = Arc::clone(&ready_count);
+        let ready = ready.clone();
         handles.spawn(async move {
             let mut err = BufReader::new(child.stderr.take().unwrap()).lines();
             let mut out = BufReader::new(child.stdout.take().unwrap()).lines();
 
+            // A session is only counted once: the user's binary inherits the
+            // same stdout after `execve`, so a later line matching the marker
+            // must not be double-counted.
+            let mut counted = false;
+
             loop {
                 tokio::select! {
                     line = out.next_line() => match line {
-                        Ok(Some(line)) => println!("{name}: {line}"),
+                        Ok(Some(line)) => {
+                            if counted.not() && line.trim() == SESSION_READY_MESSAGE {
+                                counted = true;
+                                if ready_count.fetch_add(1, Ordering::Relaxed) + 1 == total {
+                                    // TODO(areg) downgrade to a
+                                    // `debug_assert` once the feature
+                                    // stabilizes.
+                                    ready.elapsed.set(start.elapsed()).expect("only the final task should set the ready marker");
+                                }
+                            }
+                            println!("{name}: {line}");
+                        }
                         Ok(None) => {}
                         Err(err) => println!("{name} error: {err:?}"),
                     },

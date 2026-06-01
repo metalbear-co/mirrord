@@ -5,7 +5,7 @@ use std::io::ErrorKind;
 use miette::Diagnostic;
 use mirrord_analytics::{Analytics, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::config::EnvKey;
-use mirrord_up::{InitError, UpError, load_up_config, run_wizard};
+use mirrord_up::{InitError, ReadyTracker, UpError, load_up_config, run_wizard};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -81,7 +81,18 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     let correlation_id = Uuid::new_v4();
     analytics.get_mut().add("correlation_id", correlation_id);
 
-    Ok(mirrord_up::run(up_config, key, correlation_id).await?)
+    let ready = ReadyTracker::default();
+    let result = mirrord_up::run(up_config, key, correlation_id, ready.clone()).await;
+
+    // Recorded whenever all sessions reached readiness, even if `run` then
+    // failed, left absent otherwise (e.g. a session crashed before startup).
+    if let Some(elapsed) = ready.time_to_ready() {
+        analytics
+            .get_mut()
+            .add("time_to_ready_seconds", elapsed.as_secs());
+    }
+
+    Ok(result?)
 }
 
 /// Coarse bucket assigned to a failed `mirrord up` invocation for analytics.
