@@ -78,7 +78,8 @@ impl ResourceGuard {
             // `ApiResource::erase` captures from `K` at creation time. `DynamicObject`
             // is sufficient here since the deleter doesn't need a typed representation of `K`.
             let dyntype = ApiResource::erase::<K>(&());
-            let client = Client::try_from(config).expect("failed to create kube client for deletion");
+            let client =
+                Client::try_from(config).expect("failed to create kube client for deletion");
             let api: Api<DynamicObject> = match K::scope() {
                 ResourceScope::Cluster => Api::all_with(client, &dyntype),
                 ResourceScope::Namespaced => Api::namespaced_with(client, &namespace, &dyntype),

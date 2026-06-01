@@ -250,7 +250,8 @@ mod traffic_tests {
         let internal_service = udp_logger_service.await; // Only reachable from withing the cluster.
         let target_service = basic_service.await; // Impersonate a pod of this service, to reach internal.
         let kube_client = kube_client.await;
-        let pod_api: Api<Pod> = Api::namespaced(kube_client.get_client(), &internal_service.namespace);
+        let pod_api: Api<Pod> =
+            Api::namespaced(kube_client.get_client(), &internal_service.namespace);
         let mut lp = LogParams {
             container: Some(String::from(CONTAINER_NAME)),
             follow: false,
@@ -336,7 +337,8 @@ mod traffic_tests {
         let internal_service = udp_logger_service.await; // Only reachable from withing the cluster.
         let target_service = basic_service.await; // Impersonate a pod of this service, to reach internal.
         let kube_client = kube_client.await;
-        let pod_api: Api<Pod> = Api::namespaced(kube_client.get_client(), &internal_service.namespace);
+        let pod_api: Api<Pod> =
+            Api::namespaced(kube_client.get_client(), &internal_service.namespace);
         let mut lp = LogParams {
             container: Some(String::from(CONTAINER_NAME)),
             follow: false,

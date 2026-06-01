@@ -24,7 +24,9 @@ struct DirtyIptablesTest {
 
 /// This fixture only creates resources if a mirrord operator is NOT installed.
 #[fixture]
-async fn oss_only_dirty_iptables_test(#[future] kube_client: KubeClient) -> Option<DirtyIptablesTest> {
+async fn oss_only_dirty_iptables_test(
+    #[future] kube_client: KubeClient,
+) -> Option<DirtyIptablesTest> {
     let kube_client = kube_client.await;
     if operator_installed(&kube_client).await.unwrap() {
         return None;

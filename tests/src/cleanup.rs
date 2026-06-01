@@ -8,8 +8,8 @@ use mirrord_test_utils::run_command::run_exec_with_target;
 use rstest::*;
 
 use crate::utils::{
-    application::env::EnvApp, kube_client, kube_service::KubeService,
-    services::basic_service, watch::Watcher, KubeClient,
+    application::env::EnvApp, kube_client, kube_service::KubeService, services::basic_service,
+    watch::Watcher, KubeClient,
 };
 
 /// Verifies that the agent container correctly exits after all clients are gone.
