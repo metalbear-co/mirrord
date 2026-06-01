@@ -47,7 +47,7 @@ jobs:
           name: test
           path: /tmp
       - run: minikube image load /tmp/test.tar && rm /tmp/test.tar
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+      - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: astral-sh/setup-uv@v2
