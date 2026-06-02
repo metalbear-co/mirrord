@@ -251,16 +251,13 @@ pub(super) enum Commands {
     /// Watches active mirrord sessions and displays a web dashboard showing
     /// real-time events (file operations, DNS queries, HTTP requests, etc.)
     /// from all running mirrord sessions.
-    #[cfg(unix)]
     Ui(UiArgs),
 
     /// Manage local mirrord sessions.
-    #[cfg(unix)]
     #[command(visible_alias = "sessions")]
     Session(Box<SessionArgs>),
 
     /// Kill a local mirrord session.
-    #[cfg(unix)]
     Kill(Box<KillArgs>),
 
     /// Detached guardian that monitors a PID and cleans up resources when it exits.
@@ -1509,7 +1506,6 @@ pub(super) struct PitmArgs {
 }
 
 /// Arguments for the `mirrord ui` command.
-#[cfg(unix)]
 #[derive(Args, Debug)]
 pub struct UiArgs {
     /// Port to serve the UI on.
@@ -1518,7 +1514,6 @@ pub struct UiArgs {
 }
 
 /// Arguments for the `mirrord session` command.
-#[cfg(unix)]
 #[derive(Args, Debug)]
 pub struct SessionArgs {
     /// Arguments shared across `mirrord session` commands.
@@ -1531,7 +1526,6 @@ pub struct SessionArgs {
 }
 
 /// Arguments shared across `mirrord session` commands.
-#[cfg(unix)]
 #[derive(Args, Clone, Debug)]
 pub struct SessionCommonArgs {
     /// Namespace to operate on. Can also be set via `target.namespace` in the mirrord config.
@@ -1553,7 +1547,6 @@ pub struct SessionCommonArgs {
 }
 
 /// `mirrord session` subcommands.
-#[cfg(unix)]
 #[derive(Subcommand, Debug)]
 pub enum LocalSessionCommand {
     /// List mirrord sessions currently running locally and in cluster (in same namespace).
@@ -1566,7 +1559,6 @@ pub enum LocalSessionCommand {
 }
 
 /// Arguments for deleting local mirrord sessions.
-#[cfg(unix)]
 #[derive(Args, Debug)]
 pub struct SessionDeleteArgs {
     /// Session ID to kill.
@@ -1579,7 +1571,6 @@ pub struct SessionDeleteArgs {
 }
 
 /// Arguments for the `mirrord kill` command.
-#[cfg(unix)]
 #[derive(Args, Debug)]
 pub struct KillArgs {
     /// Arguments shared across `mirrord session` commands.

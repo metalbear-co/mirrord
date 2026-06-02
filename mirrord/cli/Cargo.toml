@@ -73,8 +73,6 @@ tower = { workspace = true, features = ["retry"] }
 ci_info.workspace = true
 opener.workspace = true
 tempfile = { workspace = true, optional = true }
-axum = { workspace = true, features = ["ws"], optional = true }
-tower-http = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
 itertools = { workspace = true, optional = true }
@@ -83,15 +81,12 @@ yamlpath.workspace = true
 url.workspace = true
 whoami.workspace = true
 base64.workspace = true
-
-[target.'cfg(unix)'.dependencies]
 rand.workspace = true
 axum = { workspace = true, features = ["ws"] }
 axum-extra = { workspace = true }
 rust-embed.workspace = true
 notify.workspace = true
 mime_guess.workspace = true
-eventsource-stream.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 mirrord-session-monitor-client.workspace = true
 tower-http = { workspace = true, features = ["cors"] }
@@ -121,4 +116,4 @@ tempfile.workspace = true
 
 [features]
 windows_build = []
-wizard = ["dep:axum", "dep:tower-http", "dep:tar", "dep:flate2", "dep:tempfile", "dep:itertools"]
+wizard = ["dep:tar", "dep:flate2", "dep:tempfile", "dep:itertools"]
