@@ -2,35 +2,45 @@ import https from "node:https";
 
 const AVAILABLE_HOSTS = process.env.AVAILABLE_HOSTS;
 
+// We hit servers we don't control, so an occasional failure is expected and
+// shouldn't fail the test. We only fail if more than this many requests fail.
+const MAX_ALLOWED_FAILURES = 2;
+
 function makeRequest(host) {
-  const options = {
-    hostname: host,
-    port: 443,
-    path: "/",
-    method: "GET",
-  };
+  return new Promise((resolve) => {
+    const options = {
+      hostname: host,
+      port: 443,
+      path: "/",
+      method: "GET",
+    };
 
-  console.log(`making request to ${host}`);
+    console.log(`making request to ${host}`);
 
-  const request = https.request(options, (response) => {
-    console.log(
-      `got a response from ${host}: statusCode=${response.statusCode}`
-    );
+    const request = https.request(options, (response) => {
+      console.log(
+        `got a response from ${host}: statusCode=${response.statusCode}`
+      );
 
-    response.on("data", (_data) => {});
+      response.on("data", (_data) => {});
 
-    response.on("error", (error) => {
-      console.error(`response from ${host} failed: ${error}`);
-      process.exit(1);
+      response.on("end", () => {
+        resolve(true);
+      });
+
+      response.on("error", (error) => {
+        console.error(`response from ${host} failed: ${error}`);
+        resolve(false);
+      });
     });
-  });
 
-  request.on("error", (error) => {
-    console.error(`request to ${host} failed: ${error}`)
-    process.exit(1);
-  });
+    request.on("error", (error) => {
+      console.error(`request to ${host} failed: ${error}`);
+      resolve(false);
+    });
 
-  request.end();
+    request.end();
+  });
 }
 
 if (AVAILABLE_HOSTS === undefined) {
@@ -38,4 +48,15 @@ if (AVAILABLE_HOSTS === undefined) {
   process.exit(1);
 }
 
-AVAILABLE_HOSTS.split(",").forEach(makeRequest);
+const hosts = AVAILABLE_HOSTS.split(",");
+const results = await Promise.all(hosts.map(makeRequest));
+const failures = results.filter((succeeded) => !succeeded).length;
+
+console.log(`${failures} out of ${hosts.length} requests failed`);
+
+if (failures > MAX_ALLOWED_FAILURES) {
+  console.error(
+    `${failures} requests failed, more than the allowed ${MAX_ALLOWED_FAILURES}`
+  );
+  process.exit(1);
+}
