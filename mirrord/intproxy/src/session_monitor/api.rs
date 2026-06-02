@@ -1,4 +1,3 @@
-#[cfg(unix)]
 use std::{
     convert::Infallible,
     fs,
@@ -8,7 +7,6 @@ use std::{
     time::Duration,
 };
 
-#[cfg(unix)]
 use axum::{
     Json, Router,
     extract::State,
@@ -19,34 +17,27 @@ use axum::{
     routing::{get, post},
 };
 use mirrord_session_monitor_protocol::{PortSubscription, ProcessInfo, SessionInfo};
-#[cfg(unix)]
 use tokio::{
     net::UnixListener,
     sync::{RwLock, broadcast::error::RecvError},
 };
-#[cfg(unix)]
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
-#[cfg(unix)]
 use tokio_util::sync::CancellationToken;
 
-#[cfg(unix)]
 use super::{MonitorEvent, MonitorTx};
 
 /// Per-session API state. Access control is provided by Unix socket file
 /// permissions (`0o600`), so the HTTP layer itself is unauthenticated.
-#[cfg(unix)]
 struct AppState {
     session_info: RwLock<SessionInfo>,
     monitor_tx: MonitorTx,
     shutdown: CancellationToken,
 }
 
-#[cfg(unix)]
 struct SocketCleanup {
     path: PathBuf,
 }
 
-#[cfg(unix)]
 impl Drop for SocketCleanup {
     fn drop(&mut self) {
         if let Err(err) = fs::remove_file(&self.path) {
@@ -55,18 +46,15 @@ impl Drop for SocketCleanup {
     }
 }
 
-#[cfg(unix)]
 async fn health() -> impl IntoResponse {
     Json(serde_json::json!({"status": "ok"}))
 }
 
-#[cfg(unix)]
 async fn info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let info = state.session_info.read().await;
     Json(info.clone())
 }
 
-#[cfg(unix)]
 async fn events(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
@@ -93,13 +81,11 @@ async fn events(
 
 /// Cancels the API server's cancellation token, triggering graceful shutdown of the API server
 /// only. The mirrord session lifecycle is managed separately by the intproxy.
-#[cfg(unix)]
 async fn kill(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     state.shutdown.cancel();
     Json(serde_json::json!({"status": "shutting_down"}))
 }
 
-#[cfg(unix)]
 async fn update_session_info_from_events(
     state: Arc<AppState>,
     mut rx: tokio::sync::broadcast::Receiver<MonitorEvent>,
@@ -150,7 +136,6 @@ async fn update_session_info_from_events(
 
 /// Returns `true` when `session_id` is a single normal path component, so that joining it with
 /// the sessions directory cannot escape that directory or produce an absolute path.
-#[cfg(unix)]
 fn verify_session_id(session_id: &str) -> bool {
     let as_path = Path::new(session_id);
     let mut components = as_path.components();
@@ -160,7 +145,6 @@ fn verify_session_id(session_id: &str) -> bool {
     )
 }
 
-#[cfg(unix)]
 pub async fn start_api_server(
     session_info: SessionInfo,
     monitor_tx: MonitorTx,
