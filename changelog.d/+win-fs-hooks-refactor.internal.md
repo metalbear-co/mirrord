@@ -1,1 +1,0 @@
-Windows: reorganized the layer's NT file-system hooks into one module per operation, `hooks/files/ops/{open,read,close,set_info,query_info,cancel,wait}`, with shared IO-status-block and IO-completion-port helpers, replacing the monolithic `mod.rs`.

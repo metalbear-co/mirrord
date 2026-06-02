@@ -8,6 +8,42 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.213.0](https://github.com/metalbear-co/mirrord/tree/3.213.0) - 2026-05-28
+
+
+### Added
+
+- Add support for Unix sockets of type `SOCK_SEQPACKET`.
+- Added the `s3Event` flag to the operator queue registry CRD.
+- Windows: added support for asynchronous file reads (fixes
+  `File.ReadAllTextAsync` etc).
+- mirrord now automatically reads the target container's volume mounts
+  (ConfigMaps, Secrets, PVCs) from the remote pod and serves those paths
+  read-only from the remote, so the local process transparently sees its
+  mounted files. Controlled by the new `feature.magic.auto_mount` flag, enabled
+  by default.
+
+
+### Changed
+
+- Wizard target selection now lets users choose the target container.
+
+
+### Fixed
+
+- Agent now sets up ip6tables rules whenever the IPv6 stack is usable
+  (including IPv4-only clusters that still have an IPv6 loopback), so traffic
+  to `[::1]` is no longer silently excluded from steal/mirror.
+- Fixed mirrored/stolen HTTP traffic failing to reach a local server bound to a
+  wildcard address such as `0.0.0.0` on Windows: the intproxy HTTP gateway now
+  normalizes the forward address to loopback before connecting, matching the
+  raw-TCP path.
+- Fixed the issue where foreground CI session prints stdout and stderr even
+  though output directory
+  is set in mirrord CI configuration.
+- Implemented support for Windows async DNS resolution, and solved scenarios
+  where DNS resolution would wrongly pass through local.
+
 ## [3.212.0](https://github.com/metalbear-co/mirrord/tree/3.212.0) - 2026-05-22
 
 
