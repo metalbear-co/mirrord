@@ -61,9 +61,9 @@ impl std::ops::Deref for KubeClient {
 #[fixture]
 pub async fn kube_client() -> KubeClient {
     CRYPTO_PROVIDER_INSTALLED.call_once(|| {
-        rustls::crypto::aws_lc_rs::default_provider()
-            .install_default()
-            .expect("Failed to install crypto provider");
+        if rustls::crypto::CryptoProvider::get_default().is_none() {
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        }
     });
 
     let mut config = Config::infer().await.unwrap();
