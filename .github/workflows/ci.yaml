@@ -79,13 +79,13 @@ jobs:
         run: echo "rust_toolchain=${{ env.PINNED_NIGHTLY }}" >> "$GITHUB_OUTPUT"
       - name: get CI changes
         id: changed-ci
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             .github/workflows/**
       - name: get changed rs files
         id: changed-rs
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             **/*.rs
@@ -100,14 +100,14 @@ jobs:
             .cargo/**
       - name: get vale changes
         id: changed-vale
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             *.md
             changelog.d/*.md
       - name: get changed windows files
         id: changed-windows
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             mirrord/layer-win/**
@@ -120,32 +120,32 @@ jobs:
             .github/workflows/windows-build.yaml
       - name: get markdown changes
         id: changed-markdown
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             README.md
       - name: get protocol changes
         id: changed-protocol
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             mirrord/protocol/**
       - name: get protocol toml changes
         id: changed-protocol-toml
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             mirrord/protocol/Cargo.toml
       - name: get dockerfile changes
         id: changed-dockerfile
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             mirrord/agent/Dockerfile
             mirrord/cli/Dockerfile
       - name: get wizard frontend changes
         id: changed-wizard-frontend
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             packages/wizard/**
@@ -157,7 +157,7 @@ jobs:
           fi
       - name: get config changes
         id: changed-config-schema
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             mirrord-schema.json

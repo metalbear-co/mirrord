@@ -779,7 +779,7 @@ jobs:
           fetch-depth: 0
       - name: get config changes since last release
         id: changed-config-schema
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             mirrord-schema.json
