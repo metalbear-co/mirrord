@@ -1820,7 +1820,7 @@
         },
         "disable_reuseaddr": {
           "title": "_experimental_ disable_reuseaddr {#experimental-disable_reuseaddr}",
-          "description": "Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors.\nOn macOS the application can use the same address many times but then we don't steal it\ncorrectly. This probably should be on by default but we want to gradually roll it out.\n<https://github.com/metalbear-co/mirrord/issues/2819>\nThis option applies only on macOS.",
+          "description": "Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors.\nOn macOS the application can use the same address many times but then we don't steal it\ncorrectly. This probably should be on by default but we want to gradually roll it out.\n<https://github.com/metalbear-co/mirrord/issues/2819>\nThis option applies only on macOS.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
           "type": [
             "boolean",
             "null"
@@ -1834,15 +1834,6 @@
             "null"
           ]
         },
-        "dns_permission_error_fatal": {
-          "title": "_experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}",
-          "description": "Whether to terminate the session when a permission denied error\noccurs during DNS resolution. This error often means that the Kubernetes cluster is\nhardened, and the mirrord-agent is not fully functional without `agent.privileged`\nenabled.\n\nDefaults to `true`\n\nDEPRECATED, WILL BE REMOVED",
-          "type": [
-            "boolean",
-            "null"
-          ],
-          "deprecated": true
-        },
         "enable_exec_hooks_linux": {
           "title": "_experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}",
           "description": "Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application\nshares sockets with child commands (e.g Python web servers with reload),\nbut the feature is not stable and may cause other issues.",
@@ -1851,15 +1842,6 @@
             "null"
           ]
         },
-        "force_hook_connect": {
-          "title": "_experimental_ force_hook_connect {#experimental-force_hook_connect}",
-          "description": "Forces hooking all instances of the connect function.\nIn very niche cases the connect function has multiple exports and this flag\nmakes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>\n\nDefaults to `true`\n\nDEPRECATED, WILL BE REMOVED",
-          "type": [
-            "boolean",
-            "null"
-          ],
-          "deprecated": true
-        },
         "hide_ipv6_interfaces": {
           "title": "_experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}",
           "description": "Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.",
@@ -1867,15 +1849,6 @@
             "boolean",
             "null"
           ]
-        },
-        "hook_rename": {
-          "title": "_experimental_ hook_rename {#experimental-hook_rename}",
-          "description": "Enables hooking the `rename` function.\n\nUseful if you need file remapping and your application uses `rename`, i.e. `php-fpm`,\n`twig`, to create and rename temporary files.\n\nDEPRECATED, WILL BE REMOVED",
-          "type": [
-            "boolean",
-            "null"
-          ],
-          "deprecated": true
         },
         "idle_local_http_connection_timeout": {
           "title": "_experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}",
@@ -1909,11 +1882,12 @@
         },
         "non_blocking_tcp_connect": {
           "title": "_experimental_non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}",
-          "description": "Enables better support for outgoing connections using\nnon-blocking TCP sockets.\n\nDue to technical reasons, enabling this causes the existence\nof the internal proxy acting as a TCP proxy observable to the\napplication. Notable consequences of this include:\n\n1. `getsockname(2)` will always return a localhost address,\n2. `connect(2)` will succeed immediately, before the remote side of the connection is\n   established. If the remote side of the connection fails, the connection to the app will\n   be closed after the fact.\n\nEssentially your application has to assume that it might be\nsitting behind a TCP proxy. Most \"standard\" apps (e.g. HTTP\nclients) should be unaffected, but custom implementations of\nother protocols may not.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
+          "description": "Enables better support for outgoing connections using\nnon-blocking TCP sockets.\n\nDue to technical reasons, enabling this causes the existence\nof the internal proxy acting as a TCP proxy observable to the\napplication. Notable consequences of this include:\n\n1. `getsockname(2)` will always return a localhost address,\n2. `connect(2)` will succeed immediately, before the remote side of the connection is\n   established. If the remote side of the connection fails, the connection to the app will\n   be closed after the fact.\n\nEssentially your application has to assume that it might be\nsitting behind a TCP proxy. Most \"standard\" apps (e.g. HTTP\nclients) should be unaffected, but custom implementations of\nother protocols may not.\n\nDEPRECATED, WILL BE REMOVED",
           "type": [
             "boolean",
             "null"
-          ]
+          ],
+          "deprecated": true
         },
         "sip_log_destination": {
           "title": "_experimental_ sip_log_destination {#experimental-sip_log_destination}",
@@ -1925,11 +1899,12 @@
         },
         "sip_utils": {
           "title": "_experimental_ sip_utils {#experimental-sip_utils}",
-          "description": "Extract pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses\nthem in place of SIP-patching the originals.\nThis shouldn't be used unless someone from MetalBear/mirrord tells you to.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
+          "description": "Extract pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses\nthem in place of SIP-patching the originals.\nThis shouldn't be used unless someone from MetalBear/mirrord tells you to.\n\nDEPRECATED, WILL BE REMOVED",
           "type": [
             "boolean",
             "null"
-          ]
+          ],
+          "deprecated": true
         },
         "tcp_ping4_mock": {
           "title": "_experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}",
