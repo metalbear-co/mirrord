@@ -46,8 +46,11 @@ pub struct ExperimentalConfig {
     /// correctly. This probably should be on by default but we want to gradually roll it out.
     /// <https://github.com/metalbear-co/mirrord/issues/2819>
     /// This option applies only on macOS.
-    #[config(default = false)]
-    pub disable_reuseaddr: bool,
+    ///
+    /// Defaults to `true` in OSS.
+    /// Defaults to `false` in mfT.
+    #[config(default = None)]
+    pub disable_reuseaddr: Option<bool>,
 
     /// ### _experimental_ use_dev_null {#experimental-use_dev_null}
     ///
@@ -159,7 +162,9 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("trust_any_certificate", self.trust_any_certificate);
         analytics.add("enable_exec_hooks_linux", self.enable_exec_hooks_linux);
         analytics.add("hide_ipv6_interfaces", self.hide_ipv6_interfaces);
-        analytics.add("disable_reuseaddr", self.disable_reuseaddr);
+        if let Some(disable_reuseaddr) = self.disable_reuseaddr {
+            analytics.add("disable_reuseaddr", disable_reuseaddr);
+        }
         analytics.add(
             "idle_local_http_connection_timeout",
             self.idle_local_http_connection_timeout,

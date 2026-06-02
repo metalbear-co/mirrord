@@ -1820,7 +1820,7 @@
         },
         "disable_reuseaddr": {
           "title": "_experimental_ disable_reuseaddr {#experimental-disable_reuseaddr}",
-          "description": "Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors.\nOn macOS the application can use the same address many times but then we don't steal it\ncorrectly. This probably should be on by default but we want to gradually roll it out.\n<https://github.com/metalbear-co/mirrord/issues/2819>\nThis option applies only on macOS.",
+          "description": "Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors.\nOn macOS the application can use the same address many times but then we don't steal it\ncorrectly. This probably should be on by default but we want to gradually roll it out.\n<https://github.com/metalbear-co/mirrord/issues/2819>\nThis option applies only on macOS.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
           "type": [
             "boolean",
             "null"

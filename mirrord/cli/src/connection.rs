@@ -377,6 +377,8 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
         _ => (),
     };
 
+    config.experimental.disable_reuseaddr = config.experimental.disable_reuseaddr.or(Some(true));
+
     Ok(())
 }
 
