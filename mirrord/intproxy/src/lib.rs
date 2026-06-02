@@ -200,13 +200,13 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let simple = background_tasks.register(
-            SimpleProxy::new(experimental.dns_permission_error_fatal),
+            SimpleProxy::new(),
             MainTaskId::SimpleProxy,
             Self::CHANNEL_SIZE,
         );
         let outgoing = background_tasks.register(
             OutgoingProxy::new(
-                experimental.non_blocking_tcp_connect.unwrap_or_default(),
+                experimental.non_blocking_tcp_connect,
                 experimental.latency.receive_delay,
                 experimental.latency.transmit_delay,
             ),
@@ -835,8 +835,8 @@ mod test {
     };
     use mirrord_intproxy_protocol::{
         IncomingRequest, LayerToProxyMessage, LocalMessage, NetProtocol, NewSessionRequest,
-        OutgoingConnectRequest, OutgoingRequest, OutgoingResponse, PortSubscribe, PortSubscription,
-        ProcessInfo, ProxyToLayerMessage,
+        OutgoingConnectRequest, OutgoingConnectResponse, OutgoingRequest, OutgoingResponse,
+        PortSubscribe, PortSubscription, ProcessInfo, ProxyToLayerMessage,
         codec::{AsyncDecoder, AsyncEncoder},
     };
     use mirrord_protocol::{
@@ -1441,6 +1441,20 @@ mod test {
                 remote_address,
                 ..
             })) if remote_address == socket_addr
+        ));
+
+        // With non blocking TCP connection, intproxy responds right away.
+        assert!(matches!(
+            to_layer.receive().await,
+            Ok(Some(LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Ok(
+                    OutgoingConnectResponse {
+                        in_cluster_address: None,
+                        ..
+                    }
+                )))
+            }))
         ));
 
         drop(to_proxy);
