@@ -18,7 +18,7 @@
 # places.
 #
 # 1. The `test-images` repo, if your e2e wants to use a custom image, that's not already there, and;
-# 2. The `mirrord-ci` repo, where you should add the compilation call to `e2e-setup-action/action.yaml`.
+# 2. The local `.github/actions/e2e-setup/action.yaml`, where you should add the compilation call.
 #
 # Forgetting (2) will probably net you a message saying that `mirrord exec` could not find the path of the app,
 # while forgetting (1) nets you a message saying that the service could not be reached/found.

@@ -38,11 +38,11 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
-      - uses: metalbear-co/ci/e2e-setup-action@main
+      - uses: ./.github/actions/e2e-setup
         with:
           container-runtime: ${{ matrix.container-runtime }}
       - name: download image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: test
           path: /tmp

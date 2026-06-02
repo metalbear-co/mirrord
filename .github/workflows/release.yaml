@@ -418,11 +418,11 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-x86_64-apple-darwin
           path: artifacts/layer-x86_64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-aarch64-apple-darwin
           path: artifacts/layer-aarch64
@@ -474,7 +474,7 @@ jobs:
           node-version: 24
       - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
         run: corepack enable pnpm
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-universal-apple-darwin
           path: artifacts/layer-universal
@@ -525,7 +525,7 @@ jobs:
           node-version: 24
       - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
         run: corepack enable pnpm
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-universal-apple-darwin
           path: artifacts/layer-universal
@@ -570,15 +570,15 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: cli-x86_64-apple-darwin
           path: artifacts/cli-x86_64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: cli-aarch64-apple-darwin
           path: artifacts/cli-aarch64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-universal-apple-darwin
           path: artifacts/layer-universal
@@ -840,7 +840,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           path: /tmp/artifacts
           pattern: +(*-unknown-linux-gnu|*-apple-darwin|*-pc-windows-msvc)
@@ -917,7 +917,7 @@ jobs:
     runs-on: ubuntu-24.04
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: shasum
           path: /tmp/artifacts
@@ -958,7 +958,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: x86_64-pc-windows-msvc
           path: artifacts/windows
