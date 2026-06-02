@@ -43,15 +43,10 @@ enum ResourceScope {
     Unsupported(&'static str),
 }
 
-enum CleanupClient {
-    Infer,
-    Config(Box<Config>),
-}
-
 fn deletion_future<K>(
     name: String,
     namespace: String,
-    cleanup_client: CleanupClient,
+    cleanup_config: Option<Config>,
 ) -> BoxFuture<'static, ()>
 where
     K: Resource<DynamicType = ()> + 'static,
@@ -68,9 +63,9 @@ where
         // `ApiResource::erase` captures from `K` at creation time. `DynamicObject`
         // is sufficient here since the deleter doesn't need a typed representation of `K`.
         let dyntype = ApiResource::erase::<K>(&());
-        let client = match cleanup_client {
-            CleanupClient::Infer => kube_client().await,
-            CleanupClient::Config(config) => kube_client_with_config(*config),
+        let client = match cleanup_config {
+            Some(config) => kube_client_with_config(config),
+            None => kube_client().await,
         };
         let api: Api<DynamicObject> = match K::scope() {
             ResourceScope::Cluster => Api::all_with(client, &dyntype),
@@ -116,14 +111,7 @@ impl ResourceGuard {
         Ok((
             Self {
                 delete_on_fail,
-                deleter: Some(deletion_future::<K>(
-                    name,
-                    namespace,
-                    match cleanup_config {
-                        Some(config) => CleanupClient::Config(Box::new(config)),
-                        None => CleanupClient::Infer,
-                    },
-                )),
+                deleter: Some(deletion_future::<K>(name, namespace, cleanup_config)),
             },
             created,
         ))
