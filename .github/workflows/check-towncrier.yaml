@@ -16,7 +16,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
         with:
-          enable-cache: false
+          enable-cache: "false"
       - run: uv python install
       - run: uv venv
       - name: install towncrier
