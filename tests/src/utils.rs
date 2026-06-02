@@ -49,9 +49,8 @@ pub fn random_string() -> String {
         .to_ascii_lowercase()
 }
 
-static CRYPTO_PROVIDER_INSTALL_ATTEMPTED: OnceLock<()> = OnceLock::new();
-
-pub(crate) fn ensure_crypto_provider() {
+fn ensure_crypto_provider() {
+    static CRYPTO_PROVIDER_INSTALL_ATTEMPTED: OnceLock<()> = OnceLock::new();
     CRYPTO_PROVIDER_INSTALL_ATTEMPTED.get_or_init(|| {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     });
@@ -59,10 +58,13 @@ pub(crate) fn ensure_crypto_provider() {
 
 #[fixture]
 pub async fn kube_client() -> Client {
-    ensure_crypto_provider();
-
     let mut config = Config::infer().await.unwrap();
     config.accept_invalid_certs = true;
+    kube_client_with_config(config)
+}
+
+pub fn kube_client_with_config(config: Config) -> Client {
+    ensure_crypto_provider();
     Client::try_from(config).unwrap()
 }
 

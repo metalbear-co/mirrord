@@ -8,11 +8,11 @@ use futures_util::future::BoxFuture;
 use k8s_openapi::{ClusterResourceScope, NamespaceResourceScope};
 use kube::{
     api::{ApiResource, DeleteParams, DynamicObject, PostParams},
-    Api, Client, Config, Error, Resource,
+    Api, Config, Error, Resource,
 };
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::utils::{ensure_crypto_provider, kube_client};
+use crate::utils::{kube_client, kube_client_with_config};
 
 /// RAII-style guard for deleting kube resources after tests.
 /// This guard deletes the kube resource when dropped.
@@ -70,10 +70,7 @@ where
         let dyntype = ApiResource::erase::<K>(&());
         let client = match cleanup_client {
             CleanupClient::Infer => kube_client().await,
-            CleanupClient::Config(config) => {
-                ensure_crypto_provider();
-                Client::try_from(*config).expect("failed to create cleanup kube client")
-            }
+            CleanupClient::Config(config) => kube_client_with_config(*config),
         };
         let api: Api<DynamicObject> = match K::scope() {
             ResourceScope::Cluster => Api::all_with(client, &dyntype),
