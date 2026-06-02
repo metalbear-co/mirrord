@@ -10,9 +10,9 @@
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/metalbear-co/mirrord)](https://github.com/metalbear-co/mirrord/releases)
 [![X Follow](https://img.shields.io/twitter/follow/metalbear?style=social)](https://x.com/metalbear)
 
-[mirrord runs your local process inside a live Kubernetes cluster](https://metalbear.com/mirrord/).
+[mirrord runs a process inside a live Kubernetes cluster](https://metalbear.com/mirrord/).
 It works the same way for developers and for AI coding agents (Claude Code, Cursor, Codex, Copilot, Windsurf):
-your code runs on your machine, but mirrord routes its traffic, files, and environment variables through a target pod in the cluster.
+the process runs wherever you launch it, on your machine, a CI runner, or a cloud agent's environment, and mirrord routes its traffic, files, and environment variables through the cluster so it behaves as if it were running inside it.
 
 That covers both halves of the software development loop. Read live cluster context while writing the code (real env vars, real service responses, real queue contents)
 so the change is grounded in what's actually deployed. Then run the code against those same services and data to confirm it works end-to-end.
@@ -170,6 +170,9 @@ MIRRORD_AGENT_DISABLED_CAPABILITIES=CAP_NET_RAW,CAP_SYS_PTRACE mirrord exec node
 
 mirrord works first-class with Claude Code, Cursor, Codex CLI, Gemini CLI, and other AI coding agents,
 letting them run and verify generated code against real cluster services without deploying.
+
+This works the same whether the agent runs locally or in the cloud. Managed and self-hosted agents (such as Cursor background agents, Devin, and Claude managed agents)
+run mirrord in their own environment to read live cluster context and verify their code against real services, with per-agent isolation and no deploy.
 
 For setup guides and ready-made workflow skills,
 see [metalbear-co/skills](https://github.com/metalbear-co/skills) or the [mirrord for AI Agents](https://metalbear.com/mirrord/ai) page.
