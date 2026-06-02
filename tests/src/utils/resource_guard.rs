@@ -52,7 +52,11 @@ impl ResourceGuard {
         delete_on_fail: bool,
         config: Config,
     ) -> Result<(ResourceGuard, K), Error> {
-        println!("Creating {} `{}`: {data:?}", K::kind(&()), data.meta().name.as_deref().unwrap_or("?"));
+        println!(
+            "Creating {} `{}`: {data:?}",
+            K::kind(&()),
+            data.meta().name.as_deref().unwrap_or("?")
+        );
         let created = api.create(&PostParams::default(), data).await?;
         // Use the server response to get name and namespace: the input `data` may omit namespace
         // (relying on the Api scope to route the request), which would cause cleanup to target the
