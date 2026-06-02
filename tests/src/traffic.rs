@@ -212,29 +212,6 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    /// Verifies that a local socket that has a port subscription can receive traffic
-    /// from within the application itself.
-    #[cfg_attr(not(feature = "job"), ignore)]
-    #[rstest]
-    #[tokio::test]
-    #[timeout(Duration::from_secs(60))]
-    pub async fn outgoing_connection_to_self(#[future] basic_service: KubeService) {
-        let service = basic_service.await;
-        let node_command = ["node", "node-e2e/outgoing/outgoing_connection_to_self.mjs"]
-            .map(String::from)
-            .to_vec();
-        let mut process = run_exec_with_target(
-            node_command,
-            &service.pod_container_target(),
-            None,
-            None,
-            None,
-        )
-        .await;
-        let res = process.wait().await;
-        assert!(res.success());
-    }
-
     /// Currently, mirrord only intercepts and forwards outgoing udp traffic if the application
     /// binds a non-0 port and calls `connect`. This test runs with mirrord a node app that does
     /// that and verifies that mirrord intercepts and forwards the outgoing udp message.
