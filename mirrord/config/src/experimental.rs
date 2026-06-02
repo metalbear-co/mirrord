@@ -113,10 +113,12 @@ pub struct ExperimentalConfig {
     /// clients) should be unaffected, but custom implementations of
     /// other protocols may not.
     ///
-    /// Defaults to `true` in OSS.
-    /// Defaults to `false` in mfT.
-    #[config(default = None)]
-    pub non_blocking_tcp_connect: Option<bool>,
+    /// DEPRECATED, WILL BE REMOVED
+    #[config(
+        default = true,
+        deprecated = "`non_blocking_tcp_connect` is deprecated and is default to true."
+    )]
+    pub non_blocking_tcp_connect: bool,
 
     /// ### _experimental_ dlopen_cgo {#experimental-dlopen_cgo}
     ///
@@ -143,10 +145,12 @@ pub struct ExperimentalConfig {
     /// them in place of SIP-patching the originals.
     /// This shouldn't be used unless someone from MetalBear/mirrord tells you to.
     ///
-    /// Defaults to `true` in OSS.
-    /// Defaults to `false` in mfT.
-    #[config(default = None)]
-    pub sip_utils: Option<bool>,
+    /// DEPRECATED, WILL BE REMOVED
+    #[config(
+        default = true,
+        deprecated = "`non_blocking_tcp_connect` is deprecated and is default to true."
+    )]
+    pub sip_utils: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -161,16 +165,12 @@ impl CollectAnalytics for &ExperimentalConfig {
             self.idle_local_http_connection_timeout,
         );
         analytics.add("browser_extension_config", self.browser_extension_config);
-        if let Some(non_blocking_tcp_connect) = self.non_blocking_tcp_connect {
-            analytics.add("non_blocking_tcp_connect", non_blocking_tcp_connect);
-        }
+        analytics.add("non_blocking_tcp_connect", self.non_blocking_tcp_connect);
         analytics.add("dlopen_cgo", self.dlopen_cgo);
         analytics.add("latency_transmit_delay", self.latency.transmit_delay);
         analytics.add("latency_receive_delay", self.latency.receive_delay);
         analytics.add("applev", self.applev.is_some());
-        if let Some(sip_utils) = self.sip_utils {
-            analytics.add("sip_utils", sip_utils);
-        }
+        analytics.add("sip_utils", self.sip_utils);
     }
 }
 

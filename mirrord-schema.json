@@ -1882,11 +1882,12 @@
         },
         "non_blocking_tcp_connect": {
           "title": "_experimental_non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}",
-          "description": "Enables better support for outgoing connections using\nnon-blocking TCP sockets.\n\nDue to technical reasons, enabling this causes the existence\nof the internal proxy acting as a TCP proxy observable to the\napplication. Notable consequences of this include:\n\n1. `getsockname(2)` will always return a localhost address,\n2. `connect(2)` will succeed immediately, before the remote side of the connection is\n   established. If the remote side of the connection fails, the connection to the app will\n   be closed after the fact.\n\nEssentially your application has to assume that it might be\nsitting behind a TCP proxy. Most \"standard\" apps (e.g. HTTP\nclients) should be unaffected, but custom implementations of\nother protocols may not.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
+          "description": "Enables better support for outgoing connections using\nnon-blocking TCP sockets.\n\nDue to technical reasons, enabling this causes the existence\nof the internal proxy acting as a TCP proxy observable to the\napplication. Notable consequences of this include:\n\n1. `getsockname(2)` will always return a localhost address,\n2. `connect(2)` will succeed immediately, before the remote side of the connection is\n   established. If the remote side of the connection fails, the connection to the app will\n   be closed after the fact.\n\nEssentially your application has to assume that it might be\nsitting behind a TCP proxy. Most \"standard\" apps (e.g. HTTP\nclients) should be unaffected, but custom implementations of\nother protocols may not.\n\nDEPRECATED, WILL BE REMOVED",
           "type": [
             "boolean",
             "null"
-          ]
+          ],
+          "deprecated": true
         },
         "sip_log_destination": {
           "title": "_experimental_ sip_log_destination {#experimental-sip_log_destination}",
@@ -1898,11 +1899,12 @@
         },
         "sip_utils": {
           "title": "_experimental_ sip_utils {#experimental-sip_utils}",
-          "description": "Extract pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses\nthem in place of SIP-patching the originals.\nThis shouldn't be used unless someone from MetalBear/mirrord tells you to.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
+          "description": "Extract pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses\nthem in place of SIP-patching the originals.\nThis shouldn't be used unless someone from MetalBear/mirrord tells you to.\n\nDEPRECATED, WILL BE REMOVED",
           "type": [
             "boolean",
             "null"
-          ]
+          ],
+          "deprecated": true
         },
         "tcp_ping4_mock": {
           "title": "_experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}",
