@@ -1834,15 +1834,6 @@
             "null"
           ]
         },
-        "dns_permission_error_fatal": {
-          "title": "_experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}",
-          "description": "Whether to terminate the session when a permission denied error\noccurs during DNS resolution. This error often means that the Kubernetes cluster is\nhardened, and the mirrord-agent is not fully functional without `agent.privileged`\nenabled.\n\nDefaults to `true`\n\nDEPRECATED, WILL BE REMOVED",
-          "type": [
-            "boolean",
-            "null"
-          ],
-          "deprecated": true
-        },
         "enable_exec_hooks_linux": {
           "title": "_experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}",
           "description": "Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application\nshares sockets with child commands (e.g Python web servers with reload),\nbut the feature is not stable and may cause other issues.",
@@ -1851,15 +1842,6 @@
             "null"
           ]
         },
-        "force_hook_connect": {
-          "title": "_experimental_ force_hook_connect {#experimental-force_hook_connect}",
-          "description": "Forces hooking all instances of the connect function.\nIn very niche cases the connect function has multiple exports and this flag\nmakes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>\n\nDefaults to `true`\n\nDEPRECATED, WILL BE REMOVED",
-          "type": [
-            "boolean",
-            "null"
-          ],
-          "deprecated": true
-        },
         "hide_ipv6_interfaces": {
           "title": "_experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}",
           "description": "Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.",
@@ -1867,15 +1849,6 @@
             "boolean",
             "null"
           ]
-        },
-        "hook_rename": {
-          "title": "_experimental_ hook_rename {#experimental-hook_rename}",
-          "description": "Enables hooking the `rename` function.\n\nUseful if you need file remapping and your application uses `rename`, i.e. `php-fpm`,\n`twig`, to create and rename temporary files.\n\nDEPRECATED, WILL BE REMOVED",
-          "type": [
-            "boolean",
-            "null"
-          ],
-          "deprecated": true
         },
         "idle_local_http_connection_timeout": {
           "title": "_experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}",

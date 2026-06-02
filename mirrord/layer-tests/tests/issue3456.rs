@@ -23,9 +23,6 @@ async fn test_issue3456(#[values(Application::NodeIssue3456)] application: Appli
     let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
 
     let config = serde_json::json!({
-        "experimental": {
-            "hook_rename": true
-        },
         "feature": {
             "fs": {
                 "mode": "localwithoverrides",

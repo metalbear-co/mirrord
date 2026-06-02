@@ -517,7 +517,7 @@ fn sip_only_layer_start(
 
     init_layer_setup(config, true);
 
-    unsafe { file::hooks::enable_file_hooks(&mut hook_manager, setup()) };
+    unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
 
     if let Some(unset) = setup().env_config().unset.as_ref() {
         let unset = unset.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>();
@@ -615,7 +615,7 @@ fn enable_hooks(state: &LayerSetup) {
     }
 
     if enabled_file_ops {
-        unsafe { file::hooks::enable_file_hooks(&mut hook_manager, state) };
+        unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
     }
 
     #[cfg(all(

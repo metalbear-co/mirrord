@@ -94,51 +94,6 @@ pub struct ExperimentalConfig {
     #[config(default = None)]
     pub sip_log_destination: Option<PathBuf>,
 
-    /// ### _experimental_ hook_rename {#experimental-hook_rename}
-    ///
-    /// Enables hooking the `rename` function.
-    ///
-    /// Useful if you need file remapping and your application uses `rename`, i.e. `php-fpm`,
-    /// `twig`, to create and rename temporary files.
-    ///
-    /// DEPRECATED, WILL BE REMOVED
-    #[config(
-        default = true,
-        deprecated = "`hook_rename` is deprecated and is default to true."
-    )]
-    pub hook_rename: bool,
-
-    /// ### _experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}
-    ///
-    /// Whether to terminate the session when a permission denied error
-    /// occurs during DNS resolution. This error often means that the Kubernetes cluster is
-    /// hardened, and the mirrord-agent is not fully functional without `agent.privileged`
-    /// enabled.
-    ///
-    /// Defaults to `true`
-    ///
-    /// DEPRECATED, WILL BE REMOVED
-    #[config(
-        default = true,
-        deprecated = "`dns_permission_error_fatal` is deprecated and is default to true."
-    )]
-    pub dns_permission_error_fatal: bool,
-
-    /// ### _experimental_ force_hook_connect {#experimental-force_hook_connect}
-    ///
-    /// Forces hooking all instances of the connect function.
-    /// In very niche cases the connect function has multiple exports and this flag
-    /// makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>
-    ///
-    /// Defaults to `true`
-    ///
-    /// DEPRECATED, WILL BE REMOVED
-    #[config(
-        default = true,
-        deprecated = "`force_hook_connect` is deprecated and is default to true."
-    )]
-    pub force_hook_connect: bool,
-
     /// ### _experimental_non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
     ///
     /// Enables better support for outgoing connections using
@@ -206,11 +161,6 @@ impl CollectAnalytics for &ExperimentalConfig {
             self.idle_local_http_connection_timeout,
         );
         analytics.add("browser_extension_config", self.browser_extension_config);
-        analytics.add(
-            "dns_permission_error_fatal",
-            self.dns_permission_error_fatal,
-        );
-        analytics.add("force_hook_connect", self.force_hook_connect);
         if let Some(non_blocking_tcp_connect) = self.non_blocking_tcp_connect {
             analytics.add("non_blocking_tcp_connect", non_blocking_tcp_connect);
         }

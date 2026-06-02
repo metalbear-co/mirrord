@@ -87,6 +87,7 @@ impl From<AgentLostSimpleResponse> for ToLayer {
 
 /// For passing messages between the layer and the agent without custom internal logic.
 /// Run as a [`BackgroundTask`].
+#[derive(Default)]
 pub struct SimpleProxy {
     /// For [`GetAddrInfoRequestV2`]s.
     addr_info_reqs: RequestQueue,
@@ -95,18 +96,11 @@ pub struct SimpleProxy {
     /// [`mirrord_protocol`] version negotiated with the agent.
     /// Determines whether we can use `GetAddrInfoRequestV2`.
     protocol_version: Option<Version>,
-    /// Whether to consider permission errors in DNS lookup to be fatal.
-    dns_permission_error_fatal: bool,
 }
 
 impl SimpleProxy {
-    pub fn new(dns_permission_error_fatal: bool) -> Self {
-        Self {
-            addr_info_reqs: Default::default(),
-            get_env_reqs: Default::default(),
-            protocol_version: Default::default(),
-            dns_permission_error_fatal,
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     fn set_protocol_version(&mut self, version: Version) {
@@ -195,7 +189,7 @@ impl BackgroundTask for SimpleProxy {
                     ResponseError::DnsLookup(DnsLookupError {
                         kind: ResolveErrorKindInternal::PermissionDenied,
                     }),
-                ))) if self.dns_permission_error_fatal => {
+                ))) => {
                     return Err(SimpleProxyError::DnsPermissionDenied);
                 }
                 SimpleProxyMessage::AddrInfoRes(res) => {
