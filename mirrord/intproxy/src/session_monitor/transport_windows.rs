@@ -11,7 +11,8 @@
 #![cfg(windows)]
 
 use std::{
-    fs, io,
+    fs::{self, File},
+    io,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -32,7 +33,7 @@ pub fn bind_session_transport(
     let sentinel_path = sessions_dir.join(format!("{session_id}.pipe"));
     let pipe_name = pipe_name_for_session(session_id);
 
-    fs::write(&sentinel_path, b"")?;
+    File::create(&sentinel_path)?;
 
     let listener = NamedPipeListener::bind(pipe_name)?;
 
