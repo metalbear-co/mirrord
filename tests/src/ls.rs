@@ -4,7 +4,7 @@ use fancy_regex::Regex;
 use mirrord_test_utils::run_command::run_ls;
 use rstest::rstest;
 
-use crate::utils::kube_client;
+use crate::utils::client::kube_client;
 #[cfg(feature = "operator")]
 use crate::utils::services::operator::service_for_mirrord_ls;
 #[cfg(not(feature = "operator"))]

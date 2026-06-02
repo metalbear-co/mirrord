@@ -4,7 +4,7 @@ use k8s_openapi::api::{
     apps::v1::Deployment,
     core::v1::{Namespace, Service},
 };
-use kube::{api::DeleteParams, Api, Client};
+use kube::{api::DeleteParams, Api};
 use kube_service::KubeService;
 use mirrord_test_utils::format_time;
 use resource_guard::ResourceGuard;
@@ -13,7 +13,8 @@ use serde_json::json;
 
 use super::{cluster_resource, kube_service, resource_guard, TestWorkloadType};
 use crate::utils::{
-    default_env, kube_client, random_string, watch, PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
+    client::kube_client, default_env, random_string, watch, KubeClient, PRESERVE_FAILED_ENV_NAME,
+    TEST_RESOURCE_LABEL,
 };
 
 #[fixture]
@@ -23,7 +24,7 @@ pub async fn service_for_mirrord_ls(
     #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
     #[default("http-echo")] service_name: &str,
     #[default(true)] randomize_name: bool,
-    #[future] kube_client: Client,
+    #[future] kube_client: KubeClient,
 ) -> KubeService {
     use k8s_openapi::api::{
         apps::v1::StatefulSet,
@@ -33,12 +34,12 @@ pub async fn service_for_mirrord_ls(
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
 
     let kube_client = kube_client.await;
-    let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
-    let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
-    let stateful_set_api: Api<StatefulSet> = Api::namespaced(kube_client.clone(), namespace);
-    let cron_job_api: Api<CronJob> = Api::namespaced(kube_client.clone(), namespace);
-    let job_api: Api<Job> = Api::namespaced(kube_client.clone(), namespace);
-    let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
+    let namespace_api: Api<Namespace> = Api::all(kube_client.get_client());
+    let deployment_api: Api<Deployment> = Api::namespaced(kube_client.get_client(), namespace);
+    let stateful_set_api: Api<StatefulSet> = Api::namespaced(kube_client.get_client(), namespace);
+    let cron_job_api: Api<CronJob> = Api::namespaced(kube_client.get_client(), namespace);
+    let job_api: Api<Job> = Api::namespaced(kube_client.get_client(), namespace);
+    let service_api: Api<Service> = Api::namespaced(kube_client.get_client(), namespace);
 
     let name = if randomize_name {
         format!("{}-{}", service_name, random_string())
@@ -81,45 +82,67 @@ pub async fn service_for_mirrord_ls(
         namespace_api.clone(),
         &namespace_resource,
         delete_after_fail,
+        kube_client.get_config(),
     )
     .await
     .ok();
 
     // `Deployment`
     let deployment = deployment_from_json(&name, image, default_env(), None, 1);
-    let (deployment_guard, _deployment) =
-        ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
-            .await
-            .unwrap();
+    let (deployment_guard, _deployment) = ResourceGuard::create(
+        deployment_api.clone(),
+        &deployment,
+        delete_after_fail,
+        kube_client.get_config(),
+    )
+    .await
+    .unwrap();
 
     // `Service`
     let service = service_from_json(&name, service_type);
-    let (service_guard, service) =
-        ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
-            .await
-            .unwrap();
+    let (service_guard, service) = ResourceGuard::create(
+        service_api.clone(),
+        &service,
+        delete_after_fail,
+        kube_client.get_config(),
+    )
+    .await
+    .unwrap();
 
     // `StatefulSet`
     let stateful_set = stateful_set_from_json(&name, image, false);
-    let (stateful_set_guard, _) =
-        ResourceGuard::create(stateful_set_api.clone(), &stateful_set, delete_after_fail)
-            .await
-            .unwrap();
+    let (stateful_set_guard, _) = ResourceGuard::create(
+        stateful_set_api.clone(),
+        &stateful_set,
+        delete_after_fail,
+        kube_client.get_config(),
+    )
+    .await
+    .unwrap();
 
     // `CronJob`
     let cron_job = cron_job_from_json(&name, image);
-    let (cron_job_guard, _) =
-        ResourceGuard::create(cron_job_api.clone(), &cron_job, delete_after_fail)
-            .await
-            .unwrap();
+    let (cron_job_guard, _) = ResourceGuard::create(
+        cron_job_api.clone(),
+        &cron_job,
+        delete_after_fail,
+        kube_client.get_config(),
+    )
+    .await
+    .unwrap();
 
     // `Job`
     let job = job_from_json(&name, image);
-    let (job_guard, _) = ResourceGuard::create(job_api.clone(), &job, delete_after_fail)
-        .await
-        .unwrap();
+    let (job_guard, _) = ResourceGuard::create(
+        job_api.clone(),
+        &job,
+        delete_after_fail,
+        kube_client.get_config(),
+    )
+    .await
+    .unwrap();
 
-    let pod_name = watch::wait_until_pods_ready(&service, 1, kube_client.clone())
+    let pod_name = watch::wait_until_pods_ready(&service, 1, kube_client.get_client())
         .await
         .into_iter()
         .next()

@@ -72,6 +72,7 @@ fds
 syscalls
 subcommand
 ASCII
+crypto
 
 # Linux syscalls and C API
 openat
