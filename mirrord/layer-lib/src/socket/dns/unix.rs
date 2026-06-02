@@ -113,7 +113,8 @@ pub fn getaddrinfo(
             let ai_family = rawish_sock_addr.family() as _;
 
             // Must outlive this function, as it is stored as a pointer in `libc::addrinfo`.
-            let ai_addr = Box::into_raw(Box::new(unsafe { *rawish_sock_addr.as_ptr() }));
+            let ai_addr =
+                Box::into_raw(Box::new(rawish_sock_addr.as_storage())).cast::<libc::sockaddr>();
             let ai_canonname = CString::new(name).unwrap().into_raw();
 
             libc::addrinfo {

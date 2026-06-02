@@ -143,44 +143,63 @@ export const updateConfigCopyTarget = (
 
 // ===== TARGET =====
 
+type TargetDetails = { type: string; name?: string; container?: string };
+
+const targetDetails = (
+  type: string,
+  name?: string,
+  container?: string | null,
+): TargetDetails => ({
+  type,
+  ...(name ? { name } : {}),
+  ...(container ? { container } : {}),
+});
+
+const getTargetPathDetails = (target: string): TargetDetails => {
+  const nameParts = target.split("/");
+  if (nameParts.length < 2) {
+    return { type: "targetless" };
+  }
+
+  const containerIndex = nameParts.indexOf("container");
+  return targetDetails(
+    nameParts[0]!,
+    nameParts[1],
+    containerIndex > -1 ? nameParts[containerIndex + 1] : undefined,
+  );
+};
+
 // Extract the (resource) type and name of a target from the generated Target type
-const getTargetDetails = (
-  target: TargetRootTarget,
-): { type: string; name?: string } => {
+const getTargetDetails = (target: TargetRootTarget): TargetDetails => {
   if (target === "targetless" || !target) {
     return { type: "targetless" };
   }
   if (typeof target === "string") {
-    const nameParts = target.split("/");
-    if (nameParts.length < 2) {
-      return { type: "targetless" };
-    } else {
-      return { type: nameParts[0]!, name: nameParts[1] };
-    }
+    return getTargetPathDetails(target);
   }
   if ("deployment" in target) {
-    return { type: "deployment", name: target.deployment };
+    return targetDetails("deployment", target.deployment, target.container);
   }
   if ("pod" in target) {
-    return { type: "pod", name: target.pod };
+    return targetDetails("pod", target.pod, target.container);
   }
   if ("rollout" in target) {
-    return { type: "rollout", name: target.rollout };
+    return targetDetails("rollout", target.rollout, target.container);
   }
   if ("job" in target) {
-    return { type: "job", name: target.job };
+    return targetDetails("job", target.job, target.container);
   }
   if ("cron_job" in target) {
-    return { type: "cron_job", name: target.cron_job };
+    return targetDetails("cron_job", target.cron_job, target.container);
   }
   if ("stateful_set" in target) {
-    return { type: "stateful_set", name: target.stateful_set };
+    return targetDetails("stateful_set", target.stateful_set, target.container);
   }
   if ("service" in target) {
-    return { type: "service", name: target.service };
+    return targetDetails("service", target.service, target.container);
   }
   if ("replica_set" in target) {
-    return { type: "replica_set", name: target.replica_set };
+    return targetDetails("replica_set", target.replica_set, target.container);
   }
   return { type: "targetless" };
 };
@@ -189,17 +208,12 @@ const getTargetDetails = (
 // If no target is set, return "targetless"
 export const readCurrentTargetDetails = (
   config: LayerFileConfig,
-): { type: string; name?: string } => {
+): TargetDetails => {
   const target = config.target;
   if (!target) {
     return { type: "targetless" };
   } else if (typeof target === "string") {
-    const nameParts = target.split("/");
-    if (nameParts.length < 2) {
-      return { type: "targetless" };
-    } else {
-      return { type: nameParts[0]!, name: nameParts[1] };
-    }
+    return getTargetPathDetails(target);
   } else if (typeof target === "object") {
     if ("path" in target && target.path) {
       return getTargetDetails(target.path);
@@ -215,13 +229,16 @@ export const updateConfigTarget = (
   config: LayerFileConfig,
   target: string,
   targetNamespace: string,
+  container?: string,
 ) => {
   if (typeof config !== "object") {
     throw "config badly formed";
   }
 
+  const targetPath = container ? `${target}/container/${container}` : target;
+
   const newTarget = {
-    path: target,
+    path: targetPath,
     namespace: targetNamespace,
   };
 

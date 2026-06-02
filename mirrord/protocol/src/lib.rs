@@ -25,7 +25,8 @@
 //! Example changes that **do break** backwards compatibility:
 //! 1. Adding a new field.
 //! 2. Changing the type of a field from `T` to `Option<T>` and vice versa.
-//! 3. Reordering variants of an enum.
+//! 3. Reordering fields in a struct.
+//! 4. Reordering variants of an enum.
 //!
 //! If you're not sure whether your change is breaking,
 //! you can check it manually with a unit test.

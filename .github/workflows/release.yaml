@@ -99,14 +99,14 @@ jobs:
           cache: false
           rustflags: ""
 
-      - uses: astral-sh/setup-uv@v2
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
       - run: uv --version
       - run: uv tool install cargo-zigbuild==0.22.1
       - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
       - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
       - run: rustup target add aarch64-unknown-linux-gnu
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 24
       - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
@@ -115,7 +115,7 @@ jobs:
         env:
           RUSTFLAGS: ${{ env.RUSTFLAGS }} -A dead_code
         run: cargo xtask build-cli --platform linux-aarch64 --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: aarch64-unknown-linux-gnu
           path: |
@@ -132,20 +132,20 @@ jobs:
         with:
           cache: false
           rustflags: ""
-      - uses: astral-sh/setup-uv@v2
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
       - run: uv --version
       - run: uv tool install cargo-zigbuild==0.22.1
       - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
       - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 24
       - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
         run: corepack enable pnpm
       - name: Build mirrord CLI
         run: cargo xtask build-cli --platform linux-x86_64 --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: x86_64-unknown-linux-gnu
           path: |
@@ -329,7 +329,7 @@ jobs:
           (Get-FileHash $dll -Algorithm SHA256).Hash.ToLower() | Out-File -FilePath "$dll.sha256" -NoNewline -Encoding ascii
           (Get-FileHash $msi -Algorithm SHA256).Hash.ToLower() | Out-File -FilePath "$msi.sha256" -NoNewline -Encoding ascii
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: x86_64-pc-windows-msvc
           path: |
@@ -369,7 +369,7 @@ jobs:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo +${{ env.PINNED_NIGHTLY }} xtask build-layer --platform macos-x86_64 --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: layer-x86_64-apple-darwin
           path: target/x86_64-apple-darwin/release/libmirrord_layer.dylib
@@ -403,7 +403,7 @@ jobs:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo +${{ env.PINNED_NIGHTLY }} xtask build-layer --platform macos-aarch64 --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: layer-aarch64-apple-darwin
           path: |
@@ -418,11 +418,11 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-x86_64-apple-darwin
           path: artifacts/layer-x86_64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-aarch64-apple-darwin
           path: artifacts/layer-aarch64
@@ -447,7 +447,7 @@ jobs:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo xtask link-layer-universal --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: layer-universal-apple-darwin
           path: |
@@ -469,12 +469,12 @@ jobs:
           toolchain: ${{ env.PINNED_NIGHTLY }}
           rustflags: ""
           cache: false
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 24
       - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
         run: corepack enable pnpm
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-universal-apple-darwin
           path: artifacts/layer-universal
@@ -500,7 +500,7 @@ jobs:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo +${{ env.PINNED_NIGHTLY }} xtask build-cli --platform macos-x86_64 --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: cli-x86_64-apple-darwin
           path: target/x86_64-apple-darwin/release/mirrord
@@ -520,12 +520,12 @@ jobs:
           toolchain: ${{ env.PINNED_NIGHTLY }}
           rustflags: ""
           cache: false
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 24
       - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
         run: corepack enable pnpm
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-universal-apple-darwin
           path: artifacts/layer-universal
@@ -551,7 +551,7 @@ jobs:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo +${{ env.PINNED_NIGHTLY }} xtask build-cli --platform macos-aarch64 --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: cli-aarch64-apple-darwin
           path: target/aarch64-apple-darwin/release/mirrord
@@ -570,15 +570,15 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: cli-x86_64-apple-darwin
           path: artifacts/cli-x86_64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: cli-aarch64-apple-darwin
           path: artifacts/cli-aarch64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-universal-apple-darwin
           path: artifacts/layer-universal
@@ -604,7 +604,7 @@ jobs:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo xtask merge-cli-universal --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: universal-apple-darwin
           path: |
@@ -663,7 +663,7 @@ jobs:
         id: qemu
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -740,7 +740,7 @@ jobs:
         id: qemu
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -779,7 +779,7 @@ jobs:
           fetch-depth: 0
       - name: get config changes since last release
         id: changed-config-schema
-        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             mirrord-schema.json
@@ -840,7 +840,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           path: /tmp/artifacts
           pattern: +(*-unknown-linux-gnu|*-apple-darwin|*-pc-windows-msvc)
@@ -861,7 +861,7 @@ jobs:
           shasum -a 256 mirrord_mac_universal.zip > mirrord_mac_universal.shasum256
         working-directory: /tmp/artifacts/universal-apple-darwin
       # used for the homebrew formula
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: shasum
           path: |
@@ -917,7 +917,7 @@ jobs:
     runs-on: ubuntu-24.04
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: shasum
           path: /tmp/artifacts
@@ -958,7 +958,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: x86_64-pc-windows-msvc
           path: artifacts/windows
@@ -1095,9 +1095,20 @@ jobs:
           $version = (Select-String -Path "Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
           echo "version=$version" >> $env:GITHUB_OUTPUT
 
+      - name: Create app token for WinGet manifest submission
+        id: winget_app_token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+          private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+          owner: metalbear-co
+          repositories: winget-pkgs
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Update WinGet manifest
         env:
-          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          WINGET_TOKEN: ${{ steps.winget_app_token.outputs.token }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -1111,9 +1122,9 @@ jobs:
           Write-Host "Updating WinGet manifest for package '$packageId' version '$version'"
           Write-Host "Installer URL: $installerUrl"
 
-          # Validate WINGET_TOKEN is set
+          # Validate the Cubby token is set
           if (-not $env:WINGET_TOKEN) {
-            throw "WINGET_TOKEN secret is not set. Cannot publish to WinGet."
+            throw "Cubby GitHub App token is not set. Cannot publish to WinGet."
           }
 
           # Download wingetcreate

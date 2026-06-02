@@ -38,6 +38,7 @@ use crate::{
     },
 };
 
+pub(crate) mod seqpacket;
 mod socket_stream;
 mod throttle;
 mod udp;
@@ -80,7 +81,12 @@ impl TcpOutgoingApi {
     /// # Params
     ///
     /// * `runtime` - tokio runtime to spawn the background task on.
-    pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
+    ///
+    /// * `fs_pid` - In targeted mode (both in pod and ephemeral), the PID of the main process. This
+    ///   will be passed to an
+    ///   [`InTargetPathResolver`](crate::util::path_resolver::InTargetPathResolver) to resolve unix
+    ///   socket paths.
+    pub(crate) fn new(runtime: &BgTaskRuntime, pid: Option<u64>) -> Self {
         // IMPORTANT: this makes tokio tasks spawn on `runtime`.
         // Do not remove this.
         let _rt = runtime.handle().enter();
@@ -88,7 +94,6 @@ impl TcpOutgoingApi {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
-        let pid = runtime.target_pid();
         let task_status = tokio::spawn(TcpOutgoingTask::new(pid, layer_rx, daemon_tx).run())
             .into_status("TcpOutgoingTask");
 
@@ -159,7 +164,7 @@ impl TcpOutgoingTask {
     /// How much incoming data we can accumulate in memory, before it's flushed to the client.
     ///
     /// This **must** be larger than [`Self::READ_BUFFER_SIZE`].
-    const THROTTLE_PERMITS: usize = 512 * 1024;
+    const THROTTLE_PERMITS: usize = Self::READ_BUFFER_SIZE * 8;
 
     /// Timeout for connect attempts.
     ///

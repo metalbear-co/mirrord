@@ -21,10 +21,11 @@ use mirrord_config::{
             MIRRORD_OVERRIDE_ENV_FILE_ENV, MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV,
             MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV,
         },
-        preview::PreviewTtlMins,
+        preview::PreviewTtl,
     },
     target::TargetType,
 };
+use mirrord_up::ServiceMode;
 use thiserror::Error;
 
 use crate::config::ci::CiArgs;
@@ -1299,7 +1300,7 @@ pub(super) struct PreviewStartArgs {
     ///
     /// Set to `"infinite"` to disable TTL.
     #[arg(long)]
-    pub ttl: Option<PreviewTtlMins>,
+    pub ttl: Option<PreviewTtl>,
 
     /// How long (in seconds) to wait for the preview to become ready.
     ///
@@ -1376,6 +1377,12 @@ pub(super) struct PreviewStatusArgs {
     /// Query all namespaces.
     #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
     pub all_namespaces: bool,
+
+    /// Show only failed sessions.
+    ///
+    /// By default, `mirrord preview status` only shows active sessions.
+    #[arg(long)]
+    pub failed: bool,
 }
 
 impl PreviewStatusArgs {
@@ -1450,11 +1457,30 @@ pub(super) struct UpArgs {
     #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml")]
     pub config_file: PathBuf,
 
+    /// Network mode to use for all defined services.
+    #[arg(short = 'm', long, value_enum, default_value_t = ServiceMode::default())]
+    pub mode: ServiceMode,
+
     /// Session key, used as the `{{ key }}` template variable.
     ///
     /// If not provided, a key is generated automatically from the system username.
     #[arg(long)]
     pub key: Option<String>,
+
+    /// Subcommand. When absent, `mirrord up` runs the sessions defined in
+    /// the config file. With a subcommand, the flags above are ignored.
+    #[command(subcommand)]
+    pub command: Option<UpSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+pub(super) enum UpSubcommand {
+    /// Launch an interactive wizard that generates a skeleton mirrord-up.yaml.
+    Init {
+        /// Default path for the generated config (overrideable in the wizard).
+        #[arg(short = 'o', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml")]
+        output: PathBuf,
+    },
 }
 /// `mirrord attach` args.
 #[cfg(windows)]

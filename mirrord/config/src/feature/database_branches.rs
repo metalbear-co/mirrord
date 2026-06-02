@@ -5,7 +5,7 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize, ser::SerializeMap};
 
-use crate::config::{self, source::MirrordConfigSource};
+use crate::config::{self, ConfigError, source::MirrordConfigSource};
 
 /// Deserializes from either a single value or a JSON array.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -293,6 +293,86 @@ impl DatabaseBranchesConfig {
             .filter(|db| matches!(db, DatabaseBranchConfig::Redis { .. }))
             .count()
     }
+
+    /// Verifies invariants that span individual branch configs (e.g. `ttl_secs`/`ttl_mins`
+    /// mutual exclusion).
+    pub fn verify(&self) -> Result<(), ConfigError> {
+        for branch in &self.0 {
+            if let Some(base) = branch.base() {
+                base.verify()?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl DatabaseBranchConfig {
+    pub(crate) fn base(&self) -> Option<&DatabaseBranchBaseConfig> {
+        match self {
+            Self::Mongodb(cfg) => Some(&cfg.base),
+            Self::Mssql(cfg) => Some(&cfg.base),
+            Self::Mysql(cfg) => Some(&cfg.base),
+            Self::Pg(cfg) => Some(&cfg.base),
+            Self::Redis(_) => None,
+        }
+    }
+
+    /// Names of target-pod env vars that the operator uses to redirect this branch's
+    /// connection. Locally overriding any of these (via `feature.env.override`) would
+    /// fight the operator's redirection, so [`LayerConfig::verify`] rejects such configs.
+    ///
+    /// [`LayerConfig::verify`]: crate::LayerConfig::verify
+    pub(crate) fn connection_env_keys(&self) -> Vec<&str> {
+        let mut keys = Vec::new();
+        if let Some(base) = self.base() {
+            base.connection.collect_env_keys(&mut keys);
+        }
+        if let Self::Redis(cfg) = self {
+            cfg.connection.collect_env_keys(&mut keys);
+        }
+        keys
+    }
+}
+
+impl ConnectionSource {
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            Self::Url { url } => url.collect_env_keys(out),
+            Self::FlatUrl { url, .. } => out.extend(url.iter().map(String::as_str)),
+            Self::Params(config) => config.params.collect_env_keys(out),
+        }
+    }
+}
+
+impl TargetEnvironmentVariableSource {
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            Self::Env { variable, .. } | Self::EnvFrom { variable, .. } => out.push(variable),
+            Self::Secret {
+                env_var_name: Some(name),
+                ..
+            } => out.push(name),
+            Self::Secret {
+                env_var_name: None, ..
+            } => {}
+        }
+    }
+}
+
+impl ConnectionParamsVars {
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        [
+            &self.host,
+            &self.port,
+            &self.user,
+            &self.password,
+            &self.database,
+        ]
+        .iter()
+        .filter_map(|t| t.as_ref())
+        .flatten()
+        .for_each(|var| var.collect_env_keys(out));
+    }
 }
 
 /// Configuration for a database branch.
@@ -348,8 +428,18 @@ pub struct DatabaseBranchBaseConfig {
     /// Users can set `ttl_secs` to customize this value according to their need. Please note
     /// that longer TTL paired with frequent mirrord session turnover can result in increased
     /// resource usage. For this reason, branch database TTL caps out at 15 min.
-    #[serde(default = "default_ttl_secs")]
-    pub ttl_secs: u64,
+    ///
+    /// Mutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_secs: Option<u64>,
+
+    /// #### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}
+    ///
+    /// Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.
+    ///
+    /// Mutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_mins: Option<u64>,
 
     /// #### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
     ///
@@ -370,6 +460,33 @@ pub struct DatabaseBranchBaseConfig {
     /// When the branch database is ready for use, Mirrord operator will replace the connection
     /// information with the branch database's.
     pub connection: ConnectionSource,
+}
+
+impl DatabaseBranchBaseConfig {
+    /// Default TTL in seconds applied when neither `ttl_secs` nor `ttl_mins` is set.
+    pub const DEFAULT_TTL_SECS: u64 = 300;
+
+    /// Returns the configured TTL in seconds. `ttl_mins` (if set) takes precedence over
+    /// `ttl_secs`; if both are unset, [`Self::DEFAULT_TTL_SECS`] is returned. Configurations
+    /// that set both fields are rejected by [`Self::verify`].
+    pub fn resolved_ttl_secs(&self) -> u64 {
+        if let Some(mins) = self.ttl_mins {
+            mins.saturating_mul(60)
+        } else {
+            self.ttl_secs.unwrap_or(Self::DEFAULT_TTL_SECS)
+        }
+    }
+
+    pub fn verify(&self) -> Result<(), ConfigError> {
+        if self.ttl_secs.is_some() && self.ttl_mins.is_some() {
+            return Err(ConfigError::Conflict(
+                "`feature.db_branches[].ttl_secs` and `feature.db_branches[].ttl_mins` \
+                 cannot both be set."
+                    .to_owned(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Different ways of connecting to the source database.
@@ -517,6 +634,22 @@ impl ParamSource {
             Self::Secret { .. } => None,
         }
     }
+
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            ParamSource::Variable(v) => out.push(v),
+            ParamSource::Env { env_var_name, .. } | ParamSource::Pattern { env_var_name, .. } => {
+                out.push(env_var_name)
+            }
+            ParamSource::Secret {
+                env_var_name: Some(name),
+                ..
+            } => out.push(name),
+            ParamSource::Secret {
+                env_var_name: None, ..
+            } => {}
+        }
+    }
 }
 
 /// Individual database connection parameter sources.
@@ -593,10 +726,6 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
         analytics.add("pg_branch_count", self.count_pg());
         analytics.add("redis_branch_count", self.count_redis());
     }
-}
-
-fn default_ttl_secs() -> u64 {
-    300
 }
 
 pub fn default_creation_timeout_secs() -> u64 {
@@ -968,5 +1097,133 @@ mod tests {
             ConnectionSource::FlatUrl { url, .. } => assert_eq!(url.len(), 2),
             other => panic!("expected FlatUrl, got {:?}", other),
         }
+    }
+
+    fn base_with_ttl(ttl_secs: Option<u64>, ttl_mins: Option<u64>) -> DatabaseBranchBaseConfig {
+        DatabaseBranchBaseConfig {
+            id: None,
+            name: None,
+            ttl_secs,
+            ttl_mins,
+            creation_timeout_secs: 60,
+            version: None,
+            connection: ConnectionSource::FlatUrl {
+                source_type: None,
+                url: "DB_URL".to_owned().into(),
+            },
+        }
+    }
+
+    #[test]
+    fn db_branch_resolved_ttl_prefers_minutes_when_only_minutes_set() {
+        let base = base_with_ttl(None, Some(5));
+        assert_eq!(base.resolved_ttl_secs(), 300);
+    }
+
+    #[test]
+    fn db_branch_resolved_ttl_falls_back_to_default() {
+        let base = base_with_ttl(None, None);
+        assert_eq!(
+            base.resolved_ttl_secs(),
+            DatabaseBranchBaseConfig::DEFAULT_TTL_SECS
+        );
+    }
+
+    #[test]
+    fn db_branch_resolved_ttl_uses_seconds_when_set() {
+        let base = base_with_ttl(Some(123), None);
+        assert_eq!(base.resolved_ttl_secs(), 123);
+    }
+
+    #[test]
+    fn db_branch_verify_rejects_both_ttl_fields() {
+        let base = base_with_ttl(Some(120), Some(2));
+        assert!(matches!(base.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    fn pg_branch_with_connection(connection: ConnectionSource) -> DatabaseBranchConfig {
+        DatabaseBranchConfig::Pg(Box::new(pg::PgBranchConfig {
+            base: DatabaseBranchBaseConfig {
+                id: None,
+                name: None,
+                ttl_secs: None,
+                ttl_mins: None,
+                creation_timeout_secs: 60,
+                version: None,
+                connection,
+            },
+            copy: Default::default(),
+            iam_auth: None,
+        }))
+    }
+
+    #[test]
+    fn connection_env_keys_url_variant() {
+        let branch = pg_branch_with_connection(ConnectionSource::Url {
+            url: TargetEnvironmentVariableSource::Env {
+                container: None,
+                variable: "DB_URL".to_owned(),
+                value: None,
+            },
+        });
+        assert_eq!(branch.connection_env_keys(), vec!["DB_URL"]);
+    }
+
+    #[test]
+    fn connection_env_keys_flat_url_variant() {
+        let branch = pg_branch_with_connection(ConnectionSource::FlatUrl {
+            source_type: Some(ConnectionSourceType::Env),
+            url: vec!["WRITE_URL".to_owned(), "READ_URL".to_owned()].into(),
+        });
+        assert_eq!(branch.connection_env_keys(), vec!["WRITE_URL", "READ_URL"]);
+    }
+
+    #[test]
+    fn connection_env_keys_params_variant_skips_secret_without_env_name() {
+        let branch =
+            pg_branch_with_connection(ConnectionSource::Params(Box::new(ConnectionParamsConfig {
+                source_type: None,
+                params: ConnectionParamsVars {
+                    host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
+                    port: None,
+                    user: Some(ParamSource::Variable("DB_USER".to_owned()).into()),
+                    password: Some(
+                        ParamSource::Secret {
+                            name: "rds".to_owned(),
+                            key: "password".to_owned(),
+                            env_var_name: None,
+                        }
+                        .into(),
+                    ),
+                    database: Some(ParamSource::Variable("DB_NAME".to_owned()).into()),
+                },
+            })));
+        assert_eq!(
+            branch.connection_env_keys(),
+            vec!["DB_HOST", "DB_USER", "DB_NAME"]
+        );
+    }
+
+    #[test]
+    fn connection_env_keys_redis() {
+        let branch = DatabaseBranchConfig::Redis(Box::new(redis::RedisBranchConfig {
+            id: None,
+            location: Default::default(),
+            connection: redis::RedisConnectionConfig {
+                url: Some(redis::RedisValueSource::Env(redis::RedisEnvSource {
+                    source_type: redis::RedisEnvSourceType::Env,
+                    variable: "REDIS_URL".to_owned(),
+                    container: None,
+                })),
+                host: None,
+                port: None,
+                password: Some(redis::RedisValueSource::Direct("hunter2".to_owned())),
+                username: None,
+                database: None,
+                tls: None,
+            },
+            local: Default::default(),
+        }));
+        assert_eq!(branch.connection_env_keys(), vec!["REDIS_URL"]);
     }
 }

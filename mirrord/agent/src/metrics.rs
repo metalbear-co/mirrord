@@ -45,6 +45,8 @@ pub(crate) static TCP_OUTGOING_CONNECTION: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) static UDP_OUTGOING_CONNECTION: AtomicUsize = AtomicUsize::new(0);
 
+pub(crate) static SEQPACKET_CONNECTION: AtomicUsize = AtomicUsize::new(0);
+
 /// Metrics for tracking bypassed requests (a request that did not match an http filter or wasn't
 /// stolen by the stealer task).
 ///

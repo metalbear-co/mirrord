@@ -267,6 +267,12 @@ async fn load_remote_sessions(
     // Workaround until operator sessions are exposed through a namespaced CRD.
     // `mirrord operator status` returns sessions cluster-wide, but `mirrord session`
     // should only surface sessions for the current effective namespace.
+    //
+    // Preview-env entries are folded into the same status.sessions list so the local
+    // mirrord UI and browser extension can surface them, but they're not real exec
+    // sessions and don't behave like ones (different id shape, no locked ports, no
+    // queue-splitting state), so we hide them from `mirrord session` to avoid
+    // confusing users into running e.g. `mirrord session delete` against a preview.
     Ok(api
         .operator()
         .status
@@ -275,6 +281,7 @@ async fn load_remote_sessions(
         .sessions
         .into_iter()
         .filter(|session| session.namespace.as_deref() == Some(current_namespace.as_str()))
+        .filter(|session| !session.is_preview())
         .collect())
 }
 

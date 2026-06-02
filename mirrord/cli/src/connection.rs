@@ -1,4 +1,4 @@
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, ops::Not, time::Duration};
 
 use mirrord_analytics::Reporter;
 use mirrord_config::{
@@ -150,6 +150,12 @@ where
             .clone()
             .unwrap_or(Target::Targetless);
 
+        if layer_config.feature.magic.auto_mount {
+            progress.warning(
+                "auto_mount: skipped in multi-cluster mode (target is resolved server-side)",
+            );
+        }
+
         api.connect_in_multi_cluster_session(
             &target_config,
             layer_config,
@@ -171,6 +177,10 @@ where
         )
         .await
         .map_err(CliError::OperatorTargetResolution)?;
+
+        if layer_config.feature.magic.auto_mount {
+            apply_auto_mount_for_target(layer_config, &target, api.client(), progress).await;
+        }
 
         api.connect_in_new_session(
             target,
@@ -219,7 +229,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
         }
         return Ok((
             AgentConnectInfo::Operator(connection.session),
-            connection.conn,
+            Connection::from_channel(connection.conn),
         ));
     }
 
@@ -235,6 +245,31 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
         .map_err(|fail| CliError::friendlier_error_or_else(fail, CliError::CreateAgentFailed))
         .inspect_err(|fail| tracing::debug!(?fail, "Failed to detect OpenShift!"))
         .ok();
+
+    let auto_mount_target = config
+        .feature
+        .magic
+        .auto_mount
+        .then(|| config.target.path.clone())
+        .flatten()
+        .filter(|target| matches!(target, Target::Targetless).not());
+
+    if let Some(target_path) = auto_mount_target {
+        match ResolvedTarget::new(
+            k8s_api.client(),
+            &target_path,
+            config.target.namespace.as_deref(),
+        )
+        .await
+        {
+            Ok(target) => {
+                apply_auto_mount_for_target(config, &target, k8s_api.client(), progress).await
+            }
+            Err(error) => {
+                tracing::debug!(%error, "auto_mount: failed to resolve target, skipping")
+            }
+        }
+    }
 
     let agent_container_config = ContainerConfig::default();
 
@@ -258,10 +293,30 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
             .map_err(|error| {
                 CliError::friendlier_error_or_else(error, CliError::AgentConnectionFailed)
             })?,
-    )
-    .await;
+    );
 
     Ok((AgentConnectInfo::DirectKubernetes(agent_connect_info), conn))
+}
+
+/// Resolves `target`'s pod spec and applies `feature.magic.auto_mount` to `config`, adding the
+/// target container's volume-mount paths to `feature.fs.read_only`.
+///
+/// auto_mount is a best-effort convenience, so any failure to resolve the pod spec is logged and
+/// ignored rather than aborting the session.
+async fn apply_auto_mount_for_target<P: Progress>(
+    config: &mut LayerConfig,
+    target: &ResolvedTarget<false>,
+    client: &kube::Client,
+    progress: &P,
+) {
+    match target.resolve_pod_spec(client).await {
+        Ok(Some(pod_spec)) => config.apply_auto_mount(pod_spec.as_ref(), target.container()),
+        Ok(None) => {}
+        Err(error) => {
+            tracing::warn!(?error, "failed to resolve target pod spec");
+            progress.warning("auto_mount: failed to resolve target pod spec, skipping")
+        }
+    }
 }
 
 /// Verifies and adjusts the [`LayerConfig`] after we've determined that this run does not use the

@@ -351,6 +351,7 @@ pub(crate) async fn connect_and_ping(
             | message @ Some(DaemonMessage::Tcp(_))
             | message @ Some(DaemonMessage::TcpSteal(_))
             | message @ Some(DaemonMessage::TcpOutgoing(_))
+            | message @ Some(DaemonMessage::SeqpacketOutgoing(_))
             | message @ Some(DaemonMessage::File(_))
             | message @ Some(DaemonMessage::LogMessage(_))
             | message @ Some(DaemonMessage::GetEnvVarsResponse(_))

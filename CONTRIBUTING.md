@@ -829,7 +829,7 @@ Releases are fully automated. Under normal circumstances no manual steps are req
    - Builds all platform binaries (Linux x86\_64 / aarch64, macOS universal, Windows).
    - Publishes the Docker images to GHCR.
    - Creates the GitHub release (with tag and release notes from `CHANGELOG.md`).
-   - Publishes to Homebrew, Chocolatey, and winget.
+   - Publishes to Homebrew, Chocolatey, and WinGet.
    - Updates the `latest` git tag and notifies the infra repository.
 
 ## Triggering a release PR manually

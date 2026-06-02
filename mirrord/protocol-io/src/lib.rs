@@ -14,9 +14,8 @@ use std::{
 };
 
 use actix_codec::{AsyncRead, AsyncWrite, Decoder, Encoder, Framed};
-use bincode::error::DecodeError;
-use bytes::{BufMut, BytesMut};
-use futures::{Sink, SinkExt, Stream, StreamExt, future::Either};
+use bytes::BytesMut;
+use futures::{Sink, SinkExt, Stream, StreamExt};
 use mirrord_protocol::{ClientMessage, DaemonMessage, ProtocolCodec};
 use rand::seq::IteratorRandom;
 use tokio::{
@@ -86,8 +85,7 @@ impl<I: bincode::Decode<()>> Decoder for Codec<I> {
 impl<I> Encoder<Vec<u8>> for Codec<I> {
     type Error = io::Error;
     fn encode(&mut self, encoded: Vec<u8>, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        dst.reserve(encoded.len());
-        dst.put(&encoded[..]);
+        dst.extend_from_slice(&encoded);
         Ok(())
     }
 }
@@ -112,17 +110,15 @@ pub struct Connection<Type: ProtocolEndpoint> {
 }
 
 impl<Type: ProtocolEndpoint> Connection<Type> {
-    /// Create a new connection running over a byte stream, i.e.
-    /// `AsyncRead` + `AsyncWrite`.
-    pub async fn from_stream<IO>(inner: IO) -> Self
+    /// Create a new connection running over a bidirectional byte stream ([`AsyncRead`] +
+    /// [`AsyncWrite`]).
+    pub fn from_stream<IO>(inner: IO) -> Self
     where
         IO: AsyncIO,
     {
         let framed = Framed::new(inner, Codec::<Type::InMsg>(PhantomData));
-
         let (inbound_tx, inbound_rx) = mpsc::channel(64);
-
-        let shared_state = Arc::new(SharedState::new(inbound_tx.downgrade(), None));
+        let shared_state = Arc::new(SharedState::new(inbound_tx.downgrade()));
 
         tokio::spawn(io_task::<_, Type>(
             framed,
@@ -136,49 +132,34 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         }
     }
 
-    /// Create a new connection, running over a `Sink` + `Stream` of `Vec<u8>`s.
-    /// Used for connecting to the operator over a websocket connection.
-    pub async fn from_channel<C, Filter>(
-        channel: C,
-        filter: Option<Filter>,
-    ) -> Result<Self, ProtocolError>
+    /// Create a new connection, running over a [`Sink`] + [`Stream`] of byte [`Vec`]s.
+    ///
+    /// Used for connecting to the operator over a WebSocket connection.
+    pub fn from_channel<C>(channel: C) -> Self
     where
-        C: Transport<Vec<u8>, Vec<u8>>,
-        Filter: Fn(Type::OutMsg) -> Either<Type::OutMsg, Type::InMsg> + Send + Sync + 'static,
-        C::Error: From<DecodeError> + std::error::Error + Send + 'static,
+        C: Transport<Type::InMsg, Vec<u8>>,
+        C::Error: std::error::Error + Send + 'static,
     {
-        let framed = channel.map(|msg| {
-            msg.and_then(|e| {
-                bincode::decode_from_slice::<Type::InMsg, _>(&e, bincode::config::standard())
-                    .map(|(msg, _)| msg)
-                    .map_err(<C::Error as From<DecodeError>>::from)
-            })
-        });
-
         let (inbound_tx, inbound_rx) = mpsc::channel(64);
-
-        let shared_state = Arc::new(SharedState::new(
-            inbound_tx.downgrade(),
-            filter.map(|f| Box::new(f) as _),
-        ));
+        let shared_state = Arc::new(SharedState::new(inbound_tx.downgrade()));
 
         tokio::spawn(io_task::<_, Type>(
-            framed,
+            channel,
             Arc::clone(&shared_state),
             inbound_tx,
         ));
 
-        Ok(Self {
+        Self {
             rx: inbound_rx,
             shared_state,
-        })
+        }
     }
 
     /// Create a dummy instance, mainly used for tests.
     pub fn dummy() -> (Self, mpsc::Sender<Type::InMsg>, ConnectionOutput<Type>) {
         let (inbound_tx, inbound_rx) = mpsc::channel(32);
 
-        let shared_state = Arc::new(SharedState::new(inbound_tx.downgrade(), None));
+        let shared_state = Arc::new(SharedState::new(inbound_tx.downgrade()));
 
         let connection = Connection {
             rx: inbound_rx,
@@ -370,8 +351,6 @@ struct OutQueue {
     free: Arc<Notify>,
 }
 
-type FilterFn<I, O> = dyn Fn(O) -> Either<O, I> + Send + Sync;
-
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 struct QueueId(usize);
 
@@ -391,12 +370,6 @@ struct SharedState<Type: ProtocolEndpoint> {
     /// task is dead.
     in_tx: mpsc::WeakSender<Type::InMsg>,
 
-    /// Used for doing a sort of filter_map and message faking. If
-    /// Some, all outgoing messages are passed to this function, and
-    /// the return value is either injected as an incoming message
-    /// (left), or enqueued for sending (right).
-    out_filter: Option<Box<FilterFn<Type::InMsg, Type::OutMsg>>>,
-
     next_queue_id: AtomicUsize,
 }
 
@@ -412,10 +385,8 @@ impl<Type: ProtocolEndpoint> fmt::Debug for SharedState<Type> {
 
 impl<Type: ProtocolEndpoint> SharedState<Type> {
     const MAX_CAPACITY: usize = 1024 * 16;
-    fn new(
-        in_tx: mpsc::WeakSender<Type::InMsg>,
-        out_filter: Option<Box<FilterFn<Type::InMsg, Type::OutMsg>>>,
-    ) -> Self {
+
+    fn new(in_tx: mpsc::WeakSender<Type::InMsg>) -> Self {
         Self {
             queues: Mutex::new(Queues {
                 queues: HashMap::new(),
@@ -423,7 +394,6 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
             }),
             nonempty: Arc::new(Notify::new()),
             in_tx,
-            out_filter,
             // 0 is reserved for the Connection struct
             next_queue_id: 1.into(),
         }
@@ -471,26 +441,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
     /// Push a message into the given queue, creating it if necessary.
     /// Will wait for the queue to free up if necessary, resolves only
     /// when the message has been successfully pushed.
-    async fn push(&self, id: QueueId, mut msg: Type::OutMsg) {
-        if let Some(filter) = &self.out_filter {
-            match filter(msg) {
-                Either::Left(out) => msg = out,
-                Either::Right(inj) => {
-                    match self.in_tx.upgrade() {
-                        Some(tx) => {
-                            let _ = tx.send(inj).await;
-                        }
-                        None => {
-                            tracing::warn!(
-                                "Cannot inject response to filtered message because the IO task has closed. Dropping."
-                            )
-                        }
-                    }
-                    return;
-                }
-            }
-        }
-
+    async fn push(&self, id: QueueId, msg: Type::OutMsg) {
         let mut encoded = bincode::encode_to_vec(msg, bincode::config::standard()).unwrap();
 
         loop {

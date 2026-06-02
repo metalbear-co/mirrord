@@ -6,12 +6,13 @@ use std::{
     time::Duration,
 };
 
-use futures::{StreamExt, stream::FuturesOrdered};
+use futures::{StreamExt, TryFutureExt, stream::FuturesOrdered};
 use hickory_resolver::{
     Hosts, Resolver,
     config::{LookupIpStrategy, ServerOrderingStrategy},
     lookup_ip::LookupIp,
     net::{DnsError, NetError, runtime::TokioRuntimeProvider},
+    proto::rr::{IntoName, Name},
     system_conf::parse_resolv_conf,
 };
 use mirrord_agent_env::envs;
@@ -178,13 +179,30 @@ impl DnsWorker {
 
             resolver
         };
+        let resolver = resolver
+            .inspect_err(|error| tracing::error!(%error, "Failed to build a DNS resolver"))?;
 
-        let lookup = resolver
-            .inspect_err(|fail| tracing::error!(?fail, "Failed to build a DNS resolver"))?
-            .lookup_ip(request.node)
-            .await
+        let result = if request.node.to_ip().is_some() {
+            // If `request.node` is an IP address,
+            // we don't want to convert it to `Name`.
+            // `IntoName::to_ip` implementation of `Name` always returns `None`.
+            resolver.lookup_ip(request.node).await
+        } else {
+            // If `request.node` is not an IP address,
+            // we convert it to `Name` using relaxed parsing mode,
+            // because hickory is too eager when validating hostnames.
+            // For example, it rejects names containing `_` character.
+            let host = Name::from_str_relaxed(request.node)
+                .map_err(|error| format!("node name rejected by hickory: {error:?}"))
+                .map_err(NetError::Msg);
+            std::future::ready(host)
+                .and_then(|host| resolver.lookup_ip(host))
+                .await
+        };
+
+        let lookup = result
             .inspect(|lookup| tracing::trace!(?lookup, "DNS lookup finished"))
-            .inspect_err(|e| tracing::debug!(%e, "DNS lookup failed"))?
+            .inspect_err(|error| tracing::debug!(%error, "DNS lookup failed"))?
             .convert();
 
         Ok(lookup)
@@ -208,7 +226,6 @@ impl DnsWorker {
         DNS_REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) async fn run(mut self, cancellation_token: CancellationToken) {
         loop {
             tokio::select! {
@@ -299,7 +316,13 @@ impl DnsApi {
     /// [`Self::make_request`]).
     ///
     /// If there is no outstanding DNS request, never returns.
-    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
+    ///
+    /// # Tracing
+    ///
+    /// Do not instrument this method. It gets called and aborted a lot,
+    /// so the logs are just spam.
+    ///
+    /// DNS results are logged in the background task methods.
     pub(crate) async fn recv(&mut self) -> AgentResult<GetAddrInfoResponse> {
         let Some(response) = self.responses.next().await else {
             return future::pending().await;
@@ -361,6 +384,9 @@ impl ProtocolConversion<ResolveErrorKindInternal> for &NetError {
             NetError::Dns(DnsError::NoRecordsFound(no_records)) => {
                 ResolveErrorKindInternal::NoRecordsFound(no_records.response_code.into())
             }
+            NetError::Dns(DnsError::ResponseCode(code)) => {
+                ResolveErrorKindInternal::Message(format!("DNS server error response: {code}"))
+            }
             NetError::Proto(proto_error) => {
                 ResolveErrorKindInternal::Message(format!("proto error: {proto_error}"))
             }
@@ -412,5 +438,23 @@ impl ProtocolConversion<LookupIpStrategy> for AddressFamily {
                 LookupIpStrategy::Ipv4AndIpv6
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use hickory_resolver::proto::rr::Name;
+    use rstest::rstest;
+
+    /// Verifies that [`Name::from_str_relaxed`] behaves as expected.
+    ///
+    /// This includes accepting underscores in names.
+    #[rstest]
+    #[case("google.com")]
+    #[case("UPPERCASE-IS-FINE.mydomain.com")]
+    #[case("underscore_is_fine.mydomain.com")]
+    #[test]
+    fn parse_dns_name_with_hickory(#[case] node_name: &str) {
+        Name::from_str_relaxed(node_name).unwrap();
     }
 }

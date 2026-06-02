@@ -22,6 +22,7 @@ Linkerd
 # Container / cloud
 OCI
 PVC
+PVCs
 crio
 colima
 WSL
@@ -70,6 +71,7 @@ fd
 fds
 syscalls
 subcommand
+ASCII
 
 # Linux syscalls and C API
 openat
@@ -111,6 +113,7 @@ unix
 preload
 dylib
 intproxy
+loopback
 
 # Networking
 TCP
@@ -125,6 +128,7 @@ TTL
 RTT
 VPN
 URI
+loopback
 
 # File formats
 YAML
@@ -145,7 +149,7 @@ gradle
 sbt
 protoc
 nixpkgs
-winget
+WinGet
 Chocolatey
 choco
 asdf
@@ -223,4 +227,7 @@ uutils
 teardown
 portforward
 portforwards
+
+# Customer / company names
+Zooplus
 ```

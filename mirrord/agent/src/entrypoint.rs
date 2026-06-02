@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     mem,
-    net::{Ipv6Addr, SocketAddr},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
     path::PathBuf,
     sync::{
@@ -21,6 +21,7 @@ use mirrord_agent_iptables::{
     error::{IPTablesError, IPTablesResult},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
+use socket2::SockRef;
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
     process::Command,
@@ -46,7 +47,7 @@ use crate::{
     metrics,
     mirror::TcpMirrorApi,
     namespace::NamespaceType,
-    outgoing::{TcpOutgoingApi, UdpOutgoingApi},
+    outgoing::{TcpOutgoingApi, UdpOutgoingApi, seqpacket::SeqpacketApi},
     reverse_dns::ReverseDnsApi,
     runtime::{self, get_container},
     steal::{StealerCommand, TcpStealerApi},
@@ -82,8 +83,16 @@ struct IpVersionAvailability {
     v6: bool,
 }
 
-/// Checks whether or not IPv4 and IPv6 addresses are present on any
-/// available network interfaces.
+/// Checks whether the IPv4 and IPv6 stacks are usable in the current network namespace,
+/// by looking for an assigned address of each family on any interface.
+///
+/// We deliberately count loopback (`127.0.0.1`/`::1`) here. The kernel assigns these
+/// automatically exactly when the corresponding stack is enabled, and removes them when it
+/// is disabled (e.g. `net.ipv6.conf.all.disable_ipv6=1`). So their presence is a reliable
+/// signal that `ip(6)tables` will work *and* that processes in the pod can talk to that
+/// family's loopback. The latter matters: in an IPv4-only cluster a pod still has `::1`, and
+/// Go's resolver in particular prefers `[::1]` for `localhost`, so without IPv6 rules that
+/// traffic would silently bypass mirrord's steal/mirror.
 static IP_VERSION_AVAILABILITY: LazyLock<IpVersionAvailability> = LazyLock::new(|| {
     let addrs = match nix::ifaddrs::getifaddrs() {
         Ok(addrs) => addrs,
@@ -103,23 +112,8 @@ static IP_VERSION_AVAILABILITY: LazyLock<IpVersionAvailability> = LazyLock::new(
         let Some(addr) = addr.address else {
             continue;
         };
-        if let Some(v4) = addr.as_sockaddr_in()
-            && v4.ip().is_loopback().not()
-            && v4.ip().is_broadcast().not()
-            && v4.ip().is_unspecified().not()
-        {
-            has_v4 = true;
-        }
-
-        if let Some(v6) = addr.as_sockaddr_in6()
-            && v6.ip().is_loopback().not()
-            && v6.ip().is_unspecified().not()
-            // these are automatically assigned, they don't mean
-            // anything
-            && v6.ip().is_unicast_link_local().not()
-        {
-            has_v6 = true;
-        }
+        has_v4 |= addr.as_sockaddr_in().is_some();
+        has_v6 |= addr.as_sockaddr_in6().is_some();
     }
 
     if has_v4.not() && has_v6.not() {
@@ -355,6 +349,7 @@ struct ClientConnectionHandler {
     tcp_stealer_api: Option<TcpStealerApi>,
     tcp_outgoing_api: TcpOutgoingApi,
     udp_outgoing_api: UdpOutgoingApi,
+    seqpacket_api: SeqpacketApi,
     dns_api: DnsApi,
     reverse_dns_api: ReverseDnsApi,
     state: State,
@@ -383,7 +378,9 @@ impl ClientConnectionHandler {
 
         let pid = state.container_pid();
 
-        let file_manager = FileManager::new(pid.or_else(|| state.ephemeral.then_some(1)));
+        let file_pid = pid.or_else(|| state.ephemeral.then_some(1));
+
+        let file_manager = FileManager::new(file_pid);
 
         let tcp_mirror_api = bg_tasks
             .mirror_handle
@@ -397,8 +394,9 @@ impl ClientConnectionHandler {
         .await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
         let reverse_dns_api = ReverseDnsApi::new(&state.network_runtime);
-        let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime);
+        let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime, file_pid);
         let udp_outgoing_api = UdpOutgoingApi::new(&state.network_runtime);
+        let seqpacket_api = SeqpacketApi::new(&state.network_runtime, file_pid);
 
         let client_handler = Self {
             id,
@@ -408,6 +406,7 @@ impl ClientConnectionHandler {
             tcp_stealer_api,
             tcp_outgoing_api,
             udp_outgoing_api,
+            seqpacket_api,
             dns_api,
             reverse_dns_api,
             state,
@@ -520,6 +519,15 @@ impl ClientConnectionHandler {
                     },
                     Err(e) => break e,
                 },
+                message = self.seqpacket_api.recv_from_task() => match message {
+                    Ok(message) => {
+                        // Being explicit here.
+                        // Throttle permits should be dropped only when the message has been sent and flushed.
+                        let _throttle = message.throttle;
+                        self.respond(message.message).await?
+                    },
+                    Err(e) => break e,
+                },
                 message = self.dns_api.recv() => match message {
                     Ok(message) => self.respond(DaemonMessage::GetAddrInfoResponse(message)).await?,
                     Err(e) => break e,
@@ -572,6 +580,9 @@ impl ClientConnectionHandler {
             }
             ClientMessage::UdpOutgoing(layer_message) => {
                 self.udp_outgoing_api.send_to_task(layer_message).await?
+            }
+            ClientMessage::SeqpacketOutgoing(layer_message) => {
+                self.seqpacket_api.send_to_task(layer_message).await?
             }
             ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
@@ -866,14 +877,35 @@ async fn check_leftover_rules(
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent(args: Args) -> AgentResult<()> {
     let listener = {
-        let listener = TcpSocket::new_v6()?;
-        // SO_REUSEADDR is required to handle rapid agent restarts.
-        listener.set_reuseaddr(true)?;
-        listener.bind(SocketAddr::new(
-            Ipv6Addr::UNSPECIFIED.into(),
-            args.communicate_port,
-        ))?;
-        listener.listen(1024).map_err(AgentError::from)?
+        // Prefer a dual-stack IPv6 socket so both IPv4 and IPv6 clients can connect.
+        // If anything in that setup fails (e.g. IPv6 is disabled in the cluster),
+        // fall back to a plain IPv4 listener.
+        let create_dual_stack = || -> AgentResult<TcpListener> {
+            let listener = TcpSocket::new_v6()?;
+            // SO_REUSEADDR is required to handle rapid agent restarts.
+            listener.set_reuseaddr(true)?;
+            // Accept IPv4 clients on this socket as well, not only IPv6 ones.
+            SockRef::from(&listener).set_only_v6(false)?;
+            listener.bind(SocketAddr::new(
+                Ipv6Addr::UNSPECIFIED.into(),
+                args.communicate_port,
+            ))?;
+            listener.listen(1024).map_err(AgentError::from)
+        };
+
+        match create_dual_stack() {
+            Ok(listener) => listener,
+            Err(error) => {
+                warn!(%error, "Failed to set up an IPv6 client listener, falling back to IPv4.");
+                let listener = TcpSocket::new_v4()?;
+                listener.set_reuseaddr(true)?;
+                listener.bind(SocketAddr::new(
+                    Ipv4Addr::UNSPECIFIED.into(),
+                    args.communicate_port,
+                ))?;
+                listener.listen(1024).map_err(AgentError::from)?
+            }
+        }
     };
 
     let client_listener_address = listener.local_addr()?;

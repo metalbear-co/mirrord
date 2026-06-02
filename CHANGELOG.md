@@ -8,6 +8,135 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.213.0](https://github.com/metalbear-co/mirrord/tree/3.213.0) - 2026-05-28
+
+
+### Added
+
+- Add support for Unix sockets of type `SOCK_SEQPACKET`.
+- Added the `s3Event` flag to the operator queue registry CRD.
+- Windows: added support for asynchronous file reads (fixes
+  `File.ReadAllTextAsync` etc).
+- mirrord now automatically reads the target container's volume mounts
+  (ConfigMaps, Secrets, PVCs) from the remote pod and serves those paths
+  read-only from the remote, so the local process transparently sees its
+  mounted files. Controlled by the new `feature.magic.auto_mount` flag, enabled
+  by default.
+
+
+### Changed
+
+- Wizard target selection now lets users choose the target container.
+
+
+### Fixed
+
+- Agent now sets up ip6tables rules whenever the IPv6 stack is usable
+  (including IPv4-only clusters that still have an IPv6 loopback), so traffic
+  to `[::1]` is no longer silently excluded from steal/mirror.
+- Fixed mirrored/stolen HTTP traffic failing to reach a local server bound to a
+  wildcard address such as `0.0.0.0` on Windows: the intproxy HTTP gateway now
+  normalizes the forward address to loopback before connecting, matching the
+  raw-TCP path.
+- Fixed the issue where foreground CI session prints stdout and stderr even
+  though output directory
+  is set in mirrord CI configuration.
+- Implemented support for Windows async DNS resolution, and solved scenarios
+  where DNS resolution would wrongly pass through local.
+
+## [3.212.0](https://github.com/metalbear-co/mirrord/tree/3.212.0) - 2026-05-22
+
+
+### Added
+
+- Added operator-session listings to the local `mirrord ui`: a Team tab that
+  shows cluster-wide sessions, and a 3-step Connect operator wizard for the
+  no-operator state.
+- Preview environments are now resilient to pod crashes and evictions.
+- Preview environments now support mounting user-supplied files in the preview
+  pod via a new `spec.config_mounts` field on `PreviewSession`.
+
+
+### Changed
+
+- Preview sessions are now deleted automatically when their TTL expires, and
+  failed sessions are cleaned up automatically after the retention window
+  configured by `operator.preview.cleanupAfterMins` in the chart configuration.
+  Alongside this change, `mirrord preview status` now only shows active
+  sessions by default, and a new `--failed` flag lets you inspect failed
+  sessions that haven't been cleaned up yet.
+- Rewrite README intro to name both halves of the developer + AI coding agent
+  feedback loop. Update `metalbear.co` links to `metalbear.com`.
+
+
+### Fixed
+
+- Fixed an issue where remote DNS resolution would always fail for host names
+  containing an underscore.
+- Fixed broken pipe error in install script.
+- Fixed panic on Windows when resolving config with `feature.magic.aws`
+  enabled. The auto-generated `~/.aws` path mapping now uses the same
+  home-directory transform as the `layer-win` filter logic (drive letter
+  stripped, slashes flipped, regex-escaped), so it no longer produces an
+  invalid regex from a Windows `USERPROFILE` (`HOME`) like `C:\Users\foo`.
+- Host names listed in `feature.network.outgoing.filter` are now automatically
+  mirrored into `feature.network.dns.filter` so that DNS resolution for each
+  host happens on the same side (local app or remote pod) the connection is
+  routed to.
+- Reject configurations that put the same environment variable in both
+  `feature.env.override` and `feature.db_branches[].connection`.
+- `mirrord operator status` and `mirrord session list` no longer show
+  preview-env entries. Previews are still surfaced in the local `mirrord ui`
+  and browser extension via `MirrordOperator.status.sessions`, but the CLI's
+  session-management surfaces hide them so the displayed ids, ports, and
+  queue-splitting state always reflect real exec sessions. Long-term
+  unification of previews and exec sessions is tracked separately.
+
+## [3.211.0](https://github.com/metalbear-co/mirrord/tree/3.211.0) - 2026-05-19
+
+
+### Added
+
+- Add `iam` auth for `mysql`.
+- Add support for `Azure Servicebus` queue splitting.
+- Add support for unified queue splitting `azure` + `gcp` for preview env.
+- Added `mirrord up init`, an interactive wizard that generates a skeleton
+  `mirrord-up.yaml`.
+- HTTP protocol detection on redirected connections now applies a read timeout
+  (default `2s`, configurable via `agent.http_detection_timeout` /
+  `MIRRORD_AGENT_HTTP_DETECTION_TIMEOUT`) instead of waiting indefinitely for
+  the client's first byte. This unblocks server-first protocols such as SMTP
+  that previously stalled in detection.
+
+## [3.210.0](https://github.com/metalbear-co/mirrord/tree/3.210.0) - 2026-05-13
+
+
+### Added
+
+- Added `feature.preview.ttl_secs` and `feature.db_branches[].ttl_mins` so each
+  feature accepts the TTL in either unit. Setting both `ttl_secs` and
+  `ttl_mins` on the same item is rejected.
+- Added clarifications for Windows-specific `fs` mapping and `fs` filter quirks
+- Document jq filtering support for GCP Pub/Sub in the configuration docs.
+
+
+### Changed
+
+- In mirrord-up, renamed `mode` to `default_mode` and added a CLI argument to
+  set it.
+
+
+### Fixed
+
+- Agent now falls back to an IPv4 client listener when setting up the
+  dual-stack IPv6 one fails (e.g. on clusters with IPv6 disabled).
+- Fixed `getaddrinfo` truncating IPv6 addresses resolved through the agent.
+- Fixed outgoing connections to path-addressed Unix sockets failing with a "not
+  found" error when the agent runs as an ephemeral container.
+- The agent no longer logs a spurious warning when a DNS server returns an
+  error response code, and layer no longer logs bogus DNS errors with error
+  level.
+
 ## [3.209.2](https://github.com/metalbear-co/mirrord/tree/3.209.2) - 2026-05-09
 
 

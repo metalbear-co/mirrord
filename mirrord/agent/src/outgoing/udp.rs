@@ -47,8 +47,6 @@ struct UdpOutgoingTask {
     writers: HashMap<ConnectionId, (UdpFramed<BytesCodec, Arc<UdpSocket>>, SocketAddr)>,
     /// Reading halves of peer connections made on layer's requests.
     readers: StreamMap<ConnectionId, UdpReadStream>,
-    /// Optional pid of agent's target. Used in `SocketStream::connect`.
-    pid: Option<u64>,
     layer_rx: Receiver<LayerUdpOutgoing>,
     daemon_tx: Sender<Throttled<DaemonUdpOutgoing>>,
     throttler: Arc<Semaphore>,
@@ -67,7 +65,6 @@ impl fmt::Debug for UdpOutgoingTask {
             .field("next_connection_id", &self.next_connection_id)
             .field("writers", &self.writers.len())
             .field("readers", &self.readers.len())
-            .field("pid", &self.pid)
             .finish()
     }
 }
@@ -79,7 +76,6 @@ impl UdpOutgoingTask {
     const THROTTLE_PERMITS: usize = 512 * 1024;
 
     fn new(
-        pid: Option<u64>,
         layer_rx: Receiver<LayerUdpOutgoing>,
         daemon_tx: Sender<Throttled<DaemonUdpOutgoing>>,
     ) -> Self {
@@ -87,7 +83,6 @@ impl UdpOutgoingTask {
             next_connection_id: 0,
             writers: Default::default(),
             readers: Default::default(),
-            pid,
             layer_rx,
             daemon_tx,
             throttler: Arc::new(Semaphore::new(Self::THROTTLE_PERMITS)),
@@ -343,9 +338,8 @@ impl UdpOutgoingApi {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
-        let task_status =
-            tokio::spawn(UdpOutgoingTask::new(runtime.target_pid(), layer_rx, daemon_tx).run())
-                .into_status("UdpOutgoingTask");
+        let task_status = tokio::spawn(UdpOutgoingTask::new(layer_rx, daemon_tx).run())
+            .into_status("UdpOutgoingTask");
 
         Self {
             task_status,

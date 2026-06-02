@@ -17,7 +17,9 @@ use dns_lookup::{LookupErrorKind, getaddrinfo};
 use libc::c_int;
 // Cross-platform socket constants
 #[cfg(unix)]
-pub use libc::{AF_INET, AF_INET6, AF_UNIX, SOCK_DGRAM, SOCK_STREAM, sockaddr, socklen_t};
+pub use libc::{
+    AF_INET, AF_INET6, AF_UNIX, SOCK_DGRAM, SOCK_SEQPACKET, SOCK_STREAM, sockaddr, socklen_t,
+};
 use mirrord_config::feature::network::{
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
     outgoing::{OutgoingConfig, OutgoingFilterConfig},
@@ -136,6 +138,7 @@ pub enum SocketState {
 pub enum SocketKind {
     Tcp(c_int),
     Udp(c_int),
+    Seqpacket(c_int),
 }
 
 impl SocketKind {
@@ -146,6 +149,10 @@ impl SocketKind {
     pub const fn is_tcp(self) -> bool {
         matches!(self, Self::Tcp(..))
     }
+
+    pub const fn is_seqpacket(self) -> bool {
+        matches!(self, Self::Seqpacket(..))
+    }
 }
 
 impl From<SocketKind> for NetProtocol {
@@ -153,6 +160,7 @@ impl From<SocketKind> for NetProtocol {
         match kind {
             SocketKind::Tcp(..) => Self::Stream,
             SocketKind::Udp(..) => Self::Datagrams,
+            SocketKind::Seqpacket(..) => Self::Seqpacket,
         }
     }
 }
@@ -160,10 +168,28 @@ impl From<SocketKind> for NetProtocol {
 impl TryFrom<c_int> for SocketKind {
     type Error = Bypass;
 
+    #[cfg(unix)]
     fn try_from(type_: c_int) -> Result<Self, Self::Error> {
-        if (type_ & SOCK_STREAM) > 0 {
+        // Gets the lower bits so we can compare just the `SOCK_STREAM`, `SOCK_DGRAM` or
+        // `SOCK_SEQPACKET` part.
+        let socket_type = type_ & 0xf;
+
+        if socket_type == SOCK_STREAM {
             Ok(SocketKind::Tcp(type_))
-        } else if (type_ & SOCK_DGRAM) > 0 {
+        } else if socket_type == SOCK_DGRAM {
+            Ok(SocketKind::Udp(type_))
+        } else if socket_type == SOCK_SEQPACKET {
+            Ok(SocketKind::Seqpacket(type_))
+        } else {
+            Err(Bypass::Type(type_))
+        }
+    }
+
+    #[cfg(windows)]
+    fn try_from(type_: c_int) -> Result<Self, Self::Error> {
+        if (type_ & SOCK_STREAM) == SOCK_STREAM {
+            Ok(SocketKind::Tcp(type_))
+        } else if (type_ & SOCK_DGRAM) == SOCK_DGRAM {
             Ok(SocketKind::Udp(type_))
         } else {
             Err(Bypass::Type(type_))
@@ -218,7 +244,7 @@ impl UserSocket {
             } => {
                 let _ = make_proxy_request_no_response(PortUnsubscribe {
                     port: bound.requested_address.port(),
-                    listening_on: bound.address,
+                    listening_on: bound.address.into(),
                 });
             }
             Self {

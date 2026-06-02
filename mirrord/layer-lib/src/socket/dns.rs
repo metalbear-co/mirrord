@@ -25,7 +25,7 @@ use crate::{
 /// # Note
 ///
 /// This function updates the mapping in [`reverse_dns::REMOTE_DNS_REVERSE_MAPPING`].
-#[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err)]
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
 pub fn remote_getaddrinfo(
     node: String,
     service_port: u16,

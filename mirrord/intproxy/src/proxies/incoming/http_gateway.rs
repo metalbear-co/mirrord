@@ -3,13 +3,13 @@ use std::{
     convert::Infallible,
     error::Report,
     fmt,
-    net::SocketAddr,
     ops::ControlFlow,
     time::{Duration, Instant},
 };
 
 use http_body_util::BodyExt;
 use hyper::{StatusCode, body::Incoming, http::response::Parts};
+use mirrord_intproxy_protocol::ListeningOn;
 use mirrord_protocol::{
     ClientMessage, Payload,
     batched_body::BatchedBody,
@@ -24,6 +24,7 @@ use tokio_retry::strategy::ExponentialBackoff;
 use tracing::Level;
 
 use super::{
+    ListeningOnExt,
     http::{ClientStore, LocalHttpError, ResponseMode, StreamingBody, mirrord_error_response},
     tasks::{HttpOut, InProxyTaskMessage},
 };
@@ -43,8 +44,9 @@ pub struct HttpGatewayTask {
     ///
     /// [`None`] if this is a mirrored request and we should discard the response.
     response_mode: Option<ResponseMode>,
-    /// Address of the HTTP server in the user application.
-    server_addr: SocketAddr,
+    /// Forward destination, resolved on every send attempt so hostname subscriptions spread
+    /// load across the backing pods.
+    listening_on: ListeningOn,
     /// How to transport the HTTP request to the server.
     transport: IncomingTrafficTransportType,
 }
@@ -54,7 +56,7 @@ impl fmt::Debug for HttpGatewayTask {
         f.debug_struct("HttpGatewayTask")
             .field("request", &self.request)
             .field("response_mode", &self.response_mode)
-            .field("server_addr", &self.server_addr)
+            .field("listening_on", &self.listening_on)
             .field("transport", &self.transport)
             .finish()
     }
@@ -66,14 +68,14 @@ impl HttpGatewayTask {
         request: HttpRequest<StreamingBody>,
         client_store: ClientStore,
         response_mode: Option<ResponseMode>,
-        server_addr: SocketAddr,
+        listening_on: ListeningOn,
         transport: IncomingTrafficTransportType,
     ) -> Self {
         Self {
             request,
             client_store,
             response_mode,
-            server_addr,
+            listening_on,
             transport,
         }
     }
@@ -227,10 +229,18 @@ impl HttpGatewayTask {
     /// sending [`ChunkedResponse::Start`]. The agent would get a duplicated response.
     #[tracing::instrument(level = Level::DEBUG, skip_all, err(level = Level::WARN))]
     async fn send_attempt(&self, message_bus: &mut MessageBus<Self>) -> Result<(), LocalHttpError> {
+        // `resolve_addr` returns a connectable address, normalizing a wildcard listen address
+        // (e.g. `0.0.0.0`) to loopback. That matters on Windows, where connecting to `0.0.0.0`
+        // fails outright (on Linux it happens to route to loopback).
+        let server_addr = self
+            .listening_on
+            .resolve_addr()
+            .await
+            .map_err(LocalHttpError::ConnectTcpFailed)?;
         let mut client = self
             .client_store
             .get(
-                self.server_addr,
+                server_addr,
                 self.request.version(),
                 &self.transport,
                 &self.request.internal_request.uri,
@@ -672,7 +682,7 @@ mod test {
                     LocalTlsSetup::from_config(Default::default()),
                 ),
                 is_steal.then_some(ResponseMode::Basic),
-                local_destination,
+                ListeningOn::Socket(local_destination),
                 if use_tls {
                     IncomingTrafficTransportType::Tls {
                         alpn_protocol: Some(b"http/1.1".to_vec()),
@@ -841,7 +851,7 @@ mod test {
                 request,
                 ClientStore::new_with_timeout(Duration::from_secs(1), Default::default()),
                 response_mode,
-                addr,
+                ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
             ),
             (),
@@ -1002,7 +1012,7 @@ mod test {
                 request,
                 client_store.clone(),
                 Some(ResponseMode::Basic),
-                addr,
+                ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
             ),
             (),
@@ -1082,7 +1092,7 @@ mod test {
                 request.clone(),
                 client_store.clone(),
                 Some(ResponseMode::Basic),
-                addr,
+                ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
             ),
             0,
@@ -1093,7 +1103,7 @@ mod test {
                 request.clone(),
                 client_store.clone(),
                 Some(ResponseMode::Basic),
-                addr,
+                ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
             ),
             1,

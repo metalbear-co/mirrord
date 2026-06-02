@@ -1,4 +1,9 @@
-use std::{net::Ipv4Addr, num::NonZeroUsize, ops::Not};
+use std::{
+    net::{Ipv4Addr, SocketAddr},
+    num::NonZeroUsize,
+    ops::Not,
+    time::Duration,
+};
 
 use futures::{SinkExt, StreamExt};
 use mirrord_protocol::{
@@ -13,13 +18,17 @@ use mirrord_protocol::{
         OpenFileResponse, OpenOptionsInternal, ReadDirRequest, ReadDirResponse, STATFS_V2_VERSION,
         STATFS_VERSION, StatFsRequestV2, XstatFsResponse, XstatFsResponseV2,
     },
-    outgoing::tcp::LayerTcpOutgoing,
+    outgoing::{
+        DaemonConnect, DaemonConnectV2,
+        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
+    },
+    tcp::{DaemonTcp, LayerTcpSteal, NewTcpConnectionV1, StealType},
 };
 use rstest::rstest;
 
 use crate::client::{
-    ClientConfig, ClientError, MirrordClient, error::TaskError, outgoing::OutgoingMode,
-    test::connector::TestConnector,
+    ClientConfig, ClientError, MirrordClient, MirrordClientRetry, error::TaskError,
+    incoming::IncomingMode, outgoing::OutgoingMode, test::connector::TestConnector,
 };
 
 mod connector;
@@ -48,7 +57,7 @@ async fn dns(#[values(true, false)] downgraded: bool) {
         let client = MirrordClient::new(
             connector,
             ClientConfig::cli(),
-            NonZeroUsize::new(32 * 1024).unwrap(),
+            NonZeroUsize::new(32).unwrap(),
         )
         .await
         .unwrap();
@@ -152,7 +161,7 @@ async fn reverse_dns(#[values(true, false)] supported: bool) {
         let client = MirrordClient::new(
             connector,
             ClientConfig::cli(),
-            NonZeroUsize::new(32 * 1024).unwrap(),
+            NonZeroUsize::new(32).unwrap(),
         )
         .await
         .unwrap();
@@ -199,7 +208,7 @@ async fn file_ops() {
         let client = MirrordClient::new(
             connector,
             ClientConfig::cli(),
-            NonZeroUsize::new(32 * 1024).unwrap(),
+            NonZeroUsize::new(32).unwrap(),
         )
         .await
         .unwrap();
@@ -340,7 +349,7 @@ async fn file_ops_compat(
         let client = MirrordClient::new(
             connector,
             ClientConfig::cli(),
-            NonZeroUsize::new(32 * 1024).unwrap(),
+            NonZeroUsize::new(32).unwrap(),
         )
         .await
         .unwrap();
@@ -425,7 +434,7 @@ async fn connection_lost(#[values(true, false)] can_reconnect: bool) {
         let client = MirrordClient::new(
             connector,
             ClientConfig::cli(),
-            NonZeroUsize::new(32 * 1024).unwrap(),
+            NonZeroUsize::new(32).unwrap(),
         )
         .await
         .unwrap();
@@ -496,6 +505,152 @@ async fn connection_lost(#[values(true, false)] can_reconnect: bool) {
             let Some(mut acceptor) = acceptor.take() else {
                 break;
             };
+            server = acceptor.accept(mirrord_protocol::VERSION.clone()).await;
+        }
+    };
+
+    tokio::join!(client_fut, server_fut);
+}
+
+/// Verifies that [`MirrordClientRetry`] methods correctly retry requests after reconnects.
+#[tokio::test]
+async fn retrying_requests() {
+    let (connector, mut acceptor) = TestConnector::new_pair();
+
+    let client_fut = async {
+        let client = MirrordClient::new(
+            connector,
+            ClientConfig::cli(),
+            NonZeroUsize::new(32).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        tokio::try_join!(
+            client.connect_ip_retry(
+                "127.0.0.1:2137".parse().unwrap(),
+                OutgoingMode::Tcp,
+                Duration::from_millis(500),
+            ),
+            client.make_request_retry(
+                GetAddrInfoRequest {
+                    node: "localhost".into(),
+                },
+                Duration::from_millis(500),
+            ),
+        )
+        .unwrap();
+    };
+
+    let server_fut = async {
+        let mut server = acceptor.accept(mirrord_protocol::VERSION.clone()).await;
+
+        for _ in 0..2 {
+            match server.stream.next().await.unwrap() {
+                ClientMessage::GetAddrInfoRequest(..) => {}
+                ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(..)) => {}
+                other => panic!("unexpected message: {other:?}"),
+            }
+        }
+        drop(server);
+        server = acceptor.accept(mirrord_protocol::VERSION.clone()).await;
+
+        for _ in 0..2 {
+            match server.stream.next().await.unwrap() {
+                ClientMessage::GetAddrInfoRequest(request) => {
+                    server
+                        .sink
+                        .send(Ok(DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(
+                            Ok(DnsLookup(vec![LookupRecord {
+                                name: request.node,
+                                ip: Ipv4Addr::LOCALHOST.into(),
+                            }])),
+                        ))))
+                        .await
+                        .unwrap();
+                }
+                ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(connect)) => {
+                    server
+                        .sink
+                        .send(Ok(DaemonMessage::TcpOutgoing(
+                            DaemonTcpOutgoing::ConnectV2(DaemonConnectV2 {
+                                uid: connect.uid,
+                                connect: Ok(DaemonConnect {
+                                    connection_id: 0,
+                                    remote_address: connect.remote_address,
+                                    local_address: "127.0.0.1:2136"
+                                        .parse::<SocketAddr>()
+                                        .unwrap()
+                                        .into(),
+                                }),
+                            }),
+                        )))
+                        .await
+                        .unwrap();
+                }
+                other => panic!("unexpected message: {other:?}"),
+            }
+        }
+    };
+
+    tokio::join!(client_fut, server_fut);
+}
+
+/// Verifies that [`MirrordClientRetry`] methods correctly retries port subscriptions.
+#[tokio::test]
+async fn retrying_port_subscription() {
+    let (connector, mut acceptor) = TestConnector::new_pair();
+
+    let client_fut = async {
+        let client = MirrordClient::new(
+            connector,
+            ClientConfig::cli(),
+            NonZeroUsize::new(32).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let mut subscription =
+            client.subscribe_port_retry(80, IncomingMode::Steal, None, Duration::from_millis(500));
+
+        let traffic = subscription.next().await.unwrap().unwrap();
+        assert_eq!(traffic.remote_peer_addr, "127.0.0.1:1".parse().unwrap());
+
+        let traffic = subscription.next().await.unwrap().unwrap();
+        assert_eq!(traffic.remote_peer_addr, "127.0.0.1:2".parse().unwrap());
+
+        subscription.next().await.unwrap().unwrap_err();
+    };
+
+    let server_fut = async {
+        let mut server = acceptor.accept(mirrord_protocol::VERSION.clone()).await;
+
+        for i in 1..=2 {
+            match server.stream.next().await.unwrap() {
+                ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(80))) => {}
+                other => panic!("unexpected message: {other:?}"),
+            }
+            server
+                .sink
+                .send(Ok(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(
+                    80,
+                )))))
+                .await
+                .unwrap();
+            server
+                .sink
+                .send(Ok(DaemonMessage::TcpSteal(DaemonTcp::NewConnectionV1(
+                    NewTcpConnectionV1 {
+                        connection_id: 0,
+                        remote_address: Ipv4Addr::LOCALHOST.into(),
+                        destination_port: 80,
+                        local_address: Ipv4Addr::LOCALHOST.into(),
+                        source_port: i,
+                    },
+                ))))
+                .await
+                .unwrap();
+            drop(server);
             server = acceptor.accept(mirrord_protocol::VERSION.clone()).await;
         }
     };

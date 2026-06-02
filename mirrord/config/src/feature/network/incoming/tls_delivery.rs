@@ -126,7 +126,7 @@ impl LocalTlsDelivery {
                 ..
             } if roots.is_empty() => {
                 return Err(ConfigError::InvalidValue {
-                    name: ".feature.network.incoming.tls_delivery.trust_roots",
+                    name: ".feature.network.incoming.tls_delivery.trust_roots".into(),
                     provided: "[]".into(),
                     error: "cannot be an empty list".into(),
                 });
@@ -138,7 +138,7 @@ impl LocalTlsDelivery {
             && ServerName::try_from(server_name).is_err()
         {
             return Err(ConfigError::InvalidValue {
-                name: ".feature.network.incoming.tls_delivery.server_name",
+                name: ".feature.network.incoming.tls_delivery.server_name".into(),
                 provided: server_name.into(),
                 error: "must be a valid DNS name or an IP address".into(),
             });
