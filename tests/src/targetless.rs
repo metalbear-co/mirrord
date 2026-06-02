@@ -13,7 +13,7 @@ mod targetless_tests {
     use tempfile::NamedTempFile;
 
     use crate::utils::{
-        application::Application, kube_client, operator_installed, random_string,
+        application::Application, client::kube_client, operator_installed, random_string,
         resource_guard::ResourceGuard, KubeClient,
     };
 

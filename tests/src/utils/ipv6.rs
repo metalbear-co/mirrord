@@ -10,7 +10,7 @@ use kube::Api;
 use rstest::fixture;
 
 use crate::utils::{
-    kube_client,
+    client::kube_client,
     kube_service::KubeService,
     services::{internal_service, TestWorkloadType},
     KubeClient,

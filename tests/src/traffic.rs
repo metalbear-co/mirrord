@@ -16,8 +16,8 @@ mod traffic_tests {
     use crate::utils::windows::LegacyConsoleGuard;
     use crate::utils::{
         application::{Application, GoVersion},
+        client::kube_client,
         ipv6::ipv6_service,
-        kube_client,
         kube_service::KubeService,
         services::{basic_service, hostname_service, udp_logger_service},
         KubeClient, CONTAINER_NAME,

@@ -20,9 +20,9 @@ mod steal_tests {
 
     use crate::utils::{
         application::Application,
+        client::kube_client,
         config_dir,
         ipv6::{ipv6_service, portforward_http_requests},
-        kube_client,
         kube_service::KubeService,
         port_forwarder::PortForwarder,
         send_request, send_requests,

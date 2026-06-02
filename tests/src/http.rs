@@ -9,8 +9,8 @@ use rstest::*;
 use tokio::net::TcpStream;
 
 use crate::utils::{
-    application::Application, kube_client, port_forwarder::PortForwarder, services::basic_service,
-    KubeClient,
+    application::Application, client::kube_client, port_forwarder::PortForwarder,
+    services::basic_service, KubeClient,
 };
 
 async fn make_http_conn(portforwarder: &PortForwarder) -> SendRequest<String> {

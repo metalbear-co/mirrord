@@ -1,10 +1,10 @@
 #![allow(clippy::unused_io_amount)]
 #![allow(clippy::indexing_slicing)]
 
-use std::{collections::BTreeMap, path::PathBuf, sync::Once};
+use std::{collections::BTreeMap, path::PathBuf};
 
 use k8s_openapi::api::core::v1::Service;
-use kube::{api::GroupVersionKind, discovery, Client, Config, Resource};
+use kube::{api::GroupVersionKind, discovery, Client, Resource};
 use mirrord_operator::crd::MirrordOperatorCrd;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest::{RequestBuilder, StatusCode};
@@ -12,6 +12,7 @@ use rstest::*;
 use serde_json::{json, Value};
 
 pub mod application;
+pub mod client;
 pub mod cluster_resource;
 pub mod ipv6;
 pub mod kube_service;
@@ -23,6 +24,8 @@ pub mod services;
 pub mod windows;
 
 pub mod watch;
+
+pub use client::{kube_client, KubeClient};
 
 const TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 pub const CONTAINER_NAME: &str = "test";
@@ -47,54 +50,6 @@ pub fn random_string() -> String {
     Alphanumeric
         .sample_string(&mut rand::rng(), 7)
         .to_ascii_lowercase()
-}
-
-static CRYPTO_PROVIDER_INSTALLED: Once = Once::new();
-
-/// A kube [`Client`] bundled with the [`Config`] it was created from.
-///
-/// Carrying the config lets cleanup code (running in a fresh runtime inside `Drop`) create a new
-/// client pointed at the same cluster without calling [`Config::infer`] again — which would break
-/// in multi-cluster setups where the active kubeconfig context may differ at deletion time.
-///
-/// Derefs to [`Client`] so it can be used where `&Client` is expected without an explicit field
-/// access. For owned [`Client`] values (e.g. `Api::all(...)`) use `.client.clone()` directly.
-#[derive(Clone)]
-pub struct KubeClient {
-    client: Client,
-    config: Config,
-}
-
-impl KubeClient {
-    pub fn get_client(&self) -> Client {
-        self.client.clone()
-    }
-
-    pub fn get_config(&self) -> Config {
-        self.config.clone()
-    }
-}
-
-impl std::ops::Deref for KubeClient {
-    type Target = Client;
-
-    fn deref(&self) -> &Client {
-        &self.client
-    }
-}
-
-#[fixture]
-pub async fn kube_client() -> KubeClient {
-    CRYPTO_PROVIDER_INSTALLED.call_once(|| {
-        rustls::crypto::aws_lc_rs::default_provider()
-            .install_default()
-            .expect("Failed to install crypto provider");
-    });
-
-    let mut config = Config::infer().await.unwrap();
-    config.accept_invalid_certs = true;
-    let client = Client::try_from(config.clone()).unwrap();
-    KubeClient { client, config }
 }
 
 /// Change the `ipFamilies` and `ipFamilyPolicy` fields to make the service IPv6-only.

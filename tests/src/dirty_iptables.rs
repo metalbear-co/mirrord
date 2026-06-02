@@ -11,7 +11,7 @@ use rstest::*;
 use serde_json::json;
 
 use crate::utils::{
-    application::env::EnvApp, kube_client, operator_installed, random_string,
+    application::env::EnvApp, client::kube_client, operator_installed, random_string,
     resource_guard::ResourceGuard, watch, KubeClient, PRESERVE_FAILED_ENV_NAME,
     TEST_RESOURCE_LABEL,
 };

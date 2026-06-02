@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 
 use super::{cluster_resource, kube_service, resource_guard};
 use crate::utils::{
-    default_env, kube_client, random_string, set_ipv6_only, watch, KubeClient,
+    client::kube_client, default_env, random_string, set_ipv6_only, watch, KubeClient,
     PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
 };
 
