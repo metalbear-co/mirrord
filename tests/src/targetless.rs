@@ -62,6 +62,7 @@ mod targetless_tests {
             Api::<PriorityClass>::all(kube_client.clone()),
             &priority_class,
             true,
+            None,
         )
         .await
         .unwrap();

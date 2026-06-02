@@ -47,6 +47,7 @@ pub async fn ipv6_service(
         None,
         true,
         TestWorkloadType::Deployment,
+        None,
     )
     .await
 }

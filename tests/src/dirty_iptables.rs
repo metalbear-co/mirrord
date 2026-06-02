@@ -60,6 +60,7 @@ async fn dirty_iptables_test_inner(kube_client: Client) -> DirtyIptablesTest {
         }))
         .unwrap(),
         delete_after_fail,
+        None,
     )
     .await
     .unwrap_or_else(|error| panic!("Should be able to create namespace {namespace}: {error}"));

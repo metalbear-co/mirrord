@@ -8,11 +8,11 @@ use futures_util::future::BoxFuture;
 use k8s_openapi::{ClusterResourceScope, NamespaceResourceScope};
 use kube::{
     api::{ApiResource, DeleteParams, DynamicObject, PostParams},
-    Api, Error, Resource,
+    Api, Client, Config, Error, Resource,
 };
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::utils::kube_client;
+use crate::utils::{ensure_crypto_provider, kube_client};
 
 /// RAII-style guard for deleting kube resources after tests.
 /// This guard deletes the kube resource when dropped.
@@ -43,6 +43,57 @@ enum ResourceScope {
     Unsupported(&'static str),
 }
 
+enum CleanupClient {
+    Infer,
+    Config(Box<Config>),
+}
+
+fn deletion_future<K>(
+    name: String,
+    namespace: String,
+    cleanup_client: CleanupClient,
+) -> BoxFuture<'static, ()>
+where
+    K: Resource<DynamicType = ()> + 'static,
+{
+    async move {
+        // `kube::Client` is a channel + background worker task bound to the runtime it was
+        // created on. When `Drop` runs, the test runtime is blocked waiting for the
+        // drop to finish, so reusing the original `Api` would deadlock: the deleter
+        // needs the worker to advance, but the worker lives on the blocked runtime.
+        // Creating a fresh client here gives the deleter its own worker on the new
+        // single-threaded runtime, avoiding the deadlock.
+        //
+        // Deletion only requires the resource name and GVK (group/version/kind), which
+        // `ApiResource::erase` captures from `K` at creation time. `DynamicObject`
+        // is sufficient here since the deleter doesn't need a typed representation of `K`.
+        let dyntype = ApiResource::erase::<K>(&());
+        let client = match cleanup_client {
+            CleanupClient::Infer => kube_client().await,
+            CleanupClient::Config(config) => {
+                ensure_crypto_provider();
+                Client::try_from(*config).expect("failed to create cleanup kube client")
+            }
+        };
+        let api: Api<DynamicObject> = match K::scope() {
+            ResourceScope::Cluster => Api::all_with(client, &dyntype),
+            ResourceScope::Namespaced => Api::namespaced_with(client, &namespace, &dyntype),
+            ResourceScope::Unsupported(ty) => panic!("unsupported resource type: {ty}"),
+        };
+
+        println!("Deleting {} `{name}`", K::kind(&()));
+        let delete_params = DeleteParams {
+            grace_period_seconds: Some(0),
+            ..Default::default()
+        };
+        let res = api.delete(&name, &delete_params).await;
+        if let Err(e) = res {
+            println!("Failed to delete {} `{name}`: {e:?}", K::kind(&()));
+        }
+    }
+    .boxed()
+}
+
 impl ResourceGuard {
     /// Create a kube resource and spawn a task to delete it when this guard is dropped.
     /// Return [`Error`] if creating the resource failed.
@@ -52,6 +103,7 @@ impl ResourceGuard {
         api: Api<K>,
         data: &K,
         delete_on_fail: bool,
+        cleanup_config: Option<Config>,
     ) -> Result<(ResourceGuard, K), Error> {
         let name = data.meta().name.clone().unwrap();
         let namespace = data
@@ -64,40 +116,17 @@ impl ResourceGuard {
         let created = api.create(&PostParams::default(), data).await?;
         println!("Created {} `{name}`", K::kind(&()));
 
-        let deleter = async move {
-            // `kube::Client` is a channel + background worker task bound to the runtime it was
-            // created on. When `Drop` runs, the test runtime is blocked waiting for the
-            // drop to finish, so reusing the original `Api` would deadlock: the deleter
-            // needs the worker to advance, but the worker lives on the blocked runtime.
-            // Creating a fresh client here gives the deleter its own worker on the new
-            // single-threaded runtime, avoiding the deadlock.
-            //
-            // Deletion only requires the resource name and GVK (group/version/kind), which
-            // `ApiResource::erase` captures from `K` at creation time. `DynamicObject`
-            // is sufficient here since the deleter doesn't need a typed representation of `K`.
-            let dyntype = ApiResource::erase::<K>(&());
-            let client = kube_client().await;
-            let api: Api<DynamicObject> = match K::scope() {
-                ResourceScope::Cluster => Api::all_with(client, &dyntype),
-                ResourceScope::Namespaced => Api::namespaced_with(client, &namespace, &dyntype),
-                ResourceScope::Unsupported(ty) => panic!("unsupported resource type: {ty}"),
-            };
-
-            println!("Deleting {} `{name}`", K::kind(&()));
-            let delete_params = DeleteParams {
-                grace_period_seconds: Some(0),
-                ..Default::default()
-            };
-            let res = api.delete(&name, &delete_params).await;
-            if let Err(e) = res {
-                println!("Failed to delete {} `{name}`: {e:?}", K::kind(&()));
-            }
-        };
-
         Ok((
             Self {
                 delete_on_fail,
-                deleter: Some(deleter.boxed()),
+                deleter: Some(deletion_future::<K>(
+                    name,
+                    namespace,
+                    match cleanup_config {
+                        Some(config) => CleanupClient::Config(Box::new(config)),
+                        None => CleanupClient::Infer,
+                    },
+                )),
             },
             created,
         ))

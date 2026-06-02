@@ -1,7 +1,7 @@
 #![allow(clippy::unused_io_amount)]
 #![allow(clippy::indexing_slicing)]
 
-use std::{collections::BTreeMap, path::PathBuf, sync::Once};
+use std::{collections::BTreeMap, path::PathBuf, sync::OnceLock};
 
 use k8s_openapi::api::core::v1::Service;
 use kube::{api::GroupVersionKind, discovery, Client, Config, Resource};
@@ -49,15 +49,17 @@ pub fn random_string() -> String {
         .to_ascii_lowercase()
 }
 
-static CRYPTO_PROVIDER_INSTALLED: Once = Once::new();
+static CRYPTO_PROVIDER_INSTALL_ATTEMPTED: OnceLock<()> = OnceLock::new();
+
+pub(crate) fn ensure_crypto_provider() {
+    CRYPTO_PROVIDER_INSTALL_ATTEMPTED.get_or_init(|| {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    });
+}
 
 #[fixture]
 pub async fn kube_client() -> Client {
-    CRYPTO_PROVIDER_INSTALLED.call_once(|| {
-        rustls::crypto::aws_lc_rs::default_provider()
-            .install_default()
-            .expect("Failed to install crypto provider");
-    });
+    ensure_crypto_provider();
 
     let mut config = Config::infer().await.unwrap();
     config.accept_invalid_certs = true;

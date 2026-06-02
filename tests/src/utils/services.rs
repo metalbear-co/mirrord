@@ -4,7 +4,7 @@ use k8s_openapi::api::{
     apps::v1::{Deployment, StatefulSet},
     core::v1::{ConfigMap, EnvFromSource, Namespace, Service},
 };
-use kube::{api::DeleteParams, Api, Client, Resource, ResourceExt};
+use kube::{api::DeleteParams, Api, Client, Config, Resource, ResourceExt};
 use kube_service::KubeService;
 use mirrord_kube::api::kubernetes::rollout::Rollout;
 use mirrord_test_utils::format_time;
@@ -45,6 +45,7 @@ pub async fn basic_service(
         None,
         false,
         TestWorkloadType::Deployment,
+        None,
     )
     .await
 }
@@ -77,6 +78,7 @@ pub async fn service_with_env(
         None,
         false,
         TestWorkloadType::Deployment,
+        None,
     )
     .await
 }
@@ -105,6 +107,7 @@ pub async fn service_with_env_and_env_from(
         config_maps,
         false,
         TestWorkloadType::Deployment,
+        None,
     )
     .await
 }
@@ -132,6 +135,7 @@ impl TestWorkloadType {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn create_rollout(
     rollout_api: Api<Rollout>,
     rollout: &Rollout,
@@ -140,15 +144,21 @@ async fn create_rollout(
     name: &str,
     namespace: &str,
     kube_client: &Client,
+    cleanup_config: Option<&Config>,
 ) {
-    let (rollout_guard, rollout) = ResourceGuard::create(rollout_api, rollout, delete_after_fail)
-        .await
-        .unwrap_or_else(|err| {
-            panic!(
-                "Failed to create rollout guard! Error: \n{err:?}\nRollout:\n{}",
-                serde_json::to_string_pretty(&rollout).unwrap()
-            )
-        });
+    let (rollout_guard, rollout) = ResourceGuard::create(
+        rollout_api,
+        rollout,
+        delete_after_fail,
+        cleanup_config.cloned(),
+    )
+    .await
+    .unwrap_or_else(|err| {
+        panic!(
+            "Failed to create rollout guard! Error: \n{err:?}\nRollout:\n{}",
+            serde_json::to_string_pretty(&rollout).unwrap()
+        )
+    });
     println!(
         "Created rollout\n{}",
         serde_json::to_string_pretty(&rollout).unwrap()
@@ -159,6 +169,7 @@ async fn create_rollout(
     watch::wait_until_rollout_available(name, namespace, 1, kube_client.clone()).await;
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn create_stateful_set(
     stateful_set_api: Api<StatefulSet>,
     stateful_set: &StatefulSet,
@@ -167,16 +178,21 @@ async fn create_stateful_set(
     name: &str,
     namespace: &str,
     kube_client: &Client,
+    cleanup_config: Option<&Config>,
 ) {
-    let (stateful_set_guard, stateful_set) =
-        ResourceGuard::create(stateful_set_api, stateful_set, delete_after_fail)
-            .await
-            .unwrap_or_else(|err| {
-                panic!(
-                    "Failed to create stateful set guard, Error: \n{err:?}\nStateful Set:\n{}",
-                    serde_json::to_string_pretty(&stateful_set).unwrap()
-                )
-            });
+    let (stateful_set_guard, stateful_set) = ResourceGuard::create(
+        stateful_set_api,
+        stateful_set,
+        delete_after_fail,
+        cleanup_config.cloned(),
+    )
+    .await
+    .unwrap_or_else(|err| {
+        panic!(
+            "Failed to create stateful set guard, Error: \n{err:?}\nStateful Set:\n{}",
+            serde_json::to_string_pretty(&stateful_set).unwrap()
+        )
+    });
     println!(
         "Created stateful set\n{}",
         serde_json::to_string_pretty(&stateful_set).unwrap()
@@ -211,8 +227,10 @@ pub async fn internal_service(
     config_maps: Option<Vec<ConfigMap>>,
     ipv6_only: bool,
     workload_type: TestWorkloadType,
+    cleanup_config: Option<Config>,
 ) -> KubeService {
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
+    let cleanup_config = cleanup_config.as_ref();
 
     let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
     let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
@@ -260,6 +278,7 @@ pub async fn internal_service(
         }))
         .unwrap(),
         delete_after_fail,
+        cleanup_config.cloned(),
     )
     .await
     {
@@ -282,18 +301,26 @@ pub async fn internal_service(
     match workload_type {
         TestWorkloadType::Deployment => {
             let deployment = deployment_from_json(&name, image, env, env_from, 1);
-            let (deployment_guard, _deployment) =
-                ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
-                    .await
-                    .unwrap();
+            let (deployment_guard, _deployment) = ResourceGuard::create(
+                deployment_api.clone(),
+                &deployment,
+                delete_after_fail,
+                cleanup_config.cloned(),
+            )
+            .await
+            .unwrap();
             guards.push(deployment_guard);
         }
         TestWorkloadType::ArgoRolloutWithWorkloadRef => {
             let deployment = deployment_from_json(&name, image, env, env_from, 0);
-            let (deployment_guard, deployment) =
-                ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
-                    .await
-                    .unwrap();
+            let (deployment_guard, deployment) = ResourceGuard::create(
+                deployment_api.clone(),
+                &deployment,
+                delete_after_fail,
+                cleanup_config.cloned(),
+            )
+            .await
+            .unwrap();
             guards.push(deployment_guard);
             let rollout = argo_rollout_from_json(&name, SpecSource::WorkloadRef(&deployment));
             create_rollout(
@@ -304,6 +331,7 @@ pub async fn internal_service(
                 &name,
                 namespace,
                 &kube_client,
+                cleanup_config,
             )
             .await;
         }
@@ -320,6 +348,7 @@ pub async fn internal_service(
                 &name,
                 namespace,
                 &kube_client,
+                cleanup_config,
             )
             .await;
         }
@@ -334,6 +363,7 @@ pub async fn internal_service(
                 &name,
                 namespace,
                 &kube_client,
+                cleanup_config,
             )
             .await;
         }
@@ -344,10 +374,14 @@ pub async fn internal_service(
     if ipv6_only {
         set_ipv6_only(&mut service);
     }
-    let (service_guard, service) =
-        ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
-            .await
-            .unwrap();
+    let (service_guard, service) = ResourceGuard::create(
+        service_api.clone(),
+        &service,
+        delete_after_fail,
+        cleanup_config.cloned(),
+    )
+    .await
+    .unwrap();
     guards.push(service_guard);
 
     let ready_pod = watch::wait_until_pods_ready(&service, 1, kube_client.clone())
@@ -530,6 +564,7 @@ pub async fn rollout_service(
         None,
         false,
         TestWorkloadType::ArgoRolloutWithWorkloadRef,
+        None,
     )
     .await
 }
@@ -555,6 +590,7 @@ pub async fn stateful_set_service(
         None,
         false,
         TestWorkloadType::StatefulSet,
+        None,
     )
     .await
 }
