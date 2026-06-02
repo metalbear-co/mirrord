@@ -28,6 +28,7 @@ fn build_wizard_frontend() {
 
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let out_dir = Path::new(&out_dir);
+    let workspace_root = Path::new("../..");
 
     println!("cargo::rerun-if-env-changed=WIZARD_DIST_DIR");
 
@@ -42,15 +43,17 @@ fn build_wizard_frontend() {
         println!("cargo::rerun-if-changed={}", input_path.display());
         println!("cargo::rerun-if-changed=.");
 
-        let status = Command::new("npm")
-            .args(["install"])
-            .current_dir(input_path)
+        let status = Command::new("pnpm")
+            .arg("install")
+            .current_dir(workspace_root)
             .status()
-            .expect("npm install command should finish");
-        assert!(status.success(), "npm install command should succeed");
+            .expect("pnpm install command should finish");
+        assert!(status.success(), "pnpm install command should succeed");
 
-        let status = Command::new("npm")
+        let status = Command::new("pnpm")
             .args([
+                "--filter",
+                "mirrord-wizard",
                 "run",
                 "build",
                 "--",
@@ -58,10 +61,10 @@ fn build_wizard_frontend() {
                 "--outDir",
                 &dist_path.display().to_string(),
             ])
-            .current_dir(input_path)
+            .current_dir(workspace_root)
             .status()
-            .expect("npm build command should finish");
-        assert!(status.success(), "npm build command should succeed");
+            .expect("pnpm build command should finish");
+        assert!(status.success(), "pnpm build command should succeed");
         dist_path
     };
 

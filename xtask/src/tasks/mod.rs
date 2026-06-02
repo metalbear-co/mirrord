@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod doc;
+pub mod frontend;
 pub mod layer;
 pub mod monitor;
 pub mod release;

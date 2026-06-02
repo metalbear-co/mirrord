@@ -17,10 +17,8 @@
 //!
 //! Note: To compile the backend, you need to enable the `wizard` feature.
 //!
-//! The build script `build.rs` installs node modules, builds the frontend, and compresses it so it
-//! can be accessed by [`COMPRESSED_FRONTEND`].
-//!
-//! Node modules are installed into the `packages/wizard` top level dir (and are `.gitignore`d)
+//! The build script `build.rs` installs frontend dependencies through the root pnpm workspace,
+//! builds the frontend, and compresses it so it can be accessed by [`COMPRESSED_FRONTEND`].
 
 use std::{
     io::Cursor,
