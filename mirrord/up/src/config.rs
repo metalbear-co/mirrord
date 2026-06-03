@@ -1,6 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Not,
+};
 
 use clap::{ValueEnum, builder::PossibleValue};
+use mirrord_analytics::{Analytics, CollectAnalytics};
 use mirrord_config::{
     LayerConfig, LayerFileConfig,
     config::{ConfigContext, EnvKey, MirrordConfig},
@@ -181,6 +185,11 @@ pub struct SubprocessCfg {
 }
 
 impl UpConfig {
+    /// True unless the user opted out of telemetry.
+    pub fn telemetry_enabled(&self) -> bool {
+        self.common.telemetry.unwrap_or(true)
+    }
+
     /// Produces an iterator of [`SubprocessCfg`]s, one per service defined in the configuration.
     pub fn service_configs<'a>(
         self,
@@ -199,6 +208,84 @@ impl UpConfig {
                 run,
             }
         })
+    }
+}
+
+impl CollectAnalytics for &CommonConfig {
+    fn collect_analytics(&self, analytics: &mut Analytics) {
+        let CommonConfig {
+            accept_invalid_certificates,
+            operator,
+            telemetry,
+        } = self;
+
+        analytics.add(
+            "accept_invalid_certificates",
+            accept_invalid_certificates.is_some(),
+        );
+        analytics.add("operator", operator.is_some());
+        analytics.add("telemetry", telemetry.is_some());
+    }
+}
+
+impl CollectAnalytics for &UpConfig {
+    fn collect_analytics(&self, analytics: &mut Analytics) {
+        analytics.add("num_services", self.services.len());
+        analytics.add("common_fields_used", &self.common);
+
+        let mut count_target: u32 = 0;
+        let mut count_env: u32 = 0;
+        let mut count_default_mode: u32 = 0;
+        let mut count_http_filter: u32 = 0;
+        let mut count_ignore_ports: u32 = 0;
+
+        let mut count_exec: u32 = 0;
+        let mut count_container: u32 = 0;
+
+        for svc in self.services.values() {
+            let ServiceConfig {
+                target,
+                env,
+                default_mode,
+                http_filter,
+                ignore_ports,
+                run,
+            } = svc;
+
+            if *target != TargetConfig::default() {
+                count_target += 1;
+            }
+            if *env != EnvConfig::default() {
+                count_env += 1;
+            }
+            if *default_mode != ServiceMode::default() {
+                count_default_mode += 1;
+            }
+            if http_filter.is_filter_set() {
+                count_http_filter += 1;
+            }
+            if ignore_ports.is_empty().not() {
+                count_ignore_ports += 1;
+            }
+
+            match run.r#type {
+                RunType::Exec => count_exec += 1,
+                RunType::Container => count_container += 1,
+            }
+        }
+
+        let mut config_fields_used = Analytics::default();
+        config_fields_used.add("target", count_target);
+        config_fields_used.add("env", count_env);
+        config_fields_used.add("default_mode", count_default_mode);
+        config_fields_used.add("http_filter", count_http_filter);
+        config_fields_used.add("ignore_ports", count_ignore_ports);
+        analytics.add("config_fields_used", config_fields_used);
+
+        let mut run_types = Analytics::default();
+        run_types.add("exec", count_exec);
+        run_types.add("container", count_container);
+        analytics.add("run_types", run_types);
     }
 }
 
@@ -389,5 +476,113 @@ mod tests {
             "#,
         );
         assert!(result.is_err());
+    }
+
+    // -- Analytics --
+
+    fn collect(config: &UpConfig) -> serde_json::Value {
+        let mut analytics = Analytics::default();
+        config.collect_analytics(&mut analytics);
+        serde_json::to_value(&analytics).unwrap()
+    }
+
+    #[test]
+    fn analytics_minimal_config_reports_zero_counts() {
+        let config = parse(
+            r#"
+            services:
+              svc:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        assert_json_diff::assert_json_eq!(
+            collect(&config),
+            serde_json::json!({
+                "num_services": 1,
+                "common_fields_used": {
+                    "accept_invalid_certificates": false,
+                    "operator": false,
+                    "telemetry": false,
+                },
+                "config_fields_used": {
+                    "target": 0,
+                    "env": 0,
+                    "default_mode": 0,
+                    "http_filter": 0,
+                    "ignore_ports": 0,
+                },
+                "run_types": {
+                    "exec": 1,
+                    "container": 0,
+                },
+            }),
+        );
+    }
+
+    #[test]
+    fn analytics_common_fields_tracked_individually() {
+        let config = parse(
+            r#"
+            common:
+              accept_invalid_certificates: true
+              telemetry: false
+            services:
+              svc:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let result = collect(&config);
+        assert_eq!(
+            result["common_fields_used"]["accept_invalid_certificates"],
+            true
+        );
+        assert_eq!(result["common_fields_used"]["operator"], false);
+        assert_eq!(result["common_fields_used"]["telemetry"], true);
+    }
+
+    #[test]
+    fn analytics_service_fields_aggregated_across_services() {
+        // Three services: svc-a sets target + ignore_ports, svc-b sets env +
+        // http_filter, svc-c sets target only. Counts should reflect the per-field
+        // population density (e.g. `target: 2`, `http_filter: 1`).
+        let config = parse(
+            r#"
+            services:
+              svc-a:
+                target:
+                  path: "deployment/web-app"
+                ignore_ports: [8080]
+                run:
+                  command: ["echo"]
+              svc-b:
+                env:
+                  override:
+                    KEY: "value"
+                http_filter:
+                  header_filter: "x-custom: foo"
+                run:
+                  type: container
+                  command: ["docker", "run", "img"]
+              svc-c:
+                target:
+                  path: "deployment/other"
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let result = collect(&config);
+        assert_eq!(result["num_services"], 3);
+        assert_eq!(result["config_fields_used"]["target"], 2);
+        assert_eq!(result["config_fields_used"]["env"], 1);
+        assert_eq!(result["config_fields_used"]["http_filter"], 1);
+        assert_eq!(result["config_fields_used"]["ignore_ports"], 1);
+        assert_eq!(result["config_fields_used"]["default_mode"], 0);
+        assert_eq!(result["run_types"]["exec"], 2);
+        assert_eq!(result["run_types"]["container"], 1);
     }
 }

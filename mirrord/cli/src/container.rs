@@ -10,7 +10,7 @@ use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, config::ConfigContext,
     external_proxy::MIRRORD_EXTPROXY_TLS_SERVER_NAME,
 };
-use mirrord_progress::Progress;
+use mirrord_progress::{Progress, messages::SESSION_READY_MESSAGE};
 use mirrord_tls_util::SecureChannelSetup;
 pub use sidecar::IntproxySidecarError;
 use tokio::process::Command;
@@ -315,7 +315,7 @@ pub(crate) async fn container_command<P: Progress>(
             ));
         }
         None => {
-            progress.success(None);
+            progress.success(Some(SESSION_READY_MESSAGE));
 
             let mut runtime_command = Command::new(&binary);
             runtime_command

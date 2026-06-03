@@ -11,6 +11,18 @@ pub mod preview;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Environment variable carrying the `mirrord up` correlation id down to child
+/// mirrord sessions.
+pub const MIRRORD_UP_CORRELATION_ID_ENV: &str = "MIRRORD_UP_CORRELATION_ID";
+
+/// Reads the [`MIRRORD_UP_CORRELATION_ID_ENV`] correlation id, if this process
+/// was spawned by `mirrord up`.
+pub fn read_correlation_id_from_env() -> Option<Uuid> {
+    std::env::var(MIRRORD_UP_CORRELATION_ID_ENV)
+        .ok()
+        .and_then(|value| value.parse().ok())
+}
+
 /// Possible values for analytic data
 /// This is strict so we won't send sensitive data by accident.
 /// (Don't add strings)
@@ -212,6 +224,27 @@ pub trait Reporter: Sized {
     fn has_error(&self) -> bool;
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ReportTarget {
+    ClientSession,
+    UpSession,
+}
+
+/// Header the client sets to tell the analytics-server which event a report is.
+/// The server maps known values to PostHog event names and treats anything
+/// unrecognized (or missing) as a client session.
+pub const EVENT_KIND_HEADER: &str = "x-mirrord-event-kind";
+
+impl ReportTarget {
+    /// The [`EVENT_KIND_HEADER`] value sent for this target.
+    fn event_kind(self) -> &'static str {
+        match self {
+            ReportTarget::ClientSession => "client-session",
+            ReportTarget::UpSession => "up-session",
+        }
+    }
+}
+
 /// Due to the drop nature using tokio::spawn, runtime must be started.
 #[derive(Debug)]
 pub struct AnalyticsReporter {
@@ -222,6 +255,7 @@ pub struct AnalyticsReporter {
     start_instant: Instant,
     operator_properties: Option<AnalyticsOperatorProperties>,
     watch: drain::Watch,
+    target: ReportTarget,
 }
 
 impl AnalyticsReporter {
@@ -244,6 +278,7 @@ impl AnalyticsReporter {
             operator_properties: None,
             start_instant: Instant::now(),
             watch,
+            target: ReportTarget::ClientSession,
         }
     }
 
@@ -256,6 +291,24 @@ impl AnalyticsReporter {
         let mut reporter = AnalyticsReporter::new(enabled, execution_kind, watch, machine_id);
         reporter.error_only_send = true;
         reporter
+    }
+
+    /// Constructs a reporter that delivers to [`ReportTarget::UpSession`].
+    pub fn for_up_event(enabled: bool, watch: drain::Watch, machine_id: Uuid) -> Self {
+        let mut analytics = Analytics::default();
+        analytics.add("machine_id", machine_id);
+        analytics.add("is_ci", ci_info::is_ci());
+
+        AnalyticsReporter {
+            analytics,
+            error_only_send: false,
+            enabled,
+            error: None,
+            operator_properties: None,
+            start_instant: Instant::now(),
+            watch,
+            target: ReportTarget::UpSession,
+        }
     }
 
     fn as_report(&self) -> AnalyticsReport {
@@ -323,8 +376,9 @@ impl Drop for AnalyticsReporter {
         if self.enabled && (self.error.is_some() || !self.error_only_send) {
             let report = self.as_report();
             let watch = self.watch.clone();
+            let target = self.target;
             tokio::spawn(async move {
-                send_analytics(report).await;
+                send_analytics(report, target).await;
                 // hold clone of watch to prevent it from being dropped
                 // allowing our task to finish
                 drop(watch);
@@ -359,9 +413,14 @@ const ANALYTICS_ENDPOINT: &str = "https://analytics.metalbear.com/api/v1/event";
 
 /// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.com
 #[tracing::instrument(level = Level::TRACE)]
-async fn send_analytics(report: AnalyticsReport) {
+async fn send_analytics(report: AnalyticsReport, target: ReportTarget) {
     let client = reqwest::Client::new();
-    let res = client.post(ANALYTICS_ENDPOINT).json(&report).send().await;
+    let res = client
+        .post(ANALYTICS_ENDPOINT)
+        .header(EVENT_KIND_HEADER, target.event_kind())
+        .json(&report)
+        .send()
+        .await;
     if let Err(e) = res {
         info!("Failed to send analytics: {e}");
     }

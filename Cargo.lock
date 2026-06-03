@@ -5480,17 +5480,21 @@ dependencies = [
 name = "mirrord-up"
 version = "3.214.0"
 dependencies = [
+ "assert-json-diff",
  "clap",
  "inquire",
  "miette",
+ "mirrord-analytics",
  "mirrord-config",
  "mirrord-progress",
  "serde",
+ "serde_json",
  "serde_yaml",
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "thiserror 2.0.18",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

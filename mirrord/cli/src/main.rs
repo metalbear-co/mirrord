@@ -285,6 +285,7 @@ use extension::extension_exec;
 use extract::extract_library;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
+    read_correlation_id_from_env,
 };
 use mirrord_config::{
     LayerConfig,
@@ -300,7 +301,10 @@ use mirrord_config::{
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_operator::client::database_branches::resolve_branch_id;
-use mirrord_progress::{JsonProgress, Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
+use mirrord_progress::{
+    JsonProgress, Progress, ProgressTracker,
+    messages::{EXEC_CONTAINER_BINARY, SESSION_READY_MESSAGE},
+};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
 use operator::operator_command;
@@ -532,7 +536,7 @@ async fn run_process_with_mirrord<P: Progress>(
         .map(|(k, v)| CString::new(format!("{k}={v}")))
         .collect::<CliResult<Vec<_>, _>>()?;
 
-    progress.success(Some("Ready!"));
+    progress.success(Some(SESSION_READY_MESSAGE));
 
     // Foreground CI start command with no given log output location is treated same as mirrord exec
     // upon this point, while background CI start command spawns a child process
@@ -835,6 +839,9 @@ async fn exec(
         user_data.machine_id(),
     );
     (&config).collect_analytics(analytics.get_mut());
+    if let Some(correlation_id) = read_correlation_id_from_env() {
+        analytics.get_mut().add("correlation_id", correlation_id);
+    }
 
     analytics
         .get_mut()
@@ -977,7 +984,7 @@ async fn port_forward(
 
     let connection_2 = agent_conn.connection;
 
-    progress.success(Some("Ready!"));
+    progress.success(Some(SESSION_READY_MESSAGE));
     let _ = tokio::try_join!(
         async {
             if !args.port_mapping.is_empty() {
@@ -1172,7 +1179,7 @@ fn main() -> miette::Result<()> {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
             Commands::Preview(args) => preview::preview_command(*args, watch, &user_data).await?,
-            Commands::Up(args) => up::up_command(*args).await?,
+            Commands::Up(args) => up::up_command(*args, watch, &user_data).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             #[cfg(feature = "wizard")]
             Commands::Wizard(args) => {
