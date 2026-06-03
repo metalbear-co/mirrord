@@ -1108,7 +1108,10 @@ jobs:
 
       - name: Update WinGet manifest
         env:
+          # Token for the metalbear-co/winget-pkgs fork. Used both to push the
+          # update branch to the fork and (via gh) to open the PR upstream.
           WINGET_TOKEN: ${{ steps.winget_app_token.outputs.token }}
+          GH_TOKEN: ${{ steps.winget_app_token.outputs.token }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -1118,6 +1121,9 @@ jobs:
           # Construct MSI download URL from GitHub release
           $installerUrl = "https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord.msi"
           $packageId = "MetalBear.mirrord"
+          $fork = "metalbear-co/winget-pkgs"
+          $upstream = "microsoft/winget-pkgs"
+          $branch = "mirrord-$version"
 
           Write-Host "Updating WinGet manifest for package '$packageId' version '$version'"
           Write-Host "Installer URL: $installerUrl"
@@ -1127,31 +1133,76 @@ jobs:
             throw "Cubby GitHub App token is not set. Cannot publish to WinGet."
           }
 
-          # Download wingetcreate
+          # Download wingetcreate and generate the updated manifests locally
+          # (no --submit; we drive the branch + PR ourselves below).
           Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
 
-          # Update manifest
           $output = & .\wingetcreate.exe update $packageId `
             --version $version `
             --urls $installerUrl `
-            --submit `
+            --out generated `
             --token $env:WINGET_TOKEN 2>&1
 
           $exitCode = $LASTEXITCODE
-
-          # Display output
           $output | ForEach-Object { Write-Host $_ }
 
-          # Check for errors
           if ($exitCode -ne 0) {
             if ($output -match "was not found") {
-              throw "WinGet package '$packageId' was not found in microsoft/winget-pkgs. Create the initial package manually first."
+              throw "WinGet package '$packageId' was not found in $upstream. Create the initial package manually first."
             } else {
               throw "wingetcreate update failed with exit code $exitCode"
             }
           }
 
-          Write-Host "Successfully updated WinGet manifest"
+          # Locate the manifest directory wingetcreate produced for this version.
+          $manifestSrc = (Get-ChildItem -Path generated -Recurse -Directory |
+            Where-Object { $_.Name -eq $version } | Select-Object -First 1).FullName
+          if (-not $manifestSrc) {
+            throw "Could not find generated manifests for version $version under 'generated'"
+          }
+          Write-Host "Generated manifests at $manifestSrc"
+
+          # Clone our fork and branch off the latest upstream master so the PR
+          # carries only this version's changes.
+          git clone "https://x-access-token:$env:WINGET_TOKEN@github.com/$fork.git" winget-pkgs
+          if ($LASTEXITCODE -ne 0) { throw "Failed to clone fork $fork" }
+
+          Push-Location winget-pkgs
+          git config user.name "Cubby"
+          git config user.email "hi@metalbear.com"
+
+          git remote add upstream "https://github.com/$upstream.git"
+          git fetch upstream master
+          if ($LASTEXITCODE -ne 0) { throw "Failed to fetch upstream master" }
+
+          git checkout -b $branch upstream/master
+          if ($LASTEXITCODE -ne 0) { throw "Failed to create branch $branch" }
+
+          # Drop the generated manifests into the WinGet package path.
+          $manifestDest = "manifests/m/MetalBear/mirrord/$version"
+          New-Item -ItemType Directory -Force -Path $manifestDest | Out-Null
+          Copy-Item "$manifestSrc/*" $manifestDest -Recurse -Force
+
+          git add $manifestDest
+          git commit -m "New version: $packageId version $version"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to commit manifests" }
+
+          # Push the branch to our fork.
+          git push --force origin $branch
+          if ($LASTEXITCODE -ne 0) { throw "Failed to push branch $branch to $fork" }
+
+          # Open a PR from the fork branch to upstream microsoft/winget-pkgs.
+          $forkOwner = $fork.Split("/")[0]
+          gh pr create `
+            --repo $upstream `
+            --base master `
+            --head "${forkOwner}:${branch}" `
+            --title "New version: $packageId version $version" `
+            --body "Automated update of $packageId to version $version. Submitted by mirrord release workflow."
+          if ($LASTEXITCODE -ne 0) { throw "Failed to open PR to $upstream" }
+
+          Pop-Location
+          Write-Host "Successfully opened WinGet manifest PR for version $version"
 
   update_latest:
     needs: [validate_release_request, release_homebrew, check_for_new_docs]
