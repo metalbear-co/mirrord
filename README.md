@@ -11,7 +11,7 @@
 [![X Follow](https://img.shields.io/twitter/follow/metalbear?style=social)](https://x.com/metalbear)
 
 [mirrord runs a process against a live Kubernetes cluster](https://metalbear.com/mirrord/).
-The process runs wherever you (or your AI agent) launch it, and mirrord routes its traffic, files, and environment variables through the cluster so it behaves as if it were running inside it.
+The process runs wherever you (or your AI agent) launch it, on your machine, a CI runner, or a cloud agent's environment, and mirrord routes its traffic, files, and environment variables through the cluster so it behaves as if it were running inside it.
 
 That covers both halves of the software development loop. Read live cluster context while writing the code (real env vars, real service responses, real queue contents)
 so the change is grounded in what's actually deployed. Then run the code against those same services and data to confirm it works end-to-end.
