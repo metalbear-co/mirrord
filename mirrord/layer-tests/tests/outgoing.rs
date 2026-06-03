@@ -2,6 +2,7 @@
 
 use std::{
     net::{Ipv4Addr, SocketAddr},
+    ops::Not,
     path::Path,
     time::Duration,
 };
@@ -9,11 +10,12 @@ use std::{
 #[cfg(unix)]
 use mirrord_protocol::outgoing::udp::{DaemonUdpOutgoing, LayerUdpOutgoing};
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage,
+    ClientMessage, ConnectionId, DaemonMessage,
     outgoing::{
-        DaemonRead, LayerConnectV2, LayerWrite, SocketAddress,
+        DaemonRead, LayerClose, LayerConnectV2, LayerWrite, SocketAddress,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
+    uid::Uid,
 };
 use rstest::rstest;
 
@@ -102,54 +104,84 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, config_dir: &Path) {
         config_path
     });
 
-    let (mut test_process, mut intproxy) = Application::RustOutgoingTcp {
-        non_blocking: false,
-    }
-    .start_process(vec![], config.as_deref())
-    .await;
+    let (mut test_process, mut intproxy) = Application::RustOutgoingTcp { non_blocking: true }
+        .start_process(vec![], config.as_deref())
+        .await;
 
     let peers = RUST_OUTGOING_PEERS
         .split(',')
         .map(|s| s.parse::<SocketAddr>().unwrap())
         .collect::<Vec<_>>();
 
-    for (connection_id, peer) in peers.into_iter().enumerate() {
-        let connection_id = connection_id as u64;
-
+    // Verify that intproxy sends concurrent connect requests.
+    // The test app uses a single-threaded runtime, so this is enough to check whether the connect
+    // emulation really is non-blocking.
+    let mut received_connects: Vec<(SocketAddr, ConnectionId, Uid)> =
+        Vec::with_capacity(peers.len());
+    while received_connects.len() < peers.len() {
         let (uid, addr) = intproxy.recv_tcp_connect().await;
-        assert_eq!(addr, peer);
+        if peers.contains(&addr).not() {
+            panic!("unexpected connect request to {addr}");
+        }
+        if received_connects
+            .iter()
+            .any(|(prev_addr, _, _)| *prev_addr == addr)
+        {
+            panic!("duplicate connect request to {addr}");
+        }
+        let connection_id = received_connects.len() as ConnectionId;
+        received_connects.push((addr, connection_id, uid));
+    }
+    for (addr, id, uid) in &received_connects {
         intproxy
-            .send_tcp_connect_ok(
-                uid,
-                connection_id,
-                addr,
-                RUST_OUTGOING_LOCAL.parse().unwrap(),
-            )
+            .send_tcp_connect_ok(*uid, *id, *addr, RUST_OUTGOING_LOCAL.parse().unwrap())
             .await;
+    }
 
+    let mut received_data: Vec<ConnectionId> = Vec::with_capacity(peers.len());
+    while received_data.len() < peers.len() {
         let msg = intproxy.recv().await;
-        let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
-            connection_id: returned_connection_id,
-            bytes,
-        })) = msg
-        else {
-            panic!("Invalid message received from layer: {msg:?}");
-        };
-        assert_eq!(returned_connection_id, connection_id);
-
-        intproxy
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
-                DaemonRead {
+        match msg {
+            ClientMessage::TcpOutgoing(message) => match message {
+                LayerTcpOutgoing::Write(LayerWrite {
                     connection_id,
                     bytes,
-                },
-            ))))
-            .await;
-        intproxy
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(
-                connection_id,
-            )))
-            .await;
+                }) => {
+                    if received_connects
+                        .iter()
+                        .any(|(_, id, _)| *id == connection_id)
+                        .not()
+                    {
+                        panic!("unexpected write to {connection_id}");
+                    }
+                    if received_data.contains(&connection_id) {
+                        panic!("duplicate write to {connection_id}");
+                    }
+                    received_data.push(connection_id);
+
+                    intproxy
+                        .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
+                            DaemonRead {
+                                connection_id,
+                                bytes,
+                            },
+                        ))))
+                        .await;
+                    intproxy
+                        .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(
+                            connection_id,
+                        )))
+                        .await;
+                }
+                LayerTcpOutgoing::Close(LayerClose { connection_id }) => {
+                    if received_data.contains(&connection_id).not() {
+                        panic!("unexpected close of {connection_id}");
+                    }
+                }
+                other => panic!("unexpected client message {other:?}"),
+            },
+            other => panic!("unexpected client message {other:?}"),
+        }
     }
 
     test_process.wait_assert_success().await;

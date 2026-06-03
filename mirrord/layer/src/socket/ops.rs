@@ -241,7 +241,7 @@ pub(super) fn bind(
     #[cfg(target_os = "macos")]
     {
         let experimental = crate::setup().experimental();
-        if experimental.disable_reuseaddr {
+        if experimental.disable_reuseaddr.unwrap_or_default() {
             let fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
             if let Err(e) =
                 nix::sys::socket::setsockopt(&fd, nix::sys::socket::sockopt::ReuseAddr, &false)

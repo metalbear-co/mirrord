@@ -633,7 +633,6 @@ pub(crate) enum CliError {
     Up(#[from] UpCliError),
 
     /// Errors produced by the `mirrord ui` command.
-    #[cfg(unix)]
     #[error("Session monitor UI error: {0}")]
     #[diagnostic(help("Check that no other process is using the port and try again."))]
     UiError(String),
