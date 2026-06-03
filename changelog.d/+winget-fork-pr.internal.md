@@ -1,0 +1,1 @@
+Release workflow now pushes the WinGet manifest update to a branch in our `winget-pkgs` fork and opens a PR from it to upstream `microsoft/winget-pkgs`, instead of submitting via `wingetcreate --submit` directly.
