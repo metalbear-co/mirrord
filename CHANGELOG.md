@@ -8,6 +8,32 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.214.0](https://github.com/metalbear-co/mirrord/tree/3.214.0) - 2026-06-03
+
+
+### Added
+
+- Preview environments can now control the number of pod replicas in a session
+  through the new `feature.preview.replicas` option.
+- `mirrord ui` now works on Windows, using a named pipe restricted to the
+  current user instead of the mode 0o600 unix socket.
+
+
+### Changed
+
+- Refreshed experimental feature configuration default values.
+  `hook_rename`, `dns_permission_error_fatal`, `force_hook_connect` are
+  removed.
+  `non_blocking_tcp_connect` and `sip_utils` are now `true` by default and
+  marked as deprecated.
+  `disable_reuseaddr` is set to `true` by default for OSS users.
+
+
+### Fixed
+
+- Fix so if db-branching resource name is generated will not exceed the 63
+  character limit of k8s.
+
 ## [3.213.0](https://github.com/metalbear-co/mirrord/tree/3.213.0) - 2026-05-28
 
 
