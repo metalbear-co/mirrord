@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-05-29T00:00:00.000Z
+lastmod: 2026-06-03T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -568,22 +568,14 @@ correctly. This probably should be on by default but we want to gradually roll i
 <https://github.com/metalbear-co/mirrord/issues/2819>
 This option applies only on macOS.
 
+Defaults to `true` in OSS.
+Defaults to `false` in mfT.
+
 ### _experimental_ dlopen_cgo {#experimental-dlopen_cgo}
 
 Useful when the user's application loads a c-shared golang library dynamically.
 
 Defaults to `false`.
-
-### _experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}
-
-Whether to terminate the session when a permission denied error
-occurs during DNS resolution. This error often means that the Kubernetes cluster is
-hardened, and the mirrord-agent is not fully functional without `agent.privileged`
-enabled.
-
-Defaults to `true`
-
-DEPRECATED, WILL BE REMOVED
 
 ### _experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}
 
@@ -591,28 +583,9 @@ Enables exec hooks on Linux. Enable Linux hooks can fix issues when the applicat
 shares sockets with child commands (e.g Python web servers with reload),
 but the feature is not stable and may cause other issues.
 
-### _experimental_ force_hook_connect {#experimental-force_hook_connect}
-
-Forces hooking all instances of the connect function.
-In very niche cases the connect function has multiple exports and this flag
-makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>
-
-Defaults to `true`
-
-DEPRECATED, WILL BE REMOVED
-
 ### _experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}
 
 Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.
-
-### _experimental_ hook_rename {#experimental-hook_rename}
-
-Enables hooking the `rename` function.
-
-Useful if you need file remapping and your application uses `rename`, i.e. `php-fpm`,
-`twig`, to create and rename temporary files.
-
-DEPRECATED, WILL BE REMOVED
 
 ### _experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}
 
@@ -672,8 +645,7 @@ sitting behind a TCP proxy. Most "standard" apps (e.g. HTTP
 clients) should be unaffected, but custom implementations of
 other protocols may not.
 
-Defaults to `true` in OSS.
-Defaults to `false` in mfT.
+DEPRECATED, WILL BE REMOVED
 
 ### _experimental_ sip_log_destination {#experimental-sip_log_destination}
 
@@ -686,8 +658,7 @@ Extract pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and u
 them in place of SIP-patching the originals.
 This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 
-Defaults to `true` in OSS.
-Defaults to `false` in mfT.
+DEPRECATED, WILL BE REMOVED
 
 ### _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
 
@@ -2986,6 +2957,10 @@ If the session hasn't reached `Ready` within this time, the CLI deletes it.
 
 Container image to run in the preview pod.
 The image must be pre-built and pushed to a registry accessible by the cluster.
+
+#### feature.preview.replicas {#feature-preview-replicas}
+
+Number of preview pods to deploy.
 
 #### feature.preview.ttl_mins {#feature-preview-ttl_mins}
 
