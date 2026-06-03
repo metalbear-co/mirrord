@@ -52,15 +52,21 @@ impl ResourceGuard {
         delete_on_fail: bool,
         config: Config,
     ) -> Result<(ResourceGuard, K), Error> {
-        let name = data.meta().name.clone().unwrap();
-        let namespace = data
+        println!(
+            "Creating {} `{}`: {data:?}",
+            K::kind(&()),
+            data.meta().name.as_deref().unwrap_or("?")
+        );
+        let created = api.create(&PostParams::default(), data).await?;
+        // Use the server response to get name and namespace: the input `data` may omit namespace
+        // (relying on the Api scope to route the request), which would cause cleanup to target the
+        // wrong namespace.
+        let name = created.meta().name.clone().unwrap();
+        let namespace = created
             .meta()
             .namespace
             .clone()
             .unwrap_or("default".to_string());
-
-        println!("Creating {} `{name}`: {data:?}", K::kind(&()));
-        let created = api.create(&PostParams::default(), data).await?;
         println!("Created {} `{name}`", K::kind(&()));
 
         let deleter = async move {
