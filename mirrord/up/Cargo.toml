@@ -27,6 +27,7 @@ strum.workspace = true
 tokio = { workspace = true, features = ["process"] }
 clap.workspace = true
 inquire.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

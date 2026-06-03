@@ -285,6 +285,7 @@ use extension::extension_exec;
 use extract::extract_library;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
+    read_correlation_id_from_env,
 };
 use mirrord_config::{
     LayerConfig,
@@ -835,6 +836,9 @@ async fn exec(
         user_data.machine_id(),
     );
     (&config).collect_analytics(analytics.get_mut());
+    if let Some(correlation_id) = read_correlation_id_from_env() {
+        analytics.get_mut().add("correlation_id", correlation_id);
+    }
 
     analytics
         .get_mut()

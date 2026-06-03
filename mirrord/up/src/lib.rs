@@ -11,6 +11,7 @@ use std::{
 };
 
 use miette::Diagnostic;
+use mirrord_analytics::MIRRORD_UP_CORRELATION_ID_ENV;
 use mirrord_config::config::{ConfigError, EnvKey};
 use thiserror::Error;
 mod config;
@@ -24,6 +25,7 @@ use tokio::{
     process::Command,
     task::{JoinError, JoinSet},
 };
+use uuid::Uuid;
 
 /// Environment variable used to pass the resolved configuration to child mirrord processes.
 pub const RESOLVED_CONFIG_ENV: &str = "MIRRORD_UP_RESOLVED_CONFIG";
@@ -70,7 +72,7 @@ pub fn load_up_config(path: &PathBuf) -> Result<UpConfig, UpError> {
 /// the session.
 ///
 /// Returns when one of the child mirrord sessions exits.
-pub async fn run(up_config: UpConfig, key: EnvKey) -> Result<(), UpError> {
+pub async fn run(up_config: UpConfig, key: EnvKey, correlation_id: Uuid) -> Result<(), UpError> {
     let commands: Vec<_> = up_config
         .service_configs(&key)
         .map(|config| {
@@ -85,6 +87,7 @@ pub async fn run(up_config: UpConfig, key: EnvKey) -> Result<(), UpError> {
             let mut cmd = Command::new(std::env::current_exe()?);
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
                 .env(MIRRORD_PROGRESS_ENV, "simple")
+                .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
                 .arg(Into::<&'static str>::into(run.r#type))
                 .arg("--")
                 .args(run.command)

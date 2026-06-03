@@ -7,6 +7,7 @@ use mirrord_analytics::{Analytics, AnalyticsReporter, CollectAnalytics, Reporter
 use mirrord_config::config::EnvKey;
 use mirrord_up::{InitError, UpError, load_up_config, run_wizard};
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::{
     config::{UpArgs, UpSubcommand},
@@ -75,7 +76,12 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     };
     analytics.get_mut().add("has_custom_key", key.is_provided());
 
-    Ok(mirrord_up::run(up_config, key).await?)
+    // Generated once per invocation and propagated to every child session so
+    // their `client_session_v1` events can be joined back to this event.
+    let correlation_id = Uuid::new_v4();
+    analytics.get_mut().add("correlation_id", correlation_id);
+
+    Ok(mirrord_up::run(up_config, key, correlation_id).await?)
 }
 
 /// Coarse bucket assigned to a failed `mirrord up` invocation for analytics.

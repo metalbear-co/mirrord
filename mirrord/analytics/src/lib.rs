@@ -11,6 +11,18 @@ pub mod preview;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Environment variable carrying the `mirrord up` correlation id down to child
+/// mirrord sessions.
+pub const MIRRORD_UP_CORRELATION_ID_ENV: &str = "MIRRORD_UP_CORRELATION_ID";
+
+/// Reads the [`MIRRORD_UP_CORRELATION_ID_ENV`] correlation id, if this process
+/// was spawned by `mirrord up`.
+pub fn read_correlation_id_from_env() -> Option<Uuid> {
+    std::env::var(MIRRORD_UP_CORRELATION_ID_ENV)
+        .ok()
+        .and_then(|value| value.parse().ok())
+}
+
 /// Possible values for analytic data
 /// This is strict so we won't send sensitive data by accident.
 /// (Don't add strings)
