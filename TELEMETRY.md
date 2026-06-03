@@ -12,6 +12,12 @@ Types of data sent:
 
 When there's an error, we send the name of the error (out of a hard-coded list, so there's no risk of any sensitive data being sent).
 
+## `mirrord up`
+
+`mirrord up` emits one additional anonymous event per invocation summarizing the multi-service configuration: the number of services, which YAML fields are populated and across how many services, which run types (`exec` / `container`) are used, whether a custom `--key` was provided, the success/failure outcome, and (on failure) a coarse error category (`config_validation` / `service_crash` / `internal_error`). No service names, config values, target paths, or command arguments are included.
+
+The opt-out below disables this event as well; setting `common.telemetry: false` in `mirrord-up.yaml` is honored the same way as `telemetry: false` in a regular mirrord config.
+
 ## Disabling
 
 Telemetry can be disabled by specifying the following in the mirrord config file:

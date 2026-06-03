@@ -21,7 +21,9 @@ use std::{
     time::Duration,
 };
 
-use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
+use mirrord_analytics::{
+    AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
+};
 use mirrord_config::{
     LayerConfig, LayerFileConfig,
     config::{ConfigContext, MirrordConfig},
@@ -243,6 +245,9 @@ pub(crate) async fn proxy(
         )
     };
     (&config).collect_analytics(analytics.get_mut());
+    if let Some(correlation_id) = read_correlation_id_from_env() {
+        analytics.get_mut().add("correlation_id", correlation_id);
+    }
 
     let operator_session_id = if let AgentConnectInfo::Operator(session) = &agent_connect_info {
         Some(session.id())
