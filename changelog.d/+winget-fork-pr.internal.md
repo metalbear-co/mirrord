@@ -1,1 +1,1 @@
-Release workflow now pushes the WinGet manifest update to a branch in our `winget-pkgs` fork and opens a PR from it to upstream `microsoft/winget-pkgs`, instead of submitting via `wingetcreate --submit` directly.
+Fixed the WinGet release step to authenticate `wingetcreate --submit` with a classic PAT (`BREW_GITHUB_PAT`) instead of the Cubby GitHub App token, which cannot open a PR against `microsoft/winget-pkgs`.
