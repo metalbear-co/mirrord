@@ -1,0 +1,1 @@
+Fixed the WinGet release step to authenticate `wingetcreate --submit` with a classic PAT (`BREW_GITHUB_PAT`) instead of the Cubby GitHub App token, which cannot open a PR against `microsoft/winget-pkgs`.
