@@ -653,6 +653,7 @@ where
             } = UnifiedDatabaseBranchParams::new(
                 &mut db_branches,
                 &target,
+                target_namespace,
                 layer_config.key.as_str(),
                 &subtask,
             )?;

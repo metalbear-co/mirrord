@@ -920,8 +920,18 @@ impl GeneratedName {
 
 /// Create the future [`BranchDatabase`]'s name,
 ///
+/// A user-specified id gets the target-independent `deterministic_name` so that two
+/// workloads asking for the same branch id resolve to the same resource and reuse it via
+/// the 409 conflict path instead of each creating its own branch. A generated id has no
+/// sharing intent, so it uses `generateName` from `name_prefix`, which keeps the target
+/// workload name for readability.
+///
 /// Important: Make sure that the returning value will not exceed the 63 character limit of k8s.
-fn generate_branch_name(name_prefix: String, database_id: &BranchDatabaseId) -> GeneratedName {
+fn generate_branch_name(
+    name_prefix: String,
+    deterministic_name: String,
+    database_id: &BranchDatabaseId,
+) -> GeneratedName {
     match database_id {
         BranchDatabaseId::Generated(_) if name_prefix.len() <= 63 => {
             GeneratedName::Generate(name_prefix)
@@ -934,25 +944,22 @@ fn generate_branch_name(name_prefix: String, database_id: &BranchDatabaseId) -> 
 
             GeneratedName::Generate(format!("{:x}", prefix_hasher.finish()))
         }
-        BranchDatabaseId::Specified(branch_id) => {
-            use std::hash::{Hash, Hasher};
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            branch_id.hash(&mut hasher);
-            let hash = format!("{:x}", hasher.finish());
-
-            // 62 and not 63 because of the "-" name_prefix and hash in the template.
-            let name = if name_prefix.len() + hash.len() <= 62 {
-                format!("{name_prefix}-{hash}")
-            } else {
-                let mut prefix_hasher = std::collections::hash_map::DefaultHasher::new();
-                name_prefix.hash(&mut prefix_hasher);
-
-                format!("{:x}-{hash}", prefix_hasher.finish())
-            };
-
-            GeneratedName::Explicit(name)
-        }
+        BranchDatabaseId::Specified(_) => GeneratedName::Explicit(deterministic_name),
     }
+}
+
+/// Build the target-independent branch resource name for a user-specified id.
+///
+/// The id can contain characters that are not valid in a Kubernetes resource name, so it
+/// is hashed. The target namespace is part of the hash so that, in multi-cluster mode where
+/// every branch lives in the single operator namespace, two different target namespaces
+/// using the same id never collide. The result stays well within the 63 character limit:
+/// `mirrord-` + dialect + `-branch-` + a 16 character hash.
+fn deterministic_branch_name(dialect: &str, target_namespace: &str, id: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (target_namespace, id).hash(&mut hasher);
+    format!("mirrord-{dialect}-branch-{:x}", hasher.finish())
 }
 
 /// Create unified branch databases and wait for their readiness.
@@ -978,7 +985,8 @@ pub async fn create_branches<P: Progress>(
             Some(params.annotations)
         };
 
-        let (name, generate_name) = generate_branch_name(params.name_prefix, &id).into_parts();
+        let (name, generate_name) =
+            generate_branch_name(params.name_prefix, params.deterministic_name, &id).into_parts();
 
         let branch = BranchDatabase {
             metadata: ObjectMeta {
@@ -1274,6 +1282,7 @@ impl UnifiedDatabaseBranchParams {
     pub fn new<P: Progress>(
         config: &mut DatabaseBranchesConfig,
         target: &Target,
+        target_namespace: &str,
         session_key: &str,
         progress: &P,
     ) -> Result<Self, OperatorApiError> {
@@ -1304,6 +1313,7 @@ impl UnifiedDatabaseBranchParams {
                     id.as_ref(),
                     c,
                     target,
+                    target_namespace,
                     &session_target,
                     literal_values,
                 ),
@@ -1311,6 +1321,7 @@ impl UnifiedDatabaseBranchParams {
                     id.as_ref(),
                     c,
                     target,
+                    target_namespace,
                     &session_target,
                     literal_values,
                 ),
@@ -1318,6 +1329,7 @@ impl UnifiedDatabaseBranchParams {
                     id.as_ref(),
                     c,
                     target,
+                    target_namespace,
                     &session_target,
                     literal_values,
                 ),
@@ -1325,6 +1337,7 @@ impl UnifiedDatabaseBranchParams {
                     id.as_ref(),
                     c,
                     target,
+                    target_namespace,
                     &session_target,
                     literal_values,
                 ),
@@ -1347,7 +1360,12 @@ impl UnifiedDatabaseBranchParams {
 
 #[derive(Debug, Clone)]
 pub struct UnifiedBranchParams {
+    /// Prefix for `generateName`, used only for a branch with a generated id. It keeps the
+    /// target workload name so the random resource name stays readable.
     pub name_prefix: String,
+    /// Target-independent resource name used for a branch with a user-specified id, so two
+    /// workloads sharing the same id map to the same resource and reuse one branch.
+    pub deterministic_name: String,
     pub labels: BTreeMap<String, String>,
     pub annotations: BTreeMap<String, String>,
     pub spec: BranchDatabaseSpec,
@@ -1359,10 +1377,12 @@ impl UnifiedBranchParams {
         id: &str,
         config: &PgBranchConfig,
         target: &Target,
+        target_namespace: &str,
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("pg", target_namespace, id);
         let connection_source = convert_connection_source(&config.base.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
@@ -1386,6 +1406,7 @@ impl UnifiedBranchParams {
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
         Self {
             name_prefix,
+            deterministic_name,
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -1397,10 +1418,12 @@ impl UnifiedBranchParams {
         id: &str,
         config: &MysqlBranchConfig,
         target: &Target,
+        target_namespace: &str,
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("mysql", target_namespace, id);
         let connection_source = convert_connection_source(&config.base.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         let spec = BranchDatabaseSpec {
@@ -1422,6 +1445,7 @@ impl UnifiedBranchParams {
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
         Self {
             name_prefix,
+            deterministic_name,
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -1433,10 +1457,12 @@ impl UnifiedBranchParams {
         id: &str,
         config: &MongodbBranchConfig,
         target: &Target,
+        target_namespace: &str,
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("mongodb", target_namespace, id);
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_string(),
@@ -1456,6 +1482,7 @@ impl UnifiedBranchParams {
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
         Self {
             name_prefix,
+            deterministic_name,
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -1467,10 +1494,12 @@ impl UnifiedBranchParams {
         id: &str,
         config: &mirrord_config::feature::database_branches::MssqlBranchConfig,
         target: &Target,
+        target_namespace: &str,
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-mssql-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("mssql", target_namespace, id);
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_string(),
@@ -1490,6 +1519,7 @@ impl UnifiedBranchParams {
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
         Self {
             name_prefix,
+            deterministic_name,
             labels,
             annotations: BTreeMap::new(),
             spec,
