@@ -1,1 +1,0 @@
-`mirrord up` now reports a single aggregate analytics event per invocation describing how the multi-service configuration is shaped, alongside the existing per-session events. Honors the `telemetry` opt-out.
