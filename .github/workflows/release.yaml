@@ -1097,12 +1097,12 @@ jobs:
 
       - name: Update WinGet manifest
         env:
-          # Classic PAT from a bot account (reusing the Homebrew tap PAT). A
-          # GitHub App installation token can't be used here: wingetcreate opens
-          # the PR against microsoft/winget-pkgs, where our app isn't (and can't
-          # be) installed. A classic PAT can open a cross-fork PR to a public
-          # repo without write access, which is exactly what WinGet needs.
-          WINGET_TOKEN: ${{ secrets.BREW_GITHUB_PAT }}
+          # Classic PAT from a bot account. A GitHub App installation token
+          # can't be used here: wingetcreate opens the PR against
+          # microsoft/winget-pkgs, where our app isn't (and can't be) installed.
+          # A classic PAT can open a cross-fork PR to a public repo without
+          # write access, which is exactly what WinGet needs.
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -1118,7 +1118,7 @@ jobs:
 
           # Validate the WinGet PAT is set
           if (-not $env:WINGET_TOKEN) {
-            throw "BREW_GITHUB_PAT is not set. Cannot publish to WinGet."
+            throw "WINGET_GITHUB_PAT is not set. Cannot publish to WinGet."
           }
 
           # Download wingetcreate
