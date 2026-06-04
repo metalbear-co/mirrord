@@ -86,6 +86,10 @@ pub const INJECT_HEADERS: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_INJE
 pub const HTTP_DETECTION_TIMEOUT: CheckedEnv<u64> =
     CheckedEnv::new("MIRRORD_AGENT_HTTP_DETECTION_TIMEOUT");
 
+/// Sets how long (in seconds) to keep an unused incoming port redirection before removing it.
+pub const UNUSED_PORT_LINGER: CheckedEnv<u64> =
+    CheckedEnv::new("MIRRORD_AGENT_UNUSED_PORT_LINGER_SECS");
+
 /// Sets the max size (in bytes) for bodies buffered for body filters.
 pub const MAX_BODY_BUFFER_SIZE: CheckedEnv<u32> = CheckedEnv::new("MIRRORD_MAX_BODY_BUFFER_SIZE");
 
