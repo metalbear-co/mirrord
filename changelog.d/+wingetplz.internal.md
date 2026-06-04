@@ -1,1 +1,1 @@
-fix winget attempt #3
+fix WinGet attempt #3
