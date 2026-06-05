@@ -1,10 +1,10 @@
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 
+use anyhow::error;
 use mirrord_config::feature::network::filter::AddressFilter;
 use mirrord_protocol::tcp::HttpFilter;
-use regex::RegexSet;
-use serde::Serialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumString;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -93,7 +93,7 @@ pub mod api;
 
 // priority: Conflict resolution when multiple rules match the same request. Higher number wins; the
 // matching rule with the highest priority applies and others are skipped. Defaults to 0.
-#[allow(unused)] // TODO: remove
+#[derive(Debug)]
 pub struct ChaosRule {
     pub id: Uuid,
     pub name: Option<String>,
@@ -102,9 +102,31 @@ pub struct ChaosRule {
     pub hit_count: usize,
 }
 
+impl ChaosRule {
+    pub fn new(name: Option<String>, priority: Option<usize>) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: name,
+            priority: priority.unwrap_or_default(),
+            ..Default::default()
+        }
+    }
+}
+
 impl Default for ChaosRule {
-    // Avoid using `#[derive(Default)]` on `ChaosRule` -> Uuid::Default() gives Uuid::nil(), which
-    // is just zero.
+    /// Avoid using `#[derive(Default)]` on `ChaosRule` -> Uuid::Default() gives Uuid::nil(), which
+    /// is just zero.
+    ///
+    /// ```
+    /// // equivalent to calling ChaosRule::default()
+    /// let default_rule = ChaosRule {
+    ///     id: Uuid::new_v4(),
+    ///     name: None,
+    ///     priority: 0,
+    ///     selector: ChaosSelector::None,
+    ///     hit_count: 0,
+    /// };
+    /// ```
     fn default() -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -116,58 +138,106 @@ impl Default for ChaosRule {
     }
 }
 
-// example rule request
-// nb: requests dont contain the rule id
-//
-// {
-//   "name": "config-read-slow",
-//   "effect": {
-//     "latency": {
-//       "delay_ms": 200,
-//       "jitter_ms": 50,
-//     },
-//     "selector": {
-//       "file_path": "/etc/config/*"
-//     }
-//   }
-// }
+impl TryFrom<ChaosRuleRequest> for ChaosRule {
+    type Error = anyhow::Error;
 
-impl TryFrom<Value> for ChaosRuleRequest {
-    type Error = ();
+    fn try_from(value: ChaosRuleRequest) -> Result<Self, Self::Error> {
+        // start with name, priority, a new UUID (from `impl Default`) and default values for
+        // selector, effect and hit_count
+        let mut rule = ChaosRule::new(value.name, value.priority);
 
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        // assert this is a single rule
-        if !value.is_object() {
-            return Err(());
-        }
-        // top level: name, effect, selector, priority
-        value.get("name");
-        todo!()
+        // infer selector type from which fields were set
+        // see `ChaosSelector` variants for which fields each selector can have.
+        let percentage = value
+            .selector
+            .percentage
+            .map(Percentage::from)
+            .unwrap_or_default();
+        rule.selector = match value.selector {
+            ChaosSelectorRequest {
+                upstream: Some(upstream),
+                percentage: _,
+            } => {
+                let upstream = AddressFilter::from_str(&upstream)
+                    .context("failed to parse 'selector.upstream' into an address")?;
+
+                ChaosSelector::Tcp {
+                    upstream,
+                    percentage,
+                    effect: TcpChaosEffect::Nothing,
+                }
+            }
+            _ => panic!("invalid selector, couldn't derive a type"),
+        };
+
+        // check the effect and selector are compatible
+        match rule.selector {
+            ChaosSelector::Tcp { ref mut effect, .. } => {
+                *effect = match value.effect {
+                    ChaosEffectRequest::Latency {
+                        delay_ms,
+                        jitter_ms,
+                    } => TcpChaosEffect::Latency(ChaosEffectLatency {
+                        delay: Duration::from_millis(delay_ms),
+                        jitter: jitter_ms.map(Duration::from_millis).unwrap_or_default(),
+                    }),
+                    ChaosEffectRequest::ConnectionError {
+                        error_type,
+                        after_ms,
+                    } => TcpChaosEffect::ConnectionError(ChaosEffectConnError {
+                        error_type: ConnErrorType::from_str(&error_type)?,
+                        after: after_ms.map(Duration::from_millis).unwrap_or_default(),
+                    }),
+                };
+            }
+            ChaosSelector::Http { .. } | ChaosSelector::Fs { .. } | ChaosSelector::None => {
+                unimplemented!()
+            }
+        };
+
+        Ok(rule)
     }
 }
 
-// TODO: move this closer to endpoint the user curls
 /// Exists to match the structure of a rule request from POST requests, this rule is unvalidated. In
-/// converting to ChaosRule, the rule becomes validated.
+/// converting to a ChaosRule, the rule becomes validated.
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct ChaosRuleRequest {
-    pub name: Option<()>,
-    pub priority: Option<()>,
-    pub effect: ChaosEffectRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority: Option<usize>,
+    pub effect: ChaosEffectRequest, // enum of like Latency {thing: type, thign2: type}
     pub selector: ChaosSelectorRequest,
 }
 
-impl TryFrom<ChaosRuleRequest> for ChaosRule {
-    type Error = ();
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChaosEffectRequest {
+    Latency {
+        delay_ms: u64, // req
+        #[serde(skip_serializing_if = "Option::is_none")]
+        jitter_ms: Option<u64>,
+    },
+    ConnectionError {
+        #[serde(rename = "type")]
+        error_type: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        after_ms: Option<u64>,
+    },
+}
 
-    fn try_from(value: ChaosRuleRequest) -> Result<Self, Self::Error> {
-        // TODO: determine selector type from fields
-        todo!()
-    }
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct ChaosSelectorRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    upstream: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    percentage: Option<usize>,
 }
 
 // can use mirrord_config::feature::network::filter::AddressFilter
 // then filter.matches() (like in the layer)
-#[derive(Default)]
+#[derive(Default, Debug, PartialEq)]
 pub enum ChaosSelector {
     Tcp {
         upstream: AddressFilter, // req
@@ -181,7 +251,7 @@ pub enum ChaosSelector {
         effect: HttpChaosEffect,
     },
     Fs {
-        file_path: RegexSet, // req
+        file_path: Vec<String>, // req
         percentage: Percentage,
         effect: FsChaosEffect,
     },
@@ -194,7 +264,7 @@ pub enum ChaosSelector {
 
 // having separate enums per selector allows invalid effect/ selector combos to
 // be impossible
-#[derive(Default)]
+#[derive(Default, Debug, PartialEq)]
 pub enum TcpChaosEffect {
     Latency(ChaosEffectLatency),
     ConnectionError(ChaosEffectConnError),
@@ -203,7 +273,7 @@ pub enum TcpChaosEffect {
     Nothing,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, PartialEq)]
 pub enum HttpChaosEffect {
     Latency(ChaosEffectLatency),
     HttpOverride,
@@ -211,7 +281,7 @@ pub enum HttpChaosEffect {
     Nothing,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, PartialEq)]
 pub enum FsChaosEffect {
     Latency(ChaosEffectLatency),
     FsError,
@@ -219,24 +289,28 @@ pub enum FsChaosEffect {
     Nothing,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct ChaosEffectLatency {
     pub delay: Duration, // req
     pub jitter: Duration,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct ChaosEffectConnError {
     pub error_type: ConnErrorType, // req
-    pub delay: Duration,
+    pub after: Duration,
 }
 
-enum ConnErrorType {
+#[derive(Debug, PartialEq, EnumString)]
+#[strum(ascii_case_insensitive)]
+pub enum ConnErrorType {
     Reset,   // TCP RST
     Timeout, // hangs then closes
     Refused, // ECONNREFUSED
 }
 
 // Helper type for a number between 0 and 100 inclusive. Defaults to 100
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Percentage(usize);
 
 impl Percentage {

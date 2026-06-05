@@ -5024,6 +5024,7 @@ dependencies = [
 name = "mirrord-intproxy"
 version = "3.216.0"
 dependencies = [
+ "anyhow",
  "axum 0.8.8",
  "bytes",
  "futures",

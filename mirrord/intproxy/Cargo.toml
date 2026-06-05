@@ -49,6 +49,7 @@ tokio-rustls.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true
 regex.workspace = true
+anyhow.workspace = true
 
 axum.workspace = true
 serde_json.workspace = true
