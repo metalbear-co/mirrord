@@ -28,7 +28,7 @@ use axum::{
     routing::{get, post},
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
-use futures::stream::StreamExt as _;
+use futures::{TryFutureExt as _, stream::StreamExt as _};
 use k8s_openapi::api::authentication::v1::SelfSubjectReview;
 use kube::{Api, Client, api::PostParams};
 use mirrord_operator::crd::{
@@ -871,6 +871,23 @@ fn build_router(state: Arc<AppState>) -> Router {
 }
 
 pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
+    let (router, url) = setup_ui(args.port).await?;
+
+    if let Err(err) = opener::open(&url) {
+        warn!(?err, "Failed to open browser");
+    }
+
+    eprintln!();
+    eprintln!("  mirrord session monitor");
+    eprintln!("    Web UI:             {url}");
+    eprintln!();
+
+    router.await
+}
+
+pub async fn setup_ui(
+    port: u16,
+) -> Result<(impl Future<Output = Result<(), CliError>>, String), CliError> {
     let sessions_dir = sessions_dir()
         .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
 
@@ -899,7 +916,7 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
 
     let app = build_router(state);
 
-    let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), args.port);
+    let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .map_err(|e| CliError::UiError(format!("failed to bind to {addr}: {e}")))?;
@@ -909,20 +926,11 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
         .map_err(|e| CliError::UiError(format!("failed to get listener address: {e}")))?;
     let url = format!("http://{addr}?token={token}");
 
-    eprintln!();
-    eprintln!("  mirrord session monitor");
-    eprintln!("    Web UI:             {url}");
-    eprintln!();
+    let future = axum::serve(listener, app)
+        .into_future()
+        .map_err(|e| CliError::UiError(format!("server error: {e}")));
 
-    if let Err(err) = opener::open(&url) {
-        warn!(?err, "Failed to open browser");
-    }
-
-    axum::serve(listener, app)
-        .await
-        .map_err(|e| CliError::UiError(format!("server error: {e}")))?;
-
-    Ok(())
+    Ok((future, url))
 }
 
 #[cfg(test)]
