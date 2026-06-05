@@ -18,6 +18,7 @@ use mirrord_config::{
 };
 use mirrord_kube::error::KubeApiError;
 use mirrord_progress::Progress;
+use sha2::{Digest, Sha256};
 use tracing::Level;
 use uuid::Uuid;
 
@@ -948,18 +949,26 @@ fn generate_branch_name(
     }
 }
 
-/// Build the target-independent branch resource name for a user-specified id.
+/// Branch resource name for a user-specified id, independent of the target workload.
 ///
-/// The id can contain characters that are not valid in a Kubernetes resource name, so it
-/// is hashed. The target namespace is part of the hash so that, in multi-cluster mode where
-/// every branch lives in the single operator namespace, two different target namespaces
-/// using the same id never collide. The result stays well within the 63 character limit:
-/// `mirrord-` + dialect + `-branch-` + a 16 character hash.
+/// Two workloads sharing the same id must produce the same name so they reuse one branch,
+/// so the hash stays stable across mirrord builds and platforms (hence SHA-256). The
+/// namespace is mixed in so the same id in two namespaces never collides, and the id is
+/// hashed because it can hold characters not allowed in a resource name. The result fits
+/// the 63 character limit: `mirrord-<dialect>-branch-<16 hex chars>`.
 fn deterministic_branch_name(dialect: &str, target_namespace: &str, id: &str) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    (target_namespace, id).hash(&mut hasher);
-    format!("mirrord-{dialect}-branch-{:x}", hasher.finish())
+    let mut hasher = Sha256::new();
+    hasher.update(target_namespace.as_bytes());
+    // Separator so ("ab", "c") and ("a", "bc") can't hash to the same value.
+    hasher.update([0]);
+    hasher.update(id.as_bytes());
+    let digest = hasher.finalize();
+    // 8 bytes make collisions effectively impossible and render as exactly 16 hex chars.
+    let short_bytes = *digest
+        .first_chunk::<8>()
+        .expect("a sha256 digest is always 32 bytes long");
+    let short = u64::from_be_bytes(short_bytes);
+    format!("mirrord-{dialect}-branch-{short:016x}")
 }
 
 /// Create unified branch databases and wait for their readiness.
@@ -1110,6 +1119,7 @@ pub struct ExistingBranches {
 pub async fn list_existing_branches<P: Progress>(
     api: &Api<BranchDatabase>,
     params: &HashMap<BranchDatabaseId, UnifiedBranchParams>,
+    target_namespace: &str,
     progress: &P,
 ) -> Result<ExistingBranches, OperatorApiError> {
     let specified_ids = params
@@ -1150,6 +1160,20 @@ pub async fn list_existing_branches<P: Progress>(
     let mut pending = HashMap::new();
 
     for db in all_branches {
+        // The name is keyed on (target namespace, id), so reuse must be too. Read the
+        // target namespace from the annotation, falling back to the branch's own namespace
+        // when it isn't set, and skip branches from a different target namespace.
+        let branch_target_namespace = db
+            .metadata
+            .annotations
+            .as_ref()
+            .and_then(|annotations| annotations.get(TARGET_NAMESPACE_ANNOTATION))
+            .map(String::as_str)
+            .or(db.metadata.namespace.as_deref());
+        if branch_target_namespace != Some(target_namespace) {
+            continue;
+        }
+
         let id: BranchDatabaseId = db.spec.id.clone().into();
         match db.status.as_ref().map(|s| &s.phase) {
             Some(&BranchDatabasePhase::Ready) => {
