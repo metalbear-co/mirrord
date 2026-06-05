@@ -84,6 +84,8 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     let ready = ReadyTracker::default();
 
     // Run UI
+    analytics.get_mut().add("ui_enabled", args.ui);
+
     if args.ui {
         tokio::spawn(async move {
             let (router, url) = match crate::ui::setup_ui(UI_DEFAULT_PORT).await {
