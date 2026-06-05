@@ -10,7 +10,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    config::{UpArgs, UpSubcommand},
+    config::{UI_DEFAULT_PORT, UpArgs, UpSubcommand},
     user_data::UserData,
 };
 
@@ -82,6 +82,28 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     analytics.get_mut().add("correlation_id", correlation_id);
 
     let ready = ReadyTracker::default();
+
+    // Run UI
+    if args.ui {
+        tokio::spawn(async move {
+            let (router, url) = match crate::ui::setup_ui(UI_DEFAULT_PORT).await {
+                Ok(rv) => rv,
+                Err(err) => {
+                    tracing::warn!(?err, "failed to start local UI");
+                    return;
+                }
+            };
+
+            if let Err(err) = opener::open(&url) {
+                tracing::warn!(?err, "Failed to open browser");
+            }
+
+            let _ = router
+                .await
+                .inspect_err(|err| tracing::warn!(?err, "error serving local ui"));
+        });
+    }
+
     let result = mirrord_up::run(up_config, key, correlation_id, ready.clone()).await;
 
     // Recorded whenever all sessions reached readiness, even if `run` then
