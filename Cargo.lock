@@ -5050,6 +5050,7 @@ dependencies = [
  "semver 1.0.27",
  "serde",
  "serde_json",
+ "serde_with",
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "tempfile",
@@ -7847,7 +7848,20 @@ dependencies = [
  "schemars 1.2.1",
  "serde_core",
  "serde_json",
+ "serde_with_macros",
  "time",
+]
+
+[[package]]
+name = "serde_with_macros"
+version = "3.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3db8978e608f1fe7357e211969fd9abdcae80bac1ba7a3369bb7eb6b404eb65"
+dependencies = [
+ "darling 0.23.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]

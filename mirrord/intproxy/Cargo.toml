@@ -31,7 +31,8 @@ mirrord-protocol-io = { path = "../protocol-io" }
 
 futures.workspace = true
 semver.workspace = true
-serde = { workspace = true }
+serde.workspace = true
+serde_with.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

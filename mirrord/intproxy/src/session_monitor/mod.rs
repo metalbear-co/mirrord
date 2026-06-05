@@ -1,28 +1,13 @@
-use std::{
-    borrow::Borrow,
-    collections::HashSet,
-    fmt::Display,
-    hash::Hasher,
-    ops::Deref,
-    str::FromStr,
-    sync::{
-        Arc,
-        atomic::{AtomicU32, Ordering},
-    },
-    time::Duration,
-};
+use std::{fmt::Display, str::FromStr, time::Duration};
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use mirrord_config::feature::network::filter::AddressFilter;
 use mirrord_protocol::tcp::HttpFilter;
-use regex::RegexSet;
-use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_with::skip_serializing_none;
 use strum_macros::EnumString;
-use tokio::sync::{
-    broadcast,
-    watch::{self, error::SendError},
-};
+use thiserror::Error;
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 /// Wrapper around `Vec<String>` that redacts its [`Debug`] output to avoid leaking environment
@@ -114,11 +99,14 @@ pub mod api;
 /// and applied to a single `mirrord` session. When outgoing traffic matches a rule, the `effect`
 /// specified by the user is applied, for example artificial latency or a connection error.
 ///
-/// Rules can be applied to TCP, HTTP or Fs traffic with a given percentage probability. The traffic
+/// Rules can be applied to TCP, HTTP or FS traffic with a given percentage probability. The traffic
 /// type is inferred from the requested `selector`.
 ///
 /// For examples of requests and the rules they correspond to, see [`mod test`].
-#[derive(Debug)]
+///
+/// _WARNING: This type implements `PartialEq` for testing purposes - trying to compare rules
+/// without accounting for their unique `id`s will fail!_
+#[derive(Debug, PartialEq)]
 pub struct ChaosRule {
     /// The UUID of the rule (unrelated to the session ID that the rule is attached to). Created
     /// with [`Uuid::new_v4()`] via [`Self::new()`] or [`Self::default()`]. Cannot be specified
@@ -190,8 +178,17 @@ impl Default for ChaosRule {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum ChaosRuleError {
+    #[error("the chaos rule request was invalid: {0}")]
+    Invalid(anyhow::Error),
+
+    #[error("this feature is not yet available in mirrord chaos: {0}")]
+    Unimplemented(String),
+}
+
 impl TryFrom<ChaosRuleRequest> for ChaosRule {
-    type Error = anyhow::Error;
+    type Error = ChaosRuleError;
 
     /// Create a new [`Self`](ChaosRule) from a [`ChaosRuleRequest`], verifying that the rule is
     /// valid. The selector must be inferred from the fields in `@value.selector`, and then checked
@@ -213,10 +210,17 @@ impl TryFrom<ChaosRuleRequest> for ChaosRule {
         rule.selector = match value.selector {
             ChaosSelectorRequest {
                 upstream: Some(upstream),
+                file_path: None,
+                header_filter: None,
+                path_filter: None,
+                method_filter: None,
+                all_of: None,
+                any_of: None,
                 percentage: _,
             } => {
                 let upstream = AddressFilter::from_str(&upstream)
-                    .context("failed to parse requested 'selector.upstream' into an address")?;
+                    .context("failed to parse requested 'selector.upstream' into an address")
+                    .map_err(ChaosRuleError::Invalid)?;
 
                 ChaosSelector::Tcp {
                     upstream,
@@ -224,7 +228,37 @@ impl TryFrom<ChaosRuleRequest> for ChaosRule {
                     effect: TcpChaosEffect::Nothing,
                 }
             }
-            _ => panic!("invalid selector, couldn't derive a type"),
+            ChaosSelectorRequest {
+                upstream: Some(_upstream),
+                file_path: None,
+                header_filter: Some(_header_filter),
+                path_filter: Some(_path_filter),
+                method_filter: Some(_method_filter),
+                all_of: Some(_all_of),
+                any_of: Some(_any_of),
+                percentage: _,
+            } => {
+                // todo: parse all filter fields into one `mirrord_protocol::tcp::HttpFilter`
+                return Err(ChaosRuleError::Unimplemented("HTTP selector".to_owned()));
+            }
+            ChaosSelectorRequest {
+                upstream: None,
+                file_path: Some(_file_path),
+                header_filter: None,
+                path_filter: None,
+                method_filter: None,
+                all_of: None,
+                any_of: None,
+                percentage: _,
+            } => {
+                return Err(ChaosRuleError::Unimplemented("FS selector".to_owned()));
+            }
+            _ => {
+                return Err(anyhow!(
+                    "couldn't derive a protocol type from fields in `selector` request"
+                ))
+                .map_err(ChaosRuleError::Invalid);
+            }
         };
 
         // check the effect and selector are compatible
@@ -242,13 +276,24 @@ impl TryFrom<ChaosRuleRequest> for ChaosRule {
                         error_type,
                         after_ms,
                     } => TcpChaosEffect::ConnectionError(ChaosEffectConnError {
-                        error_type: ConnErrorType::from_str(&error_type)?,
+                        error_type: ConnErrorType::from_str(&error_type)
+                            .context("unknown value for 'effect.connection_error.type'")
+                            .map_err(ChaosRuleError::Invalid)?,
                         after: after_ms.map(Duration::from_millis).unwrap_or_default(),
                     }),
+                    other @ ChaosEffectRequest::Degradation
+                    | other @ ChaosEffectRequest::HttpOverride
+                    | other @ ChaosEffectRequest::FsError => {
+                        return Err(ChaosRuleError::Unimplemented(format!("{other:?} effect")));
+                    }
                 };
             }
-            ChaosSelector::Http { .. } | ChaosSelector::Fs { .. } | ChaosSelector::None => {
-                unimplemented!("HTTP and Fs selectors are not yet available for chaos rules")
+            other @ ChaosSelector::Http { .. } | other @ ChaosSelector::Fs { .. } => {
+                return Err(ChaosRuleError::Unimplemented(format!("{other:?} selector")));
+            }
+            ChaosSelector::None => {
+                return Err(anyhow!("you must specify a selector for a chaos rule"))
+                    .map_err(ChaosRuleError::Invalid);
             }
         };
 
@@ -258,17 +303,16 @@ impl TryFrom<ChaosRuleRequest> for ChaosRule {
 
 /// Represents a rule request from POST requests, corresponding to a rule that is not yet validated.
 /// In converting [`Self`](ChaosRuleRequest) to a [`ChaosRule`], the rule becomes validated.
+#[skip_serializing_none]
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct ChaosRuleRequest {
     /// Optional label specified by the user to identify the rule. Internally, the rule ID is used
     /// to differentiate between rules, so `name` uniqueness is not required.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
     /// Optional integer used to choose which rule to apply when multiple rules match the same
     /// request. Only the rule with the highest `priority` value is applied. If not given, defaults
     /// to 0 (lowest priority).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<usize>,
 
     /// The type of effect that the rule should apply. Should only be used with a compatible
@@ -283,36 +327,48 @@ pub struct ChaosRuleRequest {
 
 /// The type of effect that a [`ChaosRule`] should apply. Can only be used with a compatible
 /// `selector`, as checked in [`ChaosRule::try_from<ChaosRuleRequest>()`].
+#[skip_serializing_none]
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ChaosEffectRequest {
     Latency {
         delay_ms: u64,
-        #[serde(skip_serializing_if = "Option::is_none")]
         jitter_ms: Option<u64>,
     },
     ConnectionError {
         #[serde(rename = "type")]
         error_type: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
         after_ms: Option<u64>,
     },
+    Degradation,
+    HttpOverride,
+    FsError,
 }
 
 /// The traffic to which a [`ChaosRule`] should apply. The (protocol) type of selector (see
 /// [`ChaosSelector`] variants) is inferred from the combination of fields in the request. Either
 /// `upstream` or `file_path` is required. The `percentage` can be specified for any protocol.
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[skip_serializing_none]
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct ChaosSelectorRequest {
     /// The target of the rule. Uses the same syntax via [`AddressFilter`] as `mirrord_config`'s
     /// [`OutgoingFilterConfig`](mirrord_config::feature::network::outgoing::OutgoingFilterConfig).
-    #[serde(skip_serializing_if = "Option::is_none")]
     upstream: Option<String>,
+
+    /// File path patterns for the rule to target. Uses the same syntax as
+    /// [`FsConfig`](mirrord_config::feature::fs::advanced).
+    file_path: Option<()>,
+
+    // these fields get turned into ChaosSelector::Http.filter ie. HttpFilter
+    header_filter: Option<()>,
+    path_filter: Option<()>,
+    method_filter: Option<()>,
+    all_of: Option<()>,
+    any_of: Option<()>,
 
     /// The chance of a rule being applied to matching traffic. Roughly equal to the proportion of
     /// requests that the rule is applied to. Should be an integer between 0 and 100 (values higher
     /// than 100 will be rounded down to 100).
-    #[serde(skip_serializing_if = "Option::is_none")]
     percentage: Option<usize>,
 }
 
@@ -438,6 +494,15 @@ mod test {
         ChaosSelector, ChaosSelectorRequest, ConnErrorType, Percentage, TcpChaosEffect,
     };
 
+    /// A helper function that returns a [`ChaosRule`] the same as `@rule` with the `id` set to 0
+    /// for comparing rules. This means newly added fields won't be missed in the comparison.
+    fn no_id(rule: ChaosRule) -> ChaosRule {
+        ChaosRule {
+            id: Uuid::nil(),
+            ..rule
+        }
+    }
+
     #[rstest]
     #[case::tcp_latency(json!({
       "name": "rust-connect-slow",
@@ -459,12 +524,11 @@ mod test {
         },
         selector: ChaosSelectorRequest {
             upstream: Some("rust-lang.org".to_owned()),
-            percentage: None
+            ..Default::default()
         }
     }, ChaosRule {
         id: Uuid::default(),
         name: Some("rust-connect-slow".to_owned()),
-        priority: 0,
         selector: ChaosSelector::Tcp {
             upstream: AddressFilter::Name("rust-lang.org".to_owned(), 0),
             percentage: Percentage::from(100),
@@ -473,7 +537,7 @@ mod test {
                 jitter: Duration::from_millis(50),
             }),
         },
-        hit_count: 0,
+        ..Default::default()
     })]
     #[case::tcp_conn_error(json!({
         "selector": {
@@ -496,11 +560,11 @@ mod test {
         },
         selector: ChaosSelectorRequest {
             upstream: Some("rust-lang.org".to_owned()),
-            percentage: Some(75)
+            percentage: Some(75),
+            ..Default::default()
         }
     }, ChaosRule {
         id: Uuid::default(),
-        name: None,
         priority: 100,
         selector: ChaosSelector::Tcp {
             upstream: AddressFilter::Name("rust-lang.org".to_owned(), 0),
@@ -510,7 +574,7 @@ mod test {
                 after: Duration::from_millis(750)
             }),
         },
-        hit_count: 0,
+        ..Default::default()
     })]
     fn parse_valid_request_into_rule(
         #[case] valid_rule_req: serde_json::Value,
@@ -529,14 +593,10 @@ mod test {
             .expect("ChaosRule failed creation from a valid ChaosRuleRequest");
 
         // we can't compare rules on contents alone since they have unique UUIDs
-        assert_eq!(validated_rule.name, expected_validated_rule.name);
-        assert_eq!(validated_rule.priority, expected_validated_rule.priority);
-        assert_eq!(validated_rule.selector, expected_validated_rule.selector);
-        assert_eq!(validated_rule.hit_count, expected_validated_rule.hit_count);
+        assert_eq!(no_id(validated_rule), no_id(expected_validated_rule));
     }
 
     #[rstest]
-    #[should_panic]
     #[case::invalid_selector_too_many_fields(json!({
       "effect": {
         "latency": {
@@ -558,7 +618,8 @@ mod test {
         },
         selector: ChaosSelectorRequest {
             upstream: Some("rust-lang.org".to_owned()),
-            percentage: Some(20)
+            percentage: Some(20),
+            ..Default::default()
         }
     })]
     #[case::invalid_selector_missing_minimum(json!({
@@ -580,7 +641,8 @@ mod test {
         },
         selector: ChaosSelectorRequest {
             upstream: None,
-            percentage: Some(40)
+            percentage: Some(40),
+            ..Default::default()
         }
     })]
     #[case::http_effect_with_tcp_selector(json!({
@@ -597,13 +659,14 @@ mod test {
     }), ChaosRuleRequest {
         name: None,
         priority: None,
-        effect: ChaosEffectRequest::ConnectionError { // FIX: impl http_override
+        effect: ChaosEffectRequest::ConnectionError {
             error_type: "timeout".to_owned(),
             after_ms: Some(750)
         },
         selector: ChaosSelectorRequest {
             upstream: Some("rust-lang.org".to_owned()),
-            percentage: Some(75)
+            percentage: Some(75),
+            ..Default::default()
         }
     })]
     #[case::invalid_selector_upstream_address_filter(json!({
@@ -627,9 +690,11 @@ mod test {
         },
         selector: ChaosSelectorRequest {
             upstream: Some("rust-lang.org".to_owned()),
-            percentage: Some(75)
+            percentage: Some(75),
+            ..Default::default()
         }
     })]
+    #[should_panic]
     fn parse_well_formed_request_into_invalid_rule(
         #[case] valid_rule_req: serde_json::Value,
         #[case] expected_parsed_type: ChaosRuleRequest,
@@ -647,7 +712,6 @@ mod test {
     }
 
     #[rstest]
-    #[should_panic]
     #[case::missing_selector(json!({
       "name" : "the-crocodile-is-called-vector-apparently",
       "effect": {
@@ -681,6 +745,7 @@ mod test {
           "http_override": "vector-isn't-a-very-reptilian-name"
         }
     }))]
+    #[should_panic]
     fn error_on_parse_malformed_request(#[case] invalid_rule_req: serde_json::Value) {
         let _: ChaosRuleRequest = serde_json::from_str(&invalid_rule_req.to_string()).unwrap();
     }
