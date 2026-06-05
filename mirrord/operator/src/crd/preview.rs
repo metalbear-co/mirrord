@@ -388,6 +388,10 @@ pub struct PreviewQueueSplittingConfig {
     /// Azure Service Bus queue splitting filters, keyed by queue ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub azure_service_bus_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
+    /// Redis Pub/Sub queue splitting filters, keyed by queue ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub redis_pubsub_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
 }
 
 impl PreviewQueueSplittingConfig {
@@ -422,11 +426,17 @@ impl PreviewQueueSplittingConfig {
             value.azure_service_bus_jq_filters(),
         );
 
+        let redis_pubsub_queue_filters = collect_queue_filters(
+            value.redis_pubsub(),
+            value.redis_pubsub_jq_filters(),
+        );
+
         let config = Self {
             sqs_queue_filters,
             kafka_queue_filters,
             gcp_pubsub_queue_filters,
             azure_service_bus_queue_filters,
+            redis_pubsub_queue_filters,
         };
 
         if config == Self::default() {

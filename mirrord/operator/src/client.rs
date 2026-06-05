@@ -946,6 +946,18 @@ where
                 .require_feature(NewOperatorFeature::GcpPubSubQueueSplitting)?;
         }
 
+        if layer_config
+            .feature
+            .split_queues
+            .redis_pubsub_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::RedisPubSubQueueSplitting)?;
+        }
+
         Ok(())
     }
 
@@ -1638,6 +1650,8 @@ impl OperatorApi<PreparedClientCert> {
             gcp_pubsub_jq_filters: Default::default(),
             azure_service_bus_splits: Default::default(),
             azure_service_bus_jq_filters: Default::default(),
+            redis_pubsub_splits: Default::default(),
+            redis_pubsub_jq_filters: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -2268,6 +2282,8 @@ mod test {
             rmq_output_queues: Default::default(),
             azure_service_bus_splits: Default::default(),
             azure_service_bus_jq_filters: Default::default(),
+            redis_pubsub_splits: Default::default(),
+            redis_pubsub_jq_filters: Default::default(),
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
@@ -2395,6 +2411,8 @@ mod test {
             rmq_output_queues: Default::default(),
             azure_service_bus_splits: Default::default(),
             azure_service_bus_jq_filters: Default::default(),
+            redis_pubsub_splits: Default::default(),
+            redis_pubsub_jq_filters: Default::default(),
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,

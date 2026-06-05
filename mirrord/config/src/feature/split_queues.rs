@@ -158,6 +158,33 @@ impl SplitQueuesConfig {
         })
     }
 
+    pub fn redis_pubsub(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::RedisPubSub {
+                message_filter: Some(message_filter),
+                ..
+            } => Some((name.as_str(), message_filter)),
+            _ => None,
+        })
+    }
+
+    pub fn redis_pubsub_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::RedisPubSub {
+                jq_filter: Some(jq),
+                ..
+            } => Some((name.as_str(), jq.as_str())),
+            _ => None,
+        })
+    }
+
+    pub fn redis_pubsub_queues(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::RedisPubSub { .. } => Some(name.as_str()),
+            _ => None,
+        })
+    }
+
     fn verify_message_attribute_filter(
         queue_id: &QueueId,
         filter: &QueueMessageFilter,
@@ -201,6 +228,10 @@ impl SplitQueuesConfig {
                     jq_filter,
                 }
                 | QueueFilter::AzureServiceBus {
+                    message_filter,
+                    jq_filter,
+                }
+                | QueueFilter::RedisPubSub {
                     message_filter,
                     jq_filter,
                 } => {
@@ -334,6 +365,19 @@ pub enum QueueFilter {
         jq_filter: Option<String>,
     },
 
+    #[serde(rename = "RedisPubSub")]
+    RedisPubSub {
+        /// A filter is a mapping between top-level JSON field names and regexes they
+        /// should match. The local application will only receive messages whose JSON
+        /// payload contains fields matching **all** of the given patterns.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message_filter: Option<QueueMessageFilter>,
+
+        /// A jq filter that runs on the JSON representation of the message payload.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        jq_filter: Option<String>,
+    },
+
     #[serde(rename = "AzureServiceBus")]
     AzureServiceBus {
         /// A filter is a mapping between Azure Service Bus application property names and
@@ -380,6 +424,11 @@ impl CollectAnalytics for &SplitQueuesConfig {
         analytics.add(
             "azure_service_bus_jq_filter_count",
             self.azure_service_bus_jq_filters().count(),
+        );
+        analytics.add("redis_pubsub_queue_count", self.redis_pubsub_queues().count());
+        analytics.add(
+            "redis_pubsub_jq_filter_count",
+            self.redis_pubsub_jq_filters().count(),
         );
     }
 }
