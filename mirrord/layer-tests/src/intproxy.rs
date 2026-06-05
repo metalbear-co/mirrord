@@ -13,7 +13,7 @@ use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     experimental::ExperimentalFileConfig,
 };
-use mirrord_intproxy::{IntProxy, agent_conn::AgentConnection};
+use mirrord_intproxy::{IntProxy, IntProxyIntervals, agent_conn::AgentConnection};
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
     file::{
@@ -64,7 +64,10 @@ impl TestIntProxy {
                 listener,
                 0,
                 Default::default(),
-                Duration::from_secs(60),
+                IntProxyIntervals {
+                    ping: Duration::from_secs(60),
+                    process_logging: Duration::from_secs(60),
+                },
                 &experimental_config,
                 mirrord_intproxy::session_monitor::MonitorTx::disabled(),
             );

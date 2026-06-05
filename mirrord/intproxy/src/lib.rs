@@ -152,6 +152,12 @@ pub struct IntProxy {
     monitor_tx: MonitorTx,
 }
 
+/// Timing configuration for [`IntProxy`] maintenance tasks.
+pub struct IntProxyIntervals {
+    pub ping: Duration,
+    pub process_logging: Duration,
+}
+
 impl IntProxy {
     /// Size of channels used to communicate with main tasks (see [`MainTaskId`]).
     const CHANNEL_SIZE: usize = 512;
@@ -169,8 +175,7 @@ impl IntProxy {
         listener: TcpListener,
         file_buffer_size: u64,
         https_delivery: LocalTlsDelivery,
-        ping_interval: Duration,
-        process_logging_interval: Duration,
+        intervals: IntProxyIntervals,
         experimental: &ExperimentalConfig,
         monitor_tx: MonitorTx,
     ) -> Self {
@@ -193,7 +198,7 @@ impl IntProxy {
         background_tasks.suspend_messages(MainTaskId::LayerInitializer);
         let ping_pong = background_tasks.register_restartable(
             PingPong::new(
-                ping_interval,
+                intervals.ping,
                 if agent_conn_reconnectable {
                     Self::PING_PONG_MAX_RECONNECTS
                 } else {
@@ -240,10 +245,10 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
 
-        let mut ping_pong_update_debounce = time::interval(ping_interval / 10);
+        let mut ping_pong_update_debounce = time::interval(intervals.ping / 10);
         ping_pong_update_debounce.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        let mut process_logging_interval = time::interval(process_logging_interval);
+        let mut process_logging_interval = time::interval(intervals.process_logging);
         process_logging_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         Self {
@@ -899,8 +904,10 @@ mod test {
             listener,
             4096,
             Default::default(),
-            IntProxy::PING_INTERVAL,
-            Duration::from_secs(60),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
@@ -1019,8 +1026,10 @@ mod test {
             listener,
             4096,
             Default::default(),
-            IntProxy::PING_INTERVAL,
-            Duration::from_secs(60),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
@@ -1114,8 +1123,10 @@ mod test {
             listener,
             4096,
             Default::default(),
-            IntProxy::PING_INTERVAL,
-            Duration::from_secs(60),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
@@ -1187,8 +1198,10 @@ mod test {
             listener,
             4096,
             Default::default(),
-            IntProxy::PING_INTERVAL,
-            Duration::from_secs(60),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
