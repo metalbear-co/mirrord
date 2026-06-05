@@ -872,7 +872,7 @@ mod test {
     };
 
     use crate::{
-        IntProxy,
+        IntProxy, IntProxyIntervals,
         agent_conn::{
             AgentConnectInfo, AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow,
         },
