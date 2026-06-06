@@ -2665,6 +2665,16 @@
             "null"
           ]
         },
+        "ping_interval": {
+          "title": "internal_proxy.ping_interval {#internal_proxy-ping_interval}",
+          "description": "How often the internal proxy should ping the agent connection, in seconds.\n\nSmaller values detect dropped operator connections faster, at the cost of more frequent\nping traffic.\n\n```json\n{\n  \"internal_proxy\": {\n    \"ping_interval\": 5\n  }\n}\n```",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
         "process_logging_interval": {
           "title": "internal_proxy.process_logging_interval {#internal_proxy-process_logging_interval}",
           "description": "How often to log information about connected processes in seconds.\n\nThis feature logs details about processes that are currently connected to the internal\nproxy, including their PID, process name, command line, and connection status.\n\n```json\n{\n  \"internal_proxy\": {\n    \"process_logging_interval\": 60\n  }\n}\n```",

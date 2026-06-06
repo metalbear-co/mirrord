@@ -152,12 +152,16 @@ pub struct IntProxy {
     monitor_tx: MonitorTx,
 }
 
+/// Timing configuration for [`IntProxy`] maintenance tasks.
+pub struct IntProxyIntervals {
+    pub ping: Duration,
+    pub process_logging: Duration,
+}
+
 impl IntProxy {
     /// Size of channels used to communicate with main tasks (see [`MainTaskId`]).
     const CHANNEL_SIZE: usize = 512;
-    /// How long can the agent connection remain silent.
-    #[cfg(not(test))]
-    const PING_INTERVAL: Duration = Duration::from_secs(30);
+    /// Default test interval for checking whether the agent connection is still alive.
     #[cfg(test)]
     const PING_INTERVAL: Duration = Duration::from_secs(1);
     /// How many sequential reconnects should PingPong task attepmt to perform before giving up.
@@ -171,7 +175,7 @@ impl IntProxy {
         listener: TcpListener,
         file_buffer_size: u64,
         https_delivery: LocalTlsDelivery,
-        process_logging_interval: Duration,
+        intervals: IntProxyIntervals,
         experimental: &ExperimentalConfig,
         monitor_tx: MonitorTx,
     ) -> Self {
@@ -194,7 +198,7 @@ impl IntProxy {
         background_tasks.suspend_messages(MainTaskId::LayerInitializer);
         let ping_pong = background_tasks.register_restartable(
             PingPong::new(
-                Self::PING_INTERVAL,
+                intervals.ping,
                 if agent_conn_reconnectable {
                     Self::PING_PONG_MAX_RECONNECTS
                 } else {
@@ -241,10 +245,10 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
 
-        let mut ping_pong_update_debounce = time::interval(Self::PING_INTERVAL / 10);
+        let mut ping_pong_update_debounce = time::interval(intervals.ping / 10);
         ping_pong_update_debounce.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        let mut process_logging_interval = time::interval(process_logging_interval);
+        let mut process_logging_interval = time::interval(intervals.process_logging);
         process_logging_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         Self {
@@ -868,7 +872,7 @@ mod test {
     };
 
     use crate::{
-        IntProxy,
+        IntProxy, IntProxyIntervals,
         agent_conn::{
             AgentConnectInfo, AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow,
         },
@@ -900,7 +904,10 @@ mod test {
             listener,
             4096,
             Default::default(),
-            Duration::from_secs(60),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
@@ -1019,7 +1026,10 @@ mod test {
             listener,
             4096,
             Default::default(),
-            Duration::from_secs(60),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
@@ -1113,7 +1123,10 @@ mod test {
             listener,
             4096,
             Default::default(),
-            Duration::from_secs(60),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
@@ -1185,7 +1198,10 @@ mod test {
             listener,
             4096,
             Default::default(),
-            Duration::from_secs(60),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),

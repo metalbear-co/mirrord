@@ -3,6 +3,7 @@ use std::{
     error::{Error, Report},
     fmt,
     ops::Not,
+    pin::Pin,
     sync::Arc,
     time::Duration,
 };
@@ -16,6 +17,7 @@ use tokio::{
         oneshot,
     },
     task::JoinSet,
+    time::Sleep,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
@@ -399,9 +401,11 @@ where
                             mirror_txs: vec![conn_tx.clone()],
                             shutdown: Default::default(),
                             connections: Default::default(),
+                            cleanup_sleep: None,
                         });
                     }
                     Entry::Occupied(mut e) => {
+                        e.get_mut().cleanup_sleep = None;
                         e.get_mut().mirror_txs.push(conn_tx.clone());
                     }
                 };
@@ -430,9 +434,11 @@ where
                             mirror_txs: Default::default(),
                             shutdown: Default::default(),
                             connections: Default::default(),
+                            cleanup_sleep: None,
                         });
                     }
                     Entry::Occupied(mut e) => {
+                        e.get_mut().cleanup_sleep = None;
                         e.get_mut().steal_tx.replace(conn_tx.clone());
                     }
                 }
@@ -466,6 +472,7 @@ where
             steal_tx,
             mirror_txs,
             connections,
+            cleanup_sleep,
             ..
         } = state;
 
@@ -481,6 +488,33 @@ where
 
         // Remove if the [`PortState`] is no longer needed.
         if mirror_txs.is_empty() && steal_tx.is_none() && connections.is_empty() {
+            if self.config.unused_port_linger.is_zero() {
+                e.remove().graceful_shutdown().await;
+                self.redirector.remove_redirection(port).await?;
+                if self.ports.is_empty() {
+                    self.redirector.cleanup().await?;
+                }
+                return Ok(());
+            }
+
+            match cleanup_sleep {
+                Some(sleep) if sleep.is_elapsed() => {}
+                Some(..) => return Ok(()),
+                None => {
+                    let linger = self.config.unused_port_linger;
+                    *cleanup_sleep = Some(Box::pin(tokio::time::sleep(linger)));
+
+                    let tx = self.internal_tx.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(linger).await;
+                        // Wake the redirector to re-check this port after the linger period.
+                        let _ = tx.send(InternalMessage::MaybeDeadChannel(port)).await;
+                    });
+
+                    return Ok(());
+                }
+            }
+
             e.remove().graceful_shutdown().await;
             self.redirector.remove_redirection(port).await?;
             if self.ports.is_empty() {
@@ -488,6 +522,8 @@ where
             }
             return Ok(());
         }
+
+        *cleanup_sleep = None;
 
         Ok(())
     }
@@ -562,6 +598,8 @@ pub struct RedirectorTaskConfig {
     pub inject_headers: bool,
     /// HTTP version detection read timeout for a redirected connection.
     pub http_detection_timeout: Duration,
+    /// How long to keep an unused port redirection before removing it.
+    pub unused_port_linger: Duration,
 }
 
 impl RedirectorTaskConfig {
@@ -572,10 +610,17 @@ impl RedirectorTaskConfig {
             .flatten()
             .map(Duration::from_secs)
             .unwrap_or(Duration::from_secs(2));
+        let unused_port_linger = envs::UNUSED_PORT_LINGER
+            .try_from_env()
+            .ok()
+            .flatten()
+            .map(Duration::from_secs)
+            .unwrap_or_default();
 
         Self {
             inject_headers: envs::INJECT_HEADERS.from_env_or_default(),
             http_detection_timeout,
+            unused_port_linger,
         }
     }
 }
@@ -675,6 +720,8 @@ struct PortState {
     shutdown: CancellationToken,
     /// Used to track connection IO tasks and wait for their graceful shutdown.
     connections: JoinSet<()>,
+    /// Timer used to delay removal of an unused redirection.
+    cleanup_sleep: Option<Pin<Box<Sleep>>>,
 }
 
 impl fmt::Debug for PortState {

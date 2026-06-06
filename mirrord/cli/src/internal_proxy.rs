@@ -29,7 +29,7 @@ use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
 };
 use mirrord_intproxy::{
-    IntProxy,
+    IntProxy, IntProxyIntervals,
     agent_conn::{AgentConnectInfo, AgentConnection},
     session_monitor::MonitorTx,
 };
@@ -289,6 +289,7 @@ pub(crate) async fn proxy(
 
     let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);
     let consecutive_connection_timeout = Duration::from_secs(config.internal_proxy.idle_timeout);
+    let ping_interval = Duration::from_secs(config.internal_proxy.ping_interval.max(1));
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
@@ -305,7 +306,10 @@ pub(crate) async fn proxy(
             .tls_delivery
             .or(config.feature.network.incoming.https_delivery)
             .unwrap_or_default(),
-        process_logging_interval,
+        IntProxyIntervals {
+            ping: ping_interval,
+            process_logging: process_logging_interval,
+        },
         &config.experimental,
         monitor_tx,
     )
