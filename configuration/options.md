@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-06-03T00:00:00.000Z
+lastmod: 2026-06-07T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -3129,6 +3129,21 @@ Set the log level for the internal proxy.
 The value should follow the RUST_LOG convention (i.e `mirrord=trace`).
 
 Defaults to `mirrord=info,warn`.
+
+### internal_proxy.ping_interval {#internal_proxy-ping_interval}
+
+How often the internal proxy should ping the agent connection, in seconds.
+
+Smaller values detect dropped operator connections faster, at the cost of more frequent
+ping traffic.
+
+```json
+{
+  "internal_proxy": {
+    "ping_interval": 5
+  }
+}
+```
 
 ### internal_proxy.process_logging_interval {#internal_proxy-process_logging_interval}
 
