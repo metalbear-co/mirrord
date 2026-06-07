@@ -1467,6 +1467,10 @@ pub(super) struct UpArgs {
     #[arg(long)]
     pub key: Option<String>,
 
+    /// Start `mirrord ui` in the background.
+    #[arg(short = 'u', long)]
+    pub ui: bool,
+
     /// Subcommand. When absent, `mirrord up` runs the sessions defined in
     /// the config file. With a subcommand, the flags above are ignored.
     #[command(subcommand)]
@@ -1505,11 +1509,13 @@ pub(super) struct PitmArgs {
     pub command: Vec<String>,
 }
 
+pub const UI_DEFAULT_PORT: u16 = 59281;
+
 /// Arguments for the `mirrord ui` command.
 #[derive(Args, Debug)]
 pub struct UiArgs {
     /// Port to serve the UI on.
-    #[arg(short = 'p', long, default_value_t = 59281)]
+    #[arg(short = 'p', long, default_value_t = UI_DEFAULT_PORT)]
     pub port: u16,
 }
 
