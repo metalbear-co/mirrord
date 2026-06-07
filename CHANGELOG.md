@@ -8,6 +8,24 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.216.0](https://github.com/metalbear-co/mirrord/tree/3.216.0) - 2026-06-07
+
+
+### Added
+
+- Added `-u` flag to `up` that opens the UI in parallel to running `mirrord
+  up`.
+- Added `internal_proxy.ping_interval` to configure how often intproxy checks
+  the agent connection.
+
+
+### Fixed
+
+- Database branches with a user-specified `id` are now shared across workloads.
+  Two sessions targeting different deployments that point at the same database
+  and use the same branch `id` now reuse a single branch instead of each
+  creating its own.
+
 ## [3.215.1](https://github.com/metalbear-co/mirrord/tree/3.215.1) - 2026-06-04
 
 ## [3.215.0](https://github.com/metalbear-co/mirrord/tree/3.215.0) - 2026-06-04
