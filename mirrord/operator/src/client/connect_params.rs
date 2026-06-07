@@ -193,11 +193,7 @@ impl<'a> ConnectParams<'a> {
                 .azure_service_bus_jq_filters()
                 .collect(),
             temporal_splits: config.feature.split_queues.temporal().collect(),
-            temporal_jq_filters: config
-                .feature
-                .split_queues
-                .temporal_jq_filters()
-                .collect(),
+            temporal_jq_filters: config.feature.split_queues.temporal_jq_filters().collect(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
