@@ -181,3 +181,271 @@ impl TryFrom<ChaosRuleRequest> for ChaosRule {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::time::Duration;
+
+    use mirrord_config::feature::network::filter::AddressFilter;
+    use rstest::rstest;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    use crate::session_monitor::chaos::api::types::*;
+
+    /// A helper function that returns a [`ChaosRule`] the same as `@rule` with the `id` set to 0
+    /// for comparing rules.
+    fn no_id(rule: ChaosRule) -> ChaosRule {
+        ChaosRule {
+            id: Uuid::nil(),
+            ..rule
+        }
+    }
+
+    #[rstest]
+    #[case::tcp_latency(json!({
+      "name": "rust-connect-slow",
+      "effect": {
+        "latency": {
+          "delay_ms": 200,
+          "jitter_ms": 50,
+        }
+      },
+      "selector": {
+        "upstream": "rust-lang.org"
+      }
+    }), ChaosRuleRequest {
+        name: Some("rust-connect-slow".to_owned()),
+        priority: None,
+        effect: ChaosEffectRequest::Latency {
+            delay_ms: 200,
+            jitter_ms: Some(50)
+        },
+        selector: ChaosSelectorRequest {
+            upstream: Some("rust-lang.org".to_owned()),
+            ..Default::default()
+        }
+    }, ChaosRule {
+        id: Uuid::default(),
+        name: Some("rust-connect-slow".to_owned()),
+        selector: ChaosSelector::Tcp {
+            upstream: AddressFilter::Name("rust-lang.org".to_owned(), 0),
+            percentage: Percentage::new(100),
+            effect: TcpChaosEffect::Latency(ChaosEffectLatency {
+                delay: Duration::from_millis(200),
+                jitter: Duration::from_millis(50),
+            }),
+        },
+        ..Default::default()
+    })]
+    #[case::tcp_conn_error(json!({
+        "selector": {
+          "upstream": "rust-lang.org",
+          "percentage": 75
+        },
+        "priority": 100,
+        "effect": {
+          "connection_error": {
+            "type": "timeout",
+            "after_ms": 750
+          }
+        }
+    }), ChaosRuleRequest {
+        name: None,
+        priority: Some(100),
+        effect: ChaosEffectRequest::ConnectionError {
+            error_type: "timeout".to_owned(),
+            after_ms: Some(750)
+        },
+        selector: ChaosSelectorRequest {
+            upstream: Some("rust-lang.org".to_owned()),
+            percentage: Some(75),
+            ..Default::default()
+        }
+    }, ChaosRule {
+        id: Uuid::default(),
+        priority: 100,
+        selector: ChaosSelector::Tcp {
+            upstream: AddressFilter::Name("rust-lang.org".to_owned(), 0),
+            percentage: Percentage::new(75),
+            effect: TcpChaosEffect::ConnectionError(ChaosEffectConnError {
+                error_type: ConnErrorType::Timeout,
+                after: Duration::from_millis(750)
+            }),
+        },
+        ..Default::default()
+    })]
+    fn parse_valid_request_into_rule(
+        #[case] valid_rule_req: serde_json::Value,
+        #[case] expected_parsed_type: ChaosRuleRequest,
+        #[case] expected_validated_rule: ChaosRule,
+    ) {
+        let parsed_request: ChaosRuleRequest = serde_json::from_str(&valid_rule_req.to_string())
+            .expect("failed deserialization of rule request from valid json");
+
+        assert_eq!(
+            parsed_request, expected_parsed_type,
+            "json request was turned into a `ChaosRuleRequest`, but it did not match the expected request"
+        );
+
+        let validated_rule = ChaosRule::try_from(parsed_request)
+            .expect("ChaosRule failed creation from a valid ChaosRuleRequest");
+
+        // we can't compare rules on contents alone since they have unique UUIDs
+        assert_eq!(no_id(validated_rule), no_id(expected_validated_rule));
+    }
+
+    #[rstest]
+    #[case::invalid_selector_too_many_fields(json!({
+      "effect": {
+        "latency": {
+          "delay_ms": 200,
+          "jitter_ms": 50,
+        }
+      },
+      "selector": {
+        "upstream": "rust-lang.org",
+        "file_path": "/mnt/data/*.json",
+        "percentage": 20
+      }
+    }), ChaosRuleRequest {
+        name: None,
+        priority: None,
+        effect: ChaosEffectRequest::Latency {
+            delay_ms: 200,
+            jitter_ms: Some(50)
+        },
+        selector: ChaosSelectorRequest {
+            upstream: Some("rust-lang.org".to_owned()),
+            percentage: Some(20),
+            ..Default::default()
+        }
+    })]
+    #[case::invalid_selector_missing_minimum(json!({
+      "effect": {
+        "latency": {
+          "delay_ms": 200,
+          "jitter_ms": 50,
+        }
+      },
+      "selector": {
+        "percentage": 40
+      }
+    }), ChaosRuleRequest {
+        name: None,
+        priority: None,
+        effect: ChaosEffectRequest::Latency {
+            delay_ms: 200,
+            jitter_ms: Some(50)
+        },
+        selector: ChaosSelectorRequest {
+            upstream: None,
+            percentage: Some(40),
+            ..Default::default()
+        }
+    })]
+    #[case::http_effect_with_tcp_selector(json!({
+        "selector": {
+          "percentage": 75,
+          "upstream": "rust-lang.org"
+        },
+        "effect": {
+          "http_override": {
+            "type": "timeout",
+            "after_ms": 750
+          }
+        }
+    }), ChaosRuleRequest {
+        name: None,
+        priority: None,
+        effect: ChaosEffectRequest::ConnectionError {
+            error_type: "timeout".to_owned(),
+            after_ms: Some(750)
+        },
+        selector: ChaosSelectorRequest {
+            upstream: Some("rust-lang.org".to_owned()),
+            percentage: Some(75),
+            ..Default::default()
+        }
+    })]
+    #[case::invalid_selector_upstream_address_filter(json!({
+        "selector": {
+          "upstream": "meow://i-guess-i-could-be-blaze",
+          "percentage": 75
+        },
+        "priority": 100,
+        "effect": {
+          "connection_error": {
+            "type": "timeout",
+            "after_ms": 750
+          }
+        }
+    }), ChaosRuleRequest {
+        name: None,
+        priority: Some(100),
+        effect: ChaosEffectRequest::ConnectionError {
+            error_type: "timeout".to_owned(),
+            after_ms: Some(750)
+        },
+        selector: ChaosSelectorRequest {
+            upstream: Some("rust-lang.org".to_owned()),
+            percentage: Some(75),
+            ..Default::default()
+        }
+    })]
+    #[should_panic]
+    fn parse_well_formed_request_into_invalid_rule(
+        #[case] valid_rule_req: serde_json::Value,
+        #[case] expected_parsed_type: ChaosRuleRequest,
+    ) {
+        let parsed_request: ChaosRuleRequest = serde_json::from_str(&valid_rule_req.to_string())
+            .expect("failed deserialization of rule request from valid json");
+
+        assert_eq!(
+            parsed_request, expected_parsed_type,
+            "json request was turned into a `ChaosRuleRequest`, but it did not match the expected request"
+        );
+
+        let rule = ChaosRule::try_from(parsed_request).unwrap();
+        println!("{rule:?}");
+    }
+
+    #[rstest]
+    #[case::missing_selector(json!({
+      "name" : "the-crocodile-is-called-vector-apparently",
+      "effect": {
+        "latency": {
+          "delay_ms": 200,
+          "jitter_ms": 50,
+        }
+      }
+    }))]
+    #[case::multiple_effects(json!({
+        "selector": {
+          "percentage": 75,
+          "upstream": "rust-lang.org"
+        },
+        "effect": {
+          "http_override": {
+            "type": "timeout",
+            "after_ms": 750
+          },
+          "latency": {
+            "delay_ms": 200,
+          }
+        }
+    }))]
+    #[case::non_object_effect(json!({
+        "selector": {
+          "percentage": 75,
+          "upstream": "https://sonic.fandom.com/wiki/Team_Chaotix"
+        },
+        "effect": {
+          "http_override": "vector-isn't-a-very-reptilian-name"
+        }
+    }))]
+    #[should_panic]
+    fn error_on_parse_malformed_request(#[case] invalid_rule_req: serde_json::Value) {
+        let _: ChaosRuleRequest = serde_json::from_str(&invalid_rule_req.to_string()).unwrap();
+    }
+}

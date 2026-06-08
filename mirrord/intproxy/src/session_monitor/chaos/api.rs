@@ -77,13 +77,13 @@ impl IntoResponse for ApiError {
 pub(crate) fn chaos_router() -> Router<AppState> {
     Router::new()
         .route(
-            "/rules/{session_id}",
+            "/",
             post(post_create_rule)
                 .delete(delete_clear_session_rules)
                 .get(get_list_active_rules_for_session),
         )
         .route(
-            "/{session_id}/{rule_id}",
+            "/{rule_id}",
             put(put_update_rule).delete(delete_rule).get(get_rule),
         )
 }

@@ -199,7 +199,7 @@ pub async fn start_api_server(
         .route("/info", get(info))
         .route("/events", get(events))
         .route("/kill", post(kill))
-        .nest("/chaos", chaos_router())
+        .nest("/chaos/rules", chaos_router())
         .with_state(state);
 
     serve_session(&sessions_dir, &session_id, app, shutdown).await

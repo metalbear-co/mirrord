@@ -203,6 +203,34 @@ pub struct ChaosRule {
     pub hit_count: Arc<AtomicU32>,
 }
 
+// Note for devs: Avoid implementing `#[derive(Default)]` on `ChaosRule`: `Uuid::default()`
+// gives `Uuid::nil()`, which is just zero and will lead to conflicts.
+impl Default for ChaosRule {
+    /// Use [`Self::new()`] instead.
+    ///
+    /// ```
+    /// let default_rule = ChaosRule::default();
+    /// // equivalent to calling ChaosRule::default()
+    /// let expected = ChaosRule {
+    ///     id: default_rule.id, // Uuid::new_v4()
+    ///     name: None,
+    ///     priority: 0,
+    ///     selector: ChaosSelector::None,
+    ///     hit_count: 0,
+    /// };
+    /// assert_eq!(default_rule, expected);
+    /// ```
+    fn default() -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: Default::default(),
+            priority: Default::default(),
+            selector: Default::default(),
+            hit_count: Default::default(),
+        }
+    }
+}
+
 impl PartialEq for ChaosRule {
     fn eq(
         &self,
