@@ -102,7 +102,7 @@ impl StartedServer {
         let monitor_tx = MonitorTx::from_sender(tx);
         let shutdown = CancellationToken::new();
 
-        let (chaos_tx, chaos_rx) = watch::channel(Default::default());
+        let (chaos_tx, _) = watch::channel(Default::default());
 
         let server = tokio::spawn({
             let monitor_tx = monitor_tx.clone();
@@ -380,7 +380,7 @@ async fn invalid_session_id_with_path_traversal_returns_error() {
 
     let info = synthetic_session_info("../escape");
 
-    let (chaos_tx, chaos_rx) = watch::channel(Default::default());
+    let (chaos_tx, _) = watch::channel(Default::default());
 
     let result = start_api_server(
         tempdir.path().to_path_buf(),

@@ -31,13 +31,16 @@ use mirrord_config::{
 use mirrord_intproxy::{
     IntProxy, IntProxyIntervals,
     agent_conn::{AgentConnectInfo, AgentConnection},
-    session_monitor::{MonitorTx, chaos::ChaosWatcherTx},
+    session_monitor::{
+        MonitorTx,
+        chaos::{ChaosWatcherRx, ChaosWatcherTx},
+    },
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use mirrord_session_monitor_protocol::SessionInfo;
 #[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
-use tokio::{net::TcpListener, sync::watch};
+use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
 #[cfg(not(target_os = "windows"))]
@@ -110,9 +113,16 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 }
 
 /// Starts the session monitor API server if enabled.
-async fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> MonitorTx {
+async fn start_session_monitor(
+    config: &LayerConfig,
+    is_operator: bool,
+) -> (MonitorTx, ChaosWatcherRx) {
+    use tokio::sync::watch;
+
+    let (chaos_tx, chaos_rx) = watch::channel(Default::default());
+
     if !config.api {
-        return MonitorTx::disabled();
+        return (MonitorTx::disabled(), ChaosWatcherRx::new(chaos_rx));
     }
 
     let (tx, _rx) =
@@ -164,8 +174,6 @@ async fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> Monit
 
     let sessions_dir = home::home_dir().map(|home_dir| home_dir.join(".mirrord").join("sessions"));
 
-    let (chaos_tx, chaos_rx) = watch::channel(Default::default());
-
     tokio::spawn(async move {
         let Some(sessions_dir) = sessions_dir else {
             tracing::warn!(
@@ -187,7 +195,7 @@ async fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> Monit
         }
     });
 
-    proxy_monitor_tx
+    (proxy_monitor_tx, ChaosWatcherRx::new(chaos_rx))
 }
 
 /// Main entry point for the internal proxy.
@@ -296,7 +304,7 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    let monitor_tx = start_session_monitor(&config, is_operator).await;
+    let (monitor_tx, chaos_rx) = start_session_monitor(&config, is_operator).await;
 
     IntProxy::new_with_connection(
         agent_conn,
@@ -315,6 +323,7 @@ pub(crate) async fn proxy(
         },
         &config.experimental,
         monitor_tx,
+        chaos_rx,
     )
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await

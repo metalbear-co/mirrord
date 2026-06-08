@@ -24,6 +24,16 @@ type ChaosRuleList = HashSet<ChaosRule>;
 #[derive(Debug, Clone)]
 pub struct ChaosWatcherRx(watch::Receiver<ChaosRuleList>);
 
+impl ChaosWatcherRx {
+    pub fn new(rx: watch::Receiver<ChaosRuleList>) -> Self {
+        Self(rx)
+    }
+
+    pub(crate) fn get_rule(&self) -> Option<()> {
+        todo!()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ChaosWatcherTx(watch::Sender<ChaosRuleList>);
 
