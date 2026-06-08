@@ -39,6 +39,7 @@ use crate::{
     proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
+    session_monitor::chaos::{ChaosSelector, ChaosWatcherRx, TcpChaosEffect},
 };
 
 mod interceptor;
@@ -220,6 +221,8 @@ pub struct OutgoingProxy {
     connections_in_layers: RemoteResources<u128>,
     /// Maps outgoing connection local IDs to local addresses of corresponding agent sockets.
     agent_local_addresses: HashMap<u128, SocketAddr>,
+
+    chaos_rx: ChaosWatcherRx,
 }
 
 impl OutgoingProxy {
@@ -237,6 +240,7 @@ impl OutgoingProxy {
         non_blocking_tcp_connect: bool,
         receive_delay_ms: u64,
         transmit_delay_ms: u64,
+        chaos_rx: ChaosWatcherRx,
     ) -> Self {
         Self {
             datagrams_reqs: Default::default(),
@@ -250,6 +254,7 @@ impl OutgoingProxy {
             transmit_delay_ms,
             connections_in_layers: Default::default(),
             agent_local_addresses: Default::default(),
+            chaos_rx,
         }
     }
 
@@ -496,7 +501,49 @@ impl OutgoingProxy {
                     },
                 ))),
             };
-            message_bus.send(to_layer).await;
+
+            if let Some(chaos_selector) = self.chaos_rx.chaos_effect(&request) {
+                match chaos_selector {
+                    ChaosSelector::Tcp {
+                        upstream,
+                        percentage,
+                        effect,
+                    } => match effect {
+                        TcpChaosEffect::Latency(chaos_effect_latency) => todo!(),
+                        TcpChaosEffect::ConnectionError(chaos_effect_conn_error) => {
+                            // TODO(alex): Use the actual error and apply sleep or whatever.
+                            message_bus
+                                .send(ToLayer {
+                                    message_id,
+                                    layer_id: session_id,
+                                    message: ProxyToLayerMessage::Outgoing(
+                                        OutgoingResponse::Connect(Err(
+                                            ResponseError::NotImplemented,
+                                        )),
+                                    ),
+                                })
+                                .await;
+                            return Ok(());
+                        }
+                        TcpChaosEffect::Degradation => todo!(),
+                        TcpChaosEffect::Nothing => todo!(),
+                    },
+                    ChaosSelector::Http {
+                        upstream,
+                        percentage,
+                        filter,
+                        effect,
+                    } => todo!(),
+                    ChaosSelector::Fs {
+                        file_path,
+                        percentage,
+                        effect,
+                    } => todo!(),
+                    ChaosSelector::None => todo!(),
+                }
+            } else {
+                message_bus.send(to_layer).await;
+            }
 
             Some(listener)
         } else {
@@ -781,11 +828,13 @@ mod test {
         },
     };
     use mirrord_protocol_io::Connection;
+    use tokio::sync::watch;
 
     use crate::{
         background_tasks::{BackgroundTasks, TaskUpdate},
         main_tasks::{ConnectionRefresh, ProxyMessage, ToLayer},
         proxies::outgoing::{OutgoingProxy, OutgoingProxyError, OutgoingProxyMessage},
+        session_monitor::chaos::ChaosWatcherRx,
     };
 
     /// Verifies that the outgoing proxy can handle operator reconnect
@@ -795,9 +844,16 @@ mod test {
         let peer_addr = "1.1.1.1:80".parse::<SocketAddr>().unwrap();
         let (connection, _, out) = Connection::dummy();
 
+        let (_, chaos_rx) = watch::channel(Default::default());
+
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, OutgoingProxyError> =
             BackgroundTasks::new(connection.tx_handle());
-        let outgoing = background_tasks.register(OutgoingProxy::new(false, 0, 0), (), 8);
+
+        let outgoing = background_tasks.register(
+            OutgoingProxy::new(false, 0, 0, ChaosWatcherRx::new(chaos_rx)),
+            (),
+            8,
+        );
 
         for i in 0..=1 {
             // Layer wants to make an outgoing connection.

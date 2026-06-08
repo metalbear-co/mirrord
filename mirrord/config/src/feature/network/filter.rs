@@ -13,6 +13,7 @@ use nom::{
     multi::many1,
     sequence::{delimited, preceded, terminated},
 };
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// The protocols we support in [`ProtocolAndAddressFilter`].
@@ -45,7 +46,7 @@ impl FromStr for ProtocolFilter {
 
 /// <!--${internal}-->
 /// Parsed addresses can be one of these 3 variants.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum AddressFilter {
     /// Only port was specified.
     Port(u16),
