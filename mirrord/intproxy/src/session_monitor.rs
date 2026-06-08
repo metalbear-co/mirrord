@@ -1,6 +1,8 @@
 use serde::Serialize;
 use tokio::sync::broadcast;
 
+pub mod api;
+
 /// Wrapper around `Vec<String>` that redacts its [`Debug`] output to avoid leaking environment
 /// variable names into logs, while still serializing normally for the session monitor API.
 #[derive(Clone, Serialize)]
@@ -79,5 +81,3 @@ impl MonitorTx {
         self.inner.as_ref().map(|tx| tx.subscribe())
     }
 }
-
-pub mod api;
