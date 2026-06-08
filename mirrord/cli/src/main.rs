@@ -291,7 +291,7 @@ use mirrord_config::{
     LayerConfig,
     config::ConfigContext,
     feature::{
-        database_branches::{DatabaseBranchConfig, RedisBranchLocation},
+        database_branches::{DatabaseBranchConfig, RedisBranchConfig},
         fs::FsModeConfig,
         network::{
             dns::{DnsConfig, DnsFilterConfig},
@@ -795,9 +795,9 @@ async fn exec(
     let _local_redis: Option<local_redis::LocalRedis> = if let Some(redis_config) =
         config.feature.db_branches.iter().find_map(|branch| {
             if let DatabaseBranchConfig::Redis(redis_config) = branch
-                && redis_config.location == RedisBranchLocation::Local
+                && let RedisBranchConfig::Local(local_redis_config) = &**redis_config
             {
-                return Some(redis_config.clone());
+                return Some(local_redis_config.clone());
             }
             None
         }) {
