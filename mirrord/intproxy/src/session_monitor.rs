@@ -2,6 +2,7 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 
 pub mod api;
+pub mod chaos;
 
 /// Wrapper around `Vec<String>` that redacts its [`Debug`] output to avoid leaking environment
 /// variable names into logs, while still serializing normally for the session monitor API.
