@@ -1,18 +1,75 @@
 use std::{
     borrow::Borrow,
+    collections::HashSet,
     hash::Hash,
-    sync::{Arc, atomic::AtomicU32},
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    },
     time::Duration,
 };
 
 use mirrord_config::feature::network::filter::AddressFilter;
 use mirrord_protocol::tcp::HttpFilter;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use strum_macros::EnumString;
+use thiserror::Error;
+use tokio::sync::watch;
 use uuid::Uuid;
+
+pub mod api;
+
+type ChaosRuleList = HashSet<ChaosRule>;
+
+#[derive(Debug, Clone)]
+pub struct ChaosWatcherRx(watch::Receiver<ChaosRuleList>);
+
+#[derive(Debug, Clone)]
+pub struct ChaosWatcherTx(watch::Sender<ChaosRuleList>);
+
+impl ChaosWatcherTx {
+    pub(super) fn create_rule(&self, new_rule: ChaosRule) {
+        self.0.send_modify(|current_rules| {
+            current_rules.insert(new_rule);
+        });
+    }
+
+    pub(super) fn list_active_rules_for_session(&self) -> ChaosRuleList {
+        self.0.borrow().clone()
+    }
+
+    pub(super) fn clear_session_rules(&self) {
+        self.0.send_replace(Default::default());
+    }
+
+    pub(super) fn update_rule(&self, new_rule: ChaosRule) {
+        self.0.send_modify(|current_rules| {
+            current_rules.replace(new_rule);
+        });
+    }
+
+    pub(super) fn delete_rule(&self, rule_id: Uuid) {
+        self.0.send_modify(|current_rules| {
+            current_rules.remove(&rule_id);
+        });
+    }
+
+    fn get_rule(&self, rule_id: Uuid) -> Option<ChaosRule> {
+        self.0.borrow().get(&rule_id).cloned()
+    }
+}
+#[derive(Debug, Error)]
+pub enum ChaosRuleError {
+    #[error("the chaos rule request was invalid: {0}")]
+    Invalid(anyhow::Error),
+
+    #[error("this feature is not yet available in mirrord chaos: {0}")]
+    Unimplemented(String),
+}
 
 // having separate enums per selector allows invalid effect/ selector combos to
 // be impossible
-#[derive(Default, Debug, PartialEq, Hash)]
+#[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize)]
 pub enum TcpChaosEffect {
     Latency(ChaosEffectLatency),
     ConnectionError(ChaosEffectConnError),
@@ -21,7 +78,7 @@ pub enum TcpChaosEffect {
     Nothing,
 }
 
-#[derive(Default, Debug, PartialEq, Hash)]
+#[derive(Clone, Serialize, Deserialize, Default, Debug, PartialEq, Hash)]
 pub enum HttpChaosEffect {
     Latency(ChaosEffectLatency),
     HttpOverride,
@@ -29,7 +86,7 @@ pub enum HttpChaosEffect {
     Nothing,
 }
 
-#[derive(Default, Debug, PartialEq, Hash)]
+#[derive(Clone, Serialize, Deserialize, Default, Debug, PartialEq, Hash)]
 pub enum FsChaosEffect {
     Latency(ChaosEffectLatency),
     FsError,
@@ -37,19 +94,19 @@ pub enum FsChaosEffect {
     Nothing,
 }
 
-#[derive(Debug, PartialEq, Hash)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct ChaosEffectLatency {
     pub delay: Duration, // req
     pub jitter: Duration,
 }
 
-#[derive(Debug, PartialEq, Hash)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct ChaosEffectConnError {
     pub error_type: ConnErrorType, // req
     pub after: Duration,
 }
 
-#[derive(Debug, PartialEq, EnumString, Hash)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, EnumString, Hash)]
 #[strum(ascii_case_insensitive)]
 pub enum ConnErrorType {
     Reset,   // TCP RST
@@ -59,7 +116,7 @@ pub enum ConnErrorType {
 
 /// Helper type for a number between 0 and 100 inclusive. Defaults to 100%. Values larger than 100%
 /// get rounded down to 100%.
-#[derive(Clone, Copy, Debug, PartialEq, Hash)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash)]
 pub struct Percentage(u32);
 
 impl Percentage {
@@ -68,7 +125,13 @@ impl Percentage {
     }
 }
 
-#[derive(Default, Debug, PartialEq, Hash)]
+impl Default for Percentage {
+    fn default() -> Self {
+        Self::new(100)
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Default, Debug, PartialEq, Hash)]
 pub enum ChaosSelector {
     Tcp {
         upstream: AddressFilter, // req
@@ -105,7 +168,7 @@ pub enum ChaosSelector {
 ///
 /// _WARNING: This type implements `PartialEq` for testing purposes - trying to compare rules
 /// without accounting for their unique `id`s will fail!_
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChaosRule {
     /// The UUID of the rule (unrelated to the session ID that the rule is attached to). Created
     /// with [`Uuid::new_v4()`] via [`Self::new()`] or [`Self::default()`]. Cannot be specified
@@ -132,6 +195,7 @@ pub struct ChaosRule {
 
     /// The number of times the rule has been applied, modified by the tasks where the rule is
     /// applied. Cannot be specified by the user, starts at zero.
+    #[serde(with = "atomic_u32_arc")]
     pub hit_count: Arc<AtomicU32>,
 }
 
@@ -149,6 +213,8 @@ impl PartialEq for ChaosRule {
     }
 }
 
+impl Eq for ChaosRule {}
+
 impl Hash for ChaosRule {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
@@ -161,5 +227,24 @@ impl Hash for ChaosRule {
 impl Borrow<Uuid> for ChaosRule {
     fn borrow(&self) -> &Uuid {
         &self.id
+    }
+}
+
+mod atomic_u32_arc {
+    use super::*;
+
+    pub fn serialize<S>(value: &Arc<AtomicU32>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u32(value.load(Ordering::Relaxed))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Arc<AtomicU32>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = u32::deserialize(deserializer)?;
+        Ok(Arc::new(AtomicU32::new(value)))
     }
 }

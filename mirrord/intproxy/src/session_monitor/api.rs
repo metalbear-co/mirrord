@@ -35,6 +35,7 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use tokio_util::sync::CancellationToken;
 
 use super::{MonitorEvent, MonitorTx};
+use crate::session_monitor::chaos::ChaosWatcherTx;
 
 #[cfg(unix)]
 #[path = "transport_unix.rs"]
@@ -51,10 +52,11 @@ use transport::bind_session_transport;
 /// Per-session API state. Access control is provided by the OS-level permissions on the
 /// transport (`0o600` on the unix socket; restrictive DACL on the named pipe), so the HTTP
 /// layer itself is unauthenticated.
-struct AppState {
+pub(crate) struct AppState {
     session_info: RwLock<SessionInfo>,
     monitor_tx: MonitorTx,
     shutdown: CancellationToken,
+    pub(crate) chaos_tx: ChaosWatcherTx,
 }
 
 async fn health() -> impl IntoResponse {
@@ -166,6 +168,7 @@ pub async fn start_api_server(
     monitor_tx: MonitorTx,
     monitor_rx: tokio::sync::broadcast::Receiver<MonitorEvent>,
     shutdown: CancellationToken,
+    chaos_tx: ChaosWatcherTx,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let session_id = session_info.session_id.clone();
 
@@ -185,6 +188,7 @@ pub async fn start_api_server(
         session_info: RwLock::new(session_info),
         monitor_tx,
         shutdown: shutdown.clone(),
+        chaos_tx,
     });
 
     tokio::spawn(update_session_info_from_events(state.clone(), monitor_rx));
