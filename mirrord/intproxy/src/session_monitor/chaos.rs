@@ -10,6 +10,7 @@ use std::{
 };
 
 use mirrord_config::feature::network::filter::AddressFilter;
+use mirrord_intproxy_protocol::OutgoingConnectRequest;
 use mirrord_protocol::tcp::HttpFilter;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use strum_macros::EnumString;
@@ -29,8 +30,33 @@ impl ChaosWatcherRx {
         Self(rx)
     }
 
-    pub(crate) fn get_rule(&self) -> Option<()> {
-        todo!()
+    pub(crate) fn chaos_effect(
+        &self,
+        OutgoingConnectRequest {
+            remote_address,
+            protocol,
+        }: &OutgoingConnectRequest,
+    ) -> Option<ChaosSelector> {
+        let rules = self.0.borrow();
+        rules.iter().find_map(|rule| match &rule.selector {
+            ChaosSelector::Tcp {
+                upstream,
+                percentage,
+                effect,
+            } => Some(rule.selector.clone()),
+            ChaosSelector::Http {
+                upstream,
+                percentage,
+                filter,
+                effect,
+            } => todo!(),
+            ChaosSelector::Fs {
+                file_path,
+                percentage,
+                effect,
+            } => todo!(),
+            ChaosSelector::None => todo!(),
+        })
     }
 }
 

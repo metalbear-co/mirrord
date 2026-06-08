@@ -39,7 +39,7 @@ use crate::{
     proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
-    session_monitor::chaos::ChaosWatcherRx,
+    session_monitor::chaos::{ChaosSelector, ChaosWatcherRx, TcpChaosEffect},
 };
 
 mod interceptor;
@@ -502,7 +502,45 @@ impl OutgoingProxy {
                 ))),
             };
 
-            if let Some(chaos_rule) = self.chaos_rx.get_rule() {
+            if let Some(chaos_selector) = self.chaos_rx.chaos_effect(&request) {
+                match chaos_selector {
+                    ChaosSelector::Tcp {
+                        upstream,
+                        percentage,
+                        effect,
+                    } => match effect {
+                        TcpChaosEffect::Latency(chaos_effect_latency) => todo!(),
+                        TcpChaosEffect::ConnectionError(chaos_effect_conn_error) => {
+                            // TODO(alex): Use the actual error and apply sleep or whatever.
+                            message_bus
+                                .send(ToLayer {
+                                    message_id,
+                                    layer_id: session_id,
+                                    message: ProxyToLayerMessage::Outgoing(
+                                        OutgoingResponse::Connect(Err(
+                                            ResponseError::NotImplemented,
+                                        )),
+                                    ),
+                                })
+                                .await;
+                            return Ok(());
+                        }
+                        TcpChaosEffect::Degradation => todo!(),
+                        TcpChaosEffect::Nothing => todo!(),
+                    },
+                    ChaosSelector::Http {
+                        upstream,
+                        percentage,
+                        filter,
+                        effect,
+                    } => todo!(),
+                    ChaosSelector::Fs {
+                        file_path,
+                        percentage,
+                        effect,
+                    } => todo!(),
+                    ChaosSelector::None => todo!(),
+                }
             } else {
                 message_bus.send(to_layer).await;
             }
