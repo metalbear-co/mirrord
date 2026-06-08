@@ -1,6 +1,8 @@
+use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use rand::Rng;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::config::{
     ConfigContext, FromMirrordConfig, MirrordConfig, Result, from_env::FromEnv,
@@ -46,6 +48,41 @@ impl EnvKey {
         match self {
             EnvKey::Provided(s) | EnvKey::Generated(s) => s,
         }
+    }
+
+    /// Converts this key into a stable Kubernetes label value.
+    ///
+    /// Session keys are arbitrary strings, so this method hashes the key and encodes the digest in
+    /// a form that satisfies [`Self::is_valid_kubernetes_label_value`].
+    pub fn to_hashed_label_value(&self) -> String {
+        let hash = BASE64_URL_SAFE_NO_PAD.encode(Sha256::digest(self.as_str().as_bytes()));
+        // NB: First and last characters must be alphanumeric, hence the "h"s.
+        format!("h{hash}h")
+    }
+
+    /// Returns whether this key is already a valid Kubernetes label value.
+    ///
+    /// Kubernetes label values must be at most 63 characters, may only contain alphanumeric
+    /// characters, `-`, `_`, and `.`, and must start and end with an alphanumeric character.
+    ///
+    /// See the official Kubernetes reference:
+    /// <https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set>
+    pub fn is_valid_kubernetes_label_value(&self) -> bool {
+        let bytes = self.as_str().as_bytes();
+
+        if bytes.len() > 63 {
+            return false;
+        }
+
+        let Some((first, last)) = bytes.first().zip(bytes.last()) else {
+            return true;
+        };
+
+        first.is_ascii_alphanumeric()
+            && last.is_ascii_alphanumeric()
+            && bytes
+                .iter()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
     }
 
     /// Returns whether this key was provided by the user (not auto-generated).
