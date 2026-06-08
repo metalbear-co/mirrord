@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 pub mod api;
 
-type ChaosRuleList = HashSet<ChaosRule>;
+pub type ChaosRuleList = HashSet<ChaosRule>;
 
 #[derive(Debug, Clone)]
 pub struct ChaosWatcherRx(watch::Receiver<ChaosRuleList>);

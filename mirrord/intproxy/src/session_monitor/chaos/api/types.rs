@@ -10,7 +10,7 @@ use crate::session_monitor::chaos::*;
 /// In converting [`Self`](ChaosRuleRequest) to a [`ChaosRule`], the rule becomes validated.
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[skip_serializing_none]
-pub(super) struct ChaosRuleRequest {
+pub struct ChaosRuleRequest {
     /// Optional label specified by the user to identify the rule. Internally, the rule ID is used
     /// to differentiate between rules, so `name` uniqueness is not required.
     pub name: Option<String>,

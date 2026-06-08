@@ -51,7 +51,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::{debug, error, info, warn};
 
-use crate::{config::UiArgs, error::CliError};
+use crate::{config::UiArgs, error::CliError, ui::chaos::chaos_router};
 
 mod chaos;
 
@@ -835,6 +835,7 @@ fn build_router(state: AppState) -> Router {
         .route("/me", get(current_user));
 
     let authenticated_routes = Router::new()
+        .nest("/chaos/rules", chaos_router(state.clone()))
         .nest("/api", api_routes)
         .route("/ws", get(ws_handler))
         .fallback(static_handler)
