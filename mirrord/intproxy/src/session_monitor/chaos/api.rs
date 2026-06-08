@@ -26,7 +26,7 @@ mod types;
 type ChaosResult<T> = Result<T, ApiError>;
 
 #[derive(Debug)]
-struct ApiError(anyhow::Error);
+pub(crate) struct ApiError(anyhow::Error);
 
 impl FromRequest<AppState> for ChaosRule {
     type Rejection = ApiError;

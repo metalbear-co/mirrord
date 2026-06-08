@@ -31,13 +31,13 @@ use mirrord_config::{
 use mirrord_intproxy::{
     IntProxy, IntProxyIntervals,
     agent_conn::{AgentConnectInfo, AgentConnection},
-    session_monitor::MonitorTx,
+    session_monitor::{MonitorTx, chaos::ChaosWatcherTx},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use mirrord_session_monitor_protocol::SessionInfo;
 #[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::watch};
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
 #[cfg(not(target_os = "windows"))]
@@ -164,6 +164,8 @@ async fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> Monit
 
     let sessions_dir = home::home_dir().map(|home_dir| home_dir.join(".mirrord").join("sessions"));
 
+    let (chaos_tx, chaos_rx) = watch::channel(Default::default());
+
     tokio::spawn(async move {
         let Some(sessions_dir) = sessions_dir else {
             tracing::warn!(
@@ -177,6 +179,7 @@ async fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> Monit
             api_monitor_tx,
             api_monitor_rx,
             shutdown,
+            ChaosWatcherTx::new(chaos_tx),
         )
         .await
         {

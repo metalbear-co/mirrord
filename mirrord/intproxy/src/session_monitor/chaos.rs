@@ -28,6 +28,10 @@ pub struct ChaosWatcherRx(watch::Receiver<ChaosRuleList>);
 pub struct ChaosWatcherTx(watch::Sender<ChaosRuleList>);
 
 impl ChaosWatcherTx {
+    pub fn new(tx: watch::Sender<ChaosRuleList>) -> Self {
+        Self(tx)
+    }
+
     pub(super) fn create_rule(&self, new_rule: ChaosRule) {
         self.0.send_modify(|current_rules| {
             current_rules.insert(new_rule);
