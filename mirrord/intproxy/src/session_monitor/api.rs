@@ -35,7 +35,7 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use tokio_util::sync::CancellationToken;
 
 use super::{MonitorEvent, MonitorTx};
-use crate::session_monitor::chaos::ChaosWatcherTx;
+use crate::session_monitor::chaos::{ChaosWatcherTx, api::chaos_router};
 
 #[cfg(unix)]
 #[path = "transport_unix.rs"]
@@ -199,6 +199,7 @@ pub async fn start_api_server(
         .route("/info", get(info))
         .route("/events", get(events))
         .route("/kill", post(kill))
+        .nest("/chaos", chaos_router())
         .with_state(state);
 
     serve_session(&sessions_dir, &session_id, app, shutdown).await

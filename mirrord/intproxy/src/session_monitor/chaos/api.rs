@@ -74,7 +74,7 @@ impl IntoResponse for ApiError {
 // It's easier, the watcher keeps the most up-to-date info and is shareable, so we don't have to
 // keep locking something whenever we want to see if a rule applies, we just need to check the
 // channel.
-pub(super) fn chaos_router() -> Router<AppState> {
+pub(crate) fn chaos_router() -> Router<AppState> {
     Router::new()
         .route(
             "/rules/{session_id}",
