@@ -134,7 +134,7 @@ export default function AppHeader({
                 <div className="absolute right-0 top-full mt-1.5 z-50 min-w-[220px] rounded-lg border border-border bg-popover text-popover-foreground shadow-lg p-2 flex flex-col">
                   {currentUser && (
                     <div className="px-2 py-1.5">
-                      <div className="text-caps text-muted-foreground">Signed in as</div>
+                      <div className="text-caps text-muted-foreground">Running as</div>
                       <div className="font-mono text-meta text-foreground truncate" title={currentUser}>
                         {currentUser}
                       </div>
