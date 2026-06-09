@@ -9,6 +9,8 @@ use strum_macros::EnumString;
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::session_monitor::chaos::*;
+
 /// A valid chaos rule created from a user request ([`ChaosRuleRequest`]) in order to perform chaos
 /// testing via fault injection.
 ///
@@ -24,7 +26,7 @@ use uuid::Uuid;
 ///
 /// _WARNING: This type implements `PartialEq` for testing purposes - trying to compare rules
 /// without accounting for their unique `id`s will fail!_
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChaosRule {
     /// The UUID of the rule (unrelated to the session ID that the rule is attached to). Created
     /// with [`Uuid::new_v4()`] via [`Self::new()`] or [`Self::default()`]. Cannot be specified
@@ -51,7 +53,8 @@ pub struct ChaosRule {
 
     /// The number of times the rule has been applied, modified by the tasks where the rule is
     /// applied. Cannot be specified by the user, starts at zero.
-    pub hit_count: usize,
+    #[serde(with = "atomic_u32_arc")]
+    pub hit_count: Arc<AtomicU32>,
 }
 
 impl ChaosRule {
@@ -61,7 +64,7 @@ impl ChaosRule {
     pub fn new(name: Option<String>, priority: Option<usize>) -> Self {
         Self {
             id: Uuid::new_v4(),
-            name: name,
+            name,
             priority: priority.unwrap_or_default(),
             ..Default::default()
         }
@@ -96,6 +99,41 @@ impl Default for ChaosRule {
     }
 }
 
+impl PartialEq for ChaosRule {
+    fn eq(
+        &self,
+        ChaosRule {
+            id: _id,
+            name,
+            priority,
+            selector,
+            hit_count: _hit_count,
+        }: &Self,
+    ) -> bool {
+        // note: don't use .. to refer to fields in `ChaosRule` when matching, otherwise any new
+        // fields that are added will be silently ignored when comparing for equality. Explicity
+        // ignore fields that shouldn't be compared
+        self.name.eq(name) && self.priority.eq(priority) && self.selector.eq(selector)
+    }
+}
+
+impl Eq for ChaosRule {}
+
+impl Hash for ChaosRule {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+        self.name.hash(state);
+        self.priority.hash(state);
+        self.selector.hash(state);
+    }
+}
+
+impl Borrow<Uuid> for ChaosRule {
+    fn borrow(&self) -> &Uuid {
+        &self.id
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ChaosRuleError {
     #[error("the chaos rule request was invalid: {0}")]
@@ -105,27 +143,46 @@ pub enum ChaosRuleError {
     Unimplemented(String),
 }
 
-impl TryFrom<ChaosRuleRequest> for ChaosRule {
+impl TryFrom<ChaosEffectRequest> for TcpChaosEffect {
     type Error = ChaosRuleError;
 
-    /// Create a new [`Self`](ChaosRule) from a [`ChaosRuleRequest`], verifying that the rule is
-    /// valid. The selector must be inferred from the fields in `@value.selector`, and then checked
-    /// for compatibility with the requested effect type in `@value.effect`.
-    ///
-    /// Will fail for unimplemented effects and selectors.
-    fn try_from(value: ChaosRuleRequest) -> Result<Self, Self::Error> {
-        // start with name, priority, a new UUID (from `impl Default`) and default values for
-        // selector, effect and hit_count
-        let mut rule = ChaosRule::new(value.name, value.priority);
+    fn try_from(value: ChaosEffectRequest) -> Result<Self, Self::Error> {
+        match value {
+            ChaosEffectRequest::Latency {
+                delay_ms,
+                jitter_ms,
+            } => Ok(Self::Latency(ChaosEffectLatency {
+                delay: Duration::from_millis(delay_ms),
+                jitter: jitter_ms.map(Duration::from_millis).unwrap_or_default(),
+            })),
 
-        // infer selector type from which fields were set
-        // see `ChaosSelector` variants for which fields each selector can have
-        let percentage = value
-            .selector
+            ChaosEffectRequest::ConnectionError {
+                error_type,
+                after_ms,
+            } => Ok(Self::ConnectionError(ChaosEffectConnError {
+                error_type: ConnErrorType::from_str(&error_type)
+                    .context("unknown value for 'effect.connection_error.type'")
+                    .map_err(ChaosRuleError::Invalid)?,
+                after: after_ms.map(Duration::from_millis).unwrap_or_default(),
+            })),
+
+            other => Err(ChaosRuleError::Unimplemented(format!("{other:?} effect"))),
+        }
+    }
+}
+
+impl TryFrom<(ChaosSelectorRequest, ChaosEffectRequest)> for ChaosSelector {
+    type Error = ChaosRuleError;
+
+    fn try_from(
+        (selector, effect): (ChaosSelectorRequest, ChaosEffectRequest),
+    ) -> Result<Self, Self::Error> {
+        let percentage = selector
             .percentage
             .map(Percentage::from)
             .unwrap_or_default();
-        rule.selector = match value.selector {
+
+        match selector {
             ChaosSelectorRequest {
                 upstream: Some(upstream),
                 file_path: None,
@@ -135,87 +192,62 @@ impl TryFrom<ChaosRuleRequest> for ChaosRule {
                 all_of: None,
                 any_of: None,
                 percentage: _,
-            } => {
-                let upstream = AddressFilter::from_str(&upstream)
+            } => Ok(Self::Tcp {
+                upstream: AddressFilter::from_str(&upstream)
                     .context("failed to parse requested 'selector.upstream' into an address")
-                    .map_err(ChaosRuleError::Invalid)?;
+                    .map_err(ChaosRuleError::Invalid)?,
+                percentage,
+                effect: TcpChaosEffect::try_from(effect)?,
+            }),
 
-                ChaosSelector::Tcp {
-                    upstream,
-                    percentage,
-                    effect: TcpChaosEffect::Nothing,
-                }
-            }
             ChaosSelectorRequest {
-                upstream: Some(_upstream),
+                upstream: Some(_),
                 file_path: None,
-                header_filter: Some(_header_filter),
-                path_filter: Some(_path_filter),
-                method_filter: Some(_method_filter),
-                all_of: Some(_all_of),
-                any_of: Some(_any_of),
+                header_filter: Some(_),
+                path_filter: Some(_),
+                method_filter: Some(_),
+                all_of: Some(_),
+                any_of: Some(_),
                 percentage: _,
-            } => {
-                // todo: parse all filter fields into one `mirrord_protocol::tcp::HttpFilter`
-                return Err(ChaosRuleError::Unimplemented("HTTP selector".to_owned()));
-            }
+            } => Err(ChaosRuleError::Unimplemented("HTTP selector".to_owned())),
+
             ChaosSelectorRequest {
                 upstream: None,
-                file_path: Some(_file_path),
+                file_path: Some(_),
                 header_filter: None,
                 path_filter: None,
                 method_filter: None,
                 all_of: None,
                 any_of: None,
                 percentage: _,
-            } => {
-                return Err(ChaosRuleError::Unimplemented("FS selector".to_owned()));
-            }
-            _ => {
-                return Err(anyhow!(
-                    "couldn't derive a protocol type from fields in `selector` request"
-                ))
-                .map_err(ChaosRuleError::Invalid);
-            }
-        };
+            } => Err(ChaosRuleError::Unimplemented("FS selector".to_owned())),
 
-        // check the effect and selector are compatible
-        match rule.selector {
-            ChaosSelector::Tcp { ref mut effect, .. } => {
-                *effect = match value.effect {
-                    ChaosEffectRequest::Latency {
-                        delay_ms,
-                        jitter_ms,
-                    } => TcpChaosEffect::Latency(ChaosEffectLatency {
-                        delay: Duration::from_millis(delay_ms),
-                        jitter: jitter_ms.map(Duration::from_millis).unwrap_or_default(),
-                    }),
-                    ChaosEffectRequest::ConnectionError {
-                        error_type,
-                        after_ms,
-                    } => TcpChaosEffect::ConnectionError(ChaosEffectConnError {
-                        error_type: ConnErrorType::from_str(&error_type)
-                            .context("unknown value for 'effect.connection_error.type'")
-                            .map_err(ChaosRuleError::Invalid)?,
-                        after: after_ms.map(Duration::from_millis).unwrap_or_default(),
-                    }),
-                    other @ ChaosEffectRequest::Degradation
-                    | other @ ChaosEffectRequest::HttpOverride
-                    | other @ ChaosEffectRequest::FsError => {
-                        return Err(ChaosRuleError::Unimplemented(format!("{other:?} effect")));
-                    }
-                };
-            }
-            other @ ChaosSelector::Http { .. } | other @ ChaosSelector::Fs { .. } => {
-                return Err(ChaosRuleError::Unimplemented(format!("{other:?} selector")));
-            }
-            ChaosSelector::None => {
-                return Err(anyhow!("you must specify a selector for a chaos rule"))
-                    .map_err(ChaosRuleError::Invalid);
-            }
-        };
+            _ => Err(anyhow!(
+                "couldn't derive a protocol type from fields in `selector` request"
+            ))
+            .map_err(ChaosRuleError::Invalid),
+        }
+    }
+}
 
-        Ok(rule)
+impl TryFrom<ChaosRuleRequest> for ChaosRule {
+    type Error = ChaosRuleError;
+
+    fn try_from(
+        ChaosRuleRequest {
+            name,
+            priority,
+            effect,
+            selector,
+        }: ChaosRuleRequest,
+    ) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: Uuid::new_v4(),
+            name,
+            priority: priority.unwrap_or_default(),
+            selector: ChaosSelector::try_from((selector, effect))?,
+            hit_count: Arc::new(AtomicU32::default()),
+        })
     }
 }
 
@@ -290,7 +322,7 @@ pub struct ChaosSelectorRequest {
     percentage: Option<usize>,
 }
 
-#[derive(Default, Debug, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, Default, Debug, PartialEq, Hash)]
 pub enum ChaosSelector {
     Tcp {
         upstream: AddressFilter, // req
@@ -314,7 +346,7 @@ pub enum ChaosSelector {
 
 // having separate enums per selector allows invalid effect/ selector combos to
 // be impossible
-#[derive(Default, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, Default)]
 pub enum TcpChaosEffect {
     Latency(ChaosEffectLatency),
     ConnectionError(ChaosEffectConnError),
@@ -323,7 +355,7 @@ pub enum TcpChaosEffect {
     Nothing,
 }
 
-#[derive(Default, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, Default)]
 pub enum HttpChaosEffect {
     Latency(ChaosEffectLatency),
     HttpOverride,
@@ -331,7 +363,7 @@ pub enum HttpChaosEffect {
     Nothing,
 }
 
-#[derive(Default, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, Default)]
 pub enum FsChaosEffect {
     Latency(ChaosEffectLatency),
     FsError,
@@ -339,19 +371,19 @@ pub enum FsChaosEffect {
     Nothing,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash)]
 pub struct ChaosEffectLatency {
     pub delay: Duration, // req
     pub jitter: Duration,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash)]
 pub struct ChaosEffectConnError {
     pub error_type: ConnErrorType, // req
     pub after: Duration,
 }
 
-#[derive(Debug, PartialEq, EnumString)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, EnumString)]
 #[strum(ascii_case_insensitive)]
 pub enum ConnErrorType {
     Reset,   // TCP RST
@@ -361,7 +393,7 @@ pub enum ConnErrorType {
 
 /// Helper type for a number between 0 and 100 inclusive. Defaults to 100%. Values larger than 100%
 /// get rounded down to 100%.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash)]
 pub struct Percentage(usize);
 
 impl Percentage {
@@ -382,7 +414,7 @@ impl From<usize> for Percentage {
 
 impl From<f32> for Percentage {
     fn from(value: f32) -> Self {
-        (value / 100.).into()
+        Self(value.min(1.) as usize * 100)
     }
 }
 
@@ -407,7 +439,7 @@ mod test {
     use serde_json::json;
     use uuid::Uuid;
 
-    use crate::session_monitor::rules::{
+    use crate::session_monitor::chaos::rules::{
         ChaosEffectConnError, ChaosEffectLatency, ChaosEffectRequest, ChaosRule, ChaosRuleRequest,
         ChaosSelector, ChaosSelectorRequest, ConnErrorType, Percentage, TcpChaosEffect,
     };

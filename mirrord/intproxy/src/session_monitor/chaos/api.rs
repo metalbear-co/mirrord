@@ -18,10 +18,8 @@ use uuid::Uuid;
 
 use crate::session_monitor::{
     api::AppState,
-    chaos::{ChaosRule, ChaosRuleList, api::types::ChaosRuleRequest},
+    chaos::{ChaosRule, ChaosRuleList, rules::ChaosRuleRequest},
 };
-
-pub mod types;
 
 type ChaosResult<T> = Result<T, ApiError>;
 

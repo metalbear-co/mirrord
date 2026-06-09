@@ -8,7 +8,8 @@ use axum::{
     routing::{post, put},
 };
 use mirrord_intproxy::session_monitor::chaos::{
-    ChaosRule, ChaosRuleList, api::types::ChaosRuleRequest,
+    ChaosRuleList,
+    rules::{ChaosRule, ChaosRuleRequest},
 };
 use reqwest::Client;
 use serde_json::Value;
