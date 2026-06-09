@@ -134,7 +134,7 @@ hyper = { version = "1.10", features = ["full"] }
 hyper-util = { version = "0.1" }
 indicatif = "0.18"
 inquire = "0.9.4"
-ipnet = "2.8"
+ipnet = { version = "2.8", features = ["serde"] }
 iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }
 itertools = "0.14.0"
 jaq-core = "2.2.1"
@@ -207,6 +207,7 @@ serde_json_path_macros = "0.1.6"
 serde_urlencoded = "0.7"
 serde_with = "3.18"
 serde_yaml = "0.9"
+serde_with = "3.18"
 sha2 = "0.10"
 shellexpand = "3"
 socket2 = { version = "0.5", features = ["all"] }

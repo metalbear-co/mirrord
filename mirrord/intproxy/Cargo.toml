@@ -55,6 +55,10 @@ axum.workspace = true
 serde_json.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 
+uuid = { workspace = true }
+anyhow = { workspace = true }
+serde_with = { workspace = true }
+
 [target.'cfg(windows)'.dependencies]
 winapi = { workspace = true }
 
