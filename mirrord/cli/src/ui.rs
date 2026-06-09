@@ -33,9 +33,7 @@ use futures::{TryFutureExt as _, stream::StreamExt as _};
 use k8s_openapi::{api::authentication::v1::SelfSubjectReview, jiff::Timestamp};
 use kube::{Api, Client, api::PostParams};
 use mirrord_config::target::{Target, TargetDisplay};
-use mirrord_operator::crd::{
-    MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, SessionHttpFilter, TARGETLESS_TARGET_NAME,
-};
+use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, SessionHttpFilter};
 use mirrord_session_monitor_client::{
     SESSION_SENTINEL_EXTENSION, SessionClient, SessionEndpoint, connect_to_session,
     session_endpoints, sessions_dir,

@@ -39,7 +39,10 @@ use crate::{
     proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
-    session_monitor::chaos::{ChaosSelector, ChaosWatcherRx, TcpChaosEffect},
+    session_monitor::chaos::{
+        ChaosWatcherRx,
+        rules::{ChaosSelector, TcpChaosEffect},
+    },
 };
 
 mod interceptor;
