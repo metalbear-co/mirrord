@@ -4,6 +4,7 @@ use std::{
     str::FromStr,
 };
 
+use mirrord_protocol::outgoing::SocketAddress;
 use nom::{
     IResult,
     branch::alt,
@@ -75,6 +76,23 @@ impl AddressFilter {
             Self::Name(_, port) => *port,
             Self::Socket(socket) => socket.port(),
             Self::Subnet(_, port) => *port,
+        }
+    }
+
+    pub fn matches_socket_address(&self, address: &SocketAddress) -> bool {
+        match self {
+            AddressFilter::Port(port) => {
+                *port == 0 || address.get_port().is_some_and(|p| *port == p)
+            }
+            AddressFilter::Socket(socket_addr) => {
+                socket_addr.ip().is_unspecified()
+                    || address.get_ip().is_some_and(|ip| socket_addr.ip() == ip)
+            }
+            AddressFilter::Subnet(ip_net, port) if let Some(ip) = address.get_ip() => {
+                ip_net.contains(&ip)
+                    && (*port == 0 || address.get_port().is_some_and(|p| *port == p))
+            }
+            _ => false,
         }
     }
 }

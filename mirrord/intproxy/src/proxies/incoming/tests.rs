@@ -24,12 +24,13 @@ use mirrord_protocol::{
 };
 use mirrord_protocol_io::Connection;
 use rstest::rstest;
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::watch};
 
 use crate::{
     background_tasks::BackgroundTasks,
     main_tasks::{ProxyMessage, ToLayer},
     proxies::incoming::{IncomingProxy, IncomingProxyError, IncomingProxyMessage},
+    session_monitor::chaos::ChaosWatcherRx,
 };
 
 /// Dummy service mocking a server sent events HTTP server.
@@ -61,11 +62,14 @@ async fn http_request_terminates_on_remote_close(#[case] steal_type: StealType) 
     let local_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let local_addr = local_listener.local_addr().unwrap();
 
+    let (_chaos_tx, chaos_rx) = watch::channel(Default::default());
+
     let (conn, _, out) = Connection::dummy();
     let proxy = IncomingProxy::new(
         Duration::from_secs(3),
         Default::default(),
         crate::session_monitor::MonitorTx::disabled(),
+        ChaosWatcherRx::new(chaos_rx),
     );
     let mut background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError> =
         BackgroundTasks::new(conn.tx_handle());

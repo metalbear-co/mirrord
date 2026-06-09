@@ -12,7 +12,7 @@ use mirrord_intproxy::{
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     main_tasks::{ProxyMessage, ToLayer},
     proxies::incoming::{IncomingProxy, IncomingProxyError, IncomingProxyMessage},
-    session_monitor::MonitorTx,
+    session_monitor::{MonitorTx, chaos::ChaosWatcherRx},
 };
 use mirrord_intproxy_protocol::{
     IncomingRequest, IncomingResponse, LayerId, PortSubscribe, PortSubscription,
@@ -40,7 +40,7 @@ use tokio::{
     select,
     sync::{
         mpsc::{self, Receiver, Sender},
-        oneshot,
+        oneshot, watch,
     },
 };
 use tokio_stream::{StreamMap, wrappers::TcpListenerStream};
@@ -579,6 +579,8 @@ impl ReversePortForwarder {
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError> =
             BackgroundTasks::new(agent_connection.tx_handle());
 
+        let (_chaos_tx, chaos_rx) = watch::channel(Default::default());
+
         let incoming = background_tasks.register(
             IncomingProxy::new(
                 idle_local_http_connection_timeout,
@@ -588,6 +590,7 @@ impl ReversePortForwarder {
                     .or_else(|| network_config.https_delivery.clone())
                     .unwrap_or_default(),
                 MonitorTx::disabled(),
+                ChaosWatcherRx::new(chaos_rx),
             ),
             (),
             512,

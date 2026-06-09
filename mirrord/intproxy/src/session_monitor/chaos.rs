@@ -13,12 +13,25 @@ use serde::{Deserialize, Deserializer, Serializer};
 use tokio::sync::watch;
 use uuid::Uuid;
 
-use crate::session_monitor::chaos::rules::{ChaosRule, ChaosSelector};
-
 pub mod api;
 pub mod rules;
 
+use rules::*;
+
+use crate::proxies::{incoming::IncomingProxyMessage, outgoing::OutgoingProxyMessage};
+
 pub type ChaosRuleList = HashSet<ChaosRule>;
+
+pub enum EffectOrMessageChat<SomeChaosEffect, SomethingToSendBackToLayer> {
+    Effect(SomeChaosEffect),
+    BackToYouLayer(SomethingToSendBackToLayer),
+}
+
+pub trait ApplyChaosRuleLol {
+    type EffectLol;
+
+    fn chaos_effect(&self, rules: &ChaosRuleList) -> Option<Self::EffectLol>;
+}
 
 #[derive(Debug, Clone)]
 pub struct ChaosWatcherRx(watch::Receiver<ChaosRuleList>);
@@ -28,33 +41,12 @@ impl ChaosWatcherRx {
         Self(rx)
     }
 
-    pub(crate) fn chaos_effect(
-        &self,
-        OutgoingConnectRequest {
-            remote_address,
-            protocol,
-        }: &OutgoingConnectRequest,
-    ) -> Option<ChaosSelector> {
+    pub fn chaos_effect<'a, M>(&'a self, message: &'a M) -> Option<M::EffectLol>
+    where
+        M: ApplyChaosRuleLol + ?Sized,
+    {
         let rules = self.0.borrow();
-        rules.iter().find_map(|rule| match &rule.selector {
-            ChaosSelector::Tcp {
-                upstream,
-                percentage,
-                effect,
-            } => Some(rule.selector.clone()),
-            ChaosSelector::Http {
-                upstream,
-                percentage,
-                filter,
-                effect,
-            } => todo!(),
-            ChaosSelector::Fs {
-                file_path,
-                percentage,
-                effect,
-            } => todo!(),
-            ChaosSelector::None => todo!(),
-        })
+        message.chaos_effect(&rules)
     }
 }
 
