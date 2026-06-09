@@ -49,7 +49,6 @@ tokio-retry.workspace = true
 tokio-rustls.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true
-regex.workspace = true
 anyhow.workspace = true
 
 axum.workspace = true

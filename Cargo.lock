@@ -5044,7 +5044,6 @@ dependencies = [
  "mirrord-tls-util",
  "rand 0.9.2",
  "rcgen",
- "regex",
  "rstest",
  "rustls",
  "semver 1.0.27",
