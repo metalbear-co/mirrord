@@ -47,7 +47,7 @@ use winapi::{
     shared::{
         guiddef::GUID,
         minwindef::{BOOL, FALSE, INT, LPHANDLE, TRUE},
-        winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA},
+        winerror::ERROR_BUFFER_OVERFLOW,
         ws2def::{
             ADDRINFOA, ADDRINFOEXW, ADDRINFOW, LPWSABUF, NS_ALL, NS_DNS, NS_NETBT, PADDRINFOEXW,
             SIO_GET_EXTENSION_FUNCTION_POINTER, SOCKADDR,
@@ -67,7 +67,7 @@ use winapi::{
 use windows_strings::{PCSTR, PCWSTR};
 
 use self::{
-    hostname::{handle_hostname_ansi, handle_hostname_unicode, is_remote_hostname},
+    hostname::{NameTooLong, handle_hostname_ansi, handle_hostname_unicode, is_remote_hostname},
     ops::{WSABufferData, get_connectex_original, hook_connectex_extension, log_connection_result},
     utils::{
         AutoCloseSocket, ERROR_SUCCESS_I32, create_thread_local_hostent, determine_local_address,
@@ -156,17 +156,12 @@ static FREE_ADDR_INFO_EX_W_ORIGINAL: OnceLock<&FreeAddrInfoExWType> = OnceLock::
 type GetAddrInfoExCancelType = unsafe extern "system" fn(lpHandle: LPHANDLE) -> INT;
 static GET_ADDR_INFO_EX_CANCEL_ORIGINAL: OnceLock<&GetAddrInfoExCancelType> = OnceLock::new();
 
-// Kernel32 hostname functions that Python might use
-type GetComputerNameAType = unsafe extern "system" fn(lpBuffer: *mut i8, nSize: *mut u32) -> i32;
-static GET_COMPUTER_NAME_A_ORIGINAL: OnceLock<&GetComputerNameAType> = OnceLock::new();
-
+// Computer-name functions. GetComputerNameW (exported from kernel32) reads the name from the
+// registry directly -- it does NOT call GetComputerNameExW (which lives in kernelbase) and bails
+// early on the _CLUSTER_NETWORK_NAME_ env var -- so both W functions are hooked. The ANSI variants
+// only forward to their W counterparts.
 type GetComputerNameWType = unsafe extern "system" fn(lpBuffer: *mut u16, nSize: *mut u32) -> BOOL;
 static GET_COMPUTER_NAME_W_ORIGINAL: OnceLock<&GetComputerNameWType> = OnceLock::new();
-
-// Additional hostname functions that Python might use
-type GetComputerNameExAType =
-    unsafe extern "system" fn(name_type: u32, lpBuffer: *mut i8, nSize: *mut u32) -> i32;
-static GET_COMPUTER_NAME_EX_A_ORIGINAL: OnceLock<&GetComputerNameExAType> = OnceLock::new();
 
 type GetComputerNameExWType =
     unsafe extern "system" fn(name_type: u32, lpBuffer: *mut u16, nSize: *mut u32) -> BOOL;
@@ -1405,35 +1400,31 @@ unsafe extern "system" fn gethostname_detour(name: *mut i8, namelen: INT) -> INT
             || original(name, namelen),
             || remote_hostname_string(true),
             "gethostname",
-            ERROR_BUFFER_OVERFLOW,
             // If no error occurs, gethostname returns zero. Otherwise, it returns SOCKET_ERROR
             //  and a specific error code can be retrieved by calling WSAGetLastError.
             (ERROR_SUCCESS_I32, SOCKET_ERROR),
+            // gethostname uses the size-probe contract (fails with WSAEFAULT + required size).
+            NameTooLong::Fail(ERROR_BUFFER_OVERFLOW),
         )
     }
 }
 
-/// Windows kernel32 hook for GetComputerNameA
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn get_computer_name_a_detour(lpBuffer: *mut i8, nSize: *mut u32) -> i32 {
-    let original = GET_COMPUTER_NAME_A_ORIGINAL.get().unwrap();
-
-    unsafe {
-        handle_hostname_ansi(
-            lpBuffer,
-            nSize,
-            || original(lpBuffer, nSize),
-            || remote_hostname_string(true),
-            "GetComputerNameA",
-            ERROR_BUFFER_OVERFLOW,
-            // If the function succeeds, the return value is a nonzero value.
-            // If the function fails, the return value is zero.
-            (1, 0),
-        )
-    }
-}
-
-/// Windows kernel32 hook for GetComputerNameW
+/// kernel32 hook for `GetComputerNameW` (the basic computer name).
+///
+/// This is what .NET's `Environment.MachineName` ends up calling:
+/// `MachineName => Interop.Kernel32.GetComputerName() ?? throw ...`. The P/Invoke targets
+/// `GetComputerNameW` with a fixed `MAX_COMPUTERNAME_LENGTH + 1` (16) wchar buffer. A `FALSE`
+/// (null) return is thrown as `InvalidOperationException`.
+///
+/// The remote pod hostname is routinely longer than that buffer. So [`handle_hostname_unicode`]
+/// writes only what fits and returns success (truncating only when it must). .NET gets a valid name
+/// instead of a hard failure, and callers with a larger buffer still get the full name.
+///
+/// # Note
+///
+/// We hook `GetComputerNameW` separately from `GetComputerNameExW`. It reads the name straight from
+/// the registry, with an early `_CLUSTER_NETWORK_NAME_` env-var bail, and does not funnel through
+/// `GetComputerNameExW`.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn get_computer_name_w_detour(lpBuffer: *mut u16, nSize: *mut u32) -> BOOL {
     let original = GET_COMPUTER_NAME_W_ORIGINAL.get().unwrap();
@@ -1444,58 +1435,24 @@ unsafe extern "system" fn get_computer_name_w_detour(lpBuffer: *mut u16, nSize: 
             || original(lpBuffer, nSize),
             || remote_hostname_string(true),
             "GetComputerNameW",
-            ERROR_BUFFER_OVERFLOW,
+            // .NET's Environment.MachineName passes a fixed 16-wchar buffer and throws on FALSE,
+            // so truncate the (longer) pod hostname to fit instead of failing.
+            NameTooLong::Truncate,
         )
     }
 }
 
-/// Windows kernel32 hook for GetComputerNameExA
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn get_computer_name_ex_a_detour(
-    name_type: u32,
-    lpBuffer: *mut i8,
-    nSize: *mut u32,
-) -> i32 {
-    tracing::debug!(
-        "GetComputerNameExA hook called with name_type: {}",
-        name_type
-    );
-    let original = GET_COMPUTER_NAME_EX_A_ORIGINAL.get().unwrap();
-
-    // supported name types for hostname interception
-    let should_intercept = matches!(
-        name_type,
-        ComputerNameDnsHostname
-            | ComputerNameDnsFullyQualified
-            | ComputerNamePhysicalDnsHostname
-            | ComputerNamePhysicalDnsFullyQualified
-            | ComputerNameNetBIOS
-            | ComputerNamePhysicalNetBIOS
-    );
-
-    if should_intercept {
-        return handle_hostname_ansi(
-            lpBuffer,
-            nSize,
-            || unsafe { original(name_type, lpBuffer, nSize) },
-            || hostname::get_hostname_for_name_type(name_type),
-            "GetComputerNameExA",
-            ERROR_MORE_DATA,
-            // If the function succeeds, the return value is a nonzero value.
-            // If the function fails, the return value is zero.
-            (1, 0),
-        );
-    }
-
-    // forward non-supported name_types to original func
-    tracing::debug!(
-        "GetComputerNameExW: unsupported name_type {}, falling back to original",
-        name_type
-    );
-    return unsafe { original(name_type, lpBuffer, nSize) };
-}
-
-/// Windows kernel32 hook for GetComputerNameExW
+/// kernelbase hook for `GetComputerNameExW`.
+///
+/// Hooked in addition to `GetComputerNameW` because callers can request the Ex name formats
+/// directly (DNS hostname / fully-qualified / NetBIOS). The ANSI `GetComputerNameExA` just forwards
+/// here, so it needs no separate hook.
+///
+/// The per-format buffer policy comes from `hostname::ex_w_policy`:
+///
+/// * NetBIOS formats truncate to fit. They're <=15 on Windows and queried with a fixed buffer the
+///   caller can't grow (e.g. SChannel/SSPI during a TLS handshake).
+/// * DNS formats keep the size-probe contract, since those names can be long.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn get_computer_name_ex_w_detour(
     name_type: u32,
@@ -1522,7 +1479,8 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
             || unsafe { original(name_type, lpBuffer, nSize) },
             || hostname::get_hostname_for_name_type(name_type),
             "GetComputerNameExW",
-            ERROR_MORE_DATA,
+            // NetBIOS formats truncate to fit; DNS formats keep the size-probe contract.
+            hostname::ex_w_policy(name_type),
         );
     }
 
@@ -1745,38 +1703,6 @@ unsafe extern "system" fn freeaddrinfo_t_detour(addrinfo: *mut ADDRINFOW) {
     }
 }
 
-/// Trim a NetBIOS name to its usable length.
-///
-/// A NetBIOS name occupies a 16-byte field: up to 15 usable characters plus a
-/// trailing resource-type *suffix* byte — a service identifier (e.g. 0x20 for
-/// the Server service), NOT a null terminator. So the usable name is capped at
-/// 15 bytes.
-///
-/// We trim in place to match Windows' own truncation before handing the
-/// (short) name to remote DNS resolution.
-///
-/// Regular DNS (`NS_DNS` / `NS_ALL`) is left untouched and follows the usual
-/// length limits.
-fn trim_netbios_name(name: &mut String) {
-    const NETBIOS_MAX_BYTES: usize = 15;
-    if name.len() <= NETBIOS_MAX_BYTES {
-        return;
-    }
-    // Bound by *bytes* (the NetBIOS field is 15 OEM bytes), truncating at the
-    // largest UTF-8 char boundary that fits. For the usual ASCII names this is
-    // the same as taking 15 characters.
-    let mut end = 0;
-    for (i, ch) in name.char_indices() {
-        if i + ch.len_utf8() > NETBIOS_MAX_BYTES {
-            break;
-        }
-        end = i + ch.len_utf8();
-    }
-    let trimmed = name[..end].to_string();
-    tracing::debug!(original = %name, %trimmed, "GetAddrInfoExW: trimmed NetBIOS name to <=15 bytes");
-    *name = trimmed;
-}
-
 /// Hook for `GetAddrInfoExW` — the async-capable resolver.
 ///
 /// Synchronous calls (no overlapped/routine) resolve inline and return 0 with
@@ -1841,7 +1767,7 @@ unsafe extern "system" fn getaddrinfoexw_detour(
         unsafe { str_win::u16_buffer_to_string(PCWSTR(p_name).as_wide()) }
     };
     if dw_name_space == NS_NETBT {
-        trim_netbios_name(&mut node);
+        hostname::trim_netbios_name(&mut node);
     }
 
     let service_opt = if p_service_name.is_null() {
@@ -2125,33 +2051,13 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
             GET_HOST_NAME_ORIGINAL
         )?;
 
-        apply_hook!(
-            guard,
-            "kernel32",
-            "GetComputerNameExW",
-            get_computer_name_ex_w_detour,
-            GetComputerNameExWType,
-            GET_COMPUTER_NAME_EX_W_ORIGINAL
-        )?;
-
-        apply_hook!(
-            guard,
-            "kernel32",
-            "GetComputerNameExA",
-            get_computer_name_ex_a_detour,
-            GetComputerNameExAType,
-            GET_COMPUTER_NAME_EX_A_ORIGINAL
-        )?;
-
-        apply_hook!(
-            guard,
-            "kernel32",
-            "GetComputerNameA",
-            get_computer_name_a_detour,
-            GetComputerNameAType,
-            GET_COMPUTER_NAME_A_ORIGINAL
-        )?;
-
+        // .NET's Environment.MachineName -> GetComputerNameW, which reads the computer name from
+        // the registry directly (with an early _CLUSTER_NETWORK_NAME_ env-var bail) and does NOT
+        // funnel through GetComputerNameExW -- so both W functions are hooked. The ANSI variants
+        // (GetComputerNameA / GetComputerNameExA) only call their W counterparts, so hooking the
+        // two W functions covers every computer-name API.
+        //
+        // GetComputerNameW is exported from kernel32; GetComputerNameExW lives in kernelbase.
         apply_hook!(
             guard,
             "kernel32",
@@ -2159,6 +2065,15 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
             get_computer_name_w_detour,
             GetComputerNameWType,
             GET_COMPUTER_NAME_W_ORIGINAL
+        )?;
+
+        apply_hook!(
+            guard,
+            "kernelbase",
+            "GetComputerNameExW",
+            get_computer_name_ex_w_detour,
+            GetComputerNameExWType,
+            GET_COMPUTER_NAME_EX_W_ORIGINAL
         )?;
     } else {
         tracing::info!("DNS hooks disabled by configuration");
