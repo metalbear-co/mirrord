@@ -655,6 +655,7 @@ where
                 &target,
                 target_namespace,
                 layer_config.key.as_str(),
+                layer_config.operator_isolation_marker.as_deref(),
                 &subtask,
             )?;
 
@@ -702,9 +703,14 @@ where
             let branch_api: Api<BranchDatabase> =
                 Api::namespaced(self.client.clone(), api_namespace);
 
-            let existing =
-                list_existing_branches(&branch_api, &create_params, target_namespace, &subtask)
-                    .await?;
+            let existing = list_existing_branches(
+                &branch_api,
+                &create_params,
+                target_namespace,
+                layer_config.operator_isolation_marker.as_deref(),
+                &subtask,
+            )
+            .await?;
 
             create_params.retain(|id, _| {
                 !existing.ready.contains_key(id) && !existing.pending.contains_key(id)
@@ -748,7 +754,11 @@ where
                 mongodb: mut create_mongodb_params,
                 mysql: mut create_mysql_params,
                 pg: mut create_pg_params,
-            } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+            } = DatabaseBranchParams::new(
+                &layer_config.feature.db_branches,
+                &target,
+                layer_config.operator_isolation_marker.as_deref(),
+            );
 
             if let Some(ref ns) = target_ns_annotation {
                 for params in create_pg_params.values_mut() {
@@ -774,21 +784,35 @@ where
             let mongodb_api: Api<MongodbBranchDatabase> =
                 Api::namespaced(self.client.clone(), api_namespace);
 
-            let reusable_pg =
-                list_reusable_pg_branches(&pg_api, &create_pg_params, &subtask).await?;
+            let reusable_pg = list_reusable_pg_branches(
+                &pg_api,
+                &create_pg_params,
+                layer_config.operator_isolation_marker.as_deref(),
+                &subtask,
+            )
+            .await?;
             create_pg_params.retain(|id, _| !reusable_pg.contains_key(id));
             let created_pg =
                 create_pg_branches(&pg_api, create_pg_params, timeout, &subtask).await?;
 
-            let reusable_mysql =
-                list_reusable_mysql_branches(&mysql_api, &create_mysql_params, &subtask).await?;
+            let reusable_mysql = list_reusable_mysql_branches(
+                &mysql_api,
+                &create_mysql_params,
+                layer_config.operator_isolation_marker.as_deref(),
+                &subtask,
+            )
+            .await?;
             create_mysql_params.retain(|id, _| !reusable_mysql.contains_key(id));
             let created_mysql =
                 create_mysql_branches(&mysql_api, create_mysql_params, timeout, &subtask).await?;
 
-            let reusable_mongodb =
-                list_reusable_mongodb_branches(&mongodb_api, &create_mongodb_params, &subtask)
-                    .await?;
+            let reusable_mongodb = list_reusable_mongodb_branches(
+                &mongodb_api,
+                &create_mongodb_params,
+                layer_config.operator_isolation_marker.as_deref(),
+                &subtask,
+            )
+            .await?;
             create_mongodb_params.retain(|id, _| !reusable_mongodb.contains_key(id));
             let created_mongodb =
                 create_mongodb_branches(&mongodb_api, create_mongodb_params, timeout, &subtask)

@@ -483,6 +483,29 @@ pub struct LayerConfig {
     /// Only relevant for use with the operator. For more details, read the [docs on monitoring](https://metalbear.com/mirrord/docs/managing-mirrord/monitoring).
     #[config(env = "BAGGAGE")]
     pub baggage: Option<String>,
+
+    /// ## operator_isolation_marker {#root-operator_isolation_marker}
+    ///
+    /// Ties the operator-managed resources this session creates as Kubernetes objects (database
+    /// branches, preview sessions) to a specific operator instance.
+    ///
+    /// Database branches and preview sessions are created by writing CRDs straight to the
+    /// Kubernetes API, so the `baggage` HTTP filter cannot route them. Instead each operator
+    /// watches these CRDs by the `operator.metalbear.co/owner` label. When this marker is set,
+    /// mirrord stamps that label so an isolated operator started with the same
+    /// `OPERATOR_ISOLATION_MARKER` value picks them up instead of the deployed one.
+    ///
+    /// Leave it unset for normal usage: the CRDs stay unlabeled and the deployed operator handles
+    /// them. Set it to `"{{ key }}"` when running against a locally-built, isolated operator (see
+    /// the operator repo's `staging.md`).
+    ///
+    /// ```json
+    /// {
+    ///   "operator_isolation_marker": "{{ key }}"
+    /// }
+    /// ```
+    #[config(env = "OPERATOR_ISOLATION_MARKER")]
+    pub operator_isolation_marker: Option<String>,
 }
 
 impl LayerConfig {
@@ -1628,6 +1651,7 @@ mod tests {
             ci: None,
             traceparent: None,
             baggage: None,
+            operator_isolation_marker: None,
             api: None,
         };
 

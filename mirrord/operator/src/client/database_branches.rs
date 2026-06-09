@@ -37,7 +37,7 @@ use crate::{
         mysql::{MysqlBranchDatabase, MysqlBranchDatabaseSpec},
         pg::{PgBranchDatabase, PgBranchDatabaseSpec},
     },
-    types::{OPERATOR_ISOLATION_MARKER_ENV, OPERATOR_OWNERSHIP_LABEL},
+    types::OPERATOR_OWNERSHIP_LABEL,
 };
 
 /// Create MySQL branch databases and wait for their readiness.
@@ -153,6 +153,7 @@ pub async fn create_mysql_branches<P: Progress>(
 pub async fn list_reusable_mysql_branches<P: Progress>(
     api: &Api<MysqlBranchDatabase>,
     params: &HashMap<BranchDatabaseId, MysqlBranchParams>,
+    marker: Option<&str>,
     progress: &P,
 ) -> Result<HashMap<BranchDatabaseId, MysqlBranchDatabase>, OperatorApiError> {
     let specified_ids = params
@@ -168,7 +169,7 @@ pub async fn list_reusable_mysql_branches<P: Progress>(
             "{} in ({}),{}",
             labels::MIRRORD_MYSQL_BRANCH_ID_LABEL,
             specified_ids.join(","),
-            ownership_label_selector(),
+            ownership_label_selector(marker),
         ))
     };
 
@@ -315,6 +316,7 @@ pub async fn create_pg_branches<P: Progress>(
 pub async fn list_reusable_pg_branches<P: Progress>(
     api: &Api<PgBranchDatabase>,
     params: &HashMap<BranchDatabaseId, PgBranchParams>,
+    marker: Option<&str>,
     progress: &P,
 ) -> Result<HashMap<BranchDatabaseId, PgBranchDatabase>, OperatorApiError> {
     let specified_ids = params
@@ -330,7 +332,7 @@ pub async fn list_reusable_pg_branches<P: Progress>(
             "{} in ({}),{}",
             labels::MIRRORD_PG_BRANCH_ID_LABEL,
             specified_ids.join(","),
-            ownership_label_selector(),
+            ownership_label_selector(marker),
         ))
     };
 
@@ -456,6 +458,7 @@ pub async fn create_mongodb_branches<P: Progress>(
 pub async fn list_reusable_mongodb_branches<P: Progress>(
     api: &Api<MongodbBranchDatabase>,
     params: &HashMap<BranchDatabaseId, MongodbBranchParams>,
+    marker: Option<&str>,
     progress: &P,
 ) -> Result<HashMap<BranchDatabaseId, MongodbBranchDatabase>, OperatorApiError> {
     let specified_ids = params
@@ -471,7 +474,7 @@ pub async fn list_reusable_mongodb_branches<P: Progress>(
             "{} in ({}),{}",
             labels::MIRRORD_MONGODB_BRANCH_ID_LABEL,
             specified_ids.join(","),
-            ownership_label_selector(),
+            ownership_label_selector(marker),
         ))
     };
 
@@ -516,7 +519,7 @@ impl DatabaseBranchParams {
     /// Create branch database parameters.
     ///
     /// We generate unique database IDs unless the user explicitly specifies them.
-    pub fn new(config: &DatabaseBranchesConfig, target: &Target) -> Self {
+    pub fn new(config: &DatabaseBranchesConfig, target: &Target, marker: Option<&str>) -> Self {
         let mut mongodb = HashMap::new();
         let mut mysql = HashMap::new();
         let mut pg = HashMap::new();
@@ -553,21 +556,21 @@ impl DatabaseBranchParams {
             };
         }
 
-        if let Ok(marker) = std::env::var(OPERATOR_ISOLATION_MARKER_ENV) {
+        if let Some(marker) = marker {
             for params in mongodb.values_mut() {
                 params
                     .labels
-                    .insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker.clone());
+                    .insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker.to_owned());
             }
             for params in mysql.values_mut() {
                 params
                     .labels
-                    .insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker.clone());
+                    .insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker.to_owned());
             }
             for params in pg.values_mut() {
                 params
                     .labels
-                    .insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker.clone());
+                    .insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker.to_owned());
             }
         }
 
@@ -881,12 +884,14 @@ impl MongodbBranchParams {
 }
 
 /// Returns a label selector fragment that scopes queries to branches owned by the current
-/// operator isolation context. When `OPERATOR_ISOLATION_MARKER` is set, matches branches
-/// with that marker; otherwise matches branches without any ownership label.
-fn ownership_label_selector() -> String {
-    match std::env::var(OPERATOR_ISOLATION_MARKER_ENV) {
-        Ok(marker) => format!("{}={}", OPERATOR_OWNERSHIP_LABEL, marker),
-        Err(_) => format!("!{}", OPERATOR_OWNERSHIP_LABEL),
+/// operator isolation context. When a marker is set, matches branches with that marker;
+/// otherwise matches branches without any ownership label, which is what the deployed
+/// operator reconciles. Keeping this aligned with the label stamped at creation time means
+/// reuse only ever finds branches the same operator will actually manage.
+fn ownership_label_selector(marker: Option<&str>) -> String {
+    match marker {
+        Some(marker) => format!("{}={}", OPERATOR_OWNERSHIP_LABEL, marker),
+        None => format!("!{}", OPERATOR_OWNERSHIP_LABEL),
     }
 }
 
@@ -1120,6 +1125,7 @@ pub async fn list_existing_branches<P: Progress>(
     api: &Api<BranchDatabase>,
     params: &HashMap<BranchDatabaseId, UnifiedBranchParams>,
     target_namespace: &str,
+    marker: Option<&str>,
     progress: &P,
 ) -> Result<ExistingBranches, OperatorApiError> {
     let specified_ids = params
@@ -1133,10 +1139,14 @@ pub async fn list_existing_branches<P: Progress>(
             pending: HashMap::new(),
         });
     } else {
+        // Scope reuse to branches owned by the same operator that will manage newly created
+        // ones, so an isolated session never reuses a branch the deployed operator owns (or
+        // vice versa).
         Some(format!(
-            "{} in ({})",
+            "{} in ({}),{}",
             labels::MIRRORD_BRANCH_ID_LABEL,
-            specified_ids.join(",")
+            specified_ids.join(","),
+            ownership_label_selector(marker),
         ))
     };
 
@@ -1308,6 +1318,7 @@ impl UnifiedDatabaseBranchParams {
         target: &Target,
         target_namespace: &str,
         session_key: &str,
+        marker: Option<&str>,
         progress: &P,
     ) -> Result<Self, OperatorApiError> {
         let mut target_with_container = target.clone();
@@ -1370,11 +1381,11 @@ impl UnifiedDatabaseBranchParams {
             branches.insert(id, params);
         }
 
-        if let Ok(marker) = std::env::var(OPERATOR_ISOLATION_MARKER_ENV) {
+        if let Some(marker) = marker {
             for branch_params in branches.values_mut() {
                 branch_params
                     .labels
-                    .insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker.clone());
+                    .insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker.to_owned());
             }
         }
 

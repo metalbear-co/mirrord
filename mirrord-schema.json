@@ -149,6 +149,14 @@
         "null"
       ]
     },
+    "operator_isolation_marker": {
+      "title": "operator_isolation_marker {#root-operator_isolation_marker}",
+      "description": "Ties the operator-managed resources this session creates as Kubernetes objects (database\nbranches, preview sessions) to a specific operator instance.\n\nDatabase branches and preview sessions are created by writing CRDs straight to the\nKubernetes API, so the `baggage` HTTP filter cannot route them. Instead each operator\nwatches these CRDs by the `operator.metalbear.co/owner` label. When this marker is set,\nmirrord stamps that label so an isolated operator started with the same\n`OPERATOR_ISOLATION_MARKER` value picks them up instead of the deployed one.\n\nLeave it unset for normal usage: the CRDs stay unlabeled and the deployed operator handles\nthem. Set it to `\"{{ key }}\"` when running against a locally-built, isolated operator (see\nthe operator repo's `staging.md`).\n\n```json\n{\n  \"operator_isolation_marker\": \"{{ key }}\"\n}\n```",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "profile": {
       "title": "profile {#root-profile}",
       "description": "Name of the mirrord profile to use.\n\nTo select a cluster-wide profile\n\n```json\n{\n  \"profile\": \"my-profile-name\"\n}\n```\n\nTo select a namespaced profile\n\n```json\n{\n  \"profile\": \"my-namespace/my-profile-name\"\n}\n```",
