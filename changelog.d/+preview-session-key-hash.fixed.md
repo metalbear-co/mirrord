@@ -1,0 +1,1 @@
+Preview environments now hash the session key before placing it in the `PreviewSession` resource's label. In practice this means keys containing characters like `/`, which are invalid for Kubernetes labels, are accepted.
