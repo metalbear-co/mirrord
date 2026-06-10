@@ -85,8 +85,11 @@ impl AddressFilter {
                 *port == 0 || address.get_port().is_some_and(|p| *port == p)
             }
             AddressFilter::Socket(socket_addr) => {
-                socket_addr.ip().is_unspecified()
-                    || address.get_ip().is_some_and(|ip| socket_addr.ip() == ip)
+                let self_ip = socket_addr.ip();
+                let self_port = socket_addr.port();
+
+                (self_ip.is_unspecified() || address.get_ip().is_some_and(|ip| self_ip == ip))
+                    && (self_port == 0 || address.get_port().is_some_and(|p| self_port == p))
             }
             AddressFilter::Subnet(ip_net, port) if let Some(ip) = address.get_ip() => {
                 ip_net.contains(&ip)
