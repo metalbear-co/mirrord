@@ -278,10 +278,13 @@ Operator License
             println!("Operator Daily Users: {}", statistics.dau);
             println!("Operator Monthly Users: {}", statistics.mau);
 
+            println!("Operator Concurrent Sessions:");
+            println!("  CI Sessions: {}", statistics.active_ci_sessions_count?);
             println!(
-                "Operator Concurrent CI Sessions: {}",
-                statistics.active_ci_sessions_count?
+                "  Preview Environment Sessions: {}",
+                statistics.active_preview_sessions_count?
             );
+            println!();
 
             Some(())
         });
