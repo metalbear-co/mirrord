@@ -40,8 +40,8 @@ use crate::{
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
     session_monitor::chaos::{
-        ApplyChaosRuleLol, ChaosWatcherRx, EffectOrMessageChat,
-        rules::{ChaosSelector, TcpChaosEffect},
+        ApplyChaosRuleLol, ChaosWatcherRx,
+        rules::{ChaosEffectConnError, ChaosSelector, TcpChaosEffect},
     },
 };
 
@@ -661,6 +661,16 @@ pub enum OutgoingProxyMessage {
     LayerClosed(LayerClosed),
 }
 
+impl OutgoingProxyMessage {
+    pub fn layer_info(&self) -> Option<(MessageId, LayerId)> {
+        let Self::Layer(_, message_id, layer_id) = self else {
+            return None;
+        };
+
+        Some((*message_id, *layer_id))
+    }
+}
+
 impl BackgroundTask for OutgoingProxy {
     type Error = OutgoingProxyError;
     type MessageIn = OutgoingProxyMessage;
@@ -668,22 +678,7 @@ impl BackgroundTask for OutgoingProxy {
 
     #[tracing::instrument(level = Level::INFO, name = "outgoing_proxy_main_loop", skip_all, ret, err)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        async fn handle_chaos(
-            chaos_reigns: <OutgoingProxyMessage as ApplyChaosRuleLol>::EffectLol,
-            message_bus: &mut MessageBus<OutgoingProxy>,
-        ) -> bool {
-            match chaos_reigns {
-                EffectOrMessageChat::Effect(TcpChaosEffect::Latency(..)) => {
-                    sleep(Duration::from_secs(5)).await;
-                    false
-                }
-                EffectOrMessageChat::Effect(other_effect) => todo!(),
-                EffectOrMessageChat::BackToYouLayer(message) => {
-                    message_bus.send(message).await;
-                    true
-                }
-            }
-        }
+        use chaos::OutgoingThingToDo;
 
         match &mut self.background_tasks {
             Some(tasks) => tasks.set_agent_tx(message_bus.clone_agent_tx()),
@@ -696,8 +691,20 @@ impl BackgroundTask for OutgoingProxy {
             tokio::select! {
                 msg = message_bus.recv() => {
                     if let Some(chaos_reigns) = msg.as_ref().and_then(|request| self.chaos_rx.chaos_effect(request)) {
-                        if handle_chaos(chaos_reigns, message_bus).await {
-                            continue;
+                        match chaos_reigns {
+                            OutgoingThingToDo::Latency { effect } => {
+                                sleep(Duration::from_secs(1)).await;
+                            }
+                            OutgoingThingToDo::ConnectionError {
+                                to_layer,
+                                effect: ChaosEffectConnError {
+                                    error_type, after
+                                }
+                            } => {
+                                sleep(after).await;
+                                message_bus.send(to_layer).await;
+                                continue;
+                            }
                         }
                     }
 

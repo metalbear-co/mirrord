@@ -12,9 +12,9 @@ pub enum IncomingLol {
 }
 
 impl ApplyChaosRuleLol for IncomingProxyMessage {
-    type EffectLol = IncomingLol;
+    type WhatToDo = IncomingLol;
 
-    fn chaos_effect(&self, rules: &ChaosRuleList) -> Option<Self::EffectLol> {
+    fn chaos_effect(&self, rules: &ChaosRuleList) -> Option<Self::WhatToDo> {
         match self {
             IncomingProxyMessage::LayerRequest(_, layer_id, incoming_request) => todo!(),
             IncomingProxyMessage::LayerForked(layer_forked) => todo!(),

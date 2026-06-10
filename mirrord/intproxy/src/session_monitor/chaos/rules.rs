@@ -2,7 +2,8 @@ use std::{fmt::Display, str::FromStr, time::Duration};
 
 use anyhow::{Context, anyhow};
 use mirrord_config::feature::network::filter::AddressFilter;
-use mirrord_protocol::tcp::HttpFilter;
+use mirrord_intproxy_protocol::NetProtocol;
+use mirrord_protocol::{outgoing::SocketAddress, tcp::HttpFilter};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use strum_macros::EnumString;
@@ -67,6 +68,21 @@ impl ChaosRule {
             name,
             priority: priority.unwrap_or_default(),
             ..Default::default()
+        }
+    }
+
+    pub fn applies_to_address(
+        &self,
+        remote_address: &SocketAddress,
+        protocol: NetProtocol,
+    ) -> bool {
+        match &self.selector {
+            ChaosSelector::Tcp { upstream, .. } => {
+                upstream.matches_socket_address(remote_address)
+                    && matches!(protocol, NetProtocol::Stream)
+            }
+
+            ChaosSelector::Http { .. } | ChaosSelector::Fs { .. } | ChaosSelector::None => false,
         }
     }
 }

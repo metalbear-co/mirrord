@@ -22,15 +22,10 @@ use crate::proxies::{incoming::IncomingProxyMessage, outgoing::OutgoingProxyMess
 
 pub type ChaosRuleList = HashSet<ChaosRule>;
 
-pub enum EffectOrMessageChat<SomeChaosEffect, SomethingToSendBackToLayer> {
-    Effect(SomeChaosEffect),
-    BackToYouLayer(SomethingToSendBackToLayer),
-}
-
 pub trait ApplyChaosRuleLol {
-    type EffectLol;
+    type WhatToDo;
 
-    fn chaos_effect(&self, rules: &ChaosRuleList) -> Option<Self::EffectLol>;
+    fn chaos_effect(&self, rules: &ChaosRuleList) -> Option<Self::WhatToDo>;
 }
 
 #[derive(Debug, Clone)]
@@ -41,7 +36,7 @@ impl ChaosWatcherRx {
         Self(rx)
     }
 
-    pub fn chaos_effect<'a, M>(&'a self, message: &'a M) -> Option<M::EffectLol>
+    pub fn chaos_effect<'a, M>(&'a self, message: &'a M) -> Option<M::WhatToDo>
     where
         M: ApplyChaosRuleLol + ?Sized,
     {
