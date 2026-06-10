@@ -1,1 +1,0 @@
-Database branches with a user-specified `id` are now shared across workloads. Two sessions targeting different deployments that point at the same database and use the same branch `id` now reuse a single branch instead of each creating its own.

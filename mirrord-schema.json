@@ -1662,7 +1662,6 @@
         },
         "filter": {
           "title": "feature.network.dns.filter {#feature-network-dns-filter}",
-          "description": "Unstable: the precise syntax of this config is subject to change.",
           "anyOf": [
             {
               "$ref": "#/$defs/DnsFilterConfig"
