@@ -857,6 +857,7 @@ mod test {
                     OutgoingRequest::Connect(OutgoingConnectRequest {
                         remote_address: SocketAddress::Ip(peer_addr),
                         protocol: NetProtocol::Stream,
+                        hostname: None,
                     }),
                     i,
                     LayerId(0),

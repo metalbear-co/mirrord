@@ -8,7 +8,6 @@ use std::{
     },
 };
 
-use mirrord_intproxy_protocol::OutgoingConnectRequest;
 use serde::{Deserialize, Deserializer, Serializer};
 use tokio::sync::watch;
 use tracing::Level;
@@ -18,8 +17,6 @@ pub mod api;
 pub mod rules;
 
 use rules::*;
-
-use crate::proxies::{incoming::IncomingProxyMessage, outgoing::OutgoingProxyMessage};
 
 pub type ChaosRuleList = HashSet<ChaosRule>;
 

@@ -145,6 +145,8 @@ pub struct OutgoingConnectRequest {
     pub remote_address: SocketAddress,
     /// The protocol stack the user application wants to use.
     pub protocol: NetProtocol,
+
+    pub hostname: Option<String>,
 }
 
 /// A request for additional metadata for an outgoing connection.

@@ -71,16 +71,18 @@ impl ChaosRule {
         }
     }
 
+    #[tracing::instrument(level = Level::INFO, ret)]
     pub fn applies_to_address(
         &self,
         remote_address: &SocketAddress,
         protocol: NetProtocol,
+        remote_hostname: Option<&String>,
     ) -> bool {
         match &self.selector {
             // TODO(alex) [high]: We need to resolve the `AddressFilter::Name(name, port)` to an ip,
             // so we can compare it with the `remote_address`.
             ChaosSelector::Tcp { upstream, .. } => {
-                upstream.matches_socket_address(remote_address)
+                upstream.matches_socket_address(remote_address, remote_hostname)
                     && matches!(protocol, NetProtocol::Stream)
             }
 
@@ -345,6 +347,13 @@ impl ChaosSelectorRequest {
         Self {
             upstream: Some(format!(":{port}")),
             percentage,
+            ..Default::default()
+        }
+    }
+
+    pub fn name() -> Self {
+        Self {
+            upstream: Some(format!("google.com:443")),
             ..Default::default()
         }
     }

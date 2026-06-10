@@ -11,6 +11,7 @@ use crate::{
     },
 };
 
+#[derive(Debug)]
 pub enum OutgoingThingToDo {
     Latency {
         effect: ChaosEffectLatency,
@@ -24,11 +25,13 @@ pub enum OutgoingThingToDo {
 impl ApplyChaosRuleLol for OutgoingProxyMessage {
     type WhatToDo = OutgoingThingToDo;
 
+    #[tracing::instrument(level = Level::INFO, skip(self), ret)]
     fn chaos_effect(&self, rules: &ChaosRuleList) -> Option<Self::WhatToDo> {
         let Self::Layer(
             OutgoingRequest::Connect(OutgoingConnectRequest {
                 remote_address,
                 protocol,
+                hostname,
             }),
             message_id,
             layer_id,
@@ -39,7 +42,7 @@ impl ApplyChaosRuleLol for OutgoingProxyMessage {
 
         let Some(rule) = rules
             .iter()
-            .filter(|rule| rule.applies_to_address(remote_address, *protocol))
+            .filter(|rule| rule.applies_to_address(remote_address, *protocol, hostname.as_ref()))
             .max_by_key(|rule| rule.priority)
         else {
             return None;

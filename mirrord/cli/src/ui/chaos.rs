@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use anyhow::anyhow;
 use axum::{
     Extension, Json, Router,
@@ -11,7 +9,7 @@ use axum::{
 };
 use mirrord_intproxy::session_monitor::chaos::{
     ChaosRuleList,
-    rules::{ChaosRule, ChaosRuleRequest, ChaosSelectorRequest, Percentage},
+    rules::{ChaosRule, ChaosRuleRequest, ChaosSelectorRequest},
 };
 use mirrord_session_monitor_client::SessionClient;
 use serde_json::Value;
@@ -112,7 +110,8 @@ async fn post_create_rule(
                 error_type: "refused".to_string(),
                 after_ms: Some(0),
             },
-        selector: ChaosSelectorRequest::tcp_port(443, Some(100)),
+        // selector: ChaosSelectorRequest::tcp_port(443, Some(100)),
+        selector: ChaosSelectorRequest::name(),
     };
 
     client
