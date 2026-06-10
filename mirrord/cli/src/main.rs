@@ -837,6 +837,7 @@ async fn exec(
         Default::default(),
         watch,
         user_data.machine_id(),
+        Some(config.key.as_str().to_owned()),
     );
     (&config).collect_analytics(analytics.get_mut());
     if let Some(correlation_id) = read_correlation_id_from_env() {
@@ -947,6 +948,7 @@ async fn port_forward(
         ExecutionKind::PortForward,
         watch,
         user_data.machine_id(),
+        Some(config.key.as_str().to_owned()),
     );
     (&config).collect_analytics(analytics.get_mut());
 
