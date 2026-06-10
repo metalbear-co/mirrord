@@ -1,0 +1,4 @@
+# rustfmt.toml sets `newline_style = "Unix"`, so enforce LF for Rust sources at the git level
+# as well. Otherwise Windows checkouts (core.autocrlf=true) get CRLF working trees that
+# `cargo fmt` rewrites back to LF, leaving line-ending-only noise in `git status`.
+*.rs text eol=lf
