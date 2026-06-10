@@ -980,9 +980,9 @@ impl BackgroundTask for IncomingProxy {
         loop {
             tokio::select! {
                 msg = message_bus.recv() => {
-                    if let Some(chaos_reigns) = msg.as_ref().and_then(|request| self.chaos_rx.chaos_effect(request)) {
+                    // if let Some(chaos_reigns) = msg.as_ref().and_then(|request| self.chaos_rx.chaos_effect(request)) {
 
-                    }
+                    // }
 
                     match msg {
                         None => {

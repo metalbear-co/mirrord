@@ -701,6 +701,7 @@ impl BackgroundTask for OutgoingProxy {
                                     error_type, after
                                 }
                             } => {
+                                tracing::info!(?after, ?to_layer, "We have a match  for a connection error");
                                 sleep(after).await;
                                 message_bus.send(to_layer).await;
                                 continue;

@@ -5384,6 +5384,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "mirrord-session-monitor-protocol",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",

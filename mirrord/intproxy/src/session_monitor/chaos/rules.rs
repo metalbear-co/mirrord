@@ -77,6 +77,8 @@ impl ChaosRule {
         protocol: NetProtocol,
     ) -> bool {
         match &self.selector {
+            // TODO(alex) [high]: We need to resolve the `AddressFilter::Name(name, port)` to an ip,
+            // so we can compare it with the `remote_address`.
             ChaosSelector::Tcp { upstream, .. } => {
                 upstream.matches_socket_address(remote_address)
                     && matches!(protocol, NetProtocol::Stream)
@@ -338,6 +340,16 @@ pub struct ChaosSelectorRequest {
     percentage: Option<usize>,
 }
 
+impl ChaosSelectorRequest {
+    pub fn tcp_port(port: u16, percentage: Option<usize>) -> Self {
+        Self {
+            upstream: Some(format!(":{port}")),
+            percentage,
+            ..Default::default()
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Default, Debug, PartialEq, Hash)]
 pub enum ChaosSelector {
     Tcp {
@@ -413,6 +425,10 @@ pub enum ConnErrorType {
 pub struct Percentage(usize);
 
 impl Percentage {
+    pub fn new(value: u32) -> Self {
+        Self(value.max(100) as usize)
+    }
+
     pub fn as_percentage(&self) -> usize {
         self.0
     }
