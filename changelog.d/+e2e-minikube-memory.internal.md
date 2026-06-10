@@ -1,1 +1,1 @@
-Give the e2e `minikube` cluster 8gb of memory (old 4gb).
+Give the e2e `minikube` cluster 8gb of memory.
