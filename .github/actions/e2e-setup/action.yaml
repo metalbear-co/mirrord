@@ -19,8 +19,14 @@ name: "Setup mirrord e2e environment"
 description: "Install all required dependencies for mirrord e2e tests"
 inputs:
   container-runtime:
-    description: "Container runtime to setup with minikube"
+    description: "Container runtime to setup when using minikube"
     default: "containerd"
+  cluster-runtime:
+    description: "Kubernetes cluster runtime to setup (minikube or kind)"
+    default: "minikube"
+  kind-cluster-name:
+    description: "Name of the kind cluster to setup"
+    default: "mirrord-e2e"
   sccache-gcs-bucket:
     description: "GCS bucket for sccache (optional)"
     required: false
@@ -36,6 +42,10 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Validate cluster runtime
+      if: ${{ inputs.cluster-runtime != 'minikube' && inputs.cluster-runtime != 'kind' }}
+      run: exit 1
+      shell: bash
     - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
       with:
         node-version: 24
@@ -117,9 +127,16 @@ runs:
       run: ./scripts/build_c_apps.sh
       shell: bash
     - name: start minikube
+      if: ${{ inputs.cluster-runtime == 'minikube' }}
       uses: metalbear-co/setup-minikube@5e53a22fad27011bc52d2caf69b8e383a53ef889
       with:
         container-runtime: ${{ inputs.container-runtime }}
         cpus: "max"
-        memory: "24gb"
+        memory: "12gb"
         start-args: "--disk-size=40g"
+    - name: start kind
+      if: ${{ inputs.cluster-runtime == 'kind' }}
+      uses: metalbear-co/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc
+      with:
+        cluster_name: ${{ inputs.kind-cluster-name }}
+        wait: "120s"
