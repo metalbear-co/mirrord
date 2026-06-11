@@ -4,6 +4,7 @@ use std::{
     str::FromStr,
 };
 
+use mirrord_protocol::outgoing::SocketAddress;
 use nom::{
     IResult,
     branch::alt,
@@ -15,6 +16,7 @@ use nom::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::Level;
 
 /// The protocols we support in [`ProtocolAndAddressFilter`].
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -75,6 +77,36 @@ impl AddressFilter {
             Self::Name(_, port) => *port,
             Self::Socket(socket) => socket.port(),
             Self::Subnet(_, port) => *port,
+        }
+    }
+
+    #[tracing::instrument(level = Level::INFO, ret)]
+    pub fn matches_socket_address(
+        &self,
+        address: &SocketAddress,
+        remote_hostname: Option<&String>,
+    ) -> bool {
+        match self {
+            AddressFilter::Port(port) => {
+                *port == 0 || address.get_port().is_some_and(|p| *port == p)
+            }
+            AddressFilter::Socket(socket_addr) => {
+                let self_ip = socket_addr.ip();
+                let self_port = socket_addr.port();
+
+                (self_ip.is_unspecified() || address.get_ip().is_some_and(|ip| self_ip == ip))
+                    && (self_port == 0 || address.get_port().is_some_and(|p| self_port == p))
+            }
+            AddressFilter::Subnet(ip_net, port) if let Some(ip) = address.get_ip() => {
+                ip_net.contains(&ip)
+                    && (*port == 0 || address.get_port().is_some_and(|p| *port == p))
+            }
+
+            AddressFilter::Name(hostname, port) if let Some(remote_hostname) = remote_hostname => {
+                tracing::info!(?hostname, ?port, ?remote_hostname, "Do we even get here?");
+                (self.port() == 0 || self.port() == *port) && remote_hostname.contains(hostname)
+            }
+            _ => false,
         }
     }
 }

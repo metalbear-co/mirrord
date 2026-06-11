@@ -229,6 +229,7 @@ impl IntProxy {
                 Duration::from_millis(experimental.idle_local_http_connection_timeout),
                 https_delivery,
                 monitor_tx.clone(),
+                chaos_rx.clone(),
             ),
             MainTaskId::IncomingProxy,
             Self::CHANNEL_SIZE,
@@ -1465,6 +1466,7 @@ mod test {
                     OutgoingConnectRequest {
                         remote_address: socket_addr.clone(),
                         protocol: NetProtocol::Stream,
+                        hostname: None,
                     },
                 )),
             })

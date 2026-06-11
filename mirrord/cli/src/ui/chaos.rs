@@ -9,9 +9,9 @@ use axum::{
 };
 use mirrord_intproxy::session_monitor::chaos::{
     ChaosRuleList,
-    rules::{ChaosRule, ChaosRuleRequest},
+    rules::{ChaosRule, ChaosRuleRequest, ChaosSelectorRequest},
 };
-use reqwest::Client;
+use mirrord_session_monitor_client::SessionClient;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -25,7 +25,7 @@ PUT /chaos/rules/{session_id}/{rule_id}: update rule
 DELETE /chaos/rules/{session_id}/{rule_id}: delete rule
 DELETE /chaos/rules/{session_id}: clear all rules for session*/
 
-const BASE_INTPROXY_CHAOS_ROUTE: &str = "http://localhost/chaos/rules";
+const BASE_INTPROXY_CHAOS_ROUTE: &str = "/chaos/rules";
 
 // TODO(alex): Ok, so this works sort of like this:
 // Some random runs `mirrord ui`, it starts up the axum server (let's say the address is
@@ -99,21 +99,34 @@ type ChaosResult<T> = Result<T, ApiError>;
 
 async fn post_create_rule(
     Path(session_id): Path<String>,
-    Extension(client): Extension<Client>,
-    Json(new_rule): Json<Value>,
+    Extension(client): Extension<SessionClient>,
+    Json(lol): Json<Value>,
 ) -> ChaosResult<()> {
+    let new_rule = ChaosRuleRequest {
+        name: Some("knuckles".to_string()),
+        priority: Some(100),
+        effect:
+            mirrord_intproxy::session_monitor::chaos::rules::ChaosEffectRequest::ConnectionError {
+                error_type: "refused".to_string(),
+                after_ms: Some(0),
+            },
+        // selector: ChaosSelectorRequest::tcp_port(443, Some(100)),
+        selector: ChaosSelectorRequest::name(),
+    };
+
     client
         .post(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}"))
         .json(&new_rule)
         .send()
-        .await?;
+        .await
+        .inspect_err(|fail| println!("{fail:?}"))?;
 
     Ok(())
 }
 
 async fn get_list_active_rules_for_session(
     Path(session_id): Path<Uuid>,
-    Extension(client): Extension<Client>,
+    Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<Json<ChaosRuleList>> {
     let response = client
         .get(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}"))
@@ -129,7 +142,7 @@ async fn get_list_active_rules_for_session(
 
 async fn delete_clear_session_rules(
     Path(session_id): Path<Uuid>,
-    Extension(client): Extension<Client>,
+    Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<()> {
     client
         .delete(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}"))
@@ -141,7 +154,7 @@ async fn delete_clear_session_rules(
 
 async fn put_update_rule(
     Path((session_id, rule_id)): Path<(Uuid, Uuid)>,
-    Extension(client): Extension<Client>,
+    Extension(client): Extension<SessionClient>,
     Json(updated_rule): Json<ChaosRuleRequest>,
 ) -> ChaosResult<()> {
     client
@@ -157,7 +170,7 @@ async fn put_update_rule(
 
 async fn delete_rule(
     Path((session_id, rule_id)): Path<(Uuid, Uuid)>,
-    Extension(client): Extension<Client>,
+    Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<()> {
     client
         .delete(format!(
@@ -171,7 +184,7 @@ async fn delete_rule(
 
 async fn get_rule(
     Path((session_id, rule_id)): Path<(Uuid, Uuid)>,
-    Extension(client): Extension<Client>,
+    Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<Json<ChaosRule>> {
     let response = client
         .get(format!(

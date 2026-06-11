@@ -8,17 +8,23 @@ use std::{
     },
 };
 
-use mirrord_intproxy_protocol::OutgoingConnectRequest;
 use serde::{Deserialize, Deserializer, Serializer};
 use tokio::sync::watch;
+use tracing::Level;
 use uuid::Uuid;
-
-use crate::session_monitor::chaos::rules::{ChaosRule, ChaosSelector};
 
 pub mod api;
 pub mod rules;
 
+use rules::*;
+
 pub type ChaosRuleList = HashSet<ChaosRule>;
+
+pub trait ApplyChaosRuleLol {
+    type WhatToDo;
+
+    fn chaos_effect(&self, rules: &ChaosRuleList) -> Option<Self::WhatToDo>;
+}
 
 #[derive(Debug, Clone)]
 pub struct ChaosWatcherRx(watch::Receiver<ChaosRuleList>);
@@ -28,33 +34,12 @@ impl ChaosWatcherRx {
         Self(rx)
     }
 
-    pub(crate) fn chaos_effect(
-        &self,
-        OutgoingConnectRequest {
-            remote_address,
-            protocol,
-        }: &OutgoingConnectRequest,
-    ) -> Option<ChaosSelector> {
+    pub fn chaos_effect<'a, M>(&'a self, message: &'a M) -> Option<M::WhatToDo>
+    where
+        M: ApplyChaosRuleLol + ?Sized,
+    {
         let rules = self.0.borrow();
-        rules.iter().find_map(|rule| match &rule.selector {
-            ChaosSelector::Tcp {
-                upstream,
-                percentage,
-                effect,
-            } => Some(rule.selector.clone()),
-            ChaosSelector::Http {
-                upstream,
-                percentage,
-                filter,
-                effect,
-            } => todo!(),
-            ChaosSelector::Fs {
-                file_path,
-                percentage,
-                effect,
-            } => todo!(),
-            ChaosSelector::None => todo!(),
-        })
+        message.chaos_effect(&rules)
     }
 }
 
@@ -66,32 +51,38 @@ impl ChaosWatcherTx {
         Self(tx)
     }
 
+    #[tracing::instrument(level = Level::INFO)]
     pub(super) fn create_rule(&self, new_rule: ChaosRule) {
         self.0.send_modify(|current_rules| {
             current_rules.insert(new_rule);
         });
     }
 
+    #[tracing::instrument(level = Level::INFO)]
     pub(super) fn list_active_rules_for_session(&self) -> ChaosRuleList {
         self.0.borrow().clone()
     }
 
+    #[tracing::instrument(level = Level::INFO)]
     pub(super) fn clear_session_rules(&self) {
         self.0.send_replace(Default::default());
     }
 
+    #[tracing::instrument(level = Level::INFO)]
     pub(super) fn update_rule(&self, new_rule: ChaosRule) {
         self.0.send_modify(|current_rules| {
             current_rules.replace(new_rule);
         });
     }
 
+    #[tracing::instrument(level = Level::INFO)]
     pub(super) fn delete_rule(&self, rule_id: Uuid) {
         self.0.send_modify(|current_rules| {
             current_rules.remove(&rule_id);
         });
     }
 
+    #[tracing::instrument(level = Level::INFO)]
     fn get_rule(&self, rule_id: Uuid) -> Option<ChaosRule> {
         self.0.borrow().get(&rule_id).cloned()
     }
