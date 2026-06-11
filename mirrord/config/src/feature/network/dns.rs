@@ -101,9 +101,7 @@ pub struct DnsConfig {
     pub enabled: bool,
 
     /// ##### feature.network.dns.filter {#feature-network-dns-filter}
-    ///
-    /// Unstable: the precise syntax of this config is subject to change.
-    #[config(default, unstable)]
+    #[config(default)]
     pub filter: Option<DnsFilterConfig>,
 }
 

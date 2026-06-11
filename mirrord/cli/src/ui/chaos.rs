@@ -59,7 +59,7 @@ pub(super) fn chaos_router(state: AppState) -> Router<AppState> {
 
 async fn get_session_client_middleware(
     State(state): State<AppState>,
-    Path(session_id): Path<Uuid>,
+    Path(session_id): Path<String>,
     mut request: Request,
     next: Next,
 ) -> ChaosResult<Response> {
@@ -125,7 +125,7 @@ async fn post_create_rule(
 }
 
 async fn get_list_active_rules_for_session(
-    Path(session_id): Path<Uuid>,
+    Path(session_id): Path<String>,
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<Json<ChaosRuleList>> {
     let response = client
@@ -141,7 +141,7 @@ async fn get_list_active_rules_for_session(
 }
 
 async fn delete_clear_session_rules(
-    Path(session_id): Path<Uuid>,
+    Path(session_id): Path<String>,
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<()> {
     client
@@ -153,7 +153,7 @@ async fn delete_clear_session_rules(
 }
 
 async fn put_update_rule(
-    Path((session_id, rule_id)): Path<(Uuid, Uuid)>,
+    Path((session_id, rule_id)): Path<(String, Uuid)>,
     Extension(client): Extension<SessionClient>,
     Json(updated_rule): Json<ChaosRuleRequest>,
 ) -> ChaosResult<()> {
@@ -169,7 +169,7 @@ async fn put_update_rule(
 }
 
 async fn delete_rule(
-    Path((session_id, rule_id)): Path<(Uuid, Uuid)>,
+    Path((session_id, rule_id)): Path<(String, Uuid)>,
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<()> {
     client
@@ -183,7 +183,7 @@ async fn delete_rule(
 }
 
 async fn get_rule(
-    Path((session_id, rule_id)): Path<(Uuid, Uuid)>,
+    Path((session_id, rule_id)): Path<(String, Uuid)>,
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<Json<ChaosRule>> {
     let response = client
