@@ -8,7 +8,7 @@ use std::{
     },
 };
 
-use serde::{Deserialize, Deserializer, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::sync::watch;
 use tracing::Level;
 use uuid::Uuid;
@@ -26,12 +26,33 @@ pub trait ApplyChaosRuleLol {
     fn chaos_effect(&self, rules: &ChaosRuleList) -> Option<Self::WhatToDo>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SessionId {
+    Uuid(Uuid),
+    VarChar(String),
+}
+
+impl core::fmt::Display for SessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SessionId::VarChar(s) => f.write_fmt(format_args!("{s}")),
+            SessionId::Uuid(uuid) => f.write_fmt(format_args!("{uuid}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ChaosWatcherRx(watch::Receiver<ChaosRuleList>);
 
 impl ChaosWatcherRx {
     pub fn new(rx: watch::Receiver<ChaosRuleList>) -> Self {
         Self(rx)
+    }
+
+    pub fn inspect_rules<T>(&self, inspect: impl FnOnce(&ChaosRuleList) -> T) -> T {
+        let rules = self.0.borrow();
+        inspect(&rules)
     }
 
     pub fn chaos_effect<'a, M>(&'a self, message: &'a M) -> Option<M::WhatToDo>

@@ -8,7 +8,7 @@ use axum::{
     routing::{post, put},
 };
 use mirrord_intproxy::session_monitor::chaos::{
-    ChaosRuleList,
+    ChaosRuleList, SessionId,
     rules::{ChaosRule, ChaosRuleRequest, ChaosSelectorRequest},
 };
 use mirrord_session_monitor_client::SessionClient;
@@ -98,18 +98,29 @@ impl IntoResponse for ApiError {
 type ChaosResult<T> = Result<T, ApiError>;
 
 async fn post_create_rule(
-    Path(session_id): Path<String>,
+    Path(session_id): Path<SessionId>,
     Extension(client): Extension<SessionClient>,
     Json(lol): Json<Value>,
 ) -> ChaosResult<()> {
+    // let new_rule = ChaosRuleRequest {
+    //     name: Some("knuckles".to_string()),
+    //     priority: Some(100),
+    //     effect:
+    //         mirrord_intproxy::session_monitor::chaos::rules::ChaosEffectRequest::ConnectionError
+    // {             error_type: "refused".to_string(),
+    //             after_ms: Some(0),
+    //         },
+    //     // selector: ChaosSelectorRequest::tcp_port(443, Some(100)),
+    //     selector: ChaosSelectorRequest::name(),
+    // };
+
     let new_rule = ChaosRuleRequest {
         name: Some("knuckles".to_string()),
         priority: Some(100),
-        effect:
-            mirrord_intproxy::session_monitor::chaos::rules::ChaosEffectRequest::ConnectionError {
-                error_type: "refused".to_string(),
-                after_ms: Some(0),
-            },
+        effect: mirrord_intproxy::session_monitor::chaos::rules::ChaosEffectRequest::Latency {
+            delay_ms: 250,
+            jitter_ms: Some(250),
+        },
         // selector: ChaosSelectorRequest::tcp_port(443, Some(100)),
         selector: ChaosSelectorRequest::name(),
     };
@@ -125,7 +136,7 @@ async fn post_create_rule(
 }
 
 async fn get_list_active_rules_for_session(
-    Path(session_id): Path<String>,
+    Path(session_id): Path<SessionId>,
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<Json<ChaosRuleList>> {
     let response = client
@@ -141,7 +152,7 @@ async fn get_list_active_rules_for_session(
 }
 
 async fn delete_clear_session_rules(
-    Path(session_id): Path<String>,
+    Path(session_id): Path<SessionId>,
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<()> {
     client
@@ -153,7 +164,7 @@ async fn delete_clear_session_rules(
 }
 
 async fn put_update_rule(
-    Path((session_id, rule_id)): Path<(String, Uuid)>,
+    Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
     Extension(client): Extension<SessionClient>,
     Json(updated_rule): Json<ChaosRuleRequest>,
 ) -> ChaosResult<()> {
@@ -169,7 +180,7 @@ async fn put_update_rule(
 }
 
 async fn delete_rule(
-    Path((session_id, rule_id)): Path<(String, Uuid)>,
+    Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<()> {
     client
@@ -183,7 +194,7 @@ async fn delete_rule(
 }
 
 async fn get_rule(
-    Path((session_id, rule_id)): Path<(String, Uuid)>,
+    Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<Json<ChaosRule>> {
     let response = client
