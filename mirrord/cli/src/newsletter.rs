@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use mirrord_progress::Progress;
 use tracing::trace;
 
-use crate::user_data::UserData;
+use crate::{interactive_session::is_interactive_session, user_data::UserData};
 
 /// Link to the mirrord newsletter signup page (with UTM query params)
 const NEWSLETTER_SIGNUP_URL: &str =
@@ -24,6 +24,10 @@ const NEWSLETTER_COUNTER_PROMPT_AFTER_THIRD: u32 = 100;
 /// Called during normal execution, suggests newsletter signup if the user has run mirrord a certain
 /// number of times.
 pub async fn suggest_newsletter_signup<P: Progress>(user_data: &mut UserData, progress: &mut P) {
+    if !is_interactive_session() {
+        return;
+    }
+
     let newsletter_invites = HashMap::from([
         (
             NEWSLETTER_COUNTER_PROMPT_AFTER_FIRST,
