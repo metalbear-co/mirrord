@@ -1,6 +1,6 @@
-use std::{fmt::Display, str::FromStr, time::Duration};
+use std::{fmt::Display, io::ErrorKind, str::FromStr, time::Duration};
 
-use anyhow::{Context, anyhow};
+use anyhow::{Context, anyhow, bail};
 use mirrord_config::feature::network::filter::AddressFilter;
 use mirrord_intproxy_protocol::NetProtocol;
 use mirrord_protocol::{outgoing::SocketAddress, tcp::HttpFilter};
@@ -433,9 +433,32 @@ pub struct ChaosEffectConnError {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, EnumString)]
 #[strum(ascii_case_insensitive)]
 pub enum ConnErrorType {
-    Reset,   // TCP RST
-    Timeout, // hangs then closes
-    Refused, // ECONNREFUSED
+    Reset,
+    Timeout,
+    Refused,
+}
+
+impl TryFrom<ErrorKind> for ConnErrorType {
+    type Error = anyhow::Error;
+
+    fn try_from(value: ErrorKind) -> Result<Self, Self::Error> {
+        match value {
+            ErrorKind::ConnectionReset => Ok(Self::Reset),
+            ErrorKind::TimedOut => Ok(Self::Timeout),
+            ErrorKind::ConnectionRefused => Ok(Self::Refused),
+            _ => bail!("invalid: {value} does not match any types of 'ConnErrorType'"),
+        }
+    }
+}
+
+impl Into<ErrorKind> for ConnErrorType {
+    fn into(self) -> ErrorKind {
+        match self {
+            ConnErrorType::Reset => ErrorKind::ConnectionReset,
+            ConnErrorType::Timeout => ErrorKind::TimedOut,
+            ConnErrorType::Refused => ErrorKind::ConnectionRefused,
+        }
+    }
 }
 
 /// Helper type for a number between 0 and 100 inclusive. Defaults to 100%. Values larger than 100%
