@@ -121,4 +121,5 @@ runs:
       with:
         container-runtime: ${{ inputs.container-runtime }}
         cpus: "max"
-        memory: "8gb"
+        memory: "24gb"
+        start-args: "--disk-size=40g"

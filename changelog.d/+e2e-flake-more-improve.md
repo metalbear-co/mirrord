@@ -1,0 +1,1 @@
+Increase more ram and disk size for minikube.
