@@ -1,23 +1,24 @@
-use std::{sync::atomic::Ordering, time::Duration};
+use std::{ops::ControlFlow, sync::atomic::Ordering, time::Duration};
 
 use mirrord_intproxy_protocol::{
     LayerId, MessageId, OutgoingConnectRequest, OutgoingResponse, ProxyToLayerMessage,
 };
 use mirrord_protocol::{RemoteError, ResponseError};
 use rand::random_range;
+use tokio::time::sleep;
 use tracing::Level;
 
 use crate::{
+    background_tasks::MessageBus,
     main_tasks::ToLayer,
     proxies::outgoing::{InterceptorId, OutgoingProxy},
-    session_monitor::chaos::{
-        ApplyChaosRuleLol, ChaosRuleList,
-        rules::{ChaosEffectConnError, ChaosEffectLatency, ChaosSelector, TcpChaosEffect},
+    session_monitor::chaos::rules::{
+        ChaosEffectConnError, ChaosEffectLatency, ChaosSelector, TcpChaosEffect,
     },
 };
 
 #[derive(Debug)]
-pub enum OutgoingThingToDo {
+pub enum OutgoingChaos {
     Latency {
         total_delay: Duration,
         effect: ChaosEffectLatency,
@@ -28,22 +29,38 @@ pub enum OutgoingThingToDo {
     },
 }
 
-impl ApplyChaosRuleLol for OutgoingProxy {
-    type WhatToDo = OutgoingThingToDo;
-
-    fn chaos_effect(&self, _rules: &ChaosRuleList) -> Option<Self::WhatToDo> {
-        None
-    }
-}
-
 impl OutgoingProxy {
+    #[tracing::instrument(level = Level::INFO, skip(message_bus), ret)]
+    pub(super) async fn apply_chaos_effect(
+        chaos_reigns: OutgoingChaos,
+        message_bus: &mut MessageBus<OutgoingProxy>,
+    ) -> ControlFlow<()> {
+        match chaos_reigns {
+            OutgoingChaos::Latency { total_delay, .. } => {
+                sleep(total_delay).await;
+
+                ControlFlow::Continue(())
+            }
+            OutgoingChaos::ConnectionError {
+                to_layer,
+                effect: ChaosEffectConnError { after, .. },
+            } => {
+                tracing::info!(?after, ?to_layer, "We have a match for a connection error");
+                sleep(after).await;
+                message_bus.send(to_layer).await;
+
+                ControlFlow::Break(())
+            }
+        }
+    }
+
     #[tracing::instrument(level = Level::INFO, skip(self), ret)]
     pub(super) fn chaos_effect_for_connect(
         &self,
         request: &OutgoingConnectRequest,
         message_id: MessageId,
         layer_id: LayerId,
-    ) -> Option<OutgoingThingToDo> {
+    ) -> Option<OutgoingChaos> {
         self.chaos_rx.inspect_rules(|rules| {
             let rule = rules
                 .iter()
@@ -66,7 +83,7 @@ impl OutgoingProxy {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::ConnectionError(effect),
                     ..
-                } => Some(OutgoingThingToDo::ConnectionError {
+                } => Some(OutgoingChaos::ConnectionError {
                     to_layer: ToLayer {
                         message_id,
                         layer_id,
@@ -81,7 +98,7 @@ impl OutgoingProxy {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
-                } => Some(OutgoingThingToDo::Latency {
+                } => Some(OutgoingChaos::Latency {
                     total_delay: latency_duration(effect),
                     effect,
                 }),
@@ -98,7 +115,7 @@ impl OutgoingProxy {
     pub(super) fn chaos_effect_for_write(
         &self,
         interceptor_id: InterceptorId,
-    ) -> Option<OutgoingThingToDo> {
+    ) -> Option<OutgoingChaos> {
         let connection_info = self.foo_chaos(interceptor_id)?;
 
         self.chaos_rx.inspect_rules(|rules| {
@@ -123,7 +140,7 @@ impl OutgoingProxy {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
-                } => Some(OutgoingThingToDo::Latency {
+                } => Some(OutgoingChaos::Latency {
                     total_delay: latency_duration(effect),
                     effect,
                 }),

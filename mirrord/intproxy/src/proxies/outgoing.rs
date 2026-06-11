@@ -699,32 +699,6 @@ impl BackgroundTask for OutgoingProxy {
 
     #[tracing::instrument(level = Level::INFO, name = "outgoing_proxy_main_loop", skip_all, ret, err)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        use chaos::OutgoingThingToDo;
-
-        #[tracing::instrument(level = Level::INFO, skip(message_bus), ret)]
-        async fn apply_chaos_effect(
-            chaos_reigns: OutgoingThingToDo,
-            message_bus: &mut MessageBus<OutgoingProxy>,
-        ) -> ControlFlow<()> {
-            match chaos_reigns {
-                OutgoingThingToDo::Latency { total_delay, .. } => {
-                    sleep(total_delay).await;
-
-                    ControlFlow::Continue(())
-                }
-                OutgoingThingToDo::ConnectionError {
-                    to_layer,
-                    effect: ChaosEffectConnError { after, .. },
-                } => {
-                    tracing::info!(?after, ?to_layer, "We have a match for a connection error");
-                    sleep(after).await;
-                    message_bus.send(to_layer).await;
-
-                    ControlFlow::Break(())
-                }
-            }
-        }
-
         match &mut self.background_tasks {
             Some(tasks) => tasks.set_agent_tx(message_bus.clone_agent_tx()),
             None => {
@@ -787,7 +761,7 @@ impl BackgroundTask for OutgoingProxy {
                         Some(OutgoingProxyMessage::Layer(request, message_id, layer_id)) => {
                             if let OutgoingRequest::Connect(connect) = &request
                                 && let Some(chaos_reigns) = self.chaos_effect_for_connect(connect, message_id, layer_id)
-                                && apply_chaos_effect(chaos_reigns, message_bus).await.is_break()
+                                && Self::apply_chaos_effect(chaos_reigns, message_bus).await.is_break()
                             {
                                 continue;
                             }
@@ -812,7 +786,7 @@ impl BackgroundTask for OutgoingProxy {
                 Some(task_update) = self.background_tasks.as_mut().unwrap().next() => match task_update {
                     (id, TaskUpdate::Message(bytes)) => {
                         if let Some(chaos_reigns) = self.chaos_effect_for_write(id)
-                            && apply_chaos_effect(chaos_reigns, message_bus).await.is_break()
+                            && Self::apply_chaos_effect(chaos_reigns, message_bus).await.is_break()
                         {
                             continue;
                         }
