@@ -104,6 +104,65 @@ pub fn get_hostname_for_name_type(name_type: u32) -> HookResult<Option<String>> 
     }
 }
 
+/// Write `units` (the encoded name, *without* a trailing null) into the caller's buffer, following
+/// the Windows size-probe / truncate contract. `null` is the terminator value to append (`0`).
+///
+/// This is the byte-for-byte-identical core shared by [`handle_hostname_ansi`] and
+/// [`handle_hostname_unicode`]; they differ only in code-unit type (`u8` vs `u16`) and the
+/// ANSI-only WinSock error, which stay in the wrappers.
+///
+/// Behaviour:
+/// - If the value + null doesn't fit and the [`NameTooLong`] policy reports size (the standard
+///   Windows size-probe contract, which also covers a `*nSize == 0` size query), sets `*nSize` to
+///   the required length, sets `SetLastError(err)`, and returns `false`.
+/// - Otherwise writes what fits (`buffer_size - 1` units) + the null terminator, sets `*nSize` to
+///   the number of units written (excluding the null), and returns `true`.
+///
+/// We don't cap the buffer size: Windows accepts any buffer, and we only ever write the (short)
+/// hostname into it.
+///
+/// # Safety
+///
+/// `nSize` must be non-null (the wrappers check this), and `lpBuffer` must point to at least
+/// `*nSize` writable units.
+unsafe fn write_name_to_caller_buffer<T: Copy>(
+    units: &[T],
+    null: T,
+    lpBuffer: *mut T,
+    nSize: *mut u32,
+    policy: NameTooLong,
+) -> bool {
+    let buffer_size = unsafe { *nSize } as usize;
+    // `units` is a Rust string's encoded form and carries no terminator, so `+ 1` is the null we
+    // write ourselves below -- it is *not* double-counting an existing terminator.
+    let needed = units.len() + 1;
+
+    if needed > buffer_size {
+        let report_required = match policy {
+            NameTooLong::Fail(err) => Some(err),
+            // `Truncate` still needs room for the null, so a zero-length buffer reports size too.
+            NameTooLong::Truncate if buffer_size == 0 => Some(ERROR_BUFFER_OVERFLOW),
+            NameTooLong::Truncate => None,
+        };
+        if let Some(err) = report_required {
+            unsafe {
+                *nSize = needed as u32;
+                SetLastError(err);
+            }
+            return false;
+        }
+    }
+
+    // `buffer_size >= 1` here: write what fits plus the null terminator.
+    let copy_len = units.len().min(buffer_size - 1);
+    unsafe {
+        std::ptr::copy_nonoverlapping(units.as_ptr(), lpBuffer, copy_len);
+        *lpBuffer.add(copy_len) = null; // null terminator -- copy_len <= buffer_size - 1
+        *nSize = copy_len as u32; // units written, excluding the null
+    }
+    true
+}
+
 /// Generic hostname writer for the ANSI (byte) APIs.
 pub fn handle_hostname_ansi<F, H>(
     lpBuffer: *mut i8,
@@ -142,58 +201,15 @@ where
         }
     };
 
-    let buffer_size = unsafe { *nSize } as usize;
     let bytes = hostname.as_bytes();
-    let needed = bytes.len() + 1; // value + null terminator
-
-    // If the value + null doesn't fit the caller's buffer, report the required size and fail. This
-    // is the standard Windows size-probe contract, and it's also what makes a `*nSize == 0` size
-    // query work.
-    //
-    // `Truncate` still needs room for the null terminator, so a zero-length buffer reports the
-    // required size as well.
-    //
-    // We don't cap the buffer size: Windows accepts any buffer, and we only ever write the (short)
-    // hostname into it.
-    if needed > buffer_size {
-        let report_required = match policy {
-            NameTooLong::Fail(err) => Some(err),
-            NameTooLong::Truncate if buffer_size == 0 => Some(ERROR_BUFFER_OVERFLOW),
-            NameTooLong::Truncate => None,
-        };
-        if let Some(err) = report_required {
-            tracing::debug!(
-                "{}: buffer too small, need {} bytes, have {}",
-                function_name,
-                needed,
-                buffer_size
-            );
-            unsafe {
-                *nSize = needed as u32;
-                SetLastError(err);
-                WSASetLastError(WSAEFAULT.try_into().unwrap());
-            }
-            return ret_err;
-        }
+    if unsafe { write_name_to_caller_buffer(bytes, 0u8, lpBuffer as *mut u8, nSize, policy) } {
+        tracing::debug!("{} returning remote hostname {:?}", function_name, hostname);
+        ret_ok
+    } else {
+        // gethostname-style callers read the WinSock error in addition to GetLastError.
+        unsafe { WSASetLastError(WSAEFAULT.try_into().unwrap()) };
+        ret_err
     }
-
-    // Write what fits (`buffer_size >= 1` here) plus the null terminator.
-    let copy_len = bytes.len().min(buffer_size - 1);
-    unsafe {
-        std::ptr::copy_nonoverlapping(bytes.as_ptr() as *const i8, lpBuffer, copy_len);
-        // Null terminator - safe: copy_len <= buffer_size - 1.
-        *(lpBuffer.add(copy_len)) = 0;
-        // Actual length, excluding the null.
-        *nSize = copy_len as u32;
-    }
-    tracing::debug!(
-        "{} returning hostname ({} bytes, caller buffer {})",
-        function_name,
-        copy_len,
-        buffer_size
-    );
-    // TRUE - Success
-    ret_ok
 }
 
 /// Generic hostname writer for the wide (UTF-16) APIs.
@@ -233,57 +249,14 @@ where
         }
     };
 
-    let buffer_size = unsafe { *nSize } as usize;
     let name: Vec<u16> = hostname.encode_utf16().collect();
-    let needed = name.len() + 1; // value + null terminator
-
-    // If the value + null doesn't fit the caller's buffer, report the required size and fail. This
-    // is the standard Windows size-probe contract, and it's also what makes a `*nSize == 0` size
-    // query work.
-    //
-    // `Truncate` still needs room for the null terminator, so a zero-length buffer reports the
-    // required size as well.
-    //
-    // We don't cap the buffer size: Windows accepts any buffer, and we only ever write the (short)
-    // hostname into it.
-    if needed > buffer_size {
-        let report_required = match policy {
-            NameTooLong::Fail(err) => Some(err),
-            NameTooLong::Truncate if buffer_size == 0 => Some(ERROR_BUFFER_OVERFLOW),
-            NameTooLong::Truncate => None,
-        };
-        if let Some(err) = report_required {
-            tracing::debug!(
-                "{}: buffer too small, need {} chars, have {}",
-                function_name,
-                needed,
-                buffer_size
-            );
-            unsafe {
-                *nSize = needed as u32;
-                SetLastError(err);
-            }
-            return 0;
-        }
+    if unsafe { write_name_to_caller_buffer(&name, 0u16, lpBuffer, nSize, policy) } {
+        tracing::debug!("{} returning remote hostname {:?}", function_name, hostname);
+        // TRUE - Success
+        1
+    } else {
+        0
     }
-
-    // Write what fits (`buffer_size >= 1` here) plus the null terminator.
-    let copy_len = name.len().min(buffer_size - 1);
-    unsafe {
-        std::ptr::copy_nonoverlapping(name.as_ptr(), lpBuffer, copy_len);
-        // UTF-16 null terminator - safe: copy_len <= buffer_size - 1.
-        *(lpBuffer.add(copy_len)) = 0;
-        // Code units written, excluding the null (matches Windows).
-        *nSize = copy_len as u32;
-    }
-    tracing::debug!(
-        "{} returning hostname ({} chars, caller buffer {})",
-        function_name,
-        copy_len,
-        buffer_size
-    );
-    // TRUE - Success
-    1
 }
 
 /// Helper function to check if a hostname matches our remote hostname
@@ -308,21 +281,10 @@ pub fn is_remote_hostname(hostname: String) -> bool {
 /// [`handle_hostname_unicode`] / [`handle_hostname_ansi`]).
 pub(super) fn trim_netbios_name(name: &mut String) {
     const NETBIOS_MAX_BYTES: usize = 15;
-    if name.len() <= NETBIOS_MAX_BYTES {
-        return;
-    }
-    // Bound by *bytes* (the NetBIOS field is 15 OEM bytes), truncating at the largest UTF-8 char
-    // boundary that fits. For the usual ASCII names this is the same as taking 15 characters.
-    let mut end = 0;
-    for (i, ch) in name.char_indices() {
-        if i + ch.len_utf8() > NETBIOS_MAX_BYTES {
-            break;
-        }
-        end = i + ch.len_utf8();
-    }
-    let trimmed = name[..end].to_string();
-    tracing::debug!(original = %name, %trimmed, "trimmed NetBIOS name to <=15 bytes");
-    *name = trimmed;
+    // `floor_char_boundary` rounds 15 down to the nearest UTF-8 char boundary, so `truncate` caps
+    // the field at 15 bytes without panicking on a multi-byte char that straddles it. NetBIOS names
+    // are ASCII/OEM, so for real names this is just the first 15 bytes.
+    name.truncate(name.floor_char_boundary(NETBIOS_MAX_BYTES));
 }
 
 #[cfg(test)]
