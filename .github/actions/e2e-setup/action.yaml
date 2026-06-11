@@ -132,7 +132,7 @@ runs:
       with:
         container-runtime: ${{ inputs.container-runtime }}
         cpus: "max"
-        memory: "24gb"
+        memory: "12gb"
         start-args: "--disk-size=40g"
     - name: start kind
       if: ${{ inputs.cluster-runtime == 'kind' }}
