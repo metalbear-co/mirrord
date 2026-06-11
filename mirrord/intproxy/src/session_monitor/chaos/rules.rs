@@ -339,11 +339,11 @@ pub struct ChaosSelectorRequest {
     /// The chance of a rule being applied to matching traffic. Roughly equal to the proportion of
     /// requests that the rule is applied to. Should be an integer between 0 and 100 (values higher
     /// than 100 will be rounded down to 100).
-    percentage: Option<usize>,
+    percentage: Option<u32>,
 }
 
 impl ChaosSelectorRequest {
-    pub fn tcp_port(port: u16, percentage: Option<usize>) -> Self {
+    pub fn tcp_port(port: u16, percentage: Option<u32>) -> Self {
         Self {
             upstream: Some(format!(":{port}")),
             percentage,
@@ -431,31 +431,90 @@ pub enum ConnErrorType {
 /// Helper type for a number between 0 and 100 inclusive. Defaults to 100%. Values larger than 100%
 /// get rounded down to 100%.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash)]
-pub struct Percentage(usize);
+pub struct Percentage(u32);
 
 impl Percentage {
     pub fn new(value: u32) -> Self {
-        Self(value.max(100) as usize)
+        Self(value.min(100))
     }
 
-    pub fn as_percentage(&self) -> usize {
+    pub fn as_percentage(&self) -> u32 {
         self.0
     }
 
     pub fn as_decimal(&self) -> f32 {
         self.0 as f32 / 100.
     }
+
+    /// Maps a matching attempt number into a bucket in the `0..100` range.
+    ///
+    /// Multiplying by 73 spreads the first 100 attempts over all buckets because 73 is coprime
+    /// with 100. This keeps percentage decisions deterministic while avoiding the bursty
+    /// distribution of `attempt % 100`, where a 25% rule would apply to attempts 0 through 24 and
+    /// then skip attempts 25 through 99.
+    ///
+    /// The first 100 buckets are:
+    ///
+    /// ```text
+    /// (00), 73,  46, (19), 92,  65,  38, (11), 84,  57,
+    ///  30, (03), 76,  49, (22), 95,  68,  41, (14), 87,
+    ///  60,  33, (06), 79,  52,  25,  98,  71,  44, (17),
+    ///  90,  63,  36, (09), 82,  55,  28, (01), 74,  47,
+    /// (20), 93,  66,  39, (12), 85,  58,  31, (04), 77,
+    ///  50, (23), 96,  69,  42, (15), 88,  61,  34, (07),
+    ///  80,  53,  26,  99,  72,  45, (18), 91,  64,  37,
+    /// (10), 83,  56,  29, (02), 75,  48, (21), 94,  67,
+    ///  40, (13), 86,  59,  32, (05), 78,  51, (24), 97,
+    ///  70,  43, (16), 89,  62,  35, (08), 81,  54,  27
+    /// ```
+    const fn bucket_for_attempt(attempt: u32) -> u32 {
+        attempt.wrapping_mul(73) % 100
+    }
+
+    /// Returns whether this percentage should apply for the given matching-attempt count.
+    ///
+    /// The hit count is passed through [`Self::bucket_for_attempt`]. The rule applies when that
+    /// bucket is lower than the configured percentage. For example, a 25% rule applies on attempts
+    /// whose bucket is in `0..25`.
+    pub const fn should_apply_for_hit(self, hit_count: u32) -> bool {
+        match self.0 {
+            0 => false,
+            100 => true,
+            percentage => Self::bucket_for_attempt(hit_count) < percentage,
+        }
+    }
+
+    /// Since our [`Self::should_apply_for_hit`] is deterministic, we can rebuild how many times it
+    /// has been hit based on [`Percentage`] and the current `hit_count`, without the need for a
+    /// secondary tracking number.
+    ///
+    /// Useful for things that depend on the amount of times a [`ChaosSelector`] has matched
+    /// something, and the [`Self::should_apply_for_hit`] has returned `true`. Translating: how many
+    /// times this [`ChaosRule`] has activated its effect.
+    pub fn applied_before_hit(self, hit_count: u32) -> u32 {
+        let percentage = self.0;
+        let full_windows = hit_count / 100;
+        let remainder = hit_count % 100;
+
+        let applied_in_full_windows = full_windows * percentage;
+
+        let applied_in_remainder = (0..remainder)
+            .filter(|attempt| Self::bucket_for_attempt(*attempt) < percentage)
+            .count() as u32;
+
+        applied_in_full_windows + applied_in_remainder
+    }
 }
 
-impl From<usize> for Percentage {
-    fn from(value: usize) -> Self {
+impl From<u32> for Percentage {
+    fn from(value: u32) -> Self {
         Self(value.min(100))
     }
 }
 
 impl From<f32> for Percentage {
     fn from(value: f32) -> Self {
-        Self(value.min(1.) as usize * 100)
+        Self(value.min(1.) as u32 * 100)
     }
 }
 

@@ -41,7 +41,7 @@ use crate::{
     request_queue::RequestQueue,
     session_monitor::chaos::{
         ApplyChaosRuleLol, ChaosWatcherRx,
-        rules::{ChaosEffectConnError, ChaosSelector, TcpChaosEffect},
+        rules::{ChaosEffectConnError, ChaosEffectLatency, ChaosSelector, TcpChaosEffect},
     },
 };
 
@@ -676,7 +676,8 @@ impl BackgroundTask for OutgoingProxy {
     type MessageIn = OutgoingProxyMessage;
     type MessageOut = ProxyMessage;
 
-    #[tracing::instrument(level = Level::INFO, name = "outgoing_proxy_main_loop", skip_all, ret, err)]
+    // #[tracing::instrument(level = Level::INFO, name = "outgoing_proxy_main_loop", skip_all, ret,
+    // err)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         use chaos::OutgoingThingToDo;
 
@@ -692,22 +693,25 @@ impl BackgroundTask for OutgoingProxy {
                 msg = message_bus.recv() => {
                     if let Some(chaos_reigns) = msg.as_ref().and_then(|request| self.chaos_rx.chaos_effect(request)) {
                         match chaos_reigns {
-                            OutgoingThingToDo::Latency { effect } => {
-                                sleep(Duration::from_secs(1)).await;
+                            OutgoingThingToDo::Latency { delay, .. } => {
+                                sleep(delay).await;
                             }
                             OutgoingThingToDo::ConnectionError {
                                 to_layer,
-                                effect: ChaosEffectConnError {
-                                    error_type, after
-                                }
+                                effect: ChaosEffectConnError { error_type, after },
                             } => {
-                                tracing::info!(?after, ?to_layer, "We have a match  for a connection error");
+                                tracing::info!(
+                                    ?after,
+                                    ?to_layer,
+                                    "We have a match  for a connection error"
+                                );
                                 sleep(after).await;
                                 message_bus.send(to_layer).await;
                                 continue;
                             }
                         }
                     }
+
 
                     match msg {
                         None => {
