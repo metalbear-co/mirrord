@@ -17,7 +17,8 @@
 //! The map narrates its own contention so the lock behaviour is never a black box:
 //! - `debug` once an op has to spin past [`CONTENTION_LOG_AT`] (early warning, well before it
 //!   bites);
-//! - `warn` when [`insert`](ShardedMap::insert) exhausts its spin budget and has to *block*;
+//! - `warn` when [`insert`](ShardedMap::insert) exhausts its spin budget and has to *block*, or
+//!   recovers from a poisoned shard lock (a writer panicked);
 //! - `error` when [`get`](ShardedMap::get) / [`remove`](ShardedMap::remove) exhaust theirs and bail
 //!   (the only paths that can still drop an op). Each line carries the map `label` and `spins`.
 
@@ -159,6 +160,14 @@ impl<K: Hash + Eq, V: Clone> ShardedMap<K, V> {
                     return;
                 }
                 Err(TryLockError::Poisoned(p)) => {
+                    // A writer panicked while holding this shard's lock. The map itself is intact,
+                    // so we take it and complete the insert -- but a panic under a layer lock is an
+                    // anomaly worth surfacing, and an insert must never be dropped silently.
+                    tracing::warn!(
+                        map = self.label,
+                        "ShardedMap::insert: recovered from a poisoned shard lock (a writer \
+                         panicked while holding it); registration kept"
+                    );
                     p.into_inner().insert(key, value);
                     return;
                 }
