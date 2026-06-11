@@ -29,7 +29,7 @@ use mirrord_analytics::{
 };
 use mirrord_config::{
     LayerConfig,
-    config::ConfigContext,
+    config::{ConfigContext, EnvKey},
     target::{Target, TargetDisplay},
 };
 use mirrord_kube::api::runtime::RuntimeDataProvider;
@@ -68,10 +68,11 @@ pub(crate) async fn preview_command(
     }
 }
 
-/// Label key used to store the preview session's environment key on the CR.
+/// Label key used to store the preview session's label-safe environment key on the CR.
 ///
-/// This allows server-side filtering with `ListParams::labels()` in the `status` and `stop`
-/// commands, avoiding the need to fetch all sessions and filter client-side.
+/// New sessions store [`EnvKey::to_hashed_label_value`] here. Sessions created by older CLIs
+/// stored the raw key, so lookups use a set selector that matches either representation when the
+/// raw key itself is a valid Kubernetes label value.
 pub const PREVIEW_SESSION_KEY_LABEL: &str = "preview.mirrord.metalbear.co/key";
 
 /// Handle `mirrord preview start` command.
@@ -127,14 +128,15 @@ async fn preview_start(
 
     // Check for an existing session with the same key+target.
     let key = layer_config.key.as_str();
-    let list_params = ListParams::default().labels(&format!("{PREVIEW_SESSION_KEY_LABEL}={key}"));
-    let existing_sessions = api.list(&list_params).await.map_err(|e| {
-        subtask.failure(None);
-        CliError::PreviewListFailed(e.to_string())
-    })?;
+    let existing_sessions = list_preview_sessions_by_key(&api, &layer_config.key)
+        .await
+        .map_err(|e| {
+            subtask.failure(None);
+            CliError::PreviewListFailed(e.to_string())
+        })?;
 
     // Check if there's an existing session with the same key and warn the user about it.
-    if existing_sessions.items.is_empty().not() {
+    if existing_sessions.is_empty().not() {
         progress.warning(&format!(
             "the key '{key}' is already part of an existing preview environment. \
             If that’s not what you intended, please switch to a different key."
@@ -142,7 +144,6 @@ async fn preview_start(
     }
 
     for session in existing_sessions
-        .items
         .into_iter()
         .filter(|session| session.spec.target == session_target)
     {
@@ -196,7 +197,7 @@ async fn preview_start(
     let session_labels = {
         let mut labels = BTreeMap::from([(
             PREVIEW_SESSION_KEY_LABEL.to_owned(),
-            layer_config.key.as_str().to_owned(),
+            layer_config.key.to_hashed_label_value(),
         )]);
         if let Ok(marker) = std::env::var("OPERATOR_ISOLATION_MARKER") {
             labels.insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker);
@@ -439,20 +440,23 @@ async fn preview_status(
 
     let mut subtask = progress.subtask("listing preview sessions");
 
-    let key_filter = layer_config.key.provided();
-    let list_params = match key_filter {
-        Some(key) => ListParams::default().labels(&format!("{PREVIEW_SESSION_KEY_LABEL}={key}")),
-        None => ListParams::default(),
+    let sessions: Vec<_> = match layer_config.key.provided() {
+        Some(_) => list_preview_sessions_by_key(&api, &layer_config.key)
+            .await
+            .map_err(|e| {
+                subtask.failure(None);
+                CliError::PreviewListFailed(e.to_string())
+            })?,
+        None => {
+            api.list(&ListParams::default())
+                .await
+                .map_err(|e| {
+                    subtask.failure(None);
+                    CliError::PreviewListFailed(e.to_string())
+                })?
+                .items
+        }
     };
-
-    let sessions: Vec<_> = api
-        .list(&list_params)
-        .await
-        .map_err(|e| {
-            subtask.failure(None);
-            CliError::PreviewListFailed(e.to_string())
-        })?
-        .items;
 
     let sessions: Vec<_> = sessions
         .iter()
@@ -615,16 +619,12 @@ async fn preview_stop(
         None => None,
     };
 
-    let list_params = ListParams::default().labels(&format!("{PREVIEW_SESSION_KEY_LABEL}={key}"));
-
-    let sessions_to_delete: Vec<_> = api
-        .list(&list_params)
+    let sessions_to_delete: Vec<_> = list_preview_sessions_by_key(&api, &layer_config.key)
         .await
         .map_err(|e| {
             subtask.failure(None);
             CliError::PreviewListFailed(e.to_string())
         })?
-        .items
         .into_iter()
         .filter(|session| {
             session_target
@@ -750,6 +750,33 @@ fn load_preview_config(
     subtask.success(Some("configuration loaded"));
 
     Ok(config)
+}
+
+async fn list_preview_sessions_by_key(
+    api: &Api<PreviewSession>,
+    key: &EnvKey,
+) -> Result<Vec<PreviewSession>, kube::Error> {
+    let key_str = key.as_str();
+    let key_label = key.to_hashed_label_value();
+
+    // Older CLIs stored the raw key in this label, so when the raw key is a valid label value we
+    // include both forms in a set selector. Invalid raw keys must not be included in the selector:
+    // the API server rejects selectors containing invalid label values instead of treating them as
+    // non-matching values. Those keys can only match sessions created by newer CLIs, since older
+    // CLIs could not create resources with invalid label values in the first place.
+    let label_selector = if key.is_valid_kubernetes_label_value() {
+        format!("{PREVIEW_SESSION_KEY_LABEL} in ({key_str},{key_label})")
+    } else {
+        format!("{PREVIEW_SESSION_KEY_LABEL}={key_label}")
+    };
+
+    Ok(api
+        .list(&ListParams {
+            label_selector: Some(label_selector),
+            ..Default::default()
+        })
+        .await?
+        .items)
 }
 
 /// Connects to the operator, validates the license and checks that the `PreviewEnv` feature is
