@@ -67,14 +67,17 @@ where
 pub trait ProtocolEndpointExt: ProtocolEndpoint + std::marker::Unpin + Send + 'static {
     /// The string sent to the server over Socket.IO / HTTP Query parameters
     const CONTROL_ROLE: Role;
+    const COUTNERPART_ROLE: Role;
 }
 
 impl ProtocolEndpointExt for Agent {
     const CONTROL_ROLE: Role = Role::Agent;
+    const COUTNERPART_ROLE: Role = Role::Intproxy;
 }
 
 impl ProtocolEndpointExt for Client {
     const CONTROL_ROLE: Role = Role::Intproxy;
+    const COUTNERPART_ROLE: Role = Role::Agent;
 }
 
 pub struct SessionsManagerClient<R: ProtocolEndpointExt> {
@@ -167,6 +170,8 @@ where
                 }),
             )
             .await;
+
+        tracing::debug!("Waiting for {:?}...", R::COUTNERPART_ROLE);
     }
 }
 
