@@ -1,1 +1,1 @@
-Increase more ram and disk size for minikube.
+Increase more ram and disk size for `minikube`.
