@@ -54,10 +54,10 @@ jobs:
           name: test
           path: /tmp
       - name: Load test image into minikube
-        if: ${{ matrix.cluster-runtime != 'kind' }}
+        if: ${{ matrix.cluster-runtime == 'minikube' }}
         run: minikube image load /tmp/test.tar && rm /tmp/test.tar
       - name: Load test image into kind
-        if: ${{ matrix.cluster-runtime != 'minikube' }}
+        if: ${{ matrix.cluster-runtime == 'kind' }}
         run: kind load image-archive /tmp/test.tar --name "$KIND_CLUSTER_NAME" && rm /tmp/test.tar
       - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
         with:
@@ -90,7 +90,7 @@ jobs:
           find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \;
           kubectl get all
           kubectl describe pods
-          if [[ "${{ matrix.cluster-runtime }}" != "kind" ]]; then
+          if [[ "${{ matrix.cluster-runtime }}" == "minikube" ]]; then
             docker exec minikube find /var/log/pods -print -exec cat {} \;
           else
             kind export logs /tmp/kind-logs --name "$KIND_CLUSTER_NAME"
