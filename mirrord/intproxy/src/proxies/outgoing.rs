@@ -717,8 +717,8 @@ impl BackgroundTask for OutgoingProxy {
                 msg = message_bus.recv() => {
                     if let Some(chaos_reigns) = msg.as_ref().and_then(|request| self.chaos_rx.chaos_effect(request)) {
                         match chaos_reigns {
-                            OutgoingThingToDo::Latency { delay, .. } => {
-                                sleep(delay).await;
+                            OutgoingThingToDo::Latency { total_delay, .. } => {
+                                sleep(total_delay).await;
                             }
                             OutgoingThingToDo::ConnectionError {
                                 to_layer,
