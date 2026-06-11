@@ -11,6 +11,10 @@ then
     exit 1
 fi
 
+# Let Go download the toolchain a module's `go` directive asks for, instead of
+# failing under the GOTOOLCHAIN=local that newer setup-go versions export.
+export GOTOOLCHAIN=auto
+
 1>&2 echo "Using $(go version)"
 
 for go_mod in $(find . -name "go\.mod")
