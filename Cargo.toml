@@ -34,6 +34,8 @@ members = [
     "tests/rust-websockets",
     "tests/rust-sqs-printer",
     "xtask",
+    "mirrord/sessions-manager/client",
+    "mirrord/sessions-manager/protocol",
 ]
 resolver = "2"
 
@@ -162,6 +164,8 @@ mime_guess = "2"
 minhook-detours-rs = { git = "https://github.com/metalbear-co/minhook-detours-rs.git", rev = "4bfbf5717c6829f91b527180a038ec591b8265ca" }
 mirrord-session-monitor-client = { path = "mirrord/session-monitor-client" }
 mirrord-session-monitor-protocol = { path = "mirrord/session-monitor-protocol" }
+mirrord-sessions-manager-client = { path = "mirrord/sessions-manager/client" }
+mirrord-sessions-manager-protocol = { path = "mirrord/sessions-manager/protocol" }
 mirrord-test-macros = { path = "mirrord/test-macros" }
 mockall = "0.13"
 nix = { version = "0.29", features = ["net"] }
@@ -278,6 +282,9 @@ x509-parser = "0.17"
 xmas-elf = "0.10"
 yamlpatch = "0.9.0"
 yamlpath = "0.32.0"
+
+# used by sessions-manager client & protocol
+rust_socketio = { version = "0.6", features = ["async"] }
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"

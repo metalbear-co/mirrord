@@ -17,6 +17,7 @@ use mirrord_intproxy::{
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
 use mirrord_protocol_io::ProtocolError;
+use mirrord_sessions_manager_client::connection::SessionsManagerClientError;
 use mirrord_tls_util::SecureChannelError;
 use mirrord_vpn::error::VpnError;
 use reqwest::StatusCode;
@@ -642,6 +643,9 @@ pub(crate) enum CliError {
         "Check that `~/.mirrord/credentials` exists and is readable.{GENERAL_HELP}"
     ))]
     CredentialStore(#[from] CredentialStoreError),
+
+    #[error("Failed to connect to sessions manager: {0}")]
+    SessionsManagerClient(#[from] SessionsManagerClientError),
 }
 
 impl CliError {

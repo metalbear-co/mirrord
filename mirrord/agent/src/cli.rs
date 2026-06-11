@@ -91,11 +91,16 @@ pub enum Mode {
     },
     #[default]
     Targetless,
+    Sidecar,
 }
 
 impl Mode {
     pub fn is_targetless(&self) -> bool {
         matches!(self, Mode::Targetless)
+    }
+
+    pub fn is_sidecar(&self) -> bool {
+        matches!(self, Mode::Sidecar)
     }
 }
 

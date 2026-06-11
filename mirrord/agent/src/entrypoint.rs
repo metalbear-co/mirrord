@@ -21,6 +21,8 @@ use mirrord_agent_iptables::{
     error::{IPTablesError, IPTablesResult},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
+use mirrord_protocol_io::{Agent, Connection};
+use mirrord_sessions_manager_client::connection::SessionsManagerClient;
 use socket2::SockRef;
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
@@ -215,7 +217,7 @@ impl State {
                 // If we are in an ephemeral container, we use pid 1.
                 (true, Some(container_handle))
             }
-            cli::Mode::Targetless => (false, None),
+            cli::Mode::Targetless | cli::Mode::Sidecar => (false, None),
         };
 
         tracing::debug!("THE ID IS: {IPTABLES_IDENTIFIER:?}");
@@ -267,6 +269,36 @@ impl State {
         let result = ClientConnection::new(stream, client_id, self.tls_connector.clone())
             .map_err(AgentError::from)
             .and_then(|connection| ClientConnectionHandler::new(client_id, connection, tasks, self))
+            .and_then(|client| client.start(cancellation_token))
+            .await;
+
+        match result {
+            Ok(()) => {
+                trace!(client_id, "serve_client_connection -> Client disconnected");
+            }
+
+            Err(error) => {
+                error!(
+                    client_id,
+                    ?error,
+                    "serve_client_connection -> Client disconnected with error",
+                );
+            }
+        }
+
+        client_id
+    }
+
+    pub async fn serve_client_connection_protocol(
+        self,
+        connection: Connection<Agent>,
+        tasks: BackgroundTasks,
+        cancellation_token: CancellationToken,
+    ) -> u32 {
+        let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
+
+        let connection = ClientConnection::from_protocol_connection(connection, client_id);
+        let result = ClientConnectionHandler::new(client_id, connection, tasks, self)
             .and_then(|client| client.start(cancellation_token))
             .await;
 
@@ -1099,6 +1131,137 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     Ok(())
 }
 
+/// The sidecar version of start_agent
+///
+/// Serves a single client through pre-connected socket fd,
+/// starts background tasks and listens for client connections.
+#[tracing::instrument(level = Level::TRACE, ret, err)]
+async fn start_agent_sidecar(args: Args) -> AgentResult<()> {
+    let state = State::new(&args).await?;
+    let cancellation_token = CancellationToken::new();
+
+    // To make sure that background tasks are cancelled when we exit early from this function.
+    let cancel_guard = cancellation_token.clone().drop_guard();
+
+    if let Some(metrics_address) = args.metrics {
+        let cancellation_token = cancellation_token.clone();
+        tokio::spawn(async move {
+            start_metrics(metrics_address, cancellation_token.clone())
+                .await
+                .inspect_err(|fail| {
+                    tracing::error!(?fail, "Failed starting metrics server!");
+                    cancellation_token.cancel();
+                })
+        });
+    }
+
+    // sidecar doesnt support incoming for now
+    let (stealer, mirror_handle) = (BackgroundTask::Disabled, None);
+    let dns = setup::start_dns(&state.network_runtime, cancellation_token.clone());
+
+    let bg_tasks = BackgroundTasks {
+        stealer,
+        dns,
+        mirror_handle,
+    };
+
+    let mut clients: JoinSet<ClientId> = JoinSet::new();
+
+    // 1. Kick off the persistent, multiplexed control plane link.
+    // todo!(swap demo with room id from env / param)
+    let mut sessions_manager_client =
+        SessionsManagerClient::<Agent>::new("demo", cancellation_token.clone());
+
+    // This returns a continuous stream of fresh data plane tunnels.
+    let mut dataplane_stream = sessions_manager_client
+        .start_multiplexed_control_plane()
+        .await?;
+
+    // Wait for the first client until communication_timeout elapses
+    let first_connection = tokio::time::timeout(
+        Duration::from_secs(args.communication_timeout.into()),
+        dataplane_stream.recv(),
+    )
+    .await;
+
+    match first_connection {
+        Ok(Some(connection)) => {
+            trace!("start_agent -> Sidecar first multiplexed data plane connection accepted");
+            clients.spawn(state.clone().serve_client_connection_protocol(
+                connection,
+                bg_tasks.clone(),
+                cancellation_token.clone(),
+            ));
+        }
+        Ok(None) => {
+            error!(
+                "start_agent -> Control plane stream closed prematurely before first client connection"
+            );
+            return Err(AgentError::FirstConnectionTimeout); // Or a custom matching error enum
+        }
+        Err(..) => {
+            error!("start_agent -> Failed to accept first connection: timeout");
+            return Err(AgentError::FirstConnectionTimeout);
+        }
+    }
+
+    let idle_ttl = Duration::from_secs(envs::IDDLE_TTL.from_env_or_default());
+    loop {
+        let exit_idle =
+            OptionFuture::from(clients.is_empty().then_some(tokio::time::sleep(idle_ttl)));
+        select! {
+            // Continuously listen for dataplane streams as pushed in the bg by the control plane stream.
+            maybe_conn = dataplane_stream.recv() => {
+                match maybe_conn {
+                    Some(connection) => {
+                        trace!("start_agent -> Sidecar subsequent multiplexed data plane connection accepted");
+                        clients.spawn(state.clone().serve_client_connection_protocol(
+                            connection,
+                            bg_tasks.clone(),
+                            cancellation_token.clone(),
+                        ));
+                    }
+                    None => {
+                        warn!("start_agent -> Data plane control channel vanished abruptly. Stopping poll.");
+                        break;
+                    }
+                }
+            },
+
+            Some(client) = clients.join_next() => {
+                match client {
+                    Ok(client) => {
+                        trace!(client, "start_agent -> Client finished");
+                    }
+                    Err(error) => {
+                        error!(%error, "start_agent -> Failed to join client handler task");
+                    }
+                }
+            }
+
+            Some(..) = exit_idle => {
+                trace!(
+                    ?idle_ttl,
+                    "start_agent -> All clients finished and idle ttl expired, exiting main agent loop"
+                );
+                break;
+            }
+        }
+    }
+
+    trace!("start_agent -> Agent shutting down, dropping cancellation token for background tasks");
+    mem::drop(cancel_guard);
+
+    let dns = tokio::join!(bg_tasks.dns.wait().inspect_err(|error| {
+        error!(%error, "start_agent -> DNS task failed");
+    }),);
+    debug!(?dns, "BackgroundTasks have finished.");
+
+    trace!("start_agent -> Agent shutdown");
+
+    Ok(())
+}
+
 async fn clear_iptable_chain(
     clear_ipv4: bool,
     clear_ipv6: bool,
@@ -1290,6 +1453,8 @@ pub async fn main() -> AgentResult<()> {
 
     if args.mode.is_targetless() || second_process {
         start_agent(args).await
+    } else if args.mode.is_sidecar() {
+        start_agent_sidecar(args).await
     } else {
         start_iptable_guard(args).await
     }

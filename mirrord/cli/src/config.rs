@@ -511,6 +511,10 @@ pub(super) struct ExecArgs {
     #[clap(flatten)]
     pub params: Box<ExecParams>,
 
+    /// Run intproxy against sessions-manager using the provided bridge token.
+    #[arg(long)]
+    pub bridge: Option<String>,
+
     /// Binary to execute and connect with the remote pod.
     pub binary: String,
 

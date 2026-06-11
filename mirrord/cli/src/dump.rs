@@ -79,7 +79,7 @@ pub async fn dump_command(
 
     // Create connection to the agent
     let (_connection_info, connection) =
-        create_and_connect(&mut config, &mut progress, &mut analytics, None, None).await?;
+        create_and_connect(&mut config, &mut progress, &mut analytics, None, None, None).await?;
 
     // If the user didn't specify ports, detect them on the target
     let ports = if args.ports.is_empty() {

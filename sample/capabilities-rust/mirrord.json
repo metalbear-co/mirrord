@@ -1,0 +1,17 @@
+{
+  "agent": {
+    "clean_iptables_on_start": false
+  },
+  "experimental": {
+    "disable_reuseaddr": false,
+    "sip_utils": false
+  },
+  "feature": {
+    "env": true,
+    "fs": "read",
+    "network": {
+      "outgoing": true,
+      "incoming": "off"
+    }
+  }
+}

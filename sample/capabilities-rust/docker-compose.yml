@@ -1,0 +1,29 @@
+services:
+  mirrord-deps-builder:
+    image: mirrord-deps-builder:local
+    build:
+      context: ./mirrord-dependancies-builder
+      dockerfile: Dockerfile
+
+  backend:
+    image: capabilities-rust-backend:local
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      - mirrord-deps-builder
+    environment:
+      - MIRRORD_SESSIONS_MANAGER_URL=host.docker.internal:4971
+      - MIRRORD_SESSION_ID=demo
+    ports:
+      - "8080:8080"
+
+  frontend:
+    image: capabilities-rust-frontend-next:local
+    build:
+      context: ./frontend-next
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"

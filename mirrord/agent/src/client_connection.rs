@@ -7,6 +7,7 @@ use std::{
 use actix_codec::Framed;
 use futures::{SinkExt, TryStreamExt};
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage};
+use mirrord_protocol_io::{Agent, Connection};
 use mirrord_tls_util::{GetSanError, HasSubjectAlternateNames};
 use thiserror::Error;
 use tokio::net::TcpStream;
@@ -112,12 +113,31 @@ impl ClientConnection {
         Ok(Self { framed, client_id })
     }
 
+    /// Wraps a protocol connection that is already backconnected to the client.
+    #[tracing::instrument(level = "trace", skip(connection))]
+    pub(crate) fn from_protocol_connection(connection: Connection<Agent>, client_id: u32) -> Self {
+        Self {
+            framed: ConnectionFramed::ProtocolConnection(connection),
+            client_id,
+        }
+    }
+
     /// Sends a [`DaemonMessage`] to the client.
     #[tracing::instrument(level = "trace", err)]
     pub async fn send(&mut self, message: DaemonMessage) -> io::Result<()> {
         match &mut self.framed {
             ConnectionFramed::Tcp(framed) => framed.send(message).await?,
             ConnectionFramed::Tls(framed) => framed.send(message).await?,
+            ConnectionFramed::ProtocolConnection(connection) => {
+                connection.send(message).await;
+
+                if connection.is_closed() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::BrokenPipe,
+                        "protocol-io connection is closed",
+                    ));
+                }
+            }
         }
 
         Ok(())
@@ -129,6 +149,7 @@ impl ClientConnection {
         match &mut self.framed {
             ConnectionFramed::Tcp(framed) => framed.try_next().await,
             ConnectionFramed::Tls(framed) => framed.try_next().await,
+            ConnectionFramed::ProtocolConnection(connection) => Ok(connection.recv().await),
         }
     }
 }
@@ -147,9 +168,11 @@ impl fmt::Debug for ClientConnection {
 
 /// Enum wraps whole [`Framed`] instead of just [`TcpStream`]/[`TlsStream`], so we don't have to
 /// implement [`AsyncRead`](actix_codec::AsyncRead) and [`AsyncWrite`](actix_codec::AsyncWrite).
+/// It also carries protocol-io Connection<Agent>
 enum ConnectionFramed {
     Tcp(Framed<TcpStream, DaemonCodec>),
     Tls(Box<Framed<TlsStream<TcpStream>, DaemonCodec>>),
+    ProtocolConnection(Connection<Agent>),
 }
 
 #[cfg(test)]
