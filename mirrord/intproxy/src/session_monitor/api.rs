@@ -36,7 +36,9 @@ use tokio_util::sync::CancellationToken;
 use tower_http::trace::TraceLayer;
 
 use super::{MonitorEvent, MonitorTx};
-use crate::session_monitor::chaos::{ChaosWatcherTx, api::chaos_router};
+use crate::session_monitor::chaos::{
+    ChaosWatcherTx, analytics::ChaosAnalyticsReporter, api::chaos_router,
+};
 
 #[cfg(unix)]
 #[path = "transport_unix.rs"]
@@ -59,6 +61,7 @@ pub(crate) struct AppState {
     monitor_tx: MonitorTx,
     shutdown: CancellationToken,
     pub(crate) chaos_tx: ChaosWatcherTx,
+    pub(crate) reporter: Arc<RwLock<ChaosAnalyticsReporter>>,
 }
 
 async fn health() -> impl IntoResponse {
@@ -186,11 +189,17 @@ pub async fn start_api_server(
         fs::set_permissions(&sessions_dir, fs::Permissions::from_mode(0o700))?;
     }
 
+    let reporter = || {
+        // AnalyticsReporter::new(enabled, execution_kind, watch, machine_id)
+        todo!()
+    };
+
     let state = AppState {
         session_info: Arc::new(RwLock::new(session_info)),
         monitor_tx,
         shutdown: shutdown.clone(),
         chaos_tx,
+        reporter: Arc::new(RwLock::new(ChaosAnalyticsReporter::new(reporter()))),
     };
 
     tokio::spawn(update_session_info_from_events(state.clone(), monitor_rx));

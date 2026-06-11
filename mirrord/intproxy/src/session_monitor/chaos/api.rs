@@ -73,6 +73,12 @@ async fn post_create_rule(
     let new_rule = ChaosRule::try_from(new_rule)?;
     let rule_id = new_rule.id;
 
+    // report new rule
+    state
+        .reporter
+        .blocking_write()
+        .add_live_rule(new_rule.clone());
+
     let created_rule = state
         .chaos_tx
         .create_rule(new_rule)

@@ -9,7 +9,7 @@ use mirrord_protocol::{
 use rand::{random_bool, random_range};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
-use strum_macros::EnumString;
+use strum_macros::{EnumDiscriminants, EnumString};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -93,13 +93,35 @@ impl ChaosRule {
         }
     }
 
-    pub fn get_selector_percentage(&self) -> Percentage {
+    pub fn selector_percentage(&self) -> Percentage {
         match self.selector {
             ChaosSelector::Tcp { percentage, .. }
             | ChaosSelector::Http { percentage, .. }
             | ChaosSelector::Fs { percentage, .. } => percentage,
             ChaosSelector::None => Percentage::default(),
         }
+    }
+
+    pub fn selector_type(&self) -> ChaosSelectorType {
+        match self.selector {
+            ChaosSelector::Tcp { .. } => ChaosSelectorType::Tcp,
+            ChaosSelector::Http { .. } => ChaosSelectorType::Http,
+            ChaosSelector::Fs { .. } => ChaosSelectorType::Fs,
+            ChaosSelector::None => ChaosSelectorType::None,
+        }
+    }
+
+    pub fn effect_type(&self) -> Option<ChaosEffectType> {
+        let string = match &self.selector {
+            ChaosSelector::Tcp { effect, .. } => effect.to_string(),
+            ChaosSelector::Http { effect, .. } => effect.to_string(),
+            ChaosSelector::Fs { effect, .. } => effect.to_string(),
+            ChaosSelector::None => {
+                return None;
+            }
+        };
+
+        ChaosEffectType::from_str(&string).ok()
     }
 }
 
@@ -328,27 +350,30 @@ pub struct ChaosRuleRequest {
 /// The type of effect that a [`ChaosRule`] should apply. Can only be used with a compatible
 /// `selector`, as checked in [`ChaosRule::try_from<ChaosRuleRequest>()`].
 #[skip_serializing_none]
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, EnumDiscriminants)]
 #[serde(rename_all = "snake_case")]
+#[strum_discriminants(name(ChaosEffectType))]
+#[strum_discriminants(derive(EnumString))]
+#[repr(u8)]
 pub enum ChaosEffectRequest {
     Latency {
         delay_ms: u64,
         jitter_ms: Option<u64>,
-    },
+    } = 0,
     ConnectionError {
         #[serde(rename = "type")]
         error_type: String,
         after_ms: Option<u64>,
-    },
+    } = 1,
     #[serde(skip)]
     // Reinstate when required protocol implemented
-    Degradation,
+    Degradation = 2,
     #[serde(skip)]
     // Reinstate when required protocol implemented
-    HttpOverride,
+    HttpOverride = 3,
     #[serde(skip)]
     // Reinstate when required protocol implemented
-    FsError,
+    FsError = 4,
 }
 
 /// The traffic to which a [`ChaosRule`] should apply. The (protocol) type of selector (see
@@ -378,52 +403,79 @@ pub struct ChaosSelectorRequest {
     percentage: Option<u32>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Default, Debug, PartialEq, Hash)]
+impl ChaosSelectorRequest {
+    pub fn tcp_port(port: u16, percentage: Option<u32>) -> Self {
+        Self {
+            upstream: Some(format!(":{port}")),
+            percentage,
+            ..Default::default()
+        }
+    }
+
+    pub fn name() -> Self {
+        Self {
+            upstream: Some(format!("google.com:443")),
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Default, Debug, PartialEq, Hash, EnumDiscriminants)]
+#[strum_discriminants(derive(Serialize, Deserialize))]
+#[strum_discriminants(name(ChaosSelectorType))]
+#[repr(u8)]
 pub enum ChaosSelector {
     Tcp {
         upstream: AddressFilter, // req
         percentage: Percentage,
         effect: TcpChaosEffect,
-    },
+    } = 1,
     Http {
         upstream: AddressFilter, // req
         percentage: Percentage,
-        filter: HttpFilter, // ::Body and ::HeaderJq variants unused
+        filter: Option<HttpFilter>, // ::Body and ::HeaderJq variants unused
         effect: HttpChaosEffect,
-    },
+    } = 2,
     Fs {
         file_path: Vec<String>, // req
         percentage: Percentage,
         effect: FsChaosEffect,
-    },
+    } = 3,
     #[default]
-    None,
+    None = 0,
 }
 
 // having separate enums per selector allows invalid effect/ selector combos to
 // be impossible
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash, Default, strum_macros::Display)]
 pub enum TcpChaosEffect {
     Latency(ChaosEffectLatency),
     ConnectionError(ChaosEffectConnectionError),
     Degradation,
     #[default]
+    #[strum(disabled)]
     Nothing,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, Default)]
+#[derive(
+    Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, Default, strum_macros::Display,
+)]
 pub enum HttpChaosEffect {
     Latency(ChaosEffectLatency),
     HttpOverride,
     #[default]
+    #[strum(disabled)]
     Nothing,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, Default)]
+#[derive(
+    Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, Default, strum_macros::Display,
+)]
 pub enum FsChaosEffect {
     Latency(ChaosEffectLatency),
     FsError,
     #[default]
+    #[strum(disabled)]
     Nothing,
 }
 
@@ -688,7 +740,7 @@ mod test {
         name: Some("http-connect-slow".to_owned()),
         selector: ChaosSelector::Http {
             upstream: AddressFilter::Name("jadwiga-wawel.pl".to_owned(), 0),
-            filter: HttpFilter::Path(Filter::new("^/api/".to_owned()).unwrap()),
+            filter: Some(HttpFilter::Path(Filter::new("^/api/".to_owned()).unwrap())),
             percentage: Percentage::from(100),
             effect: HttpChaosEffect::Latency(ChaosEffectLatency {
                 delay: Duration::from_millis(200),

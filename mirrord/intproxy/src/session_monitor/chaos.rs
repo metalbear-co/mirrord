@@ -13,6 +13,7 @@ use tokio::sync::watch;
 use tracing::Level;
 use uuid::Uuid;
 
+pub mod analytics;
 pub mod api;
 pub mod rules;
 
