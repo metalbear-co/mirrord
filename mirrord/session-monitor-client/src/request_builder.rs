@@ -80,6 +80,11 @@ impl Response {
     }
 
     pub async fn bytes(self) -> Result<Bytes, SessionError> {
+        let status = self.0.status();
+        if !status.is_success() {
+            return Err(SessionError::BadStatus(status));
+        }
+
         Ok(self
             .0
             .into_body()

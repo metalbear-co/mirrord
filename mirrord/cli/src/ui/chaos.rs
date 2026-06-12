@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use axum::{
     Extension, Json, Router,
     extract::{Path, Request, State},
@@ -11,7 +10,9 @@ use mirrord_intproxy::session_monitor::chaos::{
     ChaosRuleList, SessionId,
     rules::{ChaosRule, ChaosRuleRequest, ChaosSelectorRequest},
 };
-use mirrord_session_monitor_client::SessionClient;
+use mirrord_session_monitor_client::{SessionClient, SessionError};
+use thiserror::Error;
+use tracing::Level;
 use uuid::Uuid;
 
 use crate::ui::AppState;
@@ -69,71 +70,73 @@ async fn get_session_client_middleware(
             request.extensions_mut().insert(session.client.clone());
             Ok(next.run(request).await)
         }
-        None => Err(anyhow!("lol"))?,
+        None => Err(ApiError::SessionNotFound(session_id)),
     }
 }
 
-#[derive(Debug)]
-struct ApiError(anyhow::Error);
+#[derive(Debug, Error)]
+enum ApiError {
+    #[error("session `{0}` not found")]
+    SessionNotFound(String),
 
-impl<E> From<E> for ApiError
-where
-    E: Into<anyhow::Error>,
-{
-    fn from(err: E) -> Self {
-        Self(err.into())
+    #[error("chaos rule not found")]
+    ChaosRuleNotFound,
+
+    #[error(transparent)]
+    SessionMonitor(SessionError),
+}
+
+impl From<SessionError> for ApiError {
+    fn from(error: SessionError) -> Self {
+        match error {
+            SessionError::BadStatus(StatusCode::NOT_FOUND) => Self::ChaosRuleNotFound,
+            other => Self::SessionMonitor(other),
+        }
     }
 }
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Something went wrong: {}", self.0),
-        )
-            .into_response()
+        match self {
+            Self::SessionNotFound(_) => (
+                StatusCode::NOT_FOUND,
+                format!("Could not find session: {self}"),
+            )
+                .into_response(),
+            Self::ChaosRuleNotFound => (
+                StatusCode::NOT_FOUND,
+                format!("Could not find chaos rule: {self}"),
+            )
+                .into_response(),
+            Self::SessionMonitor(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Something went wrong: {self}"),
+            )
+                .into_response(),
+        }
     }
 }
 
 type ChaosResult<T> = Result<T, ApiError>;
 
+#[tracing::instrument(level = Level::INFO, ret, err)]
 async fn post_create_rule(
     Path(session_id): Path<SessionId>,
     Extension(client): Extension<SessionClient>,
     Json(new_rule): Json<ChaosRuleRequest>,
-) -> ChaosResult<()> {
-    // let new_rule = ChaosRuleRequest {
-    //     name: Some("knuckles".to_string()),
-    //     priority: Some(100),
-    //     effect:
-    //         mirrord_intproxy::session_monitor::chaos::rules::ChaosEffectRequest::ConnectionError
-    // {             error_type: "refused".to_string(),
-    //             after_ms: Some(0),
-    //         },
-    //     // selector: ChaosSelectorRequest::tcp_port(443, Some(100)),
-    //     selector: ChaosSelectorRequest::name(),
-    // };
-
-    let new_rule = ChaosRuleRequest {
-        name: Some("knuckles".to_string()),
-        priority: Some(100),
-        effect: mirrord_intproxy::session_monitor::chaos::rules::ChaosEffectRequest::Latency {
-            delay_ms: 250,
-            jitter_ms: Some(250),
-        },
-        // selector: ChaosSelectorRequest::tcp_port(443, Some(100)),
-        selector: ChaosSelectorRequest::name(),
-    };
-
-    client
+) -> ChaosResult<Json<ChaosRule>> {
+    let created_rule = client
         .post(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}"))
         .json(&new_rule)
         .send()
-        .await
-        .inspect_err(|fail| println!("{fail:?}"))?;
+        .await?
+        .json()
+        .await?;
 
-    Ok(())
+    Ok(Json(created_rule))
 }
 
+#[tracing::instrument(level = Level::INFO, ret, err)]
 async fn get_list_active_rules_for_session(
     Path(session_id): Path<SessionId>,
     Extension(client): Extension<SessionClient>,
@@ -142,14 +145,13 @@ async fn get_list_active_rules_for_session(
         .get(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}"))
         .send()
         .await?
-        .json::<ChaosRuleList>()
+        .json()
         .await?;
-
-    println!("{response:?} yay response");
 
     Ok(Json(response))
 }
 
+#[tracing::instrument(level = Level::INFO, ret, err)]
 async fn delete_clear_session_rules(
     Path(session_id): Path<SessionId>,
     Extension(client): Extension<SessionClient>,
@@ -162,13 +164,14 @@ async fn delete_clear_session_rules(
     Ok(())
 }
 
+#[tracing::instrument(level = Level::INFO, ret, err)]
 async fn put_update_rule(
     Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
     Extension(client): Extension<SessionClient>,
     Json(updated_rule): Json<ChaosRuleRequest>,
 ) -> ChaosResult<Json<ChaosRule>> {
     let old_rule = client
-        .post(format!(
+        .put(format!(
             "{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}/{rule_id}"
         ))
         .json(&updated_rule)
@@ -180,34 +183,36 @@ async fn put_update_rule(
     Ok(Json(old_rule))
 }
 
+#[tracing::instrument(level = Level::INFO, ret, err)]
 async fn delete_rule(
     Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
     Extension(client): Extension<SessionClient>,
-) -> ChaosResult<()> {
-    client
+) -> ChaosResult<Json<ChaosRule>> {
+    let deleted_rule = client
         .delete(format!(
             "{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}/{rule_id}"
         ))
         .send()
+        .await?
+        .json()
         .await?;
 
-    Ok(())
+    Ok(Json(deleted_rule))
 }
 
+#[tracing::instrument(level = Level::INFO, ret, err)]
 async fn get_rule(
     Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<Json<ChaosRule>> {
-    let response = client
+    let found_rule = client
         .get(format!(
             "{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}/{rule_id}"
         ))
         .send()
         .await?
-        .json::<ChaosRule>()
+        .json()
         .await?;
 
-    println!("{response:?} yay response");
-
-    Ok(Json(response))
+    Ok(Json(found_rule))
 }
