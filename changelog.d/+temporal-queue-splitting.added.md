@@ -1,0 +1,1 @@
+Added support for splitting [Temporal](https://temporal.io/) task queues.

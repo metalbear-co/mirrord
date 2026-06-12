@@ -61,12 +61,22 @@ pub struct ConnectParams<'a> {
     #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
     pub redis_pubsub_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
 
+    #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
+    pub temporal_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
+
     #[serde(
         default,
         with = "force_json_ser",
         skip_serializing_if = "HashMap::is_empty"
     )]
     pub redis_pubsub_jq_filters: HashMap<&'a str, &'a str>,
+
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub temporal_jq_filters: HashMap<&'a str, &'a str>,
 
     /// User's current git branch name - may be an empty string if user is in detached head mode or
     /// another error occurred: this case handled by the operator
@@ -143,6 +153,8 @@ pub struct OutputTmpResource {
     pub subscription: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub channel: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub task_queue: BTreeMap<String, String>,
 }
 
 /// Per-dialect branch database names, used to keep the connect params
@@ -200,6 +212,8 @@ impl<'a> ConnectParams<'a> {
                 .split_queues
                 .redis_pubsub_jq_filters()
                 .collect(),
+            temporal_splits: config.feature.split_queues.temporal().collect(),
+            temporal_jq_filters: config.feature.split_queues.temporal_jq_filters().collect(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,

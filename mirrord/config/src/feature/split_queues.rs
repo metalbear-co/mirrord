@@ -168,6 +168,16 @@ impl SplitQueuesConfig {
         })
     }
 
+    pub fn temporal(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::Temporal {
+                message_filter: Some(message_filter),
+                ..
+            } => Some((name.as_str(), message_filter)),
+            _ => None,
+        })
+    }
+
     pub fn redis_pubsub_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
         self.0.iter().filter_map(|(name, filter)| match filter {
             QueueFilter::RedisPubSub {
@@ -178,9 +188,26 @@ impl SplitQueuesConfig {
         })
     }
 
+    pub fn temporal_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::Temporal {
+                jq_filter: Some(jq),
+                ..
+            } => Some((name.as_str(), jq.as_str())),
+            _ => None,
+        })
+    }
+
     pub fn redis_pubsub_queues(&self) -> impl Iterator<Item = &str> {
         self.0.iter().filter_map(|(name, filter)| match filter {
             QueueFilter::RedisPubSub { .. } => Some(name.as_str()),
+            _ => None,
+        })
+    }
+
+    pub fn temporal_queues(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::Temporal { .. } => Some(name.as_str()),
             _ => None,
         })
     }
@@ -232,6 +259,10 @@ impl SplitQueuesConfig {
                     jq_filter,
                 }
                 | QueueFilter::RedisPubSub {
+                    message_filter,
+                    jq_filter,
+                }
+                | QueueFilter::Temporal {
                     message_filter,
                     jq_filter,
                 } => {
@@ -396,6 +427,18 @@ pub enum QueueFilter {
         jq_filter: Option<String>,
     },
 
+    #[serde(rename = "Temporal")]
+    Temporal {
+        /// Regex filters on Temporal task metadata (`workflow_id`, `workflow_type`,
+        /// `activity_type`, or custom search attribute keys). All patterns must match.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message_filter: Option<QueueMessageFilter>,
+
+        /// JQ filter on activity task input JSON. Workflow tasks ignore this filter.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        jq_filter: Option<String>,
+    },
+
     // When a newer client sends a new filter kind to an older operator, that does not yet know
     // about that filter type, the filter will be deserialized to unknown.
     #[schemars(skip)]
@@ -425,6 +468,7 @@ impl CollectAnalytics for &SplitQueuesConfig {
             "azure_service_bus_jq_filter_count",
             self.azure_service_bus_jq_filters().count(),
         );
+
         analytics.add(
             "redis_pubsub_queue_count",
             self.redis_pubsub_queues().count(),
@@ -432,6 +476,11 @@ impl CollectAnalytics for &SplitQueuesConfig {
         analytics.add(
             "redis_pubsub_jq_filter_count",
             self.redis_pubsub_jq_filters().count(),
+        );
+        analytics.add("temporal_queue_count", self.temporal_queues().count());
+        analytics.add(
+            "temporal_jq_filter_count",
+            self.temporal_jq_filters().count(),
         );
     }
 }
