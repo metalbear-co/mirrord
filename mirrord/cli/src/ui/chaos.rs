@@ -1,21 +1,21 @@
 use axum::{
     Extension, Json, Router,
     extract::{Path, Request, State},
-    http::StatusCode,
     middleware::{self, Next},
-    response::{IntoResponse, Response},
+    response::Response,
     routing::{post, put},
 };
 use mirrord_intproxy::session_monitor::chaos::{
     ChaosRuleList, SessionId,
-    rules::{ChaosRule, ChaosRuleRequest, ChaosSelectorRequest},
+    rules::{ChaosRule, ChaosRuleRequest},
 };
-use mirrord_session_monitor_client::{SessionClient, SessionError};
-use thiserror::Error;
+use mirrord_session_monitor_client::SessionClient;
 use tracing::Level;
 use uuid::Uuid;
 
-use crate::ui::AppState;
+use crate::ui::{AppState, chaos::error::ChaosApiError};
+
+mod error;
 
 /*
 POST /chaos/rules/{session_id}: create rule, return rule object with assigned ID
@@ -26,6 +26,8 @@ DELETE /chaos/rules/{session_id}/{rule_id}: delete rule
 DELETE /chaos/rules/{session_id}: clear all rules for session*/
 
 const BASE_INTPROXY_CHAOS_ROUTE: &str = "/chaos/rules";
+
+type ChaosResult<T> = Result<T, ChaosApiError>;
 
 // TODO(alex): Ok, so this works sort of like this:
 // Some random runs `mirrord ui`, it starts up the axum server (let's say the address is
@@ -70,54 +72,9 @@ async fn get_session_client_middleware(
             request.extensions_mut().insert(session.client.clone());
             Ok(next.run(request).await)
         }
-        None => Err(ApiError::SessionNotFound(session_id)),
+        None => Err(ChaosApiError::SessionNotFound(session_id)),
     }
 }
-
-#[derive(Debug, Error)]
-enum ApiError {
-    #[error("session `{0}` not found")]
-    SessionNotFound(String),
-
-    #[error("chaos rule not found")]
-    ChaosRuleNotFound,
-
-    #[error(transparent)]
-    SessionMonitor(SessionError),
-}
-
-impl From<SessionError> for ApiError {
-    fn from(error: SessionError) -> Self {
-        match error {
-            SessionError::BadStatus(StatusCode::NOT_FOUND) => Self::ChaosRuleNotFound,
-            other => Self::SessionMonitor(other),
-        }
-    }
-}
-
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        match self {
-            Self::SessionNotFound(_) => (
-                StatusCode::NOT_FOUND,
-                format!("Could not find session: {self}"),
-            )
-                .into_response(),
-            Self::ChaosRuleNotFound => (
-                StatusCode::NOT_FOUND,
-                format!("Could not find chaos rule: {self}"),
-            )
-                .into_response(),
-            Self::SessionMonitor(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Something went wrong: {self}"),
-            )
-                .into_response(),
-        }
-    }
-}
-
-type ChaosResult<T> = Result<T, ApiError>;
 
 #[tracing::instrument(level = Level::INFO, ret, err)]
 async fn post_create_rule(
