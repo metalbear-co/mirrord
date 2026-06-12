@@ -269,15 +269,9 @@ jobs:
             {
               echo "HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew"
               echo "HOMEBREW_NO_AUTO_UPDATE=1"
+              echo "HOMEBREW_SANDBOX=0"
               echo "PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
             } >> "$GITHUB_ENV"
-          fi
-
-          if command -v bwrap >/dev/null 2>&1; then
-            echo "Bubblewrap already installed on this Linux runner."
-          else
-            echo "Installing Bubblewrap on Linux"
-            sudo apt update && sudo apt install bubblewrap -y
           fi
 
       - name: Test Homebrew install (Linux + macOS)
