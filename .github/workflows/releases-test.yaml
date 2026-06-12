@@ -273,6 +273,13 @@ jobs:
             } >> "$GITHUB_ENV"
           fi
 
+          if command -v bwrap >/dev/null 2>&1; then
+            echo "Bubblewrap already installed on this Linux runner."
+          else
+            echo "Installing Bubblewrap on Linux"
+            sudo apt update && sudo apt install bubblewrap -y
+          fi
+
       - name: Test Homebrew install (Linux + macOS)
         id: brew
         shell: bash
