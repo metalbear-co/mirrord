@@ -1,0 +1,1 @@
+Disabled Bubblewrap in Homebrew installation check in release monitor (Linux).
