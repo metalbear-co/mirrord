@@ -12,7 +12,8 @@ use str_win::path_to_unix_path;
 use winapi::{
     shared::{
         minwindef::{FILETIME, ULONG},
-        ntdef::{HANDLE, POBJECT_ATTRIBUTES},
+        ntdef::{HANDLE, NTSTATUS, POBJECT_ATTRIBUTES},
+        ntstatus::{STATUS_INVALID_PARAMETER, STATUS_SUCCESS},
     },
     um::winnt::ACCESS_MASK,
 };
@@ -75,11 +76,11 @@ impl CounterAllocated for MirrordFileHandle {
 }
 
 /// Singleton registry of every file handle the layer is currently
-/// tracking. Inserts go through [`try_insert_handle`]; lookups are bare
-/// `MANAGED_FILES.try_read().ok()` calls scattered through the file hooks.
+/// tracking. Inserts go through [`insert_handle`]; lookups are
+/// `MANAGED_FILES.get(..)` calls scattered through the file hooks.
 pub(in crate::hooks::files) static MANAGED_FILES: Lazy<
     ManagedRegistry<MirrordFileHandle, HandleContext>,
-> = Lazy::new(ManagedRegistry::new);
+> = Lazy::new(|| ManagedRegistry::new("MANAGED_FILES"));
 
 /// Alias used by every [`hooks::files::ops`](crate::hooks::files::ops)
 /// module. `MANAGED_FILES` is the canonical name; `MANAGED_HANDLES`
@@ -123,49 +124,108 @@ pub(in crate::hooks::files) struct HandleContext {
     /// Matches the high-throughput-IO opt-in tested by
     /// `Test_SkipPortOnSuccess`.
     pub(in crate::hooks::files) skip_on_success: bool,
+    /// IOCP `(port, key)` binding, set via `NtSetInformationFile(FileCompletionInformation)`.
+    ///
+    /// Lives here rather than in a separate map keyed by the same handle. So it is dropped
+    /// atomically when the handle closes: no second lock, and no leak window between unbind and
+    /// remove.
+    pub(in crate::hooks::files) iocp_binding: Option<IocpBinding>,
 }
 
-/// Try to allocate the next [`MirrordFileHandle`] from the
-/// [`MANAGED_FILES`] counter and register `handle_context` under it.
+/// An IOCP `(port, key)` binding for a managed file. The OS owns the port end-to-end; we only
+/// remember where to post a completion packet when the file's async read finishes on a worker.
+#[derive(Clone, Copy)]
+pub(in crate::hooks::files) struct IocpBinding {
+    pub(in crate::hooks::files) port: HANDLE,
+    pub(in crate::hooks::files) key: usize,
+}
+
+// SAFETY: `port` is an opaque OS handle value we store and hand back but never dereference.
+unsafe impl Send for IocpBinding {}
+unsafe impl Sync for IocpBinding {}
+
+impl HandleContext {
+    /// Bind this file to an OS IOCP port.
+    ///
+    /// Records the `(port, key)`. The OS port itself is untouched.
+    ///
+    /// # Returns
+    ///
+    /// `STATUS_SUCCESS`, or `STATUS_INVALID_PARAMETER` if the file is already bound (the
+    /// double-bind the kernel rejects, per `Test_DoubleBindRejected`).
+    pub(in crate::hooks::files) fn bind_iocp(&mut self, port: HANDLE, key: usize) -> NTSTATUS {
+        if self.iocp_binding.is_some() {
+            tracing::warn!(
+                ?port,
+                "HandleContext::bind_iocp: file already bound to a port, returning STATUS_INVALID_PARAMETER"
+            );
+            return STATUS_INVALID_PARAMETER;
+        }
+        self.iocp_binding = Some(IocpBinding { port, key });
+        tracing::info!(?port, key, "HandleContext::bind_iocp: bound file -> port");
+        STATUS_SUCCESS
+    }
+
+    /// This file's IOCP `(port, key)` binding, if any.
+    pub(in crate::hooks::files) fn iocp_binding(&self) -> Option<(HANDLE, usize)> {
+        self.iocp_binding.map(|b| (b.port, b.key))
+    }
+
+    /// Drop this file's IOCP binding (idempotent). Matches
+    /// `FileReplaceCompletionInformation(Port = NULL)`.
+    pub(in crate::hooks::files) fn unbind_iocp(&mut self) {
+        if self.iocp_binding.take().is_some() {
+            tracing::info!("HandleContext::unbind_iocp: removed binding");
+        }
+    }
+}
+
+/// The IOCP `(port, key)` binding for a file handle, by value.
 ///
-/// Notes:
-///
-/// * Handle values increment linearly starting at [`MIRRORD_FIRST_FILE_HANDLE`]. They are never
-///   recycled, so any future use of an inserted-then-removed handle value indicates a bug somewhere
-///   downstream of this call.
-/// * `None` means "no managed handle was allocated, fall back to the original syscall." Callers in
-///   hook context should treat the result as a hint to defer to the unmodified `NtCreateFile`
-///   rather than waiting on the lock (we never block inside a hook).
-///
-/// # Arguments
-///
-/// * `handle_context` - The freshly-built [`HandleContext`] to attach to the new handle. Consumed
-///   because the registry takes ownership.
+/// For hooks that don't already hold the file's context (e.g. `nt_cancel_io_file_hook`).
 ///
 /// # Returns
 ///
-/// * `Some(MirrordFileHandle)` - Insertion succeeded; the returned key is the synthetic
-///   `0x5000_xxxx` handle value the caller should write into the user's `PHANDLE` out-parameter.
-/// * `None` - The registry's outer write lock was contended at try time. The handle was NOT
-///   inserted; nothing to clean up.
-pub(in crate::hooks::files) fn try_insert_handle(
-    handle_context: HandleContext,
-) -> Option<MirrordFileHandle> {
+/// The `(port, key)`, or `None` for an unmanaged file or one with no binding.
+pub(in crate::hooks::files) fn iocp_binding_for_file(file: HANDLE) -> Option<(HANDLE, usize)> {
+    let context = MANAGED_FILES.get(&file)?;
+    let context = context.try_read().ok()?;
+    context.iocp_binding()
+}
+
+/// Register a freshly-opened remote file. Returns its managed handle.
+///
+/// Allocates the next [`MirrordFileHandle`] from the [`MANAGED_FILES`] counter and stores
+/// `handle_context` under it.
+///
+/// `handle_context` is consumed: the registry takes ownership.
+///
+/// # Blocking
+///
+/// ⚠️ This always succeeds. Under pathological contention the registry blocks briefly rather than
+/// dropping the registration.
+///
+/// A remotely-opened file *must* be tracked. Otherwise its remote fd leaks, and the caller gets
+/// back a stale local handle.
+///
+/// # Note
+///
+/// Handle values start at [`MIRRORD_FIRST_FILE_HANDLE`] and increment linearly. They are never
+/// recycled. Any reuse of an inserted-then-removed value is a bug downstream.
+///
+/// # Returns
+///
+/// The new [`MirrordFileHandle`] — the `0x5000_xxxx` value the caller writes into the user's
+/// `PHANDLE`.
+pub(in crate::hooks::files) fn insert_handle(handle_context: HandleContext) -> MirrordFileHandle {
     let path = handle_context.path.clone();
     let fd = handle_context.fd;
-    let result = MANAGED_FILES.try_insert(handle_context);
-    match result {
-        Some(h) => tracing::info!(
-            handle = ?h.0, fd, path,
-            "managed_handle::try_insert_handle: registered file handle"
-        ),
-        None => tracing::error!(
-            fd,
-            path,
-            "managed_handle::try_insert_handle: MANAGED_FILES write lock contended, falling back"
-        ),
-    }
-    result
+    let handle = MANAGED_FILES.insert(handle_context);
+    tracing::info!(
+        handle = ?handle.0, fd, path,
+        "managed_handle::insert_handle: registered file handle"
+    );
+    handle
 }
 
 /// Run `fun` closure over each handle whose path matches the `object_attributes`.
@@ -182,17 +242,15 @@ pub(in crate::hooks::files) fn for_each_handle_with_path(
     let mut any = false;
 
     let name = read_object_attributes_name(object_attributes);
-    if let Some(linux_name) = path_to_unix_path(name)
-        && let Ok(handles) = MANAGED_FILES.try_read()
-    {
-        for (handle, handle_context) in handles.iter() {
-            if let Ok(handle_context) = handle_context.clone().try_read()
+    if let Some(linux_name) = path_to_unix_path(name) {
+        MANAGED_FILES.for_each(|handle, handle_context| {
+            if let Ok(handle_context) = handle_context.try_read()
                 && handle_context.path == linux_name
             {
                 fun(handle, &handle_context);
                 any = true;
             }
-        }
+        });
     }
 
     any

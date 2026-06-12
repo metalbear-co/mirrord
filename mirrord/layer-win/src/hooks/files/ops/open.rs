@@ -29,8 +29,8 @@
 //!    falls through (not an access violation, since the original NtCreateFile would itself report).
 //! 7. **agent open** -- [`mirrord_protocol::file::OpenFileRequest`] returns a remote fd; on
 //!    failure, fall through.
-//! 8. **managed handle registration** -- [`try_insert_handle`] allocates a `MirrordFileHandle`,
-//!    builds the [`crate::hooks::files::managed_handle::HandleContext`] (fd, path, access mask,
+//! 8. **managed handle registration** -- [`insert_handle`] allocates a `MirrordFileHandle`, builds
+//!    the [`crate::hooks::files::managed_handle::HandleContext`] (fd, path, access mask,
 //!    attributes, timestamps, `position = 0`, `skip_on_success = false`), and writes the synthetic
 //!    handle value at `*file_handle`. Subsequent ops on this handle hit the other hooks in this
 //!    module.
@@ -70,7 +70,7 @@ use winapi::{
 
 use crate::{
     hooks::files::{
-        managed_handle::{HandleContext, try_insert_handle},
+        managed_handle::{HandleContext, insert_handle},
         types::NT_CREATE_FILE_ORIGINAL,
         util::{WindowsTime, is_nt_path_disk_path, read_object_attributes_name},
     },
@@ -237,7 +237,7 @@ pub(in crate::hooks::files) unsafe fn handle(
         let managed_handle = match req {
             Ok(Ok(file)) => {
                 let current_time = WindowsTime::current().as_file_time();
-                try_insert_handle(HandleContext {
+                Some(insert_handle(HandleContext {
                     path: unix_path.clone(),
                     fd: file.fd,
                     desired_access,
@@ -250,7 +250,8 @@ pub(in crate::hooks::files) unsafe fn handle(
                     write_time: current_time,
                     change_time: current_time,
                     skip_on_success: false,
-                })
+                    iocp_binding: None,
+                }))
             }
             Ok(Err(e)) => {
                 tracing::warn!(

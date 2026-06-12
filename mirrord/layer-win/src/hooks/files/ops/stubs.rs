@@ -83,9 +83,8 @@ pub(in crate::hooks::files) unsafe fn set_volume_information(
     fs_info_class: FSINFOCLASS,
 ) -> NTSTATUS {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read()
-            && let Some(managed_handle) = handles.get(&file)
-            && let Ok(handle_context) = managed_handle.clone().try_read()
+        if let Some(managed_handle) = MANAGED_HANDLES.get(&file)
+            && let Ok(handle_context) = managed_handle.try_read()
         {
             tracing::warn!(
                 path = handle_context.path,
@@ -113,9 +112,8 @@ pub(in crate::hooks::files) unsafe fn set_quota_information(
     length: ULONG,
 ) -> NTSTATUS {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read()
-            && let Some(managed_handle) = handles.get(&file)
-            && let Ok(handle_context) = managed_handle.clone().try_read()
+        if let Some(managed_handle) = MANAGED_HANDLES.get(&file)
+            && let Ok(handle_context) = managed_handle.try_read()
         {
             tracing::warn!(
                 path = handle_context.path,
@@ -165,9 +163,8 @@ pub(in crate::hooks::files) unsafe fn query_quota_information(
     restart_scan: BOOLEAN,
 ) -> NTSTATUS {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read()
-            && let Some(managed_handle) = handles.get(&file)
-            && let Ok(handle_context) = managed_handle.clone().try_read()
+        if let Some(managed_handle) = MANAGED_HANDLES.get(&file)
+            && let Ok(handle_context) = managed_handle.try_read()
         {
             tracing::warn!(
                 path = handle_context.path,
@@ -229,9 +226,8 @@ pub(in crate::hooks::files) unsafe fn device_io_control(
     output_buffer_length: ULONG,
 ) -> NTSTATUS {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read()
-            && let Some(managed_handle) = handles.get(&file)
-            && let Ok(_handle_context) = managed_handle.clone().try_read()
+        if let Some(managed_handle) = MANAGED_HANDLES.get(&file)
+            && let Ok(_handle_context) = managed_handle.try_read()
         {
             // unsafe to print in
         }
@@ -267,9 +263,8 @@ pub(in crate::hooks::files) unsafe fn lock_file(
     exclusive_lock: BOOLEAN,
 ) -> NTSTATUS {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read()
-            && let Some(managed_handle) = handles.get(&file)
-            && let Ok(handle_context) = managed_handle.clone().try_read()
+        if let Some(managed_handle) = MANAGED_HANDLES.get(&file)
+            && let Ok(handle_context) = managed_handle.try_read()
         {
             tracing::warn!(
                 path = handle_context.path,
@@ -302,9 +297,8 @@ pub(in crate::hooks::files) unsafe fn unlock_file(
     key: ULONG,
 ) -> NTSTATUS {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read()
-            && let Some(managed_handle) = handles.get(&file)
-            && let Ok(handle_context) = managed_handle.clone().try_read()
+        if let Some(managed_handle) = MANAGED_HANDLES.get(&file)
+            && let Ok(handle_context) = managed_handle.try_read()
         {
             tracing::warn!(
                 path = handle_context.path,

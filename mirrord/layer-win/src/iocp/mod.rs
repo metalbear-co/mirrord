@@ -1,36 +1,37 @@
 //! IO completion port (IOCP) plumbing for managed file handles.
 //!
-//! The OS owns every IOCP end-to-end -- this module installs no
-//! syscall hooks of its own. When a managed file's async `NtReadFile`
-//! completes on a worker thread, we **post a completion packet to the
-//! user's port** via the original `NtSetIoCompletion`; the OS handles
-//! FIFO ordering, multi-thread fairness, timeout math, depth queries,
-//! `Alertable=TRUE`, the per-port event, etc.
+//! The OS owns every IOCP end-to-end, so this module installs no syscall hooks of its own.
+//!
+//! When a managed file's async `NtReadFile` completes on a worker thread, we **post a completion
+//! packet to the user's port** via the original `NtSetIoCompletion`. The OS handles the rest: FIFO
+//! ordering, multi-thread fairness, timeout math, depth queries, `Alertable=TRUE`, the per-port
+//! event, and so on.
 //!
 //! ## Module layout
 //!
-//! - [`binding`] — file <-> (port, key) map populated by
-//!   `NtSetInformationFile(FileCompletionInformation)`; queried by the FS read hook to decide
-//!   whether to take the async path.
 //! - [`packet`] — the [`IocpPacket`] struct and [`enqueue_packet`], which posts to the OS port via
 //!   the captured original `NtSetIoCompletion`.
 //!
-//! The deferred closures run on the shared [`crate::task_pool`]. The FS hook
-//! submits a closure there that does the agent IO and then calls
-//! [`enqueue_packet`]; the caller's thread returns `STATUS_PENDING` immediately.
+//! A file's `(port, key)` binding lives on the file's `HandleContext`, via `bind_iocp` /
+//! `iocp_binding` / `unbind_iocp`. It is set by `NtSetInformationFile(FileCompletionInformation)`
+//! and queried by the FS read hook to decide whether to take the async path.
+//!
+//! Keeping it on the `HandleContext` means it drops atomically when the handle closes. This module
+//! no longer keeps a separate binding map.
+//!
+//! The deferred closures run on the shared [`crate::task_pool`]. The FS hook submits a closure
+//! there that does the agent I/O and then calls [`enqueue_packet`]. The caller's thread returns
+//! `STATUS_PENDING` immediately.
 //!
 //! ## Wire-up
 //!
-//! [`initialize`] runs once during layer boot. It resolves
-//! `ntdll!NtSetIoCompletion` via `GetProcAddress` and stashes the
-//! pointer in [`packet::ORIGINAL_NT_SET_IO_COMPLETION`] so the worker
-//! can post without paying for a hook (and without any risk of
-//! recursion, since no hook is installed).
+//! [`initialize`] runs once during layer boot. It resolves `ntdll!NtSetIoCompletion` via
+//! `GetProcAddress` and stashes the pointer in [`packet::ORIGINAL_NT_SET_IO_COMPLETION`]. The
+//! worker can then post without paying for a hook, and with no risk of recursion (no hook is
+//! installed).
 
-pub(crate) mod binding;
 pub(crate) mod packet;
 
-pub(crate) use binding::{bind_file_to_port, binding_for_file, unbind_file};
 use mirrord_layer_lib::LayerResult;
 pub(crate) use packet::{IocpPacket, enqueue_packet};
 
