@@ -153,6 +153,7 @@ pub struct BranchDbNames {
     pub mysql: Vec<String>,
     pub mongodb: Vec<String>,
     pub mssql: Vec<String>,
+    pub redis: Vec<String>,
 }
 
 impl BranchDbNames {
@@ -161,6 +162,7 @@ impl BranchDbNames {
             && self.mysql.is_empty()
             && self.mongodb.is_empty()
             && self.mssql.is_empty()
+            && self.redis.is_empty()
     }
 }
 
@@ -198,7 +200,11 @@ impl<'a> ConnectParams<'a> {
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
             mongodb_branch_names: branch_db_names.mongodb,
-            branch_db_names: branch_db_names.mssql,
+            branch_db_names: branch_db_names
+                .mssql
+                .into_iter()
+                .chain(branch_db_names.redis)
+                .collect(),
             session_ci_info,
             is_default_cluster: None,
             sqs_output_queues: HashMap::new(),
