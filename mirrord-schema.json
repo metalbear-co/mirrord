@@ -3515,6 +3515,36 @@
           "required": [
             "queue_type"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "JQ filter on activity task input JSON. Workflow tasks ignore this filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "Regex filters on Temporal task metadata (`workflow_id`, `workflow_type`,\n`activity_type`, or custom search attribute keys). All patterns must match.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "Temporal"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "queue_type"
+          ]
         }
       ]
     },

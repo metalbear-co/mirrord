@@ -961,6 +961,18 @@ where
                 .require_feature(NewOperatorFeature::GcpPubSubQueueSplitting)?;
         }
 
+        if layer_config
+            .feature
+            .split_queues
+            .temporal_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::TemporalQueueSplitting)?;
+        }
+
         Ok(())
     }
 
@@ -1653,6 +1665,8 @@ impl OperatorApi<PreparedClientCert> {
             gcp_pubsub_jq_filters: Default::default(),
             azure_service_bus_splits: Default::default(),
             azure_service_bus_jq_filters: Default::default(),
+            temporal_splits: Default::default(),
+            temporal_jq_filters: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -2284,6 +2298,8 @@ mod test {
             rmq_output_queues: Default::default(),
             azure_service_bus_splits: Default::default(),
             azure_service_bus_jq_filters: Default::default(),
+            temporal_splits: Default::default(),
+            temporal_jq_filters: Default::default(),
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
@@ -2411,6 +2427,8 @@ mod test {
             rmq_output_queues: Default::default(),
             azure_service_bus_splits: Default::default(),
             azure_service_bus_jq_filters: Default::default(),
+            temporal_splits: Default::default(),
+            temporal_jq_filters: Default::default(),
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
