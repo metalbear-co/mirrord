@@ -425,7 +425,10 @@ impl CollectAnalytics for &SplitQueuesConfig {
             "azure_service_bus_jq_filter_count",
             self.azure_service_bus_jq_filters().count(),
         );
-        analytics.add("redis_pubsub_queue_count", self.redis_pubsub_queues().count());
+        analytics.add(
+            "redis_pubsub_queue_count",
+            self.redis_pubsub_queues().count(),
+        );
         analytics.add(
             "redis_pubsub_jq_filter_count",
             self.redis_pubsub_jq_filters().count(),

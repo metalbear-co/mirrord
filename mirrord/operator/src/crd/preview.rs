@@ -426,10 +426,8 @@ impl PreviewQueueSplittingConfig {
             value.azure_service_bus_jq_filters(),
         );
 
-        let redis_pubsub_queue_filters = collect_queue_filters(
-            value.redis_pubsub(),
-            value.redis_pubsub_jq_filters(),
-        );
+        let redis_pubsub_queue_filters =
+            collect_queue_filters(value.redis_pubsub(), value.redis_pubsub_jq_filters());
 
         let config = Self {
             sqs_queue_filters,
