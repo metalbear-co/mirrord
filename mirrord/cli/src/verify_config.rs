@@ -121,6 +121,10 @@ enum VerifiedConfig {
         /// Target types compatible with the source config.
         /// Meant to be used by IDE plugins for customizing target selection.
         compatible_target_types: Vec<TargetType>,
+        /// An optional fully resolved config with user's config and all default values being
+        /// used.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resolved_config: Option<Box<LayerConfig>>,
     },
     /// Invalid config was detected, mirrord cannot run.
     ///
@@ -165,7 +169,11 @@ enum VerifiedConfig {
 /// }
 /// ```
 pub(super) async fn verify_config(
-    VerifyConfigArgs { ide, path }: VerifyConfigArgs,
+    VerifyConfigArgs {
+        ide,
+        path,
+        resolved,
+    }: VerifyConfigArgs,
 ) -> CliResult<()> {
     let mut config_context = ConfigContext::default()
         .empty_target_final(ide.not())
@@ -185,11 +193,12 @@ pub(super) async fn verify_config(
 
     let verified = match layer_config {
         Ok(config) => VerifiedConfig::Success {
-            config: config.target.into(),
+            config: config.target.clone().into(),
             warnings: config_context.into_warnings(),
             compatible_target_types: TargetType::all()
                 .filter(|tt| tt.compatible_with(&config.feature))
                 .collect(),
+            resolved_config: resolved.then(|| Box::new(config)),
         },
         Err(fail) => VerifiedConfig::Fail {
             errors: vec![fail.to_string()],

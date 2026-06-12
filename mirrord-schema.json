@@ -1099,7 +1099,7 @@
           "type": "object",
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
               "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
             },
@@ -1111,7 +1111,7 @@
               }
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
               "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
               "type": "integer",
               "format": "uint64",
@@ -1119,7 +1119,7 @@
               "minimum": 0
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
               "type": [
                 "string",
@@ -1127,7 +1127,7 @@
               ]
             },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
               "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
               "type": [
                 "string",
@@ -1135,7 +1135,7 @@
               ]
             },
             "ttl_mins": {
-              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
               "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
               "type": [
                 "integer",
@@ -1145,7 +1145,7 @@
               "minimum": 0
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
               "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
               "type": [
                 "integer",
@@ -1159,7 +1159,7 @@
               "const": "mongodb"
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
               "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
               "type": [
                 "string",
@@ -1178,7 +1178,7 @@
           "type": "object",
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
               "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
             },
@@ -1190,7 +1190,7 @@
               }
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
               "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
               "type": "integer",
               "format": "uint64",
@@ -1198,7 +1198,7 @@
               "minimum": 0
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
               "type": [
                 "string",
@@ -1206,7 +1206,7 @@
               ]
             },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
               "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
               "type": [
                 "string",
@@ -1214,7 +1214,7 @@
               ]
             },
             "ttl_mins": {
-              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
               "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
               "type": [
                 "integer",
@@ -1224,7 +1224,7 @@
               "minimum": 0
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
               "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
               "type": [
                 "integer",
@@ -1238,7 +1238,7 @@
               "const": "mssql"
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
               "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
               "type": [
                 "string",
@@ -1257,7 +1257,7 @@
           "type": "object",
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
               "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
             },
@@ -1269,7 +1269,7 @@
               }
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
               "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
               "type": "integer",
               "format": "uint64",
@@ -1289,7 +1289,7 @@
               ]
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
               "type": [
                 "string",
@@ -1297,7 +1297,7 @@
               ]
             },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
               "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
               "type": [
                 "string",
@@ -1305,7 +1305,7 @@
               ]
             },
             "ttl_mins": {
-              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
               "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
               "type": [
                 "integer",
@@ -1315,7 +1315,7 @@
               "minimum": 0
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
               "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
               "type": [
                 "integer",
@@ -1329,7 +1329,7 @@
               "const": "mysql"
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
               "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
               "type": [
                 "string",
@@ -1348,7 +1348,7 @@
           "type": "object",
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
               "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
             },
@@ -1360,7 +1360,7 @@
               }
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
               "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
               "type": "integer",
               "format": "uint64",
@@ -1380,7 +1380,7 @@
               ]
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
               "type": [
                 "string",
@@ -1388,7 +1388,7 @@
               ]
             },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
               "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
               "type": [
                 "string",
@@ -1396,7 +1396,7 @@
               ]
             },
             "ttl_mins": {
-              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
               "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
               "type": [
                 "integer",
@@ -1406,7 +1406,7 @@
               "minimum": 0
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
               "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
               "type": [
                 "integer",
@@ -1420,7 +1420,7 @@
               "const": "pg"
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
               "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
               "type": [
                 "string",
@@ -1435,60 +1435,145 @@
           ]
         },
         {
-          "description": "When configuring a branch for Redis, set `type` to `redis`.\n\nExample with URL-based connection:\n```json\n{\n  \"type\": \"redis\",\n  \"location\": \"local\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"REDIS_URL\"\n    }\n  }\n}\n```\n\nExample with separated settings:\n```json\n{\n  \"type\": \"redis\",\n  \"location\": \"local\",\n  \"connection\": {\n    \"host\": { \"type\": \"env\", \"variable\": \"REDIS_HOST\" },\n    \"port\": 6379,\n    \"password\": { \"type\": \"env\", \"variable\": \"REDIS_PASSWORD\" }\n  }\n}\n```",
+          "description": "When configuring a branch for Redis, set `type` to `redis`.",
           "type": "object",
           "properties": {
-            "connection": {
-              "title": "feature.db_branches[].connection (type: redis) {#feature-db_branches-redis-connection}",
-              "description": "Connection configuration for the Redis instance.",
-              "$ref": "#/$defs/RedisConnectionConfig",
-              "default": {
-                "database": null,
-                "host": null,
-                "password": null,
-                "port": null,
-                "tls": null,
-                "url": null,
-                "username": null
-              }
-            },
-            "id": {
-              "title": "feature.db_branches[].id (type: redis) {#feature-db_branches-redis-id}",
-              "description": "Optional unique identifier for reusing branches across sessions.",
-              "type": [
-                "string",
-                "null"
-              ],
-              "default": null
-            },
-            "local": {
-              "title": "feature.db_branches[].local (type: redis) {#feature-db_branches-redis-local}",
-              "description": "Local Redis runtime configuration.\nOnly used when `location` is `local`.",
-              "$ref": "#/$defs/RedisLocalConfig",
-              "default": {
-                "container_command": null,
-                "container_runtime": "docker",
-                "options": {
-                  "args": []
-                },
-                "port": 6379,
-                "runtime": "container",
-                "server_command": null,
-                "version": "7-alpine"
-              }
-            },
-            "location": {
-              "title": "feature.db_branches[].location (type: redis) {#feature-db_branches-redis-location}",
-              "description": "Where the Redis instance should run.\n- `local`: Spawns a local Redis instance managed by mirrord.\n- `remote`: Uses the remote Redis (default behavior, no-op).",
-              "$ref": "#/$defs/RedisBranchLocation",
-              "default": "remote"
-            },
             "type": {
               "type": "string",
               "const": "redis"
             }
           },
-          "additionalProperties": false,
+          "oneOf": [
+            {
+              "description": "Configuration for a local Redis branch.\n\nExample with URL-based connection:\n```json\n{\n  \"type\": \"redis\",\n  \"location\": \"local\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"REDIS_URL\"\n    }\n  }\n}\n```\n\nExample with separated settings:\n```json\n{\n  \"type\": \"redis\",\n  \"location\": \"local\",\n  \"connection\": {\n    \"host\": { \"type\": \"env\", \"variable\": \"REDIS_HOST\" },\n    \"port\": 6379,\n    \"password\": { \"type\": \"env\", \"variable\": \"REDIS_PASSWORD\" }\n  }\n}\n```",
+              "type": "object",
+              "properties": {
+                "connection": {
+                  "title": "feature.db_branches[].connection (type: redis) {#feature-db_branches-redis-connection}",
+                  "description": "Connection configuration for the Redis instance.",
+                  "$ref": "#/$defs/RedisConnectionConfig",
+                  "default": {
+                    "database": null,
+                    "host": null,
+                    "password": null,
+                    "port": null,
+                    "tls": null,
+                    "url": null,
+                    "username": null
+                  }
+                },
+                "id": {
+                  "title": "feature.db_branches[].id (type: redis) {#feature-db_branches-redis-id}",
+                  "description": "Optional unique identifier for reusing branches across sessions.",
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "local": {
+                  "title": "feature.db_branches[].local (type: redis) {#feature-db_branches-redis-local}",
+                  "description": "Local Redis runtime configuration.",
+                  "$ref": "#/$defs/RedisLocalConfig",
+                  "default": {
+                    "container_command": null,
+                    "container_runtime": "docker",
+                    "options": {
+                      "args": []
+                    },
+                    "port": 6379,
+                    "runtime": "container",
+                    "server_command": null,
+                    "version": "7-alpine"
+                  }
+                },
+                "location": {
+                  "description": "#### feature.db_branches[].location (type: redis) {#feature-db_branches-redis-location}\nWhere the Redis instance should run.\n- `local`: Spawns a local instance.\n- `remote`: Uses a remote instance (default).",
+                  "type": "string",
+                  "const": "local"
+                }
+              }
+            },
+            {
+              "description": "Configuration for a remote Redis branch.",
+              "type": "object",
+              "properties": {
+                "connection": {
+                  "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
+                  "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+                  "$ref": "#/$defs/DbBranchingConnectionSource"
+                },
+                "copy": {
+                  "title": "feature.db_branches[].copy (type: redis) {#feature-db_branches-redis-copy}",
+                  "description": "How a Redis branch is seeded from its source.",
+                  "$ref": "#/$defs/RedisBranchCopyConfig",
+                  "default": {
+                    "mode": "empty"
+                  }
+                },
+                "creation_timeout_secs": {
+                  "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
+                  "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+                  "type": "integer",
+                  "format": "uint64",
+                  "default": 60,
+                  "minimum": 0
+                },
+                "id": {
+                  "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
+                  "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "location": {
+                  "description": "#### feature.db_branches[].location (type: redis) {#feature-db_branches-redis-location}\nWhere the Redis instance should run.\n- `local`: Spawns a local instance.\n- `remote`: Uses a remote instance (default).",
+                  "type": "string",
+                  "const": "remote"
+                },
+                "name": {
+                  "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
+                  "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "ttl_mins": {
+                  "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
+                  "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "ttl_secs": {
+                  "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
+                  "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "version": {
+                  "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
+                  "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "connection"
+              ]
+            }
+          ],
           "required": [
             "type"
           ]
@@ -1662,7 +1747,6 @@
         },
         "filter": {
           "title": "feature.network.dns.filter {#feature-network-dns-filter}",
-          "description": "Unstable: the precise syntax of this config is subject to change.",
           "anyOf": [
             {
               "$ref": "#/$defs/DnsFilterConfig"
@@ -3434,11 +3518,44 @@
         }
       ]
     },
-    "RedisBranchLocation": {
-      "type": "string",
-      "enum": [
-        "local",
-        "remote"
+    "RedisBranchCopyConfig": {
+      "description": "How a Redis branch is seeded from its source.\n\n- `empty` (default): Start a fresh, empty instance.\n- `all`: Copy keys from the source instance. Optional `patterns` are `SCAN MATCH` globs limiting\n  which keys are copied; omitting them copies the whole keyspace.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "all"
+            },
+            "patterns": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        }
       ]
     },
     "RedisConnectionConfig": {

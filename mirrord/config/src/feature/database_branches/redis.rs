@@ -1,9 +1,92 @@
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use schemars::{JsonSchema, Schema};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 
-use crate::container::ContainerRuntime;
+use crate::{
+    config::ConfigError, container::ContainerRuntime,
+    feature::database_branches::DatabaseBranchBaseConfig,
+};
 
 /// When configuring a branch for Redis, set `type` to `redis`.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize)]
+#[schemars(transform = Self::transform_schema)]
+#[serde(tag = "location", rename_all = "lowercase", deny_unknown_fields)]
+pub enum RedisBranchConfig {
+    Local(LocalRedisBranchConfig),
+    Remote(RemoteRedisBranchConfig),
+}
+
+impl RedisBranchConfig {
+    fn transform_schema(schema: &mut Schema) {
+        const DESCRIPTION: &str = r#"#### feature.db_branches[].location (type: redis) {#feature-db_branches-redis-location}
+Where the Redis instance should run.
+- `local`: Spawns a local instance.
+- `remote`: Uses a remote instance (default)."#;
+
+        let variants = schema
+            .get_mut("oneOf")
+            .and_then(|v| v.as_array_mut())
+            .unwrap();
+
+        for variant in variants {
+            let variant = variant.as_object_mut().unwrap();
+
+            variant
+                .get_mut("properties")
+                .and_then(|properties| properties.get_mut("location"))
+                .and_then(|location| location.as_object_mut())
+                .unwrap()
+                .insert("description".into(), DESCRIPTION.into());
+
+            let required = variant.get_mut("required").unwrap().as_array_mut().unwrap();
+
+            required.retain(|field| field != "location");
+
+            if required.is_empty() {
+                variant.remove("required");
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn into_local(self) -> LocalRedisBranchConfig {
+        match self {
+            RedisBranchConfig::Local(config) => config,
+            RedisBranchConfig::Remote(config) => panic!("expected local, got remote: {config:?}"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for RedisBranchConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(tag = "location", rename_all = "lowercase", deny_unknown_fields)]
+        enum Tagged {
+            Local(LocalRedisBranchConfig),
+            Remote(RemoteRedisBranchConfig),
+        }
+
+        let mut value = Value::deserialize(deserializer)?;
+
+        if let Some(object) = value.as_object_mut() {
+            object
+                .entry("location")
+                .or_insert_with(|| Value::String("remote".into()));
+        }
+
+        Ok(
+            match Tagged::deserialize(value).map_err(serde::de::Error::custom)? {
+                Tagged::Local(config) => Self::Local(config),
+                Tagged::Remote(config) => Self::Remote(config),
+            },
+        )
+    }
+}
+
+/// Configuration for a local Redis branch.
 ///
 /// Example with URL-based connection:
 /// ```json
@@ -33,20 +116,12 @@ use crate::container::ContainerRuntime;
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RedisBranchConfig {
+pub struct LocalRedisBranchConfig {
     /// #### feature.db_branches[].id (type: redis) {#feature-db_branches-redis-id}
     ///
     /// Optional unique identifier for reusing branches across sessions.
     #[serde(default)]
     pub id: Option<String>,
-
-    /// #### feature.db_branches[].location (type: redis) {#feature-db_branches-redis-location}
-    ///
-    /// Where the Redis instance should run.
-    /// - `local`: Spawns a local Redis instance managed by mirrord.
-    /// - `remote`: Uses the remote Redis (default behavior, no-op).
-    #[serde(default)]
-    pub location: RedisBranchLocation,
 
     /// #### feature.db_branches[].connection (type: redis) {#feature-db_branches-redis-connection}
     ///
@@ -57,17 +132,55 @@ pub struct RedisBranchConfig {
     /// #### feature.db_branches[].local (type: redis) {#feature-db_branches-redis-local}
     ///
     /// Local Redis runtime configuration.
-    /// Only used when `location` is `local`.
     #[serde(default)]
     pub local: RedisLocalConfig,
 }
 
+/// Configuration for a remote Redis branch.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteRedisBranchConfig {
+    #[serde(flatten)]
+    pub base: DatabaseBranchBaseConfig,
+
+    /// #### feature.db_branches[].copy (type: redis) {#feature-db_branches-redis-copy}
+    ///
+    /// How a Redis branch is seeded from its source.
+    #[serde(default)]
+    pub copy: RedisBranchCopyConfig,
+}
+
+impl RemoteRedisBranchConfig {
+    pub fn verify(&self) -> Result<(), ConfigError> {
+        self.base.verify()?;
+
+        if let Some(name) = self.base.name.as_deref() {
+            name.parse::<u32>()
+                .map_err(|error| ConfigError::InvalidValue {
+                    name: "feature.db_branches[].name".into(),
+                    provided: name.to_owned(),
+                    error: Box::new(error),
+                })?;
+        }
+
+        Ok(())
+    }
+}
+
+/// How a Redis branch is seeded from its source.
+///
+/// - `empty` (default): Start a fresh, empty instance.
+/// - `all`: Copy keys from the source instance. Optional `patterns` are `SCAN MATCH` globs limiting
+///   which keys are copied; omitting them copies the whole keyspace.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum RedisBranchLocation {
-    Local,
+#[serde(tag = "mode", rename_all = "lowercase", deny_unknown_fields)]
+pub enum RedisBranchCopyConfig {
     #[default]
-    Remote,
+    Empty,
+    All {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        patterns: Option<Vec<String>>,
+    },
 }
 
 /// Supports either a complete URL or separated connection parameters.
@@ -332,8 +445,10 @@ mod tests {
             }
         }"#;
 
-        let config: RedisBranchConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(config.location, RedisBranchLocation::Local);
+        let config = serde_json::from_str::<RedisBranchConfig>(json)
+            .unwrap()
+            .into_local();
+
         assert!(config.connection.has_url());
         assert_eq!(config.connection.override_variable(), Some("REDIS_URL"));
     }
@@ -352,8 +467,10 @@ mod tests {
             }
         }"#;
 
-        let config: RedisBranchConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(config.location, RedisBranchLocation::Local);
+        let config = serde_json::from_str::<RedisBranchConfig>(json)
+            .unwrap()
+            .into_local();
+
         assert!(!config.connection.has_url());
         assert_eq!(config.connection.effective_port(), 6380);
         assert_eq!(config.connection.override_variable(), Some("REDIS_HOST"));
@@ -373,7 +490,10 @@ mod tests {
             }
         }"#;
 
-        let config: RedisBranchConfig = serde_json::from_str(json).unwrap();
+        let config = serde_json::from_str::<RedisBranchConfig>(json)
+            .unwrap()
+            .into_local();
+
         assert_eq!(config.local.port, 6381);
         assert_eq!(config.local.version, "6.2");
         assert_eq!(config.local.runtime, RedisRuntime::Auto);
@@ -394,7 +514,10 @@ mod tests {
             }
         }"#;
 
-        let config: RedisBranchConfig = serde_json::from_str(json).unwrap();
+        let config = serde_json::from_str::<RedisBranchConfig>(json)
+            .unwrap()
+            .into_local();
+
         assert!(matches!(
             config.connection.host,
             Some(RedisValueSource::Direct(ref h)) if h == "localhost"
@@ -403,5 +526,21 @@ mod tests {
             config.connection.password,
             Some(RedisValueSource::Direct(ref p)) if p == "mypassword"
         ));
+    }
+
+    #[test]
+    fn test_default_remote() {
+        let json = r#"{
+            "connection": {
+                "url": {
+                    "type": "env",
+                    "variable": "REDIS_URL"
+                }
+            }
+        }"#;
+
+        let config = serde_json::from_str::<RedisBranchConfig>(json).unwrap();
+
+        assert!(matches!(config, RedisBranchConfig::Remote(_)));
     }
 }
