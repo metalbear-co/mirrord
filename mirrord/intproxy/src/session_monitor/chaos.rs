@@ -90,10 +90,12 @@ impl ChaosWatcherTx {
     }
 
     #[tracing::instrument(level = Level::INFO)]
-    pub(super) fn update_rule(&self, new_rule: ChaosRule) {
-        self.0.send_modify(|current_rules| {
-            current_rules.replace(new_rule);
-        });
+    pub(super) fn update_rule(&self, new_rule: ChaosRule) -> Option<ChaosRule> {
+        let mut old_rule = None;
+        self.0
+            .send_modify(|current_rules| old_rule = current_rules.replace(new_rule));
+
+        old_rule
     }
 
     #[tracing::instrument(level = Level::INFO)]

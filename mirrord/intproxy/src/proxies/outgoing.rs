@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     fmt, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
-    ops::{ControlFlow, Not},
+    ops::Not,
     time::Instant,
 };
 
@@ -25,7 +25,7 @@ use mirrord_protocol::{
 };
 use semver::Version;
 use thiserror::Error;
-use tokio::{net::TcpListener, time::sleep};
+use tokio::net::TcpListener;
 use tracing::Level;
 
 use self::interceptor::Interceptor;
@@ -39,7 +39,7 @@ use crate::{
     proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
-    session_monitor::chaos::{ChaosWatcherRx, rules::ChaosEffectConnError},
+    session_monitor::chaos::ChaosWatcherRx,
 };
 
 mod chaos;

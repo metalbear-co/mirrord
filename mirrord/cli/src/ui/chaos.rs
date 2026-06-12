@@ -12,7 +12,6 @@ use mirrord_intproxy::session_monitor::chaos::{
     rules::{ChaosRule, ChaosRuleRequest, ChaosSelectorRequest},
 };
 use mirrord_session_monitor_client::SessionClient;
-use serde_json::Value;
 use uuid::Uuid;
 
 use crate::ui::AppState;
@@ -100,7 +99,7 @@ type ChaosResult<T> = Result<T, ApiError>;
 async fn post_create_rule(
     Path(session_id): Path<SessionId>,
     Extension(client): Extension<SessionClient>,
-    Json(lol): Json<Value>,
+    Json(new_rule): Json<ChaosRuleRequest>,
 ) -> ChaosResult<()> {
     // let new_rule = ChaosRuleRequest {
     //     name: Some("knuckles".to_string()),
@@ -167,16 +166,18 @@ async fn put_update_rule(
     Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
     Extension(client): Extension<SessionClient>,
     Json(updated_rule): Json<ChaosRuleRequest>,
-) -> ChaosResult<()> {
-    client
+) -> ChaosResult<Json<ChaosRule>> {
+    let old_rule = client
         .post(format!(
             "{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}/{rule_id}"
         ))
         .json(&updated_rule)
         .send()
+        .await?
+        .json()
         .await?;
 
-    Ok(())
+    Ok(Json(old_rule))
 }
 
 async fn delete_rule(

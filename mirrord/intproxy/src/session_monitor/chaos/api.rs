@@ -6,7 +6,7 @@ PUT /chaos/rules/{session_id}/{rule_id}: update rule
 DELETE /chaos/rules/{session_id}/{rule_id}: delete rule
 DELETE /chaos/rules/{session_id}: clear all rules for session*/
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use axum::{
     Json, Router,
     extract::{FromRequest, Path, State},
@@ -88,7 +88,7 @@ pub(crate) fn chaos_router() -> Router<AppState> {
 
 // TODO: creating a rule has to return the new rule after creation
 async fn post_create_rule(
-    Path(session_id): Path<SessionId>,
+    Path(_): Path<SessionId>,
     State(state): State<AppState>,
     Json(new_rule): Json<ChaosRuleRequest>,
 ) -> ChaosResult<()> {
@@ -98,38 +98,43 @@ async fn post_create_rule(
 }
 
 async fn get_list_active_rules_for_session(
-    Path(session_id): Path<SessionId>,
+    Path(_): Path<SessionId>,
     State(state): State<AppState>,
 ) -> ChaosResult<Json<ChaosRuleList>> {
     Ok(Json(state.chaos_tx.list_active_rules_for_session()))
 }
 
 async fn delete_clear_session_rules(
-    Path(session_id): Path<SessionId>,
+    Path(_): Path<SessionId>,
     State(state): State<AppState>,
 ) -> ChaosResult<()> {
     Ok(state.chaos_tx.clear_session_rules())
 }
 
-// TODO: updating a rule has to return the old, deleted rule
 async fn put_update_rule(
-    Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
+    Path((_, rule_id)): Path<(SessionId, Uuid)>,
     State(state): State<AppState>,
     Json(new_rule): Json<ChaosRuleRequest>,
-) -> ChaosResult<()> {
-    Ok(state.chaos_tx.update_rule(ChaosRule::try_from(new_rule)?))
+) -> ChaosResult<Json<ChaosRule>> {
+    let old_rule = state
+        .chaos_tx
+        .update_rule(ChaosRule::try_from((rule_id, new_rule))?);
+
+    Ok(Json(old_rule.ok_or_else(|| {
+        anyhow!("eggman stole this chaos emerald")
+    })?))
 }
 
 // TODO: deleting a rule has to return the rule (like `.pop()`)
 async fn delete_rule(
-    Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
+    Path((_, rule_id)): Path<(SessionId, Uuid)>,
     State(state): State<AppState>,
 ) -> ChaosResult<()> {
     Ok(state.chaos_tx.delete_rule(rule_id))
 }
 
 async fn get_rule(
-    Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
+    Path((_, rule_id)): Path<(SessionId, Uuid)>,
     State(state): State<AppState>,
 ) -> ChaosResult<Json<ChaosRule>> {
     Ok(Json(state.chaos_tx.get_rule(rule_id).context("not found")?))

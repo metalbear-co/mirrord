@@ -1,10 +1,9 @@
-use std::{ops::ControlFlow, sync::atomic::Ordering, time::Duration};
+use std::{ops::ControlFlow, sync::atomic::Ordering};
 
 use mirrord_intproxy_protocol::{
     LayerId, MessageId, OutgoingConnectRequest, OutgoingResponse, ProxyToLayerMessage,
 };
 use mirrord_protocol::{RemoteError, ResponseError};
-use rand::random_range;
 use tokio::time::sleep;
 use tracing::Level;
 
@@ -18,9 +17,8 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub enum OutgoingChaos {
+pub enum OutgoingChaosEffect {
     Latency {
-        total_delay: Duration,
         effect: ChaosEffectLatency,
     },
     ConnectionError {
@@ -32,20 +30,19 @@ pub enum OutgoingChaos {
 impl OutgoingProxy {
     #[tracing::instrument(level = Level::INFO, skip(message_bus), ret)]
     pub(super) async fn apply_chaos_effect(
-        chaos_reigns: OutgoingChaos,
+        which_effect: OutgoingChaosEffect,
         message_bus: &mut MessageBus<OutgoingProxy>,
     ) -> ControlFlow<()> {
-        match chaos_reigns {
-            OutgoingChaos::Latency { total_delay, .. } => {
-                sleep(total_delay).await;
+        match which_effect {
+            OutgoingChaosEffect::Latency { effect } => {
+                sleep(effect.latency_duration()).await;
 
                 ControlFlow::Continue(())
             }
-            OutgoingChaos::ConnectionError {
+            OutgoingChaosEffect::ConnectionError {
                 to_layer,
                 effect: ChaosEffectConnError { after, .. },
             } => {
-                tracing::info!(?after, ?to_layer, "We have a match for a connection error");
                 sleep(after).await;
                 message_bus.send(to_layer).await;
 
@@ -60,7 +57,7 @@ impl OutgoingProxy {
         request: &OutgoingConnectRequest,
         message_id: MessageId,
         layer_id: LayerId,
-    ) -> Option<OutgoingChaos> {
+    ) -> Option<OutgoingChaosEffect> {
         self.chaos_rx.inspect_rules(|rules| {
             let rule = rules
                 .iter()
@@ -83,7 +80,7 @@ impl OutgoingProxy {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::ConnectionError(effect),
                     ..
-                } => Some(OutgoingChaos::ConnectionError {
+                } => Some(OutgoingChaosEffect::ConnectionError {
                     to_layer: ToLayer {
                         message_id,
                         layer_id,
@@ -98,10 +95,7 @@ impl OutgoingProxy {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
-                } => Some(OutgoingChaos::Latency {
-                    total_delay: latency_duration(effect),
-                    effect,
-                }),
+                } => Some(OutgoingChaosEffect::Latency { effect }),
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Degradation,
                     ..
@@ -115,7 +109,7 @@ impl OutgoingProxy {
     pub(super) fn chaos_effect_for_write(
         &self,
         interceptor_id: InterceptorId,
-    ) -> Option<OutgoingChaos> {
+    ) -> Option<OutgoingChaosEffect> {
         let connection_info = self.foo_chaos(interceptor_id)?;
 
         self.chaos_rx.inspect_rules(|rules| {
@@ -140,20 +134,9 @@ impl OutgoingProxy {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
-                } => Some(OutgoingChaos::Latency {
-                    total_delay: latency_duration(effect),
-                    effect,
-                }),
+                } => Some(OutgoingChaosEffect::Latency { effect }),
                 _ => None,
             }
         })
     }
-}
-
-fn latency_duration(effect: ChaosEffectLatency) -> Duration {
-    effect.delay
-        + effect
-            .jitter
-            .div_f32(100.)
-            .saturating_mul(random_range(0..=100))
 }
