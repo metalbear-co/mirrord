@@ -389,6 +389,10 @@ pub struct PreviewQueueSplittingConfig {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub azure_service_bus_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
 
+    /// Redis Pub/Sub queue splitting filters, keyed by queue ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub redis_pubsub_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
     /// Temporal queue splitting filters, keyed by task queue ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub temporal_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
@@ -426,6 +430,9 @@ impl PreviewQueueSplittingConfig {
             value.azure_service_bus_jq_filters(),
         );
 
+        let redis_pubsub_queue_filters =
+            collect_queue_filters(value.redis_pubsub(), value.redis_pubsub_jq_filters());
+
         let temporal_queue_filters =
             collect_queue_filters(value.temporal(), value.temporal_jq_filters());
 
@@ -434,6 +441,7 @@ impl PreviewQueueSplittingConfig {
             kafka_queue_filters,
             gcp_pubsub_queue_filters,
             azure_service_bus_queue_filters,
+            redis_pubsub_queue_filters,
             temporal_queue_filters,
         };
 

@@ -546,6 +546,8 @@ pub enum NewOperatorFeature {
     /// This operator can perform queue splitting on Google Cloud Pub/Sub
     GcpPubSubQueueSplitting,
 
+    /// This operator can perform queue splitting on Redis Pub/Sub
+    RedisPubSubQueueSplitting,
     /// This operator can perform queue splitting on Temporal task queues
     TemporalQueueSplitting,
 
@@ -588,6 +590,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::UnifiedBranchDbCrd => "unified branch database CRD",
             NewOperatorFeature::RmqQueueSplitting => "RabbitMQ queue splitting",
             NewOperatorFeature::GcpPubSubQueueSplitting => "GCP Pub/Sub queue splitting",
+            NewOperatorFeature::RedisPubSubQueueSplitting => "Redis Pub/Sub queue splitting",
             NewOperatorFeature::TemporalQueueSplitting => "Temporal queue splitting",
             NewOperatorFeature::Unknown => "unknown feature",
         };

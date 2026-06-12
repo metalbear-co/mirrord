@@ -960,7 +960,6 @@ where
                 .spec
                 .require_feature(NewOperatorFeature::GcpPubSubQueueSplitting)?;
         }
-
         if layer_config
             .feature
             .split_queues
@@ -971,6 +970,17 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::TemporalQueueSplitting)?;
+        }
+        if layer_config
+            .feature
+            .split_queues
+            .redis_pubsub_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::RedisPubSubQueueSplitting)?;
         }
 
         Ok(())
@@ -1665,6 +1675,8 @@ impl OperatorApi<PreparedClientCert> {
             gcp_pubsub_jq_filters: Default::default(),
             azure_service_bus_splits: Default::default(),
             azure_service_bus_jq_filters: Default::default(),
+            redis_pubsub_splits: Default::default(),
+            redis_pubsub_jq_filters: Default::default(),
             temporal_splits: Default::default(),
             temporal_jq_filters: Default::default(),
             branch_name,
@@ -2298,6 +2310,8 @@ mod test {
             rmq_output_queues: Default::default(),
             azure_service_bus_splits: Default::default(),
             azure_service_bus_jq_filters: Default::default(),
+            redis_pubsub_splits: Default::default(),
+            redis_pubsub_jq_filters: Default::default(),
             temporal_splits: Default::default(),
             temporal_jq_filters: Default::default(),
             multi_cluster: None,
@@ -2427,6 +2441,8 @@ mod test {
             rmq_output_queues: Default::default(),
             azure_service_bus_splits: Default::default(),
             azure_service_bus_jq_filters: Default::default(),
+            redis_pubsub_splits: Default::default(),
+            redis_pubsub_jq_filters: Default::default(),
             temporal_splits: Default::default(),
             temporal_jq_filters: Default::default(),
             multi_cluster: None,

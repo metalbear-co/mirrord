@@ -59,7 +59,17 @@ pub struct ConnectParams<'a> {
     pub azure_service_bus_jq_filters: HashMap<&'a str, &'a str>,
 
     #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
+    pub redis_pubsub_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
+
+    #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
     pub temporal_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
+
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub redis_pubsub_jq_filters: HashMap<&'a str, &'a str>,
 
     #[serde(
         default,
@@ -142,6 +152,8 @@ pub struct OutputTmpResource {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub subscription: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub channel: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub task_queue: BTreeMap<String, String>,
 }
 
@@ -193,6 +205,12 @@ impl<'a> ConnectParams<'a> {
                 .feature
                 .split_queues
                 .azure_service_bus_jq_filters()
+                .collect(),
+            redis_pubsub_splits: config.feature.split_queues.redis_pubsub().collect(),
+            redis_pubsub_jq_filters: config
+                .feature
+                .split_queues
+                .redis_pubsub_jq_filters()
                 .collect(),
             temporal_splits: config.feature.split_queues.temporal().collect(),
             temporal_jq_filters: config.feature.split_queues.temporal_jq_filters().collect(),
