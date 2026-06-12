@@ -4,7 +4,7 @@
   },
   "experimental": {
     "disable_reuseaddr": false,
-    "sip_utils": false
+    "sip_utils": true
   },
   "feature": {
     "env": true,

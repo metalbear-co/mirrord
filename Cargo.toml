@@ -37,6 +37,10 @@ members = [
     "mirrord/sessions-manager/client",
     "mirrord/sessions-manager/protocol",
 ]
+exclude = [
+    "mirrord/sessions-manager",
+]
+
 resolver = "2"
 
 [workspace.metadata.cargo-shear]
