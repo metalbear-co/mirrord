@@ -23,6 +23,7 @@ use mirrord_progress::{
     utm_medium,
 };
 use mirrord_protocol_io::{Client, Connection};
+use mirrord_sessions_manager_client::connection::SessionsManagerClient;
 use tracing::Level;
 
 use crate::{CliError, CliResult, MirrordCi, ci::error::CiError};
@@ -213,7 +214,15 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     analytics: &mut R,
     branch_name: Option<String>,
     mirrord_for_ci: Option<&MirrordCi>,
+    bridge_token: Option<String>,
 ) -> CliResult<(AgentConnectInfo, Connection<Client>)> {
+    if let Some(token) = bridge_token {
+        let conn = SessionsManagerClient::<Client>::new(&token, None)
+            .connect_oneshot(Duration::from_mins(10))
+            .await?;
+        return Ok((AgentConnectInfo::SessionsManager { room_id: token }, conn));
+    }
+
     if let Some(connection) =
         try_connect_using_operator(config, progress, analytics, branch_name, mirrord_for_ci).await?
     {

@@ -111,6 +111,17 @@ enum Commands {
         cargo_args: Vec<String>,
     },
 
+    /// Build the serverless bootstrap library and its embedded agent artifact
+    BuildServerlessBootstrap {
+        /// Build in release mode
+        #[arg(short, long)]
+        release: bool,
+
+        /// Additional arguments passed to cargo
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        cargo_args: Vec<String>,
+    },
+
     /// Run the integration test suite, optionally with externally provided mirrord artifacts
     TestIntegration {
         /// Path to an external mirrord CLI binary
@@ -257,6 +268,13 @@ fn main() -> Result<()> {
 
         Commands::MergeCliUniversal { release } => {
             tasks::cli::merge_macos_universal_cli(release)?;
+        }
+
+        Commands::BuildServerlessBootstrap {
+            release,
+            cargo_args,
+        } => {
+            tasks::serverless_bootstrap::build_serverless_bootstrap(release, &cargo_args)?;
         }
 
         Commands::TestDoc { cargo_args } => {
