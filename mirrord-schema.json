@@ -3490,6 +3490,36 @@
           "type": "object",
           "properties": {
             "jq_filter": {
+              "description": "A jq filter that runs on the JSON representation of the message payload.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between top-level JSON field names and regexes they\nshould match. The local application will only receive messages whose JSON\npayload contains fields matching **all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "RedisPubSub"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
               "description": "A jq filter.\n\nWhen this is specified, for each Service Bus message, the jq filter runs on a JSON\nrepresentation of the full `ServiceBusMessage` object.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
               "type": [
                 "string",
