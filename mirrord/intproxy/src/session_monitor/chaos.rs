@@ -8,7 +8,7 @@ use std::{
     },
 };
 
-use serde::{Deserialize, Deserializer, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::sync::watch;
 use tracing::Level;
 use uuid::Uuid;
@@ -26,12 +26,33 @@ pub trait ApplyChaosRuleLol {
     fn chaos_effect(&self, rules: &ChaosRuleList) -> Option<Self::WhatToDo>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SessionId {
+    Uuid(Uuid),
+    VarChar(String),
+}
+
+impl core::fmt::Display for SessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SessionId::VarChar(s) => f.write_fmt(format_args!("{s}")),
+            SessionId::Uuid(uuid) => f.write_fmt(format_args!("{uuid}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ChaosWatcherRx(watch::Receiver<ChaosRuleList>);
 
 impl ChaosWatcherRx {
     pub fn new(rx: watch::Receiver<ChaosRuleList>) -> Self {
         Self(rx)
+    }
+
+    pub fn inspect_rules<T>(&self, inspect: impl FnOnce(&ChaosRuleList) -> T) -> T {
+        let rules = self.0.borrow();
+        inspect(&rules)
     }
 
     pub fn chaos_effect<'a, M>(&'a self, message: &'a M) -> Option<M::WhatToDo>
@@ -52,10 +73,13 @@ impl ChaosWatcherTx {
     }
 
     #[tracing::instrument(level = Level::INFO)]
-    pub(super) fn create_rule(&self, new_rule: ChaosRule) {
-        self.0.send_modify(|current_rules| {
-            current_rules.insert(new_rule);
-        });
+    pub(super) fn create_rule(&self, new_rule: ChaosRule) -> Option<ChaosRule> {
+        let mut created = false;
+
+        self.0
+            .send_modify(|current_rules| created = current_rules.insert(new_rule.clone()));
+
+        created.then_some(new_rule)
     }
 
     #[tracing::instrument(level = Level::INFO)]
@@ -69,17 +93,21 @@ impl ChaosWatcherTx {
     }
 
     #[tracing::instrument(level = Level::INFO)]
-    pub(super) fn update_rule(&self, new_rule: ChaosRule) {
-        self.0.send_modify(|current_rules| {
-            current_rules.replace(new_rule);
-        });
+    pub(super) fn update_rule(&self, new_rule: ChaosRule) -> Option<ChaosRule> {
+        let mut old_rule = None;
+        self.0
+            .send_modify(|current_rules| old_rule = current_rules.replace(new_rule));
+
+        old_rule
     }
 
     #[tracing::instrument(level = Level::INFO)]
-    pub(super) fn delete_rule(&self, rule_id: Uuid) {
-        self.0.send_modify(|current_rules| {
-            current_rules.remove(&rule_id);
-        });
+    pub(super) fn delete_rule(&self, rule_id: Uuid) -> Option<ChaosRule> {
+        let mut deleted_rule = None;
+        self.0
+            .send_modify(|current_rules| deleted_rule = current_rules.take(&rule_id));
+
+        deleted_rule
     }
 
     #[tracing::instrument(level = Level::INFO)]
