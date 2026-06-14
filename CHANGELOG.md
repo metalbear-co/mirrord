@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.217.1](https://github.com/metalbear-co/mirrord/tree/3.217.1) - 2026-06-14
+
+
+### Fixed
+
+- Fixed the Windows computer-name hooks `GetComputerNameW`,
+  `GetComputerNameExW`, and `gethostname` to respect the caller's buffer and
+  the standard size-probe contract. A long remote pod `hostname` no longer
+  makes .NET's `Environment.MachineName` throw, which broke clients such as
+  `StackExchange.Redis` with a `RedisConnectionException`. It also no longer
+  breaks outgoing `TLS`: `SChannel` queries the `NetBIOS` name with a fixed
+  buffer during the handshake, and a too-long name made
+  `AcquireCredentialsHandle` fail with `SEC_E_SECPKG_NOT_FOUND`, breaking
+  `HTTPS` and `gRPC` to external services such as `GCP`.
+
 ## [3.217.0](https://github.com/metalbear-co/mirrord/tree/3.217.0) - 2026-06-14
 
 
