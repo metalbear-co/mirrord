@@ -35,7 +35,7 @@ use std::{
     borrow::Borrow,
     ptr,
     sync::{
-        Arc, RwLock, TryLockError,
+        Arc, RwLock,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -84,10 +84,12 @@ type CompletionRoutineFn = unsafe extern "system" fn(DWORD, DWORD, LPWSAOVERLAPP
 const STATUS_SUCCESS: usize = 0x0000_0000;
 const STATUS_UNSUCCESSFUL: usize = 0xC000_0001;
 
-/// One in-flight async `GetAddrInfoExW`. All raw pointers are stored as `usize`
-/// so the struct is `Send`/`Sync` without an unsafe impl; the caller's context
-/// (which owns the `OVERLAPPED` and the `ppResult` slot) outlives the async
-/// operation by contract, so these stay valid until we deliver.
+/// One in-flight async `GetAddrInfoExW`.
+///
+/// All raw pointers are stored as `usize`, so the struct is `Send`/`Sync` without an unsafe impl.
+///
+/// The caller's context owns the `OVERLAPPED` and the `ppResult` slot. By contract it outlives the
+/// async operation, so those pointers stay valid until we deliver.
 struct AsyncQuery {
     /// Single-fire latch shared by the worker and any cancel.
     completed: AtomicBool,
@@ -110,7 +112,7 @@ impl AsyncQuery {
     /// Deliver the result and fire the caller's completion mechanism.
     ///
     /// # Safety
-    /// Must be called at most once per query (gate with [`claim`]). The stored
+    /// Must be called at most once per query (gate with [`claim`](AsyncQuery::claim)). The stored
     /// `overlapped`/`ppresult` pointers must still be valid (they are, by the
     /// async contract: the caller keeps its context alive until completion).
     unsafe fn deliver(&self, error: DWORD, head: PADDRINFOEXW) {
@@ -160,10 +162,11 @@ impl AsyncQuery {
 
 /// Synthetic cancel handle the layer hands out for an in-flight async query.
 ///
-/// Minted from the managed-handle registry's counter in a `0x6000_xxxx` range —
-/// disjoint from OS handles and from file handles (`0x5000_xxxx`) — so any
-/// `GetAddrInfoExCancel` on one is unambiguously ours, and the value never
-/// collides with NULL.
+/// Minted from the managed-handle registry's counter in a `0x6000_xxxx` range. That range is
+/// disjoint from OS handles and from file handles (`0x5000_xxxx`).
+///
+/// So any `GetAddrInfoExCancel` on one is unambiguously ours, and the value never collides with
+/// NULL.
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 struct DnsQueryHandle(HANDLE);
@@ -192,38 +195,19 @@ impl CounterAllocated for DnsQueryHandle {
 /// Live async queries, keyed by the synthetic cancel handle we hand out. An
 /// entry exists from [`begin`] until whichever of {worker, cancel} completes it.
 static DNS_QUERIES: Lazy<ManagedRegistry<DnsQueryHandle, AsyncQuery>> =
-    Lazy::new(ManagedRegistry::new);
+    Lazy::new(|| ManagedRegistry::new("DNS_QUERIES"));
 
 /// Look up the shared query behind a raw handle value. The registry's
-/// `Borrow<HANDLE>` key lets us query by the value the caller passed back.
-/// Spins briefly on read contention so a transient lock conflict isn't mistaken
-/// for "not one of ours".
+/// `Borrow<HANDLE>` key lets us query by the value the caller passed back, and
+/// its sharded lock spins briefly on contention so a transient conflict isn't
+/// mistaken for "not one of ours".
 fn lookup(handle: HANDLE) -> Option<Arc<RwLock<AsyncQuery>>> {
-    for _ in 0..64 {
-        match DNS_QUERIES.try_read() {
-            Ok(map) => return map.get(&handle).cloned(),
-            Err(TryLockError::Poisoned(p)) => return p.into_inner().get(&handle).cloned(),
-            Err(TryLockError::WouldBlock) => std::hint::spin_loop(),
-        }
-    }
-    None
+    DNS_QUERIES.get(&handle)
 }
 
-/// Remove a completed query from the registry. The outer write lock is held only
-/// for the brief insert/remove, so a bounded spin all but guarantees success; a
-/// (practically impossible) sustained conflict leaks one entry rather than
-/// blocking the thread.
+/// Remove a completed query from the registry.
 fn forget(handle: HANDLE) {
-    for _ in 0..64 {
-        if let Ok(mut map) = DNS_QUERIES.try_write() {
-            map.remove(&handle);
-            return;
-        }
-        std::hint::spin_loop();
-    }
-    tracing::warn!(
-        "addrinfo_ex: DNS query registry write lock stayed contended; leaking one entry"
-    );
+    DNS_QUERIES.remove(&handle);
 }
 
 /// Owns the worker's obligation to complete the query exactly once. On `Drop`
@@ -333,33 +317,21 @@ pub(crate) unsafe fn begin(
     routine: LPLOOKUPSERVICE_COMPLETION_ROUTINE,
     out_handle: LPHANDLE,
 ) -> i32 {
-    // Mint a synthetic cancel handle and register the query under it. The
-    // counter starts at 0x6000_0000, so the handle is disjoint from OS/file
-    // handles and never NULL. `try_insert` is non-blocking and refuses on
-    // transient write contention, so spin briefly rather than spuriously
-    // failing an otherwise-fine resolution (the lock is only ever held for the
-    // brief insert/remove).
-    let mut handle = None;
-    for _ in 0..64 {
-        let query = AsyncQuery {
-            completed: AtomicBool::new(false),
-            overlapped: overlapped as usize,
-            routine: routine.map_or(0, |f| f as usize),
-            ppresult: pp_result as usize,
-        };
-        if let Some(h) = DNS_QUERIES.try_insert(query) {
-            handle = Some(h);
-            break;
-        }
-        std::hint::spin_loop();
-    }
-    let Some(handle) = handle else {
-        // Registry stayed contended: we can't track an async op we can't
-        // complete, so fail synchronously (a non-pending return completes the
-        // caller inline — no dangling async).
-        tracing::error!("addrinfo_ex: DNS query registry stayed contended on insert; failing");
-        return WSAHOST_NOT_FOUND;
+    // Mint a synthetic cancel handle and register the query under it. The counter starts at
+    // 0x6000_0000, so the handle is disjoint from OS/file handles and never NULL.
+    //
+    // `insert` spreads inserts across the registry's lock shards. Under pathological same-shard
+    // contention it blocks to acquire rather than dropping one. So a burst of concurrent
+    // resolutions (e.g. a .NET HttpClient firing many at once) never spuriously fails to register.
+    //
+    // Registration therefore always succeeds. There is no synchronous-failure path here.
+    let query = AsyncQuery {
+        completed: AtomicBool::new(false),
+        overlapped: overlapped as usize,
+        routine: routine.map_or(0, |f| f as usize),
+        ppresult: pp_result as usize,
     };
+    let handle = DNS_QUERIES.insert(query);
 
     // Hand the caller our synthetic cancel handle (never a real ws2_32 handle).
     if !out_handle.is_null() {
@@ -527,16 +499,10 @@ mod tests {
         }
     }
 
-    /// Insert a query into the shared registry, retrying on transient write
-    /// contention (the non-blocking `ManagedRegistry` can momentarily refuse
-    /// under cargo's parallel test runner — mirrors `begin`'s own spin).
+    /// Insert a query into the shared registry. `insert` always succeeds (it blocks under extreme
+    /// contention), so there is nothing to retry.
     fn insert_query(ctx: &mut TestCtx, routine: bool, slot: *mut PADDRINFOEXW) -> DnsQueryHandle {
-        loop {
-            if let Some(handle) = DNS_QUERIES.try_insert(query_with(ctx, routine, slot)) {
-                return handle;
-            }
-            std::hint::spin_loop();
-        }
+        DNS_QUERIES.insert(query_with(ctx, routine, slot))
     }
 
     const SENTINEL_HEAD: usize = 0xABCD_0000;

@@ -20,7 +20,7 @@ pub fn build_monitor() -> Result<PathBuf> {
         anyhow::bail!("Monitor directory not found at {}.", monitor_dir.display());
     }
 
-    if !pnpm_available() {
+    if !pnpm_available_with_corepack_warning() {
         anyhow::bail!(
             "`pnpm` not found on PATH. Install it before building the monitor frontend \
              (for example with `corepack enable pnpm`)."
@@ -85,8 +85,21 @@ pub fn build_monitor() -> Result<PathBuf> {
     Ok(dist_dir)
 }
 
-fn pnpm_available() -> bool {
+fn pnpm_available_with_corepack_warning() -> bool {
+    if !corepack_available() {
+        eprintln!(
+            "[WARNING] - `corepack` not found in PATH: this may cause builds to fail if a compatible version of `pnpm` is not available"
+        )
+    }
+
     Command::new(pnpm_command())
+        .arg("--version")
+        .output()
+        .is_ok_and(|out| out.status.success())
+}
+
+fn corepack_available() -> bool {
+    Command::new("corepack")
         .arg("--version")
         .output()
         .is_ok_and(|out| out.status.success())

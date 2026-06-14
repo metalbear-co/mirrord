@@ -388,6 +388,14 @@ pub struct PreviewQueueSplittingConfig {
     /// Azure Service Bus queue splitting filters, keyed by queue ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub azure_service_bus_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
+    /// Redis Pub/Sub queue splitting filters, keyed by queue ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub redis_pubsub_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
+    /// Temporal queue splitting filters, keyed by task queue ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub temporal_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
 }
 
 impl PreviewQueueSplittingConfig {
@@ -422,11 +430,19 @@ impl PreviewQueueSplittingConfig {
             value.azure_service_bus_jq_filters(),
         );
 
+        let redis_pubsub_queue_filters =
+            collect_queue_filters(value.redis_pubsub(), value.redis_pubsub_jq_filters());
+
+        let temporal_queue_filters =
+            collect_queue_filters(value.temporal(), value.temporal_jq_filters());
+
         let config = Self {
             sqs_queue_filters,
             kafka_queue_filters,
             gcp_pubsub_queue_filters,
             azure_service_bus_queue_filters,
+            redis_pubsub_queue_filters,
+            temporal_queue_filters,
         };
 
         if config == Self::default() {
@@ -438,7 +454,7 @@ impl PreviewQueueSplittingConfig {
 }
 
 /// Per-queue filter configuration for preview sessions.
-/// Used by SQS, GCP Pub/Sub, and Azure Service Bus.
+/// Used by SQS, GCP Pub/Sub, Azure Service Bus, and Temporal.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewQueueFilter {
@@ -495,6 +511,10 @@ pub struct PreviewDbBranchingConfig {
     /// MSSQL branch database names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mssql_branch_names: Vec<String>,
+
+    /// Redis branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redis_branch_names: Vec<String>,
 }
 
 impl PreviewDbBranchingConfig {
@@ -509,6 +529,7 @@ impl PreviewDbBranchingConfig {
                 pg_branch_names: branch_db_names.pg,
                 mongodb_branch_names: branch_db_names.mongodb,
                 mssql_branch_names: branch_db_names.mssql,
+                redis_branch_names: branch_db_names.redis,
             })
         }
     }

@@ -159,6 +159,7 @@ LTO
 jq
 jaq
 towncrier
+Bubblewrap
 
 # Cloud services
 SNS
