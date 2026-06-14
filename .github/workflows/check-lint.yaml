@@ -64,10 +64,9 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 24
-      - run: npm install
-        working-directory: ./packages/wizard
-      - run: npm run lint
-        working-directory: ./packages/wizard
+      - run: corepack enable pnpm
+      - run: pnpm --filter mirrord-wizard install --frozen-lockfile
+      - run: pnpm --filter mirrord-wizard run lint
   vale:
     if: ${{ inputs.run_vale }}
     timeout-minutes: 10
