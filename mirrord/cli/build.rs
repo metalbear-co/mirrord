@@ -23,6 +23,11 @@ fn recheck_and_setup_layer_file() {
 }
 
 #[cfg(feature = "wizard")]
+fn pnpm_command() -> &'static str {
+    if cfg!(windows) { "pnpm.cmd" } else { "pnpm" }
+}
+
+#[cfg(feature = "wizard")]
 fn build_wizard_frontend() {
     use std::{env, path::Path, process::Command};
 
@@ -36,21 +41,24 @@ fn build_wizard_frontend() {
         println!("cargo::rerun-if-changed={}", dist.display());
         dist
     } else {
-        let input_path = Path::new("../../packages/wizard");
+        let workspace_root = Path::new("../..");
+        let input_path = workspace_root.join("packages/wizard");
         let dist_path = out_dir.join("dist");
 
         println!("cargo::rerun-if-changed={}", input_path.display());
         println!("cargo::rerun-if-changed=.");
 
-        let status = Command::new("npm")
-            .args(["install"])
-            .current_dir(input_path)
+        let status = Command::new(pnpm_command())
+            .args(["--filter", "mirrord-wizard", "install"])
+            .current_dir(workspace_root)
             .status()
-            .expect("npm install command should finish");
-        assert!(status.success(), "npm install command should succeed");
+            .expect("pnpm install command should finish");
+        assert!(status.success(), "pnpm install command should succeed");
 
-        let status = Command::new("npm")
+        let status = Command::new(pnpm_command())
             .args([
+                "--filter",
+                "mirrord-wizard",
                 "run",
                 "build",
                 "--",
@@ -58,10 +66,10 @@ fn build_wizard_frontend() {
                 "--outDir",
                 &dist_path.display().to_string(),
             ])
-            .current_dir(input_path)
+            .current_dir(workspace_root)
             .status()
-            .expect("npm build command should finish");
-        assert!(status.success(), "npm build command should succeed");
+            .expect("pnpm build command should finish");
+        assert!(status.success(), "pnpm build command should succeed");
         dist_path
     };
 
