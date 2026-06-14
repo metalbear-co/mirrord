@@ -93,8 +93,10 @@ impl ClientStore {
     /// However, this was causing issues with HTTP mirroring, so we're re-enabling it.
     #[inline]
     fn should_enable_connection_pooling() -> bool {
-        // Re-enabled for Windows to fix HTTP mirroring issues
-        true
+        // Disabled: connection pooling causes "channel closed" errors when the local
+        // application (e.g. Quarkus gRPC) closes idle HTTP/2 connections.
+        // Retries then reuse the dead sender from the pool instead of creating a new one.
+        false
     }
 
     /// Reuses or creates a new [`LocalHttpClient`].
