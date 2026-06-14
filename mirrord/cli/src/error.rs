@@ -642,6 +642,17 @@ pub(crate) enum CliError {
         "Check that `~/.mirrord/credentials` exists and is readable.{GENERAL_HELP}"
     ))]
     CredentialStore(#[from] CredentialStoreError),
+
+    #[error("Failed to subscribe to operator events: {0}")]
+    #[diagnostic(help(
+        "Please check that the mirrord operator is installed and that your Kubernetes user is \
+        allowed to `watch` `events.operator.metalbear.co`.{GENERAL_HELP}"
+    ))]
+    SubscribeError(String),
+
+    #[error("A session key is required to subscribe to operator events")]
+    #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
+    SubscribeKeyRequired,
 }
 
 impl CliError {

@@ -4758,6 +4758,7 @@ dependencies = [
  "futures",
  "hex",
  "home",
+ "http 1.4.0",
  "http-body-util",
  "humantime",
  "hyper",
