@@ -146,24 +146,25 @@ impl MirrordConfig for IncomingFileConfig {
 }
 
 fn bi_map_from_config(mappings: Vec<(u16, u16)>, field: &'static str) -> Result<BiMap<u16, u16>> {
-    let mut left_ports = HashSet::new();
-    let mut right_ports = HashSet::new();
+    let mut map = BiMap::new();
 
-    for (left, right) in &mappings {
-        if !left_ports.insert(*left) {
+    for (left, right) in mappings {
+        if map.contains_left(&left) {
             return Err(ConfigError::Conflict(format!(
                 "`{field}` contains duplicate source port `{left}`"
             )));
         }
 
-        if !right_ports.insert(*right) {
+        if map.contains_right(&right) {
             return Err(ConfigError::Conflict(format!(
                 "`{field}` contains duplicate target port `{right}`"
             )));
         }
+
+        map.insert(left, right);
     }
 
-    Ok(mappings.into_iter().collect())
+    Ok(map)
 }
 
 impl MirrordToggleableConfig for IncomingFileConfig {
