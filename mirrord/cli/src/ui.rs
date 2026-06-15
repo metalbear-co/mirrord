@@ -10,7 +10,6 @@ use std::{
     collections::{BTreeMap, HashMap, hash_map::Entry},
     convert::Infallible,
     fs::File,
-    io::{Read, Seek, Write},
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     sync::Arc,
@@ -874,34 +873,47 @@ fn build_router(state: Arc<AppState>) -> Router {
 
 /// Returns the path to the UI token file, `~/.mirrord/token`.
 ///
-/// A running `mirrord ui` holds an exclusive advisory lock on this file and writes its auth token
-/// into it. The lock — released by the OS even on a hard kill — is how a second `mirrord ui`
-/// invocation detects that one is already running, and the stored token lets that second
-/// invocation print a working URL instead of starting a duplicate server.
+/// The running `mirrord ui` writes its auth token here so a second invocation can read it back and
+/// print a working URL. This file is never locked — on Windows an exclusive lock is mandatory and
+/// would stop the second process from reading it — so mutual exclusion lives in a separate lock
+/// file (see [`lock_file_path`]).
 fn token_file_path() -> Option<PathBuf> {
     home::home_dir().map(|home| home.join(".mirrord").join("token"))
 }
 
-/// Keeps the token file open and exclusively locked for as long as the UI server runs.
+/// Returns the path to the UI lock file, `~/.mirrord/ui.lock`.
+///
+/// A running `mirrord ui` holds an exclusive lock on this file. The lock — released by the OS even
+/// on a hard kill — is how a second invocation detects that one is already running. It is kept
+/// separate from the token file so the token stays freely readable on all platforms.
+fn lock_file_path() -> Option<PathBuf> {
+    home::home_dir().map(|home| home.join(".mirrord").join("ui.lock"))
+}
+
+/// Keeps the lock file open and exclusively locked for as long as the UI server runs.
 ///
 /// Dropping the guard removes the token file, signalling that the UI is no longer running. A hard
-/// kill skips this [`Drop`] and leaves the file behind, but the OS releases the lock on process
-/// exit, so the next invocation still sees the previous instance is gone and reclaims the file.
+/// kill skips this [`Drop`] and leaves the token file behind, but the OS releases the lock on
+/// process exit, so the next invocation still sees the previous instance is gone, reclaims the
+/// lock, and overwrites the stale token.
 struct TokenFileGuard {
-    file: File,
-    path: PathBuf,
+    /// Held open to keep the exclusive lock; the lock file itself is left in place (removing it
+    /// while the handle is open is racy and a leftover empty file is harmless — the next run
+    /// re-locks it). The lock releases when this handle closes, including on a hard kill.
+    lock_file: File,
+    token_path: PathBuf,
 }
 
 impl Drop for TokenFileGuard {
     fn drop(&mut self) {
-        let _ = FileExt::unlock(&self.file);
-        if let Err(err) = std::fs::remove_file(&self.path) {
-            warn!(?err, path = %self.path.display(), "Failed to remove UI token file");
+        if let Err(err) = std::fs::remove_file(&self.token_path) {
+            warn!(?err, path = %self.token_path.display(), "Failed to remove UI token file");
         }
+        let _ = FileExt::unlock(&self.lock_file);
     }
 }
 
-/// Result of trying to claim ownership of the UI token file.
+/// Result of trying to claim ownership of the UI lock.
 enum TokenClaim {
     /// No other `mirrord ui` was running; we now hold the lock and published `token`.
     Claimed {
@@ -913,35 +925,34 @@ enum TokenClaim {
 }
 
 /// Tries to become the single running `mirrord ui` instance by taking an exclusive lock on the
-/// token file. If another instance already holds the lock, reads back the token it published.
+/// lock file. If another instance already holds it, reads back the token it published.
 fn claim_token_file() -> Result<TokenClaim, CliError> {
-    let path = token_file_path()
+    let lock_path = lock_file_path()
         .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
-    claim_token_file_at(path)
+    let token_path = token_file_path()
+        .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
+    claim_token_file_at(lock_path, token_path)
 }
 
-fn claim_token_file_at(path: PathBuf) -> Result<TokenClaim, CliError> {
-    if let Some(parent) = path.parent() {
+fn claim_token_file_at(lock_path: PathBuf, token_path: PathBuf) -> Result<TokenClaim, CliError> {
+    if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| CliError::UiError(format!("failed to create mirrord directory: {e}")))?;
     }
 
-    // Not truncated on open: if another instance holds the lock we must read back the token it
-    // wrote. We only truncate and rewrite once we've successfully taken the lock ourselves.
-    let mut file = std::fs::OpenOptions::new()
+    let lock_file = std::fs::OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
         .truncate(false)
-        .open(&path)
-        .map_err(|e| CliError::UiError(format!("failed to open token file: {e}")))?;
+        .open(&lock_path)
+        .map_err(|e| CliError::UiError(format!("failed to open lock file: {e}")))?;
 
-    if !file
+    if !lock_file
         .try_lock_exclusive()
-        .map_err(|e| CliError::UiError(format!("failed to lock token file: {e}")))?
+        .map_err(|e| CliError::UiError(format!("failed to lock lock file: {e}")))?
     {
-        let mut token = String::new();
-        file.read_to_string(&mut token)
+        let token = std::fs::read_to_string(&token_path)
             .map_err(|e| CliError::UiError(format!("failed to read token file: {e}")))?;
         return Ok(TokenClaim::AlreadyRunning {
             token: token.trim().to_owned(),
@@ -950,14 +961,14 @@ fn claim_token_file_at(path: PathBuf) -> Result<TokenClaim, CliError> {
 
     let token_bytes: [u8; 32] = rand::rng().random();
     let token = hex::encode(token_bytes);
-    file.set_len(0)
-        .and_then(|()| file.rewind())
-        .and_then(|()| file.write_all(token.as_bytes()))
-        .and_then(|()| file.flush())
+    std::fs::write(&token_path, &token)
         .map_err(|e| CliError::UiError(format!("failed to write token file: {e}")))?;
 
     Ok(TokenClaim::Claimed {
-        guard: TokenFileGuard { file, path },
+        guard: TokenFileGuard {
+            lock_file,
+            token_path,
+        },
         token,
     })
 }
@@ -1270,19 +1281,24 @@ mod tests {
     mod token_file {
         use super::*;
 
-        /// The first claim takes the lock and writes a fresh token to the file.
+        fn paths(dir: &tempfile::TempDir) -> (PathBuf, PathBuf) {
+            (dir.path().join("ui.lock"), dir.path().join("token"))
+        }
+
+        /// The first claim takes the lock and writes a fresh token to the token file.
         #[test]
         fn first_claim_succeeds_and_writes_token() {
             let dir = tempfile::tempdir().unwrap();
-            let path = dir.path().join("token");
+            let (lock, token_path) = paths(&dir);
 
-            let TokenClaim::Claimed { guard, token } = claim_token_file_at(path.clone()).unwrap()
+            let TokenClaim::Claimed { guard, token } =
+                claim_token_file_at(lock, token_path.clone()).unwrap()
             else {
                 panic!("first claim should succeed");
             };
 
             assert!(!token.is_empty());
-            assert_eq!(std::fs::read_to_string(&path).unwrap(), token);
+            assert_eq!(std::fs::read_to_string(&token_path).unwrap(), token);
             drop(guard);
         }
 
@@ -1291,14 +1307,15 @@ mod tests {
         #[test]
         fn second_claim_while_held_returns_already_running_with_same_token() {
             let dir = tempfile::tempdir().unwrap();
-            let path = dir.path().join("token");
+            let (lock, token_path) = paths(&dir);
 
-            let TokenClaim::Claimed { guard, token } = claim_token_file_at(path.clone()).unwrap()
+            let TokenClaim::Claimed { guard, token } =
+                claim_token_file_at(lock.clone(), token_path.clone()).unwrap()
             else {
                 panic!("first claim should succeed");
             };
 
-            match claim_token_file_at(path.clone()).unwrap() {
+            match claim_token_file_at(lock, token_path).unwrap() {
                 TokenClaim::AlreadyRunning { token: seen } => assert_eq!(seen, token),
                 TokenClaim::Claimed { .. } => panic!("second claim should see the lock held"),
             }
@@ -1311,20 +1328,23 @@ mod tests {
         #[test]
         fn dropping_guard_removes_file_and_allows_reclaim() {
             let dir = tempfile::tempdir().unwrap();
-            let path = dir.path().join("token");
+            let (lock, token_path) = paths(&dir);
 
             let TokenClaim::Claimed {
                 guard,
                 token: first,
-            } = claim_token_file_at(path.clone()).unwrap()
+            } = claim_token_file_at(lock.clone(), token_path.clone()).unwrap()
             else {
                 panic!("first claim should succeed");
             };
             drop(guard);
-            assert!(!path.exists(), "guard drop should remove the token file");
+            assert!(
+                !token_path.exists(),
+                "guard drop should remove the token file"
+            );
 
             let TokenClaim::Claimed { token: second, .. } =
-                claim_token_file_at(path.clone()).unwrap()
+                claim_token_file_at(lock, token_path).unwrap()
             else {
                 panic!("reclaim after drop should succeed");
             };
