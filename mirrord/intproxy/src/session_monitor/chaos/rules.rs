@@ -869,11 +869,11 @@ mod test {
     }
 
     #[rstest]
-    #[case::zero(0)]
-    #[case::twenty_five(25)]
-    #[case::forty_seven(42)]
-    #[case::seventy_five(67)]
-    #[case::one_hundred(100)]
+    #[case::never(0)]
+    #[case::occasionaly(25)]
+    #[case::sometimes(42)]
+    #[case::sixseven(67)]
+    #[case::always(100)]
     fn roll_for_hit_roughly_respects_percentage(#[case] chance: u32) {
         let percentage = Percentage::from(chance);
         let attempts = 100_000;
