@@ -62,16 +62,13 @@ impl OutgoingProxy {
                         request.hostname.as_ref(),
                     )
                 })
-                .max_by_key(|rule| rule.priority)?
-                .clone();
+                .max_by_key(|rule| rule.priority)?;
 
             if rule.get_selector_percentage().roll_for_hit().not() {
                 return None;
             }
 
-            let _ = rule.hit_count.fetch_add(1, Ordering::Relaxed);
-
-            match rule.selector {
+            let effect = match rule.selector.clone() {
                 ChaosSelector::Tcp {
                     effect:
                         TcpChaosEffect::ConnectionError(ChaosEffectConnectionError {
@@ -103,7 +100,13 @@ impl OutgoingProxy {
                     None
                 }
                 _ => None,
+            };
+
+            if effect.is_some() {
+                let _ = rule.hit_count.fetch_add(1, Ordering::Relaxed);
             }
+
+            effect
         })
     }
 
@@ -132,7 +135,7 @@ impl OutgoingProxy {
 
             let _ = rule.hit_count.fetch_add(1, Ordering::Relaxed);
 
-            match rule.selector {
+            let effect = match rule.selector {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
@@ -140,7 +143,13 @@ impl OutgoingProxy {
                     wait_for: effect.latency_duration(),
                 }),
                 _ => None,
+            };
+
+            if effect.is_some() {
+                let _ = rule.hit_count.fetch_add(1, Ordering::Relaxed);
             }
+
+            effect
         })
     }
 }
