@@ -50,6 +50,7 @@ hyper
 xtask
 Tera
 tera
+pnpm
 
 # Async / concurrency
 async
