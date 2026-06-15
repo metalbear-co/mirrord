@@ -1,9 +1,7 @@
 //! Interactive wizard that generates a skeleton `mirrord-up.yaml`.
 //!
 //! The wizard prompts for a small, curated subset of the full schema and
-//! writes the result as YAML. For fields the wizard knows about but the
-//! user did not customize, the output contains a commented-out template
-//! line so the user can discover the field without consulting the docs.
+//! writes the result as YAML.
 //!
 //! Keep the prompt set deliberately small. The values that go *into* each
 //! prompt (enum variants, defaults) must always come from the authoritative
@@ -11,13 +9,12 @@
 //! etc.), so adding a new variant downstream never requires editing this
 //! file.
 //!
-//! The hand-rolled emitter is necessary because `serde_yaml` cannot emit
-//! comments. A round-trip unit test guards against the wizard's output
-//! ever diverging from what [`crate::load_up_config`] can parse.
+//! The generated YAML is produced by serializing the assembled [`UpConfig`]
+//! with `serde_yaml` and then dropping null/empty entries (see [`prune`]), so
+//! the skeleton contains only the fields the user actually set.
 
 use std::{
-    collections::{HashMap, HashSet},
-    fmt::Write as _,
+    collections::{BTreeSet, HashMap},
     ops::Not,
     path::PathBuf,
     str::FromStr,
@@ -29,7 +26,7 @@ use mirrord_config::{
     feature::{env::EnvConfig, network::incoming::http_filter::HttpFilterConfig},
     target::Target,
 };
-use serde::Serialize;
+use serde_yaml::Value;
 use strum::VariantArray;
 use thiserror::Error;
 
@@ -47,6 +44,10 @@ pub enum InitError {
     /// Failed to write the generated config file.
     #[error("failed to write config file: {0}")]
     Io(#[from] std::io::Error),
+
+    /// Failed to serialize the assembled config to YAML.
+    #[error("failed to render config: {0}")]
+    Yaml(#[from] serde_yaml::Error),
 }
 
 /// Run the wizard end-to-end: prompt, render, preview, write.
@@ -71,7 +72,7 @@ pub fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
     }
 
     let cfg = UpConfig { common, services };
-    let rendered = render_yaml(&cfg);
+    let rendered = render_yaml(&cfg)?;
 
     println!("\n--- Step 3: Preview ---\n{rendered}");
 
@@ -219,10 +220,10 @@ fn prompt_http_filter(mode: &ServiceMode) -> Result<HttpFilterConfig, InitError>
 /// Parses a comma-separated list of u16 ports. Whitespace and empty entries
 /// are ignored. On failure, the error is the user-facing message naming the
 /// offending token.
-fn parse_ports(s: &str) -> Result<HashSet<u16>, String> {
+fn parse_ports(s: &str) -> Result<BTreeSet<u16>, String> {
     s.split(',')
         .map(str::trim)
-        .filter(|p| !p.is_empty())
+        .filter(|p| p.is_empty().not())
         .map(|p| {
             p.parse::<u16>()
                 .map_err(|_| format!("`{p}` is not a valid u16 port"))
@@ -230,7 +231,7 @@ fn parse_ports(s: &str) -> Result<HashSet<u16>, String> {
         .collect()
 }
 
-fn prompt_ignore_ports() -> Result<HashSet<u16>, InitError> {
+fn prompt_ignore_ports() -> Result<BTreeSet<u16>, InitError> {
     let presets: [(&str, &[u16]); _] = [
         ("None", &[]),
         ("Istio sidecar (9090, 9091, 15090)", &[9090, 9091, 15090]),
@@ -307,172 +308,105 @@ fn prompt_run() -> Result<RunConfig, InitError> {
     Ok(RunConfig { r#type, command })
 }
 
-// ----- YAML emitter -----
-
-/// Renders the YAML config string written by the wizard.
+/// Serializes the wizard's [`UpConfig`] to a minimal YAML skeleton.
 ///
-/// Note: this is hand-rolled (not `serde_yaml::to_string`) because we want
-/// commented-out template lines for fields the user did not customize. The
-/// `round_trips_through_loader` test makes sure the output is still a
-/// well-formed `mirrord-up.yaml` according to [`UpConfig`].
-fn render_yaml(cfg: &UpConfig) -> String {
-    let mut out = String::new();
-    render_common(&cfg.common, &mut out);
-    render_services(&cfg.services, &mut out);
-    out
+/// `serde_yaml` emits every field, including `null` for the many unset
+/// `Option`s in the shared `EnvConfig`/`HttpFilterConfig` types. [`prune`]
+/// strips those so the output only contains what the user actually set. We
+/// can't suppress them at the type level: those types are shared with the rest
+/// of `mirrord-config` (config sent to child processes, analytics, schema), so
+/// a `skip_serializing_if` there would have far wider reach than this wizard.
+///
+/// The `command` and `ignore_ports` lists are rendered inline (`[a, b]`)
+/// rather than as block sequences - see [`inline_lists`].
+fn render_yaml(cfg: &UpConfig) -> Result<String, InitError> {
+    let mut value = serde_yaml::to_value(cfg)?;
+    prune(&mut value);
+
+    let mut flows = Vec::new();
+    inline_lists(&mut value, &mut flows);
+
+    let mut yaml = serde_yaml::to_string(&value)?;
+    for (placeholder, flow) in flows {
+        yaml = yaml.replace(&placeholder, &flow);
+    }
+    Ok(yaml)
 }
 
-fn render_common(c: &CommonConfig, out: &mut String) {
-    let entries: Vec<(&str, bool)> = [
-        ("operator", c.operator),
-        ("accept_invalid_certificates", c.accept_invalid_certificates),
-        ("telemetry", c.telemetry),
-    ]
-    .into_iter()
-    .filter_map(|(k, v)| v.map(|v| (k, v)))
-    .collect();
-
-    if entries.is_empty() {
+/// Recursively removes `null` mapping entries and entries that become empty
+/// maps/sequences, so the generated skeleton omits defaulted fields. Every
+/// field dropped here is `Option`-or-defaulted on [`UpConfig`], so the result
+/// still round-trips through [`crate::load_up_config`].
+fn prune(value: &mut serde_yaml::Value) {
+    let serde_yaml::Value::Mapping(map) = value else {
         return;
+    };
+
+    for (_, v) in map.iter_mut() {
+        prune(v);
     }
-    out.push_str("common:\n");
-    for (k, v) in entries {
-        writeln!(out, "  {k}: {v}").unwrap();
-    }
-    out.push('\n');
+
+    map.retain(|_, v| match v {
+        serde_yaml::Value::Null => false,
+        serde_yaml::Value::Mapping(m) => m.is_empty().not(),
+        serde_yaml::Value::Sequence(s) => s.is_empty().not(),
+        _ => true,
+    });
 }
 
-fn render_services(services: &HashMap<String, ServiceConfig>, out: &mut String) {
-    out.push_str("services:\n");
-    for (i, (name, svc)) in services.iter().enumerate() {
-        if i > 0 {
-            out.push('\n');
-        }
-        render_service(name, svc, out);
-    }
-}
+/// Rewrites the [`INLINE_LIST_KEYS`] lists to inline flow style (`[a, b, c]`)
+/// instead of `serde_yaml`'s block style (`- a` per line).
+///
+/// `serde_yaml` has no native way to force a list inline, so we engage in a bit
+/// of tomfoolery: each targeted sequence is swapped for a unique placeholder
+/// scalar here, which the caller substitutes for the rendered flow array.
+fn inline_lists(value: &mut Value, flows: &mut Vec<(String, String)>) {
+    const INLINE_LIST_KEYS: [&str; 2] = ["command", "ignore_ports"];
 
-fn render_service(name: &str, svc: &ServiceConfig, out: &mut String) {
-    writeln!(out, "  {name}:").unwrap();
-
-    // target — emit the whole block commented if nothing is set, to avoid
-    // an empty `target:` mapping (TargetConfig.path has no serde default).
-    match (&svc.target.path, &svc.target.namespace) {
-        (None, None) => {
-            writeln!(out, "    # target:").unwrap();
-            writeln!(
-                out,
-                "    #   path: deployment/foo  # omit to run targetless"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "    #   namespace: my-ns      # omit for cluster default"
-            )
-            .unwrap();
-        }
-        (path, namespace) => {
-            writeln!(out, "    target:").unwrap();
-            match path {
-                Some(t) => writeln!(out, "      path: {}", fmt_scalar(&t.to_string())).unwrap(),
-                None => writeln!(
-                    out,
-                    "      # path: deployment/foo  # omit to run targetless"
-                )
-                .unwrap(),
-            }
-            match namespace {
-                Some(ns) => writeln!(out, "      namespace: {}", fmt_scalar(ns)).unwrap(),
-                None => {
-                    writeln!(out, "      # namespace: my-ns  # omit for cluster default").unwrap()
+    match value {
+        Value::Mapping(map) => {
+            for (key, v) in map.iter_mut() {
+                let targeted =
+                    matches!(key, Value::String(k) if INLINE_LIST_KEYS.contains(&k.as_str()));
+                match v {
+                    Value::Sequence(seq) if targeted && seq.iter().all(is_scalar) => {
+                        *v = flow_placeholder(seq, flows);
+                    }
+                    other => inline_lists(other, flows),
                 }
             }
         }
-    }
-
-    // default_mode
-    if svc.default_mode != ServiceMode::default() {
-        writeln!(out, "    default_mode: {}", svc.default_mode).unwrap();
-    } else {
-        let supported = ServiceMode::VARIANTS
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", ");
-        writeln!(
-            out,
-            "    # default_mode: {}  # supported: {supported}",
-            svc.default_mode
-        )
-        .unwrap();
-    }
-
-    // http_filter
-    if let Some(hf) = &svc.http_filter.header_filter {
-        writeln!(out, "    http_filter:").unwrap();
-        writeln!(out, "      header_filter: {}", fmt_scalar(hf)).unwrap();
-    } else {
-        writeln!(out, "    # http_filter:").unwrap();
-        writeln!(
-            out,
-            "    #   header_filter: \"...\"  # omit to auto-match the session key"
-        )
-        .unwrap();
-    }
-
-    // env.override
-    match &svc.env.r#override {
-        Some(map) if map.is_empty().not() => {
-            writeln!(out, "    env:").unwrap();
-            writeln!(out, "      override:").unwrap();
-            for (k, v) in map {
-                writeln!(out, "        {k}: {}", fmt_scalar(v)).unwrap();
+        Value::Sequence(seq) => {
+            for v in seq.iter_mut() {
+                inline_lists(v, flows);
             }
         }
-        _ => {
-            writeln!(out, "    # env:").unwrap();
-            writeln!(out, "    #   override:").unwrap();
-            writeln!(out, "    #     KEY: VALUE").unwrap();
-        }
+        _ => {}
     }
-
-    // ignore_ports
-    if svc.ignore_ports.is_empty().not() {
-        let parts: Vec<_> = svc.ignore_ports.iter().map(|p| p.to_string()).collect();
-        writeln!(out, "    ignore_ports: [{}]", parts.join(", ")).unwrap();
-    } else {
-        writeln!(out, "    # ignore_ports: []").unwrap();
-    }
-
-    // run
-    writeln!(out, "    run:").unwrap();
-    if svc.run.r#type != RunType::default() {
-        writeln!(out, "      type: {}", svc.run.r#type).unwrap();
-    } else {
-        let supported = RunType::VARIANTS
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", ");
-        writeln!(
-            out,
-            "      # type: {}  # supported: {supported}",
-            svc.run.r#type
-        )
-        .unwrap();
-    }
-    let cmd_parts: Vec<_> = svc.run.command.iter().map(fmt_scalar).collect();
-    writeln!(out, "      command: [{}]", cmd_parts.join(", ")).unwrap();
 }
 
-/// Serialize a single scalar value as a YAML token, with quoting/escaping
-/// handled by `serde_yaml`. Strips the trailing newline so callers can
-/// splice it inline.
-fn fmt_scalar<T: Serialize>(v: &T) -> String {
-    serde_yaml::to_string(v)
-        .expect("scalar serialization is infallible")
-        .trim_end_matches('\n')
-        .to_owned()
+/// Renders a scalar sequence as a flow array and records it against a unique
+/// placeholder scalar, which [`render_yaml`] substitutes back in after
+/// serialization. The array is rendered as JSON — which is valid YAML flow and
+/// quotes each item correctly, so tokens containing `,`/`[`/spaces survive
+/// intact (naively joining `serde_yaml`'s block lines would not).
+fn flow_placeholder(seq: &[Value], flows: &mut Vec<(String, String)>) -> Value {
+    let items = seq
+        .iter()
+        .map(|item| serde_json::to_string(item).expect("scalar to JSON is infallible"));
+    let flow = format!("[{}]", items.collect::<Vec<_>>().join(", "));
+    let placeholder = format!("__mirrord_up_flow_{}__", flows.len());
+    flows.push((placeholder.clone(), flow));
+    Value::String(placeholder)
+}
+
+/// Whether a [`Value`] is a leaf scalar (so a sequence of these can be safely
+/// rendered inline by [`flow_placeholder`]).
+fn is_scalar(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)
+    )
 }
 
 #[cfg(test)]
@@ -513,61 +447,48 @@ mod tests {
             },
             services: [("api".to_owned(), sample_service())].into_iter().collect(),
         };
-        let rendered = render_yaml(&cfg);
+        let rendered = render_yaml(&cfg).unwrap();
+        // Target renders in its string form, not as a nested `{deployment: api}` map.
+        assert!(
+            rendered.contains("path: deployment/api"),
+            "target path should be a string:\n{rendered}"
+        );
         let parsed: UpConfig = serde_yaml::from_str(&rendered)
             .unwrap_or_else(|e| panic!("output failed to parse: {e}\n---\n{rendered}"));
         assert_eq!(parsed.services.len(), 1);
         assert_eq!(parsed.common.operator, Some(false));
         assert_eq!(parsed.common.accept_invalid_certificates, Some(true));
         assert_eq!(parsed.common.telemetry, None);
+        assert_eq!(parsed.services["api"], sample_service());
     }
 
     #[test]
-    fn omits_common_block_when_all_defaults() {
+    fn omits_common_when_all_default() {
         let cfg = UpConfig {
             common: CommonConfig::default(),
             services: [("svc".to_owned(), sample_service())].into_iter().collect(),
         };
-        let out = render_yaml(&cfg);
+        let out = render_yaml(&cfg).unwrap();
         assert!(
             !out.contains("common:"),
             "common block should be absent:\n{out}"
         );
     }
 
+    /// A service that sets only a header filter and a command must not leak the
+    /// many defaulted `Option`s of the shared config types as `null`s, nor emit
+    /// empty `env`/`ignore_ports`/`target` blocks.
     #[test]
-    fn no_comments_for_set_common_fields() {
-        let cfg = UpConfig {
-            common: CommonConfig {
-                operator: Some(false),
-                accept_invalid_certificates: None,
-                telemetry: None,
-            },
-            services: [("svc".to_owned(), sample_service())].into_iter().collect(),
-        };
-        let out = render_yaml(&cfg);
-        // Only the one set field appears under `common:`, no commented entries for the others.
-        let common_block: String = out
-            .lines()
-            .skip_while(|l| !l.starts_with("common:"))
-            .take_while(|l| l.starts_with("common:") || l.starts_with("  "))
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(common_block.contains("operator: false"));
-        assert!(
-            !common_block.contains("#"),
-            "no commented common fields:\n{common_block}"
-        );
-    }
-
-    #[test]
-    fn unset_service_fields_are_commented() {
+    fn no_nulls_or_empty_blocks() {
         let svc = ServiceConfig {
             target: TargetConfig::default(),
             env: EnvConfig::default(),
             default_mode: ServiceMode::default(),
-            http_filter: HttpFilterConfig::default(),
-            ignore_ports: HashSet::new(),
+            http_filter: HttpFilterConfig {
+                header_filter: Some("x-session: me".to_owned()),
+                ..Default::default()
+            },
+            ignore_ports: BTreeSet::new(),
             run: RunConfig {
                 r#type: RunType::Exec,
                 command: vec!["echo".to_owned()],
@@ -575,15 +496,92 @@ mod tests {
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
-            services: [("svc".to_owned(), svc)].into_iter().collect(),
+            services: [("svc".to_owned(), svc.clone())].into_iter().collect(),
         };
-        let out = render_yaml(&cfg);
-        assert!(out.contains("# target:"));
-        assert!(out.contains("# http_filter:"));
-        assert!(out.contains("# env:"));
-        assert!(out.contains("# ignore_ports:"));
-        assert!(out.contains("# type:"));
-        // Round-trip the commented output too.
-        let _: UpConfig = serde_yaml::from_str(&out).unwrap();
+        let out = render_yaml(&cfg).unwrap();
+
+        assert!(!out.contains("null"), "no null entries:\n{out}");
+        assert!(
+            !out.contains("path_filter"),
+            "no unset filter fields:\n{out}"
+        );
+        assert!(!out.contains("env:"), "no empty env block:\n{out}");
+        assert!(
+            !out.contains("ignore_ports"),
+            "no empty ignore_ports:\n{out}"
+        );
+        assert!(!out.contains("target:"), "no empty target block:\n{out}");
+        assert!(out.contains("header_filter"), "filter retained:\n{out}");
+
+        let parsed: UpConfig = serde_yaml::from_str(&out).unwrap();
+        assert_eq!(parsed.services["svc"], svc);
+    }
+
+    /// Scalar lists (`command`, `ignore_ports`) render inline (`[a, b]`), not as
+    /// block sequences, and tokens with flow-significant chars stay intact.
+    #[test]
+    fn scalar_lists_render_inline() {
+        let svc = ServiceConfig {
+            target: TargetConfig::default(),
+            env: EnvConfig::default(),
+            default_mode: ServiceMode::default(),
+            http_filter: HttpFilterConfig::default(),
+            ignore_ports: [9090, 9091, 15090].into_iter().collect(),
+            run: RunConfig {
+                r#type: RunType::Exec,
+                command: vec!["go".to_owned(), "run".to_owned(), "--opt=a,b".to_owned()],
+            },
+        };
+        let cfg = UpConfig {
+            common: CommonConfig::default(),
+            services: [("svc".to_owned(), svc.clone())].into_iter().collect(),
+        };
+        let out = render_yaml(&cfg).unwrap();
+
+        // No block-sequence lines for these fields.
+        assert!(
+            !out.lines().any(|l| l.trim_start().starts_with("- ")),
+            "no block sequence items:\n{out}"
+        );
+        assert!(
+            out.contains(r#"command: ["go", "run", "--opt=a,b"]"#),
+            "command inline with intact comma token:\n{out}"
+        );
+        assert!(
+            out.contains("ignore_ports: [9090, 9091, 15090]"),
+            "ignore_ports inline and sorted:\n{out}"
+        );
+
+        // The comma token must survive the round-trip as a single argument.
+        let parsed: UpConfig = serde_yaml::from_str(&out).unwrap();
+        assert_eq!(parsed.services["svc"], svc);
+    }
+
+    /// A namespace-only target prunes `path: null`; the result must still parse
+    /// (the `path` field uses a custom deserializer, so it needs `#[serde(default)]`).
+    #[test]
+    fn namespace_only_target_round_trips() {
+        let svc = ServiceConfig {
+            target: TargetConfig {
+                path: None,
+                namespace: Some("staging".to_owned()),
+            },
+            env: EnvConfig::default(),
+            default_mode: ServiceMode::default(),
+            http_filter: HttpFilterConfig::default(),
+            ignore_ports: BTreeSet::new(),
+            run: RunConfig {
+                r#type: RunType::Exec,
+                command: vec!["echo".to_owned()],
+            },
+        };
+        let cfg = UpConfig {
+            common: CommonConfig::default(),
+            services: [("svc".to_owned(), svc.clone())].into_iter().collect(),
+        };
+        let out = render_yaml(&cfg).unwrap();
+        assert!(!out.contains("path"), "path: null should be pruned:\n{out}");
+        let parsed: UpConfig = serde_yaml::from_str(&out).unwrap();
+        assert_eq!(parsed.services["svc"], svc);
     }
 }
