@@ -1,6 +1,6 @@
 use std::{process::ExitStatus, sync::Arc};
 
-use mirrord_sessions_manager_client::connection::SessionsManagerClientError;
+use mirrord_sessions_manager_client::error::SessionsManagerClientError;
 use thiserror::Error;
 
 use crate::{

@@ -22,7 +22,9 @@ use mirrord_agent_iptables::{
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
 use mirrord_protocol_io::{Agent, Connection};
-use mirrord_sessions_manager_client::connection::SessionsManagerClient;
+use mirrord_sessions_manager_client::{
+    connection::SessionsManagerClient, envs::sessions_manager_room_id,
+};
 use socket2::SockRef;
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
@@ -1168,9 +1170,9 @@ async fn start_agent_sidecar(args: Args) -> AgentResult<()> {
     let mut clients: JoinSet<ClientId> = JoinSet::new();
 
     // 1. Kick off the persistent, multiplexed control plane link.
-    // todo!(swap demo with room id from env / param)
+    let room_id = sessions_manager_room_id()?;
     let mut sessions_manager_client =
-        SessionsManagerClient::<Agent>::new("demo", cancellation_token.clone());
+        SessionsManagerClient::<Agent>::new(room_id, cancellation_token.clone());
 
     // This returns a continuous stream of fresh data plane tunnels.
     let mut dataplane_stream = sessions_manager_client

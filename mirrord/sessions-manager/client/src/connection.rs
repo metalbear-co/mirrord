@@ -16,51 +16,10 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async;
 use tokio_util::sync::CancellationToken;
 
-use crate::websocket::BinaryWebSocketConnection;
+use crate::{error::SessionsManagerClientError, websocket::BinaryWebSocketConnection};
 
 pub const SESSIONS_MANAGER_URL_ENV: &str = "MIRRORD_SESSIONS_MANAGER_URL";
 const SESSIONS_MANAGER_URL_DEFAULT: &str = "http://localhost:4971";
-
-#[derive(thiserror::Error, Debug)]
-pub enum SessionsManagerClientError {
-    #[error("SocketIO control plane error: {0}")]
-    SocketIO(#[from] rust_socketio::Error),
-
-    #[error("WebSocket data plane upgrade error: {0}")]
-    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
-
-    #[error("JSON serialization or deserialization failed: {0}")]
-    Serialization(#[from] serde_json::Error),
-
-    #[error("The background control plane worker dropped before providing a payload")]
-    ChannelDropped,
-
-    #[error("Control plane initialization timed out")]
-    Timeout,
-
-    #[error("Cancellation token was signaled")]
-    CancellationToken,
-}
-
-pub fn deserialize_payload<T>(payload: &Payload) -> Result<T, serde_json::Error>
-where
-    T: for<'de> serde::Deserialize<'de>,
-{
-    let base_value = match payload {
-        Payload::Text(values) => values.first().cloned().unwrap_or(serde_json::Value::Null),
-        #[allow(deprecated)]
-        Payload::String(raw_str) => {
-            serde_json::from_str(raw_str).unwrap_or(serde_json::Value::Null)
-        }
-        _ => serde_json::Value::Null,
-    };
-    let normalized_value = if base_value.is_array() {
-        base_value.get(0).cloned().unwrap_or(base_value)
-    } else {
-        base_value
-    };
-    serde_json::from_value::<T>(normalized_value)
-}
 
 /// An extension trait implemented for your data-plane types to associate
 /// them with their respective wire-level control plane role string names.
@@ -322,6 +281,26 @@ impl SessionsManagerClient<Client> {
             }
         }
     }
+}
+
+pub fn deserialize_payload<T>(payload: &Payload) -> Result<T, serde_json::Error>
+where
+    T: for<'de> serde::Deserialize<'de>,
+{
+    let base_value = match payload {
+        Payload::Text(values) => values.first().cloned().unwrap_or(serde_json::Value::Null),
+        #[allow(deprecated)]
+        Payload::String(raw_str) => {
+            serde_json::from_str(raw_str).unwrap_or(serde_json::Value::Null)
+        }
+        _ => serde_json::Value::Null,
+    };
+    let normalized_value = if base_value.is_array() {
+        base_value.get(0).cloned().unwrap_or(base_value)
+    } else {
+        base_value
+    };
+    serde_json::from_value::<T>(normalized_value)
 }
 
 /// Resolves the target query string url parameters for a provided data plane path.

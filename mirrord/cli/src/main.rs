@@ -430,7 +430,7 @@ where
         &mut sub_progress,
         analytics,
         mirrord_for_ci.as_ref(),
-        args.bridge.clone(),
+        args.params.bridge,
     )
     .await?;
 
@@ -965,7 +965,7 @@ async fn port_forward(
         &mut analytics,
         branch_name,
         None,
-        None,
+        false,
     )
     .await?;
 

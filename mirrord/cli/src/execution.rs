@@ -205,7 +205,7 @@ impl MirrordExecution {
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
         mirrord_for_ci: Option<&MirrordCi>,
-        bridge_token: Option<String>,
+        is_bridge_mode: bool,
     ) -> CliResult<Self>
     where
         P: Progress,
@@ -242,7 +242,7 @@ impl MirrordExecution {
                         progress,
                         analytics,
                         mirrord_for_ci,
-                        bridge_token,
+                        is_bridge_mode,
                     ))
                     .await?
                 }
@@ -397,7 +397,7 @@ impl MirrordExecution {
             analytics,
             branch_name,
             mirrord_for_ci,
-            None,
+            false,
         )
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
@@ -518,7 +518,7 @@ impl MirrordExecution {
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
         mirrord_for_ci: Option<&MirrordCi>,
-        bridge_token: Option<String>,
+        is_bridge_mode: bool,
     ) -> CliResult<(HashMap<String, String>, Option<Child>, bool)>
     where
         P: Progress,
@@ -530,7 +530,7 @@ impl MirrordExecution {
             analytics,
             branch_name,
             mirrord_for_ci,
-            bridge_token,
+            is_bridge_mode,
         )
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;

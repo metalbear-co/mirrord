@@ -32,8 +32,8 @@ fn spawn_agent() -> Result<(), String> {
     command
         .arg("sidecar")
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
 
     let child = command
         .spawn()
