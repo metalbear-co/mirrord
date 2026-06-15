@@ -2,8 +2,24 @@ services:
   mirrord-deps-builder:
     image: mirrord-deps-builder:local
     build:
-      context: ./mirrord-dependancies-builder
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: sample/capabilities-rust/mirrord-dependancies-builder/Dockerfile
+
+  backend-with-agent:
+    image: capabilities-rust-backend:local
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      - mirrord-deps-builder
+    environment:
+      - MIRRORD_SESSIONS_MANAGER_URL=http://host.docker.internal:4971
+      - MIRRORD_SESSION_ID=demo
+      - LD_PRELOAD=/opt/mirrord/lib/libmirrord_serverless_bootstrap.so
+      - RUST_LOG=debug
+      - DEMO_ENV=mirrord
+    ports:
+      - "8080:8080"
 
   backend:
     image: capabilities-rust-backend:local
@@ -13,10 +29,9 @@ services:
     depends_on:
       - mirrord-deps-builder
     environment:
-      - MIRRORD_SESSIONS_MANAGER_URL=host.docker.internal:4971
-      - MIRRORD_SESSION_ID=demo
+      - DEMO_ENV=no_mirrord
     ports:
-      - "8080:8080"
+      - "8081:8080"
 
   frontend:
     image: capabilities-rust-frontend-next:local
@@ -24,6 +39,7 @@ services:
       context: ./frontend-next
       dockerfile: Dockerfile
     depends_on:
-      - backend
+      # - backend
+      - backend-with-agent
     ports:
       - "3000:3000"

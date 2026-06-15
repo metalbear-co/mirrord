@@ -13,10 +13,8 @@ COPY --from=builder /app/target/release/capabilities-rust-backend /app/capabilit
 
 # local dependencies image contains these paths
 #COPY --from=mirrord-deps-builder:local /opt/mirrord/bin/mirrord /opt/mirrord/mirrord
-#COPY --from=mirrord-deps-builder:local /opt/mirrord/lib/libmirrord_layer.so /opt/mirrord/libmirrord_layer.so
-COPY --from=mirrord-deps-builder:local /opt/mirrord/bin/mirrord-agent /opt/mirrord/mirrord-agent
-COPY --from=mirrord-deps-builder:local /opt/mirrord/lib/libmirrord_serverless_bootstrap.so /opt/mirrord/libmirrord_serverless_bootstrap.so
+#COPY --from=mirrord-deps-builder:local /opt/mirrord/bin/mirrord-agent /opt/mirrord/mirrord-agent
+#COPY --from=mirrord-deps-builder:local /opt/mirrord/lib/libmirrord_layer.so /opt/mirrord/lib/libmirrord_layer.so
+COPY --from=mirrord-deps-builder:local /opt/mirrord/lib/libmirrord_serverless_bootstrap.so /opt/mirrord/lib/libmirrord_serverless_bootstrap.so
 
-ENV MIRRORD_SESSIONS_MANAGER_URL=host.docker.internal:4971
-ENV MIRRORD_SESSION_ID=demo
 ENTRYPOINT ["/app/capabilities-rust-backend"]

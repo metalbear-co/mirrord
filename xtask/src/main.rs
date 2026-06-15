@@ -113,6 +113,10 @@ enum Commands {
 
     /// Build the serverless bootstrap library and its embedded agent artifact
     BuildServerlessBootstrap {
+        /// Target platform
+        #[arg(short, long, value_parser = parse_platform)]
+        platform: Option<Platform>,
+
         /// Build in release mode
         #[arg(short, long)]
         release: bool,
@@ -271,10 +275,23 @@ fn main() -> Result<()> {
         }
 
         Commands::BuildServerlessBootstrap {
+            platform,
             release,
             cargo_args,
         } => {
-            tasks::serverless_bootstrap::build_serverless_bootstrap(release, &cargo_args)?;
+            let platform = platform.unwrap_or_else(|| {
+                Platform::detect().unwrap_or_else(|e| {
+                    eprintln!("Failed to detect platform: {}", e);
+                    eprintln!("Please specify platform with --platform");
+                    std::process::exit(1);
+                })
+            });
+
+            tasks::serverless_bootstrap::build_serverless_bootstrap(
+                platform,
+                release,
+                &cargo_args,
+            )?;
         }
 
         Commands::TestDoc { cargo_args } => {

@@ -5,13 +5,24 @@ use std::{
 
 use anyhow::{Context, Result};
 
+use super::{layer::Target, release::Platform};
 use crate::relative_to_root;
 
-pub fn build_serverless_bootstrap(release: bool, cargo_args: &[String]) -> Result<PathBuf> {
+pub fn build_serverless_bootstrap(
+    platform: Platform,
+    release: bool,
+    cargo_args: &[String],
+) -> Result<PathBuf> {
     println!("Building mirrord serverless bootstrap...");
 
+    let target = match platform {
+        Platform::LinuxX86_64 => Target::LinuxX86_64,
+        Platform::LinuxAarch64 => Target::LinuxAarch64,
+        _ => anyhow::bail!("serverless bootstrap can only be built for Linux targets"),
+    };
+
     let mode = if release { "release" } else { "debug" };
-    let agent_binary = build_agent_binary(release, cargo_args)?;
+    let agent_binary = build_agent_binary(target, release, cargo_args)?;
 
     let mut cmd = Command::new("cargo");
     cmd.arg("build");
@@ -21,6 +32,8 @@ pub fn build_serverless_bootstrap(release: bool, cargo_args: &[String]) -> Resul
         cmd.arg("--release");
     }
 
+    let target_triple = target.triple();
+    cmd.arg("--target").arg(&target_triple);
     cmd.env(
         "MIRRORD_AGENT_BINARY",
         agent_binary
@@ -37,6 +50,7 @@ pub fn build_serverless_bootstrap(release: bool, cargo_args: &[String]) -> Resul
 
     let bootstrap_path = relative_to_root(
         Path::new("target")
+            .join(target_triple)
             .join(mode)
             .join("libmirrord_serverless_bootstrap.so")
             .as_path(),
@@ -46,7 +60,7 @@ pub fn build_serverless_bootstrap(release: bool, cargo_args: &[String]) -> Resul
     Ok(bootstrap_path)
 }
 
-fn build_agent_binary(release: bool, cargo_args: &[String]) -> Result<PathBuf> {
+fn build_agent_binary(target: Target, release: bool, cargo_args: &[String]) -> Result<PathBuf> {
     println!("Building mirrord-agent for serverless bootstrap...");
 
     let mut cmd = Command::new("cargo");
@@ -57,6 +71,8 @@ fn build_agent_binary(release: bool, cargo_args: &[String]) -> Result<PathBuf> {
         cmd.arg("--release");
     }
 
+    let target_triple = target.triple();
+    cmd.arg("--target").arg(&target_triple);
     cmd.args(cargo_args);
 
     let status = cmd.status().context("Failed to run cargo build")?;
@@ -68,6 +84,7 @@ fn build_agent_binary(release: bool, cargo_args: &[String]) -> Result<PathBuf> {
     let mode = if release { "release" } else { "debug" };
     let agent_binary = relative_to_root(
         Path::new("target")
+            .join(target_triple)
             .join(mode)
             .join("mirrord-agent")
             .as_path(),

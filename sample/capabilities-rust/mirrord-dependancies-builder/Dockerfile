@@ -2,7 +2,15 @@
 FROM ghcr.io/metalbear-co/ci-agent-build:latest AS builder
 WORKDIR /repo
 
-COPY . .
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY .cargo .cargo
+COPY xtask ./xtask
+COPY mirrord ./mirrord
+COPY sample ./sample
+COPY test-utils ./test-utils
+COPY tests ./tests
+COPY medschool ./medschool
+COPY packages ./packages
 
 RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
@@ -23,7 +31,7 @@ RUN mkdir -p /repo/packages/monitor/dist
 RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/repo/target \
-    cargo build -p mirrord-agent -p mirrord-serverless-bootstrap --release --locked && \
+    cargo xtask build-serverless-bootstrap --release --locked && \
     mkdir -p /out/bin /out/lib && \
     cp /repo/target/release/mirrord-agent /out/bin/mirrord-agent && \
     cp /repo/target/release/libmirrord_serverless_bootstrap.so /out/lib/libmirrord_serverless_bootstrap.so
