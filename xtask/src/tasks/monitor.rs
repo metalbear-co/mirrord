@@ -1,10 +1,8 @@
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use super::pnpm;
 use crate::relative_to_root;
 
 /// Builds the monitor frontend (pnpm install + build).
@@ -20,35 +18,35 @@ pub fn build_monitor() -> Result<PathBuf> {
         anyhow::bail!("Monitor directory not found at {}.", monitor_dir.display());
     }
 
-    if !pnpm_available_with_corepack_warning() {
+    let dist_dir = monitor_dir.join("dist");
+
+    if !pnpm::available_with_corepack_warning() {
+        if monitor_assets_exist(&dist_dir) {
+            println!(
+                "  ! `pnpm` is not available; reusing existing monitor frontend assets at {}",
+                dist_dir.display()
+            );
+            return Ok(dist_dir);
+        }
+
         anyhow::bail!(
             "`pnpm` not found on PATH. Install it before building the monitor frontend \
              (for example with `corepack enable pnpm`)."
         );
     }
 
-    let dist_dir = monitor_dir.join("dist");
-
-    // `--ignore-workspace` stops pnpm from walking up to the repo root and installing for all
-    // workspaces (the root `package.json` has `workspaces: ["packages/*"]`). Without it, pnpm
-    // touches `packages/wizard/node_modules` in a way that breaks the subsequent
-    // `npm install` run by `build_wizard()` ("Cannot read properties of null (reading
-    // 'matches')"). Monitor only depends on its own package.json, so a scoped install is
-    // what we want.
-    println!("  → Running pnpm install --ignore-workspace...");
-    let status = Command::new(pnpm_command())
-        .args(["install", "--ignore-workspace"])
-        .current_dir(monitor_dir)
+    println!("  → Running pnpm --filter session-monitor-frontend install...");
+    let status = pnpm::workspace_command()
+        .args(["--filter", "session-monitor-frontend", "install"])
         .status()
         .context("Failed to run pnpm install")?;
     if !status.success() {
         anyhow::bail!("pnpm install failed");
     }
 
-    println!("  → Running pnpm run build...");
-    let status = Command::new(pnpm_command())
-        .args(["run", "build"])
-        .current_dir(monitor_dir)
+    println!("  → Running pnpm --filter session-monitor-frontend run build...");
+    let status = pnpm::workspace_command()
+        .args(["--filter", "session-monitor-frontend", "run", "build"])
         .status()
         .context("Failed to run pnpm run build")?;
     if !status.success() {
@@ -62,21 +60,6 @@ pub fn build_monitor() -> Result<PathBuf> {
         );
     }
 
-    // Remove `packages/monitor/node_modules` after the dist is built. rust-embed only
-    // consumes `packages/monitor/dist/`. Leaving the pnpm-installed `node_modules` around
-    // breaks the wizard's later `npm install` — npm walks up to the repo root's
-    // `workspaces: ["packages/*"]`, tries to dedupe against the monitor's pnpm-style tree,
-    // and crashes with `Cannot read properties of null (reading 'matches')`.
-    let node_modules = monitor_dir.join("node_modules");
-    if node_modules.exists() {
-        std::fs::remove_dir_all(&node_modules).with_context(|| {
-            format!(
-                "failed to remove {} after monitor build",
-                node_modules.display()
-            )
-        })?;
-    }
-
     println!(
         "✓ Monitor frontend built successfully at {}",
         dist_dir.display()
@@ -85,30 +68,6 @@ pub fn build_monitor() -> Result<PathBuf> {
     Ok(dist_dir)
 }
 
-fn pnpm_available_with_corepack_warning() -> bool {
-    if !corepack_available() {
-        eprintln!(
-            "[WARNING] - `corepack` not found in PATH: this may cause builds to fail if a compatible version of `pnpm` is not available"
-        )
-    }
-
-    Command::new(pnpm_command())
-        .arg("--version")
-        .output()
-        .is_ok_and(|out| out.status.success())
-}
-
-fn corepack_available() -> bool {
-    Command::new("corepack")
-        .arg("--version")
-        .output()
-        .is_ok_and(|out| out.status.success())
-}
-
-/// Pnpm is installed via `corepack` as a batch script on windows, so `Command::new("pnpm")`
-/// fails — [`std::process::Command`] on windows doesn't apply `PATHEXT` (see
-/// <https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/start>)
-/// and only looks for `pnpm.exe`. Use the `.cmd` shim explicitly there.
-fn pnpm_command() -> &'static str {
-    if cfg!(windows) { "pnpm.cmd" } else { "pnpm" }
+fn monitor_assets_exist(dist_dir: &Path) -> bool {
+    dist_dir.join("index.html").is_file() && dist_dir.join("assets").is_dir()
 }
